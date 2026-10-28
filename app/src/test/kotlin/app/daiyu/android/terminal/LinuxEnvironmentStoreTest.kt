@@ -42,6 +42,9 @@ class LinuxEnvironmentStoreTest : TestCase() {
             assertEquals(0, backend.expectedUid)
             assertEquals("env-1:generation-1", backend.environmentId)
             assertTrue(backend.shellArgv.contains("-0"))
+            assertEquals(1, backend.shellArgv.count { it == "/dev:/dev" })
+            assertEquals("-b", backend.shellArgv[backend.shellArgv.indexOf("/dev:/dev") - 1])
+            assertEquals("/bin/sh", backend.shellArgv.last())
             assertTrue(backend.shellArgv.contains("${spec.sharedMounts.keys.single()}:${spec.sharedMounts.values.single()}"))
             assertEquals(spec.sharedMounts, backend.sharedMounts)
             assertEquals(requireNotNull(spec.loader).path, backend.environment["PROOT_LOADER"])
@@ -49,6 +52,31 @@ class LinuxEnvironmentStoreTest : TestCase() {
         other.clearSelection()
         assertEquals("NOT_SELECTED", store.status().getString("state"))
     }
+    fun testRuntimeDevicesCannotBeOverriddenBySharedMounts() = fixture { root, spec ->
+        for (target in listOf("/dev", "/dev/pts", "/dev/", "//dev//pts")) {
+            val store = LinuxEnvironmentStore(File(root, "selection-${target.hashCode()}"))
+            store.select(spec.copy(sharedMounts = mapOf(spec.sharedMounts.keys.single() to target)))
+            store.acquire().use { lease ->
+                try { lease.backend(root); fail("device bind conflict") }
+                catch (expected: IllegalArgumentException) {
+                    assertEquals("linux_proot_device_mount_conflict", expected.message)
+                }
+            }
+        }
+        val store = LinuxEnvironmentStore(File(root, "selection-device-sibling"))
+        store.select(spec.copy(sharedMounts = mapOf(spec.sharedMounts.keys.single() to "/device")))
+        store.acquire().use { lease -> assertTrue(lease.backend(root).shellArgv.contains("/dev:/dev")) }
+        val dev = File(spec.rootfs, "dev").apply { mkdir() }
+        val workspaceStore = LinuxEnvironmentStore(File(root, "selection-device-workspace"))
+        workspaceStore.select(spec.copy(sharedMounts = emptyMap()))
+        workspaceStore.acquire().use { lease ->
+            try { lease.backend(root, LinuxWorkspaceDirectory(dev, "/dev")); fail("device workspace conflict") }
+            catch (expected: IllegalArgumentException) {
+                assertEquals("linux_workspace_device_mount_conflict", expected.message)
+            }
+        }
+    }
+
     fun testCorruptHelperOrMetadataNeverFallsBack() = fixture { root, spec ->
         val store = LinuxEnvironmentStore(File(root, "selection")).apply { select(spec) }
         requireNotNull(spec.proot).writeText("replaced helper")

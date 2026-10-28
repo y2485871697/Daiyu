@@ -17,7 +17,7 @@
 static char fake_parent[128];
 static int fail_open,fail_stat,fail_unlink,interrupt_unlink,interrupt_stat;
 static int preflight,pre_case,pre_ioctl_seen;
-static int proc_test,mount_calls,mount_failure;
+static int proc_test,dev_test,mount_calls,mount_failure;
 static int fake_posix_openpt(int flags) {
     if(preflight && pre_case==3) { errno=EMFILE; return -1; }
     return posix_openpt(flags);
@@ -85,7 +85,7 @@ static int fake_mount(const char *source,const char *target,const char *type,uns
     assert(proc_test && data==NULL);
     if(type) { assert(!strcmp(source,"proc") && !strcmp(type,"proc")); assert(flags==(MS_NOSUID|MS_NODEV|MS_NOEXEC)); }
     else {
-        assert(flags==MS_BIND);
+        assert(flags==(dev_test ? MS_BIND|MS_REC : MS_BIND));
         int sourcefd=-1; struct stat source_value;
         assert(sscanf(source,"/proc/self/fd/%d",&sourcefd)==1 && sourcefd>=0);
         assert(fstat(sourcefd,&source_value)==0 && S_ISDIR(source_value.st_mode));
@@ -194,6 +194,26 @@ static void proc_mount_faults(void) {
     assert(root_mount_proc(rootfd)<0 && mount_calls==3); assert(unlink(proc)==0);
     close(rootfd); assert(rmdir(root)==0); proc_test=0;
 }
+static int dev_mount_faults(void) {
+    int tests=0;
+    char root[]="/tmp/daiyu-dev-test-XXXXXX"; assert(mkdtemp(root));
+    char dev[256]; snprintf(dev,sizeof(dev),"%s/dev",root);
+    proc_test=1; dev_test=1; mount_calls=0;
+    int rootfd=root_open_directory(root); assert(rootfd>=0);
+#define DEV_CHECK(expression) do { assert(expression); tests++; } while(0)
+    DEV_CHECK(root_mount_dev(rootfd)==0 && mount_calls==1);
+    DEV_CHECK(root_mount_dev(rootfd)==0 && mount_calls==2);
+    mount_failure=1;
+    DEV_CHECK(root_mount_dev(rootfd)<0 && errno==EPERM && mount_calls==3);
+    mount_failure=0; assert(rmdir(dev)==0);
+    assert(symlink("/tmp",dev)==0);
+    DEV_CHECK(root_mount_dev(rootfd)<0 && mount_calls==3); assert(unlink(dev)==0);
+    int fd=open(dev,O_CREAT|O_WRONLY,0600); assert(fd>=0); close(fd);
+    DEV_CHECK(root_mount_dev(rootfd)<0 && mount_calls==3); assert(unlink(dev)==0);
+#undef DEV_CHECK
+    close(rootfd); assert(rmdir(root)==0); proc_test=0; dev_test=0;
+    return tests;
+}
 static int workspace_mount_faults(void) {
     int tests=0;
     char root[]="/tmp/daiyu-workspace-test-XXXXXX"; assert(mkdtemp(root));
@@ -237,6 +257,7 @@ static int workspace_mount_faults(void) {
 }
 int main(void) {
     int workspace_tests=workspace_mount_faults();
+    int dev_tests=dev_mount_faults();
     proc_mount_faults();
     pre_scope_failures();
     strcpy(fake_parent,"/tmp/daiyu-root-scope-test-XXXXXX");
@@ -275,5 +296,5 @@ int main(void) {
     }
     assert(dup2(saved_stdout,STDOUT_FILENO)>=0); close(saved_stdout); close(output[0]);
     assert(rmdir(fake_parent)==0);
-    printf("root_scope_faults: %d passed\n",20+workspace_tests); return 0;
+    printf("root_scope_faults: %d passed\n",20+workspace_tests+dev_tests); return 0;
 }

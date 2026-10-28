@@ -185,11 +185,18 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
                     environmentId = "${installation.environmentId}:${installation.generation}", guestWorkingDirectory = guestCwd, sharedMounts = mounts.toMap(), rootScope = launch)
             } else {
                 val helpers = installation.requireProotFiles()
+                require(mounts.values.none { LinuxPathSyntax.guestParts(it).firstOrNull() == "dev" }) {
+                    "linux_proot_device_mount_conflict"
+                }
+                require(workspace == null || workspace.bindWorkspace ||
+                    LinuxPathSyntax.guestParts(workspace.guestDirectory).firstOrNull() != "dev") {
+                    "linux_workspace_device_mount_conflict"
+                }
                 val binds = mounts.entries.sortedBy { it.key }.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }
                 LinuxBackend(
                     label = installation.distribution,
                     shellArgv = listOf(helpers.executable.path, "-0", "-r", installation.rootfs.path,
-                        "-w", guestCwd) + binds + listOf("/bin/sh"),
+                        "-w", guestCwd, "-b", "/dev:/dev") + binds + listOf("/bin/sh"),
                     identityArgv = emptyList(),
                     environment = environment - setOf("TMPDIR", "TERM") + mapOf("PROOT_LOADER" to helpers.loader.path,
                         "PROOT_TMP_DIR" to tempDirectory.canonicalPath),

@@ -47,8 +47,9 @@ class TarLinuxRootfsExtraction internal constructor(
         check(ops.isRegularFile(verifiedArchive.toPath())) { "linux_extract_archive_file" }
         ops.setPermissions(root, PosixFilePermissions.fromString("rwx------"))
         val names = HashSet<String>()
-        val declared = HashMap<Path, Boolean>() // true = deferred link; ancestors may never be links
+        val declared = HashMap<Path, Boolean>() // true = non-directory; ancestors must be directories
         val links = ArrayList<DeferredLink>()
+        val requiredDirectories = HashSet<Path>()
         val directoryModes = LinkedHashMap<Path, Int>()
         var entries = 0
         var declaredBytes = 0L
@@ -74,11 +75,10 @@ class TarLinuxRootfsExtraction internal constructor(
                                 "linux_extract_size_limit"
                             }
                             declaredBytes += entry.size
-                            // Reject, rather than create or silently reinterpret, devices, FIFO, etc.
-                            // isFile() may classify unknown legacy flags by filename. Only
-                            // admit the five actual tar types we implement, never devices/FIFO.
-                            check(entry.linkFlag.toInt() in ALLOWED_TYPES) { "linux_extract_special_entry" }
-                            if (!entry.isFile || entry.isSymbolicLink || entry.isLink) {
+                            val type = entry.linkFlag.toInt()
+                            val skipSpecial = type in SKIPPED_SPECIAL_TYPES
+                            check(type in ALLOWED_TYPES || skipSpecial) { "linux_extract_special_entry" }
+                            if (skipSpecial || !entry.isFile || entry.isSymbolicLink || entry.isLink) {
                                 check(entry.size == 0L) { "linux_extract_nonfile_payload" }
                             }
                             val parts = archiveParts(entry.name)
@@ -91,14 +91,23 @@ class TarLinuxRootfsExtraction internal constructor(
                             check(relative.substringBefore('/') != RESERVED_MARKER) { "linux_extract_reserved_marker" }
                             val destination = root.resolve(relative)
                             check(destination.startsWith(root) && destination != root)
-                            check(declared.put(destination, entry.isSymbolicLink || entry.isLink) == null) {
+                            check(entry.isDirectory || destination !in requiredDirectories) {
+                                "linux_extract_non_directory_ancestor"
+                            }
+                            check(declared.put(destination, !entry.isDirectory) == null) {
                                 "linux_extract_duplicate_path"
                             }
                             var parent = destination.parent
                             while (parent != root) {
                                 cancellation.check()
                                 check(declared[parent] != true) { "linux_extract_link_ancestor" }
+                                requiredDirectories.add(parent)
                                 parent = parent.parent
+                            }
+                            if (skipSpecial) {
+                                check(!Files.exists(destination, NOFOLLOW_LINKS)) { "linux_extract_path_exists" }
+                                // Runtime supplies guest devices; never create device nodes, FIFOs or placeholders.
+                                continue
                             }
                             ensureParents(root, destination.parent, cancellation)
                             when {
@@ -388,5 +397,6 @@ class TarLinuxRootfsExtraction internal constructor(
         private const val MAX_DEPTH = 128
         private const val RESERVED_MARKER = ".daiyu-rootfs-install"
         private val ALLOWED_TYPES = setOf(0, '0'.code, '1'.code, '2'.code, '5'.code)
+        private val SKIPPED_SPECIAL_TYPES = setOf('3'.code, '4'.code, '6'.code)
     }
 }

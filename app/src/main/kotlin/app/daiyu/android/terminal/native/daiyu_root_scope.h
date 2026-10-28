@@ -149,6 +149,24 @@ static int root_open_directory(const char *path) {
     }
     return fd;
 }
+/* Fixed runtime devices; both endpoints are pinned, never archive-created device nodes. */
+static int root_mount_dev(int rootfd) {
+    int sourcefd=root_open_directory("/dev");
+    if(sourcefd<0) return -1;
+    int targetfd=-1,result=-1,saved;
+    if(mkdirat(rootfd,"dev",0755)<0 && errno!=EEXIST) goto done;
+    targetfd=openat(rootfd,"dev",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+    if(targetfd<0) goto done;
+    char from[64],to[64];
+    snprintf(from,sizeof(from),"/proc/self/fd/%d",sourcefd);
+    snprintf(to,sizeof(to),"/proc/self/fd/%d",targetfd);
+    result=mount(from,to,NULL,MS_BIND|MS_REC,NULL);
+done:
+    saved=errno;
+    if(targetfd>=0) close(targetfd);
+    close(sourcefd); errno=saved;
+    return result;
+}
 /* Called only after root_enter() made this child's mount namespace private. */
 static int root_identity_number(const char *text,uint64_t *value) {
     if(!text || !*text) { errno=EINVAL; return -1; }

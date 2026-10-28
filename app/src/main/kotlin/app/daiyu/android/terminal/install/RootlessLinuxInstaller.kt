@@ -514,7 +514,7 @@ class RootlessLinuxInstaller internal constructor(
         val linux = LinuxBackend(
             label = installation.distribution,
             shellArgv = rootScope?.guestArgv() ?: listOf(checkNotNull(helpers).executable.path, "-0", "-r", installation.rootfs.path,
-                "-w", "/", "/bin/sh"),
+                "-w", "/", "-b", "/dev:/dev", "/bin/sh"),
             identityArgv = emptyList(),
             environment = mapOf("HOME" to "/root", "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin") +
                 (helpers?.let { mapOf("PROOT_LOADER" to it.loader.path, "PROOT_TMP_DIR" to hostDirectory.path) } ?: emptyMap()),

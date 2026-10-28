@@ -198,9 +198,77 @@ class TarLinuxRootfsExtractionTest : TestCase() {
         }
     }
 
-    fun testNeverCreatesDeviceOrFifo() {
-        for (type in listOf('3', '4', '6', '7', 'A')) fixture { f ->
+    fun testSkipsDeviceAndFifoWithoutCreatingPlaceholdersInEitherFormat() {
+        for (format in RootfsArchive.entries) for (strip in listOf(0, 1)) fixture { f ->
+            val prefix = if (strip == 0) "" else "debian/"
+            val items = listOfNotNull(
+                if (strip == 1) Item(prefix, type = '5') else null,
+                Item("${prefix}dev/null", type = '3'),
+                Item("${prefix}dev/block", type = '4'),
+                Item("${prefix}run/pipe", type = '6'),
+                Item("${prefix}usr/bin/tool", "inert executable"),
+                Item("${prefix}bin/sh", type = '2', target = "/usr/bin/tool")
+            )
+            f.extract(compressed(tar(*items.toTypedArray()), format), format, strip)
+            assertEquals("inert executable", File(f.stage, "bin/sh").readText())
+            for (name in listOf("dev/null", "dev/block", "run/pipe", "dev", "run")) {
+                assertFalse(Files.exists(File(f.stage, name).toPath(), NOFOLLOW_LINKS))
+            }
+        }
+    }
+
+    fun testRejectsUnknownAndContiguousTypesRatherThanTreatingThemAsFiles() {
+        for (type in listOf('7', 'A')) fixture { f ->
             rejected { f.extract(compressed(tar(Item("special", type = type)), RootfsArchive.TAR_GZIP)) }
+            assertFalse(Files.exists(File(f.stage, "special").toPath(), NOFOLLOW_LINKS))
+        }
+    }
+
+    fun testSkippedSpecialEntriesStillValidateNamesAndReservedPaths() {
+        for (name in listOf("../outside", "/outside", "C:/outside", "dev\\node",
+            ".daiyu-rootfs-install", ".daiyu-rootfs-install/node")) fixture { f ->
+            val bytes = tar(Item("placeholder", type = '3'))
+            bytes.fill(0.toByte(), 0, 100)
+            name.toByteArray().copyInto(bytes)
+            fixHeaderChecksum(bytes)
+            rejected { f.extract(compressed(bytes, RootfsArchive.TAR_GZIP)) }
+            assertFalse(File(f.root, "outside").exists())
+        }
+        fixture { f ->
+            rejected { f.extract(compressed(tar(Item("root", type = '3')), RootfsArchive.TAR_XZ),
+                RootfsArchive.TAR_XZ, strip = 1) }
+        }
+    }
+
+    fun testSkippedSpecialEntriesCannotCollideOrBecomeAncestorsOrHardlinkSources() {
+        val cases = listOf(
+            arrayOf(Item("node", type = '3'), Item("./node", "file")),
+            arrayOf(Item("node", "file"), Item("node", type = '4')),
+            arrayOf(Item("node", type = '6'), Item("node/child", "file")),
+            arrayOf(Item("node/child", "file"), Item("node", type = '3')),
+            arrayOf(Item("node/child", type = '3'), Item("node", type = '2', target = "inside")),
+            arrayOf(Item("node/child", type = '4'), Item("node", "file")),
+            arrayOf(Item("node/child", type = '6'), Item("node", type = '3')),
+            arrayOf(Item("node", "file"), Item("node/child", type = '3')),
+            arrayOf(Item("node", type = '2', target = "inside"), Item("node/child", type = '3')),
+            arrayOf(Item("node", type = '3'), Item("hard", type = '1', target = "node"))
+        )
+        for (items in cases) fixture { f ->
+            rejected { f.extract(compressed(tar(*items), RootfsArchive.TAR_GZIP)) }
+            assertFalse(Files.exists(File(f.stage, "hard").toPath(), NOFOLLOW_LINKS))
+        }
+    }
+
+    fun testSkippedSpecialEntriesStillConsumeEntryQuotaAndRejectPayloads() {
+        fixture { f ->
+            rejected { f.extract(compressed(tar(Item("one", type = '3'), Item("two", type = '6')),
+                RootfsArchive.TAR_GZIP), extractor = f.extractor(maxEntries = 1)) }
+        }
+        for (type in listOf('3', '4', '6')) fixture { f ->
+            val bytes = tar(Item("special", type = type))
+            putOctal(bytes, 124, 12, 1)
+            fixHeaderChecksum(bytes)
+            rejected { f.extract(compressed(bytes, RootfsArchive.TAR_GZIP)) }
             assertFalse(Files.exists(File(f.stage, "special").toPath(), NOFOLLOW_LINKS))
         }
     }
@@ -230,7 +298,7 @@ class TarLinuxRootfsExtractionTest : TestCase() {
         }
         for (format in RootfsArchive.entries) {
             fixture { f ->
-                val bytes = compressed(tar(Item("file", "data")), format)
+                val bytes = compressed(tar(Item("dev/null", type = '3'), Item("file", "data")), format)
                 rejected { f.extract(bytes.copyOf(bytes.size - 6), format) }
             }
             fixture { f ->

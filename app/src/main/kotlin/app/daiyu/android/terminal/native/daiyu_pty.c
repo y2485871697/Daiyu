@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
             int rootfd=root_open_directory(argv[command_at+1]);
             if(rootfd<0) goto child_error;
             if(workspace && root_mount_workspace(rootfd,workspace,workspace_dev,workspace_ino)<0) goto child_error;
-            if(root_mount_proc(rootfd)<0 || fchdir(rootfd)<0) goto child_error;
+            if(root_mount_dev(rootfd)<0 || root_mount_proc(rootfd)<0 || fchdir(rootfd)<0) goto child_error;
             close(rootfd);
             /* chroot resolves this pinned cwd, not a path that can be renamed after mount. */
             argv[command_at+1]=".";

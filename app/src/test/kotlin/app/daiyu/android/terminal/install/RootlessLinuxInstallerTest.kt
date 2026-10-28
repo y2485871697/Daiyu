@@ -56,6 +56,7 @@ class RootlessLinuxInstallerTest : TestCase() {
                 check(command == "id -u")
                 check(configuration.linux!!.expectedUid == 0)
                 check(configuration.linux!!.shellArgv.first() == proot.path)
+                check(configuration.linux!!.shellArgv.takeLast(3) == listOf("-b", "/dev:/dev", "/bin/sh"))
                 check(configuration.linux!!.sharedMounts.isEmpty())
                 LinuxProbeResult(0, "0\n")
             },

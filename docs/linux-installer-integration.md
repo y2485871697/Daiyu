@@ -140,8 +140,10 @@ parent, not from invented installer constants.
   staging. Hardlinks resolve forward chains iteratively, require regular non-symlink sources,
   reject cycles/missing sources, and never follow symlink ancestors.
 - POSIX rwx bits are preserved (including executable bits), not uid/gid, setuid/setgid/sticky,
-  xattrs or host ownership. Directory permissions are applied last. Devices, FIFOs, sparse and
-  other unsupported entries are rejected rather than created or reinterpreted.
+  xattrs or host ownership. Directory permissions are applied last. Zero-payload character devices,
+  block devices and FIFOs pass the same path/namespace checks and are skipped without creating
+  nodes or placeholders. Sparse and other unsupported entries remain rejected. Skipped paths
+  still occupy the logical namespace, including their directory ancestors.
 - At most 3 GiB of **all decompressed tar bytes**, 200000 physical headers (including hidden
   GNU/PAX metadata) and logical entries, 4096 path characters, 128 path components, and 1 MiB
   per metadata header. XZ dictionary memory limit is 128 MiB. Declared file totals are also
@@ -171,7 +173,11 @@ chains, guest-absolute links, malicious paths/duplicates/NUL, staging checks, li
 escapes, cycles/missing sources, devices/FIFO, privileged mode stripping, byte/entry/metadata
 limits, truncated streams, excessive XZ dictionary memory, and explicit pre-cancellation.
 `RootlessLinuxInstallerTest` adds successful ancestor-sync ordering and injected failures at
-each new ancestor parent, requiring zero download/probe/publication. Its existing post-rename
+each new ancestor parent, requiring zero download/probe/publication. PRoot launches and the
+install identity probe bind the fixed host `/dev` to guest `/dev`; user shared mounts cannot
+override that target. The fixed chroot transport pins the same device directory by file
+descriptors inside its private mount namespace before mounting proc, including device
+submounts; no archive node is materialized. Its existing post-rename
 error/cancellation tests still require marker reconciliation and preservation of published files.
 These are source-level test additions, **not reported runtime results**. Actual full-size quota
 stress and cancellation latency during large extraction remain runtime validation work.

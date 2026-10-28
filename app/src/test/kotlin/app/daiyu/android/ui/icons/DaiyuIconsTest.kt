@@ -72,6 +72,7 @@ class DaiyuIconsTest {
         "Shield" to DaiyuIcons.Shield,
         "Chart" to DaiyuIcons.Chart,
         "Provider" to DaiyuIcons.Provider,
+        "Sponsor" to DaiyuIcons.Sponsor,
         "Balance" to DaiyuIcons.Balance,
         "Gateway" to DaiyuIcons.Gateway,
         "Vision" to DaiyuIcons.Vision,
@@ -88,7 +89,7 @@ class DaiyuIconsTest {
 
     @Test
     fun everyRequiredIconBuildsWithAUniqueName() {
-        assertEquals(75, icons.size)
+        assertEquals(76, icons.size)
         assertEquals(icons.size, icons.map { it.second.name }.toSet().size)
         icons.forEach { (name, vector) ->
             assertEquals("Daiyu.$name", vector.name)

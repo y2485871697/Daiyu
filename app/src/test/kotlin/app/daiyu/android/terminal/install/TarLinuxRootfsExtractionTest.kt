@@ -210,7 +210,7 @@ class TarLinuxRootfsExtractionTest : TestCase() {
                 Item("${prefix}bin/sh", type = '2', target = "/usr/bin/tool")
             )
             f.extract(compressed(tar(*items.toTypedArray()), format), format, strip)
-            assertEquals("inert executable", File(f.stage, "bin/sh").readText())
+            assertEquals("inert executable", f.ops.readText(File(f.stage, "bin/sh").toPath()))
             for (name in listOf("dev/null", "dev/block", "run/pipe", "dev", "run")) {
                 assertFalse(Files.exists(File(f.stage, name).toPath(), NOFOLLOW_LINKS))
             }

@@ -195,7 +195,8 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         node("appearance-color-confirm").assertIsDisplayed()
         node("appearance-color-pad:${if (title == "强调色") "主强调色" else "界面色彩"}").assertExists()
         if (title == "强调色") node("appearance-color-pad:次强调色").assertExists()
-        androidx.test.espresso.Espresso.pressBack()
+        awaitNodeWindowFocus(node("assistant-sheet"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitUntil(5_000) {
             ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
         }

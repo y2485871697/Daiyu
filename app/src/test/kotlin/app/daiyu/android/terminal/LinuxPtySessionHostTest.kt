@@ -92,7 +92,7 @@ class LinuxPtySessionHostTest {
                 assertTrue("real helper must execute shell input", f.resultFile.exists())
                 assertEquals("native-session-ok\n", f.resultFile.readText())
                 assertEquals(listOf("-0", "-r", f.installation.rootfs.path, "-w", "/workspace", "-b",
-                    "${f.mount.path}:/workspace/shared", "/bin/sh"), f.argvFile.readLines())
+                    "/dev:/dev", "-b", "${f.mount.path}:/workspace/shared", "/bin/sh"), f.argvFile.readLines())
                 assertEquals(listOf(f.loader.path, f.temp.canonicalPath, "/root",
                     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", f.cwd.canonicalPath),
                     f.environmentFile.readLines())

@@ -78,7 +78,7 @@ class LinuxSettingsApplicationFreezeTest {
             val frozen = admission.freeze(ref) {
                 selection.withSelection(ref) { TerminalPtyLaunch.Linux.freeze(it, ref, temp, cwd) }
             }
-            assertEquals(listOf(proot.path, "-0", "-r", rootfs.path, "-w", "/", "/bin/sh"), frozen.argv)
+            assertEquals(listOf(proot.path, "-0", "-r", rootfs.path, "-w", "/", "-b", "/dev:/dev", "/bin/sh"), frozen.argv)
             assertEquals(loader.path, frozen.environment["PROOT_LOADER"])
             admission.deny(ref) // Does not release an already-owned pin.
             try { store.clearSelection(); fail("lost pre-approval pin") } catch (_: IllegalStateException) {}

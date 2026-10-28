@@ -167,5 +167,22 @@ class AppearanceColorContractTest(unittest.TestCase):
         self.assertIn('Espresso.pressBack()', chrome)
 
 
+    def test_color_sheet_back_waits_for_the_modal_window_and_keeps_close_oracle(self):
+        chrome = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/SettingsChromeActivityTest.kt').read_text()
+        helper = chrome.split('private fun assertAppearanceColorSheetAndDismiss(', 1)[1].split('\n    fun ', 1)[0]
+        for required in ('awaitDialogEnter(node("assistant-sheet"))',
+                         'node("appearance-color-default").assertIsDisplayed()',
+                         'node("appearance-color-confirm").assertIsDisplayed()',
+                         'appearance-color-pad:',
+                         'ui.waitUntil(5_000)', 'fetchSemanticsNodes().isEmpty()'):
+            self.assertIn(required, helper)
+        focus = 'awaitNodeWindowFocus(node("assistant-sheet"))'
+        back = 'instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)'
+        self.assertEqual(1, helper.count(focus))
+        self.assertEqual(1, helper.count(back))
+        self.assertLess(helper.index(focus), helper.index(back))
+        self.assertNotIn('Espresso.pressBack()', helper)
+
+
 if __name__ == '__main__':
     unittest.main()

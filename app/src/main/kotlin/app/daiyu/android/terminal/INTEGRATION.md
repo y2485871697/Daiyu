@@ -97,8 +97,9 @@ frozen filesystem identities, and reports FILES_READY rather than boot/identity
 verification. Inspection does not start processes, install files, choose another
 distribution, or fall back to Android. A lease freezes the generation and blocks
 selection replacement across store instances in this app process. Lease.backend
-builds explicit PRoot -r/-w/-0/-b argv from the exact same shared mapping it
-reports, without hidden /dev or /proc binds. Distinct/overlapping bind destinations
+builds explicit PRoot -r/-w/-0/-b argv with one fixed runtime /dev:/dev bind
+followed by the exact shared mapping it reports; the runtime bind is not a user
+shared mount. PRoot does not add a /proc bind. Distinct/overlapping bind destinations
 are rejected. Loader variables cannot be overridden through TerminalConfiguration.
 Guest root remains a PRoot mapping, never Android root. Configured host-root Linux
 requests reject before any identity probe. The store checks a guest shell with

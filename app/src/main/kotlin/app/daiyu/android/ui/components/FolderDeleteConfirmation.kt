@@ -36,6 +36,7 @@ internal fun FolderDeleteConfirmation(onConfirm: () -> Unit, onDismiss: () -> Un
                 onClick = onConfirm,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("dialog-confirm"),
                 danger = true,
+                deletionAppearance = true,
             )
         },
     ) {

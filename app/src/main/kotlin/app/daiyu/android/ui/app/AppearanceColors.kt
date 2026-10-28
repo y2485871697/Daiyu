@@ -175,9 +175,9 @@ internal fun resolveAppearanceActions(appearance: AppearanceSettings, dark: Bool
 
 internal data class DestructiveColors(val container: Color, val content: Color, val border: Color)
 
-internal fun destructiveColors(dark: Boolean): DestructiveColors {
-    val colors = if (dark) DaiyuPalette.dark else DaiyuPalette.light
-    return DestructiveColors(colors.errorContainer, colors.onErrorContainer, colors.error.copy(alpha = .28f))
+internal fun destructiveColors(): DestructiveColors {
+    val red = Color(0xFFE60012)
+    return DestructiveColors(red, Color.White, red)
 }
 
 internal data class UserBubbleColors(val container: Color, val content: Color)

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components
 
+import app.daiyu.android.ui.app.destructiveColors
+
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.foundation.layout.*
@@ -269,7 +271,7 @@ private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, secondaryEnabled
         HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(top = 10.dp).testTag("subagent-config-actions"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (deletion) ConversationAgentButton(secondaryLabel, secondaryEnabled, primary = true,
-                primaryColor = MiuixTheme.colorScheme.errorContainer, onPrimaryColor = MiuixTheme.colorScheme.onErrorContainer,
+                primaryColor = destructiveColors().container, onPrimaryColor = destructiveColors().content,
                 modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onSecondary)
             else ConversationAgentButton(secondaryLabel, secondaryEnabled, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onSecondary)
             ConversationAgentButton("确认", confirmEnabled, primary = true, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onConfirm)

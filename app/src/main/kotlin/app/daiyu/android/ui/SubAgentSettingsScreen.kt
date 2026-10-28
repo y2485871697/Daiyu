@@ -1,5 +1,7 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.app.destructiveColors
+
 import app.daiyu.android.ui.navigation.PageBackStack
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.daiyuSwitchColors
@@ -136,8 +138,8 @@ internal fun SubAgentSettingsScreen(
                         text = { Text("删除“${preset.name}”不会改变已应用此组的会话配置。") },
                         dismissButton = { TextButton(onClick = { delete = null }) { Text("取消") } },
                         confirmButton = { TextButton(enabled = editable,
-                            colors = ButtonDefaults.textButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer), onClick = {
+                            colors = ButtonDefaults.textButtonColors(containerColor = destructiveColors().container,
+                                contentColor = destructiveColors().content), onClick = {
                             if (directory.change { check(repository.removePreset(preset.id)) { "子代理组不存在，请重试" } }) delete = null
                         }) { Text("删除") } })
                 }
@@ -265,8 +267,8 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                 text = { Text("将删除“${profile.name}”的配置，不会删除提供商或模型。") },
                 dismissButton = { TextButton(onClick = { delete = null }) { Text("取消") } },
                 confirmButton = { TextButton(enabled = editable,
-                    colors = ButtonDefaults.textButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer), onClick = {
+                    colors = ButtonDefaults.textButtonColors(containerColor = destructiveColors().container,
+                        contentColor = destructiveColors().content), onClick = {
                     if (editor.enabled && editor.remove(profile.id) is ConversationSubAgentPreferences.WriteResult.Saved) delete = null
                 }) { Text("删除") } })
         }

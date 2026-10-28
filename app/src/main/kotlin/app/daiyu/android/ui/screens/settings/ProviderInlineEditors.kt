@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.destructiveColors
+
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 
@@ -135,10 +137,10 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
                 }
                 IconButton(enabled = enabled, modifier = Modifier.size(48.dp).testTag("$prefix-delete:$index"),
                     colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = MiuixTheme.colorScheme.errorContainer,
-                        contentColor = MiuixTheme.colorScheme.onErrorContainer,
-                        disabledContainerColor = MiuixTheme.colorScheme.errorContainer.copy(alpha = .38f),
-                        disabledContentColor = MiuixTheme.colorScheme.onErrorContainer.copy(alpha = .38f)), onClick = {
+                        containerColor = destructiveColors().container,
+                        contentColor = destructiveColors().content,
+                        disabledContainerColor = destructiveColors().container.copy(alpha = .38f),
+                        disabledContentColor = destructiveColors().content.copy(alpha = .38f)), onClick = {
                     update(rows.filter { it.id != row.id })
                 }) {
                     DaiyuIcon(DaiyuIcons.Delete, if (headers) "删除请求头" else "删除请求体字段",

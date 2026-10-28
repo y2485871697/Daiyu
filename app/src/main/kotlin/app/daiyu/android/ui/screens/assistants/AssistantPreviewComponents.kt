@@ -64,7 +64,7 @@ internal data class AssistantPreviewPalette(val dark: Boolean, val appearance: A
     private val customSurface = appearance.paletteSeedColor != null
     private val theme = resolveAppearanceColors(appearance, dark)
     private val actions = resolveAppearanceActions(appearance, dark)
-    private val destructive = destructiveColors(dark)
+    private val destructive = destructiveColors()
     val dangerContainer = destructive.container
     val onDangerContainer = destructive.content
     val dangerBorder = destructive.border

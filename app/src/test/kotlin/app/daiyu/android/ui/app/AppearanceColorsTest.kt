@@ -230,9 +230,9 @@ class AppearanceColorsTest {
             assertEquals(defaults.error, theme.error)
             assertEquals(defaults.errorContainer, theme.errorContainer)
             assertEquals(defaults.onErrorContainer, theme.onErrorContainer)
-            assertEquals(destructiveColors(dark).container,
+            assertEquals(destructiveColors().container,
                 app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette(dark, changed).dangerContainer)
-            assertTrue(contrast(destructiveColors(dark).content, destructiveColors(dark).container) >= 4.5f)
+            assertTrue(contrast(destructiveColors().content, destructiveColors().container) >= 4.5f)
             assertEquals(resolveAppearanceColors(base, dark).primaryContainer,
                 resolveAppearanceColors(base.copy(secondaryAccentColor = Color.Green.toArgb()), dark).primaryContainer)
         }

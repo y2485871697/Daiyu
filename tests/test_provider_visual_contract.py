@@ -114,7 +114,7 @@ class ProviderVisualContractTest(unittest.TestCase):
         for fragment in ('ProviderActionButton(text = "删除提供商", enabled = enabled',
                          'if (latestEnabled && latestDraft === draft)',
                          'connection.cancel(); balance.cancel(); onDelete()',
-                         'color = MiuixTheme.colorScheme.errorContainer', 'textColor = MiuixTheme.colorScheme.onErrorContainer',
+                         'colors = deletionButtonColors()',
                          'testTag("provider-delete").padding(horizontal = 20.dp, vertical = 4.dp)'):
             self.assertIn(fragment, delete)
 

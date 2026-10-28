@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components
 
+import app.daiyu.android.ui.app.destructiveColors
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
@@ -147,7 +149,7 @@ fun ConversationWorkspaceSheet(
                                     modifier = Modifier.weight(1f).testTag("workspace-selection-cancel"),
                                     onClick = { onSelectionChange(false, emptySet()) })
                                 ConversationAgentButton("删除", enabled = !busy && selectedWorkspaces.isNotEmpty(), primary = true,
-                                    primaryColor = MaterialTheme.colorScheme.error, onPrimaryColor = MaterialTheme.colorScheme.onError,
+                                    primaryColor = destructiveColors().container, onPrimaryColor = destructiveColors().content,
                                     modifier = Modifier.weight(1f).testTag("workspace-delete"),
                                     onClick = { onDeleteWorkspaces(selectedWorkspaces) })
                             } else {

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.deletionButtonColors
+
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.lazy.LazyListScope
@@ -292,9 +294,7 @@ internal fun ModelSettingsScreen(
                 if (latestEnabled && latestDraft === draft) {
                     connection.cancel(); balance.cancel(); onDelete()
                 }
-            }, colors = ButtonDefaults.textButtonColorsPrimary(
-                color = MiuixTheme.colorScheme.errorContainer,
-                textColor = MiuixTheme.colorScheme.onErrorContainer),
+            }, colors = deletionButtonColors(),
                 modifier = Modifier.testTag("provider-delete").padding(horizontal = 20.dp, vertical = 4.dp))
         }
     }

@@ -102,8 +102,8 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
                 dismissIme()
             }
             val newButton = node("assistant-new").assertIsDisplayed().assertIsEnabled()
-            val staleCreate = newButton.fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-            newButton.performClick()
+            val staleCreate = retainedClickCallback(newButton)
+            newButton.performTouchInput { click() }
             awaitUniqueTag("assistant-editor")
             awaitNodeWindowFocus(node("assistant-editor"))
             awaitDialogEnter(node("assistant-editor"))

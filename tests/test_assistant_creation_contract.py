@@ -42,7 +42,8 @@ class AssistantCreationContractTest(unittest.TestCase):
         self.assertIn('val conversation = fixture.database.create(bound.id)', navigation)
         self.assertIn('mainThread { activity.select(conversation) }', navigation)
         self.assertNotIn('dismissOutside(fromSettings); openPicker(fromSettings)', navigation)
-        for token in ('newButton.performClick()', 'mainThread { staleCreate() }',
+        for token in ('val staleCreate = retainedClickCallback(newButton)',
+                      'newButton.performTouchInput { click() }', 'mainThread { staleCreate() }',
                       'awaitUniqueTag("assistant-editor")', 'SqliteAssistantStore(fixture.database)',
                       'assertEquals(created.copy(name = name), restored.read(created.id))',
                       'listOf("cancel", "header", "system", "outside")'):

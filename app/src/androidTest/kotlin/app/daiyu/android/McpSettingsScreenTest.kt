@@ -81,8 +81,16 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
                 node("mcp-tool-description-sheet").assertIsDisplayed()
                 node("mcp-tool-description-title").assertTextEquals(longName)
                 node("mcp-tool-description").assertTextEquals(description)
-                node("mcp-tool-description-scroll").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
-                ui.waitForIdle()
+                node("mcp-tool-description-scroll").performSemanticsAction(SemanticsActions.ScrollBy) {
+                    assertTrue(it(0f, 100_000f))
+                }
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    val range = node("mcp-tool-description-scroll").fetchSemanticsNode()
+                        .config[SemanticsProperties.VerticalScrollAxisRange]
+                    range.maxValue() > 0f && range.value() >= range.maxValue() - 1f
+                }
                 val scroll = node("mcp-tool-description-scroll").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
                 assertTrue(scroll.maxValue() > 0f); assertTrue(scroll.value() >= scroll.maxValue() - 1f)
                 node("mcp-tool-description-done").performTouchInput { click() }

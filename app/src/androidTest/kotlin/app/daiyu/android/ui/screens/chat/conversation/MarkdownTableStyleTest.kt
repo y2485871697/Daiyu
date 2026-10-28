@@ -33,6 +33,7 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -76,11 +77,13 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
             val row = ui.onNodeWithText("row-A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val headerCell = ui.onNodeWithText("A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val horizontal = (row.top - before.top - 7f * density).roundToInt()
-            val column = if (layout == LayoutDirection.Ltr) headerCell.right - before.left + 10f * density
-                else headerCell.left - before.left - 10f * density
+            val cellPadding = (10f * density).roundToInt()
+            val column = if (layout == LayoutDirection.Ltr) headerCell.right - before.left + cellPadding
+                else headerCell.left - before.left - cellPadding
             val band = ceil(density).toInt().coerceAtLeast(1)
             assertTrue("$label horizontal separator", peakDifference(pixels, pixels.width / 4, horizontal, band, background) > .12f)
-            assertTrue("$label vertical separator", peakDifference(pixels, column.roundToInt(), (3f * density).roundToInt(), band, header) > .12f)
+            assertTrue("$label vertical separator",
+                verticalStrokeDifference(pixels, column, (3f * density).roundToInt(), density, header) > .12f)
             if (wide) {
                 val axis = frame.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
                 assertTrue("$label must overflow", axis.maxValue() > 0f)
@@ -88,6 +91,7 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
                 frame.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
                     assertTrue(scroll(if (old < axis.maxValue() / 2f) 10_000f else -10_000f, 0f))
                 }
+                ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
                 assertTrue("$label actually scrolled", abs(axis.value() - old) > 1f)
                 assertEquals(before, frame.fetchSemanticsNode().boundsInRoot)
@@ -110,6 +114,32 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
         assertTrue("$label bottom border", peakDifference(pixels, w / 4, h - 1, band, background) > .12f)
         assertTrue("$label left border", peakDifference(pixels, 0, h / 2, band, background) > .12f)
         assertTrue("$label right border", peakDifference(pixels, w - 1, h / 2, band, background) > .12f)
+    }
+
+    // Integrate the centered stroke's physical footprint, including antialiased half-pixels.
+    private fun verticalStrokeDifference(
+        pixels: PixelMap,
+        x: Float,
+        y: Int,
+        strokeWidth: Float,
+        background: Color,
+    ): Float {
+        require(strokeWidth.isFinite() && strokeWidth > 0f && x.isFinite())
+        val first = floor(x - strokeWidth / 2f).toInt()
+        val endExclusive = ceil(x + strokeWidth / 2f).toInt()
+        assertTrue("Vertical stroke footprint outside capture: x=$x width=$strokeWidth y=$y",
+            first >= 0 && endExclusive <= pixels.width &&
+                first < endExclusive && y in 0 until pixels.height)
+        var red = 0f
+        var green = 0f
+        var blue = 0f
+        for (px in first until endExclusive) {
+            val color = pixels[px, y]
+            red += color.red - background.red
+            green += color.green - background.green
+            blue += color.blue - background.blue
+        }
+        return maxOf(abs(red), abs(green), abs(blue)) / strokeWidth
     }
 
     private fun peakDifference(pixels: PixelMap, x: Int, y: Int, radius: Int, background: Color): Float {

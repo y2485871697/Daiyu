@@ -166,7 +166,7 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         assertNoLegacyActions()
     }
 
-    private fun finishInstall(expected: Int) {
+    private fun finishInstall(expected: Int, retireSeparately: Boolean = false) {
         dispatcher.runNext()
         ui.waitUntil(5_000) {
             dispatcher.pending && coordinator.state.value.busy && !coordinator.state.value.discarding &&
@@ -177,9 +177,11 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
             transactions.installs == expected &&
                 (!coordinator.state.value.busy || coordinator.state.value.discarding)
         }
-        repeat(5) {
-            if (dispatcher.pending) dispatcher.drain()
-            ui.waitForIdle()
+        if (!retireSeparately) {
+            repeat(5) {
+                if (dispatcher.pending) dispatcher.drain()
+                ui.waitForIdle()
+            }
         }
         assertEquals(expected, transactions.installs)
         assertNoLegacyActions()
@@ -216,7 +218,11 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
             assertEquals(approvalsBefore + 1, approvals)
             assertEquals(selectionsBefore + 1, selections)
             assertEquals(LinuxGenerationRef(distribution, checkNotNull(coordinator.state.value.registration).installation.generation), selectedReference)
-            ui.onNodeWithText("环境已安装，重启应用后可用").assertExists()
+            ui.onNodeWithTag("page:Linux 工具环境")
+                .scrollToDescendant(hasText("环境已安装，重启应用后可用"))
+            ui.onNodeWithText("环境已安装，重启应用后可用").assertIsDisplayed()
+            ui.onNodeWithTag("page:Linux 工具环境")
+                .scrollToDescendant(hasTestTag("linux-environment-configuration"))
             node("linux-install-environment").assertDoesNotExist()
             node("linux-switch-environment").assertDoesNotExist()
             ui.onNodeWithText("启用环境").assertDoesNotExist()
@@ -313,8 +319,9 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         transactions.failInstall = true
         show()
         clickInstall()
-        finishInstall(1)
+        finishInstall(1, retireSeparately = true)
         val original = transactions.submitted.single()
+        assertEquals(0, transactions.discarded.size)
         finishRetirement(1)
         assertSame(original, transactions.discarded.single())
         assertFreshButton()

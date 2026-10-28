@@ -38,8 +38,7 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
     fun testLongPressCancelBackAndPauseKeepCatalogAndSettings() {
         openList()
         val before = fixture.settings.localModelCatalogSnapshot(); val saved = fixture.settings.load()
-        val oldSettings = reveal("local-model-rename:bulk-first").fetchSemanticsNode().config[
-            androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!
+        val oldSettings = retainedClickCallback(reveal("local-model-rename:bulk-first"))
         select("bulk-first")
         mainThread { oldSettings() }
         node("catalog-model-editor").assertDoesNotExist()

@@ -480,7 +480,7 @@ internal fun AssistantTurn(
     val contentReady = projection?.sources == sources
     val generationComplete = turn.status != RunStatus.RUNNING && contentReady
     val displayedTurn = remember(turn, projection) {
-        if (projection == null) turn
+        if (projection == null || projection.sources.none { it.isNotBlank() }) turn
         else if (turn.content.isEmpty()) turn.copy(finalText = projection.sources.single())
         else {
             var textIndex = 0

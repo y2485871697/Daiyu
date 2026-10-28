@@ -53,7 +53,8 @@ class CompletionProjectionActivityTest : WiredActivityTestCase() {
             val next = user.copy(id = MessageId("second-answer"), role = Message.ASSISTANT_ROLE,
                 status = RunStatus.RUNNING, blocks = emptyList())
             fixture.database.send(user, next)
-            fixture.database.save(next.copy(status = RunStatus.COMPLETED))
+            fixture.database.save(next.copy(status = RunStatus.COMPLETED,
+                blocks = listOf(MessageBlock.Text("body", "second answer"))))
             val fresh = checkNotNull(ConversationCompletionMarkers.read(fixture.database.readableDatabase, id))
             // Before the next UI frame, the old shown owner remains eligible but its token is not.
             call("acknowledgeCompletion", old, generation(), fixture.controller.dataRevision)

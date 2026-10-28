@@ -205,9 +205,9 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
                 ?.singleOrNull { it.id == extra.id } == expectedRenamed &&
                 ui.onAllNodes(hasTestTag("local-model:extra-local") and
                 hasAnyAncestor(hasTestTag("page:主模型服务商")) and
-                hasAnyDescendant(hasText("Renamed local model"))).fetchSemanticsNodes().size == 1
+                hasText("Renamed local model")).fetchSemanticsNodes().size == 1
         }
-        renamedRow.assert(hasAnyDescendant(hasText("Renamed local model")))
+        renamedRow.assert(hasText("Renamed local model"))
         val renamed = checkNotNull(fixture.settings.localModelCatalogSnapshot())
         assertEquals(expectedRenamed, renamed.models.single { it.id == extra.id })
         assertEquals(current, renamed.models.single { it.id == current.id })

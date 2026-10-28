@@ -69,6 +69,12 @@ class MessageActionBarLayoutTest : WiredActivityTestCase() {
 
     fun testUserTurnHidesItsTimeAndKeepsActionsWhileAssistantTimeRemains() {
         val userTime = "2026-10-27 12:34"
+        val assistantText = "助手正文"
+        markdownProjectionCache.put(MarkdownProjection(
+            listOf(assistantText),
+            mapOf(assistantText to app.daiyu.android.MarkdownParser.parse(assistantText)),
+            defaultMarkdownParser,
+        ))
         val clicked = mutableListOf<String>()
         var density = 1f
         mainThread {
@@ -85,7 +91,8 @@ class MessageActionBarLayoutTest : WiredActivityTestCase() {
                                     onDeleteTurn = { clicked += "delete:$it" },
                                 ))
                         }
-                        AssistantTurn(ChatTurnUi.Assistant("reply", timestamp = timestamp), ChatScreenActions())
+                        AssistantTurn(ChatTurnUi.Assistant("reply", timestamp = timestamp,
+                            finalText = assistantText), ChatScreenActions())
                     }
                 }
             }

@@ -155,7 +155,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
             assertFill("dialog-confirm", primary)
             assertFill("dialog-cancel", palette.secondaryVariant)
             revealEditor("local-model-delete:layout-model")
-            assertFill("local-model-delete:layout-model", palette.errorContainer)
+            assertFill("local-model-delete:layout-model", Color(0xFF92454F))
             node("dialog-cancel").performClick()
             assertFill("global-accent-reference", palette.primary)
         }

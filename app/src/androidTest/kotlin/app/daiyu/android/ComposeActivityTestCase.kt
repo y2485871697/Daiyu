@@ -761,6 +761,18 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         assertEquals("selection expected=($start,$end) actual=(${range.start},${range.end})", start, range.start)
         assertEquals("selection expected=($start,$end) actual=(${range.start},${range.end})", end, range.end)
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    @Suppress("UNCHECKED_CAST")
+    protected fun retainedClickCallback(target: androidx.compose.ui.test.SemanticsNodeInteraction): () -> Unit {
+        // Inspector metadata retains the app callback without a detached ClickableNode wrapper.
+        val callback = target.fetchSemanticsNode().layoutInfo.getModifierInfo().asSequence()
+            .map { it.modifier }
+            .filterIsInstance<androidx.compose.ui.platform.InspectableValue>()
+            .filter { it.nameFallback == "clickable" || it.nameFallback == "combinedClickable" }
+            .flatMap { it.inspectableElements }
+            .single { it.name == "onClick" }.value
+        return callback as () -> Unit
+    }
     // Retain host capabilities or app-owned semantics, not ClickableNode wrappers.
     // Capture before navigation; never refetch a replacement callback after a visit changes.
     protected fun retainedClick(activity: MainActivity, tag: String): () -> Unit {

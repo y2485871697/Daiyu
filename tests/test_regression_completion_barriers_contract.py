@@ -63,7 +63,8 @@ class RegressionCompletionBarriersContractTest(unittest.TestCase):
         self.assertEqual(3, method.count('awaitSponsorReady()'))
         self.assertEqual(3, method.count('awaitSponsorClosed()'))
         self.assertEqual(1, method.count('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)'))
-        for value in ('node("preview-dialog-scrim").performClick()', 'ui.onNodeWithContentDescription("关闭").performClick()',
+        self.assertEqual(2, method.count('node("preview-dialog-scrim").performClick()'))
+        for value in ('ui.onNodeWithContentDescription("关闭").assertDoesNotExist()',
                       'assertEquals(before, fixture.database.exportBackup())', 'assertDraft("sponsor unsent")'):
             self.assertIn(value, method)
 
@@ -72,14 +73,17 @@ class RegressionCompletionBarriersContractTest(unittest.TestCase):
         method = text.split('fun testSponsorSwitchesOriginalQrsAndClosesWithoutOpeningPayment()', 1)[1].split('fun testPausedOrRetiredSponsorCallback', 1)[0]
         reopened = method.split('entry("赞助").performClick()', 1)[1].split('entry("赞助").performClick()', 1)[0]
         order = ['awaitSponsorReady()', 'node("sponsor-wechat").assertIsSelected()',
-                 'awaitImeFrame(node("sponsor-wechat"), visible = false)',
+                 'dismissIme()',
+                 'awaitDialogImeFrame(node("sponsor-wechat"), visible = false)',
                  'instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)', 'awaitSponsorClosed()']
         for before, after in zip(order, order[1:]):
             self.assertIn(before, reopened)
             self.assertIn(after, reopened)
             self.assertLess(reopened.index(before), reopened.index(after))
         self.assertEqual(1, method.count('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)'))
-        self.assertEqual(1, method.count('awaitImeFrame(node("sponsor-wechat"), visible = false)'))
+        self.assertEqual(1, method.count('dismissIme()'))
+        self.assertEqual(1, method.count('awaitDialogImeFrame(node("sponsor-wechat"), visible = false)'))
+        self.assertNotIn('awaitImeFrame(node("sponsor-wechat"), visible = false)', method)
         for oracle in ('assertEquals(before, fixture.database.exportBackup())',
                        'assertEquals(settings, fixture.settings.loadForEditing().settings)',
                        'assertEquals(0, fixture.opens.get())', 'assertDraft("sponsor unsent")'):
@@ -101,6 +105,38 @@ class RegressionCompletionBarriersContractTest(unittest.TestCase):
                        'assertEquals(before, fixture.database.exportBackup())', 'assertEquals(0, fixture.opens.get())',
                        'ui.onNodeWithText("Unsaved name").assertDoesNotExist()'):
             self.assertIn(oracle, text)
+
+    def test_empty_projection_cannot_replace_the_first_pending_body(self):
+        text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt').read_text()
+        body = text.split('val displayedTurn = remember(turn, projection) {', 1)[1].split('var hasProjectedBody', 1)[0]
+        self.assertIn('if (projection == null || projection.sources.none { it.isNotBlank() }) turn', body)
+        self.assertLess(body.index('projection.sources.none'), body.index('turn.copy(finalText = projection.sources.single())'))
+        test = (TESTS / 'ui/screens/chat/conversation/MessageMarkdownTest.kt').read_text()
+        method = test.split('fun testEmptyProjectionDoesNotCountAsPreviouslyDisplayedBody()', 1)[1].split('fun testColdPendingTurnReplacement', 1)[0]
+        for oracle in ('MarkdownProjection(listOf(""),', 'entered.count == 0L',
+                       'ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed()',
+                       'ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()',
+                       'release.countDown()', 'body("empty-to-body", "First body.").assertIsDisplayed()'):
+            self.assertIn(oracle, method)
+
+    def test_retained_callbacks_capture_inspector_metadata_not_detached_nodes(self):
+        text = (TESTS / 'ComposeActivityTestCase.kt').read_text()
+        helper = text.split('protected fun retainedClickCallback(', 1)[1].split('protected fun retainedClick(', 1)[0]
+        for value in ('getModifierInfo()', 'InspectableValue', 'it.inspectableElements',
+                      '.single { it.name == "onClick" }.value'):
+            self.assertIn(value, helper)
+        for forbidden in ('SemanticsActions.OnClick', 'getDeclaredField', 'isAccessible', 'runCatching'):
+            self.assertNotIn(forbidden, helper)
+        assistant = (TESTS / 'AssistantNavigationActivityTest.kt').read_text()
+        self.assertIn('val staleCreate = retainedClickCallback(newButton)', assistant)
+        self.assertIn('mainThread { staleCreate() }', assistant)
+        bulk = (TESTS / 'ModelBulkSelectionActivityTest.kt').read_text()
+        self.assertIn('val oldSettings = retainedClickCallback(reveal("local-model-rename:bulk-first"))', bulk)
+        self.assertIn('mainThread { oldSettings() }', bulk)
+        linux = (TESTS / 'ui/screens/settings/LinuxSettingsScreenTest.kt').read_text()
+        for name in ('oldSwitch', 'oldBeforeFiles'):
+            self.assertIn('val ' + name + ' = retainedClickCallback(', linux)
+            self.assertIn('mainThread { ' + name + '() }', linux)
 
 if __name__ == '__main__':
     unittest.main()

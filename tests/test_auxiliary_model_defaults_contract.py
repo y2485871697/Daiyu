@@ -22,7 +22,7 @@ class AuxiliaryModelDefaultsContract(unittest.TestCase):
 
     def test_running_manual_summary_receives_the_original_run_model(self):
         controller = (MAIN / 'ChatController.kt').read_text()
-        self.assertIn('token.summaryPreparation, requestProvider)', controller)
+        self.assertIn('token.summaryPreparation, requestProvider,', controller)
         self.assertIn('it.runner === running && it.initial.id == original.id', controller)
         self.assertIn('capacity.sendBudgetTokens, currentProvider)', controller)
         worker = (MAIN / 'context/ContextManagementWorker.kt').read_text()

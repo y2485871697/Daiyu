@@ -42,11 +42,22 @@ class SubAgentThinkingPickerContractTest(unittest.TestCase):
         text = (SRC / "MainActivity.kt").read_text()
         picker = text.split("SubAgentThinkingEffortPickerDialog(show = thinkingPicker", 1)[1]
         self.assertIn("mainChat = true", picker)
-        self.assertIn("reasoningPreference.set(thinkingOwner, effort); publishChat()", picker)
+        self.assertIn("if (allowTaskConfigurationChange()) try {", picker)
+        self.assertIn("if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()", picker)
+        controller = (SRC / "ChatController.kt").read_text()
+        setter = controller.split("internal fun setChatReasoning(", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("if (!idleAvailable() || hasLiveChildTasks()) return false\n"
+                      "        reasoningPreference.set(owner, effort)\n"
+                      "        return true", setter)
         shared = (COMPONENTS / "subagent/ConversationThinkingPicker.kt").read_text()
         subagent, main_chat = shared.split("ConversationAgentTypography {", 1)
         self.assertIn("{ selected = it }, { index ->", subagent)
-        self.assertIn("selected = index\n                    if (choices[index] != effort) onEffortChange(choices[index])", main_chat)
+        self.assertIn("ConversationDepthSlider(selected, choices.lastIndex, { index ->\n"
+                      "                    if (choices[index] != effort) onEffortChange(choices[index])\n"
+                      "                }, {})", main_chat)
+        self.assertNotIn("selected = index", main_chat)
+        self.assertIn("remember(show, effort, choices)", shared)
+        self.assertIn("mutableIntStateOf(choices.indexOf(effort))", shared)
         self.assertIn("setProgress { value ->", shared)
 
     def test_draft_and_row_keep_distinct_save_ownership(self):

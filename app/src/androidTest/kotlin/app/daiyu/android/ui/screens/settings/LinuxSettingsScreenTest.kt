@@ -354,7 +354,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         val alpine = LinuxGenerationRef("alpine", "alpine-gen")
         assertTrue(LinuxInstallChoicePreferences(choicePreferences).save(LinuxInstallChoice("debian", LinuxExecutionMode.PROOT)))
         show(entries = entries, selectedReference = alpine)
-        val oldSwitch = checkNotNull(revealLinux("linux-switch-environment").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val oldSwitch = retainedClickCallback(revealLinux("linux-switch-environment").assertIsEnabled())
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:0").performClick()
         mainThread { oldSwitch() }
@@ -363,7 +363,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         node("linux-choice:linux-distribution-choice:1").performClick()
         mainThread { oldSwitch() }
         assertEquals(0, selects.get())
-        val oldBeforeFiles = checkNotNull(revealLinux("linux-switch-environment").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val oldBeforeFiles = retainedClickCallback(revealLinux("linux-switch-environment").assertIsEnabled())
         node("linux-tab:files").performClick(); node("linux-tab:basic").performClick()
         mainThread { oldBeforeFiles() }
         assertEquals(alpine, currentSelection)

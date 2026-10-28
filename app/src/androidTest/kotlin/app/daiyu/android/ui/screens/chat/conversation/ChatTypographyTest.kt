@@ -84,7 +84,7 @@ class ChatTypographyTest : WiredActivityTestCase() {
             val heading = layout("小标题")
             assertEquals(22.sp, heading.layoutInput.style.fontSize)
             assertEquals(30.sp, heading.layoutInput.style.lineHeight)
-            val code = layout("val example = 1\n")
+            val code = layout("val example = 1")
             assertEquals(14.sp, code.layoutInput.style.fontSize)
             assertEquals(22.sp, code.layoutInput.style.lineHeight)
         }

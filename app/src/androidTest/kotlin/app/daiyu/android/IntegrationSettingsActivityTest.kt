@@ -144,22 +144,53 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         }
         providers.setEnabled(registered.revision, other.slotId, true)
         val before = providers.snapshot()
+        val frozen = providers.freezeActive()
+        val database = fixture.database.exportBackup()
+        val bindings = modelBindings()
         val calls = guardChatPickerNetwork()
         node("chat-model").performClick(); awaitChatPickerLoaded()
         node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-provider:${other.slotId}"))
         node("chat-model-provider:${other.slotId}").assertTextContains("Other fixture").performClick()
         node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:${other.slotId}:second"))
         node("chat-model-option:${other.slotId}:second").assertIsNotSelected().performClick()
-        awaitControl("provider catalog selected") { providers.snapshot().activeSlotId == other.slotId && !fixture.controller.dataBusy }
-        assertEquals(before.revision + 1, providers.snapshot().revision)
+        awaitControl("provider catalog selected") {
+            fixture.database.modelBinding(null) == expectedChatBinding("second", other.slotId) && !fixture.controller.dataBusy
+        }
+        assertEquals(before, providers.snapshot())
         assertEquals(saved, fixture.settings.load())
-        assertEquals("second", providers.freezeActive().settings.model)
-        assertEquals(other.slotId, providers.freezeActive().editor.slotId)
+        assertEquals(frozen, providers.freezeActive())
+        assertChatBinding("second", other.slotId)
+        assertEquals(bindings + ("" to expectedChatBinding("second", other.slotId)), modelBindings())
+        assertEquals(database, fixture.database.exportBackup())
         node("chat-model-picker").assertDoesNotExist()
         node("chat-model").performClick(); awaitChatPickerReady()
         node("chat-model-option:second").assertIsSelected()
         assertChatPickerOffline(calls)
         assertEquals(0, fixture.opens.get())
+    }
+
+    private fun modelBindings(): Map<String, app.daiyu.android.storage.ConversationModelBinding?> =
+        fixture.database.readableDatabase.rawQuery(
+            "SELECT owner_id,provider_slot,local_model_id FROM conversation_model_selections ORDER BY owner_id", null,
+        ).use { cursor -> buildMap {
+            while (cursor.moveToNext()) put(cursor.getString(0), if (cursor.isNull(1)) null else
+                app.daiyu.android.storage.ConversationModelBinding(cursor.getString(1), cursor.getString(2)))
+        } }
+    private fun expectedChatBinding(model: String, provider: String = app.daiyu.android.storage.ProviderRegistry.PRIMARY):
+        app.daiyu.android.storage.ConversationModelBinding {
+        val repo = fixture.controller.providers
+        val record = checkNotNull(repo.catalogSnapshot(repo.editor(provider)).models.singleOrNull { it.id == model })
+        return app.daiyu.android.storage.ConversationModelBinding(provider, record.settings.localIdentity)
+    }
+    private fun assertChatBinding(model: String, provider: String = app.daiyu.android.storage.ProviderRegistry.PRIMARY) {
+        assertEquals(expectedChatBinding(model, provider), fixture.database.modelBinding(null))
+        val (editor, editing) = fixture.controller.conversationModelEditing(null)
+        assertEquals(provider, editor.slotId)
+        val expected = fixture.controller.providers.withEditor(editor) { store ->
+            val record = store.localModelCatalogSnapshot()!!.models.single { it.id == model }
+            record.settings.applyTo(store.load(), record.id)
+        }
+        assertEquals(expected, editing.settings)
     }
 
     private class PickerNetworkCalls {
@@ -222,6 +253,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         seedChatPickerCatalog()
         val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
+        val bindings = modelBindings()
         setDraft("切换模型时保留草稿")
         assertDraft("切换模型时保留草稿")
         val database = fixture.database.exportBackup()
@@ -245,7 +277,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         awaitControl("chat model selected") { !fixture.controller.dataBusy }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
         node("chat-model-picker").assertDoesNotExist()
-        assertEquals(before.copy(model = "second"), fixture.settings.load())
+        assertEquals(before, fixture.settings.load())
+        assertChatBinding("second")
+        assertEquals(bindings + ("" to expectedChatBinding("second")), modelBindings())
         assertEquals(database, fixture.database.exportBackup())
         assertDraft("切换模型时保留草稿")
         assertChatPickerOffline(calls)
@@ -255,6 +289,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         seedChatPickerCatalog()
         val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
+        val bindings = modelBindings()
         setDraft("旧选择不得借用新页面")
         assertDraft("旧选择不得借用新页面")
         dismissIme()
@@ -268,15 +303,19 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         mainThread { stale() }
         node("chat-model-picker").assertDoesNotExist()
         assertEquals(before, fixture.settings.load())
+        assertEquals(bindings, modelBindings())
         node("chat-model").performClick(); awaitChatPickerReady()
         mainThread { stale() }
         assertFalse(fixture.controller.dataBusy)
         assertEquals(before, fixture.settings.load())
+        assertEquals(bindings, modelBindings())
         node("chat-model-picker").assertExists()
         node("chat-model-option:second").performClick()
         awaitControl("new picker selection") { !fixture.controller.dataBusy }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
-        assertEquals(before.copy(model = "second"), fixture.settings.load())
+        assertEquals(before, fixture.settings.load())
+        assertChatBinding("second")
+        assertEquals(bindings + ("" to expectedChatBinding("second")), modelBindings())
         assertEquals(database, fixture.database.exportBackup())
         assertDraft("旧选择不得借用新页面")
         assertChatPickerOffline(calls)
@@ -295,23 +334,50 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         }
         modelButton.assertIsDisplayed().assertIsEnabled().performClick()
         awaitChatPickerReady()
+        val database = fixture.database.exportBackup()
+        val bindings = modelBindings()
+        val sessionField = MainActivity::class.java.getDeclaredField("chatModelSession")
+            .apply { isAccessible = true }
+        var previousSession: Any? = null
         lateinit var stale: () -> Unit
-        mainThread { stale = retainedChatPickerSelection() }
-        realPauseResume(activity)
-        mainThread { stale() }
-        assertEquals(before, fixture.settings.load())
-        assertFalse(fixture.controller.dataBusy)
-        node("chat-model-picker").assertDoesNotExist()
-        node("chat-model").performClick(); awaitChatPickerReady()
-        mainThread { stale() }
-        assertEquals(before, fixture.settings.load())
+        mainThread {
+            previousSession = sessionField.get(activity)
+            stale = retainedChatPickerSelection()
+        }
+        realPauseResume(activity, atPause = {
+            stale()
+            assertEquals(before, fixture.settings.load())
+            assertEquals(bindings, modelBindings())
+            assertFalse(fixture.controller.dataBusy)
+        })
+        ui.waitUntil(5_000) {
+            var replaced = false
+            mainThread { replaced = sessionField.get(activity)?.let { it !== previousSession } == true }
+            replaced
+        }
+        awaitChatPickerReady()
         node("chat-model-picker").assertExists()
+        mainThread { stale() }
+        assertEquals(before, fixture.settings.load())
+        assertEquals(bindings, modelBindings())
+        assertFalse(fixture.controller.dataBusy)
+        assertEquals(database, fixture.database.exportBackup())
+        node("chat-model-picker").assertExists()
+        node("chat-model-option:second").assertIsEnabled().performClick()
+        awaitControl("resumed picker selection") { !fixture.controller.dataBusy }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        assertEquals(before, fixture.settings.load())
+        assertChatBinding("second")
+        assertEquals(bindings + ("" to expectedChatBinding("second")), modelBindings())
+        assertEquals(database, fixture.database.exportBackup())
         assertChatPickerOffline(calls)
+        assertEquals(0, fixture.opens.get())
     }
     fun testDismissedChatModelPickerCannotReviveFromPendingCatalog() {
         seedChatPickerCatalog()
         val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
+        val bindings = modelBindings()
         setDraft("本地目录读取取消后保留草稿")
         val database = fixture.database.exportBackup()
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
@@ -329,8 +395,14 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
                 val previousJobs = parent.children.toSet()
                 MainActivity::class.java.getDeclaredMethod("openChatModels")
                     .apply { isAccessible = true }.invoke(activity)
-                val pending = parent.children.single { it !in previousJobs }
-                pending.invokeOnCompletion { completed.countDown() }
+                val pending = parent.children.filter { it !in previousJobs }.toList()
+                assertTrue("opening picker started background work", pending.isNotEmpty())
+                val remaining = AtomicInteger(pending.size)
+                pending.forEach { job ->
+                    job.invokeOnCompletion {
+                        if (remaining.decrementAndGet() == 0) completed.countDown()
+                    }
+                }
             }
             awaitUniqueTag("chat-model-picker")
             ui.waitUntil(5_000) {
@@ -347,10 +419,12 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             ui.waitForIdle()
             node("chat-model-picker").assertDoesNotExist()
             assertEquals(before, fixture.settings.load())
+            assertEquals(bindings, modelBindings())
             node("chat-model").performClick(); awaitChatPickerReady()
             node("chat-model-option:second").assertExists()
             closeChatPicker()
             assertEquals(before, fixture.settings.load())
+            assertEquals(bindings, modelBindings())
             assertEquals(database, fixture.database.exportBackup())
             assertDraft("本地目录读取取消后保留草稿")
             assertChatPickerOffline(calls)
@@ -361,6 +435,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         seedChatPickerCatalog()
         val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
+        val bindings = modelBindings()
         setDraft("拒绝过期选择时保留草稿")
         val database = fixture.database.exportBackup()
         node("chat-model").performClick(); awaitChatPickerReady()
@@ -371,6 +446,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val rejected = "切换未保存，请关闭后重新打开选择模型"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(rejected).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(changed, fixture.settings.load())
+        assertEquals(bindings, modelBindings())
         ui.onNodeWithText(rejected).assertExists()
         node("chat-model-option:second").assertIsNotEnabled()
         reopenChatPicker(); awaitChatPickerReady()
@@ -379,6 +455,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model-option:external-change").assertIsEnabled()
         closeChatPicker()
         assertEquals(changed, fixture.settings.load())
+        assertEquals(bindings, modelBindings())
         assertEquals(database, fixture.database.exportBackup())
         assertDraft("拒绝过期选择时保留草稿")
         assertChatPickerOffline(calls)
@@ -389,13 +466,21 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         val owner = checkNotNull(fixture.controller.active)
         val runningDatabase = fixture.database.exportBackup()
+        val runningBindings = modelBindings()
         val runningOpens = fixture.opens.get()
         try {
             node("chat-model").performClick()
             awaitChatPickerLoaded()
             node("chat-model-picker").assertExists()
-            node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:external-change"))
-            node("chat-model-option:external-change").assertIsNotEnabled()
+            node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:second"))
+            node("chat-model-option:second").assertIsEnabled().performClick()
+            assertFalse(fixture.controller.dataBusy)
+            node("chat-model-picker").assertExists()
+            assertEquals(changed, fixture.settings.load())
+            assertEquals(owner, fixture.controller.active)
+            assertEquals(runningBindings, modelBindings())
+            assertEquals(runningDatabase, fixture.database.exportBackup())
+            assertEquals(runningOpens, fixture.opens.get())
             val sessionField = MainActivity::class.java.getDeclaredField("chatModelSession")
                 .apply { isAccessible = true }
             var previousSession: Any? = null
@@ -406,8 +491,15 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
                 mainThread { replaced = sessionField.get(activity)?.let { it !== previousSession } == true }
                 replaced
             }
-            node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:external-change"))
-            node("chat-model-option:external-change").assertIsNotEnabled()
+            node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:second"))
+            node("chat-model-option:second").assertIsEnabled().performClick()
+            assertFalse(fixture.controller.dataBusy)
+            node("chat-model-picker").assertExists()
+            assertEquals(changed, fixture.settings.load())
+            assertEquals(owner, fixture.controller.active)
+            assertEquals(runningBindings, modelBindings())
+            assertEquals(runningDatabase, fixture.database.exportBackup())
+            assertEquals(runningOpens, fixture.opens.get())
             node("chat-model-refresh").assertDoesNotExist()
             assertEquals(changed, fixture.settings.load())
             assertEquals(owner, fixture.controller.active)

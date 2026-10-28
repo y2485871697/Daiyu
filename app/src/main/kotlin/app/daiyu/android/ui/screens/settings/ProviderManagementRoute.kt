@@ -210,6 +210,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 val catalog = repo.withEditor(editor) { it.localModelCatalogSnapshot() }
                 val identity = catalog?.providerIdentity
                 val balance = controller.providerBalances.get(slot).store.configurationForEditing()
+                val sameSavedProvider = restore != null &&
+                    restore.editor == editor && restore.editing == editing &&
+                    restore.balanceConfiguration == balance &&
+                    retained?.catalogIdentity == identity && catalog != null
                 val clearedDeletedModel = restore != null && restore.editor == editor &&
                     restore.editing.settings.model.isNotBlank() && editing.settings.model.isEmpty() &&
                     restore.editing.copy(settings = restore.editing.settings.copy(model = "")) == editing &&
@@ -219,7 +223,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 repo.withEditor(editor) { }
                 ProviderDetail(editor, registration.name, registration.enabled, editing, configurationRevision,
                     repo.catalogPersistence(editor), identity, balance, snapshot).also { loaded ->
-                    if (clearedDeletedModel) loaded.pageUi = checkNotNull(restore).pageUi
+                    if (clearedDeletedModel || sameSavedProvider) loaded.pageUi = checkNotNull(restore).pageUi
                 }
             } }
             if (!current(p) || serial != request) return@launch

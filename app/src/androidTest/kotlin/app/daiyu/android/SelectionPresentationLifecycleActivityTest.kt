@@ -146,7 +146,10 @@ class SelectionPresentationLifecycleActivityTest : WiredActivityTestCase() {
     }
     fun testModelRevisionChangePrunesOnlyRemovedIdsAndKeepsSurvivingSelection() {
         openModelList()
+        val saved = fixture.settings.load()
         modelRow("retained-first").performTouchInput { longClick() }; modelRow("retained-second").performClick()
+        val oldCancel = retained("local-model-cancel-selection")
+        val oldDelete = retained("local-model-delete-selected")
         homeAndReturn {
             val before = checkNotNull(fixture.settings.localModelCatalogSnapshot())
             assertEquals(CatalogLocalEditResult.APPLIED, fixture.settings.deleteCatalogModels(
@@ -156,10 +159,14 @@ class SelectionPresentationLifecycleActivityTest : WiredActivityTestCase() {
                 listOf(SavedCatalogModel("new-while-stopped", "New model", CatalogModelParameters()))) { false })
         }
         ready("local-model-delete-selected")
+        mainThread { oldCancel(); oldDelete() }
+        node("dialog-confirm").assertDoesNotExist()
+        node("local-model-selection-actions").assertIsDisplayed()
         modelRow("retained-second").assertIsOn(); modelRow("new-while-stopped").assertIsOff()
         node("local-model:retained-first").assertDoesNotExist()
         modelRow("retained-second").performClick()
         node("local-model-delete-selected").assertIsNotEnabled()
+        assertEquals(saved, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
     fun testDeletingCurrentModelRetainsModelTabAndSurvivingSelection() {

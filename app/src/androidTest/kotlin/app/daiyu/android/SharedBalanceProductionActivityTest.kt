@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import android.content.Intent
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.getOrNull
 import androidx.lifecycle.Lifecycle
 import app.daiyu.android.balance.*
 import app.daiyu.android.storage.ProviderRegistry
@@ -92,8 +93,13 @@ class SharedBalanceProductionActivityTest : WiredActivityTestCase() {
         invoke("openChatModels")
         ui.waitUntil(5000) { primary.state.value.amountValue?.toPlainString() == "8.09" &&
             other.state.value.amountValue?.toPlainString() == "8.19" }
+        ui.waitUntil(5000) {
+            ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().singleOrNull()?.config
+                ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.StateDescription) == "模型目录读取完成"
+        }
         for ((slot, value) in listOf(ProviderRegistry.PRIMARY to "8.09", secondary to "8.19")) {
-            ui.waitUntil(5000) { ui.onAllNodesWithTag("chat-model-provider-balance:$slot", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            ui.onNodeWithTag("chat-model-list", useUnmergedTree = true)
+                .scrollToDescendant(hasTestTag("chat-model-provider-balance:$slot"))
             ui.onNode(hasText(value) and hasAnyAncestor(hasTestTag("chat-model-provider-balance:$slot")),
                 useUnmergedTree = true).assertIsDisplayed()
         }

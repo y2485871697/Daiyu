@@ -33,7 +33,22 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         self.assertIn('reasoningPreference.rememberedModel(nextProvider, nextModel)', switch)
         self.assertLess(switch.rindex('changeModel()'), switch.index('reasoningPreference.set(owner, next)'))
         self.assertLess(switch.index('reasoningPreference.set(owner, next)'), switch.index('reasoningPreference.rememberModel(previousProvider, previousModel, previous)'))
-        self.assertIn('providers.catalogSnapshot(previous)', controller)
+        self.assertIn('reasoningPreference.snapshot(owner)', switch)
+        selection = controller.split('internal fun selectActiveProviderCatalogModel(', 1)[1].split('internal fun saveConversationGptSpeed(', 1)[0]
+        for fragment in ['val expectedBinding = database.modelBinding(conversation)',
+                         'switchChatReasoningModel(expectedBinding?.providerSlotId, expectedBinding?.localModelIdentity,',
+                         'target.slotId, ticket.record.settings.localIdentity, owner = conversation?.value)',
+                         'providers.selectConversationModel(target, targetSettings, ticket',
+                         'check(database.bindModel(conversation, expectedBinding,']:
+            self.assertIn(fragment, selection)
+        self.assertIn('check(database.modelBinding(conversation) == expectedBinding)', selection)
+        self.assertIn(
+            'switchChatReasoningModel(expectedBinding?.providerSlotId, expectedBinding?.localModelIdentity,\n'
+            '                target.slotId, ticket.record.settings.localIdentity, owner = conversation?.value) {\n'
+            '                providers.selectConversationModel(target, targetSettings, ticket, cancelled) { binding ->\n'
+            '                    check(database.bindModel(conversation, expectedBinding, binding))', selection)
+        self.assertLess(selection.index('switchChatReasoningModel('), selection.index('providers.selectConversationModel('))
+        self.assertLess(selection.index('providers.selectConversationModel('), selection.index('check(database.bindModel('))
 
     def test_video_off_is_applied_each_round_before_final_payload_validation(self):
         request = (SRC / 'model/ResponsesModel.kt').read_text()

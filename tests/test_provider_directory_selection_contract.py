@@ -8,6 +8,23 @@ UI = MAIN / "ui/screens/settings"
 
 
 class ProviderDirectorySelectionContractTest(unittest.TestCase):
+    def test_catalog_revision_change_reuses_presentation_without_relaxing_draft_restore(self):
+        route = (UI / "ProviderManagementRoute.kt").read_text()
+        opening = route.split("fun open(", 1)[1].split("fun mutate(", 1)[0]
+        compact = lambda text: " ".join(text.split())
+        guard = opening.split("val sameSavedProvider =", 1)[1].split("val clearedDeletedModel =", 1)[0]
+        self.assertEqual(
+            "restore != null && restore.editor == editor && restore.editing == editing && "
+            "restore.balanceConfiguration == balance && retained?.catalogIdentity == identity && catalog != null",
+            compact(guard),
+        )
+        self.assertIn("if (clearedDeletedModel || sameSavedProvider) loaded.pageUi = checkNotNull(restore).pageUi", compact(opening))
+        configuration = opening.split("val sameConfiguration =", 1)[1].split("if (newProtocol != null)", 1)[0]
+        self.assertIn("restore.configurationRevision == loaded.configurationRevision", configuration)
+        self.assertNotIn("sameSavedProvider", configuration)
+        self.assertIn("val ready = if (sameConfiguration && retained != null) retained.also { it.resume() } else loaded", compact(configuration))
+        self.assertIn("if (sameConfiguration) { ready.draft = checkNotNull(restore).draft.copy(", compact(configuration))
+
     def test_long_press_enters_selection_without_an_action_sheet(self):
         route = (UI / "ProviderManagementRoute.kt").read_text()
         page = (UI / "ProviderDirectoryPage.kt").read_text()
@@ -87,7 +104,7 @@ class ProviderDirectorySelectionContractTest(unittest.TestCase):
         for guard in ('restore.editing.copy(settings = restore.editing.settings.copy(model = "")) == editing',
                       'retained?.catalogIdentity == identity',
                       'catalog.models.none { it.id == restore.editing.settings.model }',
-                      'if (clearedDeletedModel) loaded.pageUi = checkNotNull(restore).pageUi'):
+                      'if (clearedDeletedModel || sameSavedProvider) loaded.pageUi = checkNotNull(restore).pageUi'):
             self.assertIn(guard, route)
         page = (UI / "ProviderPageUiState.kt").read_text()
         self.assertIn('selectedModelIds = mutableStateOf<Set<String>?>(null)', page)

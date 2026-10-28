@@ -17,12 +17,12 @@ class ChatPickerResumeFocusContractTest(unittest.TestCase):
         click = 'modelButton.assertIsDisplayed().assertIsEnabled().performClick()'
         self.assertEqual(1, body.count(focus))
         self.assertEqual(1, body.count(click))
-        self.assertEqual(1, body.count('node("chat-model").performClick()'))
+        self.assertNotIn('node("chat-model").performClick()', body)
         self.assertLess(body.index('val modelButton = node("chat-model")'), body.index(focus))
         self.assertLess(body.index(focus), body.index('ui.waitUntil(5_000)'))
         self.assertIn('it.getOrNull(SemanticsProperties.Disabled) == null', body)
         self.assertLess(body.index('SemanticsProperties.Disabled'), body.index(click))
-        self.assertLess(body.index(click), body.index('realPauseResume(activity)'))
+        self.assertLess(body.index(click), body.index('realPauseResume(activity, atPause = {'))
         for forbidden in ['Thread.sleep', 'SystemClock.sleep', 'advanceTimeBy', 'performSemanticsAction', 'repeat(']:
             self.assertNotIn(forbidden, body)
 
@@ -67,13 +67,48 @@ class ChatPickerResumeFocusContractTest(unittest.TestCase):
 
     def test_pause_revocation_and_stale_capability_oracles_remain(self):
         body = self.body()
-        self.assertIn('stale = retainedChatPickerSelection()', body)
-        self.assertEqual(2, body.count('mainThread { stale() }'))
-        self.assertEqual(2, body.count('assertEquals(before, fixture.settings.load())'))
-        self.assertIn('assertFalse(fixture.controller.dataBusy)', body)
-        self.assertIn('node("chat-model-picker").assertDoesNotExist()', body)
-        self.assertIn('node("chat-model-picker").assertExists()', body)
-        self.assertIn('assertChatPickerOffline(calls)', body)
+        for fragment in [
+            'stale = retainedChatPickerSelection()', 'realPauseResume(activity, atPause = {',
+            'previousSession = sessionField.get(activity)', 'it !== previousSession',
+            'mainThread { stale() }', 'assertFalse(fixture.controller.dataBusy)',
+            'assertEquals(bindings, modelBindings())', 'assertChatBinding("second")',
+            'assertEquals(bindings + ("" to expectedChatBinding("second")), modelBindings())',
+            'assertEquals(database, fixture.database.exportBackup())',
+            'node("chat-model-option:second").assertIsEnabled().performClick()',
+            'node("chat-model-picker").assertExists()', 'fetchSemanticsNodes().isEmpty()',
+            'assertChatPickerOffline(calls)', 'assertEquals(0, fixture.opens.get())',
+        ]:
+            self.assertIn(fragment, body)
+        pause = body.split('realPauseResume(activity, atPause = {', 1)[1].split('})', 1)[0]
+        self.assertIn('stale()', pause)
+        self.assertIn('assertEquals(bindings, modelBindings())', pause)
+        self.assertIn('assertEquals(before, fixture.settings.load())', pause)
+        self.assertEqual(3, body.count('assertEquals(before, fixture.settings.load())'))
+
+    def test_pending_catalog_waits_for_all_new_jobs_not_an_assumed_single_job(self):
+        text = SOURCE.read_text(encoding='utf-8')
+        body = text.split('fun testDismissedChatModelPickerCannotReviveFromPendingCatalog()', 1)[1].split('fun testChatModelPickerRejectsChangedSettingsAndRunningTask()', 1)[0]
+        for fragment in ['parent.children.filter { it !in previousJobs }.toList()',
+                         'pending.isNotEmpty()', 'AtomicInteger(pending.size)', 'pending.forEach { job ->',
+                         'job.invokeOnCompletion', 'remaining.decrementAndGet() == 0',
+                         'completed.await(5, TimeUnit.SECONDS)', 'assertEquals(bindings, modelBindings())']:
+            self.assertIn(fragment, body)
+        self.assertNotIn('parent.children.single', body)
+
+    def test_running_picker_clicks_different_model_but_preserves_configuration_owner_and_data(self):
+        text = SOURCE.read_text(encoding='utf-8')
+        body = text.split('fun testChatModelPickerRejectsChangedSettingsAndRunningTask()', 1)[1].split('fun testCatalogImportsCheckedModels', 1)[0]
+        self.assertIn('node("chat-model-option:second").assertIsNotEnabled()', body)
+        running = body.split('val session = fixture.session(holdSeconds = 120)', 1)[1]
+        self.assertEqual(2, running.count('node("chat-model-option:second").assertIsEnabled().performClick()'))
+        for fragment in ['assertEquals(changed, fixture.settings.load())',
+                         'assertEquals(owner, fixture.controller.active)',
+                         'assertEquals(runningBindings, modelBindings())',
+                         'assertEquals(runningDatabase, fixture.database.exportBackup())',
+                         'assertEquals(runningOpens, fixture.opens.get())',
+                         'assertFalse(fixture.controller.dataBusy)', 'assertChatPickerOffline(calls)']:
+            self.assertIn(fragment, running)
+        self.assertNotIn('assertIsNotEnabled()', running)
 
 
 if __name__ == '__main__':

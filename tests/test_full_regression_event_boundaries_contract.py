@@ -55,5 +55,22 @@ class FullRegressionEventBoundariesContractTest(unittest.TestCase):
             self.assertIn(token, source)
         self.assertNotIn('pixels.width - 1 - inset', source)
 
+    def test_collaboration_reference_and_subject_share_native_ime_hidden_viewport(self):
+        source = (ANDROID / 'CollaborationEmptyStateTest.kt').read_text()
+        reference = source.split('private fun assistantHeight(', 1)[1].split('private fun rawBounds(', 1)[0]
+        subject = source.split('private fun assertSpaciousWithBottomFooter(', 1)[1].split('private fun assertPrimaryFooterWithoutCross(', 1)[0]
+        for body in (reference, subject):
+            for token in ('awaitNodeWindowFocus(', 'dismissIme(view)', 'visible = false',
+                          'awaitStableWindowFrame(view)', 'viewport(view)'):
+                self.assertIn(token, body)
+        self.assertIn('return bounds.height', reference)
+        self.assertIn('assistantViewport = window', reference)
+        self.assertIn('assistantViewport, window)', subject)
+        self.assertIn('expectedHeight, surface.height, 2f', subject)
+        self.assertIn('16f * density, surface.bottom - footer.bottom, 1.5f', subject)
+        self.assertIn('assertEquals(before, prefs.all)', source)
+        self.assertNotIn('return 520', reference)
+        self.assertNotIn('return 368', reference)
+
 if __name__ == '__main__':
     unittest.main()

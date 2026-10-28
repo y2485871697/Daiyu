@@ -31,6 +31,23 @@ import java.util.UUID
 class CollaborationEmptyStateTest : WiredActivityTestCase() {
     private var density = 1f
     private var rootsBeforeShow = ""
+    private data class SheetViewport(
+        val width: Int, val height: Int, val visibleFrame: Rect,
+        val systemBars: androidx.core.graphics.Insets, val imeBottom: Int,
+    )
+    private var assistantViewport: SheetViewport? = null
+    private var assistantBounds: Rect? = null
+
+    private fun viewport(view: android.view.View): SheetViewport? {
+        val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view) ?: return null
+        if (insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())) return null
+        val visible = android.graphics.Rect()
+        view.getWindowVisibleDisplayFrame(visible)
+        return SheetViewport(view.width, view.height,
+            Rect(visible.left.toFloat(), visible.top.toFloat(), visible.right.toFloat(), visible.bottom.toFloat()),
+            insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars()),
+            insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom)
+    }
 
     private fun windowRoots(): String {
         if (android.os.Build.VERSION.SDK_INT < 29) return "unavailable before API29"
@@ -64,14 +81,26 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         } }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun assistantHeight(dark: Boolean): Float {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                 AssistantPreviewDialog(true, "高度参考", {}) {}
             }
         } }
-        awaitDialogEnter(node("assistant-sheet"))
-        return rawBounds(node("assistant-sheet").fetchSemanticsNode()).height
+        val target = node("assistant-sheet")
+        awaitDialogEnter(target)
+        awaitNodeWindowFocus(target)
+        val current = target.fetchSemanticsNode()
+        val view = (current.root as androidx.compose.ui.platform.ViewRootForTest).view
+        dismissIme(view)
+        awaitDialogImeFrame(target, visible = false)
+        val (bounds, window) = awaitStableWindowFrame(view) {
+            viewport(view)?.let { rawBounds(current) to it }
+        }
+        assistantBounds = bounds
+        assistantViewport = window
+        return bounds.height
     }
 
     private fun rawBounds(node: SemanticsNode): Rect =
@@ -88,17 +117,22 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         assertSame(cardNode.root, messageNode.root)
         assertSame(cardNode.root, surfaceNode.root)
         val view = (cardNode.root as androidx.compose.ui.platform.ViewRootForTest).view
-        val (layout, visible) = awaitStableWindowFrame(view) {
-            listOf(rawBounds(cardNode), rawBounds(footerNode), rawBounds(messageNode),
+        awaitNodeWindowFocus(node("subagent-collaboration-card"))
+        dismissIme(view)
+        awaitDialogImeFrame(node("subagent-collaboration-card"), visible = false)
+        val (layout, visible, window) = awaitStableWindowFrame(view) {
+            val currentViewport = viewport(view) ?: return@awaitStableWindowFrame null
+            Triple(listOf(rawBounds(cardNode), rawBounds(footerNode), rawBounds(messageNode),
                 rawBounds(surfaceNode).let { outer ->
                     val inset = with(surfaceNode.layoutInfo.density) { 10.dp.toPx() }
                     Rect(outer.left + inset, outer.top + inset, outer.right - inset, outer.bottom - inset)
-                }) to
-                (cardNode.boundsInRoot to footerNode.boundsInRoot)
+                }), (cardNode.boundsInRoot to footerNode.boundsInRoot), currentViewport)
         }
         val (card, footer, message, surface) = layout
         val (visibleCard, visibleFooter) = visible
-        val diagnostic = "card=$card footer=$footer message=$message visible=$visible density=$density"
+        val diagnostic = "card=$card footer=$footer message=$message visible=$visible density=$density " +
+            "assistant=$assistantBounds assistantViewport=$assistantViewport collaborationViewport=$window"
+        assertEquals("Both sheets must use the same IME-hidden viewport: $diagnostic", assistantViewport, window)
         assertEquals("Empty sheet matches the assistant surface: $diagnostic", expectedHeight, surface.height, 2f)
         assertEquals("Footer keeps only the 16dp bottom inset: $diagnostic", 16f * density, surface.bottom - footer.bottom, 1.5f)
         assertTrue("Whitespace belongs between message and footer: $diagnostic", (footer.top - message.bottom) / density > 60f)

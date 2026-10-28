@@ -7,6 +7,10 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.delegation.ReasoningEffort
 
 class ChatThinkingPickerActivityTest : WiredActivityTestCase() {
+    override fun createFixture() = RunControlFixture(instrumentation.targetContext).also {
+        it.settings.save(it.settings.load().copy(model = "gpt-6.1-sol", reasoningOverride = false))
+    }
+
     private fun openPicker() {
         node("chat-reasoning").performClick()
         awaitUniqueTag("chat-thinking-title")

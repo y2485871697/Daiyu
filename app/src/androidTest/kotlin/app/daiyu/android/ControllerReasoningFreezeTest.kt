@@ -78,25 +78,26 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
             assertTrue(fixture.database.conversations().isEmpty())
         } finally { fixture.close() }
     }
-    fun testUnsupportedMandatoryEffortKeepsExactChineseErrorDraftAndSelectionWithoutFactory() {
-        val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
-        val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
-        try {
-            awaitControl("controller ready") { fixture.controller.ready }
-            for (model in listOf("gpt-6-astra", "gpt-6.1-sol")) {
-                fixture.settings.save(fixture.settings.load().copy(model = model))
-                for (effort in listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL)) {
+    fun testFormerlyRestrictedModelAcceptsEveryChoiceWithoutLocalRejection() {
+        for (model in listOf("gpt-6-astra", "gpt-6.1-sol"))
+            for (effort in ReasoningEffort.textChoices(model)) {
+                val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
+                val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
+                try {
+                    awaitControl("controller ready") { fixture.controller.ready }
+                    fixture.settings.save(fixture.settings.load().copy(model = model, reasoningOverride = false))
                     fixture.controller.reasoningPreference.set(null, effort)
+                    fixture.session("answer", held = false)
                     fixture.database.draft("retain exact choice")
-                    assertNull(fixture.controller.send(null, "retain exact choice"))
-                    assertEquals("模型不支持${effort.displayName}思考", fixture.controller.problem)
-                    assertEquals(effort, fixture.controller.reasoningPreference.snapshot(null))
-                    assertEquals("retain exact choice", fixture.database.draft())
-                    assertEquals(0, fixture.opens.get()); assertTrue(frozen.isEmpty())
-                    assertTrue(fixture.database.conversations().isEmpty())
-                }
+                    val conversation = fixture.controller.send(null, "retain exact choice")
+                    assertNotNull(conversation)
+                    awaitControl("choice complete") { fixture.controller.active == null }
+                    assertEquals(if (effort == ReasoningEffort.OFF) "none" else effort.wireValue,
+                        JSONObject(frozen.single().requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
+                    assertEquals(effort, fixture.controller.reasoningPreference.snapshot(conversation!!.id.value))
+                    assertEquals(1, fixture.opens.get())
+                } finally { fixture.close() }
             }
-        } finally { fixture.close() }
     }
 
     fun testChatHighPreferenceReachesSharedProductionFreezeWithoutLocalRejection() {

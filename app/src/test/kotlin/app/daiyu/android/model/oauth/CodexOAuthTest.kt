@@ -129,7 +129,7 @@ class CodexOAuthTest {
         try { resolver.resolve(auth); fail() } catch (_: java.util.concurrent.CancellationException) {}
     }
     @Test fun codexRequestUsesOriginalReasoningModesAndNeverSendsOutputLimit() {
-        for ((effort, expected) in listOf("none" to "medium", "minimal" to "low", "max" to "high", "xhigh" to "xhigh")) {
+        for ((effort, expected) in listOf("none", "minimal", "low", "medium", "high", "xhigh", "max").map { it to it }) {
             val request = JSONObject().put("model", "gpt-fixture").put("max_output_tokens", 200)
                 .put("reasoning", JSONObject().put("effort", effort))
             CodexRequestPolicy.apply(request, app.daiyu.android.model.GptSpeedMode.FAST)

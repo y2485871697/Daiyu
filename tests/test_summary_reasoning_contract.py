@@ -58,9 +58,10 @@ class SummaryReasoningContract(unittest.TestCase):
         self.assertIn("acceptedContextSegments = sealed.historySegments.size", catch)
         self.assertIn("outputs = emptyList()", catch)
         self.assertIn("reopenAfterCompaction = true", catch)
-    def test_codex_preserves_summary_effort_only(self):
+    def test_codex_preserves_every_explicit_effort_and_keeps_summary_mode(self):
         code = (APP / "model/oauth/CodexRequestPolicy.kt").read_text()
         self.assertIn("preserveReasoning: Boolean = false", code)
-        self.assertIn("if (!preserveReasoning) when", code)
+        self.assertIn('if (!preserveReasoning && !reasoning.has("effort"))', code)
+        self.assertNotIn('"none" ->', code)
 if __name__ == "__main__":
     unittest.main()

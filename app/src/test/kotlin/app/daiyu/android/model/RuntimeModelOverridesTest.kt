@@ -1,12 +1,6 @@
 package app.daiyu.android.model
 
 import app.daiyu.android.delegation.ReasoningEffort
-import app.daiyu.android.domain.ModelFailure
-import app.daiyu.android.domain.ModelRequestDiagnostic
-import app.daiyu.android.domain.ModelRequestException
-import app.daiyu.android.domain.RequestField
-import app.daiyu.android.domain.RequestReasoningEffort
-import app.daiyu.android.domain.RequestRejection
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.storage.ModelSettings
 import org.json.JSONObject
@@ -17,18 +11,6 @@ class RuntimeModelOverridesTest {
     private fun settings() = ModelSettings("https://example.invalid", "model-a", "synthetic-key", false)
     private fun rejected(action: () -> Unit) {
         try { action(); fail("must reject") } catch (_: IllegalArgumentException) { }
-    }
-
-    private fun reasoningRejected(effort: RequestReasoningEffort, message: String, action: () -> Unit) {
-        try { action(); fail("must reject") } catch (error: ModelRequestException) {
-            assertEquals(ModelFailure.CONFIGURATION, error.failure)
-            assertEquals(ModelRequestDiagnostic(
-                rejection = RequestRejection.UNSUPPORTED_VALUE,
-                field = RequestField.REASONING,
-                unsupportedReasoningEffort = effort
-            ), error.diagnostic)
-            assertEquals(message, error.userMessage)
-        }
     }
 
     @Test fun snapshotAndSearchCopiesPreserveAllThreeStates() {
@@ -69,26 +51,17 @@ class RuntimeModelOverridesTest {
         assertEquals("high", JSONObject(high.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
     }
 
-    @Test fun disabledReasoningRejectsBothPreferenceAndCustomActivation() {
+    @Test fun disabledReasoningMetadataDoesNotBlockExplicitPreferencesOrCustomActivation() {
         val snapshot = ProviderSnapshot.capture(settings().copy(reasoningOverride = false))
         assertEquals(snapshot, ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.DEFAULT))
-        assertEquals(false, ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.OFF).reasoningOverride)
-        reasoningRejected(RequestReasoningEffort.HIGH, "模型不支持高思考") {
-            ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.HIGH)
+        for (effort in ReasoningEffort.textChoices()) {
+            val frozen = ReasoningRequestPolicy.freeze(snapshot, effort)
+            assertEquals(false, frozen.reasoningOverride)
+            assertEquals(if (effort == ReasoningEffort.OFF) "none" else effort.wireValue,
+                JSONObject(frozen.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
         }
-        reasoningRejected(RequestReasoningEffort.MAX, "模型不支持极高思考") {
-            ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.MAX)
-        }
-        reasoningRejected(RequestReasoningEffort.HIGH, "模型不支持高思考") {
-            ReasoningRequestPolicy.validate(JSONObject("""{"reasoning":{"effort":"high"}}"""), ProviderProtocol.RESPONSES, false)
-        }
-        ReasoningRequestPolicy.validate(JSONObject("""{"thinking":{"type":"disabled"}}"""), ProviderProtocol.MESSAGES, false)
-        rejected { ReasoningRequestPolicy.validate(JSONObject("""{"thinking":{"type":"enabled","budget_tokens":1024}}"""), ProviderProtocol.MESSAGES, false) }
-        val allowed = ProviderSnapshot.capture(settings().copy(reasoningOverride = true))
-        assertEquals(allowed, ReasoningRequestPolicy.freeze(allowed, ReasoningEffort.DEFAULT))
-        val max = ReasoningRequestPolicy.freeze(allowed, ReasoningEffort.MAX)
-        assertEquals("max", JSONObject(max.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
-        assertEquals(true, max.reasoningOverride)
+        ReasoningRequestPolicy.validate(JSONObject("""{"reasoning":{"effort":"high"}}"""), ProviderProtocol.RESPONSES, false)
+        ReasoningRequestPolicy.validate(JSONObject("""{"thinking":{"type":"enabled","budget_tokens":1024}}"""), ProviderProtocol.MESSAGES, false)
     }
 
     @Test fun modelOverridesBindCustomBodyAndFinalRequestToExactModel() {

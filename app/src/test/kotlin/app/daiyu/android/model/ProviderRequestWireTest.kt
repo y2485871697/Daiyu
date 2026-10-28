@@ -13,7 +13,7 @@ import javax.net.ssl.HttpsURLConnection
 
 class ProviderRequestWireTest {
     private val settings = ModelSettings("https://example.invalid/v1/responses", "gpt-5", "synthetic-key", false, customHeaders = ProviderHeaders.parse("""{"x-tenant":"private-tenant"}"""))
-    private class Connection(body: String) : HttpsURLConnection(URL("https://example.invalid/fixture")) {
+    private class Connection(body: String, private val status: Int = 200) : HttpsURLConnection(URL("https://example.invalid/fixture")) {
         val sent = ByteArrayOutputStream()
         private val received = body.byteInputStream()
         var closed = false
@@ -28,8 +28,9 @@ class ProviderRequestWireTest {
             return sent
         }
         override fun getInputStream() = received
-        override fun getResponseCode() = 200
-        override fun getContentType() = "text/event-stream"
+        override fun getResponseCode() = status
+        override fun getErrorStream() = received
+        override fun getContentType() = if (status >= 400) "application/json" else "text/event-stream"
         fun body() = JSONObject(sent.toString("UTF-8"))
     }
     private fun response(vararg items: JSONObject): String = items.filter { it.optString("type") == "function_call" }.joinToString("") { "data: " + JSONObject().put("type", "response.output_item.done").put("item", it) + "\n\n" } + "data: " + JSONObject().put("type", "response.completed")
@@ -355,13 +356,13 @@ class ProviderRequestWireTest {
     }
 
 
-    @Test fun explicitLowUsesTheSamePolicyInTheInitialPostAndToolContinuation() {
+    @Test fun explicitOffUsesTheSamePolicyInTheInitialPostAndToolContinuation() {
         val call = JSONObject().put("type", "function_call").put("id", "fc-a")
             .put("call_id", "a").put("name", "fixture").put("arguments", "{}")
         val first = Connection(response(call))
         val second = Connection(response())
         val config = settings.copy(model = "gpt-6.1-sol")
-        val frozen = ReasoningRequestPolicy.freeze(config.requestSnapshot(), app.daiyu.android.delegation.ReasoningEffort.LOW)
+        val frozen = ReasoningRequestPolicy.freeze(config.requestSnapshot(), app.daiyu.android.delegation.ReasoningEffort.OFF)
         val tool = ToolDefinition("fixture", "fixture tool", """{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
         var calls = 0
         val session = ResponsesModel(frozen.asModelSettings()) { if (calls++ == 0) first else second }
@@ -371,23 +372,39 @@ class ProviderRequestWireTest {
         assertEquals(2, calls)
         for (connection in listOf(first, second)) {
             assertEquals("gpt-6.1-sol", connection.body().getString("model"))
-            assertEquals("low", connection.body().getJSONObject("reasoning").getString("effort"))
+            assertEquals("none", connection.body().getJSONObject("reasoning").getString("effort"))
         }
         assertEquals("", config.requestOptions.customBody)
     }
 
-    @Test fun customModelOverrideCannotSendAnUnsupportedEffortBeforeConnecting() {
-        var calls = 0
+    @Test fun customModelOverrideSendsTheSelectedEffortInsteadOfRejectingLocally() {
         val custom = """{"model":"gpt-6.1-sol","reasoning":{"effort":"none"}}"""
-        val error = assertThrows(ModelRequestException::class.java) {
-            ResponsesModel(settings.copy(requestOptions = ProviderRequestOptions(custom))) {
-                calls++; Connection(response())
-            }.open(emptyList()).next(emptyList()) {}
-        }
-        assertEquals("模型不支持关闭思考", error.userMessage)
-        assertEquals(0, calls)
+        val conn = Connection(response())
+        var calls = 0
+        ResponsesModel(settings.copy(requestOptions = ProviderRequestOptions(custom))) {
+            calls++; conn
+        }.open(emptyList()).next(emptyList()) {}
+        assertEquals("gpt-6.1-sol", conn.body().getString("model"))
+        assertEquals("none", conn.body().getJSONObject("reasoning").getString("effort"))
+        assertEquals(1, calls)
     }
 
+    @Test fun unsupportedEffortsFailOnlyAfterTheProviderRespondsWithoutRetryOrFallback() {
+        for (effort in app.daiyu.android.delegation.ReasoningEffort.textChoices()) {
+            val wire = if (effort == app.daiyu.android.delegation.ReasoningEffort.OFF) "none" else effort.wireValue
+            val rejected = Connection("""{"error":{"type":"invalid_request_error","code":"unsupported_value","param":"reasoning.effort"}}""", 400)
+            var calls = 0
+            val frozen = ReasoningRequestPolicy.freeze(settings.copy(model = "gpt-6.1-sol").requestSnapshot(), effort)
+            val failure = assertThrows(ModelRequestException::class.java) {
+                ResponsesModel(frozen.asModelSettings()) { calls++; rejected }.open(emptyList()).next(emptyList()) {}
+            }
+            assertEquals(1, calls)
+            assertEquals(wire, rejected.body().getJSONObject("reasoning").getString("effort"))
+            assertEquals(400, failure.diagnostic?.httpStatus)
+            assertEquals("模型不支持${effort.displayName}思考", failure.userMessage)
+            assertTrue(rejected.closed)
+        }
+    }
 
     @Test fun finalOldModelPreservesOffEvenWhenTheSelectedNameIsMandatory() {
         val selected = settings.copy(model = "gpt-6.1-sol", requestOptions = ProviderRequestOptions("""{"model":"gpt-5"}"""))

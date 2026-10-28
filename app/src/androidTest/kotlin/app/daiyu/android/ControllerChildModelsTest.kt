@@ -27,6 +27,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val alias = "app.daiyu.android.test.child.$id"
         val settings = ModelSettingsStore(app, alias)
         val childOpened = AtomicInteger(); val parentOpened = AtomicInteger()
+        val childSettings = java.util.concurrent.CopyOnWriteArrayList<ModelSettings>()
         val entered = CountDownLatch(1); val cancelled = CountDownLatch(1); val release = CountDownLatch(if (held) 1 else 0)
         val child = SubAgentModel(UUID.randomUUID().toString(), childModel)
         val provider = SubAgentProvider("primary", "Fixture", listOf(child))
@@ -47,7 +48,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                         val isChild = config.model == child.modelId
-                        if (isChild) { check(definitions.isEmpty()); childOpened.incrementAndGet() }
+                        if (isChild) { check(definitions.isEmpty()); childSettings += config; childOpened.incrementAndGet() }
                         else { check(config.model == "parent-api"); parentOpened.incrementAndGet(); check(definitions.any { it.name == toolName }) }
                         var rounds = 0
                         return object : ModelSession {
@@ -165,16 +166,17 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
     }
 
-    fun testUnsupportedChildEffortKeepsExactChineseErrorWithoutOpeningParentOrChild() {
+    fun testChildOffChoiceReachesTheSelectedModelWithoutLocalRejection() {
         val f = fresh(childModel = "gpt-6.1-sol")
         val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
         f.preferences.update(key) { it.copy(profiles = listOf(f.profile.copy(reasoning = ReasoningEffort.OFF))) }
-        assertNull(f.controller.sendWithChildren(f.conversation, "retain child choice"))
-        assertEquals("模型不支持关闭思考", f.controller.problem)
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "retain child choice"))
+        awaitControl("child off complete") { f.controller.active == null }
         assertEquals(ReasoningEffort.OFF, f.preferences.snapshot(key).profiles.single().reasoning)
-        assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
-        assertTrue(f.database.messages(f.conversation.id).isEmpty())
-        assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
+        assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
+        assertEquals("none", org.json.JSONObject(f.childSettings.single().requestOptions.customBody)
+            .getJSONObject("reasoning").getString("effort"))
+        assertTrue(f.database.messages(f.conversation.id).isNotEmpty())
     }
 
     fun testStopCancelsChildAndRetainsResourcesUntilActualExit() {

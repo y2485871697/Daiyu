@@ -3,7 +3,6 @@ package app.daiyu.android.model
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.storage.ModelSettings
 import org.json.JSONObject
-import app.daiyu.android.domain.ModelRequestException
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -71,77 +70,64 @@ class ReasoningDefaultProtocolTest {
             assertThrows(IllegalArgumentException::class.java) { ReasoningRequestPolicy.validate(JSONObject(raw), ProviderProtocol.CHAT_COMPLETIONS) }
     }
 
-    @Test fun unsupportedStoredChoicesFailInChineseWithoutChangingTheOriginalPreference() {
+    @Test fun everyStoredChoiceReachesAllModelsWithoutChangingTheOriginalPreference() {
         for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS))
-            for (model in listOf("gpt-6-astra", "gpt-6.1-sol")) {
+            for (model in listOf("gpt-6-astra", "gpt-6.1-sol", "unknown-model")) {
                 val original = ModelSettings("https://example.invalid/v1", model, "fixture-key", false,
-                    protocol = protocol, reasoningOverride = true)
-                for (stored in listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL)) {
+                    protocol = protocol, reasoningOverride = false)
+                for (stored in ReasoningEffort.textChoices(model)) {
                     assertEquals(stored, ReasoningEffort.textPreference(stored, model = model))
-                    val failure = assertThrows(ModelRequestException::class.java) {
-                        ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(original), stored)
-                    }
-                    assertEquals("模型不支持${stored.displayName}思考", failure.userMessage)
+                    val body = JSONObject(ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(original), stored).requestOptions.customBody)
+                    assertEquals(if (stored == ReasoningEffort.OFF) "none" else stored.wireValue,
+                        if (protocol == ProviderProtocol.RESPONSES) body.getJSONObject("reasoning").getString("effort")
+                        else body.getString("reasoning_effort"))
                     assertEquals("", original.requestOptions.customBody)
                 }
             }
     }
 
-    @Test fun aNoReasoningModelRejectsTheActualSelectedLevelInChinese() {
+    @Test fun noReasoningCapabilityIsAdvisoryForEveryExplicitTextChoice() {
         for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES,
             ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI))
-            for (selected in ReasoningEffort.entries.filter { it != ReasoningEffort.OFF && it != ReasoningEffort.DEFAULT }) {
-                val error = assertThrows(ModelRequestException::class.java) {
-                    ReasoningRequestPolicy.freeze(provider(protocol, disabled = true), selected)
-                }
-                assertEquals("模型不支持${selected.displayName}思考", error.userMessage)
+            for (selected in ReasoningEffort.textChoices()) {
+                val body = JSONObject(ReasoningRequestPolicy.freeze(provider(protocol, disabled = true), selected).requestOptions.customBody)
+                ReasoningRequestPolicy.validate(body, protocol, false, "gpt-6.1-sol")
             }
     }
 
-    @Test fun explicitlyInvalidCustomEffortsAreRejectedRatherThanOverwritten() {
+    @Test fun customEffortsReachTheFinalModelWithoutLocalCapabilityRejection() {
         for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS))
-            for (value in listOf("none", "minimal")) {
+            for (selected in ReasoningEffort.textChoices()) {
+                val value = if (selected == ReasoningEffort.OFF) "none" else selected.wireValue
                 val body = if (protocol == ProviderProtocol.RESPONSES)
                     JSONObject().put("reasoning", JSONObject().put("effort", value))
                     else JSONObject().put("reasoning_effort", value)
-                assertThrows(ModelRequestException::class.java) {
-                    ReasoningRequestPolicy.validate(body, protocol, true, "gpt-6.1-sol")
-                }
-                assertEquals(value, if (protocol == ProviderProtocol.RESPONSES)
-                    body.getJSONObject("reasoning").getString("effort") else body.getString("reasoning_effort"))
+                val before = body.toString()
+                ReasoningRequestPolicy.validate(body, protocol, false, "gpt-6.1-sol")
+                assertEquals(before, body.toString())
             }
     }
 
-
-    @Test fun finalCustomModelControlsBothDirectionsWithoutChangingSavedSelection() {
-        val mandatory = ModelSettings("https://example.invalid/v1", "gpt-6.1-sol", "fixture-key", false,
-            requestOptions = ProviderRequestOptions("""{"model":"gpt-5"}"""))
-        val oldModel = ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(mandatory), ReasoningEffort.OFF)
-        assertEquals("none", JSONObject(oldModel.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
-        assertEquals("gpt-5", ReasoningRequestPolicy.requestModel(mandatory.model, mandatory.requestOptions))
-        val explicit = mandatory.copy(requestOptions = ProviderRequestOptions("""{"model":"gpt-5","reasoning":{"effort":"none"}}"""))
-        val retained = JSONObject(ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(explicit), ReasoningEffort.DEFAULT).requestOptions.customBody)
-        assertEquals("gpt-5", retained.getString("model"))
-        assertEquals("none", retained.getJSONObject("reasoning").getString("effort"))
-        val normal = mandatory.copy(model = "gpt-5", requestOptions = ProviderRequestOptions("""{"model":"gpt-6.1-sol"}"""))
-        val failure = assertThrows(ModelRequestException::class.java) {
-            ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(normal), ReasoningEffort.OFF)
+    @Test fun finalCustomModelRetainsOffInBothDirectionsWithoutChangingSavedSelection() {
+        for ((selected, actual) in listOf("gpt-6.1-sol" to "gpt-5", "gpt-5" to "gpt-6.1-sol")) {
+            val original = ModelSettings("https://example.invalid/v1", selected, "fixture-key", false,
+                requestOptions = ProviderRequestOptions(JSONObject().put("model", actual).toString()))
+            val body = JSONObject(ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(original), ReasoningEffort.OFF).requestOptions.customBody)
+            assertEquals(actual, body.getString("model"))
+            assertEquals(actual, ReasoningRequestPolicy.requestModel(selected, original.requestOptions))
+            assertEquals("none", body.getJSONObject("reasoning").getString("effort"))
+            assertEquals(selected, original.model)
         }
-        assertEquals("模型不支持关闭思考", failure.userMessage)
-        assertEquals("gpt-6.1-sol", mandatory.model)
     }
 
-    @Test fun customGeminiLevelRejectedByCapabilityKeepsTheExactChineseErrorAndBody() {
-        for (effort in listOf(ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH)) {
+    @Test fun customGeminiLevelsRemainUnchangedDespiteDeclaredCapabilities() {
+        for (selected in ReasoningEffort.textChoices()) {
+            val wire = if (selected == ReasoningEffort.OFF) "none" else selected.wireValue
             val body = JSONObject().put("generationConfig", JSONObject().put("thinkingConfig",
-                JSONObject().put("thinkingLevel", effort.wireValue)))
+                JSONObject().put("thinkingLevel", wire)))
             val before = body.toString()
-            val failure = assertThrows(app.daiyu.android.domain.ModelRequestException::class.java) {
-                ReasoningRequestPolicy.validate(body, ProviderProtocol.GEMINI, false, "gemini-3-pro")
-            }
-            assertEquals("模型不支持${effort.displayName}思考", failure.userMessage)
+            ReasoningRequestPolicy.validate(body, ProviderProtocol.GEMINI, false, "gemini-3-pro")
             assertEquals(before, body.toString())
         }
     }
-
 }

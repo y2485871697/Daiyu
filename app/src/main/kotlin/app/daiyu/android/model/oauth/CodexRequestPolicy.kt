@@ -13,13 +13,8 @@ internal object CodexRequestPolicy {
         request.put("include", JSONArray().put("reasoning.encrypted_content"))
         request.remove("max_output_tokens")
         val reasoning = request.optJSONObject("reasoning") ?: JSONObject().also { request.put("reasoning", it) }
-        // Codex has no no-thinking wire mode. Keep that backend constraint explicit in the UI.
-        if (!preserveReasoning) when (reasoning.optString("effort")) {
-            "", "none" -> reasoning.put("effort", "medium")
-            "minimal" -> reasoning.put("effort", "low")
-            "max" -> reasoning.put("effort", "high")
-        }
-        if (!preserveReasoning && !reasoning.has("summary")) reasoning.put("summary", "auto")
+        if (!preserveReasoning && !reasoning.has("effort")) reasoning.put("effort", "medium")
+        if (!preserveReasoning && reasoning.optString("effort") != "none" && !reasoning.has("summary")) reasoning.put("summary", "auto")
         GptServiceTier.apply(request, speed, codex = true)
     }
 

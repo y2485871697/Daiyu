@@ -68,11 +68,7 @@ internal enum class ReasoningEffort(val wireValue: String, val displayName: Stri
             return preference
         }
 
-        // These documented models require reasoning and accept low through max, not none/minimal.
-        fun textChoices(model: String = ""): List<ReasoningEffort> {
-            val required = model.trim().substringAfterLast('/').lowercase() in setOf("gpt-6-astra", "gpt-6.1-sol")
-            return entries.filter { it != DEFAULT && (!required || it.rank >= LOW.rank) }
-        }
+        fun textChoices(model: String = ""): List<ReasoningEffort> = entries.filter { it != DEFAULT }
 
         fun fromWireValue(value: String?): ReasoningEffort? {
             val normalized = value?.trim()?.lowercase().orEmpty()

@@ -63,4 +63,17 @@ class SubAgentThinkingPreferenceTest {
         }
     }
 
+    @Test fun everyTextModelShowsTheSameSevenExplicitChoicesIncludingOff() {
+        val all = listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL, ReasoningEffort.LOW,
+            ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX)
+        for (model in listOf("gpt-6-astra", "gpt-6.1-sol", "relay/gpt-6.1-sol", "unknown")) {
+            val required = config.copy(model = model, reasoningCapabilities =
+                SubAgentReasoningCapabilities(listOf(ReasoningEffort.HIGH), mandatory = true, canDisable = false))
+            for (selected in all) {
+                val shown = subAgentThinkingPreference(profile.copy(reasoning = selected), required)
+                assertEquals(all, shown.options)
+                assertEquals(selected, shown.effort)
+            }
+        }
+    }
 }

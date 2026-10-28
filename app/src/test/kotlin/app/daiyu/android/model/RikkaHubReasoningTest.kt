@@ -22,11 +22,11 @@ class RikkaHubReasoningTest {
         assertEquals(true, frozen("api.siliconflow.cn", model = "deepseek-ai/DeepSeek-V4-Flash").getBoolean("enable_thinking"))
         assertEquals("high", frozen("dashscope.aliyuncs.com").getString("reasoning_effort"))
     }
-    @Test fun deepseekAndNvidiaKeepTheirDistinctEffortRules() {
+    @Test fun deepseekAndNvidiaPreserveTheSelectedEffort() {
         val deepseek = frozen("api.deepseek.com", ReasoningEffort.MEDIUM)
         assertEquals("enabled", deepseek.getJSONObject("thinking").getString("type"))
-        assertEquals("high", deepseek.getString("reasoning_effort"))
-        assertEquals("max", frozen("integrate.api.nvidia.com", ReasoningEffort.XHIGH, "deepseek-v4-pro").getString("reasoning_effort"))
+        assertEquals("medium", deepseek.getString("reasoning_effort"))
+        assertEquals("xhigh", frozen("integrate.api.nvidia.com", ReasoningEffort.XHIGH, "deepseek-v4-pro").getString("reasoning_effort"))
         assertEquals("all", frozen("api.moonshot.cn", model = "kimi-k2.6").getJSONObject("thinking").getString("keep"))
     }
     @Test fun messagesAdaptiveAndLegacyMinimalDoNotSilentlyDowngrade() {
@@ -43,17 +43,27 @@ class RikkaHubReasoningTest {
     @Test fun geminiBudgetAndLevelModelsAreDistinct() {
         fun thinking(model: String, effort: ReasoningEffort) = frozen("google.invalid", effort, model, ProviderProtocol.GEMINI).getJSONObject("generationConfig").getJSONObject("thinkingConfig")
         assertEquals(32000, thinking("gemini-2.5-flash", ReasoningEffort.MAX).getInt("thinkingBudget"))
-        assertEquals("high", thinking("gemini-3.1-pro-preview", ReasoningEffort.MAX).getString("thinkingLevel"))
-        assertEquals("minimal", thinking("gemini-4-pro", ReasoningEffort.OFF).getString("thinkingLevel"))
+        assertEquals("max", thinking("gemini-3.1-pro-preview", ReasoningEffort.MAX).getString("thinkingLevel"))
+        assertEquals("none", thinking("gemini-4-pro", ReasoningEffort.OFF).getString("thinkingLevel"))
         val mandatory = thinking("gemini-2.5-pro", ReasoningEffort.OFF)
-        assertFalse(mandatory.has("thinkingBudget"))
+        assertEquals(0, mandatory.getInt("thinkingBudget"))
         assertFalse(mandatory.getBoolean("includeThoughts"))
     }
-    @Test fun falseCapabilityCannotBeBypassedWithConflictingCustomFlags() {
+    @Test fun capabilityFlagsDoNotRejectValidProtocolParameters() {
         for (body in listOf("""{"reasoning_effort":"none","enable_thinking":true}""", """{"thinking":{"type":"enabled"}}""", """{"reasoning":{"enabled":true}}""", """{"reasoning":{"effort":"none","enabled":true}}""", """{"reasoning":{"effort":"high","enabled":false}}""", """{"reasoning":{"enabled":false,"max_tokens":100}}"""))
-            assertThrows(if (body.contains("\"high\"")) app.daiyu.android.domain.ModelRequestException::class.java else IllegalArgumentException::class.java) {
-                ReasoningRequestPolicy.validate(JSONObject(body), ProviderProtocol.CHAT_COMPLETIONS, false)
-            }
+            ReasoningRequestPolicy.validate(JSONObject(body), ProviderProtocol.CHAT_COMPLETIONS, false)
+    }
+    @Test fun unsupportedVendorChoicesAreSentWithoutLocalAllowlistsOrFallback() {
+        for (effort in ReasoningEffort.textChoices()) {
+            val wire = if (effort == ReasoningEffort.OFF) "none" else effort.wireValue
+            for (host in listOf("api.deepseek.com", "integrate.api.nvidia.com", "api.mistral.ai"))
+                assertEquals(wire, frozen(host, effort, "unlisted-model").getString("reasoning_effort"))
+            assertEquals(effort != ReasoningEffort.OFF,
+                frozen("api.siliconflow.cn", effort, "unlisted-model").getBoolean("enable_thinking"))
+            for (model in listOf("gemini-3-pro", "gemini-4-pro"))
+                assertEquals(wire, frozen("google.invalid", effort, model, ProviderProtocol.GEMINI)
+                    .getJSONObject("generationConfig").getJSONObject("thinkingConfig").getString("thinkingLevel"))
+        }
     }
     @Test fun inactiveEndpointPreferencesAreRetainedButNeverEmittedToChat() {
         val options = ProviderRequestOptions(speedMode = GptSpeedMode.FAST, anthropicVersion = "2023-06-01", openAiWebSearchEnabled = true)

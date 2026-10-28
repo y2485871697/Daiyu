@@ -54,6 +54,28 @@ class CodexSpeedWireTest {
             mapOf("Authorization" to "Bearer synthetic-oauth", "ChatGPT-Account-ID" to "synthetic-account")
         })
 
+    @Test fun everyExplicitReasoningEffortStaysUnchangedAcrossOAuthToolRounds() {
+        for (effort in app.daiyu.android.delegation.ReasoningEffort.textChoices()) {
+            val first = Connection(response(tool = true)); val second = Connection(response())
+            var calls = 0
+            val selected = settings(GptSpeedMode.NORMAL).copy(model = "gpt-6.1-sol",
+                requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.NORMAL))
+            val frozen = ReasoningRequestPolicy.freeze(selected.requestSnapshot(), effort)
+            val session = model(frozen.asModelSettings()) { if (calls++ == 0) first else second }
+                .open(emptyList(), listOf(ToolDefinition("fixture", "fixture", """{"type":"object","properties":{}}""")))
+            session.next(emptyList()) {}
+            session.next(listOf(ToolOutput(ToolCallId("one"), "result"))) {}
+            assertEquals(2, calls)
+            for (conn in listOf(first, second)) {
+                val reasoning = conn.body().getJSONObject("reasoning")
+                assertEquals(if (effort == app.daiyu.android.delegation.ReasoningEffort.OFF) "none" else effort.wireValue,
+                    reasoning.getString("effort"))
+                if (effort == app.daiyu.android.delegation.ReasoningEffort.OFF) assertFalse(reasoning.has("summary"))
+                assertTrue(conn.closed)
+            }
+        }
+    }
+
     @Test fun oauthModesReachTheActualPostWithMatchingFinalRoutingHints() {
         for ((mode, tier) in listOf(GptSpeedMode.NORMAL to null, GptSpeedMode.FAST to "priority",
             GptSpeedMode.ULTRA_FAST to "ultrafast")) {

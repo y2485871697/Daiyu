@@ -4,10 +4,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelReasoningEffortTest {
-    private val supported = listOf(ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH,
+    private val supported = listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH,
         ReasoningEffort.XHIGH, ReasoningEffort.MAX)
 
-    @Test fun mandatoryModelsOnlyExposeDocumentedEfforts() {
+    @Test fun allModelsExposeEveryExplicitEffort() {
         for (model in listOf("gpt-6-astra", "gpt-6.1-sol", "openai/gpt-6.1-sol", " Vendor/GPT-6-ASTRA "))
             assertEquals(model, supported, ReasoningEffort.textChoices(model))
     }

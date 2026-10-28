@@ -55,7 +55,7 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         options = (SRC / 'model/ProviderRequestOptions.kt').read_text()
         self.assertIn('if (config.has("thinkingConfig")) ReasoningRequestPolicy.validate(body, protocol)', options)
 
-    def test_mandatory_model_efforts_are_shared_by_main_display_picker_and_freeze(self):
+    def test_unrestricted_model_efforts_are_shared_by_main_display_picker_and_freeze(self):
         main = (SRC / 'MainActivity.kt').read_text()
         controller = (SRC / 'ChatController.kt').read_text()
         policy = (SRC / 'model/ReasoningRequestPolicy.kt').read_text()

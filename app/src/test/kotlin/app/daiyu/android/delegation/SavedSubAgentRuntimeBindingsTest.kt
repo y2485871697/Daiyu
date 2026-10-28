@@ -176,11 +176,6 @@ class SavedSubAgentRuntimeBindingsTest {
         )) assertThrows(IllegalArgumentException::class.java) {
             bindings.freeze(owner, configured, listOf(source), resolver)
         }
-        val failure = assertThrows(ModelRequestException::class.java) {
-            bindings.freeze(owner, config.copy(profiles = listOf(profile.copy(reasoning = ReasoningEffort.OFF))),
-                listOf(provider.copy(models = listOf(child.copy(reasoningMandatory = true)))), resolver)
-        }
-        assertEquals("模型不支持关闭思考", failure.userMessage)
         assertEquals(0, reads)
     }
 
@@ -316,26 +311,20 @@ class SavedSubAgentRuntimeBindingsTest {
             assertTrue(profile.gptSpeedByModel.isEmpty())
         }
     }
-    @Test fun unsupportedChildPreferenceIsNotReplacedAndNeverCreatesAPort() {
-        val required = child.copy(modelId = "gpt-6.1-sol")
-        var opens = 0
-        val binding = SavedSubAgentRuntimeBindings { opens++; noNetwork }
-        for (effort in listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL)) {
+    @Test fun everyChildPreferenceReachesItsFactoryDespiteMandatoryModelMetadata() {
+        val required = child.copy(modelId = "gpt-6.1-sol", reasoningMandatory = true, reasoningCanDisable = false)
+        val captured = mutableListOf<ProviderSnapshot>()
+        val binding = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        for (effort in ReasoningEffort.textChoices(required.modelId)) {
             val selected = profile.copy(reasoning = effort)
-            val error = assertThrows(ModelRequestException::class.java) {
-                binding.freeze(owner, config.copy(profiles = listOf(selected)),
-                    listOf(provider.copy(models = listOf(required))), { _, _ -> saved.copy(model = required.modelId) })
-            }
-            assertEquals("模型不支持${effort.displayName}思考", error.userMessage)
+            val frozen = binding.freeze(owner, config.copy(profiles = listOf(selected)),
+                listOf(provider.copy(models = listOf(required))), { _, _ -> saved.copy(model = required.modelId, reasoningOverride = false) })
+            frozen.getValue(selected.id).create()
+            assertEquals(if (effort == ReasoningEffort.OFF) "none" else effort.wireValue,
+                JSONObject(captured.last().requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
             assertEquals(effort, selected.reasoning)
-            assertEquals(0, opens)
         }
-        val mandatory = child.copy(reasoningMandatory = true)
-        val error = assertThrows(ModelRequestException::class.java) {
-            binding.freeze(owner, config, listOf(provider.copy(models = listOf(mandatory))), { _, _ -> saved })
-        }
-        assertEquals("模型不支持关闭思考", error.userMessage)
-        assertEquals(0, opens)
+        assertEquals(7, captured.size)
     }
 
 }

@@ -770,7 +770,7 @@ class ProviderSummaryModelTest {
         assertEquals(listOf("none", "minimal"), wires.map { it.json().getJSONObject("reasoning").getString("effort") })
     }
 
-    @Test fun nvidiaSummaryStartsAtNoneWhileConversationMappingStaysUnchanged() {
+    @Test fun nvidiaSummaryNegotiationDoesNotChangeTheExplicitConversationOffChoice() {
         val base = configuration(ProviderProtocol.CHAT_COMPLETIONS)
         val config = base.copy(provider = ProviderSnapshot.capture(base.provider.asModelSettings()
             .copy(endpoint = "https://integrate.api.nvidia.com/v1")))
@@ -779,7 +779,7 @@ class ProviderSummaryModelTest {
         assertEquals(checkpointText(), call()); assertEquals(2, admissions())
         assertEquals(listOf("none", "minimal"), wires.map { it.json().getString("reasoning_effort") })
         val chat = ReasoningRequestPolicy.freeze(config.provider, app.daiyu.android.delegation.ReasoningEffort.OFF)
-        assertEquals("low", JSONObject(chat.requestOptions.customBody).getString("reasoning_effort"))
+        assertEquals("none", JSONObject(chat.requestOptions.customBody).getString("reasoning_effort"))
     }
 
     @Test fun booleanThinkingBackendDoesNotPostDuplicateEnabledLevels() {

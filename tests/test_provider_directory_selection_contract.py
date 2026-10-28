@@ -44,7 +44,8 @@ class ProviderDirectorySelectionContractTest(unittest.TestCase):
                          'selectedSlots.isNotEmpty()', 'testTag("provider-selection-actions")'):
             self.assertIn(fragment, footer)
         self.assertEqual(2, footer.count("Modifier.weight(1f).heightIn(min = 48.dp)"))
-        self.assertIn('Modifier.weight(1f), listState = listState', page)
+        self.assertIn('Modifier.fillMaxSize(), listState = listState', page)
+        self.assertIn('bottomSpacerMinHeight = bottomSpacerMinHeight', page)
         self.assertIn("selectedSlots - visibleIds else selectedSlots + visibleIds", page)
         self.assertIn("val visibleIds = rows.map { it.slotId }.toSet()", page)
         layout = (MAIN / "ui/layout/AdaptivePageLayout.kt").read_text()

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -45,6 +46,7 @@ fun MiuixScaffoldPage(
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     containerColor: Color = MiuixTheme.colorScheme.surface,
     compactTitle: Boolean = false,
+    bottomSpacerMinHeight: Dp = 0.dp,
     content: LazyListScope.() -> Unit,
 ) {
     val pageScrollConnection = remember(scrollBehavior, editorScrollIsolation) {
@@ -92,7 +94,7 @@ fun MiuixScaffoldPage(
             ) {
                 content()
                 item(key = "bottom_spacer") {
-                    MiuixPageBottomSpacer()
+                    MiuixPageBottomSpacer(Modifier.heightIn(min = bottomSpacerMinHeight))
                 }
             }
         }

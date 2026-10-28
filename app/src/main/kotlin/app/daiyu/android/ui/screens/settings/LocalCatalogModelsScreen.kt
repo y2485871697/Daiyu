@@ -15,6 +15,7 @@ import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.components.deletionButtonColors
+import app.daiyu.android.ui.layout.FloatingPageActionsLayout
 import app.daiyu.android.ui.layout.WidePageContent
 import app.daiyu.android.ui.layout.horizontalCutoutPadding
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -278,8 +279,9 @@ internal fun <T> LocalCatalogModelsScreen(
     fun changeSelection(value: Set<String>) {
         if (selectionCurrent() && currentEnabled && request == null && selectedIds === selection) selectedIds = value
     }
-    Column(Modifier.fillMaxSize().background(settingsPageBackground())) {
-        SettingsScaffoldPage(pageTitle, onBack = back, modifier = Modifier.weight(1f),
+    FloatingPageActionsLayout(Modifier.fillMaxSize().background(settingsPageBackground()), content = { bottomSpacerMinHeight ->
+        SettingsScaffoldPage(pageTitle, onBack = back, modifier = Modifier.fillMaxSize(),
+            bottomSpacerMinHeight = bottomSpacerMinHeight,
             // The short loading list must not clamp the retained model position to its first rows.
             listState = if (snapshot == null) loadingListState else listState,
             scrollBehavior = if (snapshot == null) loadingScrollBehavior else scrollBehavior) {
@@ -388,6 +390,7 @@ internal fun <T> LocalCatalogModelsScreen(
                 }
             }
         }
+    }) {
         if (selection != null) WidePageContent(fillHeight = false) { sidePadding ->
             Row(Modifier.fillMaxWidth().horizontalCutoutPadding().padding(horizontal = sidePadding)
                 .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)

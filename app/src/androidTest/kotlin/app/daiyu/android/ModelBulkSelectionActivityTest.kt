@@ -18,12 +18,13 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
     override fun cleanupFixture() {
         try { super.cleanupFixture() } finally { directory?.deleteRecursively(); directory = null }
     }
-    private fun openList() {
+    private fun openList(extraRows: Int = 0) {
         val base = fixture.settings.modelCatalogSnapshot()
         assertEquals(CatalogCommitResult.COMMITTED, fixture.settings.modelCatalog.compareAndAppend(base.providerIdentity, base.revision,
             listOf(SavedCatalogModel("bulk-first", "A model with a deliberately long display name that wraps across lines",
                 CatalogModelParameters(contextWindowOverride = 272000, visionOverride = true)),
-                SavedCatalogModel("bulk-second", "Second bulk model", CatalogModelParameters()))) { false })
+                SavedCatalogModel("bulk-second", "Second bulk model", CatalogModelParameters())) +
+                List(extraRows) { SavedCatalogModel("floating-$it", "Floating model $it", CatalogModelParameters()) }) { false })
         openModels(); selectProviderTab("模型")
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:bulk-first").fetchSemanticsNodes().size == 1 }
     }
@@ -47,7 +48,8 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
         node("catalog-model-editor").assertDoesNotExist()
         val page = node("page:主模型服务商").fetchSemanticsNode().boundsInRoot
         val footer = node("local-model-selection-actions").fetchSemanticsNode().boundsInRoot
-        assertTrue(footer.top >= page.bottom - 1f)
+        assertTrue("list continues behind the floating actions", footer.top < page.bottom)
+        assertTrue("floating actions remain inside the page", footer.bottom <= page.bottom + 1f)
         node("local-model-cancel-selection").performClick()
         node("local-model-selection-actions").assertDoesNotExist()
         select("bulk-first"); mainThread { activity.onBackPressedDispatcher.onBackPressed() }
@@ -58,6 +60,20 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.settings.localModelCatalogSnapshot()); assertEquals(saved, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
+    fun testFloatingSelectionCanScrollLastModelAboveButtons() {
+        openList(extraRows = 20)
+        val before = fixture.settings.localModelCatalogSnapshot()
+        select("bulk-first")
+        node("page:主模型服务商").performScrollToKey("bottom_spacer")
+        val card = node("local-model:floating-19").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val cancel = node("local-model-cancel-selection").fetchSemanticsNode().boundsInRoot
+        assertTrue("last model clears the floating buttons", card.bottom <= cancel.top + 1f)
+        node("local-model:floating-19").performTouchInput { click() }
+        node("local-model:floating-19").assertIsOn()
+        node("local-model-cancel-selection").performClick()
+        assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+    }
+
     fun testFilteredAllAndInvertPreserveHiddenSelectionAndKeepEmptyMode() {
         openList(); val before = fixture.settings.localModelCatalogSnapshot(); val saved = fixture.settings.load()
         select(saved.model)

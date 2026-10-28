@@ -12,7 +12,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+import app.daiyu.android.ui.layout.FloatingPageActionsLayout
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -81,8 +81,9 @@ internal fun ProviderDirectoryPage(
         query.isBlank() || registration.name.contains(query.trim(), ignoreCase = true) ||
             summaries[registration.slotId]?.endpoint?.contains(query.trim(), ignoreCase = true) == true
     }
-    Column(modifier.fillMaxSize().background(settingsPageBackground())) {
-        SettingsScaffoldPage("模型提供商", onBack, Modifier.weight(1f), listState = listState) {
+    FloatingPageActionsLayout(modifier.fillMaxSize().background(settingsPageBackground()), content = { bottomSpacerMinHeight ->
+        SettingsScaffoldPage("模型提供商", onBack, Modifier.fillMaxSize(), listState = listState,
+            bottomSpacerMinHeight = bottomSpacerMinHeight) {
             item("provider-search") {
                 SettingsSearch(query, onQuery, "搜索提供商", "provider-search")
             }
@@ -166,6 +167,7 @@ internal fun ProviderDirectoryPage(
                 }
             } }
         }
+    }) {
         if (selectedSlots != null) WidePageContent(fillHeight = false) { sidePadding ->
             Row(Modifier.fillMaxWidth().horizontalCutoutPadding().padding(horizontal = sidePadding)
                 .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)

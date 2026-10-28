@@ -34,7 +34,8 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         val page = node("page:模型提供商").fetchSemanticsNode().boundsInRoot
         val actions = node("provider-selection-actions").fetchSemanticsNode().boundsInRoot
         assertTrue("selection retains a visible list", page.height > actions.height)
-        assertTrue("footer is below the list, not over it", actions.top >= page.bottom - 1f)
+        assertTrue("list continues behind the transparent floating actions", actions.top < page.bottom)
+        assertTrue("floating actions remain inside the page", actions.bottom <= page.bottom + 1f)
         val delete = node("provider-delete-selected").fetchSemanticsNode().boundsInRoot
         val cancel = node("provider-cancel-selection").fetchSemanticsNode().boundsInRoot
         assertTrue("cancel precedes delete without overlap", cancel.right <= delete.left)
@@ -64,6 +65,22 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
         row(ProviderRegistry.PRIMARY).performClick()
         awaitUniqueTag("page:主模型服务商")
+    }
+
+    fun testFloatingSelectionCanScrollLastProviderAboveButtons() {
+        val repo = fixture.controller.providers
+        var before = repo.snapshot()
+        repeat(20) { before = repo.register(before.revision, "Floating provider $it") }
+        val last = before.providers.last()
+        openProviderManagement(); select(ProviderRegistry.PRIMARY)
+        node("page:模型提供商").performScrollToKey("bottom_spacer")
+        val card = node("provider-open-${last.slotId}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val cancel = node("provider-cancel-selection").fetchSemanticsNode().boundsInRoot
+        assertTrue("last provider clears the floating buttons", card.bottom <= cancel.top + 1f)
+        node("provider-open-${last.slotId}").performTouchInput { click() }
+        node("provider-open-${last.slotId}").assertIsOn()
+        node("provider-cancel-selection").performClick()
+        assertEquals(before, repo.snapshot())
     }
 
     fun testSelectedProviderAndConfirmationShareOriginalRedWithoutDeletingOnCancel() {

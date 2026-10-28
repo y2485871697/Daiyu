@@ -13,6 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import app.daiyu.android.ui.components.MiuixScaffold
 import app.daiyu.android.ui.components.MiuixScaffoldPage
@@ -36,12 +37,14 @@ internal fun SettingsScaffoldPage(
     listState: LazyListState = rememberLazyListState(),
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     compactTitle: Boolean = true,
+    bottomSpacerMinHeight: Dp = 0.dp,
     content: LazyListScope.() -> Unit,
 ) {
     CompositionLocalProvider(LocalSettingsPageStyle provides true) {
         MiuixScaffoldPage(title = title, onBack = onBack, modifier = modifier, actions = actions, listState = listState,
             containerColor = settingsPageBackground(), scrollBehavior = scrollBehavior,
-            listModifier = Modifier.background(settingsPageBackground()), compactTitle = compactTitle, content = content)
+            listModifier = Modifier.background(settingsPageBackground()), compactTitle = compactTitle,
+            bottomSpacerMinHeight = bottomSpacerMinHeight, content = content)
     }
 }
 

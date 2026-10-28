@@ -3,6 +3,7 @@ package app.daiyu.android.balance.ui
 import androidx.compose.material3.SwitchDefaults
 
 import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.app.daiyuSwitchColors
 
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.materialImeCursorColor
@@ -215,8 +216,8 @@ internal fun ProviderBalanceOptionFields(option: BalanceOption, onChange: (Balan
         BasicComponent(title = "余额信息", summary = "独立余额接口、预设与结果表达式", onClick = { expanded = !expanded },
             endActions = {
                 Switch(checked = option.enabled, enabled = enabled,
-                    colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                        checkedBorderColor = DaiyuPalette.switchTrack), onCheckedChange = {
+                    colors = daiyuSwitchColors(SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                        checkedBorderColor = DaiyuPalette.switchTrack)), onCheckedChange = {
                     onChange(option.copy(enabled = it))
                     if (it) expanded = true
                 })

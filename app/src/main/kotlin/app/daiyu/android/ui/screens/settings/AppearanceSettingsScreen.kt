@@ -44,6 +44,7 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.app.daiyuSwitchColors
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import kotlin.math.roundToInt
@@ -210,8 +211,8 @@ internal fun AppearanceSettingsScreen(
                         } else loadingExpanded = !loadingExpanded
                     }, trailing = {
                         SettingsSwitch(checked = state.morphLoadingIndicator,
-                            colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                checkedBorderColor = DaiyuPalette.switchTrack),
+                            colors = daiyuSwitchColors(SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                checkedBorderColor = DaiyuPalette.switchTrack)),
                             onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) })
                     })
                 SettingsExpandableContent(state.morphLoadingIndicator && loadingExpanded) {

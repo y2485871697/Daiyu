@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.haptics.material
 
+import app.daiyu.android.ui.app.daiyuSwitchColors
 import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.runtime.mutableStateOf
@@ -155,7 +156,7 @@ internal fun Switch(
     modifier: Modifier = Modifier,
     thumbContent: (@Composable () -> Unit)? = null,
     enabled: Boolean = true,
-    colors: SwitchColors = SwitchDefaults.colors(),
+    colors: SwitchColors = daiyuSwitchColors(),
     interactionSource: MutableInteractionSource? = null,
 ) {
     val change = onCheckedChange?.let { hapticChange(enabled, it) }

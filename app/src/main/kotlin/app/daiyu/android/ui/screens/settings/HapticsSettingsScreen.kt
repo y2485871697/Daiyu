@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.app.daiyuSwitchColors
 
 import android.os.Handler
 import android.os.Looper
@@ -111,8 +112,8 @@ internal fun HapticsSettingsScreen(
                     onClick = { if (canAct()) intensityDialog = true }, trailing = {
                         HapticsSwitchSlot("触感反馈", expanded = intensityDialog) {
                             Switch(checked = settings.touch,
-                                colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                    checkedBorderColor = DaiyuPalette.switchTrack), onCheckedChange = { save { copy(touch = it) } })
+                                colors = daiyuSwitchColors(SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                    checkedBorderColor = DaiyuPalette.switchTrack)), onCheckedChange = { save { copy(touch = it) } })
                         }
                     })
                 HapticsSwitchRow("消息生成震动", settings.generationOn, settings.touch) {
@@ -132,8 +133,8 @@ internal fun HapticsSettingsScreen(
                     }) else null, trailing = {
                         HapticsSwitchSlot("后台震动", expanded = expanded.takeIf { settings.backgroundOn }) {
                             Switch(checked = settings.backgroundOn, enabled = settings.generationOn,
-                                colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                    checkedBorderColor = DaiyuPalette.switchTrack),
+                                colors = daiyuSwitchColors(SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                    checkedBorderColor = DaiyuPalette.switchTrack)),
                                 onCheckedChange = { if (save { copy(background = it) }) expanded = it })
                         }
                     })
@@ -184,10 +185,10 @@ private fun HapticsSwitchRow(title: String, checked: Boolean, enabled: Boolean,
     ), trailing = {
         HapticsSwitchSlot(title) {
             Switch(checked = checked, enabled = enabled, onCheckedChange = null,
-                colors = SwitchDefaults.colors(checkedThumbColor = colors.onPrimary,
+                colors = daiyuSwitchColors(SwitchDefaults.colors(checkedThumbColor = colors.onPrimary,
                     checkedTrackColor = DaiyuPalette.switchTrack, checkedBorderColor = DaiyuPalette.switchTrack,
                     uncheckedThumbColor = colors.onSurfaceVariantSummary,
-                    uncheckedTrackColor = colors.surface, uncheckedBorderColor = colors.onSurfaceVariantSummary))
+                    uncheckedTrackColor = colors.surface, uncheckedBorderColor = colors.onSurfaceVariantSummary)))
         }
     })
 }

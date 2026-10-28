@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.SwitchColors
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -13,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.app.daiyuSwitchColors
 import app.daiyu.android.ui.haptics.material.Switch
 import app.daiyu.android.ui.haptics.toggleable
 
@@ -22,7 +22,7 @@ internal fun SettingsSwitch(
     onCheckedChange: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: SwitchColors = SwitchDefaults.colors(),
+    colors: SwitchColors = daiyuSwitchColors(),
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val target = if (onCheckedChange != null) {

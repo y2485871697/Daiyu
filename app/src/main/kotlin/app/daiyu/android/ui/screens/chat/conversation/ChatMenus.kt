@@ -92,7 +92,7 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     )
     val dark = MiuixTheme.colorScheme.background.luminance() < .3f
     ChatAnchoredMenu(expanded, onDismiss, Modifier.testTag("chat-overflow-menu"),
-        maxHeight = null, offset = androidx.compose.ui.unit.DpOffset(5.dp, 14.dp), screenMargin = 16.dp) {
+        maxHeight = null, offset = androidx.compose.ui.unit.DpOffset(5.dp, 14.dp), screenMargin = 16.dp, outsideClickFeedback = false) {
         Column(Modifier.padding(1.dp)) {
             groups.forEachIndexed { index, entries ->
                 if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 3.dp),

@@ -1586,7 +1586,7 @@ class ChatController internal constructor(private val application:Application,
     private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools,
         val auxiliary: ControllerAuxiliaryVision? = null,
         val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null,
-        val provider: ProviderSnapshot) {
+        val provider: ProviderSnapshot, val modelBinding: Pair<String, String>? = null) {
         var browserVisual: ControllerBrowserVisual? = null
         var reconnectNotice: String? = null
         var childrenPauseRequested = false
@@ -1681,11 +1681,56 @@ class ChatController internal constructor(private val application:Application,
     }
     private val toolLedger = ToolLedger(SQLiteToolLedgerStore(database))
     private val childPreferences by lazy { ConversationSubAgentPreferences(application.getSharedPreferences("subagent_configuration", 0)) }
+    private val deletedCatalogModels = java.util.concurrent.ConcurrentHashMap.newKeySet<Pair<String, String>>()
+    private val modelDeletionWorker = Executors.newSingleThreadExecutor { action ->
+        Thread(action, "catalog-model-deletion").apply { isDaemon = true }
+    }
+    private var catalogDeletionReaders = 0
+    @Volatile internal var modelDeletionRevision = 0L; private set
+    @Synchronized internal fun retainedDeletedMainModel(conversationId: String?): String? = resources
+        ?.takeIf { it.initial.conversationId.value == conversationId && it.modelBinding?.let(deletedCatalogModels::contains) == true }
+        ?.provider?.model
+
+    private fun reconcileDeletedModelCards(): Int {
+        val live = synchronized(this) { childSupervisor }?.liveProfiles().orEmpty() +
+            synchronized(this) { childModelBatches.entries.map { it.key to it.value } }.flatMap { (batch, owner) ->
+                batch.liveProfiles().map { owner to it }
+            }
+        return childPreferences.removeDeletedModels(deletedCatalogModels.toSet(), live)
+    }
+    private fun scheduleDeletedModelCleanup() {
+        if (deletedCatalogModels.isEmpty()) return
+        runCatching { modelDeletionWorker.execute {
+            runCatching { reconcileDeletedModelCards() }.onSuccess { removed ->
+                if (removed > 0) handler.post { synchronized(this) { if (!closed) notifyChanged() } }
+            }.onFailure {
+                handler.post { synchronized(this) { if (!closed) { problem = "已删除模型的子代理卡清理未保存；下次启动将继续清理"; notifyChanged() } } }
+            }
+        } }
+    }
+    private fun recoverDeletedModelBindings() {
+        val slots = providers.snapshot().providers.map { it.slotId }.toSet()
+        val available = slots.mapNotNull { slot -> runCatching {
+            providers.withEditor(providers.editor(slot)) { store ->
+                store.clearMissingCatalogSelection()
+                val catalog = store.localModelCatalogSnapshot() ?: return@withEditor null
+                slot to catalog.models.map { it.settings.localIdentity }.toSet()
+            }
+        }.getOrNull() }.toMap()
+        childPreferences.runtimeOwners().forEach { owner -> childPreferences.snapshot(owner).profiles.forEach { profile ->
+            if (profile.providerId.isNotBlank() && profile.modelId.isNotBlank() &&
+                (profile.providerId !in slots || available[profile.providerId]?.contains(profile.modelId) == false)) {
+                deletedCatalogModels.add(profile.providerId to profile.modelId)
+            }
+        } }
+        reconcileDeletedModelCards()
+    }
     private val childModelBatches = java.util.WeakHashMap<ChildModelBatch, String>()
     private val childConfigurationWorker = Executors.newSingleThreadExecutor { action ->
         Thread(action, "child-configuration-control").apply { isDaemon = true }
     }
     private val childConfigurationObserver = childPreferences.observeChanges { owner, _ ->
+        if (owner !is SubAgentConfigKey.Preset) scheduleDeletedModelCleanup()
         if (owner is SubAgentConfigKey.Conversation) {
             runCatching { childConfigurationWorker.execute {
                 val supervisor = synchronized(this) { if (closed) null else childSupervisor } ?: return@execute
@@ -1720,8 +1765,9 @@ class ChatController internal constructor(private val application:Application,
         val config = childPreferences.snapshot(key)
         val lifetimes = config.profiles.associate { it.id to childPreferences.profileLifetime(key, it.id) }
         val registryRevision = providers.snapshot().revision
-        val selection = if (profileId == null) config else config.copy(enabled = true,
-            profiles = config.profiles.filter { it.id == profileId }.map { it.copy(enabled = true) })
+        val availableConfig = config.copy(profiles = config.profiles.filterNot { (it.providerId to it.modelId) in deletedCatalogModels })
+        val selection = if (profileId == null) availableConfig else availableConfig.copy(enabled = true,
+            profiles = availableConfig.profiles.filter { it.id == profileId }.map { it.copy(enabled = true) })
         check(profileId == null || selection.profiles.size == 1) { "child_profile_removed_or_role_changed" }
         val catalogRevisions = selection.profiles.filter { selection.enabled && it.enabled }.map { it.providerId }.distinct().associateWith { slot ->
             providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it } }
@@ -1740,7 +1786,8 @@ class ChatController internal constructor(private val application:Application,
             latestModel = if (hotUpdates) ({ id -> freezeSavedChildModels(key, hotUpdates = false,
                 profileId = id, runModel = runModel).getValue(id) }) else null,
             latestModels = if (hotUpdates) ({ freezeSavedChildModels(key, runModel = runModel) }) else null,
-            profileCurrent = { id -> childPreferences.profileLifetime(key, id) == lifetimes[id] })
+            profileCurrent = { id -> childPreferences.profileLifetime(key, id) == lifetimes[id] },
+            modelDeleted = { (it.providerId to it.modelId) in deletedCatalogModels })
         } catch (failure: app.daiyu.android.domain.ModelRequestException) {
             problem = failure.userMessage
             notifyChanged()
@@ -1889,6 +1936,7 @@ class ChatController internal constructor(private val application:Application,
         while(entries.hasNext()) if(entries.next().value.isReleased()) entries.remove()
     }
     private fun backgroundTasksChanged() {
+        scheduleDeletedModelCleanup()
         handler.post {synchronized(this) {
             pruneBackgroundRuns()
             if(closed) closeStorageWhenIdle() else notifyChanged()
@@ -1940,7 +1988,7 @@ class ChatController internal constructor(private val application:Application,
             CloudContextUsageStore.read(it, conversation, model)
         }
     }
-    private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
+    private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && catalogDeletionReaders == 0 && active==null &&
         resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && pendingPlatformAction==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     @Synchronized internal fun taskConfigurationBusy(): Boolean = preparing || active != null ||
@@ -2005,6 +2053,9 @@ class ChatController internal constructor(private val application:Application,
             false
         } catch (_:Exception) {true}
         if (!failed) {
+            runCatching { recoverDeletedModelBindings() }.onFailure {
+                problem = "已删除模型的绑定清理未完成；原会话和未知状态的配置保留"
+            }
             try {
                 preferences.getString("selected", null)?.let { selected ->
                     val messages = database.messages(ConversationId(selected)).map { it.second }
@@ -3781,6 +3832,7 @@ class ChatController internal constructor(private val application:Application,
                 currentProfiles = currentChildProfiles)
             val children = if (!withChildren) null else RunChildModels(
                 ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
+                    onProfilesChanged = ::scheduleDeletedModelCleanup,
                     usageRecorder = checkNotNull(runtimeStore).childUsage,
                     currentModels = currentChildModels).also { batch ->
                     synchronized(this) { childModelBatches[batch] = conversationId.value }
@@ -4133,7 +4185,8 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) { virtualDisplay?.accepted = true; gui?.accepted = true }
         video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
-        val lifetime=RunResources(assistant,owned,tools,auxiliaryPort,token.summaryPreparation, requestProvider)
+        val lifetime=RunResources(assistant,owned,tools,auxiliaryPort,token.summaryPreparation, requestProvider,
+            frozenProvider.localModelIdentity?.let { frozenProvider.editor.slotId to it })
         if (browserBinding?.visibleSupported == true) {
             lifetime.browserVisual = ControllerBrowserVisual(assistant, browserBinding,
                 ownerCurrent = { isRunUnfenced(assistant) },
@@ -4338,6 +4391,8 @@ class ChatController internal constructor(private val application:Application,
         lifetime.writer.shutdown();lifetime.waiter.shutdown()
         if (videoSession?.assistant?.runId == lifetime.initial.runId) videoSession = null
         resources=null;runner=null;runTools=null
+        if (lifetime.modelBinding?.let(deletedCatalogModels::contains) == true) modelDeletionRevision++
+        scheduleDeletedModelCleanup()
         clearCleanupProblem(lifetime.tools)
         guiEntry?.takeIf { it.catalog === lifetime.tools && !it.persistenceUnknown && it.session?.releaseConfirmed == true }
             ?.let { it.taskSurface.end(); guiEntry = null }
@@ -4367,7 +4422,7 @@ class ChatController internal constructor(private val application:Application,
         if (browserChildren.isNotEmpty()) return // Child workers/UNKNOWN still own the DB and ledger.
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || guiEntry!=null || generationReaders!=0 ||
-            unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || timelineWriters!=0 || contextManagementReaders!=0 || closingStorage) return
+            catalogDeletionReaders!=0 || unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || timelineWriters!=0 || contextManagementReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -4389,7 +4444,7 @@ class ChatController internal constructor(private val application:Application,
         closingStorage=true
         executor.execute {
             try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
-            finally {timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
+            finally {modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
     private val staticGenerationAssets by lazy { app.daiyu.android.media.StaticGenerationAssets(
@@ -4709,19 +4764,21 @@ class ChatController internal constructor(private val application:Application,
     internal fun deleteProviderCatalogModel(editor: ProviderEditorSlot,
         ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
         cancelled: () -> Boolean, completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
-    ) = editConfiguredCatalogModel(cancelled, completed) {
-        providers.withEditor(editor) { it.deleteCatalogModel(ticket, cancelled) }
-    }
+    ) = deleteProviderCatalogModels(editor, listOf(ticket), cancelled, completed)
     internal fun deleteProviderCatalogModels(editor: ProviderEditorSlot,
         tickets: List<app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>>,
         cancelled: () -> Boolean, completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
-    ) = editConfiguredCatalogModel(cancelled, completed) {
-        providers.withEditor(editor) { it.deleteCatalogModels(tickets, cancelled) }
+    ) = deleteCatalogModelBindings(cancelled, completed) {
+        providers.withEditor(editor) { it.deleteCatalogModels(tickets, cancelled) {
+            deletedCatalogModels.addAll(tickets.map { editor.slotId to it.record.settings.localIdentity })
+        } }
     }
     internal fun deleteConfiguredCatalogModels(
         tickets: List<app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>>,
         cancelled: () -> Boolean, completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
-    ) = editConfiguredCatalogModel(cancelled, completed) { settings.deleteCatalogModels(tickets, cancelled) }
+    ) = deleteCatalogModelBindings(cancelled, completed) { settings.deleteCatalogModels(tickets, cancelled) {
+        deletedCatalogModels.addAll(tickets.map { ProviderRegistry.PRIMARY to it.record.settings.localIdentity })
+    } }
 
     internal fun saveModelSettings(value:ModelSettings,protocolChangeAuthorized:Boolean,
         requestOptionsReplacementAuthorized:Boolean,completed:(Boolean)->Unit) =
@@ -4784,7 +4841,36 @@ class ChatController internal constructor(private val application:Application,
         ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
         cancelled: () -> Boolean,
         completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
-    ) = editConfiguredCatalogModel(cancelled, completed) { settings.deleteCatalogModel(ticket, cancelled) }
+    ) = deleteConfiguredCatalogModels(listOf(ticket), cancelled, completed)
+
+    private fun deleteCatalogModelBindings(
+        cancelled: () -> Boolean,
+        completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+        change: () -> app.daiyu.android.model.catalog.CatalogLocalEditResult,
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val admitted = synchronized(this) {
+            if (!ready || closed || dataBusy) false else { catalogDeletionReaders++; true }
+        }
+        if (!admitted) { completed(app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED); return }
+        modelDeletionWorker.execute {
+            val result = runCatching {
+                if (cancelled()) app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED else change()
+            }.getOrDefault(app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED)
+            if (result == app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED) {
+                runCatching { reconcileDeletedModelCards() }.onFailure {
+                    handler.post { synchronized(this) { problem = "模型已删除，子代理卡清理未保存；下次启动将继续清理" } }
+                }
+            }
+            handler.post { synchronized(this) {
+                catalogDeletionReaders--
+                if (closed) closeStorageWhenIdle()
+                if (result == app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED) modelDeletionRevision++
+                if (!closed) notifyChanged()
+                completed(result)
+            } }
+        }
+    }
 
     private fun editConfiguredCatalogModel(
         cancelled: () -> Boolean,
@@ -4802,7 +4888,6 @@ class ChatController internal constructor(private val application:Application,
                 app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED -> "本地模型已更新"
                 app.daiyu.android.model.catalog.CatalogLocalEditResult.STALE -> "目录已变化，请重新选择模型"
                 app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED -> "本地模型修改已取消"
-                app.daiyu.android.model.catalog.CatalogLocalEditResult.CURRENT_MODEL -> "请先切换当前模型，再删除此模型"
                 app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED -> throw java.io.IOException("local_catalog_edit_failed")
             }
         })
@@ -5248,6 +5333,7 @@ class ChatController internal constructor(private val application:Application,
     internal fun close() {
         childConfigurationObserver.close()
         childConfigurationWorker.shutdown()
+
         stopBrowserChildren()
         synchronized(this) { generationEntry }?.let { entry ->
             if (!entry.submitted) abandonGeneration(entry) else entry.session?.revokeAdmission()

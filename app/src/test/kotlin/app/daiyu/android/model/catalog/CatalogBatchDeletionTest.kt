@@ -24,30 +24,32 @@ class CatalogBatchDeletionTest {
     @Test fun deletesManyWithOneRevisionAndNeverReencodesSurvivors() {
         val store = backend(); val base = initial(store)
         encodingForbidden = true
-        assertEquals(CatalogLocalEditResult.APPLIED, store.deleteSelections(tickets(base, "first", "second"), { false }, { false }))
+        assertEquals(CatalogLocalEditResult.APPLIED, store.deleteSelections(tickets(base, "first", "second"), { false }))
         val after = checkNotNull(backend().current())
         assertEquals(base.providerIdentity, after.providerIdentity)
         assertEquals(base.revision + 1, after.revision)
         assertEquals(base.models.filterNot { it.id in setOf("first", "second") }, after.models)
     }
-    @Test fun rejectsWholeBatchContainingCurrentModel() {
+    @Test fun deletesWholeBatchContainingCurrentModelWithOneRevision() {
         val store = backend(); val base = initial(store)
-        assertEquals(CatalogLocalEditResult.CURRENT_MODEL,
-            store.deleteSelections(tickets(base, "first", "current"), { "current" in it }, { false }))
-        assertEquals(base, store.current())
+        assertEquals(CatalogLocalEditResult.APPLIED,
+            store.deleteSelections(tickets(base, "first", "current"), { false }))
+        val after = checkNotNull(store.current())
+        assertEquals(base.revision + 1, after.revision)
+        assertEquals(base.models.filterNot { it.id in setOf("first", "current") }, after.models)
     }
-    @Test fun checksCurrentModelInsideLeaseAndRechecksCancellationBeforeRename() {
+    @Test fun rechecksCancellationBeforeRename() {
         val store = backend(); val base = initial(store)
-        var checked = false
+        var checks = 0
         assertEquals(CatalogLocalEditResult.CANCELLED,
-            store.deleteSelections(tickets(base, "first", "second"), { checked = true; false }, { checked }))
-        assertTrue(checked)
+            store.deleteSelections(tickets(base, "first", "second"), { ++checks > 1 }))
+        assertTrue(checks > 1)
         assertEquals(base, store.current())
     }
     @Test fun cancellationBeforeValidationDoesNotWrite() {
         val store = backend(); val base = initial(store)
         assertEquals(CatalogLocalEditResult.CANCELLED,
-            store.deleteSelections(tickets(base, "first", "second"), { error("must not check current") }, { true }))
+            store.deleteSelections(tickets(base, "first", "second"), { true }))
         assertEquals(base, store.current())
     }
     @Test fun rejectsAnyChangedCompleteRecordWithoutPartialDeletion() {
@@ -55,7 +57,7 @@ class CatalogBatchDeletionTest {
         val selections = tickets(base, "first", "second").map {
             if (it.record.id == "second") it.copy(record = it.record.copy(settings = "tampered")) else it
         }
-        assertEquals(CatalogLocalEditResult.STALE, store.deleteSelections(selections, { false }, { false }))
+        assertEquals(CatalogLocalEditResult.STALE, store.deleteSelections(selections, { false }))
         assertEquals(base, store.current())
     }
     @Test fun missingMixedProviderOrMixedRevisionTicketsLeaveEveryRecord() {
@@ -63,14 +65,14 @@ class CatalogBatchDeletionTest {
         val first = checkNotNull(base.selectionFor("first")); val second = checkNotNull(base.selectionFor("second"))
         for (invalid in listOf(second.copy(providerIdentity = "another-provider"),
             second.copy(expectedRevision = base.revision + 1), second.copy(record = second.record.copy(id = "missing")))) {
-            assertEquals(CatalogLocalEditResult.STALE, store.deleteSelections(listOf(first, invalid), { false }, { false }))
+            assertEquals(CatalogLocalEditResult.STALE, store.deleteSelections(listOf(first, invalid), { false }))
             assertEquals(base, store.current())
         }
     }
     @Test fun rejectsEmptyAndDuplicateIds() {
         val store = backend(); val base = initial(store); val first = checkNotNull(base.selectionFor("first"))
-        assertEquals(CatalogLocalEditResult.FAILED, store.deleteSelections(emptyList(), { false }, { false }))
-        assertEquals(CatalogLocalEditResult.FAILED, store.deleteSelections(listOf(first, first), { false }, { false }))
+        assertEquals(CatalogLocalEditResult.FAILED, store.deleteSelections(emptyList(), { false }))
+        assertEquals(CatalogLocalEditResult.FAILED, store.deleteSelections(listOf(first, first), { false }))
         assertEquals(base, store.current())
     }
     @Test fun appendMakesEveryOldTicketStaleAndOtherProviderStaysUnchanged() {
@@ -79,10 +81,10 @@ class CatalogBatchDeletionTest {
         assertEquals(CatalogCommitResult.COMMITTED, store.compareAndAppend(base.providerIdentity, base.revision,
             listOf(SavedCatalogModel("new", "New", "new-settings"))) { false })
         val afterAppend = store.current()
-        assertEquals(CatalogLocalEditResult.STALE, store.deleteSelections(tickets(base, "first", "second"), { false }, { false }))
+        assertEquals(CatalogLocalEditResult.STALE, store.deleteSelections(tickets(base, "first", "second"), { false }))
         assertEquals(afterAppend, store.current()); assertEquals(otherBase, other.current())
     }
-    @Test fun currentCheckAndWriteHoldLeaseAgainstAnotherInstance() {
+    @Test fun cancellationCheckAndWriteHoldLeaseAgainstAnotherInstance() {
         val file = File(temporary.root, "models.bin"); val store = backend(file); val base = initial(store)
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val attempted = CountDownLatch(1)
         val executor = Executors.newFixedThreadPool(2)
@@ -90,7 +92,7 @@ class CatalogBatchDeletionTest {
             val deleting = executor.submit<CatalogLocalEditResult> {
                 store.deleteSelections(tickets(base, "first", "second"), {
                     entered.countDown(); check(release.await(5, TimeUnit.SECONDS)); false
-                }, { false })
+                })
             }
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             val competing = executor.submit<SavedModelCatalogSnapshot<String>?> {

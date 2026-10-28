@@ -66,13 +66,15 @@ class RetainedChildTasksCommandIoTest {
     private class Fixture(capacity: Int = 4, budget: Int = 8) {
         val store = Journal()
         val opens = AtomicInteger()
+        var deleted = false
         val supervisor = RetainedChildTasks(store, maxRetainedTasks = capacity, maxRequestsPerBinding = budget)
         val owner = RunExecutionOwner.issue(Message(MessageId("parent-message"), ConversationId("conversation"),
             RunId("parent"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val authorization = TaskAuthorization("session", owner.runId.value)
         val invocation = ToolInvocation(ToolCallId("command"), "direct_child_task", "{}")
         val binding = supervisor.bind(owner, SessionCapabilities("session", emptySet()), authorization,
-            mapOf("p" to ChildModelDefinition("pool", 1) {
+            mapOf("p" to ChildModelDefinition("pool", 1, null, latest = null, selection = "saved-model",
+                admissionAllowed = { !deleted }) {
                 object : ModelPort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
@@ -100,6 +102,17 @@ class RetainedChildTasksCommandIoTest {
             supervisor.closeWhenIdle { done.countDown() }
             assertTrue("real drain", done.await(5, TimeUnit.SECONDS))
         }
+    }
+
+    @Test fun deletionBetweenRefreshAndFinalCommandReservationRejectsWithoutSuccessorWrite() {
+        val fixture = Fixture()
+        try {
+            fixture.store.getHook = { fixture.deleted = true }
+            assertEquals(ChildTaskCommandReceipt.Rejected("child_model_deleted"), fixture.send())
+            assertEquals(0, fixture.store.writes.get())
+            assertEquals(1, fixture.opens.get())
+            assertEquals(ChildTaskStatus.COMPLETED, fixture.source.status)
+        } finally { fixture.drain() }
     }
 
     private class Block {

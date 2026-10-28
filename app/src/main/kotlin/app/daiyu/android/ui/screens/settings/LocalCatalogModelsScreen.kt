@@ -87,6 +87,7 @@ internal fun <T> LocalCatalogModelsScreen(
     queryState: MutableState<String> = remember { mutableStateOf("") },
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     backPreviewEnabled: Boolean = true,
+    editingEnabled: Boolean = enabled,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -162,7 +163,6 @@ internal fun <T> LocalCatalogModelsScreen(
                     CatalogLocalEditResult.APPLIED -> if (name == null) "本地模型已删除" else "模型名称已保存"
                     CatalogLocalEditResult.STALE -> "目录已变化，请重新选择模型"
                     CatalogLocalEditResult.CANCELLED -> "修改已取消"
-                    CatalogLocalEditResult.CURRENT_MODEL -> "请先切换当前模型，再删除此模型"
                     CatalogLocalEditResult.FAILED -> "修改未保存，请刷新后重试"
                 }
                 reload()
@@ -187,7 +187,6 @@ internal fun <T> LocalCatalogModelsScreen(
                     CatalogLocalEditResult.APPLIED -> "已删除 ${selections.size} 个本地模型"
                     CatalogLocalEditResult.STALE -> "目录已变化，请重新选择模型"
                     CatalogLocalEditResult.CANCELLED -> "删除已取消"
-                    CatalogLocalEditResult.CURRENT_MODEL -> "请先切换当前模型，再删除此模型"
                     CatalogLocalEditResult.FAILED -> "删除未保存，请刷新后重试"
                 }
                 reload()
@@ -235,13 +234,13 @@ internal fun <T> LocalCatalogModelsScreen(
     val editorEnabled = enabled && resumed && request == null
     val addVisit = adding
     if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", "自定义模型"), isNew = true,
-        enabled = editorEnabled, canSave = !editorStale, errorText = notice,
+        enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice,
         onSave = { if (adding === addVisit) saveForm(it, null) }, onDismiss = { if (request == null && adding === addVisit) adding = null })
     editing?.let { selection ->
         val form = actions.form
         if (form != null) CatalogModelEditorDialog(form(selection.record), isNew = false,
-            enabled = editorEnabled, canSave = !editorStale, errorText = notice,
-            canDelete = !editorStale && selection.record.id != actions.currentModelId,
+            enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice,
+            canDelete = !editorStale,
             onDelete = { if (editing === selection && current() && currentEnabled && request == null && matches(selection)) { editing = null; deleting = selection } },
             onSave = { if (editing === selection) saveForm(it, selection) },
             onDismiss = { if (request == null && editing === selection) editing = null })
@@ -256,12 +255,12 @@ internal fun <T> LocalCatalogModelsScreen(
             }, onDismiss = { if (editing === selection) editing = null })
     }
     deleting?.let { selection ->
-        DaiyuConfirmDialog("删除本地模型", "删除 ${selection.record.displayName} 的本地记录，不影响远端模型或其他配置。", "删除", true, deletionAppearance = true,
+        DaiyuConfirmDialog("删除本地模型", "删除 ${selection.record.displayName} 的本地记录，不会删除远端模型；空闲会话立即清理，执行中的绑定在本次任务结束后清理。", "删除", true, deletionAppearance = true,
             onConfirm = { if (deleting === selection && current() && matches(selection)) submit(selection, null) },
             onDismiss = { if (deleting === selection) deleting = null })
     }
     deletingSelected?.let { selections ->
-        DaiyuConfirmDialog("删除本地模型", "确定删除选中的 ${selections.size} 个本地模型？不影响远端模型或其他配置。", "删除", true,
+        DaiyuConfirmDialog("删除本地模型", "确定删除选中的 ${selections.size} 个本地模型？不会删除远端模型；空闲会话立即清理，执行中的绑定在本次任务结束后清理。", "删除", true,
             deletionAppearance = true, onConfirm = { submitSelected(selections) },
             onDismiss = { if (deletingSelected === selections) deletingSelected = null })
     }
@@ -276,7 +275,7 @@ internal fun <T> LocalCatalogModelsScreen(
             scrollBehavior = if (snapshot == null) loadingScrollBehavior else scrollBehavior) {
             headerContent()
             item("catalog-state") {
-                val add = if (actions.add != null && editorEnabled && selection == null && loaded && snapshot != null)
+                val add = if (actions.add != null && editorEnabled && editingEnabled && selection == null && loaded && snapshot != null)
                     ({ notice = null; editorStale = false; addingBase = snapshot; adding = Any() }) else null
                 if (managementEndpoint != null) ProviderModelManagementCard(managementEndpoint, fetchingModels, onFetchModels.takeIf { editorEnabled && selection == null }, add)
                 else if (actions.add != null) SettingsCard {

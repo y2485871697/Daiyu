@@ -105,11 +105,10 @@ internal class FileSavedModelCatalogPersistence<T>(
         change(record)
     }
 
-    /** The host's current-model check runs inside the same catalog lease as the edit. */
+    /** Ticket validation and the local edit share one catalog lease. */
     fun editSelection(
         selection: CatalogModelSelection<T>,
         displayName: String?,
-        isCurrentModel: () -> Boolean,
         isCancelled: () -> Boolean,
     ): CatalogLocalEditResult = try {
         exclusive {
@@ -123,7 +122,6 @@ internal class FileSavedModelCatalogPersistence<T>(
                 ?: return@exclusive CatalogLocalEditResult.STALE
             if (SavedCatalogModel(encoded.id, encoded.name, codec.decode(encoded.record)) != selection.record)
                 return@exclusive CatalogLocalEditResult.STALE
-            if (displayName == null && isCurrentModel()) return@exclusive CatalogLocalEditResult.CURRENT_MODEL
             val models = if (displayName == null) old.models.filterNot { it.id == encoded.id }
                 else old.models.map { if (it.id == encoded.id) it.copy(name = displayName) else it }
             // Preserve encoded model parameters and every unselected record verbatim.
@@ -141,7 +139,6 @@ internal class FileSavedModelCatalogPersistence<T>(
 
     fun deleteSelections(
         selections: List<CatalogModelSelection<T>>,
-        isCurrentModel: (Set<String>) -> Boolean,
         isCancelled: () -> Boolean,
     ): CatalogLocalEditResult = try {
         exclusive {
@@ -159,7 +156,6 @@ internal class FileSavedModelCatalogPersistence<T>(
                     val encoded = records[selection.record.id]
                     encoded == null || SavedCatalogModel(encoded.id, encoded.name, codec.decode(encoded.record)) != selection.record
                 }) return@exclusive CatalogLocalEditResult.STALE
-            if (isCurrentModel(ids)) return@exclusive CatalogLocalEditResult.CURRENT_MODEL
             val next = old.copy(revision = nextRevision(old.revision), models = old.models.filterNot { it.id in ids })
             if (writeDocument(next) { cancelled(isCancelled) }) CatalogLocalEditResult.APPLIED
             else CatalogLocalEditResult.CANCELLED
@@ -212,6 +208,14 @@ internal class FileSavedModelCatalogPersistence<T>(
             else old.models.map { if (it.id == id) encoded else it }
         writeDocument(old.copy(revision = nextRevision(old.revision), models = models)) { false }
         Unit
+    }
+
+    fun updateExistingRegisteredModel(id: String, update: (SavedCatalogModel<T>) -> SavedCatalogModel<T>): Unit = exclusive {
+        val old = readDocument() ?: return@exclusive
+        if (old.identity == null) return@exclusive
+        val previous = old.models.singleOrNull { it.id == id } ?: return@exclusive
+        val record = SavedCatalogModel(previous.id, previous.name, codec.decode(previous.record))
+        updateRegisteredModel(id) { update(record) }
     }
 
     /** A new connection/account in this host slot must never inherit the old account's records. */

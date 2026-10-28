@@ -272,6 +272,28 @@ internal class ConversationSubAgentPreferences(
         }
         return stored(key(owner))?.let(::decode) ?: initial(owner)
     }
+    fun runtimeOwners(): Set<SubAgentConfigKey> = synchronized(lock) {
+        ensureClean()
+        preferences.all.keys.filter { it.startsWith(OWNER_PREFIX + "c_") || it.startsWith(OWNER_PREFIX + "d_") }
+            .map { ownerFromSuffix(it.removePrefix(OWNER_PREFIX)) }.toSet()
+    }
+
+    /** The predicate is based on committed catalog identities, not on UI editing permissions. */
+    fun removeDeletedModels(deleted: Set<Pair<String, String>>, live: Set<Pair<String, String>>): Int = synchronized(lock) {
+        var removed = 0
+        runtimeOwners().forEach { owner ->
+            val current = read(owner)
+            val profiles = current.profiles.filterNot { profile ->
+                (profile.providerId to profile.modelId) in deleted && (owner.value to profile.id) !in live
+            }
+            if (profiles.size != current.profiles.size) {
+                transaction(mapOf(key(owner) to encode(current.copy(profiles = profiles))), owner)
+                removed += current.profiles.size - profiles.size
+            }
+        }
+        removed
+    }
+
     fun snapshot(owner: SubAgentConfigKey): ConversationSubAgentConfig = synchronized(lock) { read(owner).detached() }
     fun previewSnapshot(owner: SubAgentConfigKey): ConversationSubAgentConfig = synchronized(lock) {
         (if (owner is SubAgentConfigKey.Preset) read(owner) else stored(key(owner))?.let(::decode) ?: initial(owner)).detached()

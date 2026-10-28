@@ -186,7 +186,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         val extra = checkNotNull(fixture.settings.localModelCatalogSnapshot()).models.single { it.id == "extra-local" }
         reveal("local-model-rename:${saved.model}").performClick()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:${saved.model}"))
-        node("local-model-delete:${saved.model}").assertIsNotEnabled()
+        node("local-model-delete:${saved.model}").assertIsEnabled()
         node("dialog-cancel").performClick()
         reveal("local-model-rename:extra-local").performClick()
         node("settings-field:展示名称").performTextReplacement("Renamed local model")

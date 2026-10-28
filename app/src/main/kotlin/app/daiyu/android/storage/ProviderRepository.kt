@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 internal data class ProviderEditorSlot(val slotId: String, val registryRevision: Long)
 internal data class ProviderRunConfiguration(val editor: ProviderEditorSlot, val settings: ModelSettings, val configurationRevision: Long = -1,
-    val contextReceiptIdentity: String? = null)
+    val contextReceiptIdentity: String? = null, val localModelIdentity: String? = null)
 
 /** Fixed-slot access over the existing credential and catalog stores.
  * Worker lock order is registry -> catalog -> settings. Never do network IO or acquire the
@@ -182,7 +182,8 @@ internal class ProviderRepository(
             val settings = store.loadForRun().also { it.validate() }
             ProviderRunConfiguration(ProviderEditorSlot(id, state.revision), settings.copy(
                 usageIdentity = app.daiyu.android.model.UsageModelIdentity(id, requireProvider(state, id).name)), revision,
-                contextReceiptIdentity(store, settings))
+                contextReceiptIdentity(store, settings),
+                store.localModelCatalogSnapshot()?.models?.singleOrNull { it.id == settings.model }?.settings?.localIdentity)
         }
     }
     private fun contextReceiptIdentity(store: ModelSettingsStore, settings: ModelSettings): String? {

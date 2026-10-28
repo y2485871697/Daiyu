@@ -8,6 +8,33 @@ import org.junit.Test
 import org.json.JSONObject
 
 class SavedSubAgentRuntimeBindingsTest {
+    @Test fun deletedModelKeepsAcceptedSnapshotButRejectsNewAdmissionsAndNeverReadsMissingCatalog() {
+        var deleted = false; var reads = 0
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val definition = bindings.freeze(owner, config, listOf(provider), { _, _ -> saved },
+            latestConfig = { config }, latestModel = { reads++; error("catalog was deleted") },
+            modelDeleted = { deleted }).getValue(profile.id)
+        deleted = true
+        assertFalse(definition.acceptsNewTask())
+        definition.current().create()
+        assertEquals(0, reads)
+        assertEquals(saved.model, captured.single().model)
+        assertEquals(saved.apiKey, captured.single().apiKey)
+    }
+
+    @Test fun deletionWhileResolverWaitedUsesLastAcceptedSnapshotWithoutRetryOrSwitch() {
+        var deleted = false
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val definition = bindings.freeze(owner, config, listOf(provider), { _, _ -> saved },
+            latestConfig = { config }, latestModel = { deleted = true; error("missing catalog") },
+            modelDeleted = { deleted }).getValue(profile.id)
+        definition.current().create()
+        assertFalse(definition.acceptsNewTask())
+        assertEquals(listOf(saved.model), captured.map { it.model })
+    }
+
     private val owner = SubAgentConfigKey.Conversation("conversation")
     private val child = SubAgentModel("selected-record", "exact-api-model")
     private val provider = SubAgentProvider("explicit-provider", "Explicit", listOf(child))
@@ -15,6 +42,25 @@ class SavedSubAgentRuntimeBindingsTest {
     private val config = ConversationSubAgentConfig(listOf(profile))
     private val saved = ModelSettings("https://example.invalid", child.modelId, "fixture-key", false)
     private val noNetwork = ModelPort { error("no network") }
+
+    @Test fun deletionAfterHotModelChangeRetainsTheLastSuccessfulModelNotTheInitialOne() {
+        var latest = config; var deletedModel: String? = null
+        val changed = child.copy(id = "new-record", modelId = "new-api-model")
+        val source = listOf(provider.copy(models = listOf(child, changed)))
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val definition = bindings.freeze(owner, config, source, { _, _ -> saved },
+            latestConfig = { latest }, latestModel = { id ->
+                check(latest.profiles.single().modelId != deletedModel)
+                bindings.freeze(owner, latest, source, { _, _ -> saved.copy(model = changed.modelId) }).getValue(id)
+            }, modelDeleted = { it.modelId == deletedModel }).getValue(profile.id)
+        latest = config.copy(profiles = listOf(profile.copy(modelId = changed.id)))
+        definition.current().create()
+        deletedModel = changed.id
+        assertFalse(definition.acceptsNewTask())
+        definition.current().create()
+        assertEquals(listOf(changed.modelId, changed.modelId), captured.map { it.model })
+    }
 
     @Test fun savedSelectionWorksWithoutShieldAndOldDefinitionsKeepTheirSnapshot() {
         var current = saved

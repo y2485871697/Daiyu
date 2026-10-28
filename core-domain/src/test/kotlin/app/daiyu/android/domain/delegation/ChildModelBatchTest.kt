@@ -30,6 +30,38 @@ class ChildModelBatchTest {
         }
     }
 
+    @Test fun deletedModelRejectsNewSynchronousBatchBeforeAnyModelCreation() {
+        val created = AtomicInteger()
+        val definition = ChildModelDefinition("pool", 1, null, latest = null, selection = "saved-model",
+            admissionAllowed = { false }) { created.incrementAndGet(); error("must not create") }
+        val batch = bind(ChildModelBatch(mapOf("one" to definition)))
+        try {
+            assertEquals(ExecutionReceipt.NotExecuted("child_model_deleted"), batch.execute(context(), listOf(ChildModelTask("one", "task"))))
+            assertEquals(0, created.get())
+            assertTrue(batch.liveProfiles().isEmpty())
+        } finally { batch.close() }
+    }
+
+    @Test fun liveProfilesReleaseEachCardIndependentlyRatherThanWaitingForWholeBatch() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val quick = port { _, sink -> sink(ModelEvent.TextFinal("quick", "done")) }
+        val held = port { _, sink -> entered.countDown(); check(release.await(5, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("held", "done")) }
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("quick", 1) { quick },
+            "two" to ChildModelDefinition("held", 1) { held })))
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val receipt = executor.submit<ExecutionReceipt> { batch.execute(context(), listOf(ChildModelTask("one", "quick"), ChildModelTask("two", "held"))) }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (batch.liveProfiles() != setOf("two") && System.nanoTime() < deadline) Thread.sleep(5)
+            assertEquals(setOf("two"), batch.liveProfiles())
+            release.countDown()
+            assertTrue(receipt.get(5, TimeUnit.SECONDS) is ExecutionReceipt.Confirmed)
+            while (batch.liveProfiles().isNotEmpty() && System.nanoTime() < deadline) Thread.sleep(5)
+            assertTrue(batch.liveProfiles().isEmpty())
+        } finally { release.countDown(); batch.close(); executor.shutdownNow() }
+    }
+
     @Test fun sameApiModelProfilesShareLimitAndZeroAddsNoLimit() {
         for (limit in listOf(1, 2, 0)) {
             val active = AtomicInteger(); val peak = AtomicInteger(); val ids = java.util.Collections.synchronizedSet(mutableSetOf<RunId>())

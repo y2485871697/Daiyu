@@ -84,6 +84,30 @@ class RetainedChildTasksRetentionTest {
         assertTrue("real drain", done.await(5, TimeUnit.SECONDS))
     }
 
+    @Test fun deletionKeepsLiveProfileUntilEveryAcceptedTaskPhysicallySettles() {
+        val store = Journal(); val model = Model(held = true); val parent = Parent("retired")
+        val supervisor = RetainedChildTasks(store)
+        var deleted = false
+        val definition = ChildModelDefinition("pool", 0, null, latest = null, selection = "saved-model",
+            admissionAllowed = { !deleted }) { model }
+        val binding = supervisor.bind(parent.owner, parent.session, parent.authorization, mapOf("p" to definition))
+        try {
+            val accepted = supervisor.submit(binding, parent.context("first"), listOf(
+                ChildModelTask("p", "one"), ChildModelTask("p", "two"))) as ChildTaskAdmission.Accepted
+            assertTrue(model.entered.await(5, TimeUnit.SECONDS))
+            deleted = true
+            assertEquals(setOf("conversation" to "p"), supervisor.liveProfiles())
+            assertEquals(ChildTaskAdmission.Rejected("child_model_deleted"), submit(supervisor, binding, parent, "new"))
+            assertEquals(1, store.enqueues.get())
+            assertEquals(1L, model.cancelled.count)
+            model.release.countDown()
+            await { accepted.tasks.all { settled(supervisor, binding, it.owner.childRunId) } }
+            assertTrue(supervisor.liveProfiles().isEmpty())
+            assertEquals(2, model.opens.get())
+            assertTrue(store.list("conversation", 10).all { it.status == ChildTaskStatus.COMPLETED })
+        } finally { model.release.countDown(); drain(supervisor) }
+    }
+
     @Test fun moreThan64LifetimeTasksReuseCapacityButEvictedCallsCannotResend() {
         val store = Journal(); val model = Model(); val parent = Parent("long-lived")
         val supervisor = RetainedChildTasks(store, maxRetainedTasks = 1)

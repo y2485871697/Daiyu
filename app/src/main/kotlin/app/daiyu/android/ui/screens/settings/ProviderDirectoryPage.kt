@@ -72,6 +72,7 @@ internal fun ProviderDirectoryPage(
     onSelectionChange: (Set<String>) -> Unit = {},
     onDeleteSelected: () -> Unit = {},
     onCancelSelection: () -> Unit = {},
+    navigationEnabled: Boolean = enabled,
 ) {
     val rows = registry?.providers.orEmpty().filter { registration ->
         query.isBlank() || registration.name.contains(query.trim(), ignoreCase = true) ||
@@ -152,13 +153,13 @@ internal fun ProviderDirectoryPage(
                                 role = Role.Checkbox
                                 toggleableState = if (registration.slotId in selectedSlots) ToggleableState.On else ToggleableState.Off
                             }
-                        }.combinedClickable(enabled = enabled,
+                        }.combinedClickable(enabled = if (selectedSlots == null) navigationEnabled else enabled,
                             onClick = {
                                 if (selectedSlots == null) onOpen(registration)
                                 else onSelectionChange(if (registration.slotId in selectedSlots) selectedSlots - registration.slotId
                                     else selectedSlots + registration.slotId)
                             }, onLongClickLabel = "选择提供商",
-                            onLongClick = { if (selectedSlots == null) onSelect(registration) }))
+                            onLongClick = { if (enabled && selectedSlots == null) onSelect(registration) }))
                 }
             } }
         }

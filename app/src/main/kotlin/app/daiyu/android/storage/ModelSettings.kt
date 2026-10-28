@@ -110,6 +110,7 @@ class ModelSettingsStore internal constructor(
     internal fun modelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters> =
         modelCatalog.readConfiguration {
         checkCatalogConfiguration()
+        clearMissingCatalogSelection()
         modelCatalog.registerFrom {
             val editing = synchronized(lock) { editingWithoutCredential(includeHeadersState = false) }
             check(!editing.requestOptionsUnavailable) { "请求策略已损坏；请先明确修复再导入模型" }
@@ -140,7 +141,9 @@ class ModelSettingsStore internal constructor(
     }
 
     internal fun loadForRun(modelId: String? = null): ModelSettings = modelCatalog.readConfiguration {
+        clearMissingCatalogSelection()
         val current = load()
+        check(modelId != null || current.model.isNotBlank()) { "请先在模型页选择模型" }
         val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)
         if (modelId == null) current.copy(
             requestOptions = current.requestOptions.copy(openAiWebSearchEnabled =
@@ -179,23 +182,35 @@ class ModelSettingsStore internal constructor(
 
     internal fun renameCatalogModel(
         selection: CatalogModelSelection<CatalogModelParameters>, name: String, cancelled: () -> Boolean,
-    ): CatalogLocalEditResult = modelCatalog.editSelection(selection, name, { false }, cancelled)
+    ): CatalogLocalEditResult = modelCatalog.editSelection(selection, name, cancelled)
 
     internal fun deleteCatalogModel(
         selection: CatalogModelSelection<CatalogModelParameters>, cancelled: () -> Boolean,
-    ): CatalogLocalEditResult = modelCatalog.editSelection(selection, null,
-        { synchronized(lock) {
-            check(preferences !in failedStores) { "模型设置存储不可用；请重新保存" }
-            preferences.getString("model", "") == selection.record.id
-        } }, cancelled)
+    ): CatalogLocalEditResult = deleteCatalogModels(listOf(selection), cancelled)
 
     internal fun deleteCatalogModels(
         selections: List<CatalogModelSelection<CatalogModelParameters>>, cancelled: () -> Boolean,
-    ): CatalogLocalEditResult = modelCatalog.deleteSelections(selections,
-        { ids -> synchronized(lock) {
-            check(preferences !in failedStores) { "模型设置存储不可用；请重新保存" }
-            preferences.getString("model", "") in ids
-        } }, cancelled)
+        committed: () -> Unit = {},
+    ): CatalogLocalEditResult = modelCatalog.readConfiguration {
+        val result = modelCatalog.deleteSelections(selections, cancelled)
+        // The catalog rename has committed. A preference failure must not report a failed deletion.
+        if (result == CatalogLocalEditResult.APPLIED) {
+            committed()
+            runCatching { clearMissingCatalogSelection() }
+        }
+        result
+    }
+
+    /** Catalog absence is the durable cleanup receipt, including after process death. No key read/rotation. */
+    internal fun clearMissingCatalogSelection(): Unit = modelCatalog.readConfiguration {
+        val catalog = modelCatalog.current() ?: return@readConfiguration
+        synchronized(lock) {
+            val selected = preferences.getString("model", "").orEmpty()
+            if (selected.isNotBlank() && catalog.models.none { it.id == selected }) {
+                check(preferences.edit().putString("model", "").commit()) { "模型选择清理未保存" }
+            }
+        }
+    }
 
     internal fun nonSecretConfiguration(): Map<String, Any?> = synchronized(lock) { readNonSecretConfiguration() }
     private fun readNonSecretConfiguration(includeProtocol: Boolean = true): Map<String, Any?> = buildMap {
@@ -264,7 +279,7 @@ class ModelSettingsStore internal constructor(
             // Tool-only restores still update the active model's durable local policy.
             if (!plan.credentialRebindRequired) {
                 val editing = editingWithoutCredential(includeHeadersState = false)
-                if (!editing.requestOptionsUnavailable) modelCatalog.updateRegisteredModel(editing.settings.model) {
+                if (!editing.requestOptionsUnavailable) modelCatalog.updateExistingRegisteredModel(editing.settings.model) {
                     CatalogModelParameters.updated(editing.settings, it)
                 }
             }
@@ -470,7 +485,7 @@ class ModelSettingsStore internal constructor(
                 check(preferences.edit().remove(CATALOG_PENDING).commit()) { "提供商目录保存未确认" }
             } else {
                 if (previousConnection.model.isNotBlank() && previousConnection.model != settings.model && !previousEditing.requestOptionsUnavailable) {
-                    modelCatalog.updateRegisteredModel(previousConnection.model) {
+                    modelCatalog.updateExistingRegisteredModel(previousConnection.model) {
                         CatalogModelParameters.updated(previousConnection, it)
                     }
                 }

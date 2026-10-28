@@ -171,6 +171,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val resources = binding.resources ?: return ChildTaskAdmission.Rejected("child_binding_closed")
             if (closed || !binding.accepting) return ChildTaskAdmission.Rejected("child_binding_closed")
             if (inputSnapshot.any { it.profileId !in resources.models }) return ChildTaskAdmission.Rejected("invalid_child_tasks")
+            if (inputSnapshot.any { !resources.models.getValue(it.profileId).acceptsNewTask() })
+                return ChildTaskAdmission.Rejected("child_model_deleted")
             if (cancelled) return ChildTaskAdmission.Rejected("cancelled_before_admission")
             // Old calls are resolved above even at this limit. Never drop a sent-call tombstone
             // to make room: that would turn a replay into a second provider request.
@@ -349,6 +351,9 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 if (tasks.size >= maxRetainedTasks) return ChildTaskCommandReceipt.Rejected("child_retention_limit")
                 if (source.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING) && tasks[source.owner.childRunId] == null)
                     return ChildTaskCommandReceipt.Rejected("child_source_not_controlled")
+                val definition = binding.resources?.models?.get(command.profileId)
+                    ?: return ChildTaskCommandReceipt.Rejected("child_model_configuration_unavailable")
+                if (!definition.acceptsNewTask()) return ChildTaskCommandReceipt.Rejected("child_model_deleted")
                 val parent = binding.owner
                 val epoch = Math.incrementExact(generation).also { generation = it }
                 val record = ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value,
@@ -360,7 +365,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 Task(binding, ChildTaskRequest(fingerprint.toByteArray(), 1), record, invocation,
                     System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis),
                     ChildTaskPauseControl { notifyChanged(binding) }, source,
-                    checkNotNull(binding.resources).models.getValue(command.profileId)).also {
+                    definition).also {
                     it.admitting = true
                     reserved = it
                     tasks[record.owner.childRunId] = it
@@ -550,6 +555,11 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         }
         active.forEach { it.close() }
         callback?.let { runCatching(it) }
+    }
+
+    /** Includes queued, paused and physically draining tasks across every parent binding. */
+    fun liveProfiles(): Set<Pair<String, String>> = synchronized(gate) {
+        tasks.values.map { it.initial.owner.conversationId to it.initial.profileId }.toSet()
     }
 
     fun snapshots(binding: ChildTaskBinding): List<RetainedChildTask> {

@@ -7,6 +7,53 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ConversationSubAgentPreferencesTest {
+    @Test fun modelDeletionClearsIdleOwnersAndCardsWithoutWaitingForBusyConversation() {
+        val disk = MemoryPreferences(); val repository = ConversationSubAgentPreferences(disk)
+        val a = SubAgentConfigKey.Conversation("busy")
+        val b = SubAgentConfigKey.Conversation("idle")
+        val draft = SubAgentConfigKey.Draft("draft")
+        val profile = SubAgentProfile("p", "Review", role = "review", providerId = "slot", modelId = "deleted-local")
+        val other = profile.copy(id = "other", modelId = "survivor-local")
+        listOf(a, b, draft).forEach { owner -> repository.update(owner) { it.copy(profiles = listOf(profile, other)) } }
+        val lifetime = repository.profileLifetime(a, profile.id)
+        val deleted = setOf("slot" to "deleted-local")
+        repository.removeDeletedModels(deleted, setOf(a.value to profile.id))
+        assertEquals(listOf(profile, other), repository.snapshot(a).profiles)
+        assertEquals(lifetime, repository.profileLifetime(a, profile.id))
+        assertEquals(listOf(other), repository.snapshot(b).profiles)
+        assertEquals(listOf(other), repository.snapshot(draft).profiles)
+        // A restart has no live transports; catalog absence is still the cleanup receipt.
+        val reopened = ConversationSubAgentPreferences(disk.reopen())
+        reopened.removeDeletedModels(deleted, emptySet())
+        assertEquals(listOf(other), reopened.snapshot(a).profiles)
+    }
+
+    @Test fun modelDeletionDoesNotRemoveReboundProfileOrSameNameInAnotherProviderOrPreset() {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val profile = SubAgentProfile("p", "Review", role = "review", providerId = "slot", modelId = "old-local")
+        val preset = repository.addPreset("Preset")
+        val presetOwner = SubAgentConfigKey.Preset(preset.id)
+        repository.update(presetOwner) { it.copy(profiles = listOf(profile)) }
+        repository.update(owner) { it.copy(profiles = listOf(profile, profile.copy(id = "q", providerId = "other-slot"))) }
+        repository.removeDeletedModels(setOf("slot" to "old-local"), setOf(owner.value to profile.id))
+        repository.update(owner) { it.copy(profiles = it.profiles.map { card -> if (card.id == "p") card.copy(modelId = "new-local") else card }) }
+        repository.removeDeletedModels(setOf("slot" to "old-local"), emptySet())
+        assertEquals(listOf("new-local", "old-local"), repository.snapshot(owner).profiles.map { it.modelId })
+        assertEquals(listOf(profile), repository.snapshot(presetOwner).profiles)
+    }
+
+    @Test fun oneBusyCardDoesNotProtectAnotherIdleCardUsingTheSameDeletedModel() {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val profile = SubAgentProfile("p", "Review", role = "review", providerId = "slot", modelId = "local")
+        repository.update(owner) { it.copy(profiles = listOf(profile, profile.copy(id = "q"))) }
+        repository.removeDeletedModels(setOf("slot" to "local"), setOf(owner.value to "p"))
+        assertEquals(listOf("p"), repository.snapshot(owner).profiles.map { it.id })
+        repository.removeDeletedModels(setOf("slot" to "local"), emptySet())
+        assertTrue(repository.snapshot(owner).profiles.isEmpty())
+    }
+
     @Test fun presetCreateRenameEditAndDeletePersist() {
         val disk = MemoryPreferences()
         val repository = ConversationSubAgentPreferences(disk)

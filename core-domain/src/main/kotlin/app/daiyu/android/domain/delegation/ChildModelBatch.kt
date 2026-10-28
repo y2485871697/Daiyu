@@ -22,13 +22,17 @@ class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val disp
     private var latest: (() -> ChildModelDefinition)? = null
     private var selection: Any? = null
     private var valid: () -> Boolean = { true }
+    private var admissionAllowed: () -> Boolean = { true }
     constructor(poolKey: String, parallelLimit: Int, display: ChildTaskDisplay?,
-        latest: (() -> ChildModelDefinition)?, selection: Any, valid: () -> Boolean = { true }, create: () -> ModelPort) : this(poolKey, parallelLimit, display, create) {
+        latest: (() -> ChildModelDefinition)?, selection: Any, valid: () -> Boolean = { true },
+        admissionAllowed: () -> Boolean = { true }, create: () -> ModelPort) : this(poolKey, parallelLimit, display, create) {
         this.latest = latest
         this.selection = selection
         this.valid = valid
+        this.admissionAllowed = admissionAllowed
     }
     fun isValid(): Boolean = valid()
+    fun acceptsNewTask(): Boolean = admissionAllowed()
     fun current(): ChildModelDefinition {
         check(isValid()) { "child_profile_revoked" }
         val selected = latest?.invoke() ?: this
@@ -47,7 +51,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private val usageRecorder: ChildUsageRecorder? = null,
     private val currentModels: (() -> Map<String, ChildModelDefinition>)? = null,
     private val onProgress: (ChildRunOwner, String) -> Unit = { _, _ -> },
-    private val sharedPool: ((ChildModelDefinition) -> ChildPoolLease)? = null) : AutoCloseable {
+    private val sharedPool: ((ChildModelDefinition) -> ChildPoolLease)? = null,
+    private val onProfilesChanged: () -> Unit = {}) : AutoCloseable {
     private val models = models.toMap()
     private fun limits(models: Map<String, ChildModelDefinition>) = models.values.groupBy { it.poolKey }.mapValues { (_, entries) ->
         require(entries.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
@@ -71,6 +76,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private var closed = false
     private var busy = false
     private var outstanding = 0
+    private val profileReservations = mutableMapOf<Any, String>()
+    fun liveProfiles(): Set<String> = synchronized(gate) { profileReservations.values.toSet() }
     // Registered before exposing a transport to ChatRunner, whose cancel is asynchronous.
     // Worker exit alone does not prove provider cleanup has returned.
     private var cleanupPins = 0
@@ -124,6 +131,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         val parentSession: SessionCapabilities
         val parentAuthorization: TaskAuthorization
         val current: Long
+        val reservations = snapshot.map { Any() }
+        var submitted = 0
         if (context.cancelled()) return ExecutionReceipt.NotExecuted("cancelled_before_execution")
         synchronized(gate) {
             parent = checkNotNull(owner); parentSession = checkNotNull(session); parentAuthorization = checkNotNull(authorization)
@@ -140,6 +149,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                 }) { "queued_child_owner_mismatch" }
             }
             if (closed || busy || outstanding != 0 || cleanupPins != 0) return ExecutionReceipt.NotExecuted("child_batch_unavailable")
+            if (queued == null && snapshot.any { !models.getValue(it.profileId).acceptsNewTask() })
+                return ExecutionReceipt.NotExecuted("child_model_deleted")
+            reservations.zip(snapshot).forEach { (reservation, task) -> profileReservations[reservation] = task.profileId }
             busy = true; current = ++generation
             pauseControl = pause
         }
@@ -194,7 +206,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             }
                             if (!release) return
                             if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
-                            synchronized(gate) { outstanding-- }
+                            synchronized(gate) { outstanding--; profileReservations.remove(reservations[index]) }
+                            onProfilesChanged()
                             notifyIfIdle()
                         }
                         try {
@@ -397,6 +410,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             }
                         }
                     }
+                    submitted++
                 } catch (_: Exception) {
                     synchronized(gate) { outstanding-- }
                     records.drop(index).forEach { runCatching { store?.finished(it, ChildTaskStatus.NOT_EXECUTED, detail = "child_not_submitted") } }
@@ -430,7 +444,11 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt(); return uncertain("child_wait_interrupted")
         } catch (_: Exception) { return uncertain("child_batch_unconfirmed") }
-        finally { synchronized(gate) { busy = false }; notifyIfIdle() }
+        finally {
+            synchronized(gate) { busy = false; reservations.drop(submitted).forEach(profileReservations::remove) }
+            onProfilesChanged()
+            notifyIfIdle()
+        }
     }
 
     override fun close() {

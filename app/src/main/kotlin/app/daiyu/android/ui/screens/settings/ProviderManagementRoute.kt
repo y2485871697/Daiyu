@@ -354,6 +354,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val enabled = version.let { current(p) && controller.ready && controller.active == null &&
             !controller.dataBusy && !controller.hasLiveChildTasks() && busy == null && !loading && !checkingRegistry &&
             (detail == null || detail?.live?.get() == true) }
+        val modelDeletionEnabled = current(p) && controller.ready && !controller.dataBusy &&
+            busy == null && !loading && !checkingRegistry && (detail == null || detail?.live?.get() == true)
         val modelScrollOwner = detail?.pageUi ?: pausedDraft?.pageUi
         val modelScrollBehavior = key(modelScrollOwner) { MiuixScrollBehavior() }
         val d = detail
@@ -551,7 +553,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
                     else complete(CatalogLocalEditResult.CANCELLED)
                 }, deleteSelected = { selections, requestCancelled, complete ->
-                    if (live() && enabled && !requestCancelled()) controller.deleteProviderCatalogModels(d.editor, selections,
+                    if (live() && modelDeletionEnabled && !requestCancelled()) controller.deleteProviderCatalogModels(d.editor, selections,
                         { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
                     else complete(CatalogLocalEditResult.CANCELLED)
                 }, form = { app.daiyu.android.model.catalog.CatalogModelEdit.from(it) },
@@ -611,7 +613,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }, modifier = connectionModifier, pageTitle = detailTitle, providerName = d.name,
                 // A normal list visit uses the configuration/model split for every provider.
                 twoTabs = true, ownerCurrent = live,
-                enabled = enabled, engineeringUi = engineeringUi, errorText = d.error?.takeIf { d.live.get() },
+                enabled = enabled, modelDeletionEnabled = modelDeletionEnabled, engineeringUi = engineeringUi, errorText = d.error?.takeIf { d.live.get() },
                 credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                 headersUnavailable = d.editing.headersUnavailable,
                 testConnection = connection, localModelActions = actions, testBalance = balanceTest,
@@ -636,7 +638,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 onAddOpenAi = { if (current(p) && enabled) authentication = true },
                 onAddAnthropic = { if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.MESSAGES) },
                 onAddSpeech = { if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true) },
-                onOpen = { if (current(p) && enabled) open(it.slotId) },
+                onOpen = { if (current(p) && modelDeletionEnabled) open(it.slotId) },
+                navigationEnabled = modelDeletionEnabled,
                 onSelect = { if (current(p) && enabled && registry === displayedRegistry && selectedSlots == null) selectedSlots = setOf(it.slotId) },
                 selectedSlots = selectedSlots,
                 onSelectionChange = { if (current(p) && enabled && selection != null && selectedSlots === selection) selectedSlots = it },

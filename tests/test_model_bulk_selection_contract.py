@@ -41,18 +41,18 @@ class ModelBulkSelectionContract(unittest.TestCase):
         self.assertIn('internal fun deleteCatalogModels(',store)
         batch=store.split('internal fun deleteCatalogModels(',1)[1].split('internal fun nonSecretConfiguration',1)[0]
         self.assertIn('modelCatalog.deleteSelections(selections',batch)
-        self.assertIn('preferences.getString("model", "") in ids',batch)
+        self.assertIn('clearMissingCatalogSelection()',batch)
         file=(MAIN/'model/catalog/FileSavedModelCatalogPersistence.kt').read_text()
         operation=file.split('fun deleteSelections(',1)[1].split('fun replaceSelection(',1)[0]
         self.assertEqual(1,operation.count('exclusive {'))
         self.assertEqual(1,operation.count('writeDocument('))
         for f in ('selections.isNotEmpty()', 'ids.size == selections.size', 'it.providerIdentity != old.identity',
-                  'it.expectedRevision != old.revision', '!= selection.record', 'isCurrentModel(ids)', 'filterNot { it.id in ids }'):
+                  'it.expectedRevision != old.revision', '!= selection.record', 'filterNot { it.id in ids }'):
             self.assertIn(f,operation)
     def test_behavioral_regressions_exist_for_atomicity_and_real_interaction(self):
         jvm=(ROOT/'app/src/test/kotlin/app/daiyu/android/model/catalog/CatalogBatchDeletionTest.kt').read_text()
-        self.assertIn('currentCheckAndWriteHoldLeaseAgainstAnotherInstance',jvm)
-        self.assertIn('rejectsWholeBatchContainingCurrentModel',jvm)
+        self.assertIn('cancellationCheckAndWriteHoldLeaseAgainstAnotherInstance',jvm)
+        self.assertIn('deletesWholeBatchContainingCurrentModelWithOneRevision',jvm)
         ui=(ROOT/'app/src/androidTest/kotlin/app/daiyu/android/ModelBulkSelectionActivityTest.kt').read_text()
         for f in ('testFilteredAllAndInvertPreserveHiddenSelectionAndKeepEmptyMode',
                   'testBatchConfirmationDeletesBothWithOneRevisionAndNoChatWrites',

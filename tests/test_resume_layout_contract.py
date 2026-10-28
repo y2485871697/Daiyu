@@ -59,7 +59,7 @@ class ResumeLayoutContractTest(unittest.TestCase):
 
     def test_indirect_local_catalog_action_also_keeps_its_chevron(self):
         text = (SRC / "ui/screens/settings/LocalCatalogModelsScreen.kt").read_text()
-        self.assertIn("val add = if (actions.add != null && editorEnabled && selection == null", text)
+        self.assertIn("val add = if (actions.add != null && editorEnabled && editingEnabled && selection == null", text)
         self.assertIn("showChevron = true, onClick = add)", text)
 
     def test_collaboration_presentation_is_retained_but_authority_is_not(self):

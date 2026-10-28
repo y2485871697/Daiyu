@@ -66,6 +66,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     pageUi: ProviderPageUiState? = null,
     modelScrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     speechOnly: Boolean = false,
+    modelDeletionEnabled: Boolean = enabled,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -99,7 +100,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
         }
     val tabs: LazyListScope.() -> Unit = {
         if (twoTabs) item(key = "provider-tabs") {
-            ProviderSettingsTabs(modelTab, enabled && !state.saving) { selected ->
+            ProviderSettingsTabs(modelTab, modelDeletionEnabled && !state.saving) { selected ->
                 if (ownerCurrent()) { session.invalidate(); modelTab = selected }
             }
         }
@@ -107,12 +108,12 @@ internal fun <T> ProviderCatalogSettingsScreen(
     var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
     PageBackStack(if (managingLocal && localModelActions != null) "local-models" else null) {
         if (managingLocal && localModelActions != null) {
-            LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false },
+            LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled, editingEnabled = enabled, onBack = { managingLocal = false },
                 listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior)
             return@PageBackStack
         }
         if (twoTabs && modelTab && localModelActions != null) {
-            key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled && !state.saving,
+            key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled && !state.saving, editingEnabled = enabled,
                 onBack = onBack, pageTitle = pageTitle, managementEndpoint = draft.endpoint,
                 listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior,
                 fetchingModels = state.loading, onFetchModels = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null, headerContent = {

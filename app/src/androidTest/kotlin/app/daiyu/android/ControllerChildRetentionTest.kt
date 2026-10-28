@@ -14,6 +14,7 @@ import app.daiyu.android.domain.delegation.ChildTaskStop
 import app.daiyu.android.model.catalog.CatalogCommitResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.model.catalog.SavedCatalogModel
+import app.daiyu.android.model.catalog.selectionFor
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -188,6 +189,53 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
     }
     override fun tearDown() {
         try { fixtures.forEach { it.dispose() } } finally { super.tearDown() }
+    }
+
+    private fun deleteModel(f: Fixture, apiModel: String) {
+        val ticket = checkNotNull(checkNotNull(f.settings.localModelCatalogSnapshot()).selectionFor(apiModel))
+        val done = CountDownLatch(1)
+        val result = AtomicReference<app.daiyu.android.model.catalog.CatalogLocalEditResult>()
+        main { f.controller.deleteConfiguredCatalogModels(listOf(ticket), { false }) { result.set(it); done.countDown() } }
+        assertTrue("deletion must commit while tasks are still active", done.await(5, TimeUnit.SECONDS))
+        assertEquals(app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED, result.get())
+    }
+
+    fun testDeletingCurrentMainModelRetainsOnlyBusyConversationUntilItsOriginalRunEnds() {
+        val f = fresh(submit = false, holdParent = true)
+        val idle = f.database.create("default")
+        send(f); assertTrue(f.parentEntered.await(5, TimeUnit.SECONDS))
+        deleteModel(f, "parent-api")
+        assertEquals("", f.settings.load().model)
+        assertEquals("parent-api", f.controller.retainedDeletedMainModel(f.conversation.id.value))
+        assertNull(f.controller.retainedDeletedMainModel(idle.id.value))
+        assertEquals(1, f.parentOpens.get())
+        f.parentRelease.countDown()
+        awaitChange(f, "original main task drains") { f.controller.active == null && f.controller.retainedDeletedMainModel(f.conversation.id.value) == null }
+        assertParentCompleted(f)
+        assertEquals(1, f.parentOpens.get())
+        assertEquals("", f.settings.load().model)
+    }
+
+    fun testDeletedChildModelClearsOtherSessionAndIdleCardThenWaitsForPhysicalCleanup() {
+        val f = fresh(holdChildCleanup = true)
+        val preferences = ConversationSubAgentPreferences(f.app.getSharedPreferences("subagent_configuration", 0))
+        val busy = SubAgentConfigKey.Conversation(f.conversation.id.value)
+        val idle = SubAgentConfigKey.Conversation(f.database.create("default").id.value)
+        preferences.createConversation(idle)
+        preferences.update(idle) { it.copy(profiles = listOf(f.profile)) }
+        preferences.update(busy) { it.copy(profiles = listOf(f.profile, f.profile.copy(id = "unused"))) }
+        send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent ended") { f.controller.active == null }
+        deleteModel(f, "child-api")
+        assertTrue(preferences.snapshot(idle).profiles.isEmpty())
+        assertEquals(listOf(f.profile.id), preferences.snapshot(busy).profiles.map { it.id })
+        assertEquals(0, f.childCancels.get())
+        finishChildWithCleanupBlocked(f)
+        assertEquals(listOf(f.profile.id), preferences.snapshot(busy).profiles.map { it.id })
+        f.childCleanupRelease.countDown()
+        awaitChange(f, "last child transport drains and its card is removed") { preferences.snapshot(busy).profiles.isEmpty() }
+        assertEquals(1, f.childOpens.get())
+        assertEquals(ChildTaskStatus.COMPLETED, f.controller.childTasks(f.conversation.id).single().status)
     }
 
     fun testControllerAppendUsesNewOwnerAndWaitsForOriginalWorkerAndCleanup() {

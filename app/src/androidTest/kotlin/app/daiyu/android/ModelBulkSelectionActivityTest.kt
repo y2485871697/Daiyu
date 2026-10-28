@@ -98,12 +98,13 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
         backToPage(activity, "page:设置")
         backToChat(activity); assertDraft("keep bulk draft")
     }
-    fun testCurrentModelMakesWholeBatchRefuseWithoutPartialDeletion() {
+    fun testCurrentModelBatchDeletesWithOneRevisionAndClearsSelectionWithoutSwitching() {
         openList(); val before = checkNotNull(fixture.settings.localModelCatalogSnapshot()); val saved = fixture.settings.load()
         select("bulk-first"); row(saved.model).performClick(); confirmDeletion()
-        reveal("local-model-search", lazyKey = "catalog-state")
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("请先切换当前模型，再删除此模型").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(before, fixture.settings.localModelCatalogSnapshot()); assertEquals(saved, fixture.settings.load())
+        awaitControl("catalog deletion committed") { fixture.settings.localModelCatalogSnapshot()?.revision == before.revision + 1 }
+        val after = checkNotNull(fixture.settings.localModelCatalogSnapshot())
+        assertEquals(before.models.filterNot { it.id in setOf("bulk-first", saved.model) }, after.models)
+        assertEquals(saved.copy(model = ""), fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
     fun testPrePauseBatchConfirmationCannotDeleteOrDismissFreshSelection() {

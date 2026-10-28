@@ -194,23 +194,22 @@ class FileSavedModelCatalogPersistenceTest {
         val store = backend(file)
         val first = store.register(listOf(record("a"), record("b")))
         assertEquals(CatalogLocalEditResult.APPLIED,
-            store.editSelection(first.selectionFor("b")!!, "Renamed B", { error("rename must not inspect current settings") }) { false })
+            store.editSelection(first.selectionFor("b")!!, "Renamed B") { false })
         val renamed = backend(file).current()!!
         assertEquals(first.providerIdentity, renamed.providerIdentity)
         assertEquals(first.revision + 1, renamed.revision)
         assertEquals(listOf(record("a"), record("b").copy(displayName = "Renamed B")), renamed.models)
-        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(first.selectionFor("a")!!, "Stale", { false }) { false })
-        assertEquals(CatalogLocalEditResult.APPLIED, store.editSelection(renamed.selectionFor("b")!!, null, { false }) { false })
+        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(first.selectionFor("a")!!, "Stale") { false })
+        assertEquals(CatalogLocalEditResult.APPLIED, store.editSelection(renamed.selectionFor("b")!!, null) { false })
         assertEquals(listOf(record("a")), backend(file).current()!!.models)
     }
 
-    @Test fun localEditRejectsChangedRecordAndCurrentDeletionWithoutChangingBytes() {
+    @Test fun localEditRejectsChangedRecordWithoutChangingBytes() {
         val file = File(temporary.root, "edits.catalog"); val store = backend(file)
         val first = store.register(listOf(record("a"))); val bytes = file.readBytes()
         val ticket = first.selectionFor("a")!!
-        assertEquals(CatalogLocalEditResult.CURRENT_MODEL, store.editSelection(ticket, null, { true }) { false })
-        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(ticket.copy(record = ticket.record.copy(settings = "tampered")), "Other", { false }) { false })
-        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(ticket.copy(providerIdentity = UUID.randomUUID().toString()), null, { false }) { false })
+        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(ticket.copy(record = ticket.record.copy(settings = "tampered")), "Other") { false })
+        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(ticket.copy(providerIdentity = UUID.randomUUID().toString()), null) { false })
         assertArrayEquals(bytes, file.readBytes()); assertEquals(first, store.current())
     }
 
@@ -218,7 +217,7 @@ class FileSavedModelCatalogPersistenceTest {
         val file = File(temporary.root, "edits.catalog"); val store = backend(file)
         val first = store.register(listOf(record("a"))); val bytes = file.readBytes()
         for (name in listOf("", " ", " padded", "line\nbreak", "x".repeat(201), "bad\u007f"))
-            assertEquals(CatalogLocalEditResult.FAILED, store.editSelection(first.selectionFor("a")!!, name, { false }) { false })
+            assertEquals(CatalogLocalEditResult.FAILED, store.editSelection(first.selectionFor("a")!!, name) { false })
         assertArrayEquals(bytes, file.readBytes()); assertEquals(first, store.current())
     }
 
@@ -228,12 +227,12 @@ class FileSavedModelCatalogPersistenceTest {
         for (displayName in listOf("Changed", null)) {
             var checks = 0
             assertEquals(CatalogLocalEditResult.CANCELLED,
-                store.editSelection(first.selectionFor("a")!!, displayName, { false }) { ++checks == 2 })
+                store.editSelection(first.selectionFor("a")!!, displayName) { ++checks == 2 })
             assertEquals(2, checks); assertArrayEquals(bytes, file.readBytes()); assertEquals(first, store.current())
         }
         var checks = 0; var becameCancelled = false
         assertEquals(CatalogLocalEditResult.APPLIED,
-            store.editSelection(first.selectionFor("a")!!, "Committed", { false }) {
+            store.editSelection(first.selectionFor("a")!!, "Committed") {
                 checks++; if (checks == 2) becameCancelled = true; false
             })
         assertTrue(becameCancelled); assertEquals(2, checks)

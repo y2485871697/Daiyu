@@ -1618,6 +1618,7 @@ class MainActivity : ComponentActivity() {
     private var questionRows by mutableStateOf<Map<String, QuestionRowUi>>(emptyMap())
     private var questionCards by mutableStateOf<Map<Pair<WorkStepOwnerUi, String>, ChatController.QuestionProjection>>(emptyMap())
     private var titleRevision = -1L
+    private var modelDeletionRevision = -1L
     private var dataRevision = -1L
     private var scrollSerial = 0L
     private var historyRequestSerial = 0L
@@ -2365,6 +2366,7 @@ class MainActivity : ComponentActivity() {
                             createModel = { CatalogModelParameters.newModel(it) },
                             fetchCatalog = ::requestSettingsCatalog,
                             enabled = controller.ready && controller.active == null && !controller.dataBusy,
+                            modelDeletionEnabled = controller.ready && !controller.dataBusy,
                             errorText = modelError,
                             credentialUnavailable = editingSettings?.credentialUnavailable == true,
                             requestOptionsUnavailable = editingSettings?.requestOptionsUnavailable == true,
@@ -6266,6 +6268,10 @@ class MainActivity : ComponentActivity() {
                 val id = controller.preferences.getString("selected", null)
                 select(controller.database.conversations().firstOrNull { it.id.value == id }); return@guard
             }
+            if (modelDeletionRevision != controller.modelDeletionRevision) {
+                modelDeletionRevision = controller.modelDeletionRevision
+                refreshConfirmedModelLabel()
+            }
             if (dataRevision != controller.dataRevision) {
                 val initialSupplementRestore = dataRevision == -1L && supplementMountEditor == supplementEditor()
                 dataRevision = controller.dataRevision
@@ -6376,7 +6382,7 @@ class MainActivity : ComponentActivity() {
         val binding=selected?.id?.let(controller.database::assistantId) ?: if(selected==null) assistantStore.selectedId.value else null
         if(binding==null) "未绑定助手" else assistantStore.read(binding)?.name ?: "助手已删除，请重新绑定"
     } catch (_:Exception) { "助手不可用" }
-    private fun savedModelLabel(): String = confirmedModelLabel
+    private fun savedModelLabel(): String = controller.retainedDeletedMainModel(selected?.id?.value) ?: confirmedModelLabel
     private fun readLoadedWindow(id: ConversationId, before: Long, count: Int): List<Pair<Long, Message>> {
         val result = mutableListOf<Pair<Long, Message>>()
         var cursor = before
@@ -6487,7 +6493,7 @@ class MainActivity : ComponentActivity() {
                     videoHost.state.items.isEmpty() && !videoSending && controller.active == null,
                 imageSendBlocked = inlineMessageEditor?.let { it.uncertain || it.additions.blocked || editReferencePending(it) } ?: (imageHost.busy || imageHost.hasAttachments &&
                     (!imageHost.session.attachments.state.value.canSubmit || state != null)),
-                modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
+                modelLabel = savedModelLabel(),
                 reasoningLabel = try { ReasoningEffort.textPreference(reasoningPreference.snapshot(selected?.id?.value), model = confirmedReasoningModel).displayName } catch (_: Exception) { "配置无效，需重存" },
                 gptSpeedMode = confirmedGptSpeed?.mode,
                 gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null,

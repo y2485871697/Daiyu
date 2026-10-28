@@ -28,7 +28,8 @@ internal class SavedSubAgentRuntimeBindings(
         latestConfig: (() -> ConversationSubAgentConfig)? = null,
         latestModel: ((String) -> ChildModelDefinition)? = null,
         latestModels: (() -> FrozenSubAgentModels)? = null,
-        profileCurrent: (String) -> Boolean = { true }): FrozenSubAgentModels {
+        profileCurrent: (String) -> Boolean = { true },
+        modelDeleted: (SubAgentProfile) -> Boolean = { false }): FrozenSubAgentModels {
         val frozen = config.detached(); frozen.validate()
         val enabled = if (frozen.enabled) frozen.profiles.filter { it.enabled } else emptyList()
         val selected = enabled.map { profile ->
@@ -66,18 +67,31 @@ internal class SavedSubAgentRuntimeBindings(
             val model = SubAgentParallelModel(binding.profile.providerId, binding.child.model)
             val display = ChildTaskDisplay(binding.profile.name, binding.child.model, binding.modelName)
             val original = ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model), display,
-                latest = null, selection = binding.child, valid = { profileCurrent(binding.profile.id) }) { runModel(binding.child) }
+                latest = null, selection = binding.child, valid = { profileCurrent(binding.profile.id) },
+                admissionAllowed = { !modelDeleted(binding.profile) }) { runModel(binding.child) }
+            val lastSelection = java.util.concurrent.atomic.AtomicReference(binding.profile to original)
+            fun deletedSelection(): Boolean {
+                val last = lastSelection.get().first
+                val next = latestConfig?.invoke()?.profiles?.singleOrNull { it.id == binding.profile.id }
+                return modelDeleted(last) || (next != null && modelDeleted(next))
+            }
             binding.profile.id to if (latestConfig == null || latestModel == null) original else
                 ChildModelDefinition(original.poolKey, original.parallelLimit, display,
                     latest = {
-                        val next = latestConfig()
-                        check(next.profiles.singleOrNull { it.id == binding.profile.id }?.role == binding.profile.role) {
-                            "child_profile_removed_or_role_changed"
+                        if (deletedSelection()) lastSelection.get().second else try {
+                            val next = latestConfig()
+                            check(next.profiles.singleOrNull { it.id == binding.profile.id }?.role == binding.profile.role) {
+                                "child_profile_removed_or_role_changed"
+                            }
+                            val selected = latestModel(binding.profile.id)
+                            check(latestConfig() == next) { "child_model_configuration_changed" }
+                            selected.also { lastSelection.set(next.profiles.single { it.id == binding.profile.id } to it) }
+                        } catch (failure: Exception) {
+                            // A catalog read may have waited behind the deletion commit.
+                            if (deletedSelection()) lastSelection.get().second else throw failure
                         }
-                        val selected = latestModel(binding.profile.id)
-                        check(latestConfig() == next) { "child_model_configuration_changed" }
-                        selected
-                    }, selection = binding.child, valid = { profileCurrent(binding.profile.id) }) { runModel(binding.child) }
+                    }, selection = binding.child, valid = { profileCurrent(binding.profile.id) },
+                    admissionAllowed = { !deletedSelection() }) { runModel(binding.child) }
         }
         return FrozenSubAgentModels(definitions, current, latest = if (latestConfig == null || latestModels == null) null else ({
             val next = latestConfig()

@@ -43,7 +43,7 @@ class SwitchOffColorsContractTest(unittest.TestCase):
         text = (SRC / 'ui/screens/settings/SettingsSwitch.kt').read_text()
         self.assertIn('colors: SwitchColors = daiyuSwitchColors()', text)
         self.assertIn('colors = colors,', text)
-        for name, count in (('HapticsSettingsScreen.kt', 3), ('AppearanceSettingsScreen.kt', 1)):
+        for name, count in (('HapticsSettingsScreen.kt', 3), ('AppearanceSettingsScreen.kt', 0)):
             self.assertEqual(count, (SRC / 'ui/screens/settings' / name).read_text().count('daiyuSwitchColors(SwitchDefaults.colors('))
         self.assertIn('daiyuSwitchColors(SwitchDefaults.colors(', (SRC / 'balance/ui/BalanceSettingsScreen.kt').read_text())
         self.assertIn('enabled = enabled,', text)
@@ -52,6 +52,16 @@ class SwitchOffColorsContractTest(unittest.TestCase):
                      'PetSettingsScreen.kt', 'SettingsUiComponents.kt'):
             self.assertIn('SettingsSwitch', (SRC / 'ui/screens/settings' / name).read_text())
         self.assertIn('SettingsSwitch as Switch', (SRC / 'balance/ui/BalanceSettingsScreen.kt').read_text())
+        appearance = (SRC / 'ui/screens/settings/AppearanceSettingsScreen.kt').read_text()
+        self.assertIn('SettingsSwitchRow("消息时间戳"', appearance)
+        rows = (SRC / 'ui/screens/settings/SettingsUiComponents.kt').read_text()
+        self.assertIn('SettingsSwitch as Switch', rows)
+        row = rows.split('internal fun SettingsSwitchRow(', 1)[1].split('internal fun SettingsRadioRow(', 1)[0]
+        for value in ('uncheckedThumbColor = colors.onSurfaceVariantSummary',
+                      'uncheckedTrackColor = colors.surface',
+                      'uncheckedBorderColor = colors.onSurfaceVariantSummary'):
+            self.assertIn(value, row)
+
 
     def test_independent_subagent_accent_colors_are_also_normalized(self):
         text = (SRC / 'ui/SubAgentSettingsScreen.kt').read_text()

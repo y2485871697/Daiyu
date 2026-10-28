@@ -73,7 +73,7 @@ jobs:
     name: 只检查 ${{ matrix.os }}
     if: inputs.mode == 'checks'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:

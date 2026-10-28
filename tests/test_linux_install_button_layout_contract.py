@@ -34,18 +34,50 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
         self.assertNotIn('testTag("linux-install-environment")', status)
         self.assertNotIn('item("linux-install-actions")', source)
 
-    def test_install_button_is_full_width_primary_with_original_confirm_and_owner_gate(self):
+    def test_install_button_is_full_width_primary_with_direct_request_and_owner_gate(self):
         source = SCREEN.read_text()
         config = source.split('item("linux-configuration") {', 1)[1].split('item("linux-tools-heading")', 1)[0]
         for token in [
             'Button(enabled = installEnabled,', 'ButtonDefaults.buttonColorsPrimary()',
             'Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)',
             '.fillMaxWidth().heightIn(min = 48.dp).testTag("linux-install-environment")',
-            'if (basicCurrent() && page.prepareInstall(distribution, "primary", mode)) confirmInstall = true',
+            'if (basicCurrent() && page.prepareInstall(distribution, "primary", mode)) {',
             'Text("安装环境", color = if (installEnabled) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton)',
         ]:
             self.assertIn(token, config)
         self.assertNotIn('page.install(', config)
+
+    def test_install_intent_is_one_shot_and_old_prepared_never_autostarts(self):
+        source = SCREEN.read_text()
+        self.assertIn('var installRequest by remember(page, runningMode) { mutableStateOf<LinuxInstallChoice?>(null) }', source)
+        effect = source.split('LaunchedEffect(installRequest, installation, tabScope, runningMode, state.revoked)', 1)[1].split('val registration =', 1)[0]
+        for token in ['val request = installRequest ?: return@LaunchedEffect',
+                      '!basicCurrent()', 'request.distribution != distribution', 'request.executionMode != mode',
+                      'runningModeStore.mode.value != RunningMode.ROOT',
+                      'controller.chrootInstallation else controller.installation',
+                      'if (current?.busy == true) return@LaunchedEffect',
+                      'val prepared = current?.prepared', '!current.unknown', '!current.recoveryBlocked',
+                      '!current.cleanupPending', '!current.registered', 'current.unavailableReason == null',
+                      'current.receipt == null', 'prepared.artifact.distribution.equals(request.distribution, true)',
+                      'prepared.installation.executionMode == request.executionMode', 'val preparationFailed = awaitingInstallPreparation && current?.operationFailed == true',
+                      '!preparationFailed && prepared != null', 'awaitingInstallPreparation = false', 'page.install(prepared)']:
+            self.assertIn(token, effect)
+        self.assertLess(effect.rindex('installRequest = null'), effect.index('page.install(prepared)'))
+        self.assertLess(effect.index('if (current?.busy == true)'), effect.rindex('installRequest = null'))
+        self.assertNotIn('confirmInstall', source)
+        self.assertNotIn('下载并安装', source)
+        self.assertIn('title = "启用环境"', source)
+        self.assertIn('DaiyuConfirmDialog("完成环境设置"', source)
+
+    def test_cancel_choice_and_tab_changes_clear_pending_click(self):
+        source = SCREEN.read_text()
+        self.assertIn('onInstall = { if (basicCurrent()) { awaitingInstallPreparation = false; installRequest = LinuxInstallChoice(distribution, mode) } }', source)
+        self.assertIn('onCancel = { if (basicCurrent()) { installRequest = null; page.cancelInstall() } }', source)
+        self.assertIn('state.busy -> TextButton("取消安装", onClick = onCancel', source)
+        choose = source.split('fun choose(', 1)[1].split('val nextChoice =', 1)[0]
+        self.assertIn('installRequest = null', choose)
+        self.assertIn('tabScope = Any(); installRequest = null; confirmUse = false; confirmPending = false; tab = it', source)
+        self.assertIn('page.discardInstall(mode)', source)
 
     def test_original_recovery_resume_and_enable_actions_stay_in_status_card(self):
         source = SCREEN.read_text()

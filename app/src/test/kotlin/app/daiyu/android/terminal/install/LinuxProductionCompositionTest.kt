@@ -27,7 +27,8 @@ class LinuxProductionCompositionTest : TestCase() {
         val owner = Any()
         var completions = 0
         override fun completeRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval) { completions++ }
-        override fun remember(prepared: PreparedLinuxInstall) {}
+        var rememberFailure: Exception? = null
+        override fun remember(prepared: PreparedLinuxInstall) { rememberFailure?.let { throw it } }
         override fun discard(prepared: PreparedLinuxInstall) {}
         var installs = 0
         var cleanupRetries = 0
@@ -95,6 +96,29 @@ class LinuxProductionCompositionTest : TestCase() {
     }
     private fun helpers() = PackagedProotHelpers("arm64-v8a", File("/apk/libproot_exec.so"), "a".repeat(64),
         File("/apk/libproot_loader.so"), "b".repeat(64))
+
+    fun testFailedPreparationDescriptionRetainsRequestAndReportsTypedFailureUntilExplicitRetry() = runTest {
+        val transactions = Transactions()
+        val install = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), Catalog(), this)
+        runCurrent()
+        transactions.rememberFailure = IOException("description_not_durable")
+        assertTrue(install.prepare("debian", "primary"))
+        runCurrent()
+        val prepared = checkNotNull(install.state.value.prepared)
+        assertTrue(install.state.value.operationFailed)
+        assertFalse(install.state.value.busy)
+        assertNull(install.state.value.receipt)
+        assertEquals(0, transactions.installs)
+        transactions.rememberFailure = null
+        assertTrue(install.downloadAndInstall(prepared))
+        assertTrue(install.state.value.busy)
+        assertFalse(install.state.value.operationFailed)
+        runCurrent()
+        assertEquals(1, transactions.installs)
+        assertSame(prepared, install.state.value.prepared)
+        assertFalse(install.state.value.operationFailed)
+        install.close()
+    }
 
     fun testChrootCoordinatorNeverCallsProotProviderAndBothRecoveredRequestsCanBeDiscarded() = runTest {
         val proot = Transactions()

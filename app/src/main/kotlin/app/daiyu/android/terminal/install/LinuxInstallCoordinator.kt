@@ -29,6 +29,7 @@ data class LinuxInstallState(
     val notice: String? = null,
     val recoveryBlocked: Boolean = false,
     val cleanupPending: Boolean = false,
+    val operationFailed: Boolean = false,
 )
 
 internal interface LinuxInstallTransactions {
@@ -244,7 +245,7 @@ class LinuxInstallCoordinator internal constructor(
         token = if (cancellable) LinuxInstallCancellation() else null
         val epoch = admissionEpoch
         val identity = Any().also { activeOperation = it }
-        mutable.value = before(original).copy(busy = true, notice = null)
+        mutable.value = before(original).copy(busy = true, notice = null, operationFailed = false)
         worker.launch {
             // Linearize admission against page revocation/close, before the FIRST IO.
             // Once admitted, cancellation cannot discard a save's durability receipt.
@@ -261,8 +262,8 @@ class LinuxInstallCoordinator internal constructor(
             synchronized(lock) {
                 activeOperation = null
                 token = null
-                mutable.value = result.fold({ it.copy(busy = false) }, { failure ->
-                    mutable.value.copy(busy = false,
+                mutable.value = result.fold({ it.copy(busy = false, operationFailed = false) }, { failure ->
+                    mutable.value.copy(busy = false, operationFailed = true,
                         receipt = (failure as? LinuxInstallCleanupPending)?.receipt ?: mutable.value.receipt,
                         cleanupPending = mutable.value.cleanupPending || failure is LinuxInstallCleanupPending,
                         unknown = mutable.value.unknown || failure is LinuxInstallProbeUnknown,

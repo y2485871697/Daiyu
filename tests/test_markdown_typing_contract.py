@@ -39,8 +39,9 @@ class MarkdownTypingContract(unittest.TestCase):
         for token in ["remember(identity, resetEpoch) { sources.toList() }", "MarkdownTypingSource(it.itemId, it.text)",
                       "rememberMarkdownProjection(baseline.map { it.text })", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
             self.assertIn(token, self.typing)
-        self.assertIn('visibleCharacters = reveal.limit("final")', self.chat)
-        self.assertIn("visibleCharacters = reveal.limit(text.itemId)", self.chat)
+        self.assertIn('RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final"', self.chat)
+        self.assertIn('RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId', self.chat)
+        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", self.ui)
         content = (BASE / "MessageContent.kt").read_text()
         self.assertIn("textBody: @Composable (MessageContentUi.Text, Modifier)", content)
         self.assertIn("textBody(block, Modifier.testTag", content)
@@ -48,7 +49,8 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_projection_ready_and_reveal_settled_are_separate_current_turn_gates(self):
         self.assertIn("SideEffect { onContentReady(contentReady) }", self.chat)
-        self.assertIn("SideEffect { onRevealSettled(reveal.settled) }", self.chat)
+        self.assertIn("val revealSettled = reveal.settled", self.chat)
+        self.assertIn("SideEffect { onRevealSettled(revealSettled) }", self.chat)
         self.assertEqual(2, self.chat.count("revealedTurns[it.listKey] == it"))
         self.assertEqual(2, self.chat.count("readyTurns[it.listKey] == it"))
         self.assertIn("onContentReady(false); onRevealSettled(false)", self.chat)

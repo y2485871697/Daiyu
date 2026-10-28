@@ -40,19 +40,26 @@ internal suspend fun projectMarkdown(
     sources: List<String>,
     parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser,
     cache: MarkdownProjectionCache = markdownProjectionCache,
+    previous: MarkdownProjection? = null,
 ): MarkdownProjection {
     currentCoroutineContext().ensureActive()
-    cache.get(sources, parser)?.let { return it }
-    cache.getPrepared(sources, parser)?.let { return it }
+    val cached = cache.get(sources, parser) ?: cache.getPrepared(sources, parser)
+    val predecessor = previous?.takeIf { it.parser === parser && isMarkdownAppend(it.sources, sources) }
+    if (predecessor == null) cached?.let { return it }
     val dispatcher = if (sources.sumOf { it.length.toLong() } <= INTERACTIVE_MARKDOWN_CHARS)
         interactiveMarkdownDispatcher else markdownDispatcher
     val projection = withContext(dispatcher) {
         val context = currentCoroutineContext()
-        val blocks = sources.distinct().associateWith { source ->
+        val blocks = linkedMapOf<String, List<MarkdownBlock>>()
+        sources.forEachIndexed { index, source ->
             currentCoroutineContext().ensureActive()
-            cache.getBlocks(source, parser) ?: if (parser === defaultMarkdownParser) {
-                MarkdownParser.parse(source) { context.ensureActive() }
-            } else parser(source)
+            if (source !in blocks) {
+                val parsed = cached?.blocks?.get(source) ?: cache.getBlocks(source, parser) ?: if (parser === defaultMarkdownParser) {
+                    MarkdownParser.parse(source) { context.ensureActive() }
+                } else parser(source)
+                val old = predecessor?.let { it.blocks[it.sources[index]] }
+                blocks[source] = reuseMarkdownBlocks(old, parsed)
+            }
         }
         MarkdownProjection(sources.toList(), blocks, parser)
     }
@@ -83,7 +90,13 @@ internal suspend fun collectMarkdownProjections(
                 pending = Channel(Channel.CONFLATED)
                 val queue = pending
                 worker = launch {
-                    for (snapshot in queue) publish(projectMarkdown(snapshot, parser, cache))
+                    var published: MarkdownProjection? = null
+                    for (snapshot in queue) {
+                        val projection = projectMarkdown(snapshot, parser, cache, published)
+                        currentCoroutineContext().ensureActive()
+                        publish(projection)
+                        published = projection
+                    }
                 }
             }
             previous = sources

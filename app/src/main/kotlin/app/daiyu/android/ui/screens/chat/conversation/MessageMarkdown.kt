@@ -98,6 +98,14 @@ internal fun rememberMarkdownProjection(sources: List<String>): MarkdownProjecti
     return cached ?: completed?.takeIf { it.parser === parser && isMarkdownAppend(it.sources, sources) }
 }
 
+/** Read animation state at the text leaf, not at the assistant row or its tool cards. */
+@Composable
+internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, reveal: MarkdownReveal,
+    partId: String, modifier: Modifier = Modifier, generationComplete: Boolean = true,
+) {
+    ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)
+}
+
 @Composable
 internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, modifier: Modifier = Modifier,
     visibleCharacters: Int = Int.MAX_VALUE,

@@ -11,6 +11,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
     def setUpClass(cls):
         cls.markdown = (BASE / "MessageMarkdown.kt").read_text()
         cls.code = (BASE / "MarkdownCodeBlock.kt").read_text()
+        cls.reveal = (BASE / "MarkdownCodeReveal.kt").read_text()
 
     def test_code_block_keeps_symmetric_card_and_left_aligned_body(self):
         branch = self.markdown.split("is MarkdownBlock.Code ->", 1)[1].split("is MarkdownBlock.Quote ->", 1)[0]
@@ -34,7 +35,8 @@ class MarkdownCodeBlockContract(unittest.TestCase):
 
     def test_body_uses_compact_vertical_padding_and_display_only_newline_projection(self):
         self.assertIn(".padding(horizontal = 12.dp, vertical = 4.dp)", self.code)
-        self.assertIn('BasicText(markdownCodeDisplayText(block, text), Modifier.testTag("markdown-code-text")', self.code)
+        self.assertIn('MarkdownCodeText(block, visibleCharacters, Modifier.testTag("markdown-code-text")', self.code)
+        self.assertIn('BasicText(markdownCodeDisplayText(block, visible)', self.reveal)
         policy = (BASE / "MarkdownCodePolicy.kt").read_text()
         self.assertIn("block.closed && visibleText.length == block.text.length", policy)
         self.assertIn('visibleText.removeSuffix("\\n")', policy)
@@ -62,8 +64,9 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         for token in ["screenHeightDp.dp * .25f", ".coerceIn(128.dp, 220.dp)", ".heightIn(max = maxBodyHeight)",
                       "var unlocked by remember { mutableStateOf(false) }", "verticalScroll(vertical, enabled = verticalScrollEnabled)",
                       "horizontalScroll(horizontal)", "Modifier.nestedScroll(containedScroll)",
-                      "onPostScroll", ": Offset = available", "onPostFling", ": Velocity = available", "softWrap = false"]:
+                      "onPostScroll", ": Offset = available", "onPostFling", ": Velocity = available"]:
             self.assertIn(token, self.code)
+        self.assertIn("softWrap = false", self.reveal)
         self.assertNotIn("horizontalScroll(horizontal, enabled = unlocked)", self.code)
         self.assertIn('"锁定代码上下滑动" else "解锁代码上下滑动"', self.code)
         self.assertLess(self.code.index(".heightIn(max = maxBodyHeight)"), self.code.index(".verticalScroll(vertical"))

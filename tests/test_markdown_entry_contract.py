@@ -9,7 +9,7 @@ BASE = APP / 'ui/screens/chat/conversation'
 
 class MarkdownEntryContract(unittest.TestCase):
     def test_recovery_prepares_selected_history_on_worker_before_publishing_ready(self):
-        source = (APP / 'ChatController.kt').read_text().split('init {executor.execute {', 1)[1].split('internal val providers', 1)[0]
+        source = (APP / 'ChatController.kt').read_text().split('init {executor.execute {', 1)[1].split('\n    }}', 1)[0]
         self.assertIn('preferences.getString("selected", null)', source)
         self.assertIn('database.messages(ConversationId(selected)).map { it.second }', source)
         self.assertIn('prepareRestoredMarkdown(messages)', source)
@@ -46,7 +46,8 @@ class MarkdownEntryContract(unittest.TestCase):
         self.assertIn('sources.sumOf { it.length.toLong() } <= INTERACTIVE_MARKDOWN_CHARS', source)
         self.assertIn('interactiveMarkdownDispatcher else markdownDispatcher', source)
         self.assertIn('withContext(dispatcher)', source)
-        self.assertIn('cache.getPrepared(sources, parser)?.let { return it }', source)
+        self.assertIn('cache.get(sources, parser) ?: cache.getPrepared(sources, parser)', source)
+        self.assertIn('if (predecessor == null) cached?.let { return it }', source)
         self.assertIn('currentCoroutineContext().ensureActive()\n    cache.put(projection)', source)
 
     def test_regressions_cover_real_recovery_first_composition_and_source_integrity(self):

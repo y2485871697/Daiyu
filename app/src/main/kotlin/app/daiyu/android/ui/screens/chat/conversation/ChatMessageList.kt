@@ -495,7 +495,8 @@ internal fun AssistantTurn(
     SideEffect { if (hasDisplayBody) hasProjectedBody = true }
     SideEffect { onContentReady(contentReady) }
     SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }
-    SideEffect { onRevealSettled(reveal.settled) }
+    val revealSettled = reveal.settled
+    SideEffect { onRevealSettled(revealSettled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
     if (turn.hasVisibleResponse()) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val identity = turn.assistantIdentity
@@ -521,8 +522,8 @@ internal fun AssistantTurn(
                         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
                         generationComplete = turn.status != RunStatus.RUNNING)
                 }) { text, modifier ->
-                ProjectedMessageMarkdown(text.text, projection?.blocks?.get(text.text), modifier,
-                    visibleCharacters = reveal.limit(text.itemId), generationComplete = generationComplete)
+                RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId, modifier,
+                    generationComplete = generationComplete)
             }
         } else {
             AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete, toolContent)
@@ -550,7 +551,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
         generationComplete = turn.status != RunStatus.RUNNING, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
-        ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"),
+        RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final",
             generationComplete = generationComplete)
     }
 }

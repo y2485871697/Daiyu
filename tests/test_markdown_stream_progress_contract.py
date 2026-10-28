@@ -9,7 +9,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         source = (BASE / 'MarkdownProjection.kt').read_text()
         for token in ['Channel.CONFLATED', 'worker?.cancelAndJoin()',
                       '!isMarkdownAppend(previous!!, sources)',
-                      'for (snapshot in queue) publish(projectMarkdown(snapshot, parser, cache))']:
+                      'projectMarkdown(snapshot, parser, cache, published)', 'publish(projection)', 'published = projection']:
             self.assertIn(token, source)
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         self.assertIn('collectMarkdownProjections(snapshotFlow { requested }, parser)', ui)

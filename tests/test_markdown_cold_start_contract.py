@@ -26,7 +26,8 @@ class MarkdownColdStartContract(unittest.TestCase):
         self.assertIn('if (hasDisplayBody) hasProjectedBody = true', source)
         self.assertIn('turn.status != RunStatus.RUNNING && !initialBodyPending', source)
         self.assertIn('SideEffect { onContentReady(contentReady) }', source)
-        self.assertIn('SideEffect { onRevealSettled(reveal.settled) }', source)
+        self.assertIn('val revealSettled = reveal.settled', source)
+        self.assertIn('SideEffect { onRevealSettled(revealSettled) }', source)
         self.assertIn(') = key(turn.listKey)', (BASE / 'ChatMessageList.kt').read_text())
 
     def test_android_regressions_cover_cold_final_mixed_and_append_paths(self):

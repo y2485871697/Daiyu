@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -8,11 +11,19 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import app.daiyu.android.domain.RunStatus
 
-internal class MarkdownReveal(private val target: MarkdownTypingTarget?, private val visible: Int, val settled: Boolean) {
-    fun limit(id: String): Int = target?.limit(id, visible) ?: 0
+@Stable
+internal class MarkdownReveal(
+    private val target: MarkdownTypingTarget?,
+    private val frame: State<MarkdownTypingFrame>,
+    exact: Boolean,
+) {
+    private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
+    val settled: Boolean get() = completion.value
+    private fun visible(): Int = frame.value.let { if (it.target === target) it.visible else target?.start ?: 0 }
+    fun limit(id: String): Int = target?.limit(id, visible()) ?: 0
 }
 
-private data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
+internal data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
 
 @Composable
 internal fun rememberMarkdownReveal(
@@ -45,7 +56,7 @@ internal fun rememberMarkdownReveal(
     val target = remember(motion, parts, baselineLength, turn.isStreaming, turn.status) {
         motion.update(parts, baselineLength, turn.isStreaming, turn.status != RunStatus.RUNNING)
     }
-    val frame by produceState(MarkdownTypingFrame(target, target?.start ?: 0), target) {
+    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target) {
         val current = target ?: return@produceState
         var shown = current.start
         value = MarkdownTypingFrame(current, shown)
@@ -54,8 +65,7 @@ internal fun rememberMarkdownReveal(
             value = MarkdownTypingFrame(current, shown)
         }
     }
-    val visible = if (frame.target === target) frame.visible else target?.start ?: 0
-    return MarkdownReveal(target, visible,
-        projection?.sources == sources.map { it.text } && target != null &&
-            target.parts.map { it.source } == sources && visible >= target.total)
+    val exact = projection?.sources == sources.map { it.text } && target != null &&
+        target.parts.map { it.source } == sources
+    return remember(target, frame, exact) { MarkdownReveal(target, frame, exact) }
 }

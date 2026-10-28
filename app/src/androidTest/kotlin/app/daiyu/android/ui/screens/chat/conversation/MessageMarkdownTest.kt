@@ -1330,6 +1330,76 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue(opened.isEmpty())
     }
 
+    fun testCodeRevealSemanticsAndLayoutContainOnlyItsGraphemeSafePrefix() {
+        for (full in listOf("echo first\nsecond secret line\n", "echo 😀e\u0301 first\nsecond secret line\n")) {
+            val code = MarkdownBlock.Code(full, "sh", closed = true)
+            var count by mutableStateOf(7)
+            show {
+                Column(Modifier.width(300.dp)) {
+                    MarkdownCodeBlock(code, count, generationComplete = false)
+                }
+            }
+            fun checkPrefix() {
+                val expected = full.substring(0, MarkdownTextBoundaries(full).end(count))
+                val node = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true)
+                node.assertTextEquals(expected)
+                val layouts = mutableListOf<TextLayoutResult>()
+                node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+                assertEquals(expected, layouts.single().layoutInput.text.text)
+                assertEquals("same visible line count and height", layouts.single().size.height.toFloat(),
+                    node.fetchSemanticsNode().boundsInRoot.height, 2f)
+                assertFalse(expected.contains("secret"))
+            }
+            checkPrefix()
+            mainThread { count = full.indexOf('\n') + 1 }
+            checkPrefix()
+            mainThread { count = full.length }
+            ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).assertTextEquals(full.removeSuffix("\n"))
+            ui.onNodeWithTag("markdown-code-copy", useUnmergedTree = true).performClick()
+            mainThread {
+                val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                assertEquals(full, clipboard.primaryClip!!.getItemAt(0).text.toString())
+            }
+        }
+    }
+
+    fun testAnimationFramesDoNotRecomposeTheRevealOwnerOrReplayItsCards() {
+        val plain = "LEAF " + "word ".repeat(150)
+        val source = "**$plain**"
+        val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
+        markdownProjectionCache.put(MarkdownProjection(listOf(""), mapOf("" to emptyList()), parser))
+        markdownProjectionCache.put(MarkdownProjection(listOf(source), mapOf(source to parser(source)), parser))
+        var turn by mutableStateOf(ChatTurnUi.Assistant("leaf-only", status = RunStatus.RUNNING, isStreaming = true))
+        val ownerCompositions = AtomicInteger()
+        val completed = AtomicBoolean()
+        show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+            val projection = rememberMarkdownProjection(listOf(turn.finalText))
+            val reveal = rememberMarkdownReveal(turn, projection)
+            val settled = reveal.settled
+            SideEffect { ownerCompositions.incrementAndGet(); completed.set(settled) }
+            Column(Modifier.width(320.dp).testTag("leaf-only")) {
+                RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final")
+            }
+        } }
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { turn = turn.copy(finalText = source) }
+            ui.mainClock.advanceTimeBy(80); ui.waitForIdle()
+            val matcher = hasAnyAncestor(hasTestTag("leaf-only")) and hasText("LEAF", substring = true)
+            val start = annotation(ui.onNode(matcher, useUnmergedTree = true)).length
+            val count = ownerCompositions.get()
+            repeat(6) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+            val end = annotation(ui.onNode(matcher, useUnmergedTree = true)).length
+            assertTrue(end > start)
+            assertFalse(completed.get())
+            assertEquals("only text leaves subscribe to each frame", count, ownerCompositions.get())
+            ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
+            ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
+            body("leaf-only", plain).assertTextEquals(plain)
+            assertTrue(completed.get())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testStreamingRevealUsesCachedAstWithoutPerFrameParsingAndDrainsUnicodeText() {
         val plain = "TYPE😀𠮷e\u0301 " + "word ".repeat(80) + "END"
         val source = "**$plain**"

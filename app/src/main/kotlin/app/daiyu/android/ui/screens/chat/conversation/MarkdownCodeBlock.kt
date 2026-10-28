@@ -99,10 +99,6 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
     LaunchedEffect(copied) {
         if (copied) { delay(1_400); copied = false }
     }
-    val text = if (visibleCharacters >= block.text.length) block.text else {
-        val boundaries = remember(block.text) { MarkdownTextBoundaries(block.text) }
-        block.text.substring(0, boundaries.end(visibleCharacters))
-    }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val overflowsVertically = vertical.viewportSize > 0 && vertical.maxValue > 0
@@ -170,7 +166,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                     .then(if (verticalScrollEnabled) Modifier.nestedScroll(containedScroll) else Modifier)
                     .verticalScroll(vertical, enabled = verticalScrollEnabled).horizontalScroll(horizontal)
                     .padding(horizontal = 12.dp, vertical = 4.dp)) {
-                    BasicText(markdownCodeDisplayText(block, text), Modifier.testTag("markdown-code-text"), softWrap = false,
+                    MarkdownCodeText(block, visibleCharacters, Modifier.testTag("markdown-code-text"),
                         style = TextStyle(color = colors.text, fontFamily = FontFamily.Monospace,
                             fontSize = 14.sp, lineHeight = 22.sp, textAlign = TextAlign.Left))
                 }

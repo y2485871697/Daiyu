@@ -128,7 +128,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                         ProviderSettingsTheme {
                             primary = MiuixTheme.colorScheme.primary
                             onPrimary = MiuixTheme.colorScheme.onPrimary
-                            deleteFill = Color(0xFFE60012)
+                            deleteFill = Color(0xFF92454F)
                             deleteText = Color.White
                             key(dark, fontScale) {
                                 Box(Modifier.fillMaxSize().systemBarsPadding()) {

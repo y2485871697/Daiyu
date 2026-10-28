@@ -66,28 +66,28 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("page:主模型服务商")
     }
 
-    fun testSelectedProviderAndConfirmationShareVividRedWithoutDeletingOnCancel() {
+    fun testSelectedProviderAndConfirmationShareOriginalRedWithoutDeletingOnCancel() {
         val before = addRows()
         openProviderManagement()
         select(ProviderRegistry.PRIMARY)
-        fun assertVividRed(tag: String) {
+        fun assertOriginalRed(tag: String) {
             val pixels = captureScreenNode(node(tag).assertIsEnabled()).toPixelMap()
-            val expected = Color(0xFFE60012)
+            val expected = Color(0xFF92454F)
             var red = 0
             var white = 0
             for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
                 val pixel = pixels[x, y]
-                if (kotlin.math.abs(pixel.red - expected.red) < .025f && pixel.green < .025f &&
+                if (kotlin.math.abs(pixel.red - expected.red) < .025f && kotlin.math.abs(pixel.green - expected.green) < .025f &&
                     kotlin.math.abs(pixel.blue - expected.blue) < .025f) red++
                 if (pixel.red > .97f && pixel.green > .97f && pixel.blue > .97f) white++
             }
-            assertTrue("opaque vivid-red fill: $tag", red > pixels.width * pixels.height * .35f)
+            assertTrue("opaque original-red fill: $tag", red > pixels.width * pixels.height * .35f)
             assertTrue("white label: $tag", white > 8)
         }
-        assertVividRed("provider-delete-selected")
+        assertOriginalRed("provider-delete-selected")
         node("provider-delete-selected").performClick()
         awaitUniqueTag("dialog-confirm")
-        assertVividRed("dialog-confirm")
+        assertOriginalRed("dialog-confirm")
         node("dialog-cancel").performClick()
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())

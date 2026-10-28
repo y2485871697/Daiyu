@@ -1,14 +1,14 @@
-"""Dedicated delete colors must not recolor errors, menus, or neutral message tools."""
+"""Original-reference delete colors must not recolor errors, menus, or neutral message tools."""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 def source(path): return (SRC / path).read_text()
 
-class DeletionVividRedContractTest(unittest.TestCase):
-    def test_delete_role_is_fixed_vivid_red_and_independent_of_the_theme(self):
+class DeletionOriginalRedContractTest(unittest.TestCase):
+    def test_delete_role_is_original_reference_red_and_independent_of_the_theme(self):
         resolver = source('ui/app/AppearanceColors.kt').split('internal fun destructiveColors()', 1)[1].split('internal data class UserBubbleColors', 1)[0]
-        self.assertIn('Color(0xFFE60012)', resolver)
+        self.assertIn('Color(0xFF92454F)', resolver)
         self.assertIn('DestructiveColors(red, Color.White, red)', resolver)
         for forbidden in ('DaiyuPalette', 'primaryAccentColor', 'secondaryAccentColor', 'paletteSeedColor'):
             self.assertNotIn(forbidden, resolver)
@@ -63,15 +63,16 @@ class DeletionVividRedContractTest(unittest.TestCase):
         android = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
         for name in ('DeletionButtonAppearanceTest.kt', 'ProviderDirectorySelectionActivityTest.kt'):
             test = (android / name).read_text()
-            self.assertIn('Color(0xFFE60012)', test)
+            self.assertIn('Color(0xFF92454F)', test)
             self.assertIn('captureScreenNode', test)
+            self.assertIn('abs(pixel.green - expected.green)', test)
         shared = (android / 'DeletionButtonAppearanceTest.kt').read_text()
         self.assertIn('assertIsNotEnabled()', shared)
         self.assertIn('MiuixDialogActions(', shared)
         self.assertIn('AssistantPreviewButton(', shared)
         selected = (android / 'ProviderDirectorySelectionActivityTest.kt').read_text()
-        self.assertIn('assertVividRed("provider-delete-selected")', selected)
-        self.assertIn('assertVividRed("dialog-confirm")', selected)
+        self.assertIn('assertOriginalRed("provider-delete-selected")', selected)
+        self.assertIn('assertOriginalRed("dialog-confirm")', selected)
         self.assertIn('assertEquals(before, fixture.controller.providers.snapshot())', selected)
 
 if __name__ == '__main__': unittest.main()

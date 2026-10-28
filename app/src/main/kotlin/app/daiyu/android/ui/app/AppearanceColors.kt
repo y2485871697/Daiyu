@@ -176,7 +176,7 @@ internal fun resolveAppearanceActions(appearance: AppearanceSettings, dark: Bool
 internal data class DestructiveColors(val container: Color, val content: Color, val border: Color)
 
 internal fun destructiveColors(): DestructiveColors {
-    val red = Color(0xFFE60012)
+    val red = Color(0xFF92454F)
     return DestructiveColors(red, Color.White, red)
 }
 

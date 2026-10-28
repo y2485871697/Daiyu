@@ -30,7 +30,7 @@ class ChatModelPickerBalanceBindingTest : WiredActivityTestCase() {
             BalanceResult.Available(BalanceMoney(amount().toBigDecimal(), "USD"), 1L)
         }).also { runtime ->
             runBlocking {
-                runtime.save(BalanceConfiguration(slot, "https://example.test", "fixture-key", "", "USD",
+                runtime.save(BalanceConfiguration(slot, "https://example.test", "fixture-key-$slot", "", "USD",
                     BalanceOption(enabled = true, apiPath = "/balance", resultPath = "balance")))
                 assertTrue(runtime.manualRefresh())
             }

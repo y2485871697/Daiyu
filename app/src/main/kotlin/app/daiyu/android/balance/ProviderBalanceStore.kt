@@ -20,6 +20,7 @@ class BalanceRefreshTicket internal constructor(
     internal val requestId: String,
     internal val configuration: BalanceConfiguration,
     internal val operation: Job? = null,
+    internal val startedAtMillis: Long = System.currentTimeMillis(),
 ) {
     override fun toString() = "BalanceRefreshTicket(<redacted>)"
 }
@@ -141,6 +142,27 @@ class ProviderBalanceStore(private val persistence: BalancePersistence) {
             storageFailure()
             false
         }
+    }
+
+    internal fun successForSharing(snapshot: BalanceState): Pair<BalanceConfiguration, BalanceResult.Available>? = synchronized(lock) {
+        if (mutableState.value != snapshot) return@synchronized null
+        val result = snapshot.result as? BalanceResult.Available ?: return@synchronized null
+        val config = configuration?.takeIf { it.queryEnabled } ?: return@synchronized null
+        config.snapshot() to result
+    }
+
+    /** Each recipient keeps its encrypted record and revision fence, even for a shared account. */
+    internal fun acceptSharedResult(expectedRevision: String?, source: BalanceConfiguration,
+                                    result: BalanceResult.Available): Boolean = synchronized(lock) {
+        val config = configuration ?: return@synchronized false
+        val previous = mutableState.value
+        if (expectedRevision == null || previous.revision != expectedRevision || !config.sharesQueryWith(source)) return@synchronized false
+        if (previous.successful?.checkedAtMillis?.let { it >= result.checkedAtMillis } == true) return@synchronized false
+        if (pending?.let { result.checkedAtMillis < it.startedAtMillis } == true) return@synchronized false
+        pending?.operation?.cancel()
+        val ticket = BalanceRefreshTicket(identity, expectedRevision, UUID.randomUUID().toString(), config.snapshot())
+        pending = ticket
+        complete(ticket, result)
     }
 
     /** Cancellation changes neither successful amount nor its timestamp. */

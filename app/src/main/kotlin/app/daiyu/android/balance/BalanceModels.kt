@@ -54,6 +54,19 @@ data class BalanceConfiguration(
     override fun toString() = "BalanceConfiguration(<redacted>)"
 }
 
+/** Provider slot/account labels do not identify a remote balance; compare the effective query. */
+internal fun BalanceConfiguration.sharesQueryWith(other: BalanceConfiguration): Boolean {
+    val parsing = option?.resolved()
+    val otherParsing = other.option?.resolved()
+    fun Map<String, String>.normalizedHeaders() = entries.associate { it.key.lowercase(java.util.Locale.ROOT) to it.value }
+    return queryEnabled && other.queryEnabled && resolvedEndpoint() == other.resolvedEndpoint() &&
+        resolvedToken() == other.resolvedToken() && currency == other.currency &&
+        customHeaders.normalizedHeaders() == other.customHeaders.normalizedHeaders() &&
+        (parsing == null) == (otherParsing == null) &&
+        (parsing?.resultPath ?: amountPointer) == (otherParsing?.resultPath ?: other.amountPointer) &&
+        parsing?.userId == otherParsing?.userId
+}
+
 data class BalanceMoney(val amount: BigDecimal, val currency: String) {
     init {
         require(currency.matches(Regex("[A-Z]{3}")))

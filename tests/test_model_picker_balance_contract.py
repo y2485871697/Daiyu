@@ -21,6 +21,19 @@ class ModelPickerBalanceContract(unittest.TestCase):
         for forbidden in ('project()', 'balanceText', 'activeSlotId', 'manualRefresh(', 'startPolling('):
             self.assertNotIn(forbidden, mapping)
 
+    def test_foreground_refresh_is_not_limited_to_the_selected_provider(self):
+        host = source('MainActivity.kt')
+        refresh = host.split('private fun refreshConfirmedModelLabel()', 1)[1].split('private fun refreshAutomaticCompression()', 1)[0]
+        self.assertIn('controller.providers.snapshot().providers.filter { it.enabled }', refresh)
+        self.assertIn('provider.slotId to controller.providerBalances.get(provider.slotId)', refresh)
+        self.assertIn('balanceLifecycles = loaded.second.mapValues', refresh)
+        self.assertIn('balanceLifecycles[slot]?.takeIf { it.first === runtime }', refresh)
+        self.assertIn('BalanceLifecycleBinding(lifecycle, lifecycleScope, runtime, poll = true)', refresh)
+        self.assertNotIn('balanceLifecycles.values.forEach { it.second.close() }', refresh)
+        opened = host.split('private fun openChatModels()', 1)[1].split('private fun dismissChatModels()', 1)[0]
+        self.assertIn('balanceLifecycles.values.forEach { it.second.requestRefresh() }', opened)
+        self.assertIn('balanceLifecycles.values.forEach { it.second.close() }; balanceLifecycles = emptyMap()', host)
+
     def test_provider_header_uses_static_shared_balance_component(self):
         picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')
         self.assertIn('val balance: BalanceState? = null', picker)

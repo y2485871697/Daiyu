@@ -56,6 +56,13 @@ class BalanceRuntime(val store: ProviderBalanceStore, private val query: Balance
         withContext(Dispatchers.IO) { store.clear() }
     }
 
+    internal suspend fun acceptSharedSuccess(expectedRevision: String?, configuration: BalanceConfiguration,
+                                             result: BalanceResult.Available): Boolean = mutation.withLock {
+        val accepted = withContext(Dispatchers.IO) { store.acceptSharedResult(expectedRevision, configuration, result) }
+        if (accepted) { active?.cancel(); active = null }
+        accepted
+    }
+
     suspend fun manualRefresh(): Boolean = coroutineScope {
         currentCoroutineContext().ensureActive()
         val operation = currentCoroutineContext()[Job]!!

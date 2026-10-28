@@ -243,20 +243,17 @@ internal class ContextManagementWorker(
          * Parent must obtain its lazy shared service and construct this on its worker AFTER admission:
          * first ContextService/archive-store initialization may mkdir; never evaluate it on the UI.
          * All reads are local; only explicit compress may open summary I/O. */
-        fun production(context: Context, service: ContextService): ContextManagementWorker {
+        fun production(context: Context, service: ContextService,
+            conversationModel: (() -> app.daiyu.android.storage.ConversationModelBinding)? = null,
+        ): ContextManagementWorker {
             val app = context.applicationContext ?: context
             return ContextManagementWorker(service, settings = {
                 requireWorker()
                 ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings().let { saved ->
                     if (saved.contextWindowTokens != null) saved else {
                         val repository = ProviderRepository(app)
-                        val editor = repository.activeEditor()
-                        val window = repository.withEditor(editor) { store ->
-                            store.modelCatalog.readConfiguration {
-                                val model = store.summaryRequestMetadata().model
-                                store.modelCatalog.readRegisteredModel(model)?.settings?.contextWindowOverride?.toLong()
-                            }
-                        }
+                        val binding = conversationModel?.invoke() ?: repository.selectedConversationModel()
+                        val window = binding?.let { repository.conversationContextUsage(it).windowTokens }
                         saved.copy(contextWindowTokens = window)
                     }
                 }
@@ -264,7 +261,7 @@ internal class ContextManagementWorker(
                 profiles = object : ContextManagementSummaryProfiles {
                     override fun describeSelection(selection: ContextManagementSelection): SummaryProfileDescriptor {
                         requireWorker()
-                        return ManualSummaryTargets.describe(ProviderRepository(app), selection)
+                        return ManualSummaryTargets.describe(ProviderRepository(app), selection, conversationModel?.invoke())
                     }
                     override fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor {
                         requireWorker()

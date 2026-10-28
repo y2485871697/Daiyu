@@ -145,8 +145,7 @@ class ChatController internal constructor(private val application:Application,
         ModelFactory.create(app.daiyu.android.title.TitleModelCoordinator.requestSnapshot(it),
             app.daiyu.android.title.ConversationTitleModel.INSTRUCTIONS)
     }, private val titleSettingsOverride: app.daiyu.android.title.TitleModelSettingsStore? = null,
-    private val contextManagementFactory: (android.content.Context, ContextService) -> ContextManagementBackend =
-        { context, service -> ContextManagementWorker.production(context, service) },
+    private val contextManagementFactory: ((android.content.Context, ContextService) -> ContextManagementBackend)? = null,
     private val platformActions: app.daiyu.android.platform.actions.PlatformActionBackend =
         app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application),
     private val mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = {
@@ -403,6 +402,10 @@ class ChatController internal constructor(private val application:Application,
         var token: Preparation? = null
     }
     private var contextVisit: ContextVisit? = null
+    private fun contextManagementBackend(owner: ConversationId): ContextManagementBackend =
+        contextManagementFactory?.invoke(application, contextService) ?: ContextManagementWorker.production(application, contextService) {
+            checkNotNull(database.modelBinding(owner)) { "请先为当前会话选择模型" }
+        }
 
     internal fun openContextManagement(owner: ContextManagementOwner): ContextManagementControllerAdapter? {
         check(Looper.myLooper() == Looper.getMainLooper())
@@ -474,7 +477,7 @@ class ChatController internal constructor(private val application:Application,
             val backend = object : ContextManagementBackend {
                 private val delegate by lazy {
                     check(Looper.myLooper() != Looper.getMainLooper())
-                    contextManagementFactory(application, contextService)
+                    contextManagementBackend(owner.conversationId)
                 }
                 override fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot {
                     lease.checkCurrent()
@@ -524,7 +527,7 @@ class ChatController internal constructor(private val application:Application,
             }
             val accepted = running.requestCompaction(create = { capacity ->
                 postCompressionActivity(waiting.copy(running = false))
-                contextManagementFactory(application, contextService).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider) { activity ->
+                contextManagementBackend(owner.conversationId).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider) { activity ->
                     if (activity.running) runtimeStore?.bindCompressionModel(original, activity.model)
                     postCompressionActivity(activity)
                 }
@@ -553,7 +556,7 @@ class ChatController internal constructor(private val application:Application,
         try { executor.execute {
             try {
                 lease.checkCurrent()
-                val backend = contextManagementFactory(application, contextService)
+                val backend = contextManagementBackend(owner.conversationId)
                 val selected = if (selection == null) expected else backend.selectCompression(lease, expected, selection)
                 lease.checkCurrent()
                 postCompressionActivity(waiting.copy(running = false))
@@ -1984,7 +1987,7 @@ class ChatController internal constructor(private val application:Application,
             check(!closed && ready && !recoveryFailed)
             if (conversation != null && active?.conversationId == conversation) runtimeStore?.contextUsageModel(conversation) else null
         }
-        val model = runningModel ?: providers.contextUsageModel()
+        val model = runningModel ?: providers.conversationContextUsage(checkNotNull(database.modelBinding(conversation)) { "请先为当前会话选择模型" })
         if (conversation == null) return app.daiyu.android.ui.model.CloudContextUsageUi(0, model.windowTokens)
         return app.daiyu.android.context.DatabaseTransactions { database.readableDatabase }.run {
             CloudContextUsageStore.read(it, conversation, model)
@@ -2041,9 +2044,11 @@ class ChatController internal constructor(private val application:Application,
     var dataNotice:String?=null;private set
     @Synchronized internal fun consumeDataNotice():String? = dataNotice.also {dataNotice=null}
     @Volatile var ready=false;private set
+    internal val providers = ProviderRepository(application, primary = settings)
     init {executor.execute {
         val failed=try {
             assistantStore.requireReady() // Migration failure closes the send gate without replacing source data.
+            database.initializeModelBindings(providers.selectedConversationModel())
             val runtime=SQLiteRuntimeStore.acquire(database, contextService)
             runtimeStore=runtime
             val questions=PrivateQuestionStore(application)
@@ -2077,14 +2082,19 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }}
-    internal val providers = ProviderRepository(application, primary = settings)
-    private fun freezePreparationProvider(token: Preparation): ProviderRunConfiguration {
+    internal fun freezeConversationProvider(owner: ConversationId?): ProviderRunConfiguration =
+        providers.freezeConversation(checkNotNull(database.modelBinding(owner)) { "请先为当前会话选择模型" })
+
+    internal fun conversationModelEditing(owner: ConversationId?): Pair<ProviderEditorSlot, EditingSettings> =
+        providers.conversationEditing(checkNotNull(database.modelBinding(owner)) { "请先为当前会话选择模型" })
+
+    private fun freezePreparationProvider(token: Preparation, owner: ConversationId?): ProviderRunConfiguration {
         check(Looper.myLooper() != Looper.getMainLooper())
         synchronized(this) {
             token.providerConfiguration?.let { return it }
             check(preparation === token && !token.revoked && !closed)
         }
-        val frozen = providers.freezeActive()
+        val frozen = freezeConversationProvider(owner)
         return synchronized(this) {
             check(preparation === token && !token.revoked && !closed)
             token.providerConfiguration ?: frozen.also { token.providerConfiguration = it }
@@ -3000,7 +3010,7 @@ class ChatController internal constructor(private val application:Application,
         }
         try {
             require(mode in setOf("async", "daemon"))
-            val (profile, provider) = terminalConfiguration(conversation, freezePreparationProvider(token))
+            val (profile, provider) = terminalConfiguration(conversation, freezePreparationProvider(token, conversation?.id))
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile)
             val workspace = freezeWorkspace(token, conversation?.id)
@@ -3093,7 +3103,7 @@ class ChatController internal constructor(private val application:Application,
         val id = if (conversation == null) assistantStore.selectedId.value else database.assistantId(conversation.id)
         val profile = checkNotNull(assistantStore.read(checkNotNull(id)))
         return profile.copy(enabledSkillIds = profile.enabledSkillIds.toList()) to
-            ProviderSnapshot.capture((configuration ?: providers.freezeActive()).settings)
+            ProviderSnapshot.capture((configuration ?: freezeConversationProvider(conversation?.id)).settings)
     }
 
     /** Non-starting worker entry. Linux must already be installed, trusted AND selected. */
@@ -3108,7 +3118,7 @@ class ChatController internal constructor(private val application:Application,
         var launch: TerminalPtyLaunch? = null
         var pending: ControllerTerminalPreparation? = null
         try {
-            val (profile, provider) = terminalConfiguration(conversation, freezePreparationProvider(token))
+            val (profile, provider) = terminalConfiguration(conversation, freezePreparationProvider(token, conversation?.id))
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile) { "assistant_profile_changed" }
             val workspace = freezeWorkspace(token, conversation?.id)
@@ -3223,7 +3233,7 @@ class ChatController internal constructor(private val application:Application,
             val profile = assistantStore.read(checkNotNull(binding)) ?: error("mcp_assistant_missing")
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile)
-            val config = freezePreparationProvider(token).settings
+            val config = freezePreparationProvider(token, conversation?.id).settings
             val store = app.daiyu.android.mcp.McpSettingsStore(application)
             val frozen = store.snapshot()
             val selection = app.daiyu.android.mcp.McpSelection(serverId, tool, arguments)
@@ -3269,7 +3279,7 @@ class ChatController internal constructor(private val application:Application,
                 val binding = if (pending.conversation == null) token.assistantId else database.assistantId(pending.conversation.id)
                 if (preparationCancelled(token) || !pending.confirmed || binding != pending.assistant.id ||
                     assistantStore.read(pending.assistant.id) != pending.assistant ||
-                    providers.freezeActive().settings != pending.provider.asModelSettings()) null
+                    freezeConversationProvider(pending.conversation?.id).settings != pending.provider.asModelSettings()) null
                 else sendPrepared(token, pending.conversation, text, expectedDraftText = text, mcpPreparation = pending)
             } catch (_: Exception) { null }
             val result = when {
@@ -3303,7 +3313,7 @@ class ChatController internal constructor(private val application:Application,
                 ?: error("会话助手不存在")
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile) { "assistant_profile_changed" }
-            val config = freezePreparationProvider(token).settings
+            val config = freezePreparationProvider(token, conversation?.id).settings
             val browserSettings = browserSettings.snapshot()
             val run = RunId(UUID.randomUUID().toString())
             val grant = app.daiyu.android.browser.session.BrowserGrant(
@@ -3578,7 +3588,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val currentChildProfiles: () -> Set<String> = { currentChildModels().keys }
         val interactiveSnapshot = interactiveMode.snapshot()
-        val frozenProvider = try { freezePreparationProvider(token) } catch (_: CredentialUnavailableException) {
+        val frozenProvider = try { freezePreparationProvider(token, conversation?.id) } catch (_: CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_: Exception) {
             problem="请配置、启用并选择当前提供商；草稿保留，未发送请求";notifyChanged();return null
@@ -4096,7 +4106,11 @@ class ChatController internal constructor(private val application:Application,
             auxiliaryPort?.close(); closeUnacceptedTools(tools)
             problem="子代理配置或提供商已变化；草稿保留，请重新发送";notifyChanged();return null
         }
-        if (!runCatching { providers.isCurrentActive(frozenProvider) }.getOrDefault(false)) {
+        if (!runCatching {
+            val binding = database.modelBinding(conversation?.id)
+            binding != null && binding.providerSlotId == frozenProvider.editor.slotId &&
+                binding.localModelIdentity == frozenProvider.localModelIdentity && providers.isCurrentConversation(binding, frozenProvider)
+        }.getOrDefault(false)) {
             auxiliaryPort?.close(); closeUnacceptedTools(tools)
             problem="提供商选择或配置已变化；草稿保留，请重新发送";notifyChanged();return null
         }
@@ -4128,6 +4142,8 @@ class ChatController internal constructor(private val application:Application,
                     expectedWorkspaceBinding = token.workspaceBinding,
                     cancelled = { preparationCancelled(token) || video?.first?.isRevoked() == true },
                     beforeSend = { db ->
+                        check(database.modelBinding(conversation?.id) == ConversationModelBinding(
+                            frozenProvider.editor.slotId, checkNotNull(frozenProvider.localModelIdentity))) { "会话模型已变化" }
                         val table = if (conversation == null) "composer" else "conversations"
                         val ownerId = conversation?.id?.value ?: "1"
                         val binding = db.rawQuery("SELECT workspace_binding FROM $table WHERE id=?", arrayOf(ownerId)).use {
@@ -4160,7 +4176,8 @@ class ChatController internal constructor(private val application:Application,
                 if (actionRevision != null) messageActionStore.commitRevision(db, actionRevision)
                 database.send(user,assistant,conversation==null,assistantContext.assistantId,
                     preserveDraft = actionRevision != null, replyIdentity = replyIdentity,
-                    expectedWorkspaceBinding = token.workspaceBinding)
+                    expectedWorkspaceBinding = token.workspaceBinding,
+                    expectedModelBinding = frozenProvider.editor.slotId to checkNotNull(frozenProvider.localModelIdentity))
                 } } catch (failure: Exception) {
                     // A failed pre-write CAS is definitely rejected, not an ambiguous commit.
                     if (browserPreparation != null && !databaseSendEntered) null else throw failure
@@ -4708,9 +4725,8 @@ class ChatController internal constructor(private val application:Application,
         })
     }
     private fun switchChatReasoningModel(previousProvider: String?, previousModel: String?,
-        nextProvider: String, nextModel: String, changeModel: () -> Unit) {
+        nextProvider: String, nextModel: String, owner: String? = preferences.getString("selected", null), changeModel: () -> Unit) {
         if (previousProvider == nextProvider && previousModel == nextModel) { changeModel(); return }
-        val owner = preferences.getString("selected", null)
         val next = reasoningPreference.rememberedModel(nextProvider, nextModel)
         val previous = if (previousProvider != null && previousModel != null) reasoningPreference.snapshot(owner) else null
         changeModel()
@@ -4737,24 +4753,51 @@ class ChatController internal constructor(private val application:Application,
                 Unit
             }
             if (active) switchChatReasoningModel(editor.slotId, providers.catalogSnapshot(editor).models.singleOrNull { it.id == expected.model }?.settings?.localIdentity,
-                editor.slotId, ticket.record.settings.localIdentity, change) else change()
+                editor.slotId, ticket.record.settings.localIdentity, changeModel = change) else change()
             null
         })
     }
-    @Synchronized internal fun selectActiveProviderCatalogModel(expectedActive: ProviderEditorSlot?, expectedSettings: ModelSettings?,
+    internal fun selectActiveProviderCatalogModel(expectedActive: ProviderEditorSlot?, expectedSettings: ModelSettings?,
         target: ProviderEditorSlot, targetSettings: ModelSettings?,
         ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
         cancelled: () -> Boolean, completed: (Boolean) -> Unit,
+        conversation: ConversationId? = preferences.getString("selected", null)?.let(::ConversationId),
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        check(idleAvailable() && !hasLiveChildTasks()) { "请先结束任务" }
+        synchronized(this) { check(idleAvailable() && !hasLiveChildTasks()) { "请先结束任务" } }
+        val expectedBinding = database.modelBinding(conversation)
+        check(expectedActive == null || expectedBinding?.providerSlotId == expectedActive.slotId) { "会话模型已变化，请重新打开选择器" }
         invalidateVideoConfiguration()
-        dataTask(failureNotice = "模型或提供商切换未完整确认；请重新打开目录核对", completed = completed, work = {
-            switchChatReasoningModel(expectedActive?.slotId,
-                expectedActive?.let { previous -> providers.catalogSnapshot(previous).models
-                    .singleOrNull { it.id == expectedSettings?.model }?.settings?.localIdentity },
-                target.slotId, ticket.record.settings.localIdentity) {
-                providers.selectActiveCatalogModel(expectedActive, expectedSettings, target, targetSettings, ticket, cancelled)
+        dataTask(failureNotice = "会话模型切换未保存；请重新打开目录核对", completed = completed, work = {
+            check(database.modelBinding(conversation) == expectedBinding) { "会话模型已变化" }
+            if (expectedBinding != null && expectedSettings != null) check(conversationModelEditing(conversation).second.settings == expectedSettings) { "模型配置已变化" }
+            switchChatReasoningModel(expectedBinding?.providerSlotId, expectedBinding?.localModelIdentity,
+                target.slotId, ticket.record.settings.localIdentity, owner = conversation?.value) {
+                providers.selectConversationModel(target, targetSettings, ticket, cancelled) { binding ->
+                    check(database.bindModel(conversation, expectedBinding, binding)) { "会话模型已变化" }
+                }
+            }
+            null
+        })
+    }
+
+    internal fun saveConversationGptSpeed(conversation: ConversationId?, editor: ProviderEditorSlot,
+        expected: EditingSettings, value: ModelSettings, owner: ModelSettingsSaveOwner, completed: (Boolean) -> Unit,
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        check(!taskConfigurationBusy()) { "请先结束任务" }
+        val binding = checkNotNull(database.modelBinding(conversation))
+        dataTask(failureNotice = "速度切换未保存，请重新尝试", completed = completed, work = {
+            check(database.modelBinding(conversation) == binding)
+            providers.withConversationModel(binding) { currentEditor, store, record, _ ->
+                check(currentEditor == editor && providers.conversationEditing(binding).second == expected) { "模型配置已变化" }
+                owner.commit {
+                    val ticket = checkNotNull(store.localModelCatalogSnapshot()).let { catalog ->
+                        app.daiyu.android.model.catalog.CatalogModelSelection(catalog.providerIdentity, catalog.revision, record)
+                    }
+                    val replacement = record.copy(settings = record.settings.copy(requestOptions = value.requestOptions))
+                    check(store.modelCatalog.replaceSelection(ticket, replacement) { false } == app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED)
+                }
             }
             null
         })

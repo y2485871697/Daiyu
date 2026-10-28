@@ -189,6 +189,63 @@ internal class ProviderRepository(
                 store.localModelCatalogSnapshot()?.models?.singleOrNull { it.id == settings.model }?.settings?.localIdentity)
         }
     }
+    /** Initial migration only. Binding a conversation never activates or selects a global model. */
+    internal fun selectedConversationModel(): ConversationModelBinding? = registry.access { state ->
+        val id = state.activeSlotId ?: return@access null
+        val store = resolveStore(id)
+        val model = store.summaryRequestMetadata().model
+        if (model.isBlank()) return@access null
+        val record = store.modelCatalogSnapshot().models.singleOrNull { it.id == model } ?: return@access null
+        ConversationModelBinding(id, record.settings.localIdentity)
+    }
+    internal fun <T> withConversationModel(binding: ConversationModelBinding, block: (ProviderEditorSlot, ModelSettingsStore, SavedCatalogModel<CatalogModelParameters>, Long) -> T): T = registry.access { state ->
+        check(requireProvider(state, binding.providerSlotId).enabled) { "会话提供商未启用" }
+        val store = resolveStore(binding.providerSlotId)
+        store.modelCatalog.readConfiguration { revision ->
+            val record = checkNotNull(store.localModelCatalogSnapshot()?.models?.singleOrNull {
+                it.settings.localIdentity == binding.localModelIdentity
+            }) { "会话模型已删除，请重新选择" }
+            block(ProviderEditorSlot(binding.providerSlotId, state.revision), store, record, revision)
+        }
+    }
+    internal fun freezeConversation(binding: ConversationModelBinding): ProviderRunConfiguration =
+        withConversationModel(binding) { editor, store, record, revision ->
+            val settings = store.loadForRun(record.id).also { it.validate() }
+            ProviderRunConfiguration(editor, settings.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity(
+                editor.slotId, requireProvider(registry.snapshot(), editor.slotId).name)), revision,
+                contextReceiptIdentity(store, settings), record.settings.localIdentity)
+        }
+    internal fun conversationEditing(binding: ConversationModelBinding): Pair<ProviderEditorSlot, EditingSettings> =
+        withConversationModel(binding) { editor, store, record, _ ->
+            val editing = store.loadForEditing()
+            editor to editing.copy(settings = record.settings.applyTo(editing.settings, record.id))
+        }
+    internal fun conversationContextUsage(binding: ConversationModelBinding): app.daiyu.android.ui.model.ContextUsageModel =
+        withConversationModel(binding) { editor, store, record, revision ->
+            val metadata = record.settings.applyTo(store.summaryRequestMetadata(record.id), record.id)
+            app.daiyu.android.ui.model.ContextUsageModel(editor.slotId, record.id, revision,
+                record.settings.contextWindowOverride?.toLong(), editor.registryRevision, contextReceiptIdentity(store, metadata))
+        }
+    internal fun isCurrentConversation(binding: ConversationModelBinding, frozen: ProviderRunConfiguration): Boolean = try {
+        val current = freezeConversation(binding)
+        current.editor.slotId == frozen.editor.slotId && current.localModelIdentity == frozen.localModelIdentity &&
+            current.settings == frozen.settings && current.contextReceiptIdentity == frozen.contextReceiptIdentity
+    } catch (_: Exception) { false }
+
+    internal fun selectConversationModel(target: ProviderEditorSlot, expectedSettings: ModelSettings?,
+        ticket: CatalogModelSelection<CatalogModelParameters>, cancelled: () -> Boolean,
+        save: (ConversationModelBinding) -> Unit,
+    ): Unit = withEditor(target) { store ->
+        check(requireProvider(registry.snapshot(), target.slotId).enabled) { "提供商未启用" }
+        store.modelCatalog.consumeSelection(ticket) { record ->
+            val current = store.load()
+            if (expectedSettings != null) check(current == expectedSettings) { "模型配置已变化，请重新打开选择器" }
+            record.settings.applyTo(current, record.id).validate()
+            check(!cancelled()) { "模型选择页面已关闭" }
+            save(ConversationModelBinding(target.slotId, record.settings.localIdentity))
+        }
+    }
+
     private fun contextReceiptIdentity(store: ModelSettingsStore, settings: ModelSettings): String? {
         val catalog = store.localModelCatalogSnapshot() ?: return null
         val record = catalog.models.singleOrNull { it.id == settings.model } ?: return null

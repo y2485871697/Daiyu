@@ -117,7 +117,6 @@ class ModelPickerBalanceContract(unittest.TestCase):
         collaboration = source('ui/screens/assistants/AssistantPreviewComponents.kt')
         def accent_values(text):
             line = next(line for line in text.splitlines() if 'val accent =' in line).rsplit('?:', 1)[1]
-            line = line.split('theme.surface) else ', 1)[1]
             return [value.lower() for value in re.findall(r'0[xX][0-9a-fA-F]{8}', line)]
         self.assertEqual(accent_values(usage), accent_values(collaboration))
         self.assertEqual(['0xffc6b6d5', '0xff82718f'], accent_values(usage))

@@ -123,7 +123,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         }
         database = ConversationDatabase(context)
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(29, database.readableDatabase.version)
+        assertEquals(30, database.readableDatabase.version)
         database.readableDatabase.rawQuery("SELECT has_usage FROM child_request_usage", null).use {
             assertTrue(it.moveToFirst()); assertEquals(1, it.getInt(0))
         }
@@ -173,7 +173,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         }
         database = ConversationDatabase(context)
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(29, database.readableDatabase.version)
+        assertEquals(30, database.readableDatabase.version)
         tables.forEach { table ->
             database.readableDatabase.rawQuery("SELECT cache_creation_tokens FROM $table", null).use { c ->
                 while (c.moveToNext()) assertTrue(c.isNull(0))
@@ -283,7 +283,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         app.daiyu.android.removeAssistantSchemaForLegacyFixture(database.writableDatabase)
         database.writableDatabase.version = 8; database.close()
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(29, database.readableDatabase.version)
+        assertEquals(30, database.readableDatabase.version)
         assertEquals(1, read().childCoverage.tasksWithoutReportedUsage)
         assertNull(read().summary.child.input.reportedTokens)
     }

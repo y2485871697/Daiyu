@@ -116,7 +116,7 @@ class WorkspaceBindingDatabaseTest : InstrumentationTestCase() {
                 sql.version = version
             }
             val upgraded = open(context)
-            assertEquals(29, upgraded.readableDatabase.version)
+            assertEquals(30, upgraded.readableDatabase.version)
             assertEquals(if (retained) a else null, upgraded.workspaceBinding(owner))
             assertEquals(if (retained) b else null, upgraded.workspaceBinding(null))
             assertEquals("composer draft", upgraded.draft())

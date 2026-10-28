@@ -20,14 +20,23 @@ internal object ManualSummaryTargets {
     }
     fun isManual(binding: SummaryModelBinding) = binding.providerId.startsWith("manual-summary:")
 
-    fun describe(repo: ProviderRepository, selection: ContextManagementSelection): SummaryProfileDescriptor {
+    fun describe(repo: ProviderRepository, selection: ContextManagementSelection,
+        conversationModel: app.daiyu.android.storage.ConversationModelBinding? = null,
+    ): SummaryProfileDescriptor {
         require(selection.protocol in selectable) { "摘要 API 仅支持 Chat Completions / Responses" }
-        val target = selection.binding?.let { requireNotNull(CatalogSummaryBindings.decode(it)) { "请选择本地目录模型" } }
+        val selectedBinding = selection.binding ?: conversationModel?.let { binding ->
+            repo.withConversationModel(binding) { editor, store, record, revision ->
+                val catalog = checkNotNull(store.localModelCatalogSnapshot())
+                CatalogSummaryBindings.encode(app.daiyu.android.storage.ProviderCatalogRunTarget(editor, catalog.providerIdentity,
+                    revision, record.settings.localIdentity, record.id, store.localModelCatalogProtocol()))
+            }
+        }
+        val target = selectedBinding?.let { requireNotNull(CatalogSummaryBindings.decode(it)) { "请选择本地目录模型" } }
         val editor = target?.editor ?: repo.activeEditor()
         return repo.withEditor(editor) { store ->
             store.modelCatalog.readConfiguration { revision ->
                 val model = target?.apiModel ?: store.summaryRequestMetadata().model
-                descriptor(repo, encode(Ticket(editor, revision, model, selection.protocol, selection.binding)))
+                descriptor(repo, encode(Ticket(editor, revision, model, selection.protocol, selectedBinding)))
             }
         }
     }

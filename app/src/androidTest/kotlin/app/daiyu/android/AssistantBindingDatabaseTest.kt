@@ -63,7 +63,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         prefs(source)
         val db = database()
         val store = SqliteAssistantStore(db).also { it.requireReady() }
-        assertEquals(29, db.readableDatabase.version)
+        assertEquals(30, db.readableDatabase.version)
         assertEquals(listOf(second, first), store.list())
         assertEquals(first.id, store.selectedId.value)
         assertEquals(source, raw())
@@ -100,7 +100,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         helper.close()
         val upgraded = database()
         val restored = SqliteAssistantStore(upgraded).also { it.requireReady() }
-        assertEquals(29, upgraded.readableDatabase.version)
+        assertEquals(30, upgraded.readableDatabase.version)
         assertEquals(profile, restored.read(profile.id))
         assertEquals(profile.id, restored.selectedId.value)
         assertEquals(profile.id, upgraded.assistantId(conversation.id))

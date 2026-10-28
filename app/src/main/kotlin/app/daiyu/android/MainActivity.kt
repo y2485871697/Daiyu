@@ -1727,6 +1727,18 @@ class MainActivity : ComponentActivity() {
             assistantPicker=true
         }
     }
+    private fun selectCurrentConversationAssistant(id: String, conversation: ConversationId?, generation: Long) {
+        if (!activityUsable() || selected?.id != conversation || editorGeneration != generation) return
+        if (!allowTaskConfigurationChange()) return
+        val current = selected
+        if (current == null) assistantStore.select(id)
+        else {
+            val expected = controller.database.assistantId(current.id)
+            check(controller.bindConversationAssistant(current.id, expected, id)) { "助手绑定已变化；请重新打开选择器" }
+            selected = current.copy(assistantId = id)
+        }
+        refresh()
+    }
     private fun assistantOwnerMatches(owner: AssistantSelectionOwner): Boolean = activityUsable() &&
         owner.accepts(assistantSelectionOwner,selected?.id?.value,editorGeneration,assistantPicker)
     private var assistantEditingId by mutableStateOf<String?>(null)
@@ -2018,6 +2030,8 @@ class MainActivity : ComponentActivity() {
                 val settingsScrollBehavior = top.yukonga.miuix.kmp.basic.MiuixScrollBehavior()
                 val assistantProfiles by assistantStore.assistants.collectAsState()
                 val activeAssistant by assistantStore.selectedId.collectAsState()
+                val renderedAssistantConversation = selected?.id
+                val renderedAssistantGeneration = editorGeneration
                 var projectedAssistants by remember { mutableStateOf<List<AssistantDisplay>>(emptyList()) }
                 LaunchedEffect(assistantProfiles, assistantAvatarRevision) {
                     val profiles = assistantProfiles
@@ -2472,7 +2486,7 @@ class MainActivity : ComponentActivity() {
                         modelSource = subAgentModelSource)
                     else -> ConversationSidePaneScaffold(
                         state = paneState, visible = sidebarVisible, backHandlerEnabled = true,
-                        assistants = projectedAssistants, selectedAssistantId = activeAssistant,
+                        assistants = projectedAssistants, selectedAssistantId = if (selected == null) activeAssistant else selected?.assistantId.orEmpty(),
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
                         onSearchChange = { paneState = paneState.copy(searchQuery = it) },
                         onConversationSelected = { id -> selectPaneConversation(id) },
@@ -2497,7 +2511,9 @@ class MainActivity : ComponentActivity() {
                             if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
                             updatePane()
                         } },
-                        onSelectAssistant = { id -> guard { if (allowTaskConfigurationChange()) assistantStore.select(id) } },
+                        onSelectAssistant = { id -> guard {
+                            if (sidebarVisible) selectCurrentConversationAssistant(id, renderedAssistantConversation, renderedAssistantGeneration)
+                        } },
                         onEditAssistant = { id -> guard {
                             if (!allowTaskConfigurationChange()) return@guard
                             checkNotNull(assistantStore.read(id)) { "助手已不存在" }
@@ -2551,7 +2567,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }, speechMessageId = speechMessageId, dedicatedTool = { step -> DedicatedQuestion(step) },
                                         toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
-                                        assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) },
+                                        assistant = projectedAssistants.firstOrNull { it.id == (if (selected == null) activeAssistant else selected?.assistantId) },
                                         composerAttachments = { if (!sidebarVisible) key(editorGeneration) {
                                             val editor = inlineMessageEditor
                                             if (editor == null) {
@@ -6077,9 +6093,12 @@ class MainActivity : ComponentActivity() {
         requireActivityUsable()
         check(pendingTextSend == null && controller.textSendState() == null) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
-        val reasoning = reasoningPreference.snapshot(selected?.id?.value)
+        val source = selected?.id
+        val reasoning = reasoningPreference.snapshot(source?.value)
         val created = app.daiyu.android.context.DatabaseTransactions { controller.database.writableDatabase }.run {
-            controller.database.create(controller.database.selectedAssistantId()).also {
+            val assistant = if (source == null) controller.database.selectedAssistantId()
+                else checkNotNull(controller.database.assistantId(source)) { "请先为当前会话绑定助手" }
+            controller.database.create(assistant, modelSource = source).also {
                 reasoningPreference.retainAccepted(it.id.value, reasoning)
             }
         }
@@ -6098,7 +6117,10 @@ class MainActivity : ComponentActivity() {
         revokeCommandApproval()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
-        if (selectionReady && conversation == null) reasoningPreference.inheritDraft(selected?.id?.value)
+        if (selectionReady && conversation == null) {
+            reasoningPreference.inheritDraft(selected?.id?.value)
+            controller.database.inheritModelBinding(selected?.id, null)
+        }
         historySearchEpoch++
         if (revokeContextManagementEntry()) editorGeneration++
         voiceConversationDialogOwner = null
@@ -6133,6 +6155,8 @@ class MainActivity : ComponentActivity() {
         draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
         val restoringSupplement = !selectionReady
         selected = conversation; selectionReady = true; draft = targetDraft
+        dismissChatModels()
+        confirmedModelLabel = "模型"; confirmedReasoningModel = ""; confirmedGptSpeed = null
         paneState = paneState.copy(selectedConversationId = conversation?.id?.value)
         if (restoringSupplement) {
             restoredSupplementEditor = restoredSupplementEditor?.takeIf {
@@ -6146,6 +6170,7 @@ class MainActivity : ComponentActivity() {
         shown = if (conversation == null) mutableListOf() else (prepared?.messages ?: controller.database.messages(conversation.id)).toMutableList()
         childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false
         publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()
+        refreshConfirmedModelLabel()
     }
     private fun compressionSendBlocked(conversationId: ConversationId? = selected?.id): Boolean {
         if (!controller.isMainContextCompressing(conversationId)) return false
@@ -6381,6 +6406,7 @@ class MainActivity : ComponentActivity() {
                 if (retainedMessageEdit != null) inlineMessageEditor = null
                 editorGeneration++
                 selected = latest
+                refreshConfirmedModelLabel()
                 inlineMessageEditor = retainedMessageEdit?.copy(visit = Any())
                 draft = latest?.draft ?: controller.database.draft()
                 if (initialSupplementRestore && restoredSupplementEditor?.let {
@@ -6650,12 +6676,11 @@ class MainActivity : ComponentActivity() {
         gptSpeedSaveOwner = owner
         publishChat(rowsChanged = false)
         val value = expected.editing.settings.copy(requestOptions = expected.editing.settings.requestOptions.copy(speedMode = next))
-        try { controller.saveProviderSettings(expected.editor, value, expected.editing,
-            protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false, owner = owner) { success ->
-            if (gptSpeedSaveOwner !== owner) return@saveProviderSettings
+        try { controller.saveConversationGptSpeed(conversationId?.let(::ConversationId), expected.editor, expected.editing, value, owner) { success ->
+            if (gptSpeedSaveOwner !== owner) return@saveConversationGptSpeed
             gptSpeedSaveOwner = null
             if (!activityUsable() || retainedPage != "chat" || selected?.id?.value != conversationId ||
-                confirmedGptSpeed?.editor != expected.editor || confirmedGptSpeed?.editing?.settings?.model != value.model) return@saveProviderSettings
+                confirmedGptSpeed?.editor != expected.editor || confirmedGptSpeed?.editing?.settings?.model != value.model) return@saveConversationGptSpeed
             if (success) {
                 confirmedGptSpeed = expected.copy(editing = expected.editing.copy(settings = value))
                 toast(chatGptSpeedToast(next))
@@ -6672,19 +6697,20 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshConfirmedModelLabel() {
         val request = Any()
+        val conversation = selected?.id
+        val generation = editorGeneration
         modelLabelRead = request
         balanceRuntime = null
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) {
                 runCatching {
-                    val editor = controller.providers.activeEditor()
+                    val (editor, editing) = controller.conversationModelEditing(conversation)
                     val runtime = controller.providerBalances.get(editor.slotId)
-                    val editing = controller.providers.withEditor(editor) { it.loadForEditing() }
                     Triple(editor, editing, runtime)
                 }.getOrNull()
             }
             val saved = loaded
-            if (activityUsable() && modelLabelRead === request) {
+            if (activityUsable() && modelLabelRead === request && selected?.id == conversation && editorGeneration == generation) {
                 confirmedModelLabel = saved?.second?.settings?.model?.ifBlank { "模型" } ?: "模型"
                 confirmedReasoningModel = saved?.second?.settings?.let {
                     runCatching { app.daiyu.android.model.ReasoningRequestPolicy.requestModel(it.model, it.requestOptions) }.getOrNull()
@@ -6738,6 +6764,8 @@ class MainActivity : ComponentActivity() {
     private fun reloadChatModels(owner: Any, retainPresentation: Boolean = false) {
         if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner) return
         chatModelCancelled.set(true)
+        val conversation = selected?.id
+        val generation = editorGeneration
         val cancelled = AtomicBoolean(false); chatModelCancelled = cancelled
         if (!retainPresentation) {
             chatModelProviderEditor = null; chatModelSession = null; chatModelSettings = null
@@ -6749,12 +6777,13 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) { runCatching {
                 val registry = controller.providers.snapshot()
+                val binding = controller.database.modelBinding(conversation)
                 val choices = registry.providers.filter { it.enabled }.mapNotNull { provider ->
                     val editor = ProviderEditorSlot(provider.slotId, registry.revision)
                     runCatching { controller.providers.withEditor(editor) { store ->
                         val endpoint = store.nonSecretConfiguration()["endpoint"] as? String ?: ""
                         if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint)) null
-                        else ChatModelProviderChoice(editor, if (provider.slotId == registry.activeSlotId) store.load() else null,
+                        else ChatModelProviderChoice(editor, store.load(),
                             store.localModelCatalogSnapshot())
                     } }.getOrNull()?.let { provider.slotId to it }
                 }.toMap()
@@ -6764,15 +6793,17 @@ class MainActivity : ComponentActivity() {
                         choices[provider.slotId]?.catalog?.models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) },
                         balance = controller.providerBalances.get(provider.slotId).state.value)
                 }
-                ChatModelCatalogLoad(registry.activeSlotId?.let { ProviderEditorSlot(it, registry.revision) }, choices, groups)
+                ChatModelCatalogLoad(binding?.providerSlotId?.let { id -> choices[id]?.editor }, choices, groups)
             } }
             if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner ||
-                cancelled.get() || chatModelCancelled !== cancelled) return@launch
+                cancelled.get() || chatModelCancelled !== cancelled || selected?.id != conversation || editorGeneration != generation) return@launch
             val result = loaded.getOrNull()
             chatModelProviderChoices = result?.choices.orEmpty()
             chatModelProviderEditor = result?.activeEditor
             val active = result?.let { loaded -> loaded.activeEditor?.let { loaded.choices[it.slotId] } }
-            val saved = active?.settings
+            val binding = controller.database.modelBinding(conversation)
+            val record = active?.catalog?.models?.singleOrNull { it.settings.localIdentity == binding?.localModelIdentity }
+            val saved = if (record != null && active.settings != null) record.settings.applyTo(active.settings, record.id) else null
             chatModelSettings = saved
             confirmedModelLabel = saved?.model?.ifBlank { "模型" } ?: "模型"
             confirmedReasoningModel = saved?.let {
@@ -6793,8 +6824,7 @@ class MainActivity : ComponentActivity() {
                 else -> null
             }
             chatModelPicker = (session?.state ?: ChatModelPickerState("", emptyList()))
-                .copy(loading = false, enabled = result != null && (result.activeEditor == null || saved != null) &&
-                    result.choices.isNotEmpty() && !controller.dataBusy && controller.ready,
+                .copy(loading = false, enabled = result != null && result.choices.isNotEmpty() && !controller.dataBusy && controller.ready,
                     message = message)
         }
     }
@@ -6818,7 +6848,7 @@ class MainActivity : ComponentActivity() {
                 controller.active == null && !controller.dataBusy)
             chatModelPicker = picker.copy(switching = true)
             controller.selectActiveProviderCatalogModel(chatModelProviderEditor, saved, target.editor, target.settings, ticket,
-                cancelled = { cancelled.get() || !lease.isActive }) { success ->
+                cancelled = { cancelled.get() || !lease.isActive }, conversation = selected?.id, completed = { success ->
                 if (activityUsable()) {
                     if (success) {
                         controller.revokeImageProvider()
@@ -6833,7 +6863,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-            }
+            })
         } catch (_: Exception) {
             if (chatModelOwner === owner && chatModelSession === session) {
                 chatModelSelectionFailed = true

@@ -227,7 +227,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         changed()
         io.launch {
             val request = try {
-                val configuration = controller.providers.freezeActive()
+                val configuration = controller.freezeConversationProvider(conversation?.id)
                 val saved = configuration.settings
                 val main = ProviderSnapshot.capture(saved, saved.protocol)
                 Triple(configuration, main, controller.captureImageRoute(main))

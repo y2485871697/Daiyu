@@ -20,9 +20,8 @@ class ChatGptSpeedContractTest(unittest.TestCase):
     def test_save_is_fenced_and_only_success_emits_speed_toast(self):
         host = source('MainActivity.kt').split('private fun cycleChatGptSpeed(', 1)[1].split('private fun refreshConfirmedModelLabel()', 1)[0]
         for text in ('expected !== confirmedGptSpeed', 'selected?.id?.value != conversationId', 'gptSpeedSaveOwner != null',
-                     'controller.saveProviderSettings(expected.editor, value, expected.editing',
-                     'protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false',
-                     'if (gptSpeedSaveOwner !== owner) return@saveProviderSettings'):
+                     'controller.saveConversationGptSpeed(conversationId?.let(::ConversationId), expected.editor, expected.editing, value, owner)',
+                     'if (gptSpeedSaveOwner !== owner) return@saveConversationGptSpeed'):
             self.assertIn(text, host)
         self.assertIn('if (success) {', host)
         self.assertGreater(host.index('toast(chatGptSpeedToast(next))'), host.index('if (success) {'))

@@ -27,7 +27,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         self.assertNotIn('controller.active == null', refresh)
         load = text.split('chatModelPicker = (session?.state', 1)[1].split('private fun selectChatModel(', 1)[0]
         self.assertNotIn('controller.active == null', load)
-        controller = (SRC / 'ChatController.kt').read_text().split('@Synchronized internal fun selectActiveProviderCatalogModel', 1)[1].split('internal fun renameProviderCatalogModel', 1)[0]
+        controller = (SRC / 'ChatController.kt').read_text().split('internal fun selectActiveProviderCatalogModel', 1)[1].split('internal fun renameProviderCatalogModel', 1)[0]
         self.assertLess(controller.index('check(idleAvailable() && !hasLiveChildTasks())'), controller.index('invalidateVideoConfiguration()'))
         self.assertIn('{ "请先结束任务" }', controller)
 
@@ -54,7 +54,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         host = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('canInteract = { assistantOwnerMatches(owner) && allowTaskConfigurationChange() }', host)
         self.assertIn('controller.deleteAssistant(id)', host)
-        self.assertIn('onSelectAssistant = { id -> guard { if (allowTaskConfigurationChange()) assistantStore.select(id) } }', host)
+        self.assertIn('if (sidebarVisible) selectCurrentConversationAssistant(id, renderedAssistantConversation, renderedAssistantGeneration)', host)
         gate = host.split('private fun allowTaskConfigurationChange()', 1)[1].split('private var assistantPicker', 1)[0]
         self.assertIn('toast("请先结束任务")', gate)
 

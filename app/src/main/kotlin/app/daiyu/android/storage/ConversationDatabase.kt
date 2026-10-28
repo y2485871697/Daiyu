@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 29), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 30), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -33,6 +33,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT,workspace_binding TEXT)")
         db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]',created_at INTEGER CHECK(created_at IS NULL OR (typeof(created_at)='integer' AND created_at>=0)))")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
+        ConversationModelSelections.install(db)
         createUiFolders(db)
         createComposer(db)
         installAssistants(db)
@@ -62,7 +63,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..28 && newVersion == 29) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..29 && newVersion == 30) { "不支持此数据库版本，保留原数据" }
         // Preserve installed receipts, including an authoritative empty v8 import.
         val needsUsageReceiptBackfill = !db.rawQuery(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -119,6 +120,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         if (needsUsageReceiptBackfill) ConversationUsageStore.backfill(db)
         UsageStatisticsStore.install(db)
         installWorkspaceBindings(db)
+        ConversationModelSelections.install(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
@@ -273,6 +275,24 @@ class ConversationDatabase internal constructor(context: Context, private val af
         require(folder.length<=200)
         check(writableDatabase.update("conversations",ContentValues().apply {put("folder",folder);put("pinned",if(pinned) 1 else 0)},"id=?",arrayOf(id.value))==1) {"会话不存在"}
     }
+    internal fun initializeModelBindings(fallback: ConversationModelBinding?) = transaction { db ->
+        ConversationModelSelections.initialize(db, fallback)
+    }
+    internal fun modelBinding(id: ConversationId?): ConversationModelBinding? = ConversationModelSelections.read(readableDatabase, id)
+    internal fun inheritModelBinding(source: ConversationId?, target: ConversationId?) = transaction { db ->
+        ConversationModelSelections.inherit(db, source, target)
+    }
+    internal fun bindModel(id: ConversationId?, expected: ConversationModelBinding?, replacement: ConversationModelBinding): Boolean {
+        var changed = false
+        transaction { db ->
+            if (id != null) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(id.value)).use { it.moveToFirst() }) { "会话不存在" }
+            if (ConversationModelSelections.read(db, id) == expected) {
+                ConversationModelSelections.write(db, id, replacement)
+                changed = true
+            }
+        }
+        return changed
+    }
     fun selectedAssistantId(): String = readableDatabase.rawQuery("SELECT selected_id FROM assistant_selection WHERE id=1", null).use {
         check(it.moveToFirst()) { "助手选择不存在" }; it.getString(0)
     }
@@ -297,7 +317,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         }
         return changed
     }
-    fun create(assistantId: String? = null, workspaceBinding: String? = null):Conversation {
+    fun create(assistantId: String? = null, workspaceBinding: String? = null, modelSource: ConversationId? = null):Conversation {
         validateWorkspaceBinding(workspaceBinding)
         val value=Conversation(ConversationId(UUID.randomUUID().toString()),"新会话","",System.currentTimeMillis(),assistantId=assistantId,workspaceBinding=workspaceBinding)
         transaction { db ->
@@ -305,6 +325,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             if (assistantId != null) requireAssistant(db, assistantId)
             check(db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",assistantId);put("workspace_binding",workspaceBinding)}) != -1L)
             UsageStatisticsStore.created(db, value.id.value, value.updatedAt)
+            ConversationModelSelections.inherit(db, modelSource, value.id)
             check(workspaceBinding(db, value.id) == workspaceBinding) { "创建工作区绑定回执不匹配" }
         }
         return value
@@ -324,6 +345,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.delete("context_branches","conversation_id=?",arrayOf(id.value))
         db.delete("context_usage","branch_id=?",arrayOf(id.value))
         db.delete("messages","conversation_id=?",arrayOf(id.value))
+        ConversationModelSelections.delete(db, id)
         db.delete("conversations","id=?",arrayOf(id.value))
     } }
     internal fun storedMessage(db: SQLiteDatabase, conversation: ConversationId, messageId: String,
@@ -370,13 +392,20 @@ class ConversationDatabase internal constructor(context: Context, private val af
         videoInputs: List<app.daiyu.android.model.videos.MessageVideoInput> = emptyList(),
         preserveDraft: Boolean = false,
         replyIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null,
-        expectedWorkspaceBinding: String? = null):Conversation {
+        expectedWorkspaceBinding: String? = null,
+        expectedModelBinding: Pair<String, String>? = modelBinding(if (newConversation) null else user.conversationId)?.let {
+            it.providerSlotId to it.localModelIdentity
+        }):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
         require(!preserveDraft || !newConversation)
         require(replyIdentity == null || replyIdentity.assistantId == expectedAssistantId)
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
         var conversation:Conversation?=null
         transaction { db ->
+            val modelOwner = if (newConversation) null else user.conversationId
+            val expectedModel = expectedModelBinding?.let { ConversationModelBinding(it.first, it.second) }
+            check(ConversationModelSelections.read(db, modelOwner) == expectedModel) { "会话模型已变化；草稿保留" }
+            val composerModel = ConversationModelSelections.read(db, null)
             val videoHistory = app.daiyu.android.ControllerVideoHistory(this).capture(db, user.conversationId)
             requireAssistant(db, expectedAssistantId)
             if (!newConversation) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND assistant_id=?",
@@ -395,6 +424,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 newConversationRowId=db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",expectedAssistantId);put("workspace_binding",currentWorkspace)})
                 check(newConversationRowId != -1L) {"新会话未持久化"}
                 UsageStatisticsStore.created(db, value.id.value, value.updatedAt)
+                ConversationModelSelections.inherit(db, null, value.id)
                 val composerPredicate = if (currentWorkspace == null) "workspace_binding IS NULL" else "workspace_binding=?"
                 val composerArgs = currentWorkspace?.let { arrayOf(it) }
                 check(db.update("composer",ContentValues().apply {put("draft","");putNull("workspace_binding")},
@@ -431,6 +461,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 check(it.getString(7)==currentWorkspace) { "发送工作区绑定回执不匹配" }
                 Conversation(user.conversationId,it.getString(0),nextDraft,it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6),it.getString(7))
             }
+            check(ConversationModelSelections.read(db, user.conversationId) == expectedModel) { "发送模型绑定回执不匹配" }
+            check(ConversationModelSelections.read(db, null) == composerModel) { "发送改变了新聊天模型绑定" }
             check(composerDraft(db)==expectedComposer) {"发送草稿不匹配"}
             check(workspaceBinding(db, null)==expectedComposerWorkspace) { "发送改变了新聊天工作区绑定" }
         }

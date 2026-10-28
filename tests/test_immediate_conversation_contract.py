@@ -21,9 +21,9 @@ class ImmediateConversationContractTest(unittest.TestCase):
         create = host.split('internal fun createNewConversation()', 1)[1].split('internal fun select(', 1)[0]
         self.assertLess(create.index('pendingTextSend == null'), create.index('controller.database.create('))
         self.assertLess(create.index('controller.ready && !controller.dataBusy'), create.index('controller.database.create('))
-        self.assertLess(create.index('reasoningPreference.snapshot(selected?.id?.value)'), create.index('controller.database.create('))
+        self.assertLess(create.index('reasoningPreference.snapshot(source?.value)'), create.index('controller.database.create('))
         self.assertIn('DatabaseTransactions { controller.database.writableDatabase }.run', create)
-        self.assertIn('controller.database.create(controller.database.selectedAssistantId())', create)
+        self.assertIn('controller.database.create(assistant, modelSource = source)', create)
         self.assertLess(create.index('reasoningPreference.retainAccepted(it.id.value, reasoning)'), create.index('select(created)'))
         self.assertLess(create.index('select(created)'), create.index('updatePane()'))
         self.assertNotIn('database.draft(', create)

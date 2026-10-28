@@ -5,7 +5,7 @@ import java.nio.file.Files
 
 /** Fixed app-owned storage, not a SAF grant or an implicit Linux mount. Construction is I/O-free. */
 internal class PrivateWorkspacePaths private constructor(private val filesDir: File,
-    internal val rootParts: List<String>, private val create: Boolean) {
+    internal val rootParts: List<String>, private val create: Boolean, internal val rootfsMutations: Boolean = false) {
     constructor(filesDir: File) : this(filesDir, listOf("workspace"), true)
     internal val storage: File get() = filesDir.toPath().toRealPath().toFile()
     internal val readOnly: Boolean get() = !create
@@ -29,7 +29,11 @@ internal class PrivateWorkspacePaths private constructor(private val filesDir: F
         fun storageRoot(filesDir: File): PrivateWorkspacePaths = PrivateWorkspacePaths(filesDir, emptyList(), false)
 
         /** The caller supplies an approved Rootfs; missing directories are never created. */
-        fun existingRoot(filesDir: File, root: File): PrivateWorkspacePaths {
+        fun existingRoot(filesDir: File, root: File): PrivateWorkspacePaths = existingRoot(filesDir, root, false)
+
+        fun editableRootfs(filesDir: File, root: File): PrivateWorkspacePaths = existingRoot(filesDir, root, true)
+
+        private fun existingRoot(filesDir: File, root: File, rootfsMutations: Boolean): PrivateWorkspacePaths {
             val storage = filesDir.toPath().toRealPath()
             val suppliedStorage = filesDir.absoluteFile.toPath().normalize()
             val selected = root.toPath()
@@ -39,7 +43,7 @@ internal class PrivateWorkspacePaths private constructor(private val filesDir: F
             }
             val parts = base.relativize(selected).map { it.toString() }
             require(parts.none { it.isBlank() || it == "." || it == ".." || '\\' in it || '\u0000' in it })
-            return PrivateWorkspacePaths(filesDir, parts, false)
+            return PrivateWorkspacePaths(filesDir, parts, false, rootfsMutations)
         }
     }
 }

@@ -51,8 +51,10 @@ internal val RetainedWorkspaceAction = SemanticsPropertyKey<() -> Unit>("Retaine
 
 /** Display-only metadata; filesystem access and the draft belong to the conversation owner. */
 data class WorkspaceItemOption(val path: String)
+data class WorkspaceFileOption(val name: String, val directory: Boolean)
 data class WorkspaceDirectoryOption(val path: String, val parentPath: String?, val folders: List<String>,
-    val selectable: Boolean = true)
+    val selectable: Boolean = true, val entries: List<WorkspaceFileOption> = folders.map { WorkspaceFileOption(it, true) },
+    val truncated: Boolean = false)
 
 @Composable
 fun ConversationWorkspaceSheet(
@@ -78,6 +80,7 @@ fun ConversationWorkspaceSheet(
     onCopyPath: (String) -> Unit = {},
     selectionMode: Boolean = false,
     selectedWorkspaces: Set<Int> = emptySet(),
+    onLongPressFile: (String) -> Unit = {},
     onSelectionChange: (Boolean, Set<Int>) -> Unit = { _, _ -> },
 ) {
     if (!visible) return
@@ -192,14 +195,16 @@ fun ConversationWorkspaceSheet(
                             } else {
                                 LazyColumn(Modifier.fillMaxSize().testTag("workspace-directories")) {
                                     if (directory != null) {
-                                        items(directory.folders, key = { it }) { name ->
-                                            WorkspaceFolderRow(name, "workspace-folder:$name", !busy,
-                                                onClick = { onNavigate(directory.path.trimEnd('/') + "/" + name) })
+                                        items(directory.entries, key = { it.name }) { entry ->
+                                            WorkspaceFolderRow(entry.name, "workspace-${if (entry.directory) "folder" else "file"}:${entry.name}", !busy,
+                                                directory = entry.directory, onLongClick = { onLongPressFile(entry.name) },
+                                                onClick = { if (entry.directory) onNavigate(directory.path.trimEnd('/') + "/" + entry.name) })
                                         }
                                     }
                                 }
                             }
                         }
+                        if (directory?.truncated == true) WorkspaceError("仅显示前 100 项，请缩小目录范围")
                         if (error != null) {
                             Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(vertical = 8.dp).testTag("workspace-error")
@@ -223,14 +228,15 @@ fun ConversationWorkspaceSheet(
 }
 
 @Composable
-private fun WorkspaceFolderRow(name: String, tag: String, enabled: Boolean, onClick: () -> Unit) {
+private fun WorkspaceFolderRow(name: String, tag: String, enabled: Boolean, directory: Boolean, onLongClick: () -> Unit, onClick: () -> Unit) {
     val colors = conversationAgentColors()
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(tag)
-        .clickable(enabled = enabled, role = Role.Button,
-            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+        .combinedClickable(enabled = enabled, role = Role.Button,
+            interactionSource = remember { MutableInteractionSource() }, indication = null,
+            onLongClickLabel = "文件操作", onLongClick = onLongClick, onClick = onClick)
         .padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Icon(Icons.Rounded.FolderOpen, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+        Icon(if (directory) Icons.Rounded.FolderOpen else app.daiyu.android.ui.icons.DaiyuIcons.File, null, tint = colors.accent, modifier = Modifier.size(22.dp))
         Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

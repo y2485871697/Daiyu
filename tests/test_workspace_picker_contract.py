@@ -79,7 +79,7 @@ class WorkspacePickerContract(unittest.TestCase):
         self.assertIn('freeze(raw).use', directory)
         self.assertIn('selection.binding(sourceId, path)', directory)
         self.assertIn('selection.parentPath(host)', directory)
-        self.assertIn('files.directoryNames()', directory)
+        self.assertIn('files.listAll(files.directoryAt(relative))', directory)
         self.assertNotIn('storageRoot', directory)
         self.assertIn('conversationWorkspaces.directory(source, path)', self.text('ChatController.kt'))
 

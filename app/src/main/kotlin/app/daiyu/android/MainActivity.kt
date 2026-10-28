@@ -1777,7 +1777,8 @@ class MainActivity : ComponentActivity() {
         val choosing: Boolean = false, val listing: Boolean = false,
         val selectionMode: Boolean = false, val selectedWorkspaces: Set<Int> = emptySet(),
         val editingWorkspaceIndex: Int? = null,
-        val directory: app.daiyu.android.workspace.ConversationWorkspaceDirectory? = null)
+        val directory: app.daiyu.android.workspace.ConversationWorkspaceDirectory? = null,
+        val managingEntry: app.daiyu.android.workspace.PrivateWorkspaceFiles.Entry? = null)
     private var ordinaryDialogLease by mutableStateOf<app.daiyu.android.ui.components.DialogActionLease?>(null)
     private fun dialogActionsCurrent(lease: app.daiyu.android.ui.components.DialogActionLease?) =
         lease != null && lease.isActive && ordinaryDialogLease === lease && voiceForeground && activityUsable()
@@ -1821,7 +1822,7 @@ class MainActivity : ComponentActivity() {
     private fun revalidateWorkspacePresentation() {
         val visit = workspaceVisit ?: return
         if (!workspaceCurrent(visit) || visit.busy || visit.listing) return
-        val loading = visit.copy(busy = true)
+        val loading = visit.copy(busy = true, managingEntry = null)
         workspaceVisit = loading
         lifecycleScope.launch {
             try {
@@ -1831,7 +1832,7 @@ class MainActivity : ComponentActivity() {
                         controller.workspaceDirectoryOnWorker(visit.source, visit.path) else null
                 }
                 if (workspacePresented(loading) && workspaceVisit === loading) {
-                    workspaceVisit = if (editor.binding == visit.editor.binding) visit.copy(editor = editor,
+                    workspaceVisit = if (editor.binding == visit.editor.binding) visit.copy(editor = editor, managingEntry = null,
                         directory = directory ?: visit.directory)
                     else loading.copy(editor = editor, source = editor.selectedSourceId, path = editor.path,
                         busy = false, choosing = false, listing = false, directory = null,
@@ -1863,6 +1864,36 @@ class MainActivity : ComponentActivity() {
                     workspaceVisit = loading.copy(listing = false, directory = loading.directory?.copy(selectable = false),
                         error = "目录读取失败，请重新选择")
                 }
+            }
+        }
+    }
+    private fun manageConversationWorkspaceEntry(visit: WorkspaceVisit, name: String) {
+        if (!workspaceCurrent(visit) || workspaceVisit !== visit || !visit.choosing || visit.busy || visit.listing) return
+        val entry = visit.directory?.entries?.singleOrNull { it.name == name } ?: return
+        workspaceVisit = visit.copy(managingEntry = entry)
+    }
+    private fun modifyConversationWorkspaceEntry(visit: WorkspaceVisit, name: String?) {
+        val entry = visit.managingEntry ?: return
+        if (!workspaceCurrent(visit) || workspaceVisit !== visit || !visit.choosing || visit.busy || visit.listing) return
+        val lease = ordinaryDialogLease ?: return
+        val changing = visit.copy(busy = true, managingEntry = null, error = null)
+        workspaceVisit = changing
+        fun cancelled() = !lease.isActive || !workspaceCurrent(changing) || workspaceVisit !== changing
+        lifecycleScope.launch {
+            try {
+                val directory = withContext(Dispatchers.IO) {
+                    controller.modifyWorkspaceEntryOnWorker(visit.source, visit.path, entry, name, ::cancelled)
+                    controller.workspaceDirectoryOnWorker(visit.source, visit.path)
+                }
+                if (workspacePresented(changing) && workspaceVisit === changing) workspaceVisit = changing.copy(busy = false, directory = directory)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                val refreshed = try { withContext(Dispatchers.IO) { controller.workspaceDirectoryOnWorker(visit.source, visit.path) } }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+                if (workspacePresented(changing) && workspaceVisit === changing) workspaceVisit = changing.copy(busy = false,
+                    directory = refreshed ?: visit.directory?.copy(selectable = false),
+                    error = if (name == null) "删除未完成；部分内容可能已移除，请检查列表" else "重命名失败；名称可能已存在或条目已变更")
             }
         }
     }
@@ -2835,13 +2866,15 @@ class MainActivity : ComponentActivity() {
                             choosing = visit.choosing, listing = visit.listing,
                             directory = visit.directory?.let { directory ->
                                 app.daiyu.android.ui.components.WorkspaceDirectoryOption(directory.path, directory.parentPath,
-                                    directory.folders, directory.selectable)
+                                    directory.folders, directory.selectable,
+                                    directory.entries.map { app.daiyu.android.ui.components.WorkspaceFileOption(it.name, it.directory) }, directory.truncated)
                             },
                             onBrowse = {
                                 visit.editor.sources.firstOrNull { it.id == "private" }?.takeIf { dialogActionsCurrent(lease) }?.let { source ->
                                     browseConversationWorkspace(visit, source.id, source.initialPath, editingIndex = null)
                                 }
                             },
+                            onLongPressFile = { if (dialogActionsCurrent(lease)) manageConversationWorkspaceEntry(visit, it) },
                             onNavigate = { path -> if (dialogActionsCurrent(lease)) browseConversationWorkspace(visit, path = path) }, onCancel = { if (dialogActionsCurrent(lease)) cancelWorkspaceSelection(visit) },
                             onSave = { if (dialogActionsCurrent(lease)) saveConversationWorkspace(visit) },
                             onDismiss = { if (dialogActionsCurrent(lease) && workspaceVisit === visit) {
@@ -2849,6 +2882,13 @@ class MainActivity : ComponentActivity() {
                                     workspaceVisit = visit.copy(selectionMode = false, selectedWorkspaces = emptySet())
                                 } else revokeWorkspaceVisit()
                             } })
+                        visit.managingEntry?.let { entry -> key(visit.token, entry, lease) {
+                            app.daiyu.android.ui.components.WorkspaceEntryDialogs(entry.name, entry.directory,
+                                enabled = { dialogActionsCurrent(lease) && workspaceCurrent(visit) && workspaceVisit === visit && !visit.busy && !visit.listing },
+                                onRename = { if (dialogActionsCurrent(lease)) modifyConversationWorkspaceEntry(visit, it) },
+                                onDelete = { if (dialogActionsCurrent(lease)) modifyConversationWorkspaceEntry(visit, null) },
+                                onDismiss = { if (dialogActionsCurrent(lease) && workspaceVisit === visit) workspaceVisit = visit.copy(managingEntry = null) })
+                        } }
                     } else LaunchedEffect(visit.token) { if (workspaceVisit?.token === visit.token) workspaceVisit = null }
                 }
                 val owner = collaborationOwner

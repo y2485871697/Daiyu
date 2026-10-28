@@ -101,7 +101,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
         rootfs = read('LinuxRootfsPanel.kt')
         self.assertIn('LinuxFileEntryCard {', rootfs)
         self.assertIn('summary = entry.relative', rootfs)
-        self.assertIn('PrivateWorkspacePaths.existingRoot(context.filesDir, root)', rootfs)
+        self.assertIn('PrivateWorkspacePaths.editableRootfs(context.filesDir, checkNotNull(root))', rootfs)
         self.assertNotIn('importFile(', rootfs)
         self.assertNotIn('.delete(', rootfs)
         components = read('LinuxFileComponents.kt')
@@ -115,7 +115,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
             self.assertNotIn(name, components)
         private = read('PrivateWorkspacePanel.kt')
         standalone = private.split('if (!compact) {', 1)[1].split('        notice?.let', 1)[0]
-        description = '应用专属目录，与只读共享和 Linux 挂载分开。导入按可用存储空间处理，无固定单文件大小门槛；删除仅支持文件和空目录。'
+        description = '应用专属目录，与只读共享和 Linux 挂载分开。导入按可用存储空间处理，无固定单文件大小门槛；删除文件夹会同时删除其中的内容。'
         self.assertIn(description, standalone)
         self.assertEqual(private.count(description), 1)
         self.assertNotIn('导入单文件上限', private)
@@ -143,7 +143,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
                 '已取消导出；目标可能包含部分内容',
                 '存储空间不足，文件未完成传输；导入临时文件已清理',
                 '文件访问授权已失效，请重新选择文件',
-                '未确认删除；条目可能已变更或目录非空，请刷新', '无法撤销；不会删除原导入来源。',
+                '删除未完成；部分内容可能已移除，请刷新检查',
                 'current() && !busy && !sharedBusy() && pending == null && request == null && directory != null',
                 'lifecycle.withResumed', 'permitted(at)'],
             'LinuxRootfsPanel.kt': ['Rootfs 未读取，请刷新或检查环境状态', '此目录为空',
@@ -155,6 +155,11 @@ class LinuxFilesStyleContract(unittest.TestCase):
             for text in texts:
                 with self.subTest(name=name, text=text):
                     self.assertIn(text, read(name))
+
+        dialogs = (COMPONENTS / 'WorkspaceEntryDialogs.kt').read_text()
+        self.assertIn('DaiyuConfirmDialog(', dialogs)
+        self.assertIn('无法撤销。', dialogs)
+        self.assertIn('deletionAppearance = true', dialogs)
 
     def test_settings_share_compact_topbar_without_changing_non_settings_defaults(self):
         adaptive = (COMPONENTS / 'AdaptiveTopAppBar.kt').read_text()

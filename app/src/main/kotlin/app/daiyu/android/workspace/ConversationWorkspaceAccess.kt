@@ -14,7 +14,8 @@ internal data class ConversationWorkspaceEditor(val binding: String?, val source
     val workspaces: ConversationWorkspaces, val workspacePaths: List<String>, val privateWorkspaceRoots: List<String>)
 
 internal data class ConversationWorkspaceDirectory(val path: String, val parentPath: String?,
-    val folders: List<String>, val selectable: Boolean = true)
+    val folders: List<String>, val selectable: Boolean = true,
+    val entries: List<PrivateWorkspaceFiles.Entry> = emptyList(), val truncated: Boolean = false)
 
 /** Resolves only the owner-supplied binding; it never changes the global Linux selection. */
 internal class ConversationWorkspaceAccess(private val context: Context,
@@ -58,8 +59,26 @@ internal class ConversationWorkspaceAccess(private val context: Context,
         val raw = ConversationWorkspaceCodec.encode(selection.binding(sourceId, path))
         return freeze(raw).use { run ->
             val host = run.resolved.hostDirectory
-            val files = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(context.filesDir, host))
-            ConversationWorkspaceDirectory(host.path, selection.parentPath(host), files.directoryNames())
+            val paths = PrivateWorkspacePaths(context.filesDir)
+            val files = PrivateWorkspaceFiles(paths)
+            val relative = host.relativeTo(paths.ensureRoot()).invariantSeparatorsPath
+            val shown = files.listAll(files.directoryAt(relative))
+            ConversationWorkspaceDirectory(host.path, selection.parentPath(host), shown.entries.filter { it.directory }.map { it.name },
+                entries = shown.entries, truncated = shown.truncated)
+        }
+    }
+
+    fun modifyEntry(sourceId: String, path: String, entry: PrivateWorkspaceFiles.Entry, name: String?,
+        cancelled: () -> Boolean) {
+        val selection = ConversationWorkspaceSelection(context.filesDir)
+        val raw = ConversationWorkspaceCodec.encode(selection.binding(sourceId, path))
+        freeze(raw).use { run ->
+            val paths = PrivateWorkspacePaths(context.filesDir)
+            val root = paths.ensureRoot()
+            val relative = run.resolved.hostDirectory.relativeTo(root).invariantSeparatorsPath
+            check(entry.relative.substringBeforeLast('/', "") == relative) { "workspace_entry_changed" }
+            val files = PrivateWorkspaceFiles(paths)
+            if (name == null) files.deleteTree(entry, cancelled) else files.rename(entry, name, cancelled)
         }
     }
 

@@ -318,4 +318,71 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         } catch (failure: java.io.IOException) { assertEquals("workspace_storage_full", failure.message) }
         assertTrue(File(files, "workspace").list()!!.isEmpty())
     }
+    fun testRenameFileDirectoryCollisionAndInvalidName() = fixture { files, access ->
+        access.list()
+        val workspace = File(files, "workspace")
+        File(workspace, "one.txt").writeText("one")
+        File(workspace, "two.txt").writeText("two")
+        val entry = access.list().entries.single { it.name == "one.txt" }
+        try { access.rename(entry, "two.txt"); fail("existing target replaced") } catch (_: Exception) { }
+        assertEquals("one", File(workspace, "one.txt").readText())
+        assertEquals("two", File(workspace, "two.txt").readText())
+        try { access.rename(entry, "../escape"); fail("invalid name accepted") } catch (_: IllegalArgumentException) { }
+        access.rename(entry, "文件 一.txt")
+        assertEquals("one", File(workspace, "文件 一.txt").readText())
+        val child = File(workspace, "folder").apply { mkdir() }
+        File(child, "keep").writeText("keep")
+        access.rename(access.list().entries.single { it.name == "folder" }, "renamed")
+        assertEquals("keep", File(workspace, "renamed/keep").readText())
+        try { access.rename(access.list().directory, "changed"); fail("root renamed") } catch (_: IllegalStateException) { }
+    }
+    fun testTreeDeletionNeverFollowsLinksAndRootRemainsProtected() = fixture { files, access ->
+        access.list()
+        val workspace = File(files, "workspace")
+        val outside = File(files, "outside").apply { mkdir() }
+        File(outside, "keep").writeText("keep")
+        val child = File(workspace, "folder/nested").apply { mkdirs() }
+        File(child, "file").writeText("remove")
+        java.nio.file.Files.createSymbolicLink(File(child, "outside").toPath(), outside.toPath())
+        access.deleteTree(access.list().entries.single())
+        assertTrue(workspace.list()!!.isEmpty())
+        assertEquals("keep", File(outside, "keep").readText())
+        try { access.deleteTree(access.list().directory); fail("root deleted") } catch (_: IllegalStateException) { }
+    }
+    fun testRootfsSystemProtectionIsEnforcedByBothOperations() = fixture { files, _ ->
+        val root = File(files, "rootfs").apply { mkdir() }
+        File(root, "etc").mkdir()
+        File(root, "etc/keep").writeText("keep")
+        File(root, "project").mkdir()
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths.editableRootfs(files, root))
+        val system = access.list().entries.single { it.name == "etc" }
+        assertFalse(access.canModify(system))
+        try { access.rename(system, "renamed"); fail("system renamed") } catch (_: IllegalStateException) { }
+        try { access.deleteTree(system); fail("system deleted") } catch (_: IllegalStateException) { }
+        val project = access.list().entries.single { it.name == "project" }
+        try { access.rename(project, "usr"); fail("system destination accepted") } catch (_: IllegalStateException) { }
+        access.rename(project, "project2")
+        access.deleteTree(access.list().entries.single { it.name == "project2" })
+        assertEquals("keep", File(root, "etc/keep").readText())
+        val readonly = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(files, root))
+        try { readonly.rename(readonly.list().entries.single(), "no"); fail("readonly renamed") } catch (_: IllegalStateException) { }
+    }
+    fun testDirectoryAtAndCancelledMutationKeepRootBoundary() = fixture { files, access ->
+        access.list()
+        val child = File(files, "workspace/child").apply { mkdir() }
+        File(child, "keep").writeText("keep")
+        val directory = access.directoryAt("child")
+        val entry = access.list(directory).entries.single()
+        try { access.rename(entry, "other") { true }; fail("cancelled rename executed") } catch (_: InterruptedException) { }
+        try { access.deleteTree(entry) { true }; fail("cancelled delete executed") } catch (_: InterruptedException) { }
+        assertEquals("keep", File(child, "keep").readText())
+        try { access.directoryAt("../escape"); fail("escaped") } catch (_: IllegalStateException) { }
+        val stale = access.list().entries.single()
+        child.renameTo(File(files, "moved"))
+        child.mkdir()
+        File(child, "keep").writeText("replacement")
+        try { access.deleteTree(stale); fail("stale tree deleted") } catch (_: IllegalStateException) { }
+        assertEquals("replacement", File(child, "keep").readText())
+    }
+
 }

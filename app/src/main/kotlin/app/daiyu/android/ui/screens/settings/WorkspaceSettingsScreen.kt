@@ -201,7 +201,8 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             privateOccupied = it
             if (!it && current() && !loaded) refresh(clearNotice = false)
         }) else null
-    val rootfsPanel = if (integratedLinux && location == LinuxFileLocation.ROOTFS) key(rootfs) { rememberLinuxRootfsPanel(rootfs?.rootfs) } else null
+    val rootfsPanel = if (integratedLinux && location == LinuxFileLocation.ROOTFS) key(rootfs) { rememberLinuxRootfsPanel(rootfs?.rootfs, parentVisit = visit,
+        sharedBusy = { busy || pendingTree != null }, onOccupied = { privateOccupied = it }) } else null
     // Loading must not measure the retained position against a temporarily shorter list.
     SettingsScaffoldPage(title = if (integratedLinux && location == LinuxFileLocation.WORKSPACE) "工作区" else pageTitle,
         onBack = back, modifier = modifier, compactTitle = true,

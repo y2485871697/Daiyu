@@ -20,7 +20,11 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
         val size: Long, internal val identities: List<Identity>, val symbolicLink: Boolean = false)
     data class Listing(val directory: Entry, val entries: List<Entry>, val truncated: Boolean)
 
-    fun list(directory: Entry? = null, cancelled: () -> Boolean = { false }): Listing = synchronized(publicationLock) {
+    fun list(directory: Entry? = null, cancelled: () -> Boolean = { false }): Listing = listEntries(directory, MAX_ENTRIES, cancelled)
+
+    fun listAll(directory: Entry, cancelled: () -> Boolean = { false }): Listing = listEntries(directory, Int.MAX_VALUE, cancelled)
+
+    private fun listEntries(directory: Entry?, maximumEntries: Int, cancelled: () -> Boolean): Listing = synchronized(publicationLock) {
         check(directory == null || directory.directory) { "workspace_not_directory" }
         pinned(directory, cancelled) { descriptor, chain ->
             val relative = directory?.relative.orEmpty()
@@ -32,7 +36,7 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
                 for (path in children) {
                     val child = path.toFile()
                     active(cancelled)
-                    if (scanned++ == MAX_ENTRIES) { truncated = true; break }
+                    if (scanned++ == maximumEntries) { truncated = true; break }
                     if (child.name.startsWith(STAGING)) continue
                     val stat = Os.lstat(child.path)
                     val symbolicLink = OsConstants.S_ISLNK(stat.st_mode)
@@ -172,7 +176,63 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
         }
     }
 
-    private fun <T> pinned(entry: Entry?, cancelled: () -> Boolean,
+    fun canModify(entry: Entry): Boolean = (!readOnly || paths.rootfsMutations) &&
+        WorkspaceEntryPolicy.mutable(entry.relative, paths.rootfsMutations, entry.symbolicLink)
+
+    fun rename(entry: Entry, name: String, cancelled: () -> Boolean = { false }) = synchronized(publicationLock) {
+        check(canModify(entry)) { "workspace_entry_protected" }
+        WorkspaceEntryPolicy.requireName(name)
+        val parentRelative = entry.relative.substringBeforeLast('/', "")
+        val targetRelative = listOf(parentRelative, name).filter { it.isNotEmpty() }.joinToString("/")
+        check(WorkspaceEntryPolicy.mutable(targetRelative, paths.rootfsMutations)) { "workspace_entry_protected" }
+        val parent = Entry(parentRelative, "", true, 0, entry.identities.dropLast(1))
+        pinned(parent, cancelled) { descriptor, _ ->
+            val source = File(fdPath(descriptor), entry.name).toPath()
+            val target = File(fdPath(descriptor), name).toPath()
+            active(cancelled)
+            check(identity(Os.lstat(source.toString())) == entry.identities.last()) { "workspace_entry_changed" }
+            if (entry.name != name) java.nio.file.Files.move(source, target)
+        }
+        Unit
+    }
+
+    /** No-follow deletion; a cancelled nonempty-directory operation may have removed some children. */
+    fun deleteTree(entry: Entry, cancelled: () -> Boolean = { false }) = synchronized(publicationLock) {
+        check(canModify(entry)) { "workspace_entry_protected" }
+        val parentRelative = entry.relative.substringBeforeLast('/', "")
+        val parent = Entry(parentRelative, "", true, 0, entry.identities.dropLast(1))
+        pinned(parent, cancelled) { descriptor, _ ->
+            fun remove(parentFd: ParcelFileDescriptor, name: String, expected: Identity, depth: Int) {
+                active(cancelled)
+                check(depth <= 128) { "workspace_directory_too_deep" }
+                val target = "${fdPath(parentFd)}/$name"
+                check(identity(Os.lstat(target)) == expected && expected.device == entry.identities.first().device) { "workspace_entry_changed" }
+                if (OsConstants.S_ISDIR(expected.mode)) {
+                    open(target, true).use { held ->
+                        val actual = identity(Os.fstat(held.fileDescriptor))
+                        check(sameNode(actual, expected) && actual.device == entry.identities.first().device) { "workspace_entry_changed" }
+                        java.nio.file.Files.newDirectoryStream(File(fdPath(held)).toPath()).use { children ->
+                            for (child in children) {
+                                active(cancelled)
+                                remove(held, child.fileName.toString(), identity(Os.lstat(child.toString())), depth + 1)
+                            }
+                        }
+                    }
+                    active(cancelled)
+                    check(sameNode(identity(Os.lstat(target)), expected)) { "workspace_entry_changed" }
+                }
+                active(cancelled)
+                Os.remove(target)
+            }
+            remove(descriptor, entry.name, entry.identities.last(), 0)
+        }
+    }
+
+    /** Resolve from the fixed private root, retaining the identity of every ancestor. */
+    fun directoryAt(relative: String, cancelled: () -> Boolean = { false }): Entry =
+        pinned(null, cancelled, relative) { _, chain -> Entry(relative, relative.substringAfterLast('/'), true, 0, chain) }
+
+    private fun <T> pinned(entry: Entry?, cancelled: () -> Boolean, relative: String = entry?.relative.orEmpty(),
         block: (ParcelFileDescriptor, List<Identity>) -> T): T {
         active(cancelled)
         paths.ensureRoot()
@@ -182,18 +242,20 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
             var held = storage
             for (part in paths.rootParts) held = open("${fdPath(held)}/$part", true).also { descriptors += it }
             val chain = mutableListOf(identity(Os.fstat(held.fileDescriptor)))
-            val parts = entry?.relative.orEmpty().split('/').filter { it.isNotEmpty() }
-            check(entry == null || entry.relative.isEmpty() ||
-                (!entry.relative.startsWith('/') && parts.joinToString("/") == entry.relative &&
+            val parts = relative.split('/').filter { it.isNotEmpty() }
+            check(relative.isEmpty() ||
+                (!relative.startsWith('/') && parts.joinToString("/") == relative &&
                     parts.none { it == "." || it == ".." || '\\' in it || '\u0000' in it })) { "workspace_invalid_path" }
             if (entry != null) check(entry.identities.size == parts.size + 1 && sameNode(chain[0], entry.identities[0])) { "workspace_entry_changed" }
             for ((index, part) in parts.withIndex()) {
                 active(cancelled)
-                val isDirectory = index < parts.lastIndex || checkNotNull(entry).directory
+                val isDirectory = index < parts.lastIndex || entry?.directory != false
                 held = open("${fdPath(held)}/$part", isDirectory).also { descriptors += it }
                 val id = identity(Os.fstat(held.fileDescriptor)); chain += id
-                val expected = checkNotNull(entry).identities[index + 1]
-                check(if (isDirectory) sameNode(id, expected) else id == expected) { "workspace_entry_changed" }
+                if (entry != null) {
+                    val expected = entry.identities[index + 1]
+                    check(if (isDirectory) sameNode(id, expected) else id == expected) { "workspace_entry_changed" }
+                }
             }
             active(cancelled)
             return block(held, chain.toList())

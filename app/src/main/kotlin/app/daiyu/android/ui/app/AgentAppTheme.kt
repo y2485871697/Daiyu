@@ -15,6 +15,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import app.daiyu.android.ui.components.DialogDimStack
+import app.daiyu.android.ui.components.LocalDialogDimStack
 import app.daiyu.android.ui.components.PreviewBackdropHost
 import app.daiyu.android.ui.components.WithoutPressRipple
 import app.daiyu.android.data.model.AppearanceSettings
@@ -28,6 +30,8 @@ fun AgentAppTheme(
     onResolvedDarkModeChange: (Boolean) -> Unit = {},
     content: @Composable () -> Unit,
 ) {
+    val inheritedDimStack = LocalDialogDimStack.current
+    val dialogDimStack = inheritedDimStack ?: remember { DialogDimStack() }
     val systemDark = isSystemInDarkTheme()
     val isDark = when (appearance.themeMode) {
         AppearanceThemeMode.SYSTEM -> systemDark
@@ -122,6 +126,7 @@ fun AgentAppTheme(
         }
 
         CompositionLocalProvider(
+            LocalDialogDimStack provides dialogDimStack,
             LocalAppearanceSettings provides appearance,
             LocalAppearanceDark provides isDark,
             LocalBlurEnabled provides appearance.blurEnabled,

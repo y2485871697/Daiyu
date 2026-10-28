@@ -19,7 +19,8 @@ class PreviewDialogStatusBarContractTest(unittest.TestCase):
         self.assertIn("val dimAmount = remember(window) { window?.attributes?.dimAmount ?: 0f }", source)
         self.assertLess(source.index("val dimAmount ="), source.index("window?.setDimAmount(0f)"))
         self.assertIn("scrimColor ?: Color.Black.copy(alpha = dimAmount)", source)
-        self.assertIn("animate = bottomSheet", source)
+        self.assertIn(".previewDialogDimBackground(dialogDimStack,", source)
+        self.assertIn("Color.Black.copy(alpha = dimAmount), motion)", source)
         self.assertNotIn("0x2620172d", source)
         self.assertNotIn("0x55000000", source)
 

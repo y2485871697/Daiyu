@@ -22,6 +22,8 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
     bottomSheet: Boolean = false, onOutsideDismiss: () -> Unit = onDismiss, dismissEnabled: Boolean = true,
     content: @Composable BoxWithConstraintsScope.() -> Unit) {
     val density = LocalDensity.current
+    val inheritedDimStack = LocalDialogDimStack.current
+    val dialogDimStack = inheritedDimStack ?: remember { DialogDimStack() }
     val motion = remember(bottomSheet) { if (bottomSheet) BottomSheetMotion() else null }
     Dialog(onDismissRequest = {
         if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismiss()
@@ -38,12 +40,13 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
             Box(Modifier.fillMaxSize().testTag("preview-dialog-viewport").dialogDismissInputGuard()) {
                 Box(Modifier.matchParentSize().testTag("preview-dialog-scrim")
                     .then(if (scrimBlurRadius > 0f) Modifier.previewGlassBlur(androidx.compose.ui.graphics.RectangleShape, radius = scrimBlurRadius, saturation = 1f) else Modifier)
-                    .dialogDimBackground(scrimColor ?: Color.Black.copy(alpha = dimAmount), animate = bottomSheet)
+                    .previewDialogDimBackground(dialogDimStack, scrimColor ?: Color.Black.copy(alpha = dimAmount), motion)
                     .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null,
                         clickFeedback = false, onClick = {
                         if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.Outside) ?: onOutsideDismiss()
                     }))
-                CompositionLocalProvider(LocalDensity provides density, LocalBottomSheetContent provides bottomSheet) {
+                CompositionLocalProvider(LocalDensity provides density, LocalBottomSheetContent provides bottomSheet,
+                    LocalDialogDimStack provides dialogDimStack) {
                     val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier
                     BoxWithConstraints(motion.fillMaxSize()
                         .windowInsetsPadding(WindowInsets.safeDrawing).imePadding(), content = content)

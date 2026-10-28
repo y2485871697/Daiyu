@@ -2451,6 +2451,7 @@ class MainActivity : ComponentActivity() {
                         } }
                     }
                     "providers" -> ProviderManagementRoute(controller,
+                        conversationId = selected?.id,
                         ownerCurrent = { activityUsable() && voiceForeground && retainedPage == "providers" && !sidebarVisible },
                         onBack = { closeProvidersPage() },
                         onDetailBack = { if (activityUsable() && retainedPage == "providers") returnToChat() },

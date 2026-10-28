@@ -147,6 +147,7 @@ class MainActivity : ComponentActivity() {
     private var linuxSettingsPageOwner by mutableStateOf<app.daiyu.android.terminal.LinuxSettingsPageOwner?>(null)
     private var terminalPageOwner by mutableStateOf<Any?>(null)
     private var terminalReturnPage = "settings"
+    private var linuxSettingsReturnPage = "settings"
     private val mcpSettings by lazy { app.daiyu.android.mcp.McpSettingsStore(applicationContext) }
     private var mcpSettingsPageOwner: app.daiyu.android.mcp.McpSettingsOwner? = null
     private val engineeringUi get() = (application as ChatApplication).engineeringUiForTests
@@ -2061,6 +2062,8 @@ class MainActivity : ComponentActivity() {
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { /* Settings page offers explicit repair. */ }
         }
+        linuxSettingsReturnPage = state?.getString("linux-settings-return-page")
+            ?.takeIf { it in setOf("settings", "chat", "terminal") } ?: "settings"
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()
             terminalReturnPage = state.getString("terminal-return-page")
@@ -2148,7 +2151,8 @@ class MainActivity : ComponentActivity() {
                 ) {
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "linux-settings", "chat-workspace" -> closeLinuxSettingsPage()
                         "generation-settings" -> retainedPage = "settings"
                         "legacy-library" -> retainedPage = "backup"
                         "terminal" -> closeTerminalPage()
@@ -2286,7 +2290,7 @@ class MainActivity : ComponentActivity() {
                         val visit = linuxSettingsVisit
                         val leave: () -> Unit = {
                             if (activityUsable() && retainedPage == route && linuxSettingsVisit === visit && linuxSettingsPageOwner === page) {
-                                if (route == "chat-workspace") returnToChat() else retainedPage = "settings"
+                                closeLinuxSettingsPage()
                             }
                         }
                         if (ready == null || page == null) TerminalLoadingPage(state, onBack = leave,
@@ -5469,6 +5473,7 @@ class MainActivity : ComponentActivity() {
 
         state.putBoolean("terminal-page", retainedPage == "terminal")
         state.putString("terminal-return-page", terminalReturnPage)
+        state.putString("linux-settings-return-page", linuxSettingsReturnPage)
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("legacy-next-code", nextLegacyCode)
         state.putInt("pending-backup-request", pendingBackupRequest?.takeUnless { it == 101 || it == 103 } ?: 0)
@@ -5735,11 +5740,12 @@ class MainActivity : ComponentActivity() {
     private fun pageBackPreviewTarget(): String? = when (retainedPage) {
         "chat" -> null
         "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings",
-        "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings",
+        "gui-settings", "compression-settings", "reconnect-settings", "pet-settings",
         "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> "settings"
         "generation-settings" -> "settings"
         "legacy-library" -> "backup"
         "terminal" -> terminalReturnPage
+        "linux-settings", "chat-workspace" -> linuxSettingsReturnPage
         "usage" -> usageReturnPage
         "providers" -> providersReturnPage
         "skills" -> skillsReturnPage
@@ -5810,6 +5816,8 @@ class MainActivity : ComponentActivity() {
     private fun openLinuxSettings(filesOnly: Boolean = false) {
         requireActivityUsable()
         val route = if (filesOnly) "chat-workspace" else "linux-settings"
+        linuxSettingsReturnPage = app.daiyu.android.ui.navigation.linuxSettingsBackTarget(
+            retainedPage, terminalReturnPage, linuxSettingsReturnPage, filesOnly)
         linuxSettingsPageOwner?.close()
         val visit = Any()
         linuxSettingsVisit = visit
@@ -5823,6 +5831,14 @@ class MainActivity : ComponentActivity() {
                 state is app.daiyu.android.terminal.TerminalApplicationState.Ready) {
                 linuxSettingsPageOwner = state.application.settings.enterPage()
             }
+        }
+    }
+    private fun closeLinuxSettingsPage() {
+        if (!activityUsable() || retainedPage !in setOf("linux-settings", "chat-workspace")) return
+        when (linuxSettingsReturnPage) {
+            "terminal" -> { terminalPageOwner = Any(); retainedPage = "terminal" }
+            "chat" -> returnToChat()
+            else -> retainedPage = "settings"
         }
     }
     private fun terminalPageCurrent(page: Any) = activityUsable() && voiceForeground &&
@@ -5864,10 +5880,8 @@ class MainActivity : ComponentActivity() {
     }
     private fun openTerminal() {
         requireActivityUsable()
-        terminalReturnPage = when (retainedPage) {
-            "settings", "linux-settings", "chat-workspace" -> retainedPage
-            else -> "chat"
-        }
+        terminalReturnPage = app.daiyu.android.ui.navigation.terminalBackTarget(
+            retainedPage, terminalReturnPage, linuxSettingsReturnPage)
         terminalPageOwner = Any()
         retainedPage = "terminal"
     }

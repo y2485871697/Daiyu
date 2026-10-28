@@ -362,7 +362,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         authentication -> "provider-authentication"
         else -> null
     }, if (creating != null && authentication) "provider-authentication" else null) {
-        BackHandler(previewEnabled = selectedSlots == null && (!loading || initialSlot == ProviderRegistry.PRIMARY)) { back() }
+        // Loading and detail share one visual route; loading must not discard its entry animation.
+        BackHandler(previewEnabled = selectedSlots == null) { back() }
         val p = permit
         val enabled = version.let { current(p) && controller.ready && controller.active == null &&
             !controller.dataBusy && !controller.hasLiveChildTasks() && busy == null && !loading && !checkingRegistry &&

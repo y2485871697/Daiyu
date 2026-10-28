@@ -20,7 +20,7 @@ class WorkspaceFilesEntryContract(unittest.TestCase):
         route = self.host().split('"linux-settings", "chat-workspace" -> {', 1)[1].split('"generation-settings" ->', 1)[0]
         for token in ['val route = retainedPage', 'val visit = linuxSettingsVisit',
                       'retainedPage == route && linuxSettingsVisit === visit && linuxSettingsPageOwner === page',
-                      'if (route == "chat-workspace") returnToChat() else retainedPage = "settings"',
+                      'closeLinuxSettingsPage()',
                       'else key(page)', 'LinuxSettingsScreen(ready.application.settings, page, host = ready.application.terminalOwner.host,',
                       'filesOnly = route == "chat-workspace"', 'onBack = leave']:
             self.assertIn(token, route)
@@ -70,7 +70,7 @@ class WorkspaceFilesEntryContract(unittest.TestCase):
     def test_terminal_return_and_recreation_preserve_files_only_route(self):
         host = self.host()
         self.assertIn('setOf("settings", "chat", "linux-settings", "chat-workspace")', host)
-        self.assertIn('"settings", "linux-settings", "chat-workspace" -> retainedPage', host)
+        self.assertIn('app.daiyu.android.ui.navigation.terminalBackTarget(', host)
         close = host.split('private fun closeTerminalPage()', 1)[1].split('private fun openUsagePage', 1)[0]
         self.assertIn('"chat-workspace" -> openLinuxSettings(filesOnly = true)', close)
         self.assertIn('"linux-settings" -> openLinuxSettings()', close)

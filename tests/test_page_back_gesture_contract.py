@@ -309,7 +309,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         route = (APP / 'ui/screens/settings/ProviderManagementRoute.kt').read_text()
         self.assertIn('if (success && initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY)', route)
         self.assertIn('if (initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY)', route)
-        self.assertIn('BackHandler(previewEnabled = selectedSlots == null && (!loading || initialSlot == ProviderRegistry.PRIMARY))', route)
+        self.assertIn('BackHandler(previewEnabled = selectedSlots == null)', route)
 
     def test_provider_detail_reserves_visual_route_before_async_loading(self):
         route = (APP / 'ui/screens/settings/ProviderManagementRoute.kt').read_text()

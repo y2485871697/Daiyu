@@ -280,7 +280,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                     f.controller.selectActiveProviderCatalogModel(current, currentSettings.settings, editor, global, ticket,
                         cancelled = { false }, completed = { fail("busy A model queued") }, conversation = f.conversation.id)
                     fail("busy A model accepted")
-                } catch (failure: IllegalStateException) { assertEquals("请先结束任务", failure.message) }
+                } catch (failure: IllegalStateException) { assertEquals("任务占用中", failure.message) }
             }
             assertEquals(originalModel, f.database.modelBinding(f.conversation.id))
             assertEquals(registry, f.controller.providers.snapshot())

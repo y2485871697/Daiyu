@@ -32,7 +32,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         pure = controller.split('internal fun saveConversationGptSpeed', 1)[0]
         self.assertNotIn('invalidateVideoConfiguration()', pure)
         self.assertNotIn('dataTask(', pure)
-        self.assertIn('{ "请先结束任务" }', controller)
+        self.assertIn('{ "任务占用中" }', controller)
 
     def test_reasoning_is_saved_only_under_its_conversation_gate(self):
         text = (SRC / 'MainActivity.kt').read_text()
@@ -61,7 +61,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         self.assertIn('controller.deleteAssistant(id)', host)
         self.assertIn('if (sidebarVisible) selectCurrentConversationAssistant(id, renderedAssistantConversation, renderedAssistantGeneration)', host)
         gate = host.split('private fun allowTaskConfigurationChange()', 1)[1].split('private var assistantPicker', 1)[0]
-        self.assertIn('toast("请先结束任务")', gate)
+        self.assertIn('toast("任务占用中")', gate)
 
     def test_delete_reserves_data_lane_before_store_or_asset_writes(self):
         text = (SRC / 'ChatController.kt').read_text().split('@Synchronized internal fun deleteAssistant', 1)[1].split('internal val selections', 1)[0]
@@ -71,7 +71,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         store = (SRC / 'assistants/SqliteAssistantStore.kt').read_text().split('override fun delete(id: String) = change { db ->', 1)[1].split('override fun select', 1)[0]
         self.assertLess(store.index("m.status='RUNNING'"), store.index('db.delete("assistants"'))
         self.assertIn('throw AssistantInUseException()', store)
-        self.assertIn('if (failure is AssistantInUseException) "请先结束任务"', (SRC / 'ChatController.kt').read_text())
+        self.assertIn('if (failure is AssistantInUseException) "任务占用中"', (SRC / 'ChatController.kt').read_text())
 
     def test_scoped_gate_collects_real_retained_owners_and_freezes_every_preparation(self):
         text = (SRC / 'ChatController.kt').read_text()

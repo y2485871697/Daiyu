@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 
-internal class AssistantInUseException : IllegalStateException("请先结束任务")
+internal class AssistantInUseException : IllegalStateException("任务占用中")
 
 /** Application-owned projection. The database, not preferences or the flow, is authoritative. */
 class SqliteAssistantStore(private val database: ConversationDatabase) : AssistantStore {

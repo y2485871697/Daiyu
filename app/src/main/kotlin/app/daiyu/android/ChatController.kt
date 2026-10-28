@@ -2029,7 +2029,7 @@ class ChatController internal constructor(private val application:Application,
     private fun conversationConfigurationTask(conversation: ConversationId?, failureNotice: String,
         completed: (Boolean) -> Unit, work: () -> Unit) {
         val operation = synchronized(this) {
-            checkNotNull(reserveConversationConfiguration(conversation)) { "请先结束任务" }
+            checkNotNull(reserveConversationConfiguration(conversation)) { "任务占用中" }
         }
         try { executor.execute {
             val success = try {
@@ -2058,7 +2058,7 @@ class ChatController internal constructor(private val application:Application,
     }
 
     @Synchronized internal fun deleteAssistant(id: String) {
-        check(idleAvailable() && !hasLiveChildTasks()) { "请先结束任务" }
+        check(idleAvailable() && !hasLiveChildTasks()) { "任务占用中" }
         dataTask(failureNotice = "助手删除失败；请重新打开助手列表核对", work = {
             val avatar = assistantStore.read(id)?.avatarFileName
             assistantStore.delete(id)
@@ -4814,7 +4814,7 @@ class ChatController internal constructor(private val application:Application,
         conversation: ConversationId? = preferences.getString("selected", null)?.let(::ConversationId),
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        check(!taskConfigurationBusy(conversation)) { "请先结束任务" }
+        check(!taskConfigurationBusy(conversation)) { "任务占用中" }
         val expectedBinding = database.modelBinding(conversation)
         check(expectedActive == null || expectedBinding?.providerSlotId == expectedActive.slotId) { "会话模型已变化，请重新打开选择器" }
         conversationConfigurationTask(conversation, failureNotice = "会话模型切换未保存；请重新打开目录核对", completed = completed, work = {
@@ -4833,7 +4833,7 @@ class ChatController internal constructor(private val application:Application,
         expected: EditingSettings, value: ModelSettings, owner: ModelSettingsSaveOwner, completed: (Boolean) -> Unit,
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        check(!taskConfigurationBusy()) { "请先结束任务" }
+        check(!taskConfigurationBusy()) { "任务占用中" }
         val binding = checkNotNull(database.modelBinding(conversation))
         dataTask(failureNotice = "速度切换未保存，请重新尝试", completed = completed, work = {
             check(database.modelBinding(conversation) == binding)
@@ -5288,7 +5288,7 @@ class ChatController internal constructor(private val application:Application,
                 // an attempted/duplicate import must leave old owners and their gates untouched.
                 value=work(report);success=true
             } catch(failure:Exception) {
-                value=if (failure is AssistantInUseException) "请先结束任务" else failureNotice ?: when(failure) {
+                value=if (failure is AssistantInUseException) "任务占用中" else failureNotice ?: when(failure) {
                     is SecurityException -> "备份文件访问权限不足或已失效；请重新选择文件。原会话保留，导出目标可能不完整"
                     is java.nio.charset.CharacterCodingException -> "导入失败；备份不是有效UTF-8文本。原会话保留，未执行历史请求"
                     is java.io.IOException -> if(importing) "导入失败；读取备份或写入附件失败。原会话保留，未执行历史请求"

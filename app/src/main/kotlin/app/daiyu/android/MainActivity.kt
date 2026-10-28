@@ -1713,12 +1713,12 @@ class MainActivity : ComponentActivity() {
     private var chatModelOwner: Any? = null
     private fun allowTaskConfigurationChange(): Boolean {
         if (!controller.taskConfigurationBusy()) return true
-        toast("请先结束任务")
+        toast("任务占用中")
         return false
     }
     private fun allowTaskConfigurationChange(conversation: ConversationId?): Boolean {
         if (!controller.taskConfigurationBusy(conversation)) return true
-        toast("请先结束任务")
+        toast("任务占用中")
         return false
     }
     private fun allowAssistantSelection(owner: AssistantSelectionOwner): Boolean =
@@ -2869,7 +2869,7 @@ class MainActivity : ComponentActivity() {
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {
                             if (allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))) try {
                                 if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()
-                                else toast("请先结束任务")
+                                else toast("任务占用中")
                             } catch (_: Exception) { toast("思考偏好保存未确认；请重新保存") }
                         }
                     })

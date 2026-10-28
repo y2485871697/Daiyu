@@ -47,9 +47,9 @@ class TaskConfigurationAdmissionTest : InstrumentationTestCase() {
                 f.controller.selectActiveProviderCatalogModel(editor, editing.settings, editor, global, ticket,
                     cancelled = { false }, completed = { fail("busy owner queued") }, conversation = running.id)
                 fail("busy owner accepted")
-            } catch (failure: IllegalStateException) { assertEquals("请先结束任务", failure.message) }
+            } catch (failure: IllegalStateException) { assertEquals("任务占用中", failure.message) }
             try { f.controller.deleteAssistant("default"); fail("shared assistant deleted") }
-            catch (failure: IllegalStateException) { assertEquals("请先结束任务", failure.message) }
+            catch (failure: IllegalStateException) { assertEquals("任务占用中", failure.message) }
         }
     }
     fun testActiveAndDrainingAAllowBModelAssistantAndReasoningWithoutChangingA() {
@@ -162,7 +162,7 @@ class TaskConfigurationAdmissionTest : InstrumentationTestCase() {
             fixture.database.send(user, assistant, expectedAssistantId = "default")
             controlMain { fixture.controller.deleteAssistant("default") }
             awaitControl("delete refused") { !fixture.controller.dataBusy }
-            controlMain { assertEquals("请先结束任务", fixture.controller.consumeDataNotice()) }
+            controlMain { assertEquals("任务占用中", fixture.controller.consumeDataNotice()) }
             assertNotNull(fixture.controller.assistantStore.read("default"))
             assertEquals("default", fixture.database.assistantId(running.id))
             assertEquals(app.daiyu.android.domain.RunStatus.RUNNING, fixture.database.messages(running.id).last().second.status)

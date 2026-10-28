@@ -250,7 +250,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         db.send(user, assistant, expectedAssistantId = "default")
         val profiles = store.list()
         try { store.delete("default"); fail("running assistant deleted") }
-        catch (failure: IllegalStateException) { assertEquals("请先结束任务", failure.message) }
+        catch (failure: IllegalStateException) { assertEquals("任务占用中", failure.message) }
         assertEquals(profiles, store.list())
         assertEquals("other", store.selectedId.value)
         assertEquals("default", db.assistantId(running.id))

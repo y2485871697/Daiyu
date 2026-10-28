@@ -32,6 +32,8 @@ sealed interface ModelEvent {
 }
 data class ToolOutput(val callId: ToolCallId, val output: String)
 interface ModelSession {
+    /** Applies to the next new request, never to transport resume of an in-flight request. */
+    fun updateToolDefinitions(definitions: List<ToolDefinition>) {}
     /** Blocking, ordered delivery. Return only after a successful protocol terminal event. */
     fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit)
     fun cancel()

@@ -76,6 +76,7 @@ internal class UsageRecordingModel(
     private open inner class Recording(protected val session: ModelSession, private val owner: String?) : ModelSession {
         protected var request: Request? = null
         protected fun start(): Request = Request(owner).also { request = it }
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) = session.updateToolDefinitions(definitions)
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             val current = start()
             try { session.next(outputs) { current.deliver(it, sink) } } finally { current.persist() }

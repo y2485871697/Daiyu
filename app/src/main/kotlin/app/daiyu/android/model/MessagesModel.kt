@@ -41,7 +41,7 @@ class MessagesModel internal constructor(
         private val settings: ModelSettings,
         private val maxTokens: Int,
         history: List<Message>,
-        private val tools: List<ToolDefinition>,
+        private var tools: List<ToolDefinition>,
         private val connect: (URL) -> HttpsURLConnection,
         capability: Boolean?,
         images: ModelImagePlan?,
@@ -63,6 +63,9 @@ class MessagesModel internal constructor(
         init { MessagesRequest.body(settings.model, messages, tools, maxTokens) }
         private fun checkCancelled() { if (cancelled.get()) throw InterruptedException() }
 
+        @Synchronized
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) { tools = definitions.toList() }
+
         private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
         override val canResume: Boolean get() = !cancelled.get() && retry.available
         @Synchronized
@@ -80,10 +83,11 @@ class MessagesModel internal constructor(
             val savedItems = ownItems.toList()
             val savedPending = pending
             val savedStarted = started
+            val savedTools = tools
             retry.capture(outputs) {
                 messages = JSONArray(savedMessages)
                 ownItems.clear(); ownItems.addAll(savedItems)
-                pending = savedPending; started = savedStarted; usable = true
+                pending = savedPending; started = savedStarted; usable = true; tools = savedTools
             }
             started = true
             // Retain the exact request boundary; only an explicitly enabled Runner may replay it.

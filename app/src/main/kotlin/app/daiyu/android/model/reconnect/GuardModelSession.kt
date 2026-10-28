@@ -8,6 +8,9 @@ fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSes
     if (session is CheckpointedResumableModelSession) return object : CheckpointedResumableModelSession, RequestRetryModelSession {
         override val retriesCurrentRequest: Boolean get() = (session as? RequestRetryModelSession)?.retriesCurrentRequest == true
         override val canResume: Boolean get() = session.canResume
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
+            checkRuntime(); session.updateToolDefinitions(definitions)
+        }
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkRuntime(); session.next(outputs) { checkRuntime(); sink(it) }
         }
@@ -30,6 +33,9 @@ fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSes
     if (session is RequestRetryModelSession) return object : RequestRetryModelSession {
         override val canResume: Boolean get() = session.canResume
         override val retriesCurrentRequest: Boolean get() = session.retriesCurrentRequest
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
+            checkRuntime(); session.updateToolDefinitions(definitions)
+        }
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkRuntime(); session.next(outputs) { checkRuntime(); sink(it) }
         }
@@ -41,6 +47,9 @@ fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSes
     }
     if (session is ResumableModelSession) return object : ResumableModelSession {
         override val canResume: Boolean get() = session.canResume
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
+            checkRuntime(); session.updateToolDefinitions(definitions)
+        }
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkRuntime(); session.next(outputs) { checkRuntime(); sink(it) }
         }
@@ -50,6 +59,9 @@ fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSes
         override fun cancel() = session.cancel()
     }
     return object : ModelSession {
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
+            checkRuntime(); session.updateToolDefinitions(definitions)
+        }
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkRuntime(); session.next(outputs) { checkRuntime(); sink(it) }
         }

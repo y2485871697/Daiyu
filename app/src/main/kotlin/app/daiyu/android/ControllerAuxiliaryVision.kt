@@ -110,6 +110,9 @@ internal class ControllerAuxiliaryVision private constructor(
                 throw cancellationOr(failure)
             } finally { synchronized(lifecycle) { inFlight = false } }
         }
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) = operation {
+            delegate.updateToolDefinitions(definitions)
+        }
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = operation {
             delegate.next(outputs) { event -> checkUsable(); sink(event) }
         }

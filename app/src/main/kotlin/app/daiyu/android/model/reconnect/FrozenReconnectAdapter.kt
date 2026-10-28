@@ -70,6 +70,7 @@ class FrozenReconnectAdapter private constructor(
                 (responsesBackground != null && retained is app.daiyu.android.domain.CheckpointedResumableModelSession)))
                 return retained
             return object : ModelSession {
+                override fun updateToolDefinitions(definitions: List<ToolDefinition>) = retained.updateToolDefinitions(definitions)
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     try { retained.next(outputs, sink) }
                     catch (failure: ModelRequestException) { report(failure); throw failure }

@@ -311,6 +311,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var acceptedContextSegments = 0
         var reopenAfterCompaction = false
         var contextInputOverhead = 0L
+        var requestDefinitions = emptyList<ToolDefinition>()
         fun effectiveHistory(message: Message = current): List<Message> = if (contextRuntime == null) modelHistory else modelHistory +
             MessageHistory.expand(listOf(segmentHistory.project(message).copy(status = RunStatus.COMPLETED, error = null)))
                 .drop(acceptedContextSegments)
@@ -576,13 +577,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         }
         fun contextSize(): Long {
             val runtime = contextRuntime ?: return 0
-            val local = runtime.localTokens(effectiveHistory(), (tool as? CatalogTool)?.definitions.orEmpty())
+            val local = runtime.localTokens(effectiveHistory(), requestDefinitions)
             val anchor = contextState?.calibration ?: contextState?.input
             return if (anchor != null) ((anchor.billedTokens ?: anchor.localTokens) + local - anchor.historyTokens).coerceAtLeast(0)
                 else (local + contextInputOverhead).coerceAtLeast(0)
         }
         fun awaitContextCapacity() {
-            val runtime = contextRuntime ?: return
+            val runtime = contextRuntime
             while (true) {
                 if (stopped.get() || terminalReserved) throw InterruptedException()
                 val controls = synchronized(terminalLock) {
@@ -591,6 +592,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (controls && boundary()) reopenAfterCompaction = true
                 // A manual summary is maintenance on the same writer, not a new model/tool turn.
                 if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary()
+                requestDefinitions = (tool as? CatalogTool)?.definitions.orEmpty().toList()
+                if (runtime == null) return
                 val estimate = contextSize()
                 if (estimate <= runtime.sendBudgetTokens) {
                     if (contextLimited) {
@@ -654,7 +657,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     }
                     if (!admitted) continue
                     val opened = try {
-                        if (tool is CatalogTool) model.open(modelHistory, tool.definitions) else model.open(modelHistory)
+                        if (tool is CatalogTool) model.open(modelHistory, requestDefinitions) else model.open(modelHistory)
                     } catch (failure: Exception) {
                         val invalidated = synchronized(terminalLock) {
                             if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
@@ -783,7 +786,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         is ModelEvent.InputEstimate -> {
                             contextState = contextState?.copy(input = RequestInputCheckpoint(checkNotNull(request), event.tokens,
                                 historyTokens = checkNotNull(contextRuntime).localTokens(effectiveHistory(),
-                                    (tool as? CatalogTool)?.definitions.orEmpty())))
+                                    requestDefinitions)))
                             contextState?.input?.let { contextInputOverhead = it.localTokens - it.historyTokens }
                             checkpoint()
                         }
@@ -1019,6 +1022,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     if (pauseRequested || attemptFence != pauseEpoch || delivery.isClosed) throw ModelDeliveryRejectedException()
                                 }
                                 invoked = true
+                                if (attempt == 0 && tool is CatalogTool) {
+                                    active.updateToolDefinitions(requestDefinitions)
+                                }
                                 providerInFlight.set(true)
                                 if (checkpointed != null) {
                                     check(options.runtimeStore is AtomicRuntimeStore && options.runtimeStore.durable) {
@@ -1298,7 +1304,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     if (stopped.get()) throw InterruptedException()
                     val key = call.name to call.arguments
                     check(key !in unknownOperations) { "未知操作禁止等价重放" }
-                    val sideEffect = (tool as? CatalogTool)?.definitions?.firstOrNull { it.name == call.name }?.sideEffect == true
+                    val sideEffect = requestDefinitions.firstOrNull { it.name == call.name }?.sideEffect == true
                     if (sideEffect) check(options.toolJournal?.durable == true) { "副作用工具需要持久执行日志" }
                     val result = results.getOrPut(call.id) {
                         val claim = options.toolJournal?.claim(current, call) ?: ToolClaim.Execute

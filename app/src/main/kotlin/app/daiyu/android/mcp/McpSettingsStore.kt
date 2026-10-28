@@ -77,7 +77,11 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         val callbacks = mutableListOf<() -> Unit>()
         try {
             return synchronized(lock) {
+                val beforeRevision = revisions[path]
+                val beforeStamp = stamps[path]
                 try { action() } finally {
+                    if (beforeRevision != revisions[path] || beforeStamp !== stamps[path])
+                        callbacks.addAll(changeObservers[path].orEmpty())
                     observers[path]?.let { values ->
                         val stale = values.filterNot { revisions[path] == it.expected.revision && stamps[path] === it.expected.stamp }
                         values.removeAll(stale.toSet()); callbacks.addAll(stale.map { it.invalidate })
@@ -97,12 +101,19 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
             observers[path]?.let { it.remove(observer); if (it.isEmpty()) observers.remove(path) }
         }; Unit }
     }
+    fun currentSnapshot(): McpSettings? = synchronized(lock) { snapshots[path]?.takeIf(::isCurrent) }
+    fun observeChanges(callback: () -> Unit): () -> Unit {
+        synchronized(lock) { changeObservers.getOrPut(path) { linkedSetOf() }.add(callback) }
+        return { synchronized(lock) {
+            changeObservers[path]?.let { it.remove(callback); if (it.isEmpty()) changeObservers.remove(path) }
+        }; Unit }
+    }
     fun snapshot(): McpSettings = access {
         try {
             val value = read()
             if (revisions[path] != value.revision || stamps[path] == null) stamps[path] = Any()
             revisions[path] = value.revision
-            McpSettings(value.revision, value.servers, checkNotNull(stamps[path]))
+            McpSettings(value.revision, value.servers, checkNotNull(stamps[path])).also { snapshots[path] = it }
         } catch (failure: Exception) {
             revisions[path] = UUID.randomUUID().toString(); stamps[path] = Any(); throw failure
         }
@@ -134,6 +145,7 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         check(read().revision == value.revision) { "mcp_settings_save_unconfirmed" }
         revisions[path] = value.revision
         stamps[path] = value.stamp
+        snapshots[path] = value
         value
     }
     fun clear(owner: McpSettingsOwner): McpSettings = access {
@@ -142,7 +154,7 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         file.delete()
         check(!file.baseFile.exists()) { "mcp_settings_clear_unconfirmed" }
         revisions[path] = "empty"
-        McpSettings("empty", emptyList()).also { stamps[path] = it.stamp }
+        McpSettings("empty", emptyList()).also { stamps[path] = it.stamp; snapshots[path] = it }
     }
     private fun read(): McpSettings {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return McpSettings("empty", emptyList())
@@ -198,6 +210,8 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         private val revisions = mutableMapOf<String, String>()
         private val stamps = mutableMapOf<String, Any>()
         private val observers = mutableMapOf<String, MutableSet<Observer>>()
+        private val snapshots = mutableMapOf<String, McpSettings>()
+        private val changeObservers = mutableMapOf<String, MutableSet<() -> Unit>>()
         private const val alias = "daiyu_mcp_private_v1"
         private val aad = "daiyu:mcp:private-settings:v1".toByteArray(Charsets.UTF_8)
     }

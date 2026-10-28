@@ -2,6 +2,17 @@
 
 本文说明本次新增实现和回归源码，不替代唯一功能清单或更新说明。未复用历史 Eta leaf，也未新增依赖。构建、主机回归和设备回归须由集成方执行；本实现代理仅能检查和修改源码，**没有运行测试或进行远端服务器兼容性验证**。
 
+## 普通会话实时目录（2026-10-28）
+
+- 普通父聊天在原 catalog 内挂载 `McpLiveScope`；即使启动时没有 MCP 服务器，也保留本轮动态目录入口。专用媒体、终端、浏览器、GUI 等隔离批准路径不借此扩大范围；原精确调用接口继续保留，且与 live 模式互斥。
+- Store 提供已确认的纯内存 `currentSnapshot()` 与跨实例持久 `observeChanges()`。开关、批量开关、删除、清除及配置保存沿同一原子存储链生效；读取或写入未确认时旧快照不能授权。监听回调在 Store 锁外执行，离开设置页不终止运行订阅。
+- 每个新配置 revision／stamp 生成新的运行内 epoch 和不复用的 `mcp_live_<epoch>_<index>_call` 名称。旧目录、旧工具对象、旧 ledger 回包均复核 owner 和当前 epoch；删除后以同 ID 重建也不会复活旧 alias。已关闭工具不广告、不调用；再次开启通过新 epoch 可供当前会话下一请求使用。
+- Live 工具仍全部按 WRITE，沿中央 `PreparedTool.approvedWrite` 为本次完整参数签发唯一精确 effect，不新增叶级 dispatcher／ledger。设置可用性不是远端安全声明；远端注解和输出不产生权限。
+- 模型在真正新请求的 attempt0 更新工具快照；Responses、Messages、Chat Completions、Gemini 与用量、guard、辅助视觉、工具子代理包装透传。流式请求不因设置变化重发；当前请求 retry 恢复其原 tools，游标 resume 仍走原 GET。计量估算和 sideEffect 标记使用同请求快照。
+- 保存配置先撤销旧 epoch，再取消旧真实 HTTP Call；取消不等于远端回滚。晚返回、transport 工厂及 response/body 仍由原 catalog 等待物理 drain；进入 tools/call 后状态失效返回 UNKNOWN，拒绝晚结果且不自动重试。设置不变的同 epoch 等价调用仍使用原 ledger 去重。
+
+以下“本轮精确调用”描述的是保留的专用接口，不是普通聊天需要再次填写的必经授权步骤。
+
 ## 实际入口
 
 1. 设置搜索 `MCP` → **MCP 服务器**（`SettingsCatalog` 的 `MCP_SETTINGS` route，真实 `MainActivity` 页面）。最多保存 8 个不同 ID 的服务器。地址支持 HTTPS，以及本机 `http://127.0.0.1`（端口可配置）；其他 HTTP 仍拒绝。主网络配置默认禁止明文，只对精确 `127.0.0.1` 放行，不包含子域名。拒绝 URL 用户名、密码、query、fragment。可选 Bearer 不回填、不显示、不写入日志/备份。访问页面、编辑保存、切换工具、删除和修复清除都不连接服务器，也不制造任务批准。仅新增服务器保存成功后自动刷新一次工具目录；失败保留已保存连接，可手动刷新重试。刷新只发现元数据，不发送 tools/call。
@@ -18,7 +29,7 @@
 - 工具卡片只显示单行名称、详情箭头和独立开关；长名称省略显示。点击名称或箭头打开与“本会话协作”同款底部弹层，展示完整名称及可滚动描述；点击开关只切换该工具。
 - “工具”标题右侧的“全部开启／全部关闭”为纯文字操作，一次保存当前服务器整批状态，不产生网络请求。
 - 新发现工具默认开启；旧配置中未包含 `disabled_tools` 时也全部开启。旧 `enabled`／`allowed_tools` 继续作为兼容字段，不推导成新关闭选择。用户显式关闭集合随原加密 envelope 保存，普通编辑和重开保留；刷新保留仍在目录中的关闭项、移除消失项，新增工具开启。
-- 新开关是工具可用性选择，不是第二次执行许可。关闭的工具由 `McpServer.eligible` 在冻结精确调用 scope 之前拒绝；开关保存沿用原 owner／revision／stamp 失效链，不能继续调用旧 scope。
+- 新开关是工具可用性选择，不是第二次执行许可。关闭的工具由 `McpServer.eligible` 过滤；普通聊天更新 live epoch，精确调用专用接口则沿原 owner／revision／stamp 撤销旧 scope。
 
 ## 私有配置与身份
 

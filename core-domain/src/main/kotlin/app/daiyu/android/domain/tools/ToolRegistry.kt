@@ -123,6 +123,15 @@ class ToolCatalog internal constructor(tools: Map<String, Pair<ToolDefinition, R
     private val tools = tools.toMap()
     val definitions: List<ToolDefinition> = Collections.unmodifiableList(this.tools.values.map { it.first })
     fun available(session: SessionCapabilities): List<ToolDefinition> = definitions.filter { it.capability in session.enabled }
+    fun withAdditional(additional: List<RegisteredTool>): ToolCatalog {
+        val combined = tools.toMutableMap()
+        additional.forEach { tool ->
+            val definition = tool.definition
+            require(definition.name !in combined) { "duplicate_tool" }
+            combined[definition.name] = definition to tool
+        }
+        return ToolCatalog(combined)
+    }
     internal fun find(name: String): Pair<ToolDefinition, RegisteredTool>? = tools[name]
 }
 

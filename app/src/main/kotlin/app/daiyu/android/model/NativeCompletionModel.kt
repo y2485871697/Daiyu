@@ -33,7 +33,7 @@ class NativeCompletionModel internal constructor(
 
     private inner class Session(
         history: List<Message>,
-        private val tools: List<ToolDefinition>,
+        private var tools: List<ToolDefinition>,
         images: ModelImagePlan?,
     ) : RequestRetryModelSession {
         private val endpoint = settings.also { it.validate() }.requestEndpoint()
@@ -49,6 +49,9 @@ class NativeCompletionModel internal constructor(
         private var pending = emptyMap<String, String>()
         init { NativeCompletionRequest.body(settings, rows, tools, instructions) }
         private fun checkCancelled() { if (cancelled.get()) throw InterruptedException() }
+
+        @Synchronized
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) { tools = definitions.toList() }
 
         private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
         override val canResume: Boolean get() = !cancelled.get() && retry.available
@@ -67,10 +70,11 @@ class NativeCompletionModel internal constructor(
             val savedItems = ownItems.toList()
             val savedPending = pending
             val savedStarted = started
+            val savedTools = tools
             retry.capture(outputs) {
                 rows = org.json.JSONArray(savedRows)
                 ownItems.clear(); ownItems.addAll(savedItems)
-                pending = savedPending; started = savedStarted; usable = true
+                pending = savedPending; started = savedStarted; usable = true; tools = savedTools
             }
             started = true; usable = false
             val resultRows = outputs.map { output ->

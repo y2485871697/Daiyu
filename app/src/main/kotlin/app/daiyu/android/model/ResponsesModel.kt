@@ -35,6 +35,7 @@ class ResponsesModel internal constructor(
             videoInputCapability, videoPostApprovalProvider, sessionContext, capability, oauthHeaders, oauthRefresh, summaryRequest)
     }
     private fun exposed(session: Session): ModelSession = if (backgroundResume != null) session else object : RequestRetryModelSession {
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) = session.updateToolDefinitions(definitions)
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = session.next(outputs, sink)
         override fun cancel() = session.cancel()
         override val canResume: Boolean get() = session.canResume
@@ -74,7 +75,7 @@ class ResponsesModel internal constructor(
         private val settings: ModelSettings,
         history: List<Message>,
         private val connect: (URL) -> HttpsURLConnection,
-        private val tools: List<ToolDefinition>,
+        private var tools: List<ToolDefinition>,
         capability: Boolean?,
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
@@ -97,6 +98,9 @@ class ResponsesModel internal constructor(
             try { nextAcknowledged(outputs, sink) } finally { this.localSink = null }
         }
         private var acknowledgedSink: ((ModelEventBatch) -> ModelDeliveryAck)? = null
+        @Synchronized
+        override fun updateToolDefinitions(definitions: List<ToolDefinition>) { tools = definitions.toList() }
+
         private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
         private val cursorAvailable: Boolean get() = backgroundResume != null && resumeAllowed && decoder.canResume
         override val retriesCurrentRequest: Boolean get() = !cursorAvailable
@@ -269,11 +273,12 @@ class ResponsesModel internal constructor(
             val savedItems = ownItems.toList()
             val savedPending = pending
             val savedStarted = started
+            val savedTools = tools
             if (!retry.replaying) { refreshAttempted = false; refreshFailed = false; rejectedAuthorization = null }
             retry.capture(outputs) {
                 input = org.json.JSONArray(savedInput)
                 ownItems.clear(); ownItems.addAll(savedItems)
-                pending = savedPending; started = savedStarted; usable = true
+                pending = savedPending; started = savedStarted; usable = true; tools = savedTools
             }
             started = true
             usable = false

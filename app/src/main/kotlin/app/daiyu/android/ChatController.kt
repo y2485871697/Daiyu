@@ -3812,7 +3812,16 @@ class ChatController internal constructor(private val application:Application,
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
+        var preparingLiveMcp: app.daiyu.android.mcp.McpLiveScope? = null
         val prepared = try {
+            val liveMcp = if (mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
+                browserBinding == null && terminalRun == null && terminalJobRun == null && generation == null &&
+                shizukuPreparation == null && shizukuAuthorization == null && platformAction == null) {
+                val store = app.daiyu.android.mcp.McpSettingsStore(application)
+                store.snapshot()
+                app.daiyu.android.mcp.McpLiveScope(conversationId, run, store::currentSnapshot, store::observeChanges, mcpTransport)
+                    .also { preparingLiveMcp = it }
+            } else null
             val referenceTexts = user.blocks.filterIsInstance<MessageBlock.Text>().map { it.text }
             val referenceReader = app.daiyu.android.references.ConversationReferenceReader(database,
                 application.filesDir, app.daiyu.android.references.PromptReferences.conversations(referenceTexts), conversationId)
@@ -3853,6 +3862,7 @@ class ChatController internal constructor(private val application:Application,
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
                     (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
                     (if (mcpPreparation == null) emptySet() else setOf(app.daiyu.android.mcp.McpRunScope.CAPABILITY)) +
+                    (if (liveMcp == null) emptySet() else setOf(app.daiyu.android.mcp.McpLiveScope.CAPABILITY)) +
                     (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
                     (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)) +
                     (if (terminalJobRun == null) emptySet() else setOf(TerminalJobSession.CAPABILITY)) +
@@ -3883,7 +3893,7 @@ class ChatController internal constructor(private val application:Application,
             // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
-                backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope,
+                backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope, liveMcp=liveMcp,
                 workspacePin = workspace, referenceReader = referenceReader,
                 platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
@@ -4068,6 +4078,7 @@ class ChatController internal constructor(private val application:Application,
             else {
                 preparingDevices?.close()
                 preparingChildren?.close()
+                preparingLiveMcp?.close()
             }
             problem="运行准备失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
         }

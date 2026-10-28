@@ -68,6 +68,7 @@ internal class RunCatalogTools(
     private val gui: GuiRunSession? = null,
     private val observeGuiClose: (GuiRunSession, (RunCatalogCloseResult) -> Unit) -> Unit = ::observeGuiDrain,
     private val mcp: app.daiyu.android.mcp.McpRunScope? = null,
+    private val liveMcp: app.daiyu.android.mcp.McpLiveScope? = null,
     private val platformAction: PlatformActionScope? = null,
     private val commandFactory: ((RunExecutionOwner, TaskAuthorization) -> RunCommandTools)? = null,
     private val childTaskAccess: RunChildTaskAccess? = null,
@@ -106,6 +107,7 @@ internal class RunCatalogTools(
         require(!usesVirtualDisplaySession || (virtualDisplayFactory == null && authorizationFactory == null)) {
             "virtual_display_session_factory_conflict"
         }
+        require(mcp == null || liveMcp == null) { "mcp_modes_conflict" }
         require(mcp == null || (authorization === mcp.authorization && authorizationFactory == null && !usesVirtualDisplaySession)) {
             "mcp_task_authorization_required"
         }
@@ -196,6 +198,7 @@ internal class RunCatalogTools(
             terminalLeaf?.bindOwner(owner)
             terminalJobs?.bind(owner, capabilities, authorization)
             mcp?.bind(owner, capabilities, authorization)
+            liveMcp?.bind(owner, capabilities, authorization)
             val boundBrowserTools = browser?.bindOwner(owner, authorization)?.tools ?: emptyList()
             createdBackground = backgroundFactory?.let { factory ->
                 createResource { factory(owner, capabilities, authorization) }
@@ -290,7 +293,9 @@ internal class RunCatalogTools(
                 require(gui == null || snapshot.available(capabilities).none { it.effect == ToolEffect.USER_BARRIER }) {
                     "gui_user_barrier_not_supported"
                 }
-                val result = CatalogModelBridge(snapshot, capabilities, ledger, conversationId, runId, authorization)
+                val result = CatalogModelBridge(snapshot, capabilities, ledger, conversationId, runId, authorization) {
+                    liveMcp?.let { snapshot.withAdditional(it.registeredTools()) } ?: snapshot
+                }
                 result.bindOwner(bound)
                 synchronized(closeLock) {
                     check(!closed.get()) { "run_closed" }
@@ -402,6 +407,7 @@ internal class RunCatalogTools(
             commands?.markUnknown()
             gui?.onCentralUnknown() // missing final central feedback also fails closed, with no retry
             mcp?.markUnknown()
+            liveMcp?.close()
             platformAction?.markUnknown()
             if (leaf != null || session != null) synchronized(closeLock) { recordCloseFailure("virtual_display_batch_unconfirmed") }
             // Do not invent results or finish a ticket when no final central result exists.
@@ -417,6 +423,7 @@ internal class RunCatalogTools(
         commands?.observeOutcomes(results)
         unknown?.let {
             mcp?.markUnknown()
+            liveMcp?.close()
             shizuku?.session?.markOutcomeUnknown(it.code.ifBlank { "dispatcher_outcome_unknown" })
             platformAction?.markUnknown()
         }
@@ -436,7 +443,7 @@ internal class RunCatalogTools(
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
             // R08 close is revocation only. Never synthesize a release/shutdown operation.
-            claimStops(listOfNotNull(mcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, commands, shizuku, platformAction, background, children, deviceResources, skills, referenceReader))
+            claimStops(listOfNotNull(mcp, liveMcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, commands, shizuku, platformAction, background, children, deviceResources, skills, referenceReader))
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -581,7 +588,7 @@ internal class RunCatalogTools(
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 12
+                remainingObservations = 13
                 true
             }
         }
@@ -590,6 +597,10 @@ internal class RunCatalogTools(
             observeResourceClose(gui) { done ->
                 if (gui == null) done(RunCatalogCloseResult.Drained)
                 else observeGuiClose(gui, done)
+            }
+            observeResourceClose(liveMcp) { done ->
+                if (liveMcp == null) done(RunCatalogCloseResult.Drained)
+                else liveMcp.observeDrained { done(RunCatalogCloseResult.Drained) }
             }
             observeResourceClose(mcp) { done ->
                 if (mcp == null) done(RunCatalogCloseResult.Drained)

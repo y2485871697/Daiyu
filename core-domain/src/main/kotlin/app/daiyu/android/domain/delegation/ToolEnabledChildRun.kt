@@ -133,6 +133,10 @@ class ToolEnabledChildRun(
                     synchronized(gate) { transportDrained = false }
                     val once = AtomicBoolean(false)
                     return object : ModelSession {
+                        override fun updateToolDefinitions(definitions: List<app.daiyu.android.domain.ToolDefinition>) {
+                            check(pauseControl.awaitBoundary() && !stopped())
+                            transport.updateToolDefinitions(definitions)
+                        }
                         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                             check(pauseControl.awaitBoundary() && !stopped())
                             transport.next(outputs, sink)

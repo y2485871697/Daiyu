@@ -14,6 +14,30 @@ import javax.crypto.KeyGenerator
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34], shadows = [HostAtomicFileShadow::class])
 class McpSettingsStoreTest {
+    @Test fun liveSnapshotsAndPersistentObserversFollowCrossInstanceToggleDeleteAndClear() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val store = McpSettingsStore(context) { key }
+        val other = McpSettingsStore(context) { key }
+        val owner = McpSettingsOwner()
+        store.clear(owner); store.snapshot()
+        var changes = 0
+        val cancel = store.observeChanges { changes++ }
+        try {
+            val server = McpServer("test", "fixture", "https://mcp.invalid/rpc", "", catalog = listOf(McpRemoteTool("read", "read")))
+            val first = other.save(listOf(server), owner, other.snapshot())
+            assertSame(first, store.currentSnapshot()); assertEquals(1, changes)
+            val disabled = other.save(listOf(server.withPolicy(disabledTools = setOf("read"))), owner, first)
+            assertFalse(checkNotNull(store.currentSnapshot()).servers.single().eligible("read")); assertEquals(2, changes)
+            val removed = other.save(emptyList(), owner, disabled)
+            assertTrue(checkNotNull(store.currentSnapshot()).servers.isEmpty()); assertEquals(3, changes)
+            other.save(listOf(server), owner, removed)
+            assertEquals(4, changes); assertFalse(store.isCurrent(first))
+            other.clear(owner)
+            assertTrue(checkNotNull(store.currentSnapshot()).servers.isEmpty()); assertEquals(5, changes)
+            cancel(); other.save(listOf(server), owner, other.snapshot()); assertEquals(5, changes)
+        } finally { cancel(); store.clear(owner) }
+    }
     @Test fun loopbackHttpWithEmptyTokenRoundTripsWithoutAdmittingOtherHttpTargets() {
         val context = RuntimeEnvironment.getApplication()
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()

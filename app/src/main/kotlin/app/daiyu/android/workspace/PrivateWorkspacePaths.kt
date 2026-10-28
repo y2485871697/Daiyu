@@ -7,14 +7,14 @@ import java.nio.file.Files
 internal class PrivateWorkspacePaths private constructor(private val filesDir: File,
     internal val rootParts: List<String>, private val create: Boolean) {
     constructor(filesDir: File) : this(filesDir, listOf("workspace"), true)
-    internal val storage: File get() = filesDir.canonicalFile
+    internal val storage: File get() = filesDir.toPath().toRealPath().toFile()
     internal val readOnly: Boolean get() = !create
     val root: File get() = rootParts.fold(filesDir) { parent, name -> File(parent, name) }
 
     /** Called on the owning worker. Existing home files are neither moved nor deleted. */
     fun ensureRoot(): File {
-        var directory = filesDir.canonicalFile
-        check(directory.isDirectory) { "workspace_storage_unavailable" }
+        check(filesDir.isDirectory) { "workspace_storage_unavailable" }
+        var directory = storage
         for (part in rootParts) {
             directory = File(directory, part)
             check(!Files.isSymbolicLink(directory.toPath())) { "workspace_root_changed" }
@@ -30,7 +30,7 @@ internal class PrivateWorkspacePaths private constructor(private val filesDir: F
 
         /** The caller supplies an approved Rootfs; missing directories are never created. */
         fun existingRoot(filesDir: File, root: File): PrivateWorkspacePaths {
-            val storage = filesDir.canonicalFile.toPath()
+            val storage = filesDir.toPath().toRealPath()
             val suppliedStorage = filesDir.absoluteFile.toPath().normalize()
             val selected = root.toPath()
             val base = if (selected.startsWith(storage)) storage else suppliedStorage

@@ -46,7 +46,7 @@ class R48BatchContract(unittest.TestCase):
 
     def test_sheet_precondition_finishes_before_opening_and_clock_freeze(self):
         source = (TEST / 'SubAgentPresetActionsSheetTest.kt').read_text()
-        setup = source.split('private fun installClosed()', 1)[1].split('private data class Geometry', 1)[0]
+        setup = source.split('private fun installClosed(', 1)[1].split('private data class Geometry', 1)[0]
         for token in ['dismissIme(root)', 'awaitStableWindowFrame(root)', '!insets.isVisible(ime)',
                       'insets.getInsets(ime).bottom == 0']:
             self.assertIn(token, setup)

@@ -59,7 +59,7 @@ internal class ConversationWorkspaceResolver(private val filesDir: File) {
     private fun storageDirectory(): File {
         // Android may supply /data/user/... while its canonical spelling is /data/data/...
         // Only this trusted prefix may be canonicalized before examining individual components.
-        val storage = filesDir.canonicalFile
+        val storage = filesDir.toPath().toRealPath().toFile()
         check(storage.isDirectory) { "workspace_path_unavailable" }
         return storage
     }

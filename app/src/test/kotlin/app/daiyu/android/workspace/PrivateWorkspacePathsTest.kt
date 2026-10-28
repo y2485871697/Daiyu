@@ -22,6 +22,36 @@ class PrivateWorkspacePathsTest {
         assertFalse(File(files, "user-terminal").exists())
     }
 
+    @Test fun constructionDoesNotResolveMissingStorage() = fixture { files, _ ->
+        val missing = File(files, "missing-storage")
+        val paths = PrivateWorkspacePaths(missing)
+        assertEquals(File(missing, "workspace"), paths.root)
+        assertFalse(missing.exists())
+        try { paths.ensureRoot(); fail("missing storage accepted") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_storage_unavailable", failure.message) }
+        assertFalse(missing.exists())
+    }
+
+    @Test fun defaultRootUsesTrustedStorageAliasButRejectsSelectedLinks() = fixture { files, _ ->
+        val storage = File(files, "storage").apply { mkdir() }
+        val alias = File(files, "storage-alias")
+        Files.createSymbolicLink(alias.toPath(), storage.toPath())
+        try {
+            val paths = PrivateWorkspacePaths(alias)
+            val root = File(storage, "workspace")
+            assertEquals(File(alias, "workspace"), paths.root)
+            assertFalse(root.exists())
+            assertEquals(File(storage.toPath().toRealPath().toFile(), "workspace").toPath(), paths.ensureRoot().toPath())
+            assertEquals(storage.toPath().toRealPath().toFile(), paths.storage)
+            assertTrue(root.delete())
+            val other = File(storage, "other").apply { mkdir() }
+            Files.createSymbolicLink(root.toPath(), other.toPath())
+            try { paths.ensureRoot(); fail("workspace link accepted") }
+            catch (failure: IllegalStateException) { assertEquals("workspace_root_changed", failure.message) }
+            finally { Files.delete(root.toPath()) }
+        } finally { Files.delete(alias.toPath()) }
+    }
+
     @Test fun conflictFileIsNotRemovedOrReplaced() = fixture { _, paths ->
         paths.root.writeText("not a directory")
         try { paths.ensureRoot(); fail("file accepted") }
@@ -63,11 +93,11 @@ class PrivateWorkspacePathsTest {
         val alias = File(files, "storage-alias")
         Files.createSymbolicLink(alias.toPath(), storage.toPath())
         try {
-            for (root in listOf(File(alias, "env/rootfs"), File(alias.canonicalFile, "env/rootfs"))) {
+            for (root in listOf(File(alias, "env/rootfs"), File(alias.toPath().toRealPath().toFile(), "env/rootfs"))) {
                 val paths = PrivateWorkspacePaths.existingRoot(alias, root)
                 assertTrue(paths.readOnly)
-                assertEquals(alias.canonicalFile, paths.storage)
-                assertEquals(File(alias.canonicalFile, "env/rootfs").canonicalFile, paths.ensureRoot())
+                assertEquals(alias.toPath().toRealPath().toFile(), paths.storage)
+                assertEquals(File(alias.toPath().toRealPath().toFile(), "env/rootfs").canonicalFile, paths.ensureRoot())
             }
             val target = File(storage, "other").apply { mkdir() }
             val link = File(storage, "linked")

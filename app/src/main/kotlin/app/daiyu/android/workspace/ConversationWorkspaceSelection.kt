@@ -4,7 +4,7 @@ import java.io.File
 
 /** Selection is narrower than resolution of existing conversation bindings. */
 internal class ConversationWorkspaceSelection(private val filesDir: File) {
-    private fun root() = File(filesDir.canonicalFile, "workspace")
+    private fun root() = File(filesDir.toPath().toRealPath().toFile(), "workspace")
 
     fun binding(sourceId: String, path: String): ConversationWorkspaceBinding.Private {
         require(sourceId == "private") { "workspace_selection_root_required" }

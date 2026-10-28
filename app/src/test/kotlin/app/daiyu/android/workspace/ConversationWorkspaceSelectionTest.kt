@@ -33,7 +33,8 @@ class ConversationWorkspaceSelectionTest {
 
     @Test fun descendantsRetainExactNamesAndParentStopsAtRoot() = fixture { files, _ ->
         val root = File(files, "workspace").apply { mkdir() }
-        val child = File(root, " 项目 ' 空格 ").apply { mkdir() }
+        val name = if (File.separatorChar == '\\') " 项目 ' 空格" else " 项目 ' 空格 "
+        val child = File(root, name).apply { check(mkdir()) }
         val nested = File(child, "第二级").apply { mkdir() }
         val selection = ConversationWorkspaceSelection(files)
         for (directory in listOf(child, nested)) {
@@ -125,8 +126,18 @@ class ConversationWorkspaceSelectionTest {
         val alias = File(temporary, "storage-alias")
         Files.createSymbolicLink(alias.toPath(), files.toPath())
         val selection = ConversationWorkspaceSelection(alias)
-        assertEquals(ConversationWorkspaceBinding.Private(), selection.binding("private", "$alias/workspace"))
-        assertEquals(ConversationWorkspaceBinding.Private(child.path), selection.binding("private", "$alias/workspace/child"))
+        for (base in listOf(alias, files)) {
+            assertEquals(ConversationWorkspaceBinding.Private(), selection.binding("private", File(base, "workspace").path))
+            assertEquals(ConversationWorkspaceBinding.Private(child.path), selection.binding("private", File(base, "workspace/child").path))
+        }
+        val root = File(files, "workspace")
+        assertNull(selection.parentPath(root))
+        assertEquals(root.path, selection.parentPath(child))
+        val linked = File(root, "linked")
+        Files.createSymbolicLink(linked.toPath(), child.toPath())
+        rejected("workspace_symlink_not_supported") {
+            selection.binding("private", File(alias, "workspace/linked").path)
+        }
     }
 
     @Test fun aliasPrefixAndWorkspacePrefixSiblingsAreRejected() = fixture { files, temporary ->

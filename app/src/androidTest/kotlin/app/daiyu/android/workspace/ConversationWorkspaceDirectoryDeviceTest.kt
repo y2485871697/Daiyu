@@ -37,6 +37,16 @@ class ConversationWorkspaceDirectoryDeviceTest : InstrumentationTestCase() {
         catch (expected: IllegalArgumentException) { assertEquals("workspace_selection_root_required", expected.message) }
     }
 
+    fun testPrivateNamesKeepLeadingAndTrailingSpacesAndQuotes() = fixture { storage, access ->
+        val root = File(storage, "workspace").apply { mkdir() }
+        val name = " 项目 ' 空格 "
+        val child = File(root, name).apply { check(mkdir()) }
+        val expected = child.toPath().toRealPath().toString()
+        assertEquals(listOf(name), access.directory("private", root.path).folders)
+        assertEquals(ConversationWorkspaceBinding.Private(expected), access.binding("private", child.path))
+        assertEquals(expected, access.directory("private", child.path).path)
+    }
+
     fun testFolderListingDoesNotSilentlyStopAfterOneHundredFiles() = fixture { storage, access ->
         val root = File(storage, "workspace").apply { mkdir() }
         repeat(160) { File(root, "file-$it").writeText("") }

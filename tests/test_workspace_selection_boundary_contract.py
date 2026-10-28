@@ -59,6 +59,18 @@ class WorkspaceSelectionBoundary(unittest.TestCase):
         self.assertIn('nativeAndForwardSeparatorsKeepTheSameSelectionBoundary', tests)
         self.assertIn('child.absolutePath.replace(File.separatorChar,', tests)
 
+    def test_only_trusted_storage_prefix_uses_real_path(self):
+        workspace = BASE / 'workspace'
+        for filename in ['ConversationWorkspaceResolver.kt', 'ConversationWorkspaceSelection.kt',
+                         'PrivateWorkspacePaths.kt']:
+            source = (workspace / filename).read_text()
+            self.assertIn('filesDir.toPath().toRealPath()', source)
+            self.assertNotIn('File(binding.path).toPath().toRealPath()', source)
+            self.assertNotIn('selected.toRealPath()', source)
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/workspace/ConversationWorkspaceDirectoryDeviceTest.kt').read_text()
+        self.assertIn('testPrivateNamesKeepLeadingAndTrailingSpacesAndQuotes', device)
+        self.assertIn('assertEquals(listOf(name)', device)
+
     def test_general_resolver_keeps_existing_binding_compatibility(self):
         resolver = (BASE / 'workspace/ConversationWorkspaceResolver.kt').read_text()
         self.assertIn('is ConversationWorkspaceBinding.Rootfs', resolver)

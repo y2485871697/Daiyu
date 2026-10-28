@@ -662,17 +662,15 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
         node("settings-field:名额 ID").assertDoesNotExist()
         reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
+        // Check the invalid draft before reveal() dismisses the active editing session.
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
         val reopenedSlot = reveal("settings-field:名额 ID", "制作声音").assertTextContains("invalid")
         awaitNodeWindowFocus(reopenedSlot)
         reopenedSlot.performTouchInput { click() }
         ui.onAllNodesWithText("在豆包控制台进入声音复刻音色列表", substring = true).assertCountEquals(0)
         ui.onAllNodesWithText("优先使用已有或免费名额", substring = true).assertCountEquals(0)
-        awaitImeFrame(node("settings-field:名额 ID"), visible = true)
-        reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
-        val slotField = reveal("settings-field:名额 ID", "制作声音")
-        slotField.performTouchInput { click() }
-        awaitImeFrame(slotField, visible = true)
-        slotField.performTextReplacement("S_synthetic_slot")
+        awaitImeFrame(reopenedSlot, visible = true)
+        reopenedSlot.performTextReplacement("S_synthetic_slot")
         reveal("settings-row:下一步：选择录音", "制作声音").performClick()
         node("voice-training-sample").assert(hasAnyAncestor(hasTestTag("voice-create-sample-card")))
         ui.onAllNodesWithText("选择文件不会上传", substring = false).assertCountEquals(0)

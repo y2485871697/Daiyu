@@ -49,7 +49,10 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         self.assertIn('onContentDisplayed(hasDisplayBody || contentReady)', chat)
         self.assertIn('onContentDisplayed(false)', chat)
         typing = (BASE / 'MarkdownTyping.kt').read_text()
-        self.assertIn('it.sources == baseline.map { source -> source.text }', typing)
+        self.assertIn('remember(baselineProjection, baseline, sources == baseline)', typing)
+        self.assertIn('markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline)', typing)
+        self.assertIn('it.sources == baseline || (allowPrefix && isMarkdownAppend(it.sources, baseline))', typing)
+        self.assertIn('projection?.sources == sources.map { it.text } && baselineLength != null', typing)
         self.assertIn('parsed.sources.sumOf', typing)
 
     def test_real_regressions_cover_bounded_progress_replacement_and_ui_publication(self):

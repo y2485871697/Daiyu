@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
@@ -132,15 +133,17 @@ class VoiceSettingsPaletteActivityTest : WiredActivityTestCase() {
             )
             mainThread { activity.setContent {
                 AgentAppTheme(appearance, applyInterfaceScale = false) {
-                    Column(Modifier.fillMaxSize().safeDrawingPadding()
-                        .background(MiuixTheme.colorScheme.surfaceContainerHigh)) {
-                        SettingsCard(Modifier.testTag("quota-fill-reference")) { Spacer(Modifier.height(64.dp)) }
-                        OptionSelectionItem("名额", selected.value, cardStyle = true,
-                            modifier = Modifier.padding(horizontal = 16.dp).testTag("quota-fill-choice")) {
-                            choices++; selected.value = true
+                    CompositionLocalProvider(LocalSettingsPageStyle provides true) {
+                        Column(Modifier.fillMaxSize().safeDrawingPadding()
+                            .background(MiuixTheme.colorScheme.surfaceContainerHigh)) {
+                            SettingsCard(Modifier.testTag("quota-fill-reference")) { Spacer(Modifier.height(64.dp)) }
+                            OptionSelectionItem("名额", selected.value, cardStyle = true,
+                                modifier = Modifier.padding(horizontal = 16.dp).testTag("quota-fill-choice")) {
+                                choices++; selected.value = true
+                            }
+                            OptionSelectionItem("不可用", selected = false, cardStyle = true, enabled = false,
+                                modifier = Modifier.testTag("quota-disabled")) { choices++ }
                         }
-                        OptionSelectionItem("不可用", selected = false, cardStyle = true, enabled = false,
-                            modifier = Modifier.testTag("quota-disabled")) { choices++ }
                     }
                 }
             } }

@@ -50,6 +50,52 @@ class MarkdownRevealTest {
         }
     }
 
+    @Test fun resumedBaselineUsesCompletedPrefixBeforeTheLatestParseFinishes() {
+        val prefix = "Streaming **body**.\n\nNew paragraph."
+        val latest = prefix + "\n\nLatest paragraph."
+        val parsedPrefix = MarkdownParser.parse(prefix)
+        val projection = MarkdownProjection(listOf(prefix), mapOf(prefix to parsedPrefix), MarkdownParser::parse)
+        val budget = markdownBlocksLength(parsedPrefix)
+        assertEquals(budget, markdownTypingBaselineLength(projection, listOf(latest), allowPrefix = true))
+        val state = MarkdownTypingState(listOf(source(latest)))
+        val prefixPart = MarkdownTypingPart(source(prefix), budget, markdownBlocksDisplayText(parsedPrefix))
+        val target = state.update(listOf(prefixPart),
+            markdownTypingBaselineLength(projection, listOf(latest), allowPrefix = true), true, false)!!
+        assertEquals(budget, target.start)
+        assertEquals(budget, target.limit("final", target.start))
+        val parsedLatest = MarkdownParser.parse(latest)
+        val latestProjection = MarkdownProjection(listOf(latest), mapOf(latest to parsedLatest), MarkdownParser::parse)
+        val next = state.update(listOf(MarkdownTypingPart(source(latest), markdownBlocksLength(parsedLatest),
+            markdownBlocksDisplayText(parsedLatest))),
+            markdownTypingBaselineLength(latestProjection, listOf(latest), allowPrefix = true), true, false)!!
+        assertEquals(budget, next.start)
+        assertTrue(next.start < next.total)
+    }
+
+    @Test fun completedPrefixCannotReplaceAnOlderFrozenBaselineOrUnrelatedText() {
+        val text = "existing"
+        val projection = MarkdownProjection(listOf(text), mapOf(text to MarkdownParser.parse(text)), MarkdownParser::parse)
+        assertNull(markdownTypingBaselineLength(projection, listOf("existing new"), allowPrefix = false))
+        assertNull(markdownTypingBaselineLength(projection, listOf("replacement"), allowPrefix = true))
+        assertNull(markdownTypingBaselineLength(projection, emptyList(), allowPrefix = true))
+        assertEquals(text.length, markdownTypingBaselineLength(projection, listOf(text), allowPrefix = false))
+        assertNull(markdownTypingBaselineLength(null, listOf(text), allowPrefix = true))
+    }
+
+    @Test fun resumedMixedSourcesRetainEachCompletedPartBudget() {
+        val texts = listOf("first", "second")
+        val projection = MarkdownProjection(texts, texts.associateWith(MarkdownParser::parse), MarkdownParser::parse)
+        val baseline = listOf("first", "second new", "third")
+        assertEquals(11, markdownTypingBaselineLength(projection, baseline, allowPrefix = true))
+        val state = MarkdownTypingState(baseline.mapIndexed { i, text -> source(text, "item-$i") })
+        val parts = texts.mapIndexed { i, text -> part(text, "item-$i") }
+        val target = state.update(parts, markdownTypingBaselineLength(projection, baseline, allowPrefix = true), true, false)!!
+        assertEquals(5, target.limit("item-0", target.start))
+        assertEquals(6, target.limit("item-1", target.start))
+        assertEquals(0, target.limit("item-2", target.start))
+        assertNull(markdownTypingBaselineLength(projection, listOf("changed", "second new"), allowPrefix = true))
+    }
+
     @Test fun newBodyAnimatesAndNewTargetsKeepProgress() {
         val state = MarkdownTypingState(listOf(source("")))
         state.update(listOf(part("")), 0, true, false)

@@ -55,10 +55,8 @@ internal fun rememberMarkdownReveal(
     val baseline = remember(identity, resetEpoch) { sources.toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
         streaming = !terminal)
-    val baselineLength = remember(baselineProjection) {
-        baselineProjection?.takeIf { it.sources == baseline.map { source -> source.text } }?.let { parsed -> parsed.sources.sumOf {
-            markdownBlocksLength(parsed.blocks.getValue(it)).toLong()
-        }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
+    val baselineLength = remember(baselineProjection, baseline, sources == baseline) {
+        markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline)
     }
     val parts = remember(sources, projection) {
         projection?.let { parsed -> sources.take(parsed.sources.size).mapIndexed { index, source ->
@@ -83,4 +81,13 @@ internal fun rememberMarkdownReveal(
     val exact = projection?.sources == sources.map { it.text } && baselineLength != null && target != null &&
         target.parts == parts && target.parts.map { it.source } == sources
     return remember(target, frame, exact) { MarkdownReveal(target, frame, exact) }
+}
+
+internal fun markdownTypingBaselineLength(
+    projection: MarkdownProjection?,
+    baseline: List<String>,
+    allowPrefix: Boolean,
+): Int? = projection?.takeIf { it.sources == baseline || (allowPrefix && isMarkdownAppend(it.sources, baseline)) }?.let { parsed ->
+    parsed.sources.sumOf { markdownBlocksLength(parsed.blocks.getValue(it)).toLong() }
+        .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }

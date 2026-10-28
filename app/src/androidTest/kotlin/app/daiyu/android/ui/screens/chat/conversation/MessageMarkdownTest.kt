@@ -126,12 +126,13 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             if (text == third) { thirdEntered.countDown(); releaseThird.await() }
             MarkdownParser.parse(text)
         }
+        var resetEpoch by mutableStateOf(0L)
         var turn by mutableStateOf(ChatTurnUi.Assistant("continuous-stream", finalText = first,
             status = RunStatus.RUNNING, isStreaming = true))
         try {
             show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
                 Column(Modifier.testTag("continuous-stream")) {
-                    AssistantTurn(turn, ChatScreenActions(), onContentReady = { ready.set(it) },
+                    AssistantTurn(turn, ChatScreenActions(), revealResetEpoch = resetEpoch, onContentReady = { ready.set(it) },
                         onRevealSettled = { settled.set(it) })
                 }
             } }
@@ -146,6 +147,11 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             val intermediate = body("continuous-stream", "First bold snapshot. More text.")
             intermediate.assertIsDisplayed()
             assertTrue(annotation(intermediate).spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+            assertEquals(1L, releaseThird.count)
+            assertFalse(ready.get()); assertFalse(settled.get())
+            mainThread { resetEpoch++ }
+            ui.waitForIdle()
+            body("continuous-stream", "First bold snapshot. More text.").assertIsDisplayed()
             assertEquals(1L, releaseThird.count)
             assertFalse(ready.get()); assertFalse(settled.get())
             mainThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }

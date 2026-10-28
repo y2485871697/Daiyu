@@ -46,9 +46,9 @@ class ModelEditorDefaultsContractTest(unittest.TestCase):
 
     def test_append_only_import_uses_shared_model_defaults_not_name_heuristics(self):
         source = (MAIN / "model/catalog/CatalogModelParameters.kt").read_text()
-        self.assertIn("fun newModel(remote: RemoteModel)", source)
+        self.assertIn("fun newModel(remote: RemoteModel, source: CatalogModelSource = CatalogModelSource.REMOTE)", source)
         store = (MAIN / "model/catalog/SavedModelCatalogStore.kt").read_text()
-        self.assertIn("filterNot { it.id in existingIds }", store)
+        self.assertIn("filterNot { remoteModelKey(it.id) in existingIds }", store)
         self.assertIn("createModel(remote)", store)
 
 

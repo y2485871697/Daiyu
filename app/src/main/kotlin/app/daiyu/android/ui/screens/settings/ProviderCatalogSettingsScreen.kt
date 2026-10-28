@@ -18,6 +18,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import app.daiyu.android.model.catalog.CatalogImportSession
+import app.daiyu.android.model.catalog.CatalogLocalEditResult
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import app.daiyu.android.model.catalog.RemoteModel
 import app.daiyu.android.model.catalog.SavedCatalogModel
 import app.daiyu.android.model.catalog.SavedModelCatalogPersistence
@@ -35,7 +38,8 @@ import kotlinx.coroutines.withContext
  * - fetchCatalog delegates to the existing guarded controller fetch and returns admission status;
  * - onDraftChange/onSave/onBack retain the host's existing authorization and active-model logic.
  *
- * Only checked models enter appendSelected. Fetch success never selects or saves a current model.
+ * A successful nonempty fetch prunes obsolete remote records through the host deletion chain.
+ * Only checked new models enter appendSelected; import never selects another current model.
  * No draft/credential enters saved state. The callback is marshalled to this composition's UI scope.
  */
 @Composable
@@ -67,11 +71,17 @@ internal fun <T> ProviderCatalogSettingsScreen(
     modelScrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     speechOnly: Boolean = false,
     modelDeletionEnabled: Boolean = enabled,
+    isRemoteModel: (SavedCatalogModel<T>) -> Boolean = { false },
+    catalogConnectionSaved: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
     val currentFactory by rememberUpdatedState(createModel)
-    val session = remember(persistence) { CatalogImportSession(persistence, { currentFactory(it) }) { state = it } }
+    val currentIsRemote by rememberUpdatedState(isRemoteModel)
+    val currentDelete by rememberUpdatedState(localModelActions?.deleteSelected)
+    val session = remember(persistence) {
+        CatalogImportSession(persistence, { currentFactory(it) }, { currentIsRemote(it) }) { state = it }
+    }
     DisposableEffect(session, providerIdentity, draft, enabled) {
         onDispose { session.invalidate() }
     }
@@ -87,11 +97,23 @@ internal fun <T> ProviderCatalogSettingsScreen(
                 scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     // Install the token now, before any queued draft edit/disposal can invalidate it.
                     // begin suspends for the disk/OS-lock read; edits/disposal fence its result.
-                    val request = session.begin(providerIdentity)
+                    val request = session.begin(providerIdentity, catalogConnectionSaved)
                     if (request != null) {
                         val accepted = try {
                             fetchCatalog(value, request::isCancelled) { models ->
-                                scope.launch { session.fetched(request, models) }
+                                scope.launch {
+                                    session.fetched(request, models) { tickets, isCancelled ->
+                                        val delete = currentDelete
+                                        if (!ownerCurrent() || !enabled || isCancelled()) CatalogLocalEditResult.CANCELLED
+                                        else if (delete == null) CatalogLocalEditResult.FAILED
+                                        else suspendCancellableCoroutine { continuation ->
+                                            delete(tickets, { isCancelled() || !continuation.isActive }) { result ->
+                                                if (continuation.isActive) continuation.resume(result)
+                                            }
+                                        }
+                                    }
+                                    localRevision++
+                                }
                             }
                         } catch (_: Exception) { false }
                         if (!accepted) session.rejected(request)

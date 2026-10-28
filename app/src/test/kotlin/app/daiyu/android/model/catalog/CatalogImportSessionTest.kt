@@ -108,8 +108,9 @@ class CatalogImportSessionTest {
         val session = session(store)
         val request = session.begin(initial.providerIdentity)!!
         session.fetched(request, remote)
-        assertEquals(initial, store.current()) // fetching is never a save
-        val checked = session.state.selection!!.toggle("existing").toggle("add")
+        assertEquals(initial, store.current()) // no obsolete remote models in this response
+        assertFalse(session.state.selection!!.models.any { it.id == "existing" })
+        val checked = session.state.selection!!.toggle("add")
         session.select(checked)
         val commit = session.prepareCommit(checked)!!
         assertTrue(session.state.saving)

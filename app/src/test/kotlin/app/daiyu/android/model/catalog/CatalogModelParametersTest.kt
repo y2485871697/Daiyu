@@ -13,6 +13,22 @@ import java.io.File
 class CatalogModelParametersTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun remoteSourceSurvivesCodecEditsAndReopenWhileLegacyAndManualStayLocal() {
+        val remote = CatalogModelParameters.newModel(RemoteModel("remote"))
+        assertEquals(CatalogModelSource.REMOTE, remote.settings.source)
+        val edited = CatalogModelEdit.from(remote).copy(displayName = "Customized").applyTo(remote)
+        assertEquals(CatalogModelSource.REMOTE, edited.settings.source)
+        val local = CatalogModelEdit("manual", "Manual").newRecord()
+        assertEquals(CatalogModelSource.LOCAL, local.settings.source)
+        val store = FileSavedModelCatalogPersistence(File(temporary.root, "source"), CatalogModelParametersCodec)
+        val saved = store.register(listOf(edited, local))
+        assertEquals(saved, FileSavedModelCatalogPersistence(File(temporary.root, "source"), CatalogModelParametersCodec).current())
+        val legacy = org.json.JSONObject(CatalogModelParametersCodec.encode(remote.settings)).apply { remove("source") }.toString()
+        assertEquals(remote.settings.copy(source = CatalogModelSource.LOCAL), CatalogModelParametersCodec.decode(legacy))
+        val invalid = org.json.JSONObject(CatalogModelParametersCodec.encode(remote.settings)).put("source", "unknown").toString()
+        assertThrows(IllegalArgumentException::class.java) { CatalogModelParametersCodec.decode(invalid) }
+    }
+
     @Test fun defaultCapabilitiesDoNotBecomeExplicitOverridesOrRejectCustomModel() {
         val options = ProviderRequestOptions(customBody = "{\"model\":\"relay/actual-model\"}")
         val current = ModelSettings("https://example.invalid", "catalog-model", "key", false)

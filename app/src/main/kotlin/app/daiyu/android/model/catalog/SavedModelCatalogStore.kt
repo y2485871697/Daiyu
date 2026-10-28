@@ -70,8 +70,8 @@ internal class SavedModelCatalogStore<T>(
             if (current.providerIdentity != selection.providerIdentity || current.revision != selection.expectedRevision) {
                 return CatalogImportResult.Stale
             }
-            val existingIds = current.models.map { it.id.trim() }.toSet()
-            val additions = selection.selectedModels.filterNot { it.id in existingIds }.map { remote ->
+            val existingIds = current.models.map { remoteModelKey(it.id) }.toSet()
+            val additions = selection.selectedModels.filterNot { remoteModelKey(it.id) in existingIds }.map { remote ->
                 createModel(remote).also { require(it.id == remote.id) }
             }
             if (cancelled()) return CatalogImportResult.Cancelled

@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 internal class CatalogImportSession<T>(
     private val persistence: SavedModelCatalogPersistence<T>,
     createModel: (RemoteModel) -> SavedCatalogModel<T>,
+    private val isRemoteModel: (SavedCatalogModel<T>) -> Boolean = { false },
     private val onChange: (State) -> Unit = {},
 ) {
     data class State(
@@ -22,6 +23,7 @@ internal class CatalogImportSession<T>(
         val error: String? = null,
     )
     class Request internal constructor(val providerIdentity: String) {
+        internal var receiving = false
         var revision: Long = -1
             internal set
         private val cancelled = AtomicBoolean(false)
@@ -36,8 +38,11 @@ internal class CatalogImportSession<T>(
     private var committing: Commit? = null
 
     /** Snapshot is captured on IO before the host starts the network request. */
-    suspend fun begin(providerIdentity: String): Request? {
+    suspend fun begin(providerIdentity: String, connectionSaved: Boolean = true): Request? {
         invalidate()
+        if (!connectionSaved) {
+            update(State(status = "请先保存提供商设置，再拉取模型")); return null
+        }
         val request = Request(providerIdentity)
         active = request
         update(State(loading = true))
@@ -52,18 +57,55 @@ internal class CatalogImportSession<T>(
         return request
     }
 
-    suspend fun fetched(request: Request, models: List<RemoteModel>?) {
-        if (!isLoading(request)) return
+    suspend fun fetched(
+        request: Request,
+        models: List<RemoteModel>?,
+        removeObsolete: suspend (List<CatalogModelSelection<T>>, () -> Boolean) -> CatalogLocalEditResult =
+            { _, _ -> CatalogLocalEditResult.FAILED },
+    ) {
+        if (!isLoading(request) || request.receiving) return
+        request.receiving = true
         if (models == null) { update(State(status = "获取失败，请重试")); return }
-        val snapshot = readSnapshot(request)
-        // Recheck on UI, not just before dispatching IO. Never resurrect an obsolete draft/dialog.
+        val remote = ModelSelectionState.capture(request.providerIdentity, request.revision, models).models
+        // An empty/blank response is not authoritative evidence that all models were removed.
+        if (remote.isEmpty()) { update(State(status = "模型目录为空")); return }
+        var snapshot = readSnapshot(request)
         if (!isLoading(request)) return
         if (snapshot == null || snapshot.providerIdentity != request.providerIdentity || snapshot.revision != request.revision) {
-            request.cancel(); active = null
-            update(State(status = "服务商或目录已变化，请重新获取")); return
+            stale(request); return
         }
-        val selection = ModelSelectionState.capture(request.providerIdentity, request.revision, models)
-        update(if (selection.totalCount == 0) State(status = "模型目录为空") else State(selection = selection))
+        val remoteIds = remote.map { remoteModelKey(it.id) }.toSet()
+        val obsolete = snapshot.models.filter { isRemoteModel(it) && remoteModelKey(it.id) !in remoteIds }
+        if (obsolete.isNotEmpty()) {
+            val before = snapshot
+            val tickets = obsolete.map { CatalogModelSelection(before.providerIdentity, before.revision, it) }
+            val result = try { removeObsolete(tickets, request::isCancelled) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { CatalogLocalEditResult.FAILED }
+            if (!isLoading(request)) return
+            when (result) {
+                CatalogLocalEditResult.STALE -> { stale(request); return }
+                CatalogLocalEditResult.CANCELLED -> { invalidate(); return }
+                CatalogLocalEditResult.FAILED -> { update(State(status = "过时模型未清理，请重试")); return }
+                CatalogLocalEditResult.APPLIED -> Unit
+            }
+            snapshot = readSnapshot(request)
+            if (!isLoading(request)) return
+            val expected = before.copy(revision = Math.addExact(before.revision, 1L), models = before.models - obsolete.toSet())
+            if (snapshot != expected) { stale(request); return }
+            request.revision = expected.revision
+        }
+        val existingIds = snapshot.models.map { remoteModelKey(it.id) }.toSet()
+        val selection = ModelSelectionState.capture(request.providerIdentity, request.revision,
+            remote.filterNot { remoteModelKey(it.id) in existingIds })
+        val cleanup = obsolete.takeIf { it.isNotEmpty() }?.let { "已清理 ${it.size} 个过时模型" }
+        update(if (selection.totalCount == 0) State(status = listOfNotNull(cleanup, "没有可添加的新模型").joinToString("；"))
+            else State(selection = selection, status = cleanup))
+    }
+
+    private fun stale(request: Request) {
+        request.cancel(); active = null
+        update(State(status = "服务商或目录已变化，请重新获取"))
     }
 
     private fun isLoading(request: Request) = active === request && !request.isCancelled() && state.loading

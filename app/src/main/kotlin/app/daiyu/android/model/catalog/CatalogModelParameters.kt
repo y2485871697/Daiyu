@@ -6,6 +6,8 @@ import app.daiyu.android.storage.ModelSettings
 import org.json.JSONObject
 import java.util.UUID
 
+internal enum class CatalogModelSource { LOCAL, REMOTE }
+
 /** The local per-model fields supported by the current host, without connection credentials. */
 internal data class CatalogModelParameters(
     val localIdentity: String = UUID.randomUUID().toString(),
@@ -15,6 +17,7 @@ internal data class CatalogModelParameters(
     val contextWindowOverride: Int? = null,
     val reasoningOverride: Boolean? = null,
     val visionOverride: Boolean? = null,
+    val source: CatalogModelSource = CatalogModelSource.LOCAL,
 ) {
     val reasoningSupported: Boolean get() = reasoningOverride ?: true
     val visionSupported: Boolean get() = visionOverride ?: true
@@ -53,12 +56,14 @@ internal data class CatalogModelParameters(
         )
 
         /** Normal detached new-model defaults, NOT a copy of the active model's overrides. */
-        fun newModel(remote: RemoteModel) = SavedCatalogModel(remote.id, remote.displayName, CatalogModelParameters())
+        fun newModel(remote: RemoteModel, source: CatalogModelSource = CatalogModelSource.REMOTE) =
+            SavedCatalogModel(remote.id, remote.displayName, CatalogModelParameters(source = source))
     }
 }
 
 internal object CatalogModelParametersCodec : CatalogRecordCodec<CatalogModelParameters> {
     override fun encode(record: CatalogModelParameters): String = JSONObject()
+        .put("source", record.source.name)
         .put("local_identity", record.localIdentity)
         .put("battery", record.batteryEnabled)
         .put("device_status", record.deviceStatusEnabled)
@@ -70,7 +75,7 @@ internal object CatalogModelParametersCodec : CatalogRecordCodec<CatalogModelPar
     override fun decode(encoded: String): CatalogModelParameters {
         val value = JSONObject(encoded)
         val required = setOf("local_identity", "battery", "device_status", "request_options")
-        val optional = setOf("context_window_override", "reasoning_override", "vision_override")
+        val optional = setOf("context_window_override", "reasoning_override", "vision_override", "source")
         val keys = value.keys().asSequence().toSet()
         require(keys.containsAll(required) && keys.all { it in required || it in optional })
         fun optionalBoolean(key: String): Boolean? = if (!value.has(key) || value.isNull(key)) null
@@ -84,6 +89,7 @@ internal object CatalogModelParametersCodec : CatalogRecordCodec<CatalogModelPar
             value.get("battery") as? Boolean ?: error("Invalid battery flag"),
             value.get("device_status") as? Boolean ?: error("Invalid device flag"),
             ProviderRequestOptions.decode(value.get("request_options") as? String ?: error("Invalid model options")),
-            context, optionalBoolean("reasoning_override"), optionalBoolean("vision_override"))
+            context, optionalBoolean("reasoning_override"), optionalBoolean("vision_override"),
+            if (value.has("source")) CatalogModelSource.valueOf(value.getString("source")) else CatalogModelSource.LOCAL)
     }
 }

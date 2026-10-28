@@ -1,12 +1,15 @@
 package app.daiyu.android.model.catalog
 
 import java.util.Collections
+import java.util.Locale
+
+internal fun remoteModelKey(id: String): String = id.trim().lowercase(Locale.ROOT)
 
 /**
  * One successful fetch, bound to the host's existing provider identity and catalog revision.
  * No identity is derived from a URL, credential, display name or list position here. Discard this
  * state when the host changes provider/draft or starts another fetch; never save credentials in it.
- * IDs are trimmed but case-sensitive, matching RemoteModelFetcher and the wire model identifier.
+ * Comparison keys ignore case as in the original remote catalog; wire IDs keep their spelling.
  */
 internal class ModelSelectionState private constructor(
     val providerIdentity: String,
@@ -49,13 +52,13 @@ internal class ModelSelectionState private constructor(
     )
 
     companion object {
-        /** Empty/failing fetches are not imports. First occurrence of an exact ID wins. */
+        /** Empty/failing fetches are not imports. First occurrence of a normalized ID wins. */
         fun capture(providerIdentity: String, expectedRevision: Long, models: List<RemoteModel>): ModelSelectionState {
             require(providerIdentity.isNotBlank())
             require(expectedRevision >= 0)
             val unique = models.asSequence().filter { it.id.isNotBlank() }
                 .map { it.copy(id = it.id.trim(), displayName = it.displayName.ifBlank { it.id.trim() }) }
-                .distinctBy { it.id }.toList()
+                .distinctBy { remoteModelKey(it.id) }.toList()
             return ModelSelectionState(providerIdentity, expectedRevision,
                 Collections.unmodifiableList(unique), "", emptySet())
         }

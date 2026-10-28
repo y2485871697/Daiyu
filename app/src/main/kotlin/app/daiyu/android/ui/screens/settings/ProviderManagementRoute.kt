@@ -568,7 +568,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     else complete(CatalogLocalEditResult.CANCELLED)
                 }, deleteSelected = { selections, requestCancelled, complete ->
                     if (live() && modelDeletionEnabled && !requestCancelled()) controller.deleteProviderCatalogModels(d.editor, selections,
-                        { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
+                        { cancelled() || requestCancelled() }, complete)
                     else complete(CatalogLocalEditResult.CANCELLED)
                 }, form = { app.daiyu.android.model.catalog.CatalogModelEdit.from(it) },
                 update = { selection, value, requestCancelled, complete ->
@@ -616,7 +616,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     listState = d.pageUi.configurationListState,
                     speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(d.editing.settings.endpoint))
             } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
-                createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
+                createModel = { CatalogModelParameters.newModel(it) },
+                isRemoteModel = { it.settings.source == app.daiyu.android.model.catalog.CatalogModelSource.REMOTE },
+                catalogConnectionSaved = runCatching { draft.providerSettings(saved) == saved }.getOrDefault(false),
+                fetchCatalog = { value, requestCancelled, deliver ->
                     if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
                     else connectionSettings(value)?.let { settings ->
                         controller.fetchModelCatalog(settings,

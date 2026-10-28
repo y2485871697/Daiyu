@@ -477,7 +477,7 @@ class ModelSettingsStore internal constructor(
             if (connectionChanged) {
                 val speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(settings.endpoint)
                 val initialModels = if (speechOnly) app.daiyu.android.voice.providers.DoubaoSpeech.catalogModels.map { (id, label) ->
-                    CatalogModelParameters.newModel(RemoteModel(id, label))
+                    CatalogModelParameters.newModel(RemoteModel(id, label), CatalogModelSource.LOCAL)
                 } else if (settings.model.isBlank()) emptyList() else listOf(CatalogModelParameters.fromCurrent(settings))
                 modelCatalog.replaceRegisteredProvider(initialModels)
                 catalogReplaced = true

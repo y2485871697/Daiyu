@@ -2497,14 +2497,16 @@ class MainActivity : ComponentActivity() {
                                 },
                                 deleteSelected = { tickets, cancelled, completed ->
                                     if (localModelCurrent() && !cancelled())
-                                        controller.deleteConfiguredCatalogModels(tickets, cancelled) { result ->
-                                            if (localModelCurrent() && !cancelled()) completed(result)
-                                        }
+                                        controller.deleteConfiguredCatalogModels(tickets, cancelled, completed)
                                     else completed(app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED)
                                 },
                             ),
                             createModel = { CatalogModelParameters.newModel(it) },
                             fetchCatalog = ::requestSettingsCatalog,
+                            isRemoteModel = { it.settings.source == app.daiyu.android.model.catalog.CatalogModelSource.REMOTE },
+                            catalogConnectionSaved = editingSettings?.settings?.let { saved ->
+                                runCatching { value.toSettings(saved) == saved }.getOrDefault(false)
+                            } ?: false,
                             enabled = controller.ready && controller.active == null && !controller.dataBusy,
                             modelDeletionEnabled = controller.ready && !controller.dataBusy,
                             errorText = modelError,

@@ -26,6 +26,7 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
     @Volatile private var fetched: ((List<RemoteModel>?) -> Unit)? = null
     @Volatile private var cancelled: (() -> Boolean)? = null
     private var saves = 0
+    private var connectionSaved by mutableStateOf(true)
     private val old = SavedCatalogModel("existing", "Local name", "old customized parameters")
 
     override fun tearDown() {
@@ -54,10 +55,18 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
                         providerIdentity = identity, persistence = checkedPersistence,
                         createModel = { SavedCatalogModel(it.id, it.displayName, "defaults") },
                         twoTabs = twoTabs,
+                        isRemoteModel = { it.settings.startsWith("remote:") },
+                        catalogConnectionSaved = connectionSaved,
                         localModelActions = LocalCatalogModelActions<String>(
                             currentModelId = old.id,
                             rename = { _, _, _, _ -> error("Unexpected local rename in import test") },
                             delete = { _, _, _ -> error("Unexpected local delete in import test") },
+                            deleteSelected = { tickets, isCancelled, completed ->
+                                Thread {
+                                    val result = catalog.deleteSelections(tickets, isCancelled)
+                                    activity.runOnUiThread { completed(result) }
+                                }.start()
+                            },
                         ),
                         fetchCatalog = { _, isCancelled, callback ->
                             cancelled = isCancelled; fetched = callback; true
@@ -88,9 +97,7 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         show()
         fetch()
         assertEquals(listOf(old), catalog.current()!!.models)
-        node("provider-model-option:existing").assertIsOff()
-            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
-        node("provider-model-option:existing").assertIsOn()
+        node("provider-model-option:existing").assertDoesNotExist()
         node("provider-model-list").performScrollToKey("add")
         awaitVisualIdle()
         node("provider-model-option:add").assertIsOff()
@@ -102,6 +109,48 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(listOf(old, SavedCatalogModel("add", "add", "defaults")), catalog.current()!!.models)
         ui.runOnIdle { assertEquals("existing", draft.model); assertEquals(0, saves) }
+    }
+
+    fun testFetchCleansObsoleteRemoteBeforeDialogAndCancelKeepsManualModel() {
+        show()
+        val before = catalog.current()!!
+        val obsolete = SavedCatalogModel("obsolete", "Obsolete", "remote:custom")
+        assertEquals(app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED,
+            catalog.compareAndAppend(before.providerIdentity, before.revision, listOf(obsolete)) { false })
+        fetch()
+        assertEquals(listOf(old), catalog.current()!!.models)
+        node("provider-model-option:existing").assertDoesNotExist()
+        node("provider-model-option:obsolete").assertDoesNotExist()
+        node("dialog-cancel").performClick()
+        assertEquals(listOf(old), catalog.current()!!.models)
+        ui.onNodeWithText("obsolete").assertDoesNotExist()
+        ui.runOnIdle { assertEquals(0, saves) }
+    }
+
+    fun testOnlyCleanupRefreshesLocalListWithoutOpeningNewModelDialog() {
+        show()
+        val before = catalog.current()!!
+        val obsolete = SavedCatalogModel("obsolete", "Obsolete", "remote:custom")
+        assertEquals(app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED,
+            catalog.compareAndAppend(before.providerIdentity, before.revision, listOf(obsolete)) { false })
+        startFetch()
+        mainThread { checkNotNull(fetched).invoke(listOf(RemoteModel("EXISTING"))) }
+        ui.waitUntil(5_000) { catalog.current()!!.models == listOf(old) }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("已清理 1 个过时模型；没有可添加的新模型").fetchSemanticsNodes().isNotEmpty() }
+        node("provider-model-selection").assertDoesNotExist()
+        ui.onNodeWithText("Obsolete").assertDoesNotExist()
+        ui.runOnIdle { assertEquals(0, saves) }
+    }
+
+    fun testUnsavedConnectionDoesNotStartFetchOrCleanup() {
+        show()
+        mainThread { connectionSaved = false }
+        selectProviderTab("模型")
+        reveal("model-catalog-fetch").performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("请先保存提供商设置，再拉取模型").fetchSemanticsNodes().isNotEmpty() }
+        assertNull(fetched)
+        assertEquals(listOf(old), catalog.current()!!.models)
+        node("provider-model-selection").assertDoesNotExist()
     }
 
     fun testCancelAndDraftChangeFenceBothDialogAndLateCallback() {

@@ -1,3 +1,19 @@
+# Current remote synchronization behavior
+
+The production wrapper now performs two phases: a nonempty successful fetch first removes
+missing records explicitly marked `CatalogModelSource.REMOTE` through the existing host batch
+deletion callback, then offers only not-yet-added normalized IDs for explicit append. Comparison
+uses trim plus lowercase; wire IDs, stable local identities and local settings remain intact.
+Empty/failed responses do not prune. Dismissing the add dialog does not undo committed cleanup.
+Both production hosts reject synchronization from unsaved connection drafts. Batch completion
+must be delivered even after cancellation; the session and local screen own publication fences.
+
+The optional source codec field defaults to LOCAL for older unmarked records. Their remote or
+manual origin cannot be recovered from this old schema, so they remain protected from automatic
+pruning. New remote imports persist REMOTE; manual/fixed-catalog records stay LOCAL.
+
+The older single-provider integration notes below are historical, not the current host wiring.
+
 # P06: host-owned catalog integration seam
 
 This patch supplies a real file transaction backend and a complete settings wrapper, not a

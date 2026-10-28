@@ -65,13 +65,13 @@ class ModelSelectionStateTest {
         assertFalse(selectedInReverse.toggle("alpha").toggle("gamma").canConfirm)
     }
 
-    @Test fun wireIdsRemainCaseSensitiveAndBlankLabelsUseTheId() {
+    @Test fun comparisonIgnoresCaseButWireIdKeepsFirstSpelling() {
         val state = ModelSelectionState.capture("provider", 0,
             listOf(RemoteModel("Model"), RemoteModel("model", "  ")))
-        assertEquals(2, state.totalCount)
-        assertEquals("model", state.models.last().displayName)
+        assertEquals(1, state.totalCount)
+        assertEquals("Model", state.models.single().displayName)
         assertEquals(setOf("Model"), state.toggle("Model").selectedIds)
-        assertEquals(2, state.withQuery("MODEL").visibleCount)
+        assertEquals(1, state.withQuery("MODEL").visibleCount)
     }
 
     @Test fun emptyCatalogHasNoEnabledConfirmOrBulkSelection() {

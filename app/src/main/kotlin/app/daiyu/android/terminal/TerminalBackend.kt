@@ -97,7 +97,11 @@ internal data class SelectedBackend(val name: String, val uid: Int, val root: Bo
         environment().clear(); environment().putAll(this@SelectedBackend.environment)
     }
 }
-internal data class BackendPathIdentity(val path: String, val realPath: String, val key: String?, val created: java.nio.file.attribute.FileTime)
+internal sealed interface BackendPathIdentity {
+    data class FileSystem(val path: String, val realPath: String, val key: String?,
+        val created: java.nio.file.attribute.FileTime) : BackendPathIdentity
+    data class ChrootTransport(val path: String, val identity: String) : BackendPathIdentity
+}
 
 internal object BackendSelection {
     fun paths(context: Context, config: TerminalConfiguration): List<BackendPathIdentity> {
@@ -110,17 +114,28 @@ internal object BackendSelection {
             "linux" -> config.linux?.let { linux ->
                 linux.shellArgv.firstOrNull()?.let { paths += File(it) }
                 paths += linux.sharedMounts.keys.map(::File)
-                linux.rootScope?.let { root -> paths += RootScopeLaunch.requireTrustedTransport(); paths += root.rootfs }
+                linux.rootScope?.let { root -> paths += chrootTransportFiles(); paths += root.rootfs }
             }
         }
-        return try {
-            paths.map { file ->
+        return pathIdentities(paths, config.backend == "linux" && config.linux?.rootScope != null)
+    }
+
+    internal fun pathIdentities(paths: List<File>, chroot: Boolean,
+        transportIdentity: (File) -> String = RootScopeLaunch::trustedTransportIdentity): List<BackendPathIdentity> = try {
+        paths.map { file ->
+            if (chroot && RootScopeLaunch.isFixedTransport(file)) {
+                BackendPathIdentity.ChrootTransport(file.path, transportIdentity(file))
+            } else {
                 val real = file.toPath().toRealPath()
                 val attr = java.nio.file.Files.readAttributes(real, java.nio.file.attribute.BasicFileAttributes::class.java)
-                BackendPathIdentity(file.absolutePath, real.toString(), attr.fileKey()?.toString(), attr.creationTime())
+                BackendPathIdentity.FileSystem(file.absolutePath, real.toString(), attr.fileKey()?.toString(), attr.creationTime())
             }
-        } catch (_: Exception) { throw BackendUnavailable("backend_path_unavailable") }
-    }
+        }
+    } catch (_: Exception) { throw BackendUnavailable("backend_path_unavailable") }
+
+    internal fun chrootTransportFiles(read: () -> List<File> = RootScopeLaunch::requireTrustedTransport): List<File> = try {
+        read()
+    } catch (_: Exception) { throw BackendUnavailable("linux_chroot_transport_unavailable") }
 
     fun select(context: Context, config: TerminalConfiguration): SelectedBackend {
         if (config.backend == "linux") LinuxRuntimePlatform.unavailableReason(
@@ -174,7 +189,7 @@ internal object BackendSelection {
                         linux.guestWorkingDirectory != root.guestWorkingDirectory ||
                         linux.sharedMounts != root.workspaceSource?.let { mapOf(it.path to "/workspace") }.orEmpty())
                         throw BackendUnavailable("linux_chroot_launch_mismatch")
-                    RootScopeLaunch.requireTrustedTransport()
+                    chrootTransportFiles()
                     // Native root scope checks actual uid/euid before any guest is forked.
                     return SelectedBackend("linux:${linux.label}", 0, true, linux.shellArgv.toList(), selectedEnv, cwd, true,
                         linux.environmentId, linux.guestWorkingDirectory, linux.sharedMounts.toMap(), root)

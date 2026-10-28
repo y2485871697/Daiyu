@@ -109,6 +109,13 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
             assertEquals("chroot", status.getString("execution_mode"))
             assertTrue(status.getBoolean("host_root_required"))
             assertFalse(status.getBoolean("host_root_verified"))
+            persisted.acquire().use { lease ->
+                val configuration = lease.configuration(work, work)
+                val snapshot = BackendSelection.paths(context, configuration)
+                assertTrue(snapshot.any { it is BackendPathIdentity.ChrootTransport })
+                assertTrue(snapshot.any { it is BackendPathIdentity.FileSystem })
+                assertEquals(snapshot, BackendSelection.paths(context, configuration))
+            }
             val auth = TaskAuthorization("chroot-device-$token", token)
             val owner = PtyRunOwner(ConversationId("chroot-device-$token"), auth, environment, "g1")
             val failedStarts = org.json.JSONArray()

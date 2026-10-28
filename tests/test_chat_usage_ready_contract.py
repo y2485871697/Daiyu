@@ -62,6 +62,22 @@ class ChatUsageReadyContractTest(unittest.TestCase):
         self.assertIn('onDismiss = { if (usageVisit === visit) usageVisit = null }', main)
         self.assertLess(self.source.index('readUsage: ((ConversationId)'), self.source.index('onDismiss: () -> Unit'))
 
+    def test_total_value_matches_preview_neutral_role_without_changing_type_or_other_rows(self):
+        presentation = (SRC / 'ui/components/UsagePresentation.kt').read_text()
+        metric = presentation.split('internal fun UsageMetric(', 1)[1].split('@Composable', 1)[0]
+        self.assertIn('color = if (total) colors.toolbar else colors.accent, lineHeight = 22.sp)', metric)
+        self.assertIn('fontSize = if (total) 16.sp else 14.sp', metric)
+        self.assertIn('fontWeight = if (total) FontWeight.SemiBold else FontWeight.Medium', metric)
+        content = (SRC / 'ui/app/ConversationTokenUsageDialog.kt').read_text()
+        self.assertIn('UsageMetric("累计用量", tokens(usage.totalTokens), total = true)', content)
+        self.assertEqual(1, content.count('total = true'))
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/UsageCompactPresentationTest.kt').read_text()
+        self.assertIn('fun testTotalUsesPreviewNeutralColorWithoutChangingMetricTypographyOrAccent()', regression)
+        self.assertIn('assertEquals(neutral, total.color)', regression)
+        self.assertIn('for (dark in listOf(false, true))', regression)
+        self.assertIn('primaryAccentColor = customAccent', regression)
+        self.assertIn('assertEquals(accent, row.color)', regression)
+
     def test_held_read_regressions_check_absence_before_awaiting_final_dialog(self):
         for name in ('testPendingReadDoesNotMountDialogUntilRealUsageIsReady',
                      'testBackDuringReadRevokesVisitAndLateSuccessOrFailureCannotReplaceNewDialog',

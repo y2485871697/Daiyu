@@ -38,8 +38,10 @@ class ProviderBalanceCoordinatorTest {
         val ids = MutableStateFlow(listOf("primary", "secondary"))
         val calls = ConcurrentHashMap<String, AtomicInteger>()
         val runtimes = ConcurrentHashMap<String, BalanceRuntime>()
+        val queryOperations = ConcurrentHashMap.newKeySet<Job>()
         fun runtime(id: String) = runtimes.computeIfAbsent(id) {
             BalanceRuntime(ProviderBalanceStore(Memory()).also { it.save(config(id)) }, BalanceQuery { configuration ->
+                queryOperations.add(currentCoroutineContext()[Job]!!)
                 query(id, configuration, calls.computeIfAbsent(id) { AtomicInteger() }.incrementAndGet())
             })
         }
@@ -50,11 +52,14 @@ class ProviderBalanceCoordinatorTest {
             do {
                 scheduler.runCurrent()
                 if (condition()) return
-                Thread.sleep(1)
+                Thread.yield()
             } while (System.nanoTime() < deadline)
             assertTrue("balance work did not settle", condition())
         }
-        fun idle() = settle { runtimes.values.all { !it.state.value.refreshing } }
+        fun idle() = settle {
+            // IO publishes the result before the request resumes for coordinator cleanup.
+            runtimes.values.all { !it.state.value.refreshing } && queryOperations.all { it.isCompleted }
+        }
         fun start() { coordinator.start(scope); settle { ids.value.all { count(it) > 0 } }; idle() }
         override fun close() { coordinator.close(); scope.cancel(); scheduler.runCurrent() }
     }
@@ -134,10 +139,26 @@ class ProviderBalanceCoordinatorTest {
         }
     }
 
+    @Test fun settledStartAllowsAnImmediateRefreshForEveryProvider() {
+        Fixture().use { f ->
+            f.start()
+            assertEquals(f.ids.value.size, f.queryOperations.size)
+            assertTrue(f.queryOperations.all { it.isCompleted })
+            f.coordinator.requestRefresh(f.scope)
+            f.settle { f.ids.value.all { f.count(it) == 2 } }; f.idle()
+            assertTrue(f.queryOperations.all { it.isCompleted })
+            for (id in f.ids.value) {
+                assertEquals(2, f.count(id))
+                assertFalse(f.runtime(id).state.value.refreshing)
+                assertEquals("CNY 8.22", f.runtime(id).state.value.project().balanceText)
+            }
+        }
+    }
+
     @Test fun failureKeepsPreviousSuccessfulAmountAndTimestamp() {
         Fixture { _, _, call -> if (call == 1) amount("8.22", 1234) else BalanceResult.Failed(BalanceFailure.NETWORK) }.use { f ->
             f.start(); f.coordinator.requestRefresh(f.scope)
-            f.settle { f.count("secondary") == 2 }; f.idle()
+            f.settle { f.ids.value.all { f.count(it) == 2 } }; f.idle()
             for (id in f.ids.value) {
                 val state = f.runtime(id).state.value
                 assertEquals(BalanceResult.Failed(BalanceFailure.NETWORK), state.result)

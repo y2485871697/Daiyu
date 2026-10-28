@@ -60,6 +60,24 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,', shell)
         self.assertIn('Text("$stepCount 项 · ${work.summary}"', shell)
 
+    def test_environment_dots_share_centered_circle_content_and_preserve_source_text(self):
+        helper = (CHAT / "ToolHeaderText.kt").read_text()
+        self.assertIn("character == '·' || character == '•'", helper)
+        self.assertIn("appendInlineContent(ToolHeaderSeparatorId, character.toString())", helper)
+        self.assertIn("Placeholder(.5.em, .5.em, PlaceholderVerticalAlign.Center)", helper)
+        self.assertIn("InlineTextContent(ToolHeaderSeparatorPlaceholder)", helper)
+        self.assertIn("drawCircle(color, radius = size.minDimension / 2f, center = center)", helper)
+        self.assertNotIn("SpanStyle", helper)
+        self.assertNotIn("BaselineShift", helper)
+        shell = (CHAT / "WorkProcessCard.kt").read_text()
+        self.assertEqual(2, shell.count("inlineContent = toolHeaderInlineContent(colors.text)"))
+        regression = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt").read_text()
+        self.assertIn("private fun assertCenteredUniformDots", regression)
+        self.assertIn("measured.placeholderRects.forEachIndexed", regression)
+        self.assertIn("measured.getLineTop(line) + measured.getLineBottom(line)", regression)
+        self.assertIn("assertCenteredUniformDots(titleNode)", regression)
+        self.assertIn("assertCenteredUniformDots(ui.onNodeWithText(target", regression)
+
     def test_compact_headers_adapt_locally_and_preserve_disclosure_ownership(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertEqual(2, shell.count("heightIn(min = 44.dp)"))

@@ -13,6 +13,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -151,6 +153,50 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         return layouts.single()
     }
 
+    private fun assertCenteredUniformDots(target: SemanticsNodeInteraction): Float {
+        val measured = layout(target)
+        val textBounds = target.fetchSemanticsNode().boundsInRoot
+        val positions = measured.layoutInput.text.text.indices.filter {
+            measured.layoutInput.text.text[it] == '·' || measured.layoutInput.text.text[it] == '•'
+        }
+        assertEquals(positions.size, measured.placeholderRects.size)
+        val expectedDiameter = with(measured.layoutInput.density) { 6.5.sp.toPx() }
+        val circles = ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true).fetchSemanticsNodes()
+        measured.placeholderRects.forEachIndexed { index, nullableRect ->
+            val rect = checkNotNull(nullableRect) { "Visible separator must not be ellipsized" }
+            val line = measured.getLineForOffset(positions[index])
+            assertEquals("Both dot characters must have the large bullet diameter", expectedDiameter, rect.width, 1f)
+            assertEquals("Bullet placeholder must stay square", rect.width, rect.height, 1f)
+            assertEquals("Bullet must be vertically centered in its own text line",
+                (measured.getLineTop(line) + measured.getLineBottom(line)) / 2f, rect.center.y, 1f)
+            val bounds = rect.translate(textBounds.topLeft)
+            val circleIndex = circles.indices.single { kotlin.math.abs(circles[it].boundsInRoot.center.x - bounds.center.x) <= 1f &&
+                kotlin.math.abs(circles[it].boundsInRoot.center.y - bounds.center.y) <= 1f }
+            val circle = circles[circleIndex].boundsInRoot
+            assertEquals("Drawn bullet must fill its placeholder", bounds.width, circle.width, 1f)
+            assertEquals("Drawn bullet must fill its placeholder", bounds.height, circle.height, 1f)
+            val pixels = captureScreenNode(ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true)[circleIndex]).toPixelMap()
+            val background = pixels[0, 0]
+            fun distance(color: Color): Float = kotlin.math.abs(color.red - background.red) +
+                kotlin.math.abs(color.green - background.green) + kotlin.math.abs(color.blue - background.blue)
+            val contrast = distance(pixels[pixels.width / 2, pixels.height / 2])
+            assertTrue("Bullet ink must be visible in both themes", contrast > .2f)
+            val ink = buildList {
+                for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                    if (distance(pixels[x, y]) > contrast * .25f) add(x to y)
+                }
+            }
+            assertTrue("Bullet must have actual painted pixels", ink.isNotEmpty())
+            val left = ink.minOf { it.first }; val right = ink.maxOf { it.first }
+            val top = ink.minOf { it.second }; val bottom = ink.maxOf { it.second }
+            assertEquals("Visible bullet width must retain the large-dot size", expectedDiameter, (right - left + 1).toFloat(), 2f)
+            assertEquals("Visible bullet must be round", (right - left).toFloat(), (bottom - top).toFloat(), 1f)
+            assertEquals("Painted ink must be horizontally centered", (pixels.width - 1) / 2f, (left + right) / 2f, 1f)
+            assertEquals("Painted ink must be vertically centered", (pixels.height - 1) / 2f, (top + bottom) / 2f, 1f)
+        }
+        return checkNotNull(measured.placeholderRects.first()).width
+    }
+
     private fun assertTarget(tag: String, scale: Float, minimumWidth: Boolean = false, reveal: Boolean = true, minimumHeight: Float = 48f) {
         val target = ui.onNodeWithTag(tag).let { if (reveal) it.scrollToVisible() else it }.assertIsDisplayed()
         val bounds = target.fetchSemanticsNode().boundsInRoot
@@ -234,17 +280,20 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
     fun testEmphasizedTerminalDotsKeepNarrowFontScaleHeadersReadable() {
         val target = "Android • user"
         val stepTitle = "执行命令 · $target"
-        for (fontScale in listOf(.9f, 1.3f)) {
-            show(dark = false, scale = 1f, fontScale = fontScale, narrow = true, compact = true, terminal = true)
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) for (fontScale in listOf(.9f, 1.3f)) {
+            show(dark = dark, scale = scale, fontScale = fontScale, narrow = true, compact = true, terminal = true)
             val heading = layout(ui.onNodeWithText(target, useUnmergedTree = true))
             assertEquals(13.sp, heading.layoutInput.style.fontSize)
             assertEquals(toolHeaderText(target, true), heading.layoutInput.text)
             assertFalse(heading.hasVisualOverflow)
+            val headingDiameter = assertCenteredUniformDots(ui.onNodeWithText(target, useUnmergedTree = true))
             node("work-process-header").performClick()
             val titleNode = ui.onNodeWithText(stepTitle, useUnmergedTree = true).assertIsDisplayed()
             val measured = layout(titleNode)
             assertEquals(13.sp, measured.layoutInput.style.fontSize)
             assertEquals(toolHeaderText(stepTitle, true), measured.layoutInput.text)
+            assertEquals("Group and step bullets must have identical diameters", headingDiameter,
+                assertCenteredUniformDots(titleNode), 1f)
             assertFalse(measured.hasVisualOverflow)
             for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
             assertEquals(stepTitle.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))
@@ -261,7 +310,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
                 }
                 assertEquals(expectedHeight, header.height, 1f)
                 val surface = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-                assertTrue(surface.height <= 98f * phoneDensity + 1f)
+                assertTrue(surface.height <= 98f * phoneDensity * scale + 1f)
             }
         }
         assertEquals(0, actionCount)

@@ -1,17 +1,35 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 
+internal const val ToolHeaderSeparatorId = "tool-header-separator"
+
+// Match the large bullet's visible diameter, not its former 1.4em font box.
+internal val ToolHeaderSeparatorPlaceholder = Placeholder(.5.em, .5.em, PlaceholderVerticalAlign.Center)
+
 internal fun toolHeaderText(text: String, emphasizeSeparators: Boolean): AnnotatedString = buildAnnotatedString {
-    append(text)
-    if (emphasizeSeparators) {
-        val separatorStyle = SpanStyle(fontSize = 1.4.em, fontWeight = FontWeight.Bold)
-        text.forEachIndexed { index, character ->
-            if (character == '·' || character == '•') addStyle(separatorStyle, index, index + 1)
-        }
+    text.forEach { character ->
+        if (emphasizeSeparators && (character == '·' || character == '•')) {
+            appendInlineContent(ToolHeaderSeparatorId, character.toString())
+        } else append(character)
     }
 }
+
+internal fun toolHeaderInlineContent(color: Color): Map<String, InlineTextContent> = mapOf(
+    ToolHeaderSeparatorId to InlineTextContent(ToolHeaderSeparatorPlaceholder) {
+        Canvas(Modifier.fillMaxSize().testTag(ToolHeaderSeparatorId)) {
+            drawCircle(color, radius = size.minDimension / 2f, center = center)
+        }
+    },
+)

@@ -76,6 +76,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                     null, Modifier.size(18.dp).testTag("work-process-icon"), tint = colors.accent)
                 Column(Modifier.weight(1f)) {
                     Text(toolHeaderText(title, terminalHeader), color = colors.text,
+                        inlineContent = toolHeaderInlineContent(colors.text),
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (stacked) Text("$stepCount 项 · ${work.summary}", color = colors.muted,
@@ -170,6 +171,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                     Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(18.dp).testTag("tool-operation-icon:${step.toolCallId}"), tint = colors.accent)
                     Column(Modifier.weight(1f)) {
                         Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,
+                            inlineContent = toolHeaderInlineContent(colors.text),
                             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (stacked) Text(stateLabel, Modifier.fillMaxWidth(), color = tint,

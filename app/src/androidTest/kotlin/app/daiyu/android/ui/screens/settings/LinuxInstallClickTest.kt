@@ -172,6 +172,10 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { dispatcher.pending }
         dispatcher.runNext()
         ui.waitUntil(5_000) { !coordinator.state.value.busy && coordinator.state.value.prepared == null }
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("linux-install-progress").fetchSemanticsNodes().isEmpty()
+        }
         ui.waitForIdle()
         assertEquals(expected, transactions.discarded.size)
         assertFalse(dispatcher.pending)

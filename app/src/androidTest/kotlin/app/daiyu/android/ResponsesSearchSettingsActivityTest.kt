@@ -93,6 +93,7 @@ class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
         openModels()
         chooseProviderProtocol("OpenAI Chat Completions")
         saveModel()
+        awaitModelEditor()
         editCurrentModelSearch(true)
         assertEquals(app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS, fixture.settings.loadForRun().protocol)
         assertTrue(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)

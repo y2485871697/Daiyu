@@ -41,7 +41,7 @@ class ConversationWorkspacesActivityTest : WiredActivityTestCase() {
             val added = fixture.database.workspaceBinding(owner)
             val choices = ConversationWorkspaceCodec.decodeWorkspaces(added)
             assertEquals(3, choices.bindings.size)
-            assertEquals(ConversationWorkspaceBinding.Private(second.path), choices.active)
+            assertEquals(ConversationWorkspaceBinding.Private(second.canonicalPath), choices.active)
             assertTrue(worker { fixture.controller.selectWorkspaceOnWorker(owner, added, 1) })
             val selectedBeforeEdit = fixture.database.workspaceBinding(owner)
             val third = File(fixture.application.filesDir, "workspace/list-third").apply { mkdirs() }
@@ -49,8 +49,8 @@ class ConversationWorkspacesActivityTest : WiredActivityTestCase() {
                 assertTrue(worker { fixture.controller.saveWorkspaceOnWorker(owner, selectedBeforeEdit,
                     "private", third.path, replaceIndex = 2) })
                 val edited = ConversationWorkspaceCodec.decodeWorkspaces(fixture.database.workspaceBinding(owner))
-                assertEquals(ConversationWorkspaceBinding.Private(first.path), edited.active)
-                assertEquals(ConversationWorkspaceBinding.Private(third.path), edited.bindings[2])
+                assertEquals(ConversationWorkspaceBinding.Private(first.canonicalPath), edited.active)
+                assertEquals(ConversationWorkspaceBinding.Private(third.canonicalPath), edited.bindings[2])
             } finally { third.deleteRecursively() }
             val selected = fixture.database.workspaceBinding(owner)
             val frozen = worker { fixture.controller.freezeConversationWorkspaceOnWorker(owner) }

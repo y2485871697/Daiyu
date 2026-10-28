@@ -58,13 +58,31 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         backToChat(activity); assertDraft("retained links unsent")
     }
 
+    private fun awaitSponsorReady() {
+        awaitUniqueTag("sponsor-wechat")
+        awaitDialogEnter(node("sponsor-wechat"))
+        awaitNodeWindowFocus(node("sponsor-wechat"))
+    }
+
+    private fun awaitSponsorClosed() {
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("sponsor-qr").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty() &&
+                ui.onAllNodesWithTag("preview-dialog-viewport")
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
+        node("sponsor-qr").assertDoesNotExist()
+        node("page:APP 信息与更新").assertIsDisplayed()
+        awaitNodeWindowFocus(node("page:APP 信息与更新"))
+    }
+
     fun testSponsorSwitchesOriginalQrsAndClosesWithoutOpeningPayment() {
         setDraft("sponsor unsent")
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openSettings()
         assertTrue(intercept { entry("赞助").assertHasClickAction().performClick() }.isEmpty())
-        awaitUniqueTag("sponsor-wechat")
+        awaitSponsorReady()
         node("sponsor-wechat").assertIsSelected()
         node("sponsor-alipay").assertIsNotSelected()
         ui.onNodeWithContentDescription("微信收款码").assertIsDisplayed()
@@ -78,22 +96,16 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         node("sponsor-alipay").performClick()
         node("sponsor-alipay").assertIsSelected()
         ui.onNodeWithContentDescription("关闭").performClick()
-        awaitVisualIdle()
-        node("sponsor-qr").assertDoesNotExist()
-        node("page:APP 信息与更新").assertExists()
+        awaitSponsorClosed()
         entry("赞助").performClick()
-        awaitUniqueTag("sponsor-wechat")
+        awaitSponsorReady()
         node("sponsor-wechat").assertIsSelected()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-        awaitVisualIdle()
-        node("sponsor-qr").assertDoesNotExist()
-        node("page:APP 信息与更新").assertExists()
+        awaitSponsorClosed()
         entry("赞助").performClick()
-        awaitUniqueTag("sponsor-wechat")
+        awaitSponsorReady()
         node("preview-dialog-scrim").performClick()
-        awaitVisualIdle()
-        node("sponsor-qr").assertDoesNotExist()
-        node("page:APP 信息与更新").assertExists()
+        awaitSponsorClosed()
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(settings, fixture.settings.loadForEditing().settings)
         assertEquals(0, fixture.opens.get())

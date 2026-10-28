@@ -68,8 +68,9 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
         }
         val current = node(foreground)
         awaitNodeWindowFocus(current)
+        awaitDialogEnter(current)
         dismissIme()
-        awaitImeFrame(current, visible = false)
+        awaitDialogImeFrame(current, visible = false)
         if (system) {
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         } else ui.onNodeWithContentDescription("返回").performClick()

@@ -69,9 +69,10 @@ class R77CandidateRepairsContract(unittest.TestCase):
     def test_system_education_dismissal_is_exact_and_single_shot(self):
         navigation = (TEST / 'AssistantNavigationActivityTest.kt').read_text()
         back = navigation.split('private fun back(system: Boolean) {', 1)[1].split('fun testHeader', 1)[0]
-        for earlier, later in (('awaitNodeWindowFocus(current)', 'dismissIme()'),
-                               ('dismissIme()', 'awaitImeFrame(current, visible = false)'),
-                               ('awaitImeFrame(current, visible = false)', 'if (system)')):
+        for earlier, later in (('awaitNodeWindowFocus(current)', 'awaitDialogEnter(current)'),
+                               ('awaitDialogEnter(current)', 'dismissIme()'),
+                               ('dismissIme()', 'awaitDialogImeFrame(current, visible = false)'),
+                               ('awaitDialogImeFrame(current, visible = false)', 'if (system)')):
             self.assertLess(back.index(earlier), back.index(later))
         self.assertEqual(1, back.count('sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)'))
         source = (TEST / 'DesktopEducationTooltip.kt').read_text()

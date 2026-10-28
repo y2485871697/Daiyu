@@ -4,6 +4,8 @@ import android.content.ContextWrapper
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.state.ToggleableState
 import app.daiyu.android.model.catalog.CatalogCommitResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.model.catalog.ModelCatalogService
@@ -80,6 +82,20 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertDraft("model management stays unsent")
     }
 
+    private fun editorSwitch(tag: String) = ui.onNode(
+        hasTestTag(tag) and hasAnyAncestor(hasTestTag("catalog-model-editor")))
+
+    private fun awaitEditorSwitch(tag: String, on: Boolean) {
+        val expected = hasTestTag(tag) and hasAnyAncestor(hasTestTag("catalog-model-editor")) and
+            SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState,
+                if (on) ToggleableState.On else ToggleableState.Off)
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(expected).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        if (on) editorSwitch(tag).assertIsOn() else editorSwitch(tag).assertIsOff()
+    }
+
     fun testModelBadgesUseExplicitNamesAndKeepOnlyTheCurrentModelCheck() {
         openLocalModels()
         val current = fixture.settings.load().model
@@ -94,11 +110,19 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
             ui.onNodeWithText(old).assertDoesNotExist()
 
         reveal("local-model-rename:extra-local").performClick()
+        awaitUniqueTag("catalog-model-editor")
+        awaitDialogEnter(node("catalog-model-editor"))
+        awaitNodeWindowFocus(node("catalog-model-editor"))
         node("settings-field:上下文窗口（tokens）").performTextReplacement("8000")
+        dismissIme()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:支持视觉"))
-        node("settings-switch:支持视觉").assertIsOn().performClick().assertIsOff()
+        awaitEditorSwitch("settings-switch:支持视觉", true)
+        editorSwitch("settings-switch:支持视觉").performClick()
+        awaitEditorSwitch("settings-switch:支持视觉", false)
         node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:原生搜索"))
-        node("settings-switch:原生搜索").assertIsOff().performClick().assertIsOn()
+        awaitEditorSwitch("settings-switch:原生搜索", false)
+        editorSwitch("settings-switch:原生搜索").performClick()
+        awaitEditorSwitch("settings-switch:原生搜索", true)
         node("dialog-confirm").performClick()
         awaitControl("badge configuration saved") {
             fixture.settings.localModelCatalogSnapshot()!!.models.single { it.id == "extra-local" }

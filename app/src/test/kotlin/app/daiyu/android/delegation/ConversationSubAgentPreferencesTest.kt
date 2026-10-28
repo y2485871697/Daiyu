@@ -118,6 +118,66 @@ class ConversationSubAgentPreferencesTest {
         assertTrue(reopened.snapshot(owner).enabled)
     }
 
+    @Test fun branchArchiveCopiesEveryFieldOnceAndKeepsOwnersIndependentAcrossReopen() {
+        val disk = MemoryPreferences(); val repository = ConversationSubAgentPreferences(disk)
+        val source = SubAgentConfigKey.Conversation("source")
+        val target = SubAgentConfigKey.Conversation("branch")
+        val pool = SubAgentParallelModel("provider", "api-model")
+        val key = SubAgentProfile.modelReasoningKey("provider", "local-model")
+        val profile = SubAgentProfile("worker", "Worker", providerId = "provider", modelId = "local-model",
+            enabled = false, tier = SubAgentTaskTier.COMPLEX, reasoning = ReasoningEffort.HIGH,
+            reasoningByModel = mapOf(key to ReasoningEffort.HIGH),
+            gptSpeedByModel = mapOf(key to app.daiyu.android.model.GptSpeedMode.FAST))
+        val image = SubAgentProfile("image", "Image", role = "image_generation", providerId = "media", modelId = "image-model", imageResolution = "high")
+        val preset = repository.addPreset("Preset")
+        val presetOwner = SubAgentConfigKey.Preset(preset.id)
+        repository.update(presetOwner) { it.copy(profiles = listOf(profile, image), enabled = false,
+            parallelLimits = mapOf(pool to 0), legacyParallelLimits = mapOf(pool.legacyKey() to 7)) }
+        repository.applyPreset(source, preset.id)
+        val captured = repository.snapshot(source)
+        val archive = repository.export(source)
+        repository.update(source) { it.copy(enabled = true, profiles = emptyList(), parallelLimits = mapOf(pool to 4)) }
+        assertTrue(repository.importOwner(target, archive))
+        assertEquals(captured, repository.snapshot(target))
+        assertNotEquals(captured.poolKey(source, pool), captured.poolKey(target, pool))
+        repository.update(target) { it.copy(profiles = listOf(profile.copy(name = "Branch worker"))) }
+        assertTrue(repository.snapshot(source).profiles.isEmpty())
+        assertEquals(4, repository.snapshot(source).parallelLimit(pool))
+        val targetConfig = repository.snapshot(target)
+        assertFalse(repository.importOwner(target, archive))
+        assertEquals(targetConfig, repository.snapshot(target))
+        val reopened = ConversationSubAgentPreferences(disk.reopen())
+        assertEquals(targetConfig, reopened.snapshot(target))
+        assertEquals(repository.snapshot(source), reopened.snapshot(source))
+        assertEquals(listOf(profile, image), reopened.snapshot(presetOwner).profiles)
+    }
+
+    @Test fun branchArchiveRetainsExplicitEmptyAndFailedImportDoesNotPublishConfig() {
+        val disk = MemoryPreferences(); val repository = ConversationSubAgentPreferences(disk)
+        val source = SubAgentConfigKey.Conversation("empty-source")
+        val target = SubAgentConfigKey.Conversation("empty-branch")
+        repository.update(source) { it.copy(enabled = false, profiles = emptyList()) }
+        val archive = repository.export(source)
+        val revision = repository.revision.value
+        var published = 0
+        val observation = repository.observeChanges { _, _ -> published++ }
+        disk.failNextCommit = true
+        try { repository.importOwner(target, archive); fail("must reject failed commit") }
+        catch (_: IllegalStateException) { }
+        assertEquals(revision, repository.revision.value)
+        assertEquals(0, published)
+        observation.close()
+        assertTrue(repository.recoverDurability())
+        assertFalse(repository.ownerState(target).exists)
+        assertEquals(emptyList<SubAgentProfile>(), repository.snapshot(source).profiles)
+        assertTrue(repository.importOwner(target, archive))
+        assertTrue(repository.ownerState(target).exists)
+        val reopened = ConversationSubAgentPreferences(disk.reopen())
+        assertTrue(reopened.ownerState(target).exists)
+        assertFalse(reopened.snapshot(target).enabled)
+        assertEquals(repository.snapshot(source), reopened.snapshot(target))
+    }
+
     @Test fun readsAndRejectedEditsDoNotWrite() {
         val disk = MemoryPreferences()
         val repository = ConversationSubAgentPreferences(disk) { false }

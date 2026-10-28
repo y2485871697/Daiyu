@@ -169,6 +169,81 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         } finally { sql.execSQL("DROP TRIGGER corrupt_branch_binding") }
     }
 
+    fun testBranchCopiesSourceModelReasoningAndChildrenThenKeepsBothOwnersIndependent() {
+        val f = fresh(); val owner = seed(f)
+        val sourceModel = ConversationModelBinding("source-provider", "source-local-model")
+        val laterModel = ConversationModelBinding("other-provider", "same-model-name")
+        assertTrue(f.db.bindModel(owner.id, f.db.modelBinding(owner.id), sourceModel))
+        val preferences = app.daiyu.android.delegation.ConversationSubAgentPreferences(
+            f.app.getSharedPreferences("subagent_configuration", 0))
+        val sourceKey = app.daiyu.android.delegation.SubAgentConfigKey.Conversation(owner.id.value)
+        val profile = app.daiyu.android.delegation.SubAgentProfile("worker", "Source worker",
+            providerId = "child-provider", modelId = "child-local-model",
+            reasoning = app.daiyu.android.delegation.ReasoningEffort.HIGH)
+        val pool = app.daiyu.android.delegation.SubAgentParallelModel("child-provider", "api-model")
+        preferences.update(sourceKey) { it.copy(enabled = false, profiles = listOf(profile), parallelLimits = mapOf(pool to 0)) }
+        val sourceConfig = preferences.snapshot(sourceKey)
+        val reasoning = f.controller.reasoningPreference
+        reasoning.set(owner.id.value, app.daiyu.android.delegation.ReasoningEffort.HIGH)
+        val before = history(f, owner.id)
+        val target = snapshot(f, owner.id).targets.getValue(before.last().id.value)
+        val copy = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
+        val childKey = app.daiyu.android.delegation.SubAgentConfigKey.Conversation(copy.id.value)
+        assertEquals(sourceModel, f.db.modelBinding(copy.id))
+        assertEquals(sourceConfig, preferences.snapshot(childKey))
+        assertEquals(app.daiyu.android.delegation.ReasoningEffort.HIGH, reasoning.snapshot(copy.id.value))
+        assertTrue(f.db.bindModel(owner.id, sourceModel, laterModel))
+        preferences.update(sourceKey) { it.copy(enabled = true, profiles = emptyList()) }
+        reasoning.set(owner.id.value, app.daiyu.android.delegation.ReasoningEffort.OFF)
+        assertEquals(sourceModel, f.db.modelBinding(copy.id))
+        assertEquals(sourceConfig, preferences.snapshot(childKey))
+        assertEquals(app.daiyu.android.delegation.ReasoningEffort.HIGH, reasoning.snapshot(copy.id.value))
+        val childModel = ConversationModelBinding("branch-provider", "branch-local-model")
+        assertTrue(f.db.bindModel(copy.id, sourceModel, childModel))
+        preferences.update(childKey) { it.copy(profiles = listOf(profile.copy(name = "Child worker"))) }
+        assertEquals(laterModel, f.db.modelBinding(owner.id))
+        assertTrue(preferences.snapshot(sourceKey).profiles.isEmpty())
+        val reopened = app.daiyu.android.delegation.ConversationSubAgentPreferences(
+            f.app.getSharedPreferences("subagent_configuration", 0))
+        assertEquals("Child worker", reopened.snapshot(childKey).profiles.single().name)
+        reasoning.set(copy.id.value, app.daiyu.android.delegation.ReasoningEffort.LOW)
+        val reopenedReasoning = app.daiyu.android.ui.model.ConversationReasoningPreference(
+            f.app.getSharedPreferences("conversation-ui", 0))
+        assertEquals(app.daiyu.android.delegation.ReasoningEffort.OFF, reopenedReasoning.snapshot(owner.id.value))
+        assertEquals(app.daiyu.android.delegation.ReasoningEffort.LOW, reopenedReasoning.snapshot(copy.id.value))
+        val reopenedDb = ConversationDatabase(f.app)
+        try {
+            assertEquals(laterModel, reopenedDb.modelBinding(owner.id))
+            assertEquals(childModel, reopenedDb.modelBinding(copy.id))
+        } finally { reopenedDb.close() }
+        assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
+    }
+
+    fun testProductionBranchRetainsExplicitNullModelAndModelWriteFailureRollsBack() {
+        val f = fresh(); val owner = seed(f)
+        val global = ConversationModelBinding("global-provider", "global-local-model")
+        assertTrue(f.db.bindModel(null, f.db.modelBinding(null), global))
+        ConversationModelSelections.write(f.db.writableDatabase, owner.id, null)
+        val before = history(f, owner.id)
+        val target = snapshot(f, owner.id).targets.getValue(before.last().id.value)
+        val copy = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
+        assertNull(f.db.modelBinding(copy.id))
+        assertEquals(global, f.db.modelBinding(null))
+        assertTrue(f.db.readableDatabase.rawQuery(
+            "SELECT provider_slot,local_model_id FROM conversation_model_selections WHERE owner_id=?",
+            arrayOf(copy.id.value)).use { it.moveToFirst() && it.isNull(0) && it.isNull(1) })
+        val count = f.db.conversations().size
+        val sql = f.db.writableDatabase
+        sql.execSQL("CREATE TEMP TRIGGER reject_branch_model BEFORE INSERT ON conversation_model_selections " +
+            "BEGIN SELECT RAISE(IGNORE); END")
+        try {
+            assertTrue(action(f, MessageAction.BRANCH, target) is MessageActionResult.Rejected)
+            assertEquals(count, f.db.conversations().size)
+            assertEquals(before, history(f, owner.id)); assertNull(f.db.modelBinding(owner.id))
+            assertEquals(0, f.opens.get())
+        } finally { sql.execSQL("DROP TRIGGER reject_branch_model") }
+    }
+
     fun testBranchAndDeleteUseSelectedAssistantBoundaryWithoutChangingCopy() {
         val f = fresh(); val owner = seed(f, n = 2, tool = true)
         val before = history(f, owner.id)

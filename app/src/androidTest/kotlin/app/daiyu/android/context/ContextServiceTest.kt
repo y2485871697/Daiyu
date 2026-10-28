@@ -133,6 +133,28 @@ class ContextServiceTest : InstrumentationTestCase() {
         assertEquals(cut, ArchiveCodec.decodeDocument(PrivateBlobs(context).read(hash)).logicalPrefixCount)
     }
 
+    fun testCompatibilityBranchCopiesModelOnceAndFailedModelWriteRollsBack() {
+        val owner = seed(2)
+        val binding = app.daiyu.android.storage.ConversationModelBinding("provider", "stable-local-id")
+        assertTrue(db.bindModel(owner, db.modelBinding(owner), binding))
+        val before = service.displayHistory(owner)
+        val copy = service.branch(owner, before.last().id)
+        assertEquals(binding, db.modelBinding(copy))
+        assertTrue(db.bindModel(copy, binding,
+            app.daiyu.android.storage.ConversationModelBinding("branch-provider", "branch-local-id")))
+        assertEquals(binding, db.modelBinding(owner))
+        val count = db.conversations().size
+        db.writableDatabase.execSQL("CREATE TEMP TRIGGER reject_branch_model BEFORE INSERT ON conversation_model_selections " +
+            "BEGIN SELECT RAISE(IGNORE); END")
+        try {
+            try { service.branch(owner, before.last().id); fail("model receipt required") }
+            catch (_: IllegalStateException) { }
+            assertEquals(count, db.conversations().size)
+            assertEquals(before, service.displayHistory(owner))
+            assertEquals(binding, db.modelBinding(owner))
+        } finally { db.writableDatabase.execSQL("DROP TRIGGER reject_branch_model") }
+    }
+
     fun testBranchAndPhysicalReviseDriveDisplayAndSendIdentically() {
         val owner = seed(); val old = service.displayHistory(owner); val copy = service.branch(owner, old[3].id)
         assertEquals(old, service.displayHistory(owner)); assertEquals(4, db.messages(copy).size)

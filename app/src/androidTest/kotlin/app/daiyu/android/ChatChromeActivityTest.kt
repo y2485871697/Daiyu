@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -56,10 +57,11 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
 
     private fun show(composer: ComposerUi, actions: ChatScreenActions = ChatScreenActions(),
         fontScale: Float = 1f, interfaceScale: Float = 1f, dark: Boolean = false, balance: BalanceState? = null,
-        opaqueBackground: Boolean = false) {
+        opaqueBackground: Boolean = false, readComposer: () -> ComposerUi = { composer }) {
         layoutScenario = "dark=$dark scale=$interfaceScale font=$fontScale enabled=${composer.enabled} fraction=${composer.contextFraction}"
         mainThread {
             activity.setContent {
+                val currentComposer = readComposer()
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     AgentAppTheme(AppearanceSettings(interfaceScale = interfaceScale,
@@ -71,8 +73,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                             if (opaqueBackground) Modifier.background(MiuixTheme.colorScheme.background) else Modifier,
                         )) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
-                                ChatTopBar("测试会话", actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
-                                ChatComposer(composer, actions, balanceState = balance)
+                                ChatTopBar("测试会话", actions, assistantLabel = currentComposer.assistantLabel, modelLabel = currentComposer.modelLabel)
+                                ChatComposer(currentComposer, actions, balanceState = balance)
                             }
                         }
                     }
@@ -434,6 +436,84 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             } finally { ui.mainClock.autoAdvance = automatic }
             assertTrue("display toggles do not navigate or launch model requests", events.isEmpty())
         }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testContextUsageUpdatesAnimateFromUnknownAndBetweenRealPercentagesWithoutClicking() {
+        val unknown = app.daiyu.android.ui.model.CloudContextUsageUi(null, 272_000)
+        val current = mutableStateOf(composer().copy(contextFraction = unknown.fraction,
+            contextUsageText = unknown.label(java.util.Locale.US), contextTokensText = unknown.tokensLabel(java.util.Locale.US)))
+        val events = mutableListOf<String>()
+        show(current.value, ChatScreenActions(onModelClick = { events.add("model") }, onMenuAction = { events.add("menu") }),
+            readComposer = { current.value })
+        ui.onNodeWithText("上下文", useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithText("未知", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        val automatic = ui.mainClock.autoAdvance
+        try {
+            ui.mainClock.autoAdvance = false
+            for (input in listOf(4_000L, 40_000L, 0L, null)) {
+                val value = app.daiyu.android.ui.model.CloudContextUsageUi(input, 272_000)
+                val oldText = requireNotNull(current.value.contextUsageText)
+                val text = value.label(java.util.Locale.US)
+                val before = node("chat-context").fetchSemanticsNode().boundsInRoot
+                mainThread { current.value = current.value.copy(contextFraction = value.fraction,
+                    contextUsageText = text, contextTokensText = value.tokensLabel(java.util.Locale.US)) }
+                ui.mainClock.advanceTimeByFrame()
+                ui.mainClock.advanceTimeBy(80)
+                ui.onNodeWithText(oldText, useUnmergedTree = true).assertExists()
+                ui.onNodeWithText(text, useUnmergedTree = true).assertExists()
+                val middle = node("chat-context").fetchSemanticsNode().boundsInRoot
+                ui.mainClock.advanceTimeBy(320)
+                ui.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
+                ui.onNodeWithText(oldText, useUnmergedTree = true).assertDoesNotExist()
+                val after = node("chat-context").fetchSemanticsNode().boundsInRoot
+                assertEquals(before.height, middle.height, 1f)
+                assertEquals(before.height, after.height, 1f)
+                if (abs(before.width - after.width) > 2f) {
+                    assertTrue("usage update interpolates the existing badge width",
+                        middle.width > minOf(before.width, after.width) + .5f &&
+                            middle.width < maxOf(before.width, after.width) - .5f)
+                }
+                assertNoTextOverflow(layout(text))
+            }
+        } finally { ui.mainClock.autoAdvance = automatic }
+        assertTrue(events.isEmpty())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testContextUsageUpdatesKeepTheSelectedTokenModeAndLatestPercentOnToggleBack() {
+        val value = app.daiyu.android.ui.model.CloudContextUsageUi(4_000, 272_000)
+        val current = mutableStateOf(composer().copy(contextFraction = value.fraction,
+            contextUsageText = value.label(java.util.Locale.US), contextTokensText = value.tokensLabel(java.util.Locale.US)))
+        show(current.value, readComposer = { current.value })
+        val automatic = ui.mainClock.autoAdvance
+        try {
+            ui.mainClock.autoAdvance = false
+            node("chat-context").performClick()
+            ui.mainClock.advanceTimeBy(400)
+            val oldTokens = value.tokensLabel(java.util.Locale.US)
+            ui.onNodeWithText(oldTokens, useUnmergedTree = true).assertIsDisplayed()
+            val latest = app.daiyu.android.ui.model.CloudContextUsageUi(40_000, 272_000)
+            val tokens = latest.tokensLabel(java.util.Locale.US)
+            val percent = latest.label(java.util.Locale.US)
+            mainThread { current.value = current.value.copy(contextFraction = latest.fraction,
+                contextUsageText = percent, contextTokensText = tokens) }
+            ui.mainClock.advanceTimeByFrame()
+            ui.mainClock.advanceTimeBy(80)
+            ui.onNodeWithText(oldTokens, useUnmergedTree = true).assertExists()
+            ui.onNodeWithText(tokens, useUnmergedTree = true).assertExists()
+            ui.onNodeWithText(percent, useUnmergedTree = true).assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(320)
+            ui.onNodeWithText(oldTokens, useUnmergedTree = true).assertDoesNotExist()
+            val tokenLayout = layout(tokens)
+            assertEquals(0.3.sp, tokenLayout.layoutInput.style.letterSpacing)
+            assertNoTextOverflow(tokenLayout)
+            node("chat-context").performClick()
+            ui.mainClock.advanceTimeBy(400)
+            ui.onNodeWithText(percent, useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithText(tokens, useUnmergedTree = true).assertDoesNotExist()
+            assertNoTextOverflow(layout(percent))
+        } finally { ui.mainClock.autoAdvance = automatic }
         assertEquals(0, fixture.opens.get())
     }
 

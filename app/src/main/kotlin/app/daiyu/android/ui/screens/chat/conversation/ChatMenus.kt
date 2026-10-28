@@ -238,7 +238,7 @@ internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onActio
                     Icon(entry.icon, null, Modifier.size(24.dp), tint = colors.accent)
                     Text(entry.title, Modifier.weight(1f), fontSize = 16.sp, lineHeight = 24.sp,
                         color = if (isSelected) colors.selectionContent else colors.text)
-                    Box(Modifier.size(22.dp).background(if (isSelected) colors.primary else Color.Transparent, CircleShape),
+                    Box(Modifier.size(22.dp).background(if (isSelected) colors.accent else Color.Transparent, CircleShape),
                         contentAlignment = Alignment.Center) {
                         if (isSelected) Icon(DaiyuIcons.Check, null, Modifier.size(14.dp), tint = colors.onPrimary)
                     }

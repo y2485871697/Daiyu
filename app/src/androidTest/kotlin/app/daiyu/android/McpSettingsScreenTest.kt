@@ -10,6 +10,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import org.json.JSONObject
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.data.model.AppearanceSettings
@@ -23,7 +25,7 @@ import javax.crypto.KeyGenerator
 /** Actual settings form/store; only ephemeral synthetic encrypted data under an isolated noBackup root. */
 class McpSettingsScreenTest : WiredActivityTestCase() {
     fun testAddDiscoversOnceCompactRowsAndToolSwitchesPersistIndependentlyFromDescription() {
-        for (dark in listOf(false, true)) {
+        for (dark in listOf(false, true)) for (accent in listOf(null, 0xFF3C8C73.toInt())) {
             val root = File(instrumentation.targetContext.cacheDir, "mcp-tools-${UUID.randomUUID()}").apply { mkdirs() }
             val context = object : ContextWrapper(instrumentation.targetContext) { override fun getNoBackupFilesDir() = root }
             val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
@@ -43,7 +45,8 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             } }
             try {
                 mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(
-                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                    primaryAccentColor = accent), applyInterfaceScale = false) {
                     McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {}, managementFactory = {
                         opens++; discoveryFixture(it, methods, listing)
                     })
@@ -68,6 +71,15 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
                 } }
                 node(toggle).assertIsOn()
                 node("mcp-tool-enabled:$id:$longName").assertIsOn()
+                val pixels = captureScreenNode(node(toggle)).toPixelMap()
+                val expected = Color(accent ?: 0xFF82728F.toInt())
+                var trackPixels = 0
+                for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                    val pixel = pixels[x, y]
+                    if (maxOf(kotlin.math.abs(pixel.red - expected.red), kotlin.math.abs(pixel.green - expected.green),
+                            kotlin.math.abs(pixel.blue - expected.blue)) < .01f) trackPixels++
+                }
+                assertTrue("MCP reference track; dark=$dark custom=${accent != null}", trackPixels > 0)
                 ui.onNodeWithText("简短描述").assertDoesNotExist()
                 ui.onNodeWithText(description).assertDoesNotExist()
                 val firstBounds = node(first).fetchSemanticsNode().boundsInRoot
@@ -116,7 +128,10 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
                 assertTrue(McpSettingsStore(context) { key }.snapshot().servers.single().catalog.none {
                     store.snapshot().servers.single().eligible(it.name)
                 })
-                node("mcp-refresh:$id").performClick()
+                node("mcp-refresh:$id").assertIsDisplayed().assertIsEnabled().assertHasClickAction()
+                    .assertContentDescriptionEquals("刷新").assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
+                ui.onNodeWithText("刷新", substring = false).assertDoesNotExist()
+                node("mcp-refresh:$id").performTouchInput { click() }
                 awaitStatus("工具目录已刷新；可提交精确任务，尚未调用工具。")
                 assertEquals(2, opens)
                 assertEquals(2, methods.count { it == "tools/list" })

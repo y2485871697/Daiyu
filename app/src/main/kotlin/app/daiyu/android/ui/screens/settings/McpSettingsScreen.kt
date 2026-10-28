@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.app.daiyuSwitchColors
 import app.daiyu.android.ui.navigation.PageBackStack
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
@@ -167,10 +169,12 @@ import kotlinx.coroutines.withContext
                             tint = MiuixTheme.colorScheme.onSurface, size = 24.dp)
                     }
                 } else {
-                    app.daiyu.android.ui.haptics.miuix.TextButton(text = "刷新",
+                    app.daiyu.android.ui.haptics.miuix.IconButton(
+                        onClick = { snapshot?.let { refresh(it, selected) } },
                         enabled = !busy && snapshot != null,
-                        modifier = Modifier.testTag("mcp-refresh:${selected.id}"),
-                        onClick = { snapshot?.let { refresh(it, selected) } })
+                        modifier = Modifier.size(48.dp).testTag("mcp-refresh:${selected.id}")) {
+                        DaiyuIcon(DaiyuIcons.Refresh, contentDescription = "刷新", size = 22.dp)
+                    }
                 }
             }) {
             if (selected == null && (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。")) item(key = "status") {
@@ -329,6 +333,11 @@ private fun McpToolRow(title: String, serverId: String, checked: Boolean, enable
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
         }
         SettingsSwitch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange,
+            colors = daiyuSwitchColors().copy(
+                checkedThumbColor = MiuixTheme.colorScheme.onPrimary,
+                checkedTrackColor = DaiyuPalette.switchTrack,
+                checkedBorderColor = DaiyuPalette.switchTrack,
+            ),
             modifier = Modifier.testTag("mcp-tool-enabled:$serverId:$title").semantics { contentDescription = title })
     }
 }

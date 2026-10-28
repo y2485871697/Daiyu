@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.deletionButtonColors
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.LocalAppearanceDark
@@ -146,11 +147,11 @@ internal fun ProviderDirectoryPage(
                                 val checked = registration.slotId in selectedSlots
                                 val colors = MiuixTheme.colorScheme
                                 Box(Modifier.size(24.dp).clip(CircleShape)
-                                    .background(if (checked) colors.primary else colors.surfaceVariant)
+                                    .background(if (checked) DaiyuPalette.selectionAccent else colors.surfaceVariant)
                                     .testTag("provider-selection-${registration.slotId}"), contentAlignment = Alignment.Center) {
                                     if (checked) DaiyuIcon(DaiyuIcons.Check, null, tint = colors.onPrimary, size = 18.dp)
                                 }
-                            } else if (registry?.activeSlotId == registration.slotId) DaiyuIcon(DaiyuIcons.Check, "当前提供商")
+                            } else if (registry?.activeSlotId == registration.slotId) DaiyuIcon(DaiyuIcons.Check, "当前提供商", tint = DaiyuPalette.selectionAccent)
                         },
                         modifier = Modifier.semantics {
                             if (selectedSlots != null) {

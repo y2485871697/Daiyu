@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -71,7 +72,7 @@ internal fun RunningModeSettingsScreen(onBack: () -> Unit, modifier: Modifier = 
                             })) {
                         SettingsRow(title = if (failure == null) name else "$name · $failure", trailing = {
                             if (selected == mode) DaiyuIcon(DaiyuIcons.Check, "已选择",
-                                tint = MiuixTheme.colorScheme.primary, size = 24.dp)
+                                tint = DaiyuPalette.selectionAccent, size = 24.dp)
                         })
                     }
                 }

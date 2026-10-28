@@ -65,7 +65,7 @@ private fun ThemeChoice(mode: AppearanceThemeMode, selected: Boolean, onClick: (
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.fillMaxWidth().height(104.dp)
             .background(preview.background, RoundedCornerShape(14.dp))
-            .border(if (selected) 2.dp else 1.dp, if (selected) colors.primary else colors.outline, RoundedCornerShape(14.dp))) {
+            .border(if (selected) 2.dp else 1.dp, if (selected) DaiyuPalette.selectionAccent else colors.outline, RoundedCornerShape(14.dp))) {
             if (mode == AppearanceThemeMode.SYSTEM) Box(Modifier.align(Alignment.CenterEnd)
                 .fillMaxWidth(0.5f).height(102.dp)
                 .background(DaiyuPalette.dark.background, RoundedCornerShape(topEnd = 13.dp, bottomEnd = 13.dp)))
@@ -76,7 +76,7 @@ private fun ThemeChoice(mode: AppearanceThemeMode, selected: Boolean, onClick: (
                 Box(Modifier.fillMaxWidth(0.54f).height(5.dp).background(preview.outline, CircleShape))
             }
             if (selected) Box(Modifier.align(Alignment.BottomEnd).padding(5.dp).size(20.dp)
-                .background(colors.primary, CircleShape), contentAlignment = Alignment.Center) {
+                .background(DaiyuPalette.selectionAccent, CircleShape), contentAlignment = Alignment.Center) {
                 DaiyuIcon(DaiyuIcons.Check, null, tint = colors.onPrimary, size = 13.dp)
             }
         }

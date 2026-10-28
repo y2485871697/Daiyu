@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.destructiveColors
 
 import androidx.compose.foundation.background
@@ -135,10 +136,10 @@ fun ConversationWorkspaceSheet(
                                     }
                                     if (selecting) {
                                         Checkbox(checked = checked, onCheckedChange = null,
-                                            colors = CheckboxDefaults.colors(checkedColor = actions.primary,
+                                            colors = CheckboxDefaults.colors(checkedColor = DaiyuPalette.selectionAccent,
                                                 checkmarkColor = actions.onPrimary))
                                     } else {
-                                        if (active) Icon(Icons.Rounded.CheckCircle, "当前工作区", tint = colors.accent)
+                                        if (active) Icon(Icons.Rounded.CheckCircle, "当前工作区", tint = DaiyuPalette.selectionAccent)
                                         ConversationAgentIconButton(enabled = !busy, onClick = { onEditWorkspace(index) },
                                             modifier = Modifier.size(48.dp).testTag("workspace-edit:$index")) {
                                             Icon(Icons.Rounded.Edit, "更改工作区目录", tint = colors.accent)

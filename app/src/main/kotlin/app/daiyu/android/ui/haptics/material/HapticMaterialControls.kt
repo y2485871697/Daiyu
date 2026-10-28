@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.haptics.material
 
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.daiyuSwitchColors
 import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.platform.LocalView
@@ -177,7 +178,7 @@ internal fun Checkbox(
     onCheckedChange: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: CheckboxColors = CheckboxDefaults.colors(),
+    colors: CheckboxColors = CheckboxDefaults.colors(checkedColor = DaiyuPalette.selectionAccent),
     interactionSource: MutableInteractionSource? = null,
 ) {
     val change = onCheckedChange?.let { hapticChange(enabled, it) }
@@ -197,7 +198,7 @@ internal fun RadioButton(
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: RadioButtonColors = RadioButtonDefaults.colors(),
+    colors: RadioButtonColors = RadioButtonDefaults.colors(selectedColor = DaiyuPalette.selectionAccent),
     interactionSource: MutableInteractionSource? = null,
 ) {
     val click = onClick?.let { hapticClick(enabled, it) }

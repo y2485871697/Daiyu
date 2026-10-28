@@ -22,7 +22,7 @@ class AccentForegroundContractTest(unittest.TestCase):
         for name in ['ui/components/UsagePresentation.kt', 'ui/components/ConversationPanePreview.kt',
                      'ui/components/subagent/ConversationAgentStyle.kt', 'ui/screens/assistants/AssistantPreviewComponents.kt']:
             text = source(name)
-            self.assertIn('val accent = appearance.resolvedPrimaryAccent ?: ', text)
+            self.assertIn('val accent = resolveSelectionAccent(appearance, dark)' if name == 'ui/components/UsagePresentation.kt' else 'val accent = appearance.resolvedPrimaryAccent ?: ', text)
             self.assertNotIn('resolvedPrimaryAccent?.let { readableAccent', text)
             self.assertNotIn('readableAccent(theme.onSurfaceSecondary', text)
             self.assertNotIn('if (customSurface) theme.onSurface', text)
@@ -46,10 +46,10 @@ class AccentForegroundContractTest(unittest.TestCase):
         self.assertIn('UserBubbleColors(fill, colorContentColor(fill))', colors)
         self.assertIn('colorContentColor(background) == Color.Black', source('MainActivity.kt'))
 
-    def test_settings_selected_check_keeps_custom_primary_before_default_contrast_fallback(self):
+    def test_settings_selected_check_uses_shared_exact_primary_selection_role(self):
         rows = source('ui/screens/settings/SettingsUiComponents.kt')
-        self.assertIn('tint = appearance.resolvedPrimaryAccent', rows)
-        self.assertIn('resolveAppearanceColors(appearance.copy(paletteSeedColor = null), dark).surface', rows)
-        self.assertIn('?: app.daiyu.android.ui.app.readableAccent(MiuixTheme.colorScheme.primary', rows)
+        self.assertIn('tint = DaiyuPalette.selectionAccent', rows)
+        self.assertIn('resolveSelectionAccent(LocalAppearanceSettings.current, LocalAppearanceDark.current)', source('ui/app/DaiyuPalette.kt'))
+        self.assertNotIn('readableAccent(MiuixTheme.colorScheme.primary', rows)
 
 if __name__ == '__main__': unittest.main()

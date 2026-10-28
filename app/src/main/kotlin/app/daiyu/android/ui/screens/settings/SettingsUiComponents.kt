@@ -1,7 +1,5 @@
 package app.daiyu.android.ui.screens.settings
 
-import app.daiyu.android.ui.app.resolvedPrimaryAccent
-
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
@@ -168,15 +166,11 @@ internal fun SettingsSwitchRow(title: String, checked: Boolean, enabled: Boolean
 
 @Composable
 internal fun SettingsRadioRow(title: String, selected: Boolean, enabled: Boolean = true, summary: String? = null, onClick: () -> Unit) {
-    val appearance = app.daiyu.android.ui.app.LocalAppearanceSettings.current
-    val dark = app.daiyu.android.ui.app.LocalAppearanceDark.current
-    val defaultSurface = app.daiyu.android.ui.app.resolveAppearanceColors(appearance.copy(paletteSeedColor = null), dark).surface
     Box(Modifier.testTag("settings-radio:$title").fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, enabled = enabled, onClick = onClick)) {
         SettingsRow(title = title, summary = summary, trailing = {
             if (selected) {
                 DaiyuIcon(DaiyuIcons.Check, contentDescription = "已选择",
-                    tint = appearance.resolvedPrimaryAccent
-                        ?: app.daiyu.android.ui.app.readableAccent(MiuixTheme.colorScheme.primary, dark, defaultSurface), size = 24.dp)
+                    tint = DaiyuPalette.selectionAccent, size = 24.dp)
             }
         })
     }

@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -150,7 +151,7 @@ internal fun ProviderModelSelectionDialog(
                                 onValueChange = { if (editable) onSelectionChange(selection.toggle(model.id)) }),
                             leading = {
                                 Checkbox(checked = checked, onCheckedChange = null, enabled = editable,
-                                    colors = CheckboxDefaults.colors(checkedColor = colors.primary,
+                                    colors = CheckboxDefaults.colors(checkedColor = DaiyuPalette.selectionAccent,
                                         checkmarkColor = colors.onPrimary, uncheckedColor = colors.onSurfaceVariantSummary))
                             },
                         )

@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.context
 
+import app.daiyu.android.ui.app.DaiyuPalette
 import androidx.compose.foundation.background
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -105,7 +106,7 @@ internal fun CompressionConversationDialog(
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(label, Modifier.weight(1f), fontSize = 14.sp)
                             RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(
-                                selectedColor = colors.primary, unselectedColor = colors.muted))
+                                selectedColor = DaiyuPalette.selectionAccent, unselectedColor = colors.muted))
                         }
                     }
                 }

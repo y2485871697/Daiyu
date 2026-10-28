@@ -1,12 +1,12 @@
 package app.daiyu.android.ui.components
 
+import app.daiyu.android.ui.app.resolveSelectionAccent
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.readableAccent
-import app.daiyu.android.ui.app.resolvedPrimaryAccent
 import app.daiyu.android.ui.app.styleColor
 
 import androidx.compose.ui.input.pointer.pointerInput
@@ -39,7 +39,7 @@ internal data class UsagePalette(val dark: Boolean, val appearance: AppearanceSe
     private val customSurface = appearance.paletteSeedColor != null
     private val theme = resolveAppearanceColors(appearance, dark)
     private val actions = resolveAppearanceActions(appearance, dark)
-    val primary = appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xffc6b6d5 else 0xff82718f)
+    val primary = resolveSelectionAccent(appearance, dark)
     val onPrimary = Color(if (dark) 0xff211735 else 0xffffffff)
     val selectionContainer = if (appearance.primaryAccentColor != null) theme.primaryContainer
         else if (customSurface) theme.surfaceContainerHigh else appearance.styleColor(Color(if (dark) 0xff28262f else 0xffefedfb))
@@ -50,7 +50,7 @@ internal data class UsagePalette(val dark: Boolean, val appearance: AppearanceSe
         ?: readableAccent(actions.secondary, dark, Color(if (dark) 0xff28262f else 0xfff1eff3))
     val text = Color(if (dark) 0xffe0dce8 else 0xff36333f)
     val muted = Color(if (dark) 0xff918997 else 0xff968b9f)
-    val accent = appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xffc6b6d5 else 0xff82718f)
+    val accent = resolveSelectionAccent(appearance, dark)
     val toolbar = Color(if (dark) 0xffb2a9c7 else 0xff716a82)
     val line = if (customSurface) theme.dividerLine else appearance.styleColor(Color(if (dark) 0xff393540 else 0xffe6e1e8))
     val bubble = if (customSurface) theme.surfaceContainer else appearance.styleColor(Color(if (dark) 0xff28262f else 0xfff1eff3))

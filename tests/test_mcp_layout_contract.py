@@ -25,6 +25,27 @@ class McpLayoutContractTest(unittest.TestCase):
         self.assertNotIn('已配置服务器（', self.source)
         self.assertNotIn('尚未添加服务器', self.source)
 
+    def test_detail_refresh_reuses_workspace_icon_and_preserves_owned_action(self):
+        actions = self.source.split('SettingsScaffoldPage(title =', 1)[1].split('if (selected == null &&', 1)[0]
+        for text in ('app.daiyu.android.ui.haptics.miuix.IconButton(',
+                     'onClick = { snapshot?.let { refresh(it, selected) } }',
+                     'enabled = !busy && snapshot != null',
+                     'Modifier.size(48.dp).testTag("mcp-refresh:${selected.id}")',
+                     'DaiyuIcons.Refresh, contentDescription = "刷新", size = 22.dp'):
+            self.assertIn(text, actions)
+        self.assertNotIn('TextButton(text = "刷新"', actions)
+
+    def test_tool_switch_uses_existing_reference_track_without_changing_other_states(self):
+        row = self.source.split('private fun McpToolRow(', 1)[1].split('private fun McpToolDescriptionSheet(', 1)[0]
+        for text in ('SettingsSwitch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange',
+                     'colors = daiyuSwitchColors().copy(',
+                     'checkedThumbColor = MiuixTheme.colorScheme.onPrimary',
+                     'checkedTrackColor = DaiyuPalette.switchTrack',
+                     'checkedBorderColor = DaiyuPalette.switchTrack'):
+            self.assertIn(text, row)
+        self.assertNotIn('disabledChecked', row)
+        self.assertNotIn('Color(0x', row)
+
     def test_detail_omits_explanatory_copy_without_removing_connection_or_empty_tools(self):
         detail = self.source.split('item(key = "server-settings")', 1)[1].split('if (editing)', 1)[0]
         settings = detail.split('item(key = "tools-heading")', 1)[0]

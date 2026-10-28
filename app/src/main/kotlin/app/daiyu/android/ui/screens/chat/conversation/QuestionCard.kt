@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -309,20 +310,21 @@ private fun QuestionOptionRow(
     modifier: Modifier = Modifier,
 ) {
     val colors = questionCardColors()
+    val selectionAccent = DaiyuPalette.selectionAccent
     val shape = RoundedCornerShape(12.dp)
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Row(modifier.fillMaxWidth().heightIn(min = 40.dp).clip(shape)
         .background(if (selected) colors.soft else Color.Transparent)
-        .then(if (focused) Modifier.border(1.dp, colors.accent, shape) else Modifier)
+        .then(if (focused) Modifier.border(1.dp, selectionAccent, shape) else Modifier)
         .selectable(selected = selected, enabled = enabled, role = Role.RadioButton,
             interactionSource = interaction, indication = null, onClick = onClick)
         .padding(horizontal = 7.dp, vertical = 9.dp), verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         Box(Modifier.padding(top = 2.dp).size(13.dp)
-            .border(1.3.dp, if (selected) colors.accent else colors.muted, CircleShape),
+            .border(1.3.dp, if (selected) selectionAccent else colors.muted, CircleShape),
             contentAlignment = Alignment.Center) {
-            if (selected) Box(Modifier.size(6.dp).background(colors.accent, CircleShape))
+            if (selected) Box(Modifier.size(6.dp).background(selectionAccent, CircleShape))
         }
         Column(Modifier.weight(1f)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

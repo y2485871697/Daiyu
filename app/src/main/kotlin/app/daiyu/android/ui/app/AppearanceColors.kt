@@ -14,6 +14,9 @@ import top.yukonga.miuix.kmp.theme.Colors
 internal val AppearanceSettings.resolvedPrimaryAccent: Color?
     get() = primaryAccentColor?.let(::Color)
 
+internal fun resolveSelectionAccent(appearance: AppearanceSettings, dark: Boolean): Color =
+    appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xFFC6B6D5 else 0xFF82718F)
+
 internal fun colorHsv(color: Color): FloatArray {
     val high = max(color.red, max(color.green, color.blue))
     val low = min(color.red, min(color.green, color.blue))

@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import app.daiyu.android.ui.haptics.combinedClickable
@@ -371,12 +372,12 @@ internal fun <T> LocalCatalogModelsScreen(
                                     val checked = model.id in selection
                                     val colors = MiuixTheme.colorScheme
                                     Box(Modifier.size(24.dp).clip(CircleShape)
-                                        .background(if (checked) colors.primary else colors.surfaceVariant)
+                                        .background(if (checked) DaiyuPalette.selectionAccent else colors.surfaceVariant)
                                         .testTag("local-model-selection:${model.id}"), contentAlignment = Alignment.Center) {
                                         if (checked) DaiyuIcon(DaiyuIcons.Check, null, tint = colors.onPrimary, size = 18.dp)
                                     }
                                 } else {
-                                    if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型")
+                                    if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型", tint = DaiyuPalette.selectionAccent)
                                     Box(Modifier.size(40.dp).testTag("local-model-rename:${model.id}")
                                         .clickable(enabled = editorEnabled) {
                                             if (current() && currentEnabled && selectedIds == null && request == null && ticket != null && matches(ticket)) {

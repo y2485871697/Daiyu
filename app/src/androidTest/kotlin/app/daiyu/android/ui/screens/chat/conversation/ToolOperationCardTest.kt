@@ -105,15 +105,22 @@ class ToolOperationCardTest : WiredActivityTestCase() {
     }
     fun testReceiptTargetLabelsRenderInBothProductionPathsWithoutReexecution() {
         var executions = 0
-        for (mixed in listOf(false, true)) for ((backend, uid, label) in listOf(
-            Triple("android", 0, "Android • root"), Triple("android", 10444, "Android • user"),
-            Triple("linux:debian", 0, "Debian • root"), Triple("shizuku", 2000, "Android • Shizuku"))) {
-            val fixture = source(mixed, "target-$backend-$uid-$mixed")
+        for (mixed in listOf(false, true)) for ((name, target) in listOf(
+            "terminal_exec" to Triple("android", 0, "Android • root"),
+            "terminal_exec" to Triple("android", 10444, "Android • user"),
+            "terminal_exec" to Triple("linux:debian", 0, "Debian • root"),
+            "terminal_exec" to Triple("linux:debian", 0, "Debian • root（PRoot）"),
+            "shizuku_execute" to Triple("shizuku", 2000, "Android • Shizuku"),
+            "terminal_job_read" to Triple("linux:debian", 0, "Debian • root"),
+            "terminal_job_read" to Triple("linux:debian", 0, "Debian • root（PRoot）"))) {
+            val (backend, uid, label) = target
+            val fixture = source(mixed, "target-$name-$backend-$uid-$label-$mixed")
             val payload = org.json.JSONObject().put("ok", true).put("backend", backend).put("uid", uid)
                 .put(if (backend == "shizuku") "output" else "stdout", "target-output").put("exit_code", 0)
-                .also { if (backend != "shizuku") it.put("root", uid == 0).put("host_root", uid == 0) }.toString()
-            val name = if (backend == "shizuku") "shizuku_execute" else "terminal_exec"
-            val args = if (backend == "shizuku") """{"script":"printf target-output"}"""
+                .also { if (backend != "shizuku") it.put("root", uid == 0)
+                    .put("host_root", uid == 0 && !label.contains("PRoot")) }.toString()
+            val args = if (name == "terminal_job_read") """{"job_id":"recorded-job"}"""
+                else if (backend == "shizuku") """{"script":"printf target-output"}"""
                 else org.json.JSONObject().put("command", "printf target-output")
                     .put("environment", if (backend.startsWith("linux:")) "linux" else "android").toString()
             val message = fixture.copy(blocks = fixture.blocks.map { block ->
@@ -128,13 +135,14 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                     ui.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.Text].single())
                 ui.onNodeWithTag("work-process-header").performClick()
             }
-            val title = "执行命令 · $label"
+            val title = "${if (name == "terminal_job_read") "读取后台结果" else "执行命令"} · $label"
             ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed()
             assertEquals(toolHeaderText(title, true),
                 ui.onNodeWithText(title, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.Text].single())
             ui.onNodeWithText(title).performClick()
             ui.onNodeWithText("target-output").scrollToVisible().assertIsDisplayed()
             ui.onNodeWithText("执行环境", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("Android 宿主权限", substring = true, useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText("技术详情").assertDoesNotExist()
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
             assertEquals(0, executions)

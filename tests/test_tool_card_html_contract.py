@@ -53,6 +53,16 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         shizuku = (ROOT / "app/src/main/kotlin/app/daiyu/android/shizuku/RunShizukuCommands.kt").read_text()
         self.assertIn('.put("backend", "shizuku").put("uid", backend.identity.uid)', shizuku)
 
+    def test_terminal_body_omits_permission_footer_but_keeps_receipt_identity(self):
+        body = (CHAT / "ToolBodyLayout.kt").read_text()
+        terminal = body.split('if (category in setOf("terminal", "background_job")) {', 1)[1].split('    val inputTitles', 1)[0]
+        self.assertIn("return ToolBodyLayout(emptyList(), emptyList(),", terminal)
+        self.assertNotIn('Android 宿主权限', terminal)
+        details = (CHAT / "ToolCategoryDetails.kt").read_text()
+        self.assertIn('target.hostIdentity?.let { fields += ToolFieldUi("Android 宿主权限", it) }', details)
+        content = (CHAT / "ToolCategoryContent.kt").read_text()
+        self.assertIn("if (fields.isEmpty()) return", content)
+
     def test_terminal_header_dots_are_emphasized_only_in_both_header_renderers(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertIn('val terminalHeader = steps.isNotEmpty() && steps.all { it.category in setOf("terminal", "background_job") }', shell)

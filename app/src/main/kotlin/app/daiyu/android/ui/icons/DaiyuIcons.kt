@@ -380,10 +380,12 @@ object DaiyuIcons {
     val Compress: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Compress", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(4f, 4f); lineTo(9f, 9f); moveTo(4f, 9f); lineTo(9f, 9f); lineTo(9f, 4f)
-                moveTo(20f, 4f); lineTo(15f, 9f); moveTo(15f, 4f); lineTo(15f, 9f); lineTo(20f, 9f)
-                moveTo(4f, 20f); lineTo(9f, 15f); moveTo(4f, 15f); lineTo(9f, 15f); lineTo(9f, 20f)
-                moveTo(20f, 20f); lineTo(15f, 15f); moveTo(20f, 15f); lineTo(15f, 15f); lineTo(15f, 20f)
+                moveTo(4f, 10f); lineTo(20f, 10f)
+                moveTo(4f, 14f); lineTo(20f, 14f)
+                moveTo(12f, 2f); lineTo(12f, 7f)
+                moveTo(9f, 4f); lineTo(12f, 7f); lineTo(15f, 4f)
+                moveTo(12f, 22f); lineTo(12f, 17f)
+                moveTo(9f, 20f); lineTo(12f, 17f); lineTo(15f, 20f)
             }
         }.build()
     }

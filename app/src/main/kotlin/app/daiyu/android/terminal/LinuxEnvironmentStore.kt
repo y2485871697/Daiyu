@@ -108,6 +108,14 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         } catch (_: Exception) { state("BROKEN").put("error", "linux_installation_unavailable") }
     }
 
+    internal fun inspectTrustedSelection(expected: LinuxInstallation) = synchronized(control) {
+        runnerPins.admitted {
+            check(load() == expected) { "linux_trusted_installation_mismatch" }
+            validate(expected)
+            rootfsAccess?.inspectAdmission()
+        }
+    }
+
     /** A lease freezes the selected generation; release it after the entire run/session ends. */
     fun acquire(): Lease = acquireSelected(null)
 

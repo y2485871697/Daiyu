@@ -226,6 +226,54 @@ class TerminalEnvironmentHostTest {
         assertFalse(File(root, "user-terminal").exists())
     }
 
+    @Test fun trustedStatusNeverClaimsEvenATemporaryCommonPin() = linuxFixture { root, spec ->
+        val directory = File(root, "user-terminal/linux-selection")
+        hostLinuxStore(directory).select(spec)
+        val access = LinuxRootfsBackupAccess.forFiles(root)
+        val common = File(root, "linux-rootfs-access-v1")
+        val selection = File(directory, "selected-linux.json")
+        val before = selection.readBytes()
+        var sawPin = false
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync,
+            fileKey = { path ->
+                if (common.listFiles()!!.any { it.name.startsWith(".runner-pin-") }) sawPin = true
+                hostLinuxFileKey(path)
+            }, rootfsAccess = access)
+        repeat(3) { assertEquals("FILES_READY", gate.status().state) }
+        assertFalse("status must not create even a temporary pin", sawPin)
+        assertArrayEquals(before, selection.readBytes())
+        for (dir in listOf(directory, common)) assertTrue(dir.listFiles()!!.none { it.name.startsWith(".runner-pin-") })
+        hostLinuxStore(directory).clearSelection()
+    }
+
+    @Test fun trustedStatusStillRejectsUnknownCommonPinWithoutChangingIt() = linuxFixture { root, spec ->
+        val directory = File(root, "user-terminal/linux-selection")
+        hostLinuxStore(directory).select(spec)
+        val common = LinuxRootfsBackupAccess.forFiles(root)
+        val pin = File(root, "linux-rootfs-access-v1/.runner-pin-orphan").apply { writeText("unknown") }
+        val before = pin.readBytes()
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync,
+            fileKey = ::hostLinuxFileKey, rootfsAccess = common)
+        repeat(3) { assertEquals("RUNNER_UNKNOWN", gate.status().state) }
+        assertArrayEquals(before, pin.readBytes())
+        assertEquals(listOf(pin.name), pin.parentFile.listFiles()!!.filter { it.name.startsWith(".runner-pin-") }.map { it.name })
+        assertTrue(directory.listFiles()!!.none { it.name.startsWith(".runner-pin-") })
+    }
+
+    @Test fun trustedStatusChecksMetadataAndExportWithoutCreatingCommonPins() = linuxFixture { root, spec ->
+        val directory = File(root, "user-terminal/linux-selection")
+        val store = hostLinuxStore(directory).apply { select(spec) }
+        val common = LinuxRootfsBackupAccess.forFiles(root)
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync,
+            fileKey = ::hostLinuxFileKey, rootfsAccess = common)
+        repeat(3) { assertEquals("FILES_READY", gate.status().state) }
+        assertTrue(File(root, "linux-rootfs-access-v1").listFiles()!!.none { it.name.startsWith(".runner-pin-") })
+        common.acquire(spec, listOf("root"), export = true).use { assertEquals("BROKEN", gate.status().state) }
+        assertEquals("FILES_READY", gate.status().state)
+        store.select(spec.copy(distribution = "other"))
+        assertEquals("BROKEN", gate.status().state)
+    }
+
     @Test fun matchingTrustedConfigurationIsReadyAndGuardLeaseBlocksSelectionReplacement() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
         val store = hostLinuxStore(directory).apply { select(spec) }

@@ -3945,17 +3945,22 @@ class ChatController internal constructor(private val application:Application,
                 commandFactory = if (RunCommandTools.CAPABILITY !in capabilities.enabled) null else { realOwner, task ->
                     val host = ((application as? ChatApplication)?.terminalProvider?.state?.value as?
                         app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
+                    val commandLinuxState = host?.linuxStateOnWorker()
                     val reference = workspace.resolved.rootfs?.let { app.daiyu.android.terminal.LinuxGenerationRef(it.environmentId, it.generation) }
-                        ?: host?.terminalOwner?.host?.state?.value?.linux?.selected
+                        ?: commandLinuxState?.selected
                     val commandLinux = host?.workspaceRootsOnWorker()?.firstOrNull {
                         it.environmentId == reference?.environmentId && it.generation == reference?.generation
                     }
-                    val launch = if (host == null || reference == null || commandLinux == null) null else
-                        host.freezeTerminalLaunchOnWorker(reference, application.cacheDir, workspace.resolved.hostDirectory,
-                            workspace.linux(reference))
+                    val linuxBinding = app.daiyu.android.integration.tools.CommandLinuxBinding.freeze(commandLinuxState, reference) {
+                        if (host == null || reference == null || commandLinux == null) null else
+                            host.freezeTerminalLaunchOnWorker(reference, application.cacheDir, workspace.resolved.hostDirectory,
+                                workspace.linux(reference))
+                    }
+                    val launch = linuxBinding.launch
                     try {
                         RunCommandTools.android(application, realOwner, task, launch,
-                            workingDirectory = workspace.resolved.hostDirectory, approve = { context, effect, disclosure ->
+                            workingDirectory = workspace.resolved.hostDirectory, linuxState = linuxBinding.state,
+                            approve = { context, effect, disclosure ->
                             commandApprovals.await(CommandApprovalRequest(realOwner, context.invocation.id.value,
                                 effect, disclosure), context.cancelled)
                         })

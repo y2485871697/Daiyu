@@ -71,6 +71,11 @@ class LinuxSettingsApplication private constructor(
         }
     }
 
+    internal fun linuxStateOnWorker(): TerminalLinuxState {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "terminal_freeze_requires_worker" }
+        return terminalSelection.status()
+    }
+
     internal fun freezeSelectedCommandLaunchOnWorker(tempDirectory: File,
         hostWorkingDirectory: File, workspace: LinuxWorkspaceDirectory? = null,
         reference: LinuxGenerationRef? = null): TerminalPtyLaunch.Linux? {

@@ -9,6 +9,10 @@ internal class LinuxRootfsBackupAccess private constructor(private val files: Fi
     private val pins = LinuxRunnerGenerationPins(directory, directorySync = TerminalDurability::syncDirectory)
     private var exporting = false
 
+    @Synchronized fun inspectAdmission() = pins.admitted {
+        check(!exporting) { "linux_rootfs_in_use" }
+    }
+
     @Synchronized fun acquire(installation: LinuxInstallation, identities: List<String>, export: Boolean = false): AutoCloseable {
         val pin = pins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities,
             requireEmpty = export) {

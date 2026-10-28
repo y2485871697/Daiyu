@@ -10,7 +10,7 @@ import org.junit.Test
 import java.io.File
 
 class RunCommandToolsTest {
-    private class Fixture(private val automaticConsent: Boolean = false) {
+    private class Fixture(private val automaticConsent: Boolean = false, linuxState: app.daiyu.android.terminal.TerminalLinuxState? = null) {
         val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val task = TaskAuthorization("s", "r")
@@ -40,7 +40,7 @@ class RunCommandToolsTest {
                 if (automaticConsent) gate.await(CommandApprovalRequest(owner, context.invocation.id.value,
                     effect, disclosure), context.cancelled)
                 else { prompts++; approved }
-            }, create = { _, _ ->
+            }, linuxState = linuxState, create = { _, _ ->
                 created++; onCreate()
                 object : CommandTransport {
                     override fun execute(name: String, arguments: JSONObject): JSONObject {
@@ -116,6 +116,73 @@ class RunCommandToolsTest {
         assertEquals(1, fixture.prompts); assertEquals(1, fixture.executions)
         assertTrue(fixture.task.allowedWrites.isEmpty())
     }
+    @Test fun failedFreezeReportsActualTargetAndNeverRetriesAnotherEnvironment() {
+        val selected = app.daiyu.android.terminal.LinuxGenerationRef("selected", "b")
+        val workspace = app.daiyu.android.terminal.LinuxGenerationRef("workspace", "a")
+        var freezes = 0
+        val binding = CommandLinuxBinding.freeze(app.daiyu.android.terminal.TerminalLinuxState("FILES_READY", selected), workspace) {
+            freezes++; error("linux_runner_generation_unknown")
+        }
+        assertEquals(1, freezes); assertNull(binding.launch)
+        assertEquals(workspace, binding.state?.selected)
+        assertEquals("RUNNER_UNKNOWN", binding.state?.state)
+        val fixture = Fixture(linuxState = binding.state)
+        assertEquals(DispatchOutcome.NotExecuted("linux_runner_generation_unknown"), fixture.dispatch(environment = "linux"))
+        assertTrue(fixture.dispatch("android") is DispatchOutcome.Confirmed)
+        fixture.leaf.close()
+    }
+
+    @Test fun missingWorkspaceBindingDoesNotInheritAnotherSelectionsState() {
+        val selected = app.daiyu.android.terminal.LinuxGenerationRef("selected", "b")
+        val workspace = app.daiyu.android.terminal.LinuxGenerationRef("workspace", "a")
+        val binding = CommandLinuxBinding.freeze(app.daiyu.android.terminal.TerminalLinuxState("RUNNER_UNKNOWN", selected), workspace) { null }
+        assertEquals(workspace, binding.state?.selected)
+        assertEquals("UNAVAILABLE", binding.state?.state)
+        assertEquals("linux_workspace_generation_unavailable", binding.state?.error)
+    }
+
+    @Test fun rootModeRejectionAndCancellationKeepTheirMeaning() {
+        val rejected = CommandLinuxBinding.freeze(null, null) { error("linux_root_mode_required") }
+        assertEquals("linux_root_mode_required", rejected.state?.error)
+        assertNull(rejected.launch)
+        assertThrows(java.util.concurrent.CancellationException::class.java) {
+            CommandLinuxBinding.freeze(null, null) { throw java.util.concurrent.CancellationException("cancelled") }
+        }
+    }
+
+    @Test fun unknownLinuxIsReportedAsFencedNotUnconfiguredAndNeverPromptsOrLaunches() {
+        val fixture = Fixture(linuxState = app.daiyu.android.terminal.TerminalLinuxState("RUNNER_UNKNOWN",
+            error = "linux_runner_generation_unknown"))
+        val description = fixture.leaf.tools().first().definition.description
+        assertTrue(description.contains("RUNNER_UNKNOWN"))
+        assertTrue(description.contains("linux_runner_generation_unknown"))
+        assertFalse(description.contains("未配置"))
+        assertEquals(DispatchOutcome.NotExecuted("linux_runner_generation_unknown"), fixture.dispatch(environment = "linux"))
+        assertEquals(0, fixture.prompts); assertEquals(0, fixture.created)
+        assertTrue(fixture.dispatch("android", environment = "android") is DispatchOutcome.Confirmed)
+        assertEquals(1, fixture.created)
+        fixture.leaf.close()
+    }
+
+    @Test fun unavailableLinuxStatesHaveDistinctDescriptionsAndReceipts() {
+        val states = mapOf("NOT_SELECTED" to "linux_environment_not_selected",
+            "BROKEN" to "linux_environment_unavailable", "FILES_READY" to "linux_environment_not_bound_to_run")
+        states.forEach { (state, reason) ->
+            val fixture = Fixture(linuxState = app.daiyu.android.terminal.TerminalLinuxState(state))
+            assertTrue(fixture.leaf.tools().first().definition.description.contains(state))
+            assertEquals(DispatchOutcome.NotExecuted(reason), fixture.dispatch(environment = "linux"))
+            assertEquals(0, fixture.prompts); assertEquals(0, fixture.created)
+            fixture.leaf.close()
+        }
+    }
+
+    @Test fun missingLinuxSnapshotDoesNotClaimThatNoInstallationExists() {
+        val fixture = Fixture()
+        val description = fixture.leaf.tools().first().definition.description
+        assertTrue(description.contains("不能据此推断安装状态"))
+        assertFalse(description.contains("未配置"))
+    }
+
     @Test fun denialAndUnavailableLinuxNeverConstructBackend() {
         val denied = Fixture(); denied.approved = false
         assertTrue(denied.dispatch() is DispatchOutcome.NotExecuted)

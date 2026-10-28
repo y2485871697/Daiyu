@@ -481,10 +481,9 @@ internal class TerminalTrustedLinuxSelection(
                     error = status.optString("error").takeIf { it.isNotEmpty() })
             } else {
                 val reference = LinuxGenerationRef(status.getString("environment_id"), status.getString("generation"))
-                withSelection(reference) {
-                    val trusted = trusted(reference)
-                    TerminalLinuxState("FILES_READY", reference, trusted.distribution, choices)
-                }
+                val trusted = trusted(reference)
+                store.inspectTrustedSelection(trusted)
+                TerminalLinuxState("FILES_READY", reference, trusted.distribution, choices)
             }
         } catch (_: LinuxRunnerGenerationUnknown) {
             TerminalLinuxState("RUNNER_UNKNOWN", choices = choices, error = "linux_runner_generation_unknown")

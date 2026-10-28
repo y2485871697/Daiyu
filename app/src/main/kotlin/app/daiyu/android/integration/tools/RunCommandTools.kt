@@ -14,6 +14,29 @@ internal interface CommandTransport : AutoCloseable {
     fun awaitTermination(timeoutMillis: Long): Boolean
 }
 
+/** A rejected metadata-only freeze must not remove the ordinary Android command tool. */
+internal data class CommandLinuxBinding(val launch: TerminalPtyLaunch.Linux?, val state: TerminalLinuxState?) {
+    companion object {
+        fun freeze(state: TerminalLinuxState?, target: LinuxGenerationRef?,
+            action: () -> TerminalPtyLaunch.Linux?): CommandLinuxBinding {
+            val targetState = if (target == null || state?.selected == target) state else
+                TerminalLinuxState("UNAVAILABLE", selected = target, error = "linux_workspace_generation_unavailable")
+            return try { CommandLinuxBinding(action(), targetState) }
+            catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                val reason = when (failure.message) {
+                    "linux_runner_generation_unknown" -> "linux_runner_generation_unknown"
+                    "linux_root_mode_required" -> "linux_root_mode_required"
+                    else -> "linux_environment_binding_rejected"
+                }
+                CommandLinuxBinding(null, TerminalLinuxState(
+                    if (reason == "linux_runner_generation_unknown") "RUNNER_UNKNOWN" else "UNAVAILABLE",
+                    selected = target, error = reason))
+            }
+        }
+    }
+}
+
 /** Ordinary chat commands use the same central ledger as every other tool. Each command gets
  * one exact host grant for its frozen bytes/backend under the app consent policy, not OS authority.
  * Neither a capability nor model JSON is itself a write grant. */
@@ -24,17 +47,19 @@ internal class RunCommandTools(
     private val linux: TerminalPtyLaunch.Linux?,
     private val approve: (ToolExecutionContext, WriteEffect, String) -> Boolean,
     private val create: (String, TerminalConfiguration) -> CommandTransport,
+    private val linuxState: TerminalLinuxState? = null,
 ) : AutoCloseable {
     companion object {
         const val CAPABILITY = "terminal.command.consent"
         fun android(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
             linux: TerminalPtyLaunch.Linux?,
             workingDirectory: java.io.File = app.daiyu.android.workspace.PrivateWorkspacePaths(context.filesDir).ensureRoot(),
+            linuxState: TerminalLinuxState? = null,
             approve: (ToolExecutionContext, WriteEffect, String) -> Boolean): RunCommandTools {
             val configuration = TerminalConfiguration(workingDirectory = workingDirectory,
                 environment = mapOf("HOME" to context.filesDir.path, "TMPDIR" to context.cacheDir.path,
                     "PATH" to "/system/bin:/system/xbin"))
-            return RunCommandTools(configuration, owner, authorization, linux, approve) { environment, frozen ->
+            return RunCommandTools(configuration, owner, authorization, linux, approve, create = { environment, frozen ->
                 val registry = TerminalRegistry(context)
                 try { registry.configure("${owner.runId.value}-$environment", frozen, owner.conversationId.value) }
                 catch (failure: Exception) { registry.close(); throw failure }
@@ -44,7 +69,7 @@ internal class RunCommandTools(
                     override fun close() = registry.close()
                     override fun awaitTermination(timeoutMillis: Long) = registry.awaitOrdinaryTermination(timeoutMillis)
                 }
-            }
+            }, linuxState = linuxState)
         }
     }
     private val lock = Any()
@@ -57,6 +82,26 @@ internal class RunCommandTools(
     private var closeFailed = false
     private val registries = mutableMapOf<String, CommandTransport>()
     private val linuxConfiguration = linux?.commandConfiguration()
+    private val linuxUnavailableReason = when (linuxState?.error) {
+        "linux_runner_generation_unknown", "linux_root_mode_required", "linux_environment_binding_rejected",
+        "linux_workspace_generation_unavailable" -> checkNotNull(linuxState.error)
+        else -> when (linuxState?.state) {
+        "RUNNER_UNKNOWN" -> "linux_runner_generation_unknown"
+        "NOT_SELECTED" -> "linux_environment_not_selected"
+        "BROKEN" -> "linux_environment_unavailable"
+        "FILES_READY" -> "linux_environment_not_bound_to_run"
+            else -> "linux_environment_not_ready_select_installed_environment"
+        }
+    }
+    private val linuxDescription = linuxConfiguration?.linux?.let { "Linux 工作目录：${it.guestWorkingDirectory}" }
+        ?: when (linuxState?.state) {
+            "RUNNER_UNKNOWN" -> "Linux 状态：RUNNER_UNKNOWN（环境运行状态待确认，linux_runner_generation_unknown）；安装选择仍需保留，本次不可执行，不重装、不自动重试或切换环境"
+            "NOT_SELECTED" -> "Linux 状态：NOT_SELECTED（未选择环境），本次不可执行"
+            "BROKEN" -> "Linux 状态：BROKEN（配置或安装身份校验失败），本次不可执行"
+            "UNAVAILABLE" -> "Linux 状态：UNAVAILABLE（本次环境绑定不可用，$linuxUnavailableReason），本次不可执行"
+            "FILES_READY" -> "Linux 状态：FILES_READY（环境文件已就绪，但本次运行未绑定可执行环境）"
+            else -> "Linux 状态：尚未取得可执行配置，不能据此推断安装状态"
+        }
     private fun configuration(environment: String): TerminalConfiguration? =
         if (environment == "android") android else linuxConfiguration
     private fun target(environment: String, timeout: Long): String {
@@ -85,7 +130,7 @@ internal class RunCommandTools(
     }
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = app.daiyu.android.domain.tools.ToolDefinition("terminal_exec", 1,
-            "在 Android 应用身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；Linux 工作目录：${linuxConfiguration?.linux?.guestWorkingDirectory ?: "未配置"}。两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
+            "在 Android 应用身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(maxLength = 32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = setOf("android", "linux"))),
@@ -111,7 +156,7 @@ internal class RunCommandTools(
                         TaskAuthorization(authorization.sessionId, authorization.taskId, setOf(effect)) else null
                 },
                 admit = { call -> denied(call) ?: when {
-                    config == null -> ExecutionReceipt.NotExecuted("linux_environment_not_ready_select_installed_environment")
+                    config == null -> ExecutionReceipt.NotExecuted(linuxUnavailableReason)
                     else -> null
                 } },
                 execute = { call -> execute(call, effect, environment, command, timeout) })

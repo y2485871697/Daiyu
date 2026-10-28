@@ -42,11 +42,11 @@ class SubAgentThinkingPickerContractTest(unittest.TestCase):
         text = (SRC / "MainActivity.kt").read_text()
         picker = text.split("SubAgentThinkingEffortPickerDialog(show = thinkingPicker", 1)[1]
         self.assertIn("mainChat = true", picker)
-        self.assertIn("if (allowTaskConfigurationChange()) try {", picker)
+        self.assertIn("if (allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))) try {", picker)
         self.assertIn("if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()", picker)
         controller = (SRC / "ChatController.kt").read_text()
         setter = controller.split("internal fun setChatReasoning(", 1)[1].split("\n    }", 1)[0]
-        self.assertIn("if (!idleAvailable() || hasLiveChildTasks()) return false\n"
+        self.assertIn("if (taskConfigurationBusy(owner?.let(::ConversationId))) return false\n"
                       "        reasoningPreference.set(owner, effort)\n"
                       "        return true", setter)
         shared = (COMPONENTS / "subagent/ConversationThinkingPicker.kt").read_text()

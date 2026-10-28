@@ -367,8 +367,8 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('Rejected("child_model_configuration_changed")', direct)
         prepared = controller.split('private fun sendPrepared(', 1)[1]
         self.assertLess(prepared.index('childPreparation.isCurrent()'), prepared.index('val mayCommit=synchronized(this)'))
-        failure = prepared.split('childPreparation.isCurrent()', 1)[1].split('if (!runCatching { providers.isCurrentActive', 1)[0]
-        self.assertIn('closeUnacceptedTools(tools)', failure)
+        failure = prepared.split('childPreparation.isCurrent()', 1)[1].split('\n        }', 1)[0]
+        self.assertIn('closeUnacceptedTools(tools, conversation?.id, conversationId)', failure)
         self.assertIn('return null', failure)
         helper = controller.split('private fun freezeSavedChildModels', 1)[1].split('internal fun savedSubAgentProviders', 1)[0]
         for check in ('ownerState(key)', 'snapshot(key) == config', 'providers.snapshot().revision == registryRevision', 'it == revision'):

@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownTableWidthTest {
+    @Test fun appendingUnrevealedRowsCannotChangeTheColumnWidthPolicy() {
+        val first = MarkdownParser.parse("a | b\n--- | ---\nshort | short").single() as MarkdownBlock.Table
+        val next = first.copy(rows = first.rows + listOf(listOf(listOf(MarkdownInline.Text("long ".repeat(80))), listOf(MarkdownInline.Text("tail")))))
+        assertArrayEquals(MarkdownText.tableColumnWidthEms(first.header), MarkdownText.tableColumnWidthEms(next.header), 0f)
+    }
+
     @Test fun samplingStopsBeforeLaterNodesAndCountsCodePoints() {
         var reads = 0
         val nodes = object : AbstractList<MarkdownInline>() {

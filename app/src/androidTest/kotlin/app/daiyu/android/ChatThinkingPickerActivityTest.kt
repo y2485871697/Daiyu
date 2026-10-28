@@ -70,6 +70,8 @@ class ChatThinkingPickerActivityTest : WiredActivityTestCase() {
 
     fun testSevenExplicitStopsPersistWithoutClosingOrSending() {
         setDraft("seven stops draft")
+        dismissIme()
+        awaitImeFrame(node("chat-draft"), visible = false)
         openPicker()
         val choices = listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL, ReasoningEffort.LOW,
             ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX)

@@ -63,7 +63,7 @@ class RegressionCompletionBarriersContractTest(unittest.TestCase):
         self.assertEqual(3, method.count('awaitSponsorReady()'))
         self.assertEqual(3, method.count('awaitSponsorClosed()'))
         self.assertEqual(1, method.count('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)'))
-        self.assertEqual(2, method.count('node("preview-dialog-scrim").performClick()'))
+        self.assertEqual(2, method.count('node("preview-dialog-scrim").assertHasClickAction().performSemanticsAction(SemanticsActions.OnClick) { click -> assertTrue(click()) }'))
         for value in ('ui.onNodeWithContentDescription("关闭").assertDoesNotExist()',
                       'assertEquals(before, fixture.database.exportBackup())', 'assertDraft("sponsor unsent")'):
             self.assertIn(value, method)

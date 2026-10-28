@@ -475,7 +475,7 @@ internal fun AssistantTurn(
         if (turn.content.isEmpty()) listOf(turn.finalText)
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
     }
-    val projection = rememberMarkdownProjection(sources)
+    val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)
     val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)
     val contentReady = projection?.sources == sources
     val generationComplete = turn.status != RunStatus.RUNNING && contentReady
@@ -485,7 +485,7 @@ internal fun AssistantTurn(
         else {
             var textIndex = 0
             turn.copy(content = turn.content.map { content ->
-                if (content is MessageContentUi.Text) content.copy(text = projection.sources[textIndex++]) else content
+                if (content is MessageContentUi.Text) content.copy(text = projection.sources.getOrNull(textIndex++) ?: "") else content
             })
         }
     }

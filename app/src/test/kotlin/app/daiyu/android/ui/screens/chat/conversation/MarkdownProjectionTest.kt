@@ -16,6 +16,64 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownProjectionTest {
+    @Test fun unchangedSourcesReuseThePreviousAstEvenWhenTheWholeProjectionExceedsTheCacheBudget() = runBlocking {
+        val calls = mutableListOf<String>()
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { calls += it; MarkdownParser.parse(it) }
+        val cache = MarkdownProjectionCache(maxSourceChars = 2)
+        val first = projectMarkdown(listOf("AAAA", "BBB"), parser, cache)
+        val next = projectMarkdown(listOf("AAAA", "BBBx"), parser, cache, first)
+        assertEquals(1, calls.count { it == "AAAA" })
+        assertSame(first.blocks["AAAA"], next.blocks["AAAA"])
+        assertEquals(MarkdownParser.parse("BBBx"), next.blocks["BBBx"])
+    }
+
+    @Test fun newMixedSourcesDoNotCancelAnAcceptedSnapshot() = runBlocking {
+        val requests = Channel<List<String>>(Channel.UNLIMITED)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val published = Channel<MarkdownProjection>(Channel.UNLIMITED)
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { source ->
+            if (source == "first") { entered.countDown(); release.await(5, TimeUnit.SECONDS) }
+            MarkdownParser.parse(source)
+        }
+        val job = launch { collectMarkdownProjections(requests.receiveAsFlow(), parser) { published.trySend(it) } }
+        try {
+            requests.send(listOf("first"))
+            withTimeout(5_000) { while (entered.count != 0L) yield() }
+            requests.send(listOf("first", "second"))
+            requests.send(listOf("first", "second", "third"))
+            yield(); release.countDown()
+            assertEquals(listOf("first"), withTimeout(5_000) { published.receive() }.sources)
+            var latest = withTimeout(5_000) { published.receive() }
+            while (latest.sources.size < 3) latest = withTimeout(5_000) { published.receive() }
+            assertEquals(listOf("first", "second", "third"), latest.sources)
+        } finally { release.countDown(); requests.close(); job.cancelAndJoin() }
+    }
+
+    @Test fun sameTextTerminalParseCannotReuseProvisionalCacheEntries() = runBlocking {
+        val cache = MarkdownProjectionCache()
+        for (source in listOf("正文\n-", "**未闭合", "`code")) {
+            val pending = projectMarkdown(listOf(source), streamingMarkdownParser, cache)
+            assertEquals(MarkdownParser.parseStreaming(source), pending.blocks.getValue(source))
+            assertNull(cache.get(listOf(source), defaultMarkdownParser))
+            assertNull(cache.getPrepared(listOf(source), defaultMarkdownParser))
+            val terminal = projectMarkdown(listOf(source), defaultMarkdownParser, cache, pending)
+            assertEquals(MarkdownParser.parse(source), terminal.blocks.getValue(source))
+            assertNotEquals(pending.blocks.getValue(source), terminal.blocks.getValue(source))
+            assertSame(pending.blocks.getValue(source), cache.get(listOf(source), streamingMarkdownParser)!!.blocks.getValue(source))
+        }
+    }
+
+    @Test fun finalWarmCacheCannotReplaceTheStreamingAstForIdenticalText() = runBlocking {
+        val cache = MarkdownProjectionCache()
+        val source = "**未闭合"
+        val terminal = projectMarkdown(listOf(source), defaultMarkdownParser, cache)
+        val pending = projectMarkdown(listOf(source), streamingMarkdownParser, cache)
+        assertNotSame(terminal, pending)
+        assertEquals(MarkdownParser.parseStreaming(source), pending.blocks.getValue(source))
+        assertSame(terminal.blocks.getValue(source), projectMarkdown(listOf(source), defaultMarkdownParser, cache).blocks.getValue(source))
+    }
+
     @Test fun appendedPendingBodyRetainsThePublishedSourceAndAstTogether() {
         val source = "First **paragraph**.\n\nSecond paragraph."
         val blocks = MarkdownParser.parse(source)
@@ -181,7 +239,7 @@ class MarkdownProjectionTest {
         assertFalse(isMarkdownAppend(listOf("first", "second"), listOf("second", "first")))
         assertFalse(isMarkdownAppend(listOf("first", "second"), listOf("first")))
         assertFalse(isMarkdownAppend(listOf("first"), listOf("replacement")))
-        assertFalse(isMarkdownAppend(listOf("first"), listOf("first", "new part")))
+        assertTrue(isMarkdownAppend(listOf("first"), listOf("first", "new part")))
     }
 
 }

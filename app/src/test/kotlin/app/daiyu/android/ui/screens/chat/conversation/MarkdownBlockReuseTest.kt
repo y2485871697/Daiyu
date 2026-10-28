@@ -48,7 +48,7 @@ class MarkdownBlockReuseTest {
         assertNotSame(first[0], next[1]); assertNotSame(first[1], next[2])
     }
 
-    @Test fun replacementParserAndSourceCountChangesDoNotBorrowPreviousSession() = runBlocking {
+    @Test fun replacementAndParserChangesStayIsolatedWhileNewMixedSourcesReuseTheStablePrefix() = runBlocking {
         val first = projectMarkdown(listOf("old"), cache = MarkdownProjectionCache())
         val replaced = projectMarkdown(listOf("new"), cache = MarkdownProjectionCache(), previous = first)
         assertEquals(MarkdownParser.parse("new"), replaced.blocks["new"])
@@ -56,7 +56,7 @@ class MarkdownBlockReuseTest {
         val changed = projectMarkdown(first.sources, parser, MarkdownProjectionCache(), first)
         assertNotSame(first.blocks["old"], changed.blocks["old"])
         val mixed = projectMarkdown(listOf("old", "second"), cache = MarkdownProjectionCache(), previous = first)
-        assertNotSame(first.blocks["old"], mixed.blocks["old"])
+        assertSame(first.blocks["old"], mixed.blocks["old"])
     }
 
     @Test fun realCollectorReusesOnlyItsOwnLastPublishedSnapshot() = runBlocking {

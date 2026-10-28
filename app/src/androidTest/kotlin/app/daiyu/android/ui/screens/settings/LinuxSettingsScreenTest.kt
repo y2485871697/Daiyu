@@ -364,14 +364,19 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         val oldSwitch = retainedClickCallback(revealLinux("linux-switch-environment").assertIsEnabled())
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:0").performClick()
+        awaitVisualIdle()
+        node("linux-distribution-choice").assertTextContains("Alpine")
         mainThread { oldSwitch() }
         assertEquals(0, selects.get())
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:1").performClick()
+        awaitVisualIdle()
+        node("linux-distribution-choice").assertTextContains("Debian")
         mainThread { oldSwitch() }
         assertEquals(0, selects.get())
         val oldBeforeFiles = retainedClickCallback(revealLinux("linux-switch-environment").assertIsEnabled())
         node("linux-tab:files").performClick(); node("linux-tab:basic").performClick()
+        awaitVisualIdle()
         mainThread { oldBeforeFiles() }
         assertEquals(alpine, currentSelection)
         assertEquals(0, selects.get()); assertEquals(0, fixture.opens.get())

@@ -63,6 +63,9 @@ object MarkdownText {
         return maxOf(widest, line)
     }
 
+    internal fun tableColumnWidthEms(header: List<List<MarkdownInline>>): FloatArray =
+        FloatArray(header.size) { tableCellWidthEm(header[it]) * 1.05f }
+
     internal fun renderInline(content: List<MarkdownInline>): Spanned = SpannableStringBuilder().apply {
         appendInline(content)
     }

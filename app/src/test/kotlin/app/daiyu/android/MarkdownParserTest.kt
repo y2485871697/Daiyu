@@ -15,6 +15,37 @@ class MarkdownParserTest {
         MarkdownInline.Break -> "\n"
     } }
 
+    @Test fun thematicBreaksHaveTheSamePriorityAfterAListAsOutsideIt() {
+        for (bullet in listOf("-", "*")) {
+            val blocks = MarkdownParser.parse("$bullet a\n$bullet $bullet $bullet")
+            assertEquals(2, blocks.size)
+            assertTrue(blocks.first() is MarkdownBlock.Items)
+            assertEquals(MarkdownBlock.Rule, blocks.last())
+        }
+        val nested = MarkdownParser.parse("- a\n  - - -").single() as MarkdownBlock.Items
+        assertEquals(MarkdownBlock.Rule, nested.items.single().blocks.last())
+    }
+
+    @Test fun tabIndentedThematicBreaksAreAlwaysCode() {
+        for (indent in listOf("\t", " \t", "  \t", "   \t")) for (marker in listOf("---", "***", "___")) {
+            assertTrue("$indent$marker", MarkdownParser.parse("$indent$marker").single() is MarkdownBlock.Code)
+        }
+        val quoted = MarkdownParser.parse("> \t---").single() as MarkdownBlock.Quote
+        assertTrue(quoted.blocks.single() is MarkdownBlock.Code)
+        for (indent in 0..3) assertEquals(listOf(MarkdownBlock.Rule), MarkdownParser.parse(" ".repeat(indent) + "---"))
+    }
+
+    @Test fun lazyListContinuationOnlyExtendsParagraphs() {
+        for (source in listOf("- # title\noutside", "- title\n  ---\noutside")) {
+            val blocks = MarkdownParser.parse(source)
+            assertEquals(source, 2, blocks.size)
+            assertTrue(blocks.first() is MarkdownBlock.Items)
+            assertEquals("outside", text((blocks.last() as MarkdownBlock.Paragraph).content))
+        }
+        val list = MarkdownParser.parse("- first\ncontinued").single() as MarkdownBlock.Items
+        assertEquals("first\ncontinued", text((list.items.single().blocks.single() as MarkdownBlock.Paragraph).content))
+    }
+
     @Test fun depthFallbackKeepsClosedAndUnclosedFencesEntirelyLiteral() {
         for (closed in listOf(true, false)) {
             val literal = "~~~\n[x](https://code.test)" + if (closed) "\n~~~" else ""

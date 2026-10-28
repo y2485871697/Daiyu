@@ -8,7 +8,7 @@ CHAT = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class ReportedReasoningMarkdownContractTest(unittest.TestCase):
     def test_summary_uses_background_projection_and_shared_renderer(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn("rememberMarkdownProjection(listOf(summary.text))", source)
+        self.assertIn("rememberMarkdownProjection(listOf(summary.text), streaming = !generationComplete)", source)
         self.assertIn("ProjectedMessageMarkdown(", source)
         self.assertIn("projection?.blocks?.get(displayed)", source)
         self.assertNotRegex(source, r"\bText\(it\.text")

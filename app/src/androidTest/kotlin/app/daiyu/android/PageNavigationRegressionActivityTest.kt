@@ -75,7 +75,13 @@ class PageNavigationRegressionActivityTest : WiredActivityTestCase() {
                 node("page-enter-scrim").assertExists()
                 ui.mainClock.advanceTimeBy(1_000)
                 release()
-                awaitUniqueTag("page:主模型服务商")
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    node("page-enter-previous").assertDoesNotExist()
+                    ui.onAllNodesWithTag("page:主模型服务商")
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+                }
+                node("page:主模型服务商").assertExists()
                 repeat(4) {
                     ui.mainClock.advanceTimeByFrame()
                     node("page-enter-previous").assertDoesNotExist()
@@ -93,48 +99,69 @@ class PageNavigationRegressionActivityTest : WiredActivityTestCase() {
     }
 
     fun testTerminalEnvironmentEntryAndSystemReturnKeepTheChatParentAndFreshOwner() {
-        ui.onNodeWithContentDescription("更多").performClick()
-        node("chat-menu:${ChatMenuAction.OPEN_TERMINAL.name}").scrollToVisible().performClick()
-        awaitUniqueTag("terminal-screen")
-        val owner = invokeHost(activity, "getTerminalPageOwner")
-        assertNotNull(owner)
-        val openEnvironment = node("terminal-open-environment").assertIsEnabled()
-        captureScreenNode(node("page-back-surface"))
-        val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
-        ui.mainClock.autoAdvance = false
+        val provider = (instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider
+        awaitControl("terminal provider ready") {
+            provider.state.value is app.daiyu.android.terminal.TerminalApplicationState.Ready
+        }
+        val workspace = (provider.state.value as app.daiyu.android.terminal.TerminalApplicationState.Ready)
+            .application.terminalSessions
+        val originalSimple = workspace.state.value.simple
+        mainThread { workspace.setSimple(true) }
+        val simpleBefore = workspace.state.value
         try {
-            openEnvironment.performTouchInput { click() }
-            if (Build.VERSION.SDK_INT >= 28) {
-                awaitMotion("page-enter-previous")
-                ui.mainClock.advanceTimeBy(64)
-                val incoming = node("page-back-surface").fetchSemanticsNode().boundsInRoot
-                assertTrue("environment entry has an intermediate frame", incoming.left > initial.left && incoming.left < initial.right)
-            }
-            ui.mainClock.advanceTimeBy(1_000)
-            awaitUniqueTag("page:Linux 工具环境")
+            ui.onNodeWithContentDescription("更多").performClick()
+            node("chat-menu:${ChatMenuAction.OPEN_TERMINAL.name}").scrollToVisible().performClick()
+            awaitUniqueTag("terminal-screen")
+            val owner = invokeHost(activity, "getTerminalPageOwner")
+            assertNotNull(owner)
+            assertTrue("fixture Linux environment is not installed", workspace.state.value.linux.state != "FILES_READY")
+            node("terminal-env-linux").performClick()
+            awaitUniqueTag("terminal-open-environment")
+            assertNull("fixture has no matching active Linux session", workspace.state.value.active)
+            val openEnvironment = node("terminal-open-environment").assertIsEnabled()
             captureScreenNode(node("page-back-surface"))
-            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            if (Build.VERSION.SDK_INT >= 28) {
-                awaitMotion("page-back-departure")
-                ui.mainClock.advanceTimeBy(64)
-                val outgoing = node("page-back-departure").fetchSemanticsNode().boundsInRoot
-                assertTrue("environment system return has an intermediate departure", outgoing.left > initial.left && outgoing.left < initial.right)
-                node("page-back-departure-scrim").assertExists()
-            }
-            ui.mainClock.advanceTimeBy(1_000)
-            node("terminal-screen").assertExists()
-            val returnedOwner = invokeHost(activity, "getTerminalPageOwner")
-            assertNotNull(returnedOwner)
-            assertNotSame(owner, returnedOwner)
+            val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+            ui.mainClock.autoAdvance = false
+            try {
+                openEnvironment.performTouchInput { click() }
+                if (Build.VERSION.SDK_INT >= 28) {
+                    awaitMotion("page-enter-previous")
+                    ui.mainClock.advanceTimeBy(64)
+                    val incoming = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+                    assertTrue("environment entry has an intermediate frame", incoming.left > initial.left && incoming.left < initial.right)
+                }
+                ui.mainClock.advanceTimeBy(1_000)
+                awaitMotion("page:Linux 工具环境")
+                captureScreenNode(node("page-back-surface"))
+                mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                if (Build.VERSION.SDK_INT >= 28) {
+                    awaitMotion("page-back-departure")
+                    ui.mainClock.advanceTimeBy(64)
+                    val outgoing = node("page-back-departure").fetchSemanticsNode().boundsInRoot
+                    assertTrue("environment system return has an intermediate departure", outgoing.left > initial.left && outgoing.left < initial.right)
+                    node("page-back-departure-scrim").assertExists()
+                }
+                ui.mainClock.advanceTimeBy(1_000)
+                node("terminal-screen").assertExists()
+                val returnedOwner = invokeHost(activity, "getTerminalPageOwner")
+                assertNotNull(returnedOwner)
+                assertNotSame(owner, returnedOwner)
+                mainThread {
+                    assertEquals(false, invokeHost(activity, "terminalPageCurrent", owner!!))
+                    assertEquals(true, invokeHost(activity, "terminalPageCurrent", returnedOwner!!))
+                }
+                node("page:Linux 工具环境").assertDoesNotExist()
+                mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                ui.mainClock.advanceTimeBy(1_000)
+                node("chat-draft").assertExists()
+                assertEquals(0, fixture.opens.get())
+            } finally { ui.mainClock.autoAdvance = true }
+        } finally {
             mainThread {
-                assertEquals(false, invokeHost(activity, "terminalPageCurrent", owner!!))
-                assertEquals(true, invokeHost(activity, "terminalPageCurrent", returnedOwner!!))
+                workspace.selectEnvironment(simpleBefore.linuxSelected)
+                simpleBefore.activeSessionId?.let(workspace::select)
+                workspace.setSimple(originalSimple)
             }
-            node("page:Linux 工具环境").assertDoesNotExist()
-            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            ui.mainClock.advanceTimeBy(1_000)
-            node("chat-draft").assertExists()
-            assertEquals(0, fixture.opens.get())
-        } finally { ui.mainClock.autoAdvance = true }
+        }
     }
 }

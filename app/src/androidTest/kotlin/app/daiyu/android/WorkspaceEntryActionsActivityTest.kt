@@ -3,7 +3,6 @@ package app.daiyu.android
 import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -13,6 +12,19 @@ import java.io.File
 import java.util.UUID
 
 class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    @Suppress("UNCHECKED_CAST")
+    private fun retainedLongClickCallback(target: SemanticsNodeInteraction): () -> Unit {
+        val callback = target.fetchSemanticsNode().layoutInfo.getModifierInfo().asSequence()
+            .map { it.modifier }
+            .filterIsInstance<androidx.compose.ui.platform.InspectableValue>()
+            .filter { it.nameFallback == "combinedClickable" }
+            .flatMap { it.inspectableElements }
+            .single { it.name == "onLongClick" }.value
+        return callback as () -> Unit
+    }
+
+
     fun testRootfsProtectsSystemDirectoryAndUsesHorizontalActionRowsForUserDirectory() {
         val fixtureRoot = File(activity.filesDir, "workspace-actions-${UUID.randomUUID()}").apply { mkdir() }
         val rootfs = File(fixtureRoot, "rootfs").apply { mkdir() }
@@ -28,11 +40,15 @@ class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
             reveal("linux-rootfs-entry:etc", "Rootfs文件测试").performTouchInput { longClick() }
             node("workspace-entry-action-sheet").assertDoesNotExist()
             assertTrue(File(rootfs, "etc").isDirectory)
-            val retainedRow = checkNotNull(reveal("linux-rootfs-entry:project", "Rootfs文件测试").fetchSemanticsNode().config[SemanticsActions.OnLongClick].action)
+            val retainedRow = retainedLongClickCallback(reveal("linux-rootfs-entry:project", "Rootfs文件测试"))
             realPauseResume(activity)
             awaitUniqueTag("linux-rootfs-entry:project")
             mainThread { retainedRow() }
             node("workspace-entry-action-sheet").assertDoesNotExist()
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodes(hasTestTag("linux-rootfs-entry:project") and isEnabled()).fetchSemanticsNodes().size == 1
+            }
             reveal("linux-rootfs-entry:project", "Rootfs文件测试").performTouchInput { longClick() }
             awaitUniqueTag("workspace-entry-action:rename")
             val icon = ui.onNodeWithTag("workspace-entry-icon:rename", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -111,7 +127,7 @@ class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
             node("workspace-save").assertIsEnabled()
             assertEquals(before, fixture.database.workspaceBinding(null))
             node("workspace-file:${renamed.name}").performTouchInput { longClick() }
-            val retained = checkNotNull(node("workspace-entry-action:delete").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            val retained = retainedClickCallback(node("workspace-entry-action:delete"))
             realPauseResume(activity)
             mainThread { retained() }
             assertTrue(renamed.isFile)

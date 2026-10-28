@@ -93,16 +93,16 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
         val marker = java.io.File(child, "marker").apply { writeText("unchanged") }
         openWorkspace()
         node("workspace-add").performClick()
-        loadedDirectory(root.canonicalPath)
+        loadedDirectory("/workspace")
         node("workspace-folder:retained-choice").performClick()
-        loadedDirectory(child.canonicalPath)
+        loadedDirectory("/workspace/retained-choice")
         val oldSave = node("workspace-save").fetchSemanticsNode().config[RetainedWorkspaceAction]
         val before = fixture.database.workspaceBinding(null)
         repeat(2) {
             pauseAndReturn()
-            loadedDirectory(child.canonicalPath)
+            loadedDirectory("/workspace/retained-choice")
             homeAndReturn()
-            loadedDirectory(child.canonicalPath)
+            loadedDirectory("/workspace/retained-choice")
             mainThread {
                 val beforeVisit = invokeHost(activity, "getWorkspaceVisit")
                 oldSave()

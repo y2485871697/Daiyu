@@ -94,7 +94,11 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         var cropped: Bitmap? = null
         try {
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
-            fun sampleBounds() = node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot)
+            fun sampleBounds(): androidx.compose.ui.geometry.Rect {
+                val location = IntArray(2)
+                view.getLocationOnScreen(location)
+                return node.boundsInRoot.translate(Offset(location[0].toFloat(), location[1].toFloat()))
+            }
             val bounds = awaitStableWindowFrame(view) {
                 if (view.windowToken != token || !node.layoutInfo.isPlaced ||
                     !node.layoutInfo.coordinates.isAttached) null else sampleBounds().takeIf {

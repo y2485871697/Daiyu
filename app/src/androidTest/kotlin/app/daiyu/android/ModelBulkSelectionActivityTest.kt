@@ -65,6 +65,7 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
         val before = fixture.settings.localModelCatalogSnapshot()
         select("bulk-first")
         node("page:主模型服务商").performScrollToKey("bottom_spacer")
+        awaitVisualIdle()
         val card = node("local-model:floating-19").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val cancel = node("local-model-cancel-selection").fetchSemanticsNode().boundsInRoot
         assertTrue("last model clears the floating buttons", card.bottom <= cancel.top + 1f)

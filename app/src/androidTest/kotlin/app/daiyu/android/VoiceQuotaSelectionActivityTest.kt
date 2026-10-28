@@ -250,8 +250,9 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
             hasText("训练中", substring = true) and hasAnyAncestor(hasTestTag("settings-row:S_available")),
             useUnmergedTree = true,
         ).assertIsDisplayed()
-        node("voice-preview:S_available").assertContentDescriptionEquals("播放试听")
-            .performTouchInput { click() }
+        val disabledPreview = node("voice-preview:S_available").assertHasNoClickAction()
+        disabledPreview.onChild().assertContentDescriptionEquals("播放试听")
+        disabledPreview.performTouchInput { click() }
         assertEquals(1, requests.get()); assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
         assertEquals(beforePreferences, instrumentation.targetContext.getSharedPreferences("voice_account_control_secret_v1", 0).all)
     }
@@ -265,8 +266,9 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("voice-preview:S_available").assertContentDescriptionEquals("播放试听")
         assertEquals(beforeIndex, index.readText()); assertEquals(0, requests.get())
         mount(available = true, flow = "LIST", ready = true, uncertain = true)
-        node("voice-preview:S_available").assertContentDescriptionEquals("播放试听")
-            .performTouchInput { click() }
+        val disabledPreview = node("voice-preview:S_available").assertHasNoClickAction()
+        disabledPreview.onChild().assertContentDescriptionEquals("播放试听")
+        disabledPreview.performTouchInput { click() }
         node("voice-menu:S_available").performClick()
         awaitUniqueTag("voice-choice-dialog")
         awaitNodeWindowFocus(node("voice-choice-dialog"))

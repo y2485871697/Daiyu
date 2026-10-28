@@ -12,7 +12,7 @@ internal fun restoredMarkdownSources(messages: List<Message>): List<String> =
         .flatMap { message ->
             val texts = message.blocks.filterIsInstance<MessageBlock.Text>().map { it.text }
             val summaries = message.reportedReasoning.filter { hasReportedReasoningText(it.text) }.map { it.text }
-            summaries + if (message.blocks.any { it is MessageBlock.Tool }) texts
+            summaries + if (message.blocks.any { it is MessageBlock.Tool || it is MessageBlock.Image }) texts
             else texts + texts.joinToString("\n\n")
         }
 
@@ -23,11 +23,13 @@ internal fun prepareRestoredMarkdown(
     parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser,
     checkActive: () -> Unit = {},
 ) {
-    for (source in cache.preparationSources(restoredMarkdownSources(messages))) {
+    val prepared = cache.preparationSources(restoredMarkdownSources(messages)).map { source ->
         checkActive()
-        if (cache.getBlocks(source, parser) != null) continue
-        val blocks = if (parser === defaultMarkdownParser) MarkdownParser.parse(source, checkActive) else parser(source)
+        val blocks = cache.getBlocks(source, parser) ?: if (parser === defaultMarkdownParser)
+            MarkdownParser.parse(source, checkActive) else parser(source)
         checkActive()
-        cache.put(MarkdownProjection(listOf(source), mapOf(source to blocks), parser))
+        MarkdownProjection(listOf(source), mapOf(source to blocks), parser)
     }
+    checkActive()
+    synchronized(cache) { prepared.forEach(cache::put) }
 }

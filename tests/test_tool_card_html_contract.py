@@ -63,6 +63,26 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         content = (CHAT / "ToolCategoryContent.kt").read_text()
         self.assertIn("if (fields.isEmpty()) return", content)
 
+    def test_all_cards_omit_auxiliary_footer_but_keep_real_status_and_body(self):
+        shell = (CHAT / "WorkProcessCard.kt").read_text()
+        self.assertNotIn('Text("工具回执未确认 · 不重放"', shell)
+        for token in ('Text(stateLabel', 'ToolActivityUi.STOPPING -> "所属运行停止中"',
+                      'ToolActivityUi.STOPPED -> "所属运行已停止"',
+                      'ToolActivityUi.INTERRUPTED -> "所属运行已中断"',
+                      'ToolCategoryContent(step.category, it)', 'toolContent(step)',
+                      'ToolDetailSection(section,'):
+            self.assertIn(token, shell)
+        content = (CHAT / "ToolCategoryContent.kt").read_text()
+        for text in (shell, content):
+            self.assertNotIn('Text(rich.source', text)
+            self.assertNotIn('Text(details.notice', text)
+        for token in ('if (rich.bodyRestricted)', 'body.documents.forEach', 'body.prose?.let'):
+            self.assertIn(token, content)
+        regression = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolOperationCardTest.kt").read_text()
+        self.assertIn('fun testAllCategoriesHideAuxiliaryFooterInBothProductionPaths', regression)
+        self.assertIn('ToolCardPresentations.categories + "future_category"', regression)
+        self.assertIn('ui.onNodeWithText("工具回执未确认 · 不重放", useUnmergedTree = true).assertDoesNotExist()', regression)
+
     def test_terminal_header_dots_are_emphasized_only_in_both_header_renderers(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertIn('val terminalHeader = steps.isNotEmpty() && steps.all { it.category in setOf("terminal", "background_job") }', shell)
@@ -102,7 +122,6 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn("rememberSaveable(ownerKey)", shell)
         self.assertEqual(1, shell.count("rememberSaveable(step.owner, step.toolCallId)"))
         self.assertIn("key(ownerKey, step.owner, step.toolCallId)", shell)
-        self.assertIn('Text("工具回执未确认 · 不重放"', shell)
         self.assertNotIn("graphicsLayer", shell)
         self.assertNotIn("CompositionLocalProvider(LocalDensity", shell)
         geometry = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt").read_text()

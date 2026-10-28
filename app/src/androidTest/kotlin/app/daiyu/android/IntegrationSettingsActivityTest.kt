@@ -80,6 +80,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         }
         override fun getInputStream() = body.byteInputStream()
     }
+    private val catalogRequests = AtomicInteger()
     private fun catalogue(body: String = """{"data":[{"id":"first"},{"id":"second"}]}""", status: Int = 200, held: Boolean = false):
         Triple<CountDownLatch, CountDownLatch, AtomicReference<CatalogConnection>> {
         fixture.settings.modelCatalogSnapshot()
@@ -87,6 +88,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val connection = AtomicReference<CatalogConnection>()
         fixture.controller.modelCatalog = app.daiyu.android.model.catalog.ModelCatalogService(
             { error("draft must not load saved credentials") }, app.daiyu.android.model.catalog.RemoteModelFetcher { url ->
+                catalogRequests.incrementAndGet()
                 CatalogConnection(url, entered, release, body, status).also { connection.set(it) }
             })
         return Triple(entered, release, connection)
@@ -538,10 +540,14 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         } finally { fixture.controller.stop(owner) }
     }
     fun testCatalogImportsCheckedModelsWithoutChangingCurrentDraftOrCredentials() {
-        val (_, _, connection) = catalogue(); val before = fixture.settings.load()
-        openModels(); editModel("Base URL", "https://catalog.invalid/v1/responses")
-        editModel("API Key", "")
+        val initial = fixture.settings.load()
+        fixture.settings.save(initial.copy(endpoint = "https://catalog.invalid/v1/responses"))
+        val before = fixture.settings.load()
+        val requestCountBefore = catalogRequests.get()
+        val (_, _, connection) = catalogue()
+        openModels()
         fetch(); finished(connection)
+        assertEquals(requestCountBefore + 1, catalogRequests.get())
         awaitUniqueTag("provider-model-list")
         val models = node("provider-model-list")
         awaitNodeWindowFocus(models)
@@ -552,7 +558,8 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(before, fixture.settings.load())
         assertEquals("https://catalog.invalid/v1/models", connection.get().url.toString())
-        assertNull(connection.get().getRequestProperty("Authorization"))
+        assertEquals("Bearer ${before.apiKey}", connection.get().getRequestProperty("Authorization"))
+        assertEquals(requestCountBefore + 1, catalogRequests.get())
         val imported = fixture.settings.modelCatalogSnapshot().models
         assertTrue(imported.any { it.id == "second" }); assertFalse(imported.any { it.id == "first" })
         selectProviderTab("配置")
@@ -591,18 +598,22 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     fun testCatalogSaveFailureAndDismissRevokePendingResponse() {
         for (save in listOf(true, false)) {
             val before = fixture.settings.load()
+            val requestCountBefore = catalogRequests.get()
             val (entered, release, connection) = catalogue(held = true)
-            openModels(); if (save) editModel("API Key", "")
+            openModels()
             fetch()
             try {
                 awaitCatalogEntered(entered)
+                assertEquals(requestCountBefore + 1, catalogRequests.get())
                 if (save) {
                     selectProviderTab("配置")
+                    editModel("API Key", "")
                     reveal("model-save").performClick()
                 } else backToChat(activity)
             } finally { release.countDown() }
             finished(connection)
             if (save) awaitControl("invalid model save") { !fixture.controller.dataBusy }
+            assertEquals(requestCountBefore + 1, catalogRequests.get())
             node("provider-model-selection").assertDoesNotExist()
             assertEquals(before, fixture.settings.load())
             if (save) backToChat(activity)

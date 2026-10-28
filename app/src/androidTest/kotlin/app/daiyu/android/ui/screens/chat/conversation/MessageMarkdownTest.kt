@@ -61,6 +61,56 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
 
+    fun testPendingListPrefixesKeepThePublishedParagraphAtBodySize() {
+        var source by mutableStateOf("Search and analyse")
+        show { Column(Modifier.testTag("syntax-size")) {
+            val projection = rememberMarkdownProjection(listOf(source), streaming = true)
+            val displayed = projection?.sources?.singleOrNull() ?: source
+            ProjectedMessageMarkdown(displayed, projection?.blocks?.get(displayed), generationComplete = false)
+        } }
+        val original = body("syntax-size", "Search and analyse").fetchSemanticsNode().boundsInRoot
+        for (next in listOf("Search and analyse\n-", "Search and analyse\n- ", "Search and analyse\n- item")) {
+            mainThread { source = next }
+            val node = body("syntax-size", "Search and analyse")
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(16.sp, layouts.single().layoutInput.style.fontSize)
+            assertEquals(original.top, node.fetchSemanticsNode().boundsInRoot.top, 0.5f)
+            assertEquals(original.height, node.fetchSemanticsNode().boundsInRoot.height, 0.5f)
+        }
+    }
+
+    fun testSameTextCompletionRestoresLiteralSyntaxWithoutRemountingTheBody() {
+        val source = "**unfinished"
+        var streaming by mutableStateOf(true)
+        show { Column(Modifier.testTag("syntax-terminal")) {
+            val projection = rememberMarkdownProjection(listOf(source), streaming = streaming)
+            ProjectedMessageMarkdown(source, projection?.blocks?.get(source), generationComplete = !streaming && projection != null)
+        } }
+        body("syntax-terminal", "unfinished").assertIsDisplayed()
+        mainThread { streaming = false }
+        body("syntax-terminal", source).assertIsDisplayed()
+    }
+
+    fun testUnrevealedTableRowsCannotResizeAlreadyVisibleCells() {
+        var table by mutableStateOf(MarkdownParser.parse("header | second\n--- | ---\nshort | short").single() as MarkdownBlock.Table)
+        val budget = markdownBlocksLength(listOf(table))
+        show { Column(Modifier.width(320.dp).testTag("stable-table")) {
+            ParsedMessageMarkdown("table", listOf(table), visibleCharacters = budget, generationComplete = false)
+        } }
+        val before = body("stable-table", "header").fetchSemanticsNode().boundsInRoot
+        mainThread { table = table.copy(rows = table.rows + listOf(listOf(
+            listOf(app.daiyu.android.MarkdownInline.Text("very long future cell ".repeat(20))),
+            listOf(app.daiyu.android.MarkdownInline.Text("future"))))) }
+        ui.waitForIdle()
+        val after = body("stable-table", "header").fetchSemanticsNode().boundsInRoot
+        assertEquals(before.left, after.left, 0.5f)
+        assertEquals(before.top, after.top, 0.5f)
+        assertEquals(before.width, after.width, 0.5f)
+        assertEquals(before.height, after.height, 0.5f)
+        ui.onAllNodes(hasText("very long future cell", substring = true), useUnmergedTree = true).assertCountEquals(0)
+    }
+
     fun testStreamingAppendsDisplayCompletedSnapshotsWhileNewerParsesRemainBlocked() {
         val first = "First **bold** snapshot."
         val second = "$first More text."
@@ -1529,6 +1579,37 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue(width() > initial)
         body("scaled-table", tail).assertTextEquals(tail)
         assertTrue(opened.isEmpty())
+    }
+
+    fun testAppendingAHiddenWideTableRowCannotEraseTheLastVisibleGroup() {
+        val header = (0..32).joinToString("|") { if (it == 32) "Z" else "h" }
+        val delimiter = (0..32).joinToString("|") { "---" }
+        val row = (0..32).joinToString("|") { if (it == 32) "Y" else "r" }
+        var source by mutableStateOf("$header\n$delimiter\n$row")
+        show { Column(Modifier.width(260.dp)) {
+            ParsedMessageMarkdown(source, MarkdownParser.parse(source), visibleCharacters = 66)
+        } }
+        ui.onNodeWithText("Z", useUnmergedTree = true).assertExists()
+        ui.onNodeWithText("Y", useUnmergedTree = true).assertExists()
+        ui.runOnUiThread { source += "\n$row" }
+        ui.waitForIdle()
+        ui.onNodeWithText("Z", useUnmergedTree = true).assertExists()
+        ui.onNodeWithText("Y", useUnmergedTree = true).assertExists()
+    }
+
+    fun testHiddenLongTableRowCannotResizeAlreadyVisibleCells() {
+        val cell = "existing wrapped content ".repeat(8)
+        val initial = "H | J\n--- | ---\n$cell | short"
+        val budget = markdownBlocksLength(MarkdownParser.parse(initial))
+        var source by mutableStateOf(initial)
+        show { Column(Modifier.width(320.dp).testTag("stable-table")) {
+            ParsedMessageMarkdown(source, MarkdownParser.parse(source), visibleCharacters = budget)
+        } }
+        val before = body("stable-table", cell.trim()).fetchSemanticsNode().boundsInRoot
+        ui.runOnUiThread { source += "\n" + "汉".repeat(200) + " | future" }
+        ui.waitForIdle()
+        assertEquals(before, body("stable-table", cell.trim()).fetchSemanticsNode().boundsInRoot)
+        ui.onNodeWithText("future", useUnmergedTree = true).assertDoesNotExist()
     }
 
 }

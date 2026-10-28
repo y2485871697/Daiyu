@@ -5,6 +5,18 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation'
 
 class MarkdownStreamProgressContract(unittest.TestCase):
+    def test_streaming_and_terminal_share_reveal_state_but_not_parser_cache_entries(self):
+        base = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation"
+        ui = (base / "MessageMarkdown.kt").read_text()
+        typing = (base / "MarkdownTyping.kt").read_text()
+        projection = (base / "MarkdownProjection.kt").read_text()
+        self.assertIn("streaming && configuredParser === defaultMarkdownParser", ui)
+        self.assertIn("internal val streamingMarkdownParser:", projection)
+        self.assertIn("parser === streamingMarkdownParser", projection)
+        self.assertIn("target.parts == parts", typing)
+        self.assertIn("baselineLength != null", typing)
+        self.assertIn("remember(identity, resetEpoch) { MarkdownTypingState(baseline) }", typing)
+
     def test_stream_queue_finishes_running_parse_and_conflates_pending_appends(self):
         source = (BASE / 'MarkdownProjection.kt').read_text()
         for token in ['Channel.CONFLATED', 'worker?.cancelAndJoin()',
@@ -19,7 +31,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         for token in ['val contentReady = projection?.sources == sources',
                       'turn.status != RunStatus.RUNNING && contentReady',
-                      'content.copy(text = projection.sources[textIndex++])',
+                      'content.copy(text = projection.sources.getOrNull(textIndex++) ?: "")',
                       'MessageContent(displayedTurn.content',
                       'AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete']:
             self.assertIn(token, chat)
@@ -29,7 +41,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         self.assertIn('projection?.sources == sources.map { it.text }', typing)
         reasoning = (BASE / 'ReportedReasoningCard.kt').read_text()
         self.assertIn('displayed, projection?.blocks?.get(displayed)', reasoning)
-        self.assertIn('generationComplete && displayed == summary.text', reasoning)
+        self.assertIn('generationComplete && projection != null && displayed == summary.text', reasoning)
 
     def test_resume_follow_accepts_displayed_streaming_prefix_without_relaxing_exact_readiness(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
@@ -37,7 +49,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         self.assertIn('onContentDisplayed(hasDisplayBody || contentReady)', chat)
         self.assertIn('onContentDisplayed(false)', chat)
         typing = (BASE / 'MarkdownTyping.kt').read_text()
-        self.assertIn('isMarkdownAppend(it.sources, baseline.map { source -> source.text })', typing)
+        self.assertIn('it.sources == baseline.map { source -> source.text }', typing)
         self.assertIn('parsed.sources.sumOf', typing)
 
     def test_real_regressions_cover_bounded_progress_replacement_and_ui_publication(self):

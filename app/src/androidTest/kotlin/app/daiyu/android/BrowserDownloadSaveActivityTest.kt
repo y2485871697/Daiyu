@@ -358,7 +358,8 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
             val oldCode = choose(awaitCopy = false)
             assertTrue(documents.openEntered.await(5, TimeUnit.SECONDS))
             assertTrue(controller.dataBusy)
-            val oldVisit = mainThread { checkNotNull(field("browserDownloadVisit")) }
+            lateinit var oldVisit: Any
+            mainThread { oldVisit = checkNotNull(field("browserDownloadVisit")) }
             val oldActive = oldVisit.javaClass.getDeclaredField("active").apply { isAccessible = true }
                 .get(oldVisit) as java.util.concurrent.atomic.AtomicBoolean
             mainThread {

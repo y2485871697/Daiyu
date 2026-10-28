@@ -3864,20 +3864,22 @@ class MainActivity : ComponentActivity() {
     @Composable private fun TerminalTasksSurface() {
         val visit = terminalJobsVisit?.takeIf { terminalJobsPresented(it) } ?: return
         val lease = ordinaryDialogLease
-        app.daiyu.android.ui.screens.terminal.TerminalTasksDialog(
-            busy = visit.busy,
-            rows = visit.sessions.map { session -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
-                session.plan.command, terminalTaskSummary(session, visit.taskStatus[session.plan.runId.value]),
-                id = session.plan.runId.value,
-                onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, false) },
-                onStop = if (session.jobId == null) null else ({ if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, true) }))
-            } + visit.history.map { record -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
-                record.command ?: record.jobId, "状态未知", id = record.jobId,
-                onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalHistoryPage(visit, record, 0) }) },
-            output = app.daiyu.android.ui.screens.terminal.terminalTaskOutput(visit.output),
-            outputId = visit.outputId,
-            error = visit.historyError,
-            onDismiss = { if (dialogActionsCurrent(lease) && terminalJobsVisit === visit) revokeTerminalJobsVisit() })
+        key(visit) {
+            app.daiyu.android.ui.screens.terminal.TerminalTasksDialog(
+                busy = visit.busy,
+                rows = visit.sessions.map { session -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
+                    session.plan.command, terminalTaskSummary(session, visit.taskStatus[session.plan.runId.value]),
+                    id = session.plan.runId.value,
+                    onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, false) },
+                    onStop = if (session.jobId == null) null else ({ if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, true) }))
+                } + visit.history.map { record -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
+                    record.command ?: record.jobId, "状态未知", id = record.jobId,
+                    onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalHistoryPage(visit, record, 0) }) },
+                output = app.daiyu.android.ui.screens.terminal.terminalTaskOutput(visit.output),
+                outputId = visit.outputId,
+                error = visit.historyError,
+                onDismiss = { if (dialogActionsCurrent(lease) && terminalJobsVisit === visit) revokeTerminalJobsVisit() })
+        }
     }
     private fun terminalTaskSummary(session: app.daiyu.android.integration.tools.TerminalJobSession, state: String?): String {
         val environment = session.plan.configuration.linux?.label ?: "Android"

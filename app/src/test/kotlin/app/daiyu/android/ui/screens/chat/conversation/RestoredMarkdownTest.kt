@@ -10,6 +10,34 @@ class RestoredMarkdownTest {
     private fun message(vararg texts: String) = Message(MessageId("answer"), ConversationId("chat"), RunId("run"),
         Message.ASSISTANT_ROLE, texts.mapIndexed { i, text -> MessageBlock.Text("text-$i", text) }, RunStatus.COMPLETED)
 
+    @Test fun imageMixedRecoveryPreparesTheActualSeparateSourcesWithinBudget() {
+        val a = "a".repeat(100_000)
+        val b = "b".repeat(100_000)
+        val reference = MessageImageReference(MessageImageOwner("chat", "answer"),
+            "00000000-0000-0000-0000-000000000001", "image/png", 1, "b".repeat(64), 1, 1)
+        val original = message(a, b).copy(blocks = listOf(MessageBlock.Text("a", a), MessageBlock.Image(reference), MessageBlock.Text("b", b)))
+        val cache = MarkdownProjectionCache()
+        val calls = mutableListOf<String>()
+        val parser: (String) -> List<MarkdownBlock> = { calls += it; MarkdownParser.parse(it) }
+        prepareRestoredMarkdown(listOf(original), cache, parser)
+        assertEquals(listOf(a, b), calls)
+        assertNotNull(cache.getPrepared(listOf(a, b), parser))
+        assertFalse(restoredMarkdownSources(listOf(original)).contains("$a\n\n$b"))
+    }
+
+    @Test fun prewarmingACompositeCacheHitCannotEvictAnotherSelectedSource() {
+        val cache = MarkdownProjectionCache(maxSourceChars = 2)
+        var calls = 0
+        val parser: (String) -> List<MarkdownBlock> = { calls++; MarkdownParser.parse(it) }
+        cache.put(MarkdownProjection(listOf("a", "x"), mapOf("a" to MarkdownParser.parse("a"), "x" to MarkdownParser.parse("x")), parser))
+        val messages = listOf(message("a"), message("b").copy(id = MessageId("b")))
+        prepareRestoredMarkdown(messages, cache, parser)
+        assertNotNull(cache.getPrepared(listOf("a", "b"), parser))
+        assertEquals(1, calls)
+        prepareRestoredMarkdown(messages, cache, parser)
+        assertEquals(1, calls)
+    }
+
     @Test fun restoredOrdinaryAndMixedBodiesHaveExactAstBeforeFirstLookup() {
         val original = message("**first**", "Second paragraph.")
         val cache = MarkdownProjectionCache()
@@ -95,4 +123,14 @@ class RestoredMarkdownTest {
         assertFalse(restoredMarkdownSources(listOf(running, user)).contains("**live summary**"))
         assertFalse(restoredMarkdownSources(listOf(running, user)).contains("**not an assistant**"))
     }
+    @Test fun aLaterCompositeCacheHitCannotEvictAnEarlierPreparedSource() {
+        val cache = MarkdownProjectionCache(maxSourceChars = 3)
+        var calls = 0
+        val parser: (String) -> List<MarkdownBlock> = { calls++; MarkdownParser.parse(it) }
+        cache.put(MarkdownProjection(listOf("b", "x"), mapOf("b" to MarkdownParser.parse("b"), "x" to MarkdownParser.parse("x")), parser))
+        prepareRestoredMarkdown(listOf(message("aa"), message("b").copy(id = MessageId("b"))), cache, parser)
+        assertNotNull(cache.getPrepared(listOf("aa", "b"), parser))
+        assertEquals(1, calls)
+    }
+
 }

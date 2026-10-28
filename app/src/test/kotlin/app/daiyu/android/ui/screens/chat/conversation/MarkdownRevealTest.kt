@@ -8,6 +8,39 @@ class MarkdownRevealTest {
     private fun source(text: String, id: String = "final") = MarkdownTypingSource(id, text)
     private fun part(text: String, id: String = "final") = MarkdownTypingPart(source(text, id), text.length)
 
+    @Test fun extendingAnAlreadyDisplayedClusterCannotEraseItsBaseCharacter() {
+        assertEquals(1, MarkdownTextBoundaries("e").end(1))
+        assertEquals(2, MarkdownTextBoundaries("e\u0301tail").end(1))
+        assertEquals("e\u0301", "e\u0301tail".take(MarkdownTextBoundaries("e\u0301tail").end(1)))
+        assertEquals(0, MarkdownTextBoundaries("e\u0301tail").end(0))
+    }
+
+    @Test fun entityCollapseRemapsTheFrontierWithoutRevealingNewSuffixes() {
+        val state = MarkdownTypingState(listOf(source("")))
+        state.update(listOf(part("")), 0, true, false)
+        val old = state.update(listOf(MarkdownTypingPart(source("&amp"), 4, "&amp")), 0, true, false)!!
+        state.advance(old, 1_000_000_000)
+        assertEquals(3, state.advance(old, 1_050_000_000))
+        val next = state.update(listOf(MarkdownTypingPart(source("&amp;XYZ"), 4, "&XYZ")), 0, true, false)!!
+        assertEquals(1, next.start)
+        assertEquals("&", next.parts.single().displayed.take(next.start))
+    }
+
+    @Test fun terminalLiteralRestorationPreservesTheAlreadyVisibleContent() {
+        val raw = "**字"
+        val state = MarkdownTypingState(listOf(source(raw)))
+        state.update(listOf(MarkdownTypingPart(source(raw), 1, "字")), 1, true, false)
+        val next = state.update(listOf(MarkdownTypingPart(source(raw), 3, raw)), 3, false, true)!!
+        assertEquals(3, next.start)
+    }
+
+    @Test fun displayTextAndBudgetUseIdenticalCoordinatesForEveryBlockType() {
+        for (source in listOf("", "text **bold**", "- [x] one\n- two", "> quote\n>\n> ---", "```\n\n```", "a | b\n--- | ---\nx |", "---", "# title")) {
+            val blocks = MarkdownParser.parse(source)
+            assertEquals(source, markdownBlocksLength(blocks), markdownBlocksDisplayText(blocks).length)
+        }
+    }
+
     @Test fun existingMessagesAndRemountsAreVisibleImmediately() {
         for (streaming in listOf(false, true)) {
             val state = MarkdownTypingState(listOf(source("existing")))
@@ -80,11 +113,11 @@ class MarkdownRevealTest {
         val boundaries = MarkdownTextBoundaries(text)
         for (limit in 0..text.length) {
             val end = boundaries.end(limit)
-            assertTrue(end in 0..limit)
+            assertTrue(end in limit..text.length)
             assertFalse(end in 1 until text.length && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate())
             assertFalse(end < text.length && text[end] == '\u0301')
         }
-        assertEquals(listOf(0, 1, 1, 3, 3, 5, 5, 7, 8), (0..text.length).map { boundaries.end(it) })
+        assertEquals(listOf(0, 1, 3, 3, 5, 5, 7, 7, 8), (0..text.length).map { boundaries.end(it) })
         assertEquals(text.length, boundaries.end(Int.MAX_VALUE))
     }
 
@@ -94,4 +127,20 @@ class MarkdownRevealTest {
         assertEquals(1, markdownBlocksLength(MarkdownParser.parse("```\n```")))
         assertEquals(0, markdownBlocksLength(MarkdownParser.parse("")))
     }
+    @Test fun wideTableCellOffsetsPreserveTheLastGroupWhenARowIsAppended() {
+        val header = (1..33).joinToString("|") { "h" }
+        val separator = (1..33).joinToString("|") { "---" }
+        val row = (1..33).joinToString("|") { "r" }
+        val old = MarkdownParser.parse("$header\n$separator\n$row").single() as app.daiyu.android.MarkdownBlock.Table
+        val next = MarkdownParser.parse("$header\n$separator\n$row\n$row").single() as app.daiyu.android.MarkdownBlock.Table
+        val before = markdownTableCellOffsets(old)
+        val after = markdownTableCellOffsets(next)
+        assertEquals(before, after.take(before.size))
+        assertEquals(32, after[0][32])
+        assertEquals(65, after[1][32])
+        assertEquals(98, after[2][32])
+        assertTrue(66 > after[1][32])
+        assertTrue(66 <= after[2][0])
+    }
+
 }

@@ -64,9 +64,10 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     fun testSectionSelectorClosingOptionsCannotReceiveTouch() {
         enter()
         node("voice-section-select").performClick()
-        val root = ui.onRoot()
-        val option = node("voice-section-option:READ_ALOUD").fetchSemanticsNode().boundsInRoot
-        val touch = option.center - root.fetchSemanticsNode().boundsInRoot.topLeft
+        val option = node("voice-section-option:READ_ALOUD").fetchSemanticsNode()
+        val optionRoot = option.root
+        val root = ui.onNode(isRoot() and SemanticsMatcher("voice section option root") { it.root === optionRoot }, useUnmergedTree = true)
+        val touch = option.boundsInRoot.center - root.fetchSemanticsNode().boundsInRoot.topLeft
         ui.mainClock.autoAdvance = false
         try {
             node("voice-section-select").performClick()
@@ -661,8 +662,9 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
         node("settings-field:名额 ID").assertDoesNotExist()
         reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
-        reveal("settings-field:名额 ID", "制作声音").assertTextContains("invalid")
-        reveal("settings-field:名额 ID", "制作声音").performClick()
+        val reopenedSlot = reveal("settings-field:名额 ID", "制作声音").assertTextContains("invalid")
+        awaitNodeWindowFocus(reopenedSlot)
+        reopenedSlot.performTouchInput { click() }
         ui.onAllNodesWithText("在豆包控制台进入声音复刻音色列表", substring = true).assertCountEquals(0)
         ui.onAllNodesWithText("优先使用已有或免费名额", substring = true).assertCountEquals(0)
         awaitImeFrame(node("settings-field:名额 ID"), visible = true)

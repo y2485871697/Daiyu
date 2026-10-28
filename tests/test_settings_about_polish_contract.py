@@ -41,7 +41,7 @@ class SettingsAboutPolishContractTest(unittest.TestCase):
         self.assertIn('fun testRelayLabelsAlignWithParentTitleAndKeepFullRowWidth()', test)
         self.assertIn('titleBounds.left', test)
         self.assertIn('rowBounds.right', test)
-        self.assertIn('node("preview-dialog-scrim").performClick()', test)
+        self.assertIn('node("preview-dialog-scrim").assertHasClickAction().performSemanticsAction(SemanticsActions.OnClick) { click -> assertTrue(click()) }', test)
         self.assertIn('instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)', test)
 if __name__ == '__main__':
     unittest.main()

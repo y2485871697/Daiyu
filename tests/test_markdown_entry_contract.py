@@ -23,7 +23,7 @@ class MarkdownEntryContract(unittest.TestCase):
         for token in ['MessageHistory.expand(messages)', 'it.role == Message.ASSISTANT_ROLE',
                       'it.status != RunStatus.RUNNING', 'filterIsInstance<MessageBlock.Text>()',
                       'texts + texts.joinToString("\\n\\n")', 'cache.preparationSources(restoredMarkdownSources(messages))',
-                      'MarkdownParser.parse(source, checkActive)', 'checkActive()\n        cache.put(']:
+                      'MarkdownParser.parse(source, checkActive)', 'checkActive()\n    synchronized(cache) { prepared.forEach(cache::put) }']:
             self.assertIn(token, source)
         cache = (BASE / 'MarkdownProjectionCache.kt').read_text()
         for token in ['sources.asReversed().distinct()', 'selected.size >= maxEntries',

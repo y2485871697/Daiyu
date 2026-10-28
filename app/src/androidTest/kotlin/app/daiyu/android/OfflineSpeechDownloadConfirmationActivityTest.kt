@@ -46,6 +46,7 @@ class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
         }
         awaitUniqueTag("chat-selection-sheet")
         awaitNodeWindowFocus(node("chat-selection-sheet"))
+        awaitDialogEnter(node("chat-selection-sheet"))
         ui.waitForIdle()
     }
 
@@ -82,7 +83,7 @@ class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
         for ((tag, text, background, foreground) in listOf(
             ButtonRole("dialog-cancel", "取消", expected.secondaryContainer, expected.onSecondary),
             ButtonRole("dialog-confirm", "下载", expected.primary, expected.onPrimary))) {
-            val pixels = node(tag).captureToImage().toPixelMap()
+            val pixels = captureScreenNode(node(tag)).toPixelMap()
             assertColor(background, pixels[(pixels.width * .2f).toInt(), pixels.height / 2])
             val layouts = mutableListOf<TextLayoutResult>()
             ui.onNode(hasText(text) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)

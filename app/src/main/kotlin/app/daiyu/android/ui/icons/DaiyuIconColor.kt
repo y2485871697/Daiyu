@@ -16,7 +16,7 @@ internal enum class DaiyuFeatureColor(val light: Color, val dark: Color) {
 
 internal fun featureColorFor(icon: ImageVector): DaiyuFeatureColor = when (icon.name.substringAfterLast('.')) {
     "Assistant", "SubAgent", "Reasoning", "Model", "AutoAwesome", "Psychology", "Group", "AccountTree", "RocketLaunch" -> DaiyuFeatureColor.VIOLET
-    "Palette", "Pet", "Image", "Video", "Vision", "Favorite" -> DaiyuFeatureColor.ROSE
+    "Palette", "Pet", "Image", "Video", "Vision", "Favorite", "Sponsor" -> DaiyuFeatureColor.ROSE
     "Folder", "File", "Backup", "Balance", "Export", "Download", "FolderOpen", "Bolt", "Keyboard", "Notes" -> DaiyuFeatureColor.AMBER
     "Voice", "Speak", "Chart", "Vibration", "Terminal", "Skills", "Code", "Mic", "History", "ChatBubbleOutline", "Forum" -> DaiyuFeatureColor.TEAL
     else -> DaiyuFeatureColor.BLUE

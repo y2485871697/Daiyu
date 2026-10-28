@@ -1,0 +1,20 @@
+{
+  "source_repository": "https://github.com/y2485871697/Eta",
+  "source_revision": "3196270e361c82cc1f399218d914ec49de0d83cc",
+  "authorization": "Maintainer explicitly requested reuse of the original sponsor entry and payment QR images. No additional license grant is inferred.",
+  "transformation": "None. Exact original bytes; no crop, resizing, recoloring or re-encoding.",
+  "files": [
+    {
+      "upstream_path": "app/src/main/res/drawable-nodpi/donate_wechat.png",
+      "path": "app/src/main/assets/sponsor/donate_wechat.png",
+      "bytes": 165432,
+      "sha256": "125f3c2b915a8475387de9c150dd890a7154a28120d4c885d7347edf4e8a9383"
+    },
+    {
+      "upstream_path": "app/src/main/res/drawable-nodpi/donate_alipay.jpg",
+      "path": "app/src/main/assets/sponsor/donate_alipay.jpg",
+      "bytes": 129657,
+      "sha256": "9597129b69f475b157149995f5ed4e13b24f69a47d58ee848378c60fa12c5095"
+    }
+  ]
+}

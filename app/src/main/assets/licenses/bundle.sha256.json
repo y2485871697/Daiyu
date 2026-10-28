@@ -23,6 +23,16 @@
       "sha256": "8cf7db5a6f1fb3e3362b15b99d2c55e5754a1f2919b3cb2d9470ceeee6422acd"
     },
     {
+      "path": "app/src/main/assets/licenses/community-icons/LICENSE.md",
+      "bytes": 6568,
+      "sha256": "4674b210d8a1a0926e070843950aef43367cf44dcac86081c25540e03c089e58"
+    },
+    {
+      "path": "app/src/main/assets/licenses/community-icons/sources.json",
+      "bytes": 1226,
+      "sha256": "4cfa63d7dcc009907281b658684a57878795edce1868768160b212233484fee0"
+    },
+    {
       "path": "app/src/main/assets/licenses/libandroid-shmem-0.7.txt",
       "bytes": 1529,
       "sha256": "0dd43abe17196b0224cb0b159819af798cd508a82a21e5870126fff4e899a7eb"
@@ -134,8 +144,13 @@
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 15602,
-      "sha256": "35827e3bfc72faa176b6c47aa392a05da53de16ea722a2b8eeb009542b5c75a9"
+      "bytes": 16329,
+      "sha256": "dcb99586dcef49123d202ecdeeb6fe0da24b52ca8d4b0878ed76a88f98cc7835"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sponsor-assets/sources.json",
+      "bytes": 913,
+      "sha256": "695350dd55e6a546646d9c4dedbc6d0ab9a7fe110e28acb974e528593b216a9a"
     },
     {
       "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",

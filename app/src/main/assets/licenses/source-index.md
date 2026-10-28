@@ -62,3 +62,8 @@ Required Notice: Copyright © 2026 蛮吉 (Mangi-11).
 - 对父集成已构建的 APK：`python3 scripts/verify_license_bundle.py --apk app/build/outputs/apk/debug/app-debug.apk`（或明确 release APK 路径）。核对每个资产的准确 ZIP entry、重复 entry、大小和 SHA-256；不会解压执行、联网或构建。此结果仅属于所提供的 APK。
 - 显式维护操作：`python3 scripts/verify_license_bundle.py --stage`，只从仓内现有完整原件复制，生成/更新本地摘要；应人工审查并提交 diff，**不能放到验证 CI 自动修正输入**。无网络、不下载，不能补出上述缺失制品原件。
 - 新增/更新依赖后，父集成另取真实 release/debug runtime 解析结果和制品 NOTICE，不将本入口当成完整依赖许可闭包检查。检查只证明确切字节，不判定合法授权、功能可用、设备运行或自研比例；未运行的测试和 APK 不宣称通过。
+
+## Sponsor QR images and community link icons (2026-10-28)
+
+- The maintainer explicitly requested the original sponsor QR images. Exact original bytes, source revision and paths are pinned in `THIRD_PARTY/sponsor-assets/sources.json`; bundled under `assets/sponsor/`. No new license grant for the payment images is inferred.
+- Telegram, Tencent QQ and GitHub link icons use unmodified path geometry from Simple Icons 11.0.0 (CC0-1.0). Original SVGs, immutable revision and file hashes are pinned in `THIRD_PARTY/community-icons/sources.json`; the license is included at `community-icons/LICENSE.md`. Brand trademarks remain with their owners; these icons only identify their corresponding links, without implying endorsement.

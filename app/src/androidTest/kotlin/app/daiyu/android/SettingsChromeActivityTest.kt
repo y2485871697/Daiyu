@@ -134,7 +134,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                 assertTrue(bounds.left >= card.left && bounds.right <= card.right)
                 row.assertHasClickAction()
             }
-            for (title in listOf("检查更新", "Telegram 频道", "QQ 群", "源代码", "自用中转站", "给煮波恰饭🍚")) {
+            for (title in listOf("检查更新", "Telegram 频道", "QQ 群", "源代码", "自用中转站", "赞助")) {
                 node("settings-row:$title").assertDoesNotExist()
             }
             assertEquals(0, fixture.opens.get())

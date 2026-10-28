@@ -58,15 +58,69 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         backToChat(activity); assertDraft("retained links unsent")
     }
 
-    fun testDonationRemainsUserRequestedPlaceholderWithoutOpeningPayment() {
-        setDraft("donation placeholder unsent")
+    fun testSponsorSwitchesOriginalQrsAndClosesWithoutOpeningPayment() {
+        setDraft("sponsor unsent")
         val before = fixture.database.exportBackup()
+        val settings = fixture.settings.loadForEditing().settings
         openSettings()
-        assertTrue(intercept { entry("给煮波恰饭🍚").assertHasNoClickAction() }.isEmpty())
+        assertTrue(intercept { entry("赞助").assertHasClickAction().performClick() }.isEmpty())
+        awaitUniqueTag("sponsor-wechat")
+        node("sponsor-wechat").assertIsSelected()
+        node("sponsor-alipay").assertIsNotSelected()
+        ui.onNodeWithContentDescription("微信收款码").assertIsDisplayed()
+        ui.onAllNodesWithText("给煮波恰饭🍚").assertCountEquals(0)
+        assertTrue(intercept { node("sponsor-alipay").performClick() }.isEmpty())
+        node("sponsor-alipay").assertIsSelected()
+        node("sponsor-wechat").assertIsNotSelected()
+        ui.onNodeWithContentDescription("支付宝收款码").assertIsDisplayed()
+        node("sponsor-wechat").performClick()
+        ui.onNodeWithContentDescription("微信收款码").assertIsDisplayed()
+        node("sponsor-alipay").performClick()
+        node("sponsor-alipay").assertIsSelected()
+        ui.onNodeWithContentDescription("关闭").performClick()
+        awaitVisualIdle()
+        node("sponsor-qr").assertDoesNotExist()
+        node("page:APP 信息与更新").assertExists()
+        entry("赞助").performClick()
+        awaitUniqueTag("sponsor-wechat")
+        node("sponsor-wechat").assertIsSelected()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitVisualIdle()
+        node("sponsor-qr").assertDoesNotExist()
+        node("page:APP 信息与更新").assertExists()
+        entry("赞助").performClick()
+        awaitUniqueTag("sponsor-wechat")
+        node("preview-dialog-scrim").performClick()
+        awaitVisualIdle()
+        node("sponsor-qr").assertDoesNotExist()
         node("page:APP 信息与更新").assertExists()
         assertEquals(before, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.loadForEditing().settings)
         assertEquals(0, fixture.opens.get())
-        backToChat(activity); assertDraft("donation placeholder unsent")
+        backToChat(activity); assertDraft("sponsor unsent")
+    }
+
+    fun testPausedOrRetiredSponsorCallbackCannotOpenSheet() {
+        openSettings()
+        val click = checkNotNull(entry("赞助").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        assertTrue(intercept { realPauseResume(activity, atPause = { click() }) }.isEmpty())
+        node("sponsor-qr").assertDoesNotExist()
+        backToChat(activity)
+        assertTrue(intercept { mainThread { click() } }.isEmpty())
+        node("sponsor-qr").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRelayChildrenUseFullCardLeftAlignment() {
+        openSettings()
+        val st = entry("ST API").fetchSemanticsNode().boundsInRoot
+        val moyu = entry("摸鱼").fetchSemanticsNode().boundsInRoot
+        val parent = node("settings-row:自用中转站").fetchSemanticsNode().boundsInRoot
+        assertEquals(parent.left, st.left, 1f)
+        assertEquals(parent.left, moyu.left, 1f)
+        assertEquals(parent.width, st.width, 1f)
+        assertEquals(parent.width, moyu.width, 1f)
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testReturningFromAppInfoRetiresItsExternalLinkCallback() {

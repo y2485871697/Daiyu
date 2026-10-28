@@ -51,8 +51,7 @@ class ResumeLayoutContractTest(unittest.TestCase):
     def test_permanent_read_only_rows_do_not_gain_navigation_arrows(self):
         home = (SRC / "ui/screens/settings/SettingsHomeScreen.kt").read_text()
         rootfs = (SRC / "ui/screens/settings/LinuxRootfsPanel.kt").read_text()
-        self.assertIn('onClick = if (entry.id == "donate") null else onClick', home)
-        self.assertNotIn('showChevron = true, onClick = if (entry.id == "donate")', home)
+        self.assertIn('"donate" -> showSponsor = true', home)
         self.assertIn("onClick = if (entry.directory)", rootfs)
         self.assertNotIn("showChevron = true, onClick = if (entry.directory)", rootfs)
         offline = (SRC / "ui/screens/settings/OfflineSpeechSettingsScreen.kt").read_text()

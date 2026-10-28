@@ -705,6 +705,19 @@ object DaiyuIcons {
         }.build()
     }
 
+    val Sponsor: ImageVector by lazy {
+        ImageVector.Builder(name = "Daiyu.Sponsor", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
+                moveTo(12f, 20.5f)
+                curveTo(9.8f, 18.4f, 3f, 13.3f, 3f, 8.5f)
+                curveTo(3f, 3.2f, 9.4f, 2.3f, 12f, 6.5f)
+                curveTo(14.6f, 2.3f, 21f, 3.2f, 21f, 8.5f)
+                curveTo(21f, 13.3f, 14.2f, 18.4f, 12f, 20.5f)
+                close()
+            }
+        }.build()
+    }
+
     val Balance: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Balance", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {

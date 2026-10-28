@@ -91,7 +91,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         openHub()
         val tag = "settings-row:APP 信息与更新"
         reveal(tag, "设置").assertHasClickAction()
-        for (title in listOf("检查更新", "Telegram 频道", "QQ 群", "源代码", "自用中转站", "给煮波恰饭🍚")) {
+        for (title in listOf("检查更新", "Telegram 频道", "QQ 群", "源代码", "自用中转站", "赞助")) {
             node("settings-row:$title").assertDoesNotExist()
         }
         val position = settingsScrollPosition()
@@ -102,7 +102,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             node("page:设置").assertDoesNotExist()
             for (item in SettingsCatalog.appInfoEntries.filterNot { it.id in setOf("relay_st", "relay_moyu") }) {
                 val row = reveal("settings-row:${item.title}", "APP 信息与更新").assertExists()
-                if (item.id == "donate") row.assertHasNoClickAction() else row.assertHasClickAction()
+                row.assertHasClickAction()
             }
             if (systemBack) backToPage(activity, "page:设置") else {
                 ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performClick()
@@ -201,21 +201,16 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         }, useUnmergedTree = true).assertCountEquals(0)
         backToChat(activity); node("chat-draft").assertExists(); node("chat-messages").assertExists()
     }
-    fun testUnwiredButtonsDoNothingAndKeepDraftDatabaseSettingsAndWindow() {
+    fun testRetainedRelayExpansionKeepsDraftDatabaseSettingsAndWindow() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("updates", "assistants", "subagents", "appearance", "haptics", "voice", "source", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
-        val placeholder = SettingsCatalog.entry("donate")
-        val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
+        val implemented = setOf("updates", "assistants", "subagents", "appearance", "haptics", "voice", "source", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs", "donate")
+        val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented }
         assertEquals(0, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
-        }
-        (unwired + placeholder).forEach { item ->
-            entry(item.id).assertHasNoClickAction(); node("page:APP 信息与更新").assertExists()
-            assertUnchanged()
         }
         entry("relay").performClick(); node("page:APP 信息与更新").assertExists(); assertUnchanged()
         for (title in listOf("ST API", "摸鱼")) {

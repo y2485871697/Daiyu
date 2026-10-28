@@ -40,6 +40,9 @@ COPIES = (
     ("docs/P32-voice-network-LICENSES.md", "P32-voice-network-LICENSES.md"),
     (ASSETS + "whale-maid/LICENSE", "whale-maid/LICENSE"),
     (ASSETS + "whale-maid/NOTICE", "whale-maid/NOTICE"),
+    ("THIRD_PARTY/community-icons/upstream/LICENSE.md", "community-icons/LICENSE.md"),
+    ("THIRD_PARTY/community-icons/sources.json", "community-icons/sources.json"),
+    ("THIRD_PARTY/sponsor-assets/sources.json", "sponsor-assets/sources.json"),
     (INDEX, "source-index.md"),
 ) + tuple(("THIRD_PARTY/sherpa-ncnn/" + name, "sherpa-ncnn/" + name) for name in (
     "LICENSE", "LICENSE-ncnn", "LICENSE-kaldi-native-fbank", "KISSFFT-COPYING",

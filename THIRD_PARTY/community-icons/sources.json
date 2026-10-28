@@ -1,0 +1,33 @@
+{
+  "repository": "https://github.com/simple-icons/simple-icons",
+  "version": "11.0.0",
+  "revision": "afc1b5674f1f83b6f454d475152bfad8edc916ce",
+  "license": "CC0-1.0",
+  "use": "Identify the corresponding Telegram, Tencent QQ and GitHub external links; no endorsement or trademark license is implied.",
+  "files": [
+    {
+      "path": "THIRD_PARTY/community-icons/upstream/telegram.svg",
+      "upstream_path": "icons/telegram.svg",
+      "bytes": 742,
+      "sha256": "147fd8f8923e7e5f463fe98c0eb9913bead6b2ae59935728cda141002ec8a7c9"
+    },
+    {
+      "path": "THIRD_PARTY/community-icons/upstream/tencentqq.svg",
+      "upstream_path": "icons/tencentqq.svg",
+      "bytes": 1745,
+      "sha256": "18d7fc9c2ddd2b7752871136eaa1d2f10ea17a414e256f54865db147f1460a0f"
+    },
+    {
+      "path": "THIRD_PARTY/community-icons/upstream/github.svg",
+      "upstream_path": "icons/github.svg",
+      "bytes": 822,
+      "sha256": "3bf8cceead820aec50d4ee825a3fd02c5a1cd6665cc9cf4cbf3d9c8861a204bb"
+    },
+    {
+      "path": "THIRD_PARTY/community-icons/upstream/LICENSE.md",
+      "upstream_path": "LICENSE.md",
+      "bytes": 6568,
+      "sha256": "4674b210d8a1a0926e070843950aef43367cf44dcac86081c25540e03c089e58"
+    }
+  ]
+}

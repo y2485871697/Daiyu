@@ -164,4 +164,27 @@ class SettingsPresentationTest {
         assertFalse(draft.toString().contains("never-print-body"))
         assertFalse(draft.toString().contains("never-print-headers"))
     }
+    @Test
+    fun sponsorEntryUsesHeartAndRetainsTheLocalActionIdentity() {
+        val entry = SettingsCatalog.entry("donate")
+        assertEquals("赞助", entry.title)
+        assertEquals(SettingControl.ACTION, entry.control)
+        assertEquals("Daiyu.Sponsor", entry.icon.name)
+        assertEquals(app.daiyu.android.ui.icons.DaiyuFeatureColor.ROSE,
+            app.daiyu.android.ui.icons.featureColorFor(entry.icon))
+        assertEquals(null, entry.route)
+        assertEquals(null, entry.summary)
+    }
+
+    @Test
+    fun communityEntriesConstructTheirOwnBrandVectors() {
+        for ((id, name) in listOf("telegram" to "Brand.Telegram", "qq" to "Brand.TencentQQ", "source" to "Brand.GitHub")) {
+            val entry = SettingsCatalog.entry(id)
+            assertEquals(name, entry.icon.name)
+            assertEquals(24f, entry.icon.viewportWidth)
+            assertEquals(24f, entry.icon.viewportHeight)
+            assertTrue(entry.icon.root.size > 0)
+            assertEquals(SettingControl.ACTION, entry.control)
+        }
+    }
 }

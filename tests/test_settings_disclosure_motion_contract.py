@@ -25,7 +25,7 @@ class SettingsDisclosureMotionContractTest(unittest.TestCase):
             'AppearanceSettingsScreen.kt': ['SettingsExpandableContent(state.morphLoadingIndicator && loadingExpanded)', 'settingsDisclosureRotation(iconExpanded, expandedDegrees = 180f)'],
             'IconAppearanceEditor.kt': ['SettingsExpandableContent(expanded)', 'currentExpanded && currentOwner()'],
             'ProviderInlineEditors.kt': ['SettingsExpandableContent(expanded)', 'settingsDisclosureRotation(expanded, expandedDegrees = 180f)'],
-            'SettingsHomeScreen.kt': ['SettingsExpandableContent(relayExpanded,', 'settingsDisclosureRotation(relayExpanded)'],
+            'SettingsHomeScreen.kt': ['SettingsExpandableContent(relayExpanded)', 'settingsDisclosureRotation(relayExpanded)'],
         }
         for name, expected in calls.items():
             with self.subTest(file=name):

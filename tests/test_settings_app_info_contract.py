@@ -38,12 +38,12 @@ class SettingsAppInfoContractTest(unittest.TestCase):
         self.assertIn('ownerCurrent = { visit.active && localPage == SettingsLocalPage.APP_INFO }', self.home)
         self.assertIn('"updates" -> release.check()', self.home)
 
-    def test_actions_keep_current_page_lifecycle_and_donation_guards(self):
+    def test_actions_keep_current_page_lifecycle_and_sponsor_wiring(self):
         self.assertIn('val actionPage = localPage', self.home)
         self.assertIn('localPage != actionPage', self.home)
         self.assertIn('Lifecycle.State.RESUMED', self.home)
         self.assertIn('"telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)', self.home)
-        self.assertIn('onClick = if (entry.id == "donate") null else onClick', self.home)
+        self.assertIn('"donate" -> showSponsor = true', self.home)
 
 
 if __name__ == "__main__":

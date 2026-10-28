@@ -48,6 +48,7 @@ import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.daiyuIconColor
+import app.daiyu.android.ui.icons.communityBrandIconColor
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
@@ -60,7 +61,7 @@ private class SettingsHomeVisit { var active = true }
 @Composable
 internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
-        DaiyuIcon(icon, contentDescription = null, tint = daiyuIconColor(icon), size = 23.dp)
+        DaiyuIcon(icon, contentDescription = null, tint = communityBrandIconColor(icon) ?: daiyuIconColor(icon), size = 23.dp)
     }
 }
 
@@ -120,9 +121,8 @@ private fun SettingsHomeRow(entry: SettingsEntry, diagnostics: SettingsDiagnosti
         SettingsDiagnosticRow(entry, diagnostics)
         return
     }
-    SettingsRow(entry.title, onClick = if (entry.id == "donate") null else onClick,
+    SettingsRow(entry.title, onClick = onClick,
         summary = when (entry.id) {
-            "donate" -> "暂未开放，不提供支付入口"
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
             else -> entry.summary
         }, leading = { SettingsIcon(entry.icon) })
@@ -140,7 +140,7 @@ private fun SettingsHomeRows(entries: List<SettingsEntry>, diagnosticsUi: Settin
                         DaiyuIcon(DaiyuIcons.ChevronRight,
                             if (relayExpanded) "收起" else "展开", modifier = Modifier.settingsDisclosureRotation(relayExpanded), size = 20.dp)
                     })
-                SettingsExpandableContent(relayExpanded, Modifier.padding(start = 66.dp)) {
+                SettingsExpandableContent(relayExpanded) {
                     entries.filter { it.id in setOf("relay_st", "relay_moyu") }.forEach { child ->
                         SettingsRow(child.title, onClick = { open(child) })
                     }
@@ -178,6 +178,7 @@ internal fun DaiyuSettingsScreen(
     val release = rememberSettingsReleaseCheck(releaseChecker, BuildConfig.VERSION_NAME,
         ownerCurrent = { visit.active && localPage == SettingsLocalPage.APP_INFO },
         onNotice = onReleaseNotice ?: { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
+    var showSponsor by remember { mutableStateOf(false) }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
     val catalogGroups = remember(engineeringUi) { SettingsCatalog.visibleGroups(engineeringUi) }
     val groups = catalogGroups
@@ -192,6 +193,7 @@ internal fun DaiyuSettingsScreen(
             return@open
         }
         when (entry.id) {
+            "donate" -> showSponsor = true
             "updates" -> release.check()
             "assistants" -> onOpenAssistants?.invoke()
             "subagents" -> onOpenSubAgents?.invoke()
@@ -212,6 +214,7 @@ internal fun DaiyuSettingsScreen(
         if (openedPage != null) {
             val localBack: () -> Unit = {
                 if (visit.active && localPage == openedPage) {
+                    showSponsor = false
                     localPage = if (openedPage == SettingsLocalPage.SHIZUKU_ACCESS) SettingsLocalPage.ENHANCEMENTS else null
                 }
             }
@@ -226,6 +229,7 @@ internal fun DaiyuSettingsScreen(
                         }
                     }
                 }
+                if (showSponsor) SettingsSponsorDialog(onDismiss = { showSponsor = false })
             } else {
                 SettingsSystemAccessPage(openedPage, onBack = localBack,
                     onOpenShizuku = {

@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.CommunityBrandIcons
 
 internal val RetainedSettingsEntryAction =
     androidx.compose.ui.semantics.SemanticsPropertyKey<(SettingsEntry) -> Unit>("RetainedSettingsEntryAction")
@@ -65,13 +66,13 @@ internal object SettingsCatalog {
             SettingsEntry("app_info", "APP 信息与更新", DaiyuIcons.Info, SettingControl.PAGE,
                 localPage = SettingsLocalPage.APP_INFO, summary = "版本、社区与项目入口"),
             SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.ACTION),
-            SettingsEntry("telegram", "Telegram 频道", DaiyuIcons.Browser, SettingControl.ACTION, summary = "公告与项目动态"),
-            SettingsEntry("qq", "QQ 群", DaiyuIcons.Browser, SettingControl.ACTION, summary = "交流与使用反馈"),
-            SettingsEntry("source", "源代码", DaiyuIcons.Browser, SettingControl.ACTION, summary = "项目代码与开发记录"),
+            SettingsEntry("telegram", "Telegram 频道", CommunityBrandIcons.Telegram, SettingControl.ACTION, summary = "公告与项目动态"),
+            SettingsEntry("qq", "QQ 群", CommunityBrandIcons.TencentQQ, SettingControl.ACTION, summary = "交流与使用反馈"),
+            SettingsEntry("source", "源代码", CommunityBrandIcons.GitHub, SettingControl.ACTION, summary = "项目代码与开发记录"),
             SettingsEntry("relay", "自用中转站", DaiyuIcons.Gateway, SettingControl.PAGE, summary = "常用服务入口"),
             SettingsEntry("relay_st", "ST API", DaiyuIcons.Gateway, SettingControl.ACTION, summary = "打开 ST API"),
             SettingsEntry("relay_moyu", "摸鱼", DaiyuIcons.Gateway, SettingControl.ACTION, summary = "打开摸鱼"),
-            SettingsEntry("donate", "给煮波恰饭🍚", DaiyuIcons.Balance, SettingControl.ACTION),
+            SettingsEntry("donate", "赞助", DaiyuIcons.Sponsor, SettingControl.ACTION),
         )),
     )
     private val hiddenEntryIds = setOf(

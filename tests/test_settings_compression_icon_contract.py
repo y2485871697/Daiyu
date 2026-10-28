@@ -40,7 +40,7 @@ class SettingsCompressionIconContract(unittest.TestCase):
         catalog = (SETTINGS / "SettingsCatalog.kt").read_text()
         self.assertRegex(catalog, r'SettingsEntry\("compression", "上下文压缩", DaiyuIcons\.Compress, SettingControl\.PAGE, FeatureRoute\.COMPRESSION_SETTINGS[,)]')
         home = (SETTINGS / "SettingsHomeScreen.kt").read_text()
-        self.assertIn("DaiyuIcon(icon, contentDescription = null, tint = daiyuIconColor(icon), size = 23.dp)", home)
+        self.assertIn("DaiyuIcon(icon, contentDescription = null, tint = communityBrandIconColor(icon) ?: daiyuIconColor(icon), size = 23.dp)", home)
 
 
 if __name__ == "__main__":

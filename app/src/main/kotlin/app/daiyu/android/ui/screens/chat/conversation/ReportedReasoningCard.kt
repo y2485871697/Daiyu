@@ -33,7 +33,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,18 +78,24 @@ internal fun ReportedReasoningCard(
     SideEffect { if (isThinking) observedLive = true }
     var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
     var overridePhase by rememberSaveable(ownerKey) { mutableStateOf(isThinking) }
+    val manuallyCollapsed = expandedOverride == false && overridePhase == isThinking
     val summaryDisplays = reported.map { summary ->
         key(ownerKey, summary.itemId) {
             val text = summary.text.takeIf(::hasReportedReasoningText).orEmpty()
             // Keep the parser lane and reveal owner through thought/tool/terminal transitions.
             val streamingProjection = remember(ownerKey, summary.itemId) { !generationComplete }
             val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection)
-            val reveal = rememberMarkdownReveal(
-                listOf(MarkdownTypingSource(summary.itemId, text)), projection,
-                streaming = isThinking, terminal = !isThinking,
-                resetEpoch = revealResetEpoch,
-                onVisibleAdvance = onVisibleAdvance,
-            )
+            val revealEnabled = !manuallyCollapsed && hasReportedReasoningText(text)
+            val reveal = key(revealEnabled) {
+                rememberMarkdownReveal(
+                    listOf(MarkdownTypingSource(summary.itemId, text)), projection,
+                    streaming = isThinking && revealEnabled, terminal = !isThinking,
+                    resetEpoch = revealResetEpoch,
+                    onVisibleAdvance = onVisibleAdvance,
+                    enabled = revealEnabled,
+                    allowBaselinePrefix = false,
+                )
+            }
             ReasoningSummaryDisplay(summary, projection, reveal)
         }
     }
@@ -172,7 +178,7 @@ private data class ReasoningSummaryDisplay(
     val reveal: MarkdownReveal,
 )
 
-/** Timing and Markdown leaves subscribe independently to their frame clocks. */
+/** The elapsed-time sampler is independent of Markdown reveal frames. */
 @Composable
 private fun ReasoningElapsedTime(
     ownerKey: String,
@@ -190,13 +196,9 @@ private fun ReasoningElapsedTime(
     val millis by produceState(elapsed(nanoTime()), reported, live, nanoTime) {
         value = elapsed(nanoTime())
         if (live) {
-            var sampledFrame: Long? = null
             while (true) {
-                val frame = withFrameNanos { it }
-                if (sampledFrame == null || frame - checkNotNull(sampledFrame) >= 100_000_000L) {
-                    value = elapsed(nanoTime())
-                    sampledFrame = frame
-                }
+                delay(100L)
+                value = elapsed(nanoTime())
             }
         }
     }

@@ -46,7 +46,6 @@ internal fun MessageContent(
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     flowRunning: Boolean = false,
     reasoningReady: (app.daiyu.android.domain.ReportedReasoning) -> Boolean = { true },
-    textReady: (MessageContentUi.Text) -> Boolean = { true },
     reasoningBody: @Composable (app.daiyu.android.domain.ReportedReasoning, Boolean) -> Unit = { _, _ -> },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
@@ -70,7 +69,6 @@ internal fun MessageContent(
                 when (block) {
                     is MessageContentUi.Text -> {
                         if (block.text.isNotBlank()) textBody(block, Modifier.testTag("message-content-text:$index"))
-                        precedingReady = block.text.isBlank() || textReady(block)
                     }
                     is MessageContentUi.Reasoning -> {
                         reasoningBody(block.reported,

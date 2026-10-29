@@ -40,7 +40,8 @@ class ReasoningProgressContractTest(unittest.TestCase):
 
     def test_timer_stays_local_and_uses_compact_tenths(self):
         source = (APP / "ui/screens/chat/conversation/ReportedReasoningCard.kt").read_text()
-        self.assertIn("100_000_000L", source)
+        self.assertIn("delay(100L)", source)
+        self.assertNotIn("withFrameNanos", source)
         self.assertIn('Text("${duration / 1_000}.${duration / 100 % 10}s",', source)
         self.assertLess(source.index("ReasoningElapsedTime(ownerKey"), source.index("Icon(ChatPreviewIcons.Chevron"))
 

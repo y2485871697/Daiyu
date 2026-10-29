@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import app.daiyu.android.MarkdownParser
+import java.util.concurrent.CountDownLatch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -85,6 +88,60 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
 
     fun testInnerCollapseAndReopenDoNotReplayButLaterAppendStillTypes() = assertInnerCollapse(Path.STANDALONE)
     fun testWorkInnerCollapseAndReopenDoNotReplayButLaterAppendStillTypes() = assertInnerCollapse(Path.WORK)
+    fun testMixedInnerCollapseAndReopenDoNotReplayButLaterAppendStillTypes() = assertInnerCollapse(Path.MIXED)
+
+    fun testColdFirstSummaryAndHiddenAppendReopenUseSilentBaselines() {
+        val first = "cold first summary " + "甲".repeat(120)
+        val hidden = first + " hidden " + "乙".repeat(120)
+        val next = hidden + " visible " + "丙".repeat(120)
+        val firstEntered = CountDownLatch(1)
+        val firstRelease = CountDownLatch(1)
+        val hiddenEntered = CountDownLatch(1)
+        val hiddenRelease = CountDownLatch(1)
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { text ->
+            if (text == first) { firstEntered.countDown(); firstRelease.await() }
+            if (text == hidden) { hiddenEntered.countDown(); hiddenRelease.await() }
+            MarkdownParser.parse(text)
+        }
+        var text by mutableStateOf("")
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        ReportedReasoningCard("cold", listOf(ReportedReasoning("r", text, 0L, 0L)),
+                            allowLiveTiming = true, onVisibleAdvance = { advances++ })
+                    }
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            mainThread { text = first }
+            ui.waitUntil(5_000) { firstEntered.count == 0L }
+            ui.mainClock.advanceTimeBy(64)
+            assertEquals(0, advances)
+            firstRelease.countDown()
+            await { visibleText().contains(first) }
+            assertEquals(0, advances)
+            ui.onNodeWithTag("reported-reasoning-header:cold").performClick()
+            await { ui.onAllNodesWithTag("reported-reasoning-content:cold").fetchSemanticsNodes().isEmpty() }
+            mainThread { text = hidden }
+            ui.waitUntil(5_000) { hiddenEntered.count == 0L }
+            ui.onNodeWithTag("reported-reasoning-header:cold").performClick()
+            ui.mainClock.advanceTimeBy(64)
+            assertEquals(0, advances)
+            hiddenRelease.countDown()
+            await { visibleText().contains(hidden) }
+            assertEquals(0, advances)
+            mainThread { text = next }
+            await { advances > 0 }
+            assertFalse(visibleText().contains(next))
+            await { visibleText().contains(next) }
+        } finally {
+            firstRelease.countDown(); hiddenRelease.countDown()
+            ui.mainClock.autoAdvance = true
+        }
+    }
 
     private fun assertInnerCollapse(path: Path) {
         val first = "已显示思考" + "甲".repeat(80)
@@ -111,20 +168,28 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.onNodeWithTag("reported-reasoning-header:$owner").fetchSemanticsNode()
                 .config[SemanticsProperties.StateDescription] == "已折叠"
         }
+        ui.mainClock.advanceTimeBy(48)
+        ui.onNodeWithTag("reported-reasoning-content:$owner").assertExists()
+        await {
+            ui.onAllNodesWithTag("reported-reasoning-content:$owner").fetchSemanticsNodes().isEmpty()
+        }
         val paused = advances
         mainThread { value = turn(path, hidden) }
         ui.mainClock.advanceTimeBy(48)
-        ui.onNodeWithTag("reported-reasoning-content:$owner").assertExists()
+        ui.onNodeWithTag("reported-reasoning-content:$owner").assertDoesNotExist()
         assertEquals(paused, advances)
         repeat(3) { ui.mainClock.advanceTimeBy(32); assertEquals(paused, advances) }
         ui.mainClock.advanceTimeBy(320)
         assertEquals(paused, advances)
         ui.onNodeWithTag("reported-reasoning-header:$owner").performClick()
-        await { visibleText().contains(hidden) }
+        await { assertEquals(paused, advances); visibleText().contains(hidden) }
+        assertEquals(paused, advances)
+        ui.mainClock.advanceTimeBy(320)
         assertEquals(paused, advances)
         mainThread { value = turn(path, next) }
         await { advances > paused }
         assertFalse(visibleText().contains(next))
+        await { visibleText().contains(next) }
         ui.mainClock.autoAdvance = true
     }
 

@@ -534,8 +534,6 @@ internal fun AssistantTurn(
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(displayedTurn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent,
                 reasoningReady = handoff::ready,
-                textReady = { text -> reveal.ready(text.itemId,
-                    turn.content.filterIsInstance<MessageContentUi.Text>().first { it.itemId == text.itemId }.text) },
                 reasoningBody = { reported, connector ->
                     ReasoningStepRow(turn.listKey, reported, connector,
                         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
@@ -568,11 +566,22 @@ internal fun AssistantTurn(
 
 @Composable
 private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff, toolContent: @Composable (WorkStepUi) -> Unit) {
-    turn.workProcess?.let { WorkProcessCard(it, turn.listKey,
+    val work = turn.workProcess
+    val workReasoning = work?.segments.orEmpty().mapNotNull { it.reasoning }
+    val reasoningReady = handoff.ready(turn.reportedReasoning)
+    var answerReleased by rememberSaveable(turn.listKey) {
+        mutableStateOf(reasoningReady && turn.finalText.isNotBlank())
+    }
+    work?.let { WorkProcessCard(it, turn.listKey,
         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
         generationComplete = turn.status != RunStatus.RUNNING,
-        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff, toolContent = toolContent) }
-    if (turn.finalText.isNotBlank() && handoff.ready(turn.reportedReasoning)) {
+        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff,
+        onDisclosureHandoffReady = { ready ->
+            if (ready && reasoningReady && turn.finalText.isNotBlank()) answerReleased = true
+        }, toolContent = toolContent) }
+    val canReleaseWithoutWorkflow = reasoningReady && (work == null || workReasoning.isEmpty())
+    SideEffect { if (canReleaseWithoutWorkflow && turn.finalText.isNotBlank()) answerReleased = true }
+    if (turn.finalText.isNotBlank() && (answerReleased || canReleaseWithoutWorkflow)) {
         RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final",
             generationComplete = generationComplete)
     }

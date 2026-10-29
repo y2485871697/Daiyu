@@ -59,9 +59,19 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         for (mixed in listOf(false, true)) {
             val turn = ChatTurnMapper.map(listOf(source(mixed)), toolState = { _, _ -> WorkStepState.FAILED }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
-            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+            val workflows = ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes()
+            if (!mixed) assertEquals(1, workflows.size)
+            assertTrue(workflows.size <= 1)
+            workflows.singleOrNull()?.let { workflow ->
+                val state = workflow.config[SemanticsProperties.StateDescription]
+                assertTrue(state == "已折叠" || state == "已展开")
+                val header = ui.onNodeWithTag("work-process-header")
+                if (state == "已折叠") header.scrollToVisible().performClick()
+                header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+            }
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
-            ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
+            val toolHeader = ui.onNodeWithTag("tool-step-header:card-call")
+            toolHeader.scrollToVisible().assertIsDisplayed().performClick()
             ui.onNodeWithText("原始等待状态").assertDoesNotExist()
             ui.onNodeWithTag("tool-runtime").assertDoesNotExist()
             ui.onNodeWithText("secret-output", substring = true).assertIsDisplayed()
@@ -71,7 +81,12 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("原始回执").assertDoesNotExist()
             ui.onNodeWithContentDescription("复制安全摘要").assertDoesNotExist()
             ui.onNodeWithContentDescription("重试 读取输出").assertDoesNotExist()
-            ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
+            toolHeader.scrollToVisible().assertIsDisplayed().performClick()
+            toolHeader.assert(SemanticsMatcher("Recorded details collapse without retry") {
+                it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
+            })
+            ui.onNodeWithText("secret-output", substring = true).assertDoesNotExist()
+            ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
             assertEquals(0, executions)
             ui.onNodeWithText("final answer").assertIsDisplayed()
         }

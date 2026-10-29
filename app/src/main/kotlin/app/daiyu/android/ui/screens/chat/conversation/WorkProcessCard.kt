@@ -50,14 +50,17 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
     val reasoning = work.segments.mapNotNull { it.reasoning }
     val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
     val expanded = expandedOverride ?: !sequence.ready(reasoning)
     val visibility = remember(ownerKey) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
-    val manuallyClosed = expandedOverride == false && visibility.isIdle && !visibility.currentState && !visibility.targetState
+    val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
+    val disclosureHandoffReady = sequence.ready(reasoning) && (expandedOverride == true || fullyClosed)
+    androidx.compose.runtime.SideEffect { onDisclosureHandoffReady(disclosureHandoffReady) }
+    val manuallyClosed = expandedOverride == false && fullyClosed
     androidx.compose.runtime.SideEffect {
         if (manuallyClosed) reasoning.filter { it.activeSinceNanos == null }.forEach(sequence::complete)
     }

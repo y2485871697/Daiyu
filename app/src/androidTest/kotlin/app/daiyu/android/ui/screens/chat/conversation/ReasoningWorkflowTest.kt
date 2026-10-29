@@ -129,11 +129,14 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
             mainThread { reported = reported.copy(elapsedMillis = 5_400L, activeSinceNanos = null) }
             ui.mainClock.advanceTimeBy(300)
-            ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
-                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+            assertDisclosure("work-process-header", expanded = false)
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithTag("reasoning-step-state:r1", useUnmergedTree = true).assert(SemanticsMatcher.expectValue(
                 androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已思考"))
             ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
             mainThread { running = false }
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
@@ -167,23 +170,24 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             } } }
             awaitFrame {
                 ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size == 1 &&
-                    ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 &&
-                    ui.onNodeWithText("first summary", useUnmergedTree = true).isDisplayed()
+                    ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1
             }
             ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
+            val owner = mapped(source).listKey
+            ui.onNodeWithTag("reported-reasoning-header:$owner:reasoning:r1").performClick()
+            ui.mainClock.advanceTimeBy(300)
             ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
             mainThread { source = source.copy(historySegments = listOf(first,
                 tail.copy(blocks = listOf(MessageBlock.Text("answer", "answer")),
                     reportedReasoning = tail.reportedReasoning.map { it.frozen() }))) }
             awaitFrame {
-                ui.onAllNodesWithText("answer", useUnmergedTree = true).fetchSemanticsNodes().size == 1 &&
-                    ui.onNodeWithText("first summary", useUnmergedTree = true).isDisplayed() &&
-                    ui.onNodeWithText("second summary", useUnmergedTree = true).isDisplayed()
+                ui.onNodeWithText("answer", useUnmergedTree = true).isDisplayed() &&
+                    ui.onAllNodesWithText("first summary", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
             }
             ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
-            ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
-            ui.onNodeWithText("second summary", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithText("first summary", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("second summary", useUnmergedTree = true).assertDoesNotExist()
             ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             mainThread { source = source.copy(status = RunStatus.COMPLETED,
                 historySegments = source.historySegments.map { part ->
@@ -195,8 +199,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.onNodeWithTag("work-process-header").performClick()
             ui.mainClock.advanceTimeBy(300)
             val key = mapped(source).listKey
-            ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r1").performClick()
-            ui.mainClock.advanceTimeBy(300)
+            assertDisclosure("reported-reasoning-header:$key:reasoning:r1", expanded = true)
             ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r2").performClick()
             ui.mainClock.advanceTimeBy(300)
             awaitFrame { ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
@@ -243,10 +246,15 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 reasoningBody = { reasoning, connector -> ReasoningStepRow("mixed", reasoning, connector,
                     generationComplete = !running) })
         } } }
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("second summary").fetchSemanticsNodes().size == 1 }
-        ui.onNodeWithText("mixed tool detail").assertIsDisplayed()
         val firstHeader = "reported-reasoning-header:mixed:reasoning:r1"
         val secondHeader = "reported-reasoning-header:mixed:reasoning:r2"
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag(secondHeader).fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithTag(firstHeader).performClick()
+        ui.onNodeWithTag(secondHeader).performClick()
+        ui.onNodeWithText("first summary").assertIsDisplayed()
+        ui.onNodeWithText("second summary").assertIsDisplayed()
+        ui.onNodeWithTag("tool-step-header:t1").performClick()
+        ui.onNodeWithText("mixed tool detail").assertIsDisplayed()
         ui.onNodeWithTag(firstHeader).performClick()
         ui.onNodeWithTag("tool-step-header:t1").performClick()
         mainThread { content = listOf(MessageContentUi.Text("prefix", "prefix")) + initial }
@@ -261,10 +269,13 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onNodeWithTag("tool-step-header:t1").performClick()
         mainThread { running = false }
         assertDisclosure(firstHeader, false)
-        assertDisclosure(secondHeader, false)
-        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("terminal mixed tool collapses") {
-            it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
+        assertDisclosure(secondHeader, true)
+        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("terminal retains explicit tool disclosure") {
+            it.config[SemanticsProperties.StateDescription].endsWith("已展开")
         })
+        ui.onNodeWithTag(secondHeader).performClick()
+        ui.onNodeWithTag("tool-step-header:t1").performClick()
+        assertDisclosure(secondHeader, false)
     }
 
     fun testGroupedReplyActionBarAddressesTheExactFinalSource() {
@@ -297,7 +308,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         awaitHeader()
         ui.onNodeWithText("工作流程").assertIsDisplayed()
         ui.onNodeWithText("已完成1步 · 执行中").assertIsDisplayed()
+        assertDisclosure("work-process-header", expanded = false)
         ui.onNodeWithTag("work-process-header").performClick()
+        assertDisclosure("work-process-header", expanded = true)
+        ui.onNodeWithTag("work-process-header").performClick()
+        assertDisclosure("work-process-header", expanded = false)
         val thinking = source.copy(reportedReasoning = listOf(before, after))
         mainThread { turn = project(thinking, ToolReceiptUi(WorkStepState.OK)) }
         ui.onNodeWithText("已完成2步 · 思考中").assertIsDisplayed()
@@ -387,7 +402,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true }
             ui.mainClock.advanceTimeByFrame()
             ui.onNodeWithText("answer").assertDoesNotExist()
-            ui.mainClock.advanceTimeBy(500)
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(32)
+                ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isEmpty() &&
+                    ui.onNodeWithText("answer").isDisplayed()
+            }
             ui.onNodeWithText("first summary").assertDoesNotExist()
             ui.onNodeWithText("answer").assertIsDisplayed()
         } finally { ui.mainClock.autoAdvance = true }
@@ -412,7 +431,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true; epoch++ }
             ui.mainClock.advanceTimeByFrame()
             ui.onNodeWithText("answer").assertDoesNotExist()
-            ui.mainClock.advanceTimeBy(500)
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(32)
+                ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isEmpty() &&
+                    ui.onNodeWithText("answer").isDisplayed()
+            }
             ui.onNodeWithText("first summary").assertDoesNotExist()
             ui.onNodeWithText("answer").assertIsDisplayed()
         } finally { ui.mainClock.autoAdvance = true }
@@ -436,8 +459,46 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true }
             ui.mainClock.advanceTimeByFrame()
             ui.onNodeWithText("answer").assertDoesNotExist()
-            ui.mainClock.advanceTimeBy(500)
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(32)
+                ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isEmpty() &&
+                    ui.onNodeWithText("answer").isDisplayed()
+            }
             ui.onNodeWithText("first summary").assertDoesNotExist()
+            ui.onNodeWithText("answer").assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testExplicitlyOpenLegacyWorkflowDoesNotBlockItsNewAnswer() {
+        prepare()
+        var reported by mutableStateOf(ReportedReasoning("r1", "first summary", 0L,
+            System.nanoTime(), blockOffset = 0))
+        var done by mutableStateOf(false)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val source = message(listOf(tool("t1")) + if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(),
+                    listOf(reported)).copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
+                AssistantTurn(mapped(source).copy(content = emptyList(), isStreaming = !done), ChatScreenActions())
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            assertDisclosure("work-process-header", expanded = true)
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            assertDisclosure("work-process-header", expanded = true)
+            mainThread { reported = reported.copy(activeSinceNanos = null); done = true }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(32)
+                ui.onNodeWithText("answer").isDisplayed()
+            }
+            assertDisclosure("work-process-header", expanded = true)
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("answer").assertIsDisplayed()
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("answer").assertIsDisplayed()
         } finally { ui.mainClock.autoAdvance = true }
     }

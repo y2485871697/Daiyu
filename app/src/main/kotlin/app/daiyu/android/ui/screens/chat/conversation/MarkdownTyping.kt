@@ -45,8 +45,9 @@ internal fun rememberMarkdownReveal(
     }
     val prefixProjection = remember(projection, sources) {
         projection?.let { parsed ->
-            val text = sources.map { source -> source.text }
-            if (text.all { it in parsed.blocks }) MarkdownProjection(text, parsed.blocks, parsed.parser) else null
+            val requested = sources.map { source -> source.text }
+            val displayed = parsed.sources.take(requested.size)
+            if (isMarkdownAppend(displayed, requested)) MarkdownProjection(displayed, parsed.blocks, parsed.parser) else null
         }
     }
     return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming,
@@ -62,6 +63,7 @@ internal fun rememberMarkdownReveal(
     resetEpoch: Long = 0L,
     onVisibleAdvance: () -> Unit = {},
     enabled: Boolean = true,
+    allowBaselinePrefix: Boolean = true,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
@@ -69,11 +71,11 @@ internal fun rememberMarkdownReveal(
     val baseline = remember(identity, resetEpoch) { sources.toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
         streaming = !terminal)
-    val baselineLength = remember(baselineProjection, baseline, sources == baseline) {
-        markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline)
+    val baselineLength = remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix) {
+        markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix)
     }
-    val parts = remember(sources, projection) {
-        projection?.let { parsed -> sources.take(parsed.sources.size).mapIndexed { index, source ->
+    val parts = remember(sources, projection, baseline, allowBaselinePrefix) {
+        projection?.takeIf { allowBaselinePrefix || isMarkdownAppend(baseline.map { it.text }, it.sources) }?.let { parsed -> sources.take(parsed.sources.size).mapIndexed { index, source ->
             val displayed = source.copy(text = parsed.sources[index])
             val blocks = parsed.blocks.getValue(displayed.text)
             MarkdownTypingPart(displayed, markdownBlocksLength(blocks), markdownBlocksDisplayText(blocks))

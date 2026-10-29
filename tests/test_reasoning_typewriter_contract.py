@@ -8,19 +8,22 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class ReasoningTypewriterContract(unittest.TestCase):
     def test_reasoning_uses_same_reveal_and_formatted_leaf(self):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        for token in ['val reveal = rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text)',
+        for token in ['val reveal = key(revealEnabled)', 'rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text)',
                       'RevealedMessageMarkdown(', 'display.reveal, summary.itemId',
                       'resetEpoch = revealResetEpoch', 'onVisibleAdvance = onVisibleAdvance']:
             self.assertIn(token, source)
         self.assertNotIn('ProjectedMessageMarkdown(', source)
-        for forbidden in ['TouchHaptics', 'Vibrator', 'HapticsRuntime', 'delay(']:
+        timer = source.split('private fun ReasoningElapsedTime(', 1)[1].split('internal fun hasReportedReasoningText', 1)[0]
+        self.assertIn('delay(100L)', timer)
+        self.assertNotIn('withFrameNanos', timer)
+        for forbidden in ['TouchHaptics', 'Vibrator', 'HapticsRuntime']:
             self.assertNotIn(forbidden, source)
 
     def test_all_three_production_paths_forward_feedback_and_resume(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
-        for start, end in [('if (!integratedReasoning)', 'if (turn.content.isNotEmpty())'),
+        for start, end in [('if (!integratedReasoning || closingStandalone) ReportedReasoningCard', 'if (closingStandalone)'),
                            ('reasoningBody =', '}) { text, modifier ->'),
-                           ('turn.workProcess?.let', 'if (turn.finalText.isNotBlank())')]:
+                           ('work?.let { WorkProcessCard', 'val canReleaseWithoutWorkflow')]:
             section = source.split(start, 1)[1].split(end, 1)[0]
             self.assertIn('revealResetEpoch = revealResetEpoch', section)
             self.assertIn('onVisibleAdvance = onVisibleAdvance', section)

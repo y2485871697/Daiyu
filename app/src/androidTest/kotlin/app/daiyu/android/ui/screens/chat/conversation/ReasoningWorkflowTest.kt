@@ -205,13 +205,16 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testToolOnlyRunningFlowStartsOpenAndManualOpenDoesNotPreventTerminalCollapse() {
+    fun testToolOnlyRunningFlowStartsCollapsedAndManualStatePersists() {
         var source by mutableStateOf(message(listOf(tool("t1")), emptyList()).copy(status = RunStatus.RUNNING))
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(mapped(source), ChatScreenActions(), toolContent = { Text("unique tool detail") })
         } } }
         awaitHeader()
-        ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
+        ui.onNodeWithTag("tool-step:t1").assertDoesNotExist()
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithText("unique tool detail").assertDoesNotExist()
+        ui.onNodeWithTag("tool-step-header:t1").performClick()
         ui.onNodeWithText("unique tool detail").assertIsDisplayed()
         ui.onNodeWithTag("tool-step-header:t1").performClick()
         ui.onNodeWithTag("tool-step-header:t1").performClick()
@@ -357,4 +360,107 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onNodeWithText("已完成3步 · 1步失败 · 1步待确认").assertDoesNotExist()
         assertDisclosure("work-process-header", expanded = false)
     }
+    fun testToolOnlyRunningWorkflowStartsCollapsed() {
+        val turn = mapped(message(listOf(tool("t1")), emptyList()).copy(status = RunStatus.RUNNING)).copy(isStreaming = true)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(turn, ChatScreenActions())
+        } } }
+        awaitHeader()
+        ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
+        ui.onNodeWithTag("tool-step:t1").assertDoesNotExist()
+    }
+
+    fun testStandaloneAnswerWaitsForTheLiveReasoningToFinishClosing() {
+        prepare()
+        var reported by mutableStateOf(ReportedReasoning("r1", "first summary", elapsedMillis = 0L, activeSinceNanos = System.nanoTime()))
+        var done by mutableStateOf(false)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val source = message(if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(), listOf(reported))
+                    .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
+                AssistantTurn(mapped(source).copy(isStreaming = !done), ChatScreenActions())
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("first summary").assertIsDisplayed()
+            mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("answer").assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(500)
+            ui.onNodeWithText("first summary").assertDoesNotExist()
+            ui.onNodeWithText("answer").assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+
+    fun testRevealEpochDoesNotReleaseAClosingReasoningHandoff() {
+        prepare()
+        var reported by mutableStateOf(ReportedReasoning("r1", "first summary", elapsedMillis = 0L,
+            activeSinceNanos = System.nanoTime()))
+        var done by mutableStateOf(false)
+        var epoch by mutableStateOf(0L)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val source = message(if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(), listOf(reported))
+                    .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
+                AssistantTurn(mapped(source).copy(isStreaming = !done), ChatScreenActions(), revealResetEpoch = epoch)
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("first summary").assertIsDisplayed()
+            mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true; epoch++ }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("answer").assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(500)
+            ui.onNodeWithText("first summary").assertDoesNotExist()
+            ui.onNodeWithText("answer").assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testManualWorkflowCollapseFinishesBeforeTheLegacyAnswerMounts() {
+        prepare()
+        var reported by mutableStateOf(ReportedReasoning("r1", "first summary", elapsedMillis = 0L,
+            activeSinceNanos = System.nanoTime(), blockOffset = 0))
+        var done by mutableStateOf(false)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val source = message(listOf(tool("t1")) + if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(),
+                    listOf(reported)).copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
+                AssistantTurn(mapped(source).copy(content = emptyList(), isStreaming = !done), ChatScreenActions())
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("first summary").assertIsDisplayed()
+            ui.onNodeWithTag("work-process-header").performClick()
+            mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("answer").assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(500)
+            ui.onNodeWithText("first summary").assertDoesNotExist()
+            ui.onNodeWithText("answer").assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testLaterReasoningOpensAfterAToolOnlyStartAndEmptySummaryDoesNotLockTheAnswer() {
+        prepare()
+        var summaries by mutableStateOf<List<ReportedReasoning>>(emptyList())
+        var done by mutableStateOf(false)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val source = message(listOf(tool("t1")) + if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(), summaries)
+                .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
+            AssistantTurn(mapped(source).copy(isStreaming = !done), ChatScreenActions())
+        } } }
+        awaitHeader()
+        ui.onNodeWithTag("tool-step:t1").assertDoesNotExist()
+        mainThread { summaries = listOf(ReportedReasoning("later", "first summary", elapsedMillis = 0L, activeSinceNanos = System.nanoTime(), blockOffset = 1)) }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("first summary").assertIsDisplayed()
+        mainThread { summaries = summaries.map { it.copy(activeSinceNanos = null) } +
+            ReportedReasoning("empty", "...", elapsedMillis = 0L, activeSinceNanos = System.nanoTime(), blockOffset = 1) }
+        mainThread { summaries = summaries.map { it.copy(activeSinceNanos = null) }; done = true }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("answer").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("answer").assertIsDisplayed()
+    }
+
 }

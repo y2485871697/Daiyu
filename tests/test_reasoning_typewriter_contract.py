@@ -10,7 +10,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
         for token in ['val reveal = rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text)',
                       'RevealedMessageMarkdown(', 'display.reveal, summary.itemId',
-                      'resetEpoch = revealResetEpoch', 'onVisibleAdvance = { if (disclosureExpanded) onVisibleAdvance() }']:
+                      'resetEpoch = revealResetEpoch', 'onVisibleAdvance = onVisibleAdvance']:
             self.assertIn(token, source)
         self.assertNotIn('ProjectedMessageMarkdown(', source)
         for forbidden in ['TouchHaptics', 'Vibrator', 'HapticsRuntime', 'delay(']:
@@ -31,7 +31,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
         work = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertIn('key(ownerKey, summary.itemId)', card)
-        self.assertIn('streaming = allowLiveTiming && disclosureExpanded', card)
+        self.assertIn('streaming = isThinking', card)
         self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
         self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
         self.assertIn('onVisibleAdvance = { if (expanded) onVisibleAdvance() }', work)
@@ -48,7 +48,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
 
     def test_body_adapter_and_reasoning_share_one_clock(self):
         typing = (CHAT / 'MarkdownTyping.kt').read_text()
-        self.assertIn('return rememberMarkdownReveal(sources, projection, turn.isStreaming, turn.status != RunStatus.RUNNING,', typing)
+        self.assertIn('return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, turn.status != RunStatus.RUNNING && prefix.size == turn.content.size,', ' '.join(typing.split()))
         self.assertIn('motion.update(parts, baselineLength, streaming, terminal)', typing)
         self.assertEqual(1, typing.count('withFrameNanos { motion.advance(current, it) { currentAdvance() } }'))
         self.assertIn('rememberUpdatedState(onVisibleAdvance)', typing)

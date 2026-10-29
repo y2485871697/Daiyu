@@ -14,6 +14,10 @@ class GuiLeaseGateTest {
             "Button", "", "Button", "example:id/button", true, true, true, false, true, false)), false)
     private fun code(result: GuiResult<*>) = (result as GuiResult.Rejected).code
 
+    @Test fun observationLifetimeIsExactlyTwoMinutes() {
+        assertEquals(120_000L, GUI_OBSERVATION_TTL_MILLIS)
+    }
+
     @Test fun disconnectedAndReboundNeverResurrectOldLease() {
         val gate = GuiLeaseGate { time }
         assertEquals("SERVICE_DISCONNECTED_NOT_EXECUTED", code(gate.acquire(owner)))
@@ -69,7 +73,7 @@ class GuiLeaseGateTest {
         gate.publish(lease, observation())
         gate.approveAction(lease, action, 3)
         assertEquals("OBSERVATION_STALE", gate.validateObservation(lease, "obs", 4)?.code)
-        time += 10_001
+        time += GUI_OBSERVATION_TTL_MILLIS + 1
         assertEquals("OBSERVATION_EXPIRED", gate.validateObservation(lease, "obs", 3)?.code)
         gate.publish(lease, observation("next"))
         assertTrue(gate.approvedActions(lease).isEmpty())

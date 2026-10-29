@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,9 +50,17 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
-    var expandedOverride by rememberSaveable(ownerKey, work.running) { mutableStateOf<Boolean?>(null) }
-    val expanded = expandedOverride ?: work.running
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+    var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
+    val reasoning = work.segments.mapNotNull { it.reasoning }
+    val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
+    val expanded = expandedOverride ?: !sequence.ready(reasoning)
+    val visibility = remember(ownerKey) { MutableTransitionState(expanded) }
+    visibility.targetState = expanded
+    val manuallyClosed = expandedOverride == false && visibility.isIdle && !visibility.currentState && !visibility.targetState
+    androidx.compose.runtime.SideEffect {
+        if (manuallyClosed) reasoning.filter { it.activeSinceNanos == null }.forEach(sequence::complete)
+    }
     val reasoningState = rememberSaveableStateHolder()
     val colors = conversationColors()
     val title = work.title
@@ -85,11 +95,13 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                     if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
             }
         }
-        AnimatedVisibility(expanded) {
+        AnimatedVisibility(visibility) {
             Column {
                 HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 3.dp, bottom = 4.dp)) {
+                    var precedingReady = true
                     work.segments.forEachIndexed { segmentIndex, segment ->
+                        if (!precedingReady) return@forEachIndexed
                         if (!segment.narration.isNullOrBlank()) {
                             val narrationConnector = work.segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null } &&
                                 work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }
@@ -107,11 +119,13 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                                             .any { it.steps.isNotEmpty() || it.reasoning != null },
                                         allowLiveTiming = allowLiveTiming, generationComplete = generationComplete,
                                         revealResetEpoch = revealResetEpoch,
-                                        onVisibleAdvance = { if (expanded) onVisibleAdvance() })
+                                        onVisibleAdvance = { if (expanded) onVisibleAdvance() },
+                                        onHandoffReady = { if (it) sequence.complete(reported) })
                                 }
                             }
                         }
-                        segment.steps.forEachIndexed { index, step ->
+                        if (segment.reasoning?.let { !sequence.ready(it) } == true) precedingReady = false
+                        if (precedingReady) segment.steps.forEachIndexed { index, step ->
                             key(ownerKey, step.owner, step.toolCallId) {
                                 val laterStep = index < segment.steps.lastIndex ||
                                     work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
@@ -129,9 +143,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 @Composable
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
-    var expandedOverride by rememberSaveable(step.owner, step.toolCallId, flowRunning) { mutableStateOf<Boolean?>(null) }
-    var overridePhase by rememberSaveable(step.owner, step.toolCallId, flowRunning) { mutableStateOf(flowRunning) }
-    val expanded = expandedOverride?.takeIf { overridePhase == flowRunning } ?: flowRunning
+    var expanded by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error
@@ -164,7 +176,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
         Column(Modifier.weight(1f)) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val stacked = maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f
-                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").heightIn(min = 44.dp).conversationClickable { overridePhase = flowRunning; expandedOverride = !expanded }
+                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").heightIn(min = 44.dp).conversationClickable { expanded = !expanded }
                     .semantics { stateDescription = "$stateLabel · ${if (expanded) "已展开" else "已折叠"}" }
                     .padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {

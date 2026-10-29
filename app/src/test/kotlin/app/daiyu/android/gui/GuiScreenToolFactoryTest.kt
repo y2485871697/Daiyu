@@ -51,6 +51,7 @@ class GuiScreenToolFactoryTest {
         assertTrue(json.contains("\"observation_id\":\"obs\""))
         assertTrue(json.contains("\"truncated\":true"))
         assertFalse(json.contains("data_base64"))
+        assertEquals(120_000L, org.json.JSONObject(json).getLong("expires_after_ms"))
     }
     private fun invalid(block: () -> Unit) {
         try { block(); fail("must reject malformed/expanded request") } catch (_: IllegalArgumentException) { }

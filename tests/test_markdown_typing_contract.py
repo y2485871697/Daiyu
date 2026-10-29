@@ -30,7 +30,7 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)", self.chat)
-        self.assertIn("val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)", self.chat)
+        self.assertIn("val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance, enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready)", self.chat)
         self.assertIn("withFrameNanos { motion.advance(current, it) { currentAdvance() } }", self.typing)
         for source in [self.typing, self.reveal]:
             for forbidden in ["MarkdownParser.parse", "MarkdownText.render(", "substring(0,", "Thread.sleep", "delay("]:

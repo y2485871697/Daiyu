@@ -30,6 +30,33 @@ class ToolActivityUiTest {
         assertEquals(ToolActivityUi.UNKNOWN, toolReceiptPresentation(ToolDisposition.IN_FLIGHT, false, ExecutionPhase.TOOL_EXECUTING, stopRequested = true).activity)
         assertEquals(ToolActivityUi.UNKNOWN, toolReceiptPresentation(ToolDisposition.IN_FLIGHT, true, ExecutionPhase.TERMINAL).activity)
     }
+    @Test fun activeUnknownReceiptKeepsRunningUntilItsFinalReceiptArrives() {
+        assertEquals(ToolActivityUi.RUNNING, toolReceiptPresentation(ToolDisposition.UNKNOWN, true,
+            ExecutionPhase.TOOL_EXECUTING, activeCall = true).activity)
+        assertEquals(ToolActivityUi.PAUSING, toolReceiptPresentation(ToolDisposition.UNKNOWN, true,
+            ExecutionPhase.TOOL_EXECUTING, pauseRequested = true, activeCall = true).activity)
+        for (disposition in listOf(ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)) {
+            assertEquals(ToolActivityUi.from(when (disposition) {
+                ToolDisposition.SUCCEEDED -> WorkStepState.OK
+                ToolDisposition.FAILED -> WorkStepState.FAILED
+                else -> WorkStepState.NOT_EXECUTED
+            }), toolReceiptPresentation(disposition, true, ExecutionPhase.TOOL_EXECUTING, activeCall = true).activity)
+        }
+    }
+    @Test fun activeQuestionCanWaitWithoutInventingAConfirmedReceipt() {
+        val ui = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, ExecutionPhase.WAITING_USER, activeCall = true)
+        assertEquals(ToolActivityUi.WAITING, ui.activity); assertEquals(WorkStepState.UNKNOWN, ui.state)
+    }
+    @Test fun activityRequiresBothTheExactLiveCallAndExecutingPhase() {
+        for (phase in ExecutionPhase.entries) {
+            assertEquals(ToolActivityUi.UNKNOWN, toolReceiptPresentation(ToolDisposition.UNKNOWN, false,
+                phase, activeCall = true).activity)
+            assertEquals(ToolActivityUi.UNKNOWN, toolReceiptPresentation(ToolDisposition.UNKNOWN, true,
+                phase, activeCall = false).activity)
+            if (phase !in setOf(ExecutionPhase.TOOL_EXECUTING, ExecutionPhase.WAITING_USER)) assertEquals(ToolActivityUi.UNKNOWN,
+                toolReceiptPresentation(ToolDisposition.UNKNOWN, true, phase, activeCall = true).activity)
+        }
+    }
     @Test fun allDisplayStatesHaveAnEvidenceBasedPath() {
         val seen = WorkStepState.entries.map { ToolActivityUi.from(it) }.toMutableSet()
         for (phase in ExecutionPhase.entries) for (disposition in ToolDisposition.entries) for (pause in listOf(false, true)) {

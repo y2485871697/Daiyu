@@ -45,12 +45,21 @@ internal fun MessageContent(
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     flowRunning: Boolean = false,
+    reasoningReady: (app.daiyu.android.domain.ReportedReasoning) -> Boolean = { true },
+    textReady: (MessageContentUi.Text) -> Boolean = { true },
     reasoningBody: @Composable (app.daiyu.android.domain.ReportedReasoning, Boolean) -> Unit = { _, _ -> },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         var imageNumber = 0
+        var precedingReady = true
         content.forEachIndexed { index, block ->
+            if (!precedingReady) {
+                if (block is MessageContentUi.Tool && block.step.dedicatedKey != null) {
+                    key(block.step.owner, block.step.toolCallId) { dedicatedTool(block.step) }
+                }
+                return@forEachIndexed
+            }
             val itemKey = when (block) {
                 is MessageContentUi.Text -> "text:${block.itemId}"
                 is MessageContentUi.Reasoning -> "reasoning:${block.reported.itemId}"
@@ -61,9 +70,13 @@ internal fun MessageContent(
                 when (block) {
                     is MessageContentUi.Text -> {
                         if (block.text.isNotBlank()) textBody(block, Modifier.testTag("message-content-text:$index"))
+                        precedingReady = block.text.isBlank() || textReady(block)
                     }
-                    is MessageContentUi.Reasoning -> reasoningBody(block.reported,
-                        content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning })
+                    is MessageContentUi.Reasoning -> {
+                        reasoningBody(block.reported,
+                            content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning })
+                        precedingReady = reasoningReady(block.reported)
+                    }
                     is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                     is MessageContentUi.Tool -> {
                         key(block.step.owner, block.step.toolCallId) {

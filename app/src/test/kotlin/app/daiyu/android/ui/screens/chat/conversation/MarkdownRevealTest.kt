@@ -110,6 +110,16 @@ class MarkdownRevealTest {
         assertTrue(state.advance(next, 1_150_000_000) >= shown)
     }
 
+    @Test fun aReasoningBlockedPrefixStaysOpenUntilTheTerminalAnswerIsAdmitted() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, streaming = true, terminal = false)
+        state.update(emptyList(), 0, streaming = false, terminal = false)
+        val admitted = state.update(listOf(part("answer")), 0, streaming = false, terminal = true)!!
+        assertEquals(0, admitted.start)
+        state.advance(admitted, 1_000_000_000)
+        assertEquals(6, state.advance(admitted, 1_250_000_000))
+    }
+
     @Test fun lateTerminalTargetsDrainToTheirExactEnd() {
         val state = MarkdownTypingState(listOf(source("")))
         state.update(listOf(part("")), 0, true, false)

@@ -21,6 +21,10 @@ internal class MarkdownReveal(
     val settled: Boolean get() = completion.value
     private fun visible(): Int = frame.value.let { if (it.target === target) it.visible else target?.start ?: 0 }
     fun limit(id: String): Int = target?.limit(id, visible()) ?: 0
+    private val readiness = target?.parts?.associate { part ->
+        part.source.id to (part.source.text to derivedStateOf { limit(part.source.id) >= part.length })
+    }.orEmpty()
+    fun ready(id: String, text: String): Boolean = readiness[id]?.let { (source, state) -> source == text && state.value } == true
 }
 
 internal data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
@@ -31,13 +35,22 @@ internal fun rememberMarkdownReveal(
     projection: MarkdownProjection?,
     resetEpoch: Long = 0L,
     onVisibleAdvance: () -> Unit = {},
+    enabled: Boolean = true,
+    reasoningReady: (app.daiyu.android.domain.ReportedReasoning) -> Boolean = { true },
 ): MarkdownReveal {
-    val sources = remember(turn.content, turn.finalText) {
+    val prefix = turn.content.takeWhile { it !is MessageContentUi.Reasoning || reasoningReady(it.reported) }
+    val sources = remember(prefix, turn.finalText, turn.content.isEmpty(), enabled) {
         if (turn.content.isEmpty()) listOf(MarkdownTypingSource("final", turn.finalText))
-        else turn.content.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
+        else prefix.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
     }
-    return rememberMarkdownReveal(sources, projection, turn.isStreaming, turn.status != RunStatus.RUNNING,
-        resetEpoch, onVisibleAdvance)
+    val prefixProjection = remember(projection, sources) {
+        projection?.let { parsed ->
+            val text = sources.map { source -> source.text }
+            if (text.all { it in parsed.blocks }) MarkdownProjection(text, parsed.blocks, parsed.parser) else null
+        }
+    }
+    return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming,
+        turn.status != RunStatus.RUNNING && prefix.size == turn.content.size, resetEpoch, onVisibleAdvance, enabled)
 }
 
 @Composable
@@ -48,6 +61,7 @@ internal fun rememberMarkdownReveal(
     terminal: Boolean,
     resetEpoch: Long = 0L,
     onVisibleAdvance: () -> Unit = {},
+    enabled: Boolean = true,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
@@ -69,7 +83,8 @@ internal fun rememberMarkdownReveal(
     val target = remember(motion, parts, baselineLength, streaming, terminal) {
         motion.update(parts, baselineLength, streaming, terminal)
     }
-    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target) {
+    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, enabled) {
+        if (!enabled) return@produceState
         val current = target ?: return@produceState
         var shown = current.start
         value = MarkdownTypingFrame(current, shown)

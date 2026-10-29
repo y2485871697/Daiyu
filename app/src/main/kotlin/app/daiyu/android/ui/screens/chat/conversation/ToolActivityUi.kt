@@ -10,6 +10,8 @@ enum class ToolActivityUi(val label: String) {
     PAUSING("暂停中"), PAUSED("已暂停"), STOPPING("停止中"), STOPPED("已停止"), INTERRUPTED("已中断"),
     SUCCESS("成功"), FAILED("失败"), UNKNOWN("结果未确认"), NOT_EXECUTED("未执行");
 
+    val inFlight: Boolean get() = this == RUNNING || this == WAITING || this == PAUSING || this == STOPPING
+
     companion object {
         fun from(state: WorkStepState): ToolActivityUi = when (state) {
             WorkStepState.PENDING -> PENDING
@@ -25,7 +27,7 @@ data class ToolReceiptUi(val state: WorkStepState, val activity: ToolActivityUi 
 
 internal fun toolReceiptPresentation(disposition: ToolDisposition, liveOwner: Boolean,
     phase: ExecutionPhase, pauseRequested: Boolean = false,
-    stopRequested: Boolean = false, runStatus: RunStatus? = null): ToolReceiptUi {
+    stopRequested: Boolean = false, runStatus: RunStatus? = null, activeCall: Boolean = false): ToolReceiptUi {
     val state = when (disposition) {
         ToolDisposition.SUCCEEDED -> WorkStepState.OK
         ToolDisposition.FAILED -> WorkStepState.FAILED
@@ -38,7 +40,11 @@ internal fun toolReceiptPresentation(disposition: ToolDisposition, liveOwner: Bo
             disposition == ToolDisposition.NOT_EXECUTED -> ToolActivityUi.from(state)
         runStatus == RunStatus.STOPPED -> ToolActivityUi.STOPPED
         runStatus == RunStatus.INTERRUPTED -> ToolActivityUi.INTERRUPTED
-        liveOwner && stopRequested -> ToolActivityUi.STOPPING
+        liveOwner && stopRequested && (state == WorkStepState.PENDING || activeCall) -> ToolActivityUi.STOPPING
+        disposition == ToolDisposition.UNKNOWN && liveOwner && activeCall &&
+            phase in setOf(ExecutionPhase.TOOL_EXECUTING, ExecutionPhase.WAITING_USER) ->
+            if (pauseRequested) ToolActivityUi.PAUSING
+            else if (phase == ExecutionPhase.WAITING_USER) ToolActivityUi.WAITING else ToolActivityUi.RUNNING
         state != WorkStepState.PENDING -> ToolActivityUi.from(state)
         phase == ExecutionPhase.TERMINAL || phase == ExecutionPhase.RECONNECTING -> ToolActivityUi.UNKNOWN
         phase == ExecutionPhase.PAUSED -> ToolActivityUi.PAUSED

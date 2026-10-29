@@ -202,6 +202,8 @@ object ChatTurnMapper {
             dedicatedKey = dedicatedKey, categoryDetails = display.details,
             hasBrowserScreenshot = block.invocation.name in setOf("browser_read", "browser_write") &&
                 runCatching { org.json.JSONObject(block.invocation.arguments).optString("action") == "screenshot" }.getOrDefault(false),
+            hasScreenScreenshot = block.invocation.name == "screen" &&
+                runCatching { org.json.JSONObject(block.invocation.arguments).optString("operation") == "screenshot" }.getOrDefault(false),
             operationGlyph = toolOperationGlyph(block.invocation.name, block.invocation.arguments),
             activity = activity ?: ToolActivityUi.from(receipt ?: when (confirmedError) {
                 true -> WorkStepState.FAILED
@@ -246,7 +248,7 @@ object ChatTurnMapper {
             }
         }
         val running = message.status == RunStatus.RUNNING
-        val activities = segments.flatMap { it.steps }.filter { it.state == WorkStepState.PENDING }.map { it.activity }
+        val activities = segments.flatMap { it.steps }.filter { it.state == WorkStepState.PENDING || running && it.activity.inFlight }.map { it.activity }
         val summary = when {
             running -> when {
                 ToolActivityUi.STOPPING in activities -> ToolActivityUi.STOPPING.label

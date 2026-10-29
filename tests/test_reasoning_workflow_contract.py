@@ -40,12 +40,12 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('generationComplete && projection != null && displayed == summary.text', source)
         self.assertIn('ReasoningDisclosureDurationMillis = 220', source)
         content = (CHAT / 'MessageContent.kt').read_text()
-        self.assertIn('is MessageContentUi.Reasoning -> reasoningBody', content)
+        self.assertIn('reasoningBody(block.reported,', content)
         self.assertIn('if (!dedicatedTool(block.step)) WorkStepRow', content)
 
     def test_top_card_is_not_duplicated_and_timing_has_exact_owner_gate(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
-        self.assertIn('if (!integratedReasoning) ReportedReasoningCard', source)
+        self.assertIn('if (!integratedReasoning || closingStandalone) ReportedReasoningCard', source)
         self.assertIn('turn.isStreaming && turn.status == RunStatus.RUNNING', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
@@ -85,7 +85,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('val failedStepCount: Int get()', model)
         self.assertIn('val unconfirmedStepCount: Int get()', model)
         self.assertIn('segment.steps.count { it.state == WorkStepState.FAILED }', model)
-        self.assertIn('segment.steps.count { it.state == WorkStepState.UNKNOWN }', model)
+        self.assertIn('segment.steps.count { it.state == WorkStepState.UNKNOWN && !(running && it.activity.inFlight) }', model)
         self.assertIn('if (failed > 0) add("${failed}步失败")', model)
         self.assertIn('if (unconfirmed > 0) add("${unconfirmed}步待确认")', model)
         self.assertIn('val status = controlActivity?.label ?: summary', model)

@@ -28,11 +28,13 @@ internal object RetainedToolOutcomes {
             if (snapshot.message.id != physical.id || snapshot.message.runId != physical.runId ||
                 snapshot.message.conversationId != physical.conversationId) continue
             val current = liveState(physical)
+            val stopRequested = stopping(physical)
             val results = snapshot.tools.map { record ->
                 val state = toolReceiptPresentation(record.disposition,
                     liveOwner = current != null && physical.status == app.daiyu.android.domain.RunStatus.RUNNING,
                     phase = current?.phase ?: snapshot.phase, pauseRequested = current?.pauseRequested == true,
-                    stopRequested = stopping(physical), runStatus = physical.status)
+                    stopRequested = stopRequested, runStatus = physical.status,
+                    activeCall = record.invocation.id in current?.activeToolCalls.orEmpty())
                 Result(record.invocation, record.result) to state
             }.toMap()
             receipts[Owner(physical.conversationId.value, physical.runId.value, physical.id.value)] = results

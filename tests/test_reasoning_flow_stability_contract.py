@@ -28,11 +28,13 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_disclosure_follows_the_flow_phase_not_each_thought(self):
         work = self.read('WorkProcessCard.kt')
-        self.assertIn('rememberSaveable(ownerKey, work.running)', work)
-        self.assertIn('val expanded = expandedOverride ?: work.running', work)
-        self.assertIn('expandedOverride?.takeIf { overridePhase == flowRunning } ?: flowRunning', work)
+        self.assertIn('rememberSaveable(ownerKey)', work)
+        self.assertIn('val expanded = expandedOverride ?: !sequence.ready(reasoning)', work)
+        self.assertIn('rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }', work)
+        self.assertIn('AnimatedVisibility(visibility)', work)
+        self.assertIn('expandedOverride == false && visibility.isIdle && !visibility.currentState && !visibility.targetState', work)
         card = self.read('ReportedReasoningCard.kt')
-        self.assertIn('val disclosureActive = !generationComplete', card)
+        self.assertIn('visibility.isIdle && !visibility.currentState && !visibility.targetState', card)
         self.assertNotIn('rememberSaveable(ownerKey, isThinking)', card)
         self.assertIn('key(ownerKey, summary.itemId)', card)
         self.assertNotIn('key(ownerKey, summary.itemId, disclosureExpanded)', card)
@@ -42,6 +44,12 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
         self.assertIn('val streamingProjection = remember(ownerKey, summary.itemId)', s)
         self.assertIn('display.projection?.sources?.any(::hasReportedReasoningText) == true', s)
         self.assertIn('it.projection?.sources?.any(::hasReportedReasoningText) == true', s)
+
+    def test_resume_epoch_does_not_reset_handoff_or_close_a_blocked_prefix(self):
+        chat = self.read('ChatMessageList.kt')
+        self.assertIn('remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }', chat)
+        self.assertNotIn('remember(turn.listKey, revealResetEpoch) { ReasoningHandoff', chat)
+        self.assertIn('turn.status != RunStatus.RUNNING && prefix.size == turn.content.size', self.read('MarkdownTyping.kt'))
 
     def test_completed_thought_has_a_check_without_tool_success_fabrication(self):
         s = self.read('ReportedReasoningCard.kt')

@@ -53,7 +53,7 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
         if (rich.entries.isEmpty()) details.items.forEachIndexed { index, item ->
             Disclosure(item.title, "tool-task:$index") { Fields(item.fields) }
         }
-        EntryList(rich.entries, "返回条目", private = category in setOf("memory", "personal_search"))
+        EntryList(rich.entries, "返回条目", private = category in setOf("memory", "personal_search", "gui"))
         body.documents.forEach { Document(it, showTitle = !body.plainDocuments || category == "workspace" && it.code) }
         if (category != "device_read") body.prose?.let { Document(it) }
         if (category in setOf("terminal", "background_job")) Fields(body.fields)
@@ -132,7 +132,7 @@ private fun CategoryDocument(document: ToolDisclosureUi) = Document(document)
 private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
     var opened by remember(document) { mutableStateOf(false) }
     val log = document.title in setOf("终端输出", "标准输出", "标准错误", "已收到输出", "任务日志", "守护日志", "运行回执")
-    val preview = toolOutputPreview(document.text, tail = log)
+    val preview = remember(document.text, log) { toolOutputPreview(document.text, tail = log) }
     val tappable = preview.truncated
     val colors = conversationColors()
     val code = document.code || log || preview.truncated

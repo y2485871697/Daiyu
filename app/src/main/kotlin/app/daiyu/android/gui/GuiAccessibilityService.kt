@@ -74,7 +74,9 @@ class GuiAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_FOCUSED or AccessibilityEvent.TYPE_VIEW_SELECTED or AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
                 AccessibilityEvent.TYPE_VIEW_SCROLLED or AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or
-                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) != 0) GuiRuntime.changed(this)
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) != 0) GuiRuntime.changed(this,
+                    contentOnly = event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+                        event.packageName?.toString() == packageName)
         // Do not retain event text or continuously collect a UI tree.
     }
     override fun onInterrupt() { GuiRuntime.disconnected(this) }
@@ -245,7 +247,16 @@ internal object GuiRuntime {
         generation++; clearNodes()
         confirmation?.revoke("SCREEN_LOCKED_NOT_EXECUTED")
     }
-    fun changed(value: GuiAccessibilityService) { onMain(); if (service === value) { generation++; clearNodes() } }
+    fun changed(value: GuiAccessibilityService, contentOnly: Boolean = false) {
+        onMain()
+        if (service !== value) return
+        val binding = targetBinding
+        if (contentOnly && binding != null && isSelfLease(binding.lease) && retained.isNotEmpty()) {
+            // Streaming the assistant's own reply must not replace the selected node identity.
+            // Screenshots/global actions still reject this dirty tree; node actions refresh the original handle.
+            contentChanged = true
+        } else { generation++; clearNodes() }
+    }
     private data class NodeContext(val packageName: String, val windowId: Int, val children: Int, val visible: Boolean)
     private data class TreeSample(val packageName: String, val windowId: Int, val nodes: List<GuiNode>,
         val contexts: List<NodeContext>, val truncated: Boolean) {
@@ -253,8 +264,10 @@ internal object GuiRuntime {
         val verifiable: Boolean get() = !truncated && nodes.none { it.password }
     }
     private var screenshotBinding: Pair<String, TreeSample>? = null
+    private var contentChanged = false
     @Suppress("DEPRECATION") private fun clearNodes() {
         screenshotBinding = null
+        contentChanged = false
         retained.values.forEach { it.recycle() }; retained.clear(); identities.clear()
     }
     private fun screenRejection(): GuiResult.Rejected? {
@@ -395,6 +408,11 @@ internal object GuiRuntime {
         return try { admit(node, window) } finally { window.recycle() }
     }
 
+    private fun rejectChangedTarget(lease: GuiLeaseGate.Lease, code: String): GuiResult.Rejected {
+        gate.retireObservation(lease); clearNodes()
+        return GuiResult.Rejected(code)
+    }
+
     /** Reacquire the admitted application tree; do NOT publish a new observation/clear the approved one.
      * A bounded complete traversal must find exactly one matching target. No coordinate fallback. */
     @Suppress("DEPRECATION")
@@ -403,17 +421,21 @@ internal object GuiRuntime {
         screenRejection()?.let { return it }; selfRootRejection(lease)?.let { return it }
         gate.validateObservation(lease, action.observationId, generation)?.let { return it }
         val observed = lease.observation!!
+        if (contentChanged && action.nodeId == null) return GuiResult.Rejected("OBSERVATION_STALE")
         val fetched = externalRoot(lease, service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
         val root = fetched.value
         if (root.windowId != observed.windowId || root.packageName?.toString() != observed.packageName) {
-            root.recycle(); return GuiResult.Rejected("TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED")
+            root.recycle(); return rejectChangedTarget(lease, "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED")
         }
         val original = action.nodeId?.let { id -> observed.nodes.singleOrNull { it.id == id } }
         if (action.nodeId != null && original == null) { root.recycle(); return GuiResult.Rejected("NODE_NOT_IN_OBSERVATION") }
         var count = 0
         var matches = 0
-        var complete = !observed.truncated
+        // A self-chat observation may omit off-target output. The CURRENT bounded tree
+        // must still be complete and contain exactly one unchanged target; delivery also
+        // refreshes only the originally retained Android node, never the search match.
+        var complete = !observed.truncated || isSelfLease(lease) && original != null
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
             try {
                 if (++count > 128 || depth > 16) { complete = false; return }
@@ -438,9 +460,9 @@ internal object GuiRuntime {
         return try {
             visit(root, 0)
             if (!complete || (original != null && (matches != 1 || original.password || !original.enabled)))
-                GuiResult.Rejected("TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED")
+                rejectChangedTarget(lease, "TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED")
             else GuiResult.Value(Unit)
-        } catch (_: Exception) { GuiResult.Rejected("TARGET_UNAVAILABLE_RECONFIRM_NOT_EXECUTED") }
+        } catch (_: Exception) { rejectChangedTarget(lease, "TARGET_UNAVAILABLE_RECONFIRM_NOT_EXECUTED") }
     }
 
     /** Same admission, node/depth/child/text bounds for publishing and private verification.
@@ -516,6 +538,7 @@ internal object GuiRuntime {
         onMain(); targetRejection(lease)?.let { return it }; screenRejection()?.let { return it }
         selfRootRejection(lease)?.let { return it }
         gate.validateObservation(lease, observationId, generation)?.let { return it }
+        if (contentChanged) return GuiResult.Rejected("OBSERVATION_STALE")
         val binding = screenshotBinding?.takeIf { it.first == observationId }?.second
             ?: return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
         if (!binding.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
@@ -527,7 +550,7 @@ internal object GuiRuntime {
         val actual = sampled.value
         if (!actual.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
         if (actual.packageName != binding.packageName || actual.windowId != binding.windowId)
-            return GuiResult.Rejected("SCREENSHOT_WINDOW_CHANGED")
+            return rejectChangedTarget(lease, "SCREENSHOT_WINDOW_CHANGED")
         if (actual != binding) return GuiResult.Rejected("SCREENSHOT_TREE_CHANGED")
         return null
     }
@@ -544,15 +567,17 @@ internal object GuiRuntime {
             val original = observed.nodes.firstOrNull { it.id == action.nodeId }
                 ?: return GuiResult.Rejected("NODE_NOT_IN_OBSERVATION")
             try {
-                if (node == null || !node.refresh()) return GuiResult.Rejected("NODE_STALE")
+                if (node == null || !node.refresh()) return rejectChangedTarget(lease, "NODE_STALE")
                 if (node.isPassword) return GuiResult.Rejected("PASSWORD_NODE_REFUSED")
                 val originalIdentity = identities[action.nodeId]
                     ?: return GuiResult.Rejected("TARGET_IDENTITY_EXCEEDS_BOUND")
                 val rect = Rect(); node.getBoundsInScreen(rect)
                 if (node.windowId != observed.windowId || node.packageName?.toString().orEmpty() != observed.packageName ||
                     GuiBounds(rect.left, rect.top, rect.right, rect.bottom) != original.bounds ||
-                    identity(node) != originalIdentity || !node.isVisibleToUser || !node.isEnabled)
-                    return GuiResult.Rejected("NODE_STALE")
+                    identity(node) != originalIdentity || node.isClickable != original.clickable ||
+                    node.isLongClickable != original.longClickable || node.isScrollable != original.scrollable ||
+                    node.isEditable != original.editable || !node.isVisibleToUser || !node.isEnabled)
+                    return rejectChangedTarget(lease, "NODE_STALE")
             } catch (_: Exception) { return GuiResult.Rejected("NODE_UNAVAILABLE_NOT_EXECUTED") }
         }
         // Recheck active package/window and the live narrow token after node refresh, before delivery.
@@ -563,7 +588,7 @@ internal object GuiRuntime {
             val sameWindow = try {
                 active.windowId == observed.windowId && active.packageName?.toString().orEmpty() == observed.packageName
             } finally { active.recycle() }
-            if (!sameWindow) return GuiResult.Rejected("OBSERVATION_STALE")
+            if (!sameWindow) return rejectChangedTarget(lease, "OBSERVATION_STALE")
         } catch (_: Exception) { return GuiResult.Rejected("ACTIVE_WINDOW_UNAVAILABLE_NOT_EXECUTED") }
         val consumed = gate.consumeAction(lease, action, generation)
         if (consumed is GuiResult.Rejected) return consumed

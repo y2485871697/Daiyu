@@ -296,7 +296,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val actual = if (phase == ExecutionPhase.BOUNDARY || phase == ExecutionPhase.PAUSED) {
             if (pauseRequested || contextLimited) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY
         } else phase
-        execution = ExecutionState(actual, pauseRequested || contextLimited, supplements.size, attempt, contextLimited)
+        execution = ExecutionState(phase = actual, pauseRequested = pauseRequested || contextLimited,
+            queuedSupplements = supplements.size, reconnectAttempt = attempt, contextLimited = contextLimited,
+            activeToolCalls = if (actual in setOf(ExecutionPhase.TOOL_EXECUTING, ExecutionPhase.WAITING_USER))
+                execution.activeToolCalls else emptySet())
     }
     fun run(initial: Message, history: List<Message>): Message =
         when (val slice = startInternal(initial, history, allowBarrier = false)) {
@@ -1204,10 +1207,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     continue
                 }
                 // Pause/supplement requests during this batch wait until ALL calls finish.
-                synchronized(terminalLock) { setPhase(ExecutionPhase.TOOL_EXECUTING) }
-                checkpoint()
                 val batch = options.batchExecutor
                 val receiptBatch = options.receiptBatchExecutor
+                synchronized(terminalLock) {
+                    setPhase(ExecutionPhase.TOOL_EXECUTING)
+                    execution = execution.copy(activeToolCalls = if (batch != null || receiptBatch != null) pending.map { it.id }.toSet() else emptySet())
+                }
+                checkpoint()
+                try {
                 if (receiptBatch != null) {
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
@@ -1244,6 +1251,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     } catch (failure: Exception) {
                         if (failure is PersistenceException || failure is InterruptedException) throw failure
                         pendingCheckpoint = null
+                        execution = execution.copy(activeToolCalls = emptySet())
                         pending.forEach {
                             records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
                             unknownOperations.add(it.name to it.arguments)
@@ -1267,6 +1275,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 known[call.id] = result
                             }
                             is DispatchOutcome.Unknown -> {
+                                execution = execution.copy(activeToolCalls = execution.activeToolCalls - call.id)
                                 records[call.id] = ToolRecord(call, ToolDisposition.UNKNOWN)
                                 unknownOperations.add(call.name to call.arguments)
                                 uncertainCodes += outcome.code
@@ -1285,6 +1294,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     checkpoint()
                     if (stopped.get() || terminalReserved) throw InterruptedException()
                     val batchOutputs = try { batch.execute(current, pending.toList()) } catch (_: Exception) {
+                        execution = execution.copy(activeToolCalls = emptySet())
                         pending.forEach {
                             records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
                             unknownOperations.add(it.name to it.arguments)
@@ -1304,6 +1314,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         if (it is MessageBlock.Tool && it.invocation.id in byId) it.copy(result = byId[it.invocation.id]) else it
                     }))
                 } else outputs = pending.map { call ->
+                    execution = execution.copy(activeToolCalls = setOf(call.id))
+                    try {
                     if (stopped.get()) throw InterruptedException()
                     val key = call.name to call.arguments
                     check(key !in unknownOperations) { "未知操作禁止等价重放" }
@@ -1314,6 +1326,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         when (claim) {
                             is ToolClaim.Cached -> claim.result
                             ToolClaim.Unknown -> {
+                                execution = execution.copy(activeToolCalls = emptySet())
                                 unknownOperations.add(key)
                                 records[call.id] = ToolRecord(call, ToolDisposition.UNKNOWN)
                                 checkpoint()
@@ -1328,6 +1341,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     options.toolJournal?.complete(current, call, value)
                                     value
                                 } catch (failure: Exception) {
+                                    execution = execution.copy(activeToolCalls = emptySet())
                                     unknownOperations.add(key)
                                     records[call.id] = ToolRecord(call, ToolDisposition.UNKNOWN)
                                     checkpoint()
@@ -1342,7 +1356,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         if (it is MessageBlock.Tool && it.invocation.id == call.id) it.copy(result = result) else it
                     }))
                     ToolOutput(call.id, result)
+                    } finally { execution = execution.copy(activeToolCalls = emptySet()) }
                 }
+                } finally { execution = execution.copy(activeToolCalls = emptySet()) }
                 if (contextRuntime != null && compactAtBoundary()) {
                     cancelSession(active); active = open(); reopenAfterCompaction = false
                 } else checkpoint()

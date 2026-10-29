@@ -74,6 +74,35 @@ class WorkProcessProgressTest {
         assertEquals(thinking.title, finished.title)
     }
 
+
+    @Test fun activeUnknownReceiptDoesNotFlickerInTheWorkflowSummary() {
+        for ((phase, pause, label) in listOf(
+            Triple(ExecutionPhase.TOOL_EXECUTING, false, "执行中"),
+            Triple(ExecutionPhase.WAITING_USER, false, "等待回答"),
+            Triple(ExecutionPhase.TOOL_EXECUTING, true, "暂停中"))) {
+            val receipt = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, phase,
+                pauseRequested = pause, activeCall = true)
+            val work = process(source(), receipt)
+            assertEquals(WorkStepState.UNKNOWN, work.segments.flatMap { it.steps }.single().state)
+            assertEquals(0, work.unconfirmedStepCount)
+            assertEquals("已完成1步 · $label", work.progressSummary)
+        }
+        val unknown = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, ExecutionPhase.TOOL_EXECUTING,
+            activeCall = false)
+        assertEquals("已完成1步 · 1步待确认 · 进行中", process(source(), unknown).progressSummary)
+        val stoppedUnknown = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, ExecutionPhase.TOOL_EXECUTING,
+            stopRequested = true, activeCall = false)
+        assertEquals(ToolActivityUi.UNKNOWN, stoppedUnknown.activity)
+        assertEquals(1, process(source(), stoppedUnknown).unconfirmedStepCount)
+        val stoppingActive = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, ExecutionPhase.TOOL_EXECUTING,
+            stopRequested = true, activeCall = true)
+        assertEquals("已完成1步 · 停止中", process(source(), stoppingActive).progressSummary)
+        val stillMarkedActive = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, ExecutionPhase.TOOL_EXECUTING,
+            activeCall = true)
+        assertEquals(1, process(source(RunStatus.COMPLETED), stillMarkedActive).unconfirmedStepCount)
+        assertEquals("已完成2步 · 进行中", process(source(), ToolReceiptUi(WorkStepState.OK)).progressSummary)
+    }
+
     @Test fun runningStepCountIsNotTotalMinusOneForParallelCalls() {
         val work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step(WorkStepState.OK),
             step(WorkStepState.PENDING), step(WorkStepState.PENDING).copy(id = "other")), reasoning = before)), "执行中", true)

@@ -4,6 +4,8 @@ import app.daiyu.android.domain.tools.WriteEffect
 import java.util.Collections
 import java.util.UUID
 
+internal const val GUI_OBSERVATION_TTL_MILLIS = 120_000L
+
 /** Independent host implementation; no imported Eta implementation or persistent grants. */
 internal data class GuiOwner(val sessionId: String, val runId: String) {
     init { require(sessionId.isNotBlank() && runId.isNotBlank()) }
@@ -111,7 +113,7 @@ internal class GuiLeaseGate(private val now: () -> Long) {
         return when {
             observation.observationId != id -> GuiResult.Rejected("OBSERVATION_ID_MISMATCH")
             observation.generation != generation -> GuiResult.Rejected("OBSERVATION_STALE")
-            now() - observation.capturedAt !in 0..10_000 -> GuiResult.Rejected("OBSERVATION_EXPIRED")
+            now() - observation.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS -> GuiResult.Rejected("OBSERVATION_EXPIRED")
             else -> null
         }
     }

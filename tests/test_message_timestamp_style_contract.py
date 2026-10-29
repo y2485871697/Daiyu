@@ -33,7 +33,7 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         self.assertIn('val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true', assistant)
         self.assertIn('val initialBodyPending = sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody', assistant)
         self.assertIn('SideEffect { if (hasDisplayBody) hasProjectedBody = true }', assistant)
-        self.assertIn('if (turn.status != RunStatus.RUNNING && !initialBodyPending)', assistant)
+        self.assertIn('if (turn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady)', assistant)
         self.assertIn('allowSpeech = hasTextActions, showCopyAction = hasTextActions', turns)
 
     def test_production_user_hides_timestamp_without_changing_actions_or_assistant(self):

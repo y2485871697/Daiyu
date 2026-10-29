@@ -20,7 +20,7 @@ internal object GuiScreenToolFactory {
             "Bounded accessibility observation or an explicitly requested screenshot. observe forbids observation_id. " +
                 (if (allowImplicitObservation) "screenshot accepts a current observation_id; if omitted, creates exactly one bounded observation in the same target session before capture. "
                  else "screenshot requires observation_id from a successful observe in this session. ") +
-                "IDs expire after 10 seconds or a UI change/action. Never retry a stale ID automatically. " +
+                "IDs expire after ${GUI_OBSERVATION_TTL_MILLIS / 1000} seconds, a target window change, or an action. Never retry a stale ID automatically. " +
                 (if (allowImplicitObservation) "For the current screen omit any previous target_package. Self-app observation requires target_package=app.daiyu.android. " else "") +
                 "Window failures are not Android Root permission errors. Never use shell, input, screencap or uiautomator to bypass screen admission, target or location restrictions.",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
@@ -78,7 +78,7 @@ internal object GuiScreenToolFactory {
     internal fun observationJson(value: GuiObservation): String = JSONObject()
         .put("observation_id", value.observationId).put("package_name", value.packageName)
         .put("window_id", value.windowId).put("truncated", value.truncated)
-        .put("captured_elapsed_realtime_ms", value.capturedAt).put("expires_after_ms", 10_000)
+        .put("captured_elapsed_realtime_ms", value.capturedAt).put("expires_after_ms", GUI_OBSERVATION_TTL_MILLIS)
         .put("nodes", JSONArray().apply {
             value.nodes.forEach { node -> put(JSONObject().put("id", node.id).put("parent", node.parent ?: JSONObject.NULL)
                 .put("bounds", JSONArray(listOf(node.bounds.left, node.bounds.top, node.bounds.right, node.bounds.bottom)))

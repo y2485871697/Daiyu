@@ -475,8 +475,14 @@ internal fun AssistantTurn(
         if (turn.content.isEmpty()) listOf(turn.finalText)
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
     }
+    val handoff = remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }
+    SideEffect {
+        turn.reportedReasoning.filter { it.activeSinceNanos == null && !hasReportedReasoningText(it.text) }
+            .forEach(handoff::complete)
+    }
+    val reasoningReady = handoff.ready(turn.reportedReasoning)
     val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)
-    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)
+    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance, enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready)
     val contentReady = projection?.sources == sources
     val generationComplete = turn.status != RunStatus.RUNNING && contentReady
     val displayedTurn = remember(turn, projection) {
@@ -495,7 +501,7 @@ internal fun AssistantTurn(
     SideEffect { if (hasDisplayBody) hasProjectedBody = true }
     SideEffect { onContentReady(contentReady) }
     SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }
-    val revealSettled = reveal.settled
+    val revealSettled = reveal.settled && reasoningReady
     SideEffect { onRevealSettled(revealSettled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
     if (turn.hasVisibleResponse()) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -511,32 +517,44 @@ internal fun AssistantTurn(
         }
         val integratedReasoning = if (turn.content.isNotEmpty()) turn.content.any { it is MessageContentUi.Reasoning }
             else turn.workProcess?.segments.orEmpty().any { it.reasoning != null }
-        if (!integratedReasoning) ReportedReasoningCard(turn.listKey, turn.reportedReasoning,
+        var standaloneIds by remember(turn.listKey) { mutableStateOf<Set<String>>(emptySet()) }
+        SideEffect { if (!integratedReasoning) standaloneIds = turn.reportedReasoning.map { it.itemId }.toSet() }
+        val leadingReasoning = if (integratedReasoning) turn.reportedReasoning.filter { it.itemId in standaloneIds }
+            else turn.reportedReasoning
+        val closingStandalone = integratedReasoning && !handoff.ready(leadingReasoning)
+        if (!integratedReasoning || closingStandalone) ReportedReasoningCard(turn.listKey, leadingReasoning,
             allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
             generationComplete = turn.status != RunStatus.RUNNING,
-            revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance)
-        if (turn.content.isNotEmpty()) {
+            revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
+            onHandoffReady = { if (it) leadingReasoning.forEach(handoff::complete) })
+        if (closingStandalone) {
+            turn.content.filterIsInstance<MessageContentUi.Tool>().filter { it.step.dedicatedKey != null }
+                .forEach { key(it.step.owner, it.step.toolCallId) { dedicatedTool(it.step) } }
+        } else if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(displayedTurn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent,
-                flowRunning = turn.status == RunStatus.RUNNING,
+                reasoningReady = handoff::ready,
+                textReady = { text -> reveal.ready(text.itemId,
+                    turn.content.filterIsInstance<MessageContentUi.Text>().first { it.itemId == text.itemId }.text) },
                 reasoningBody = { reported, connector ->
                     ReasoningStepRow(turn.listKey, reported, connector,
                         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
                         generationComplete = turn.status != RunStatus.RUNNING,
-                        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance)
+                        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
+                        onHandoffReady = { if (it) handoff.complete(reported) })
                 }) { text, modifier ->
                 RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId, modifier,
                     generationComplete = generationComplete)
             }
         } else {
-            AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete, revealResetEpoch, onVisibleAdvance, toolContent)
+            AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete, revealResetEpoch, onVisibleAdvance, handoff, toolContent)
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp),
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        if (turn.status != RunStatus.RUNNING && !initialBodyPending) {
+        if (turn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady) {
             // Preserve legacy text/tool actions. Mixed content is authoritative, so images
             // (or their metadata) alone must not offer body-text copy or speech actions.
             val hasTextActions = turn.content.isEmpty() || turn.content.any {
@@ -549,12 +567,12 @@ internal fun AssistantTurn(
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, toolContent: @Composable (WorkStepUi) -> Unit) {
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff, toolContent: @Composable (WorkStepUi) -> Unit) {
     turn.workProcess?.let { WorkProcessCard(it, turn.listKey,
         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
         generationComplete = turn.status != RunStatus.RUNNING,
-        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, toolContent = toolContent) }
-    if (turn.finalText.isNotBlank()) {
+        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff, toolContent = toolContent) }
+    if (turn.finalText.isNotBlank() && handoff.ready(turn.reportedReasoning)) {
         RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final",
             generationComplete = generationComplete)
     }

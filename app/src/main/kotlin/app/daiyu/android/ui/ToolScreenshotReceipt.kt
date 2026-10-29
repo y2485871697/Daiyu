@@ -20,8 +20,8 @@ internal object ToolScreenshotReceipt {
         val result = record.result?.takeIf { it.length <= MAX_BYTES * 4 / 3 + 4096 } ?: return null
         val data = JSONObject(result)
         val observation = data.opt("observation_id") as? String ?: return null
-        if ((data.opt("mime_type") as? String) != "image/png" || observation.isBlank() ||
-            observation != (args.opt("observation_id") as? String)) return null
+        if ((data.opt("mime_type") as? String) != "image/png" || observation.isBlank()) return null
+        if (args.has("observation_id") && observation != (args.opt("observation_id") as? String)) return null
         val width = data.opt("width").let { if (it is Int || it is Long) (it as Number).toLong() else return null }
         val height = data.opt("height").let { if (it is Int || it is Long) (it as Number).toLong() else return null }
         val encoded = data.opt("data_base64") as? String ?: return null

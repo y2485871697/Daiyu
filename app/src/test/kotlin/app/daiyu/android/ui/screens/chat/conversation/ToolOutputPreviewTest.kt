@@ -20,6 +20,14 @@ class ToolOutputPreviewTest {
         assertEquals(3, toolOutputPreview(text, tail = true).text.lines().size)
         assertTrue(toolOutputPreview(text + "\n…内容已截断", tail = true).text.endsWith("…内容已截断"))
     }
+    @Test fun largeNodePayloadsKeepOnlyBoundedHeadOrTailInTheirPreview() {
+        val text = "head\n" + "x".repeat(1_000_000) + "\ntail"
+        val head = toolOutputPreview(text)
+        val tail = toolOutputPreview(text, tail = true)
+        assertTrue(head.truncated); assertTrue(tail.truncated)
+        assertTrue(head.text.startsWith("head\n")); assertTrue(tail.text.endsWith("\ntail"))
+        assertTrue(head.text.length <= 241); assertTrue(tail.text.length <= 241)
+    }
     @Test fun operationIconsFollowProtocolNotTitlesOrOutputText() {
         assertNotEquals(toolOperationGlyph("list_files", "{}"), toolOperationGlyph("read_text_file", "{}"))
         assertNotEquals(toolOperationGlyph("screen", "{\"operation\":\"observe\"}"), toolOperationGlyph("screen", "{\"operation\":\"screenshot\"}"))

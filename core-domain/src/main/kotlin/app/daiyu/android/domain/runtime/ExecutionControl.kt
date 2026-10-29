@@ -169,7 +169,8 @@ data class ExecutionState(
     val pauseRequested: Boolean = false,
     val queuedSupplements: Int = 0,
     val reconnectAttempt: Int = 0,
-    val contextLimited: Boolean = false
+    val contextLimited: Boolean = false,
+    val activeToolCalls: Set<ToolCallId> = emptySet(),
 )
 
 /** Process death is a terminal interruption, not authorization to retry an uncertain request/tool. */

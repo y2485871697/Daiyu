@@ -101,7 +101,7 @@ data class WorkProcessUi(
         segment.steps.count { it.state == WorkStepState.FAILED }
     }
     val unconfirmedStepCount: Int get() = segments.sumOf { segment ->
-        segment.steps.count { it.state == WorkStepState.UNKNOWN }
+        segment.steps.count { it.state == WorkStepState.UNKNOWN && !(running && it.activity.inFlight) }
     }
     val progressSummary: String get() = buildList {
         add("已完成${completedStepCount}步")
@@ -137,6 +137,7 @@ data class WorkStepUi(
     /** Host-validated dedicated projection; never grants execution permission. */
     val dedicatedKey: String? = null,
     val hasBrowserScreenshot: Boolean = false,
+    val hasScreenScreenshot: Boolean = false,
     val categoryDetails: ToolCategoryDetailsUi? = null,
     val activity: ToolActivityUi = ToolActivityUi.from(state),
     val operationGlyph: String = "generic",

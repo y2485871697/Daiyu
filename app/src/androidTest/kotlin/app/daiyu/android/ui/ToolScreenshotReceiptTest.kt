@@ -30,6 +30,18 @@ class ToolScreenshotReceiptTest : InstrumentationTestCase() {
         assertNull(ToolScreenshotReceipt.decode(record.copy(invocation = record.invocation.copy(name = "mcp_0_call"))))
         assertNull(ToolScreenshotReceipt.decode(record.copy(invocation = record.invocation.copy(arguments = """{"operation":"observe"}"""))))
     }
+    fun testImplicitObservationScreenshotReadsItsExistingReceipt() {
+        val original = receipt()
+        val record = original.copy(invocation = original.invocation.copy(arguments = """{"operation":"screenshot"}"""))
+        val image = ToolScreenshotReceipt.decode(record)
+        assertNotNull(image); assertEquals(4, image!!.width); assertEquals(3, image.height); image.recycle()
+        for (invalid in listOf("null", "4", "\"\"", "\"other\"")) {
+            val args = "{\"operation\":\"screenshot\",\"observation_id\":$invalid}"
+            assertNull(ToolScreenshotReceipt.decode(original.copy(invocation = original.invocation.copy(arguments = args))))
+        }
+        val missing = JSONObject(record.result!!).apply { remove("observation_id") }
+        assertNull(ToolScreenshotReceipt.decode(record.copy(result = missing.toString())))
+    }
     fun testMalformedOrMismatchedMediaNeverLoadsPathOrUrl() {
         val record = receipt()
         val changes = listOf<(JSONObject) -> Unit>(

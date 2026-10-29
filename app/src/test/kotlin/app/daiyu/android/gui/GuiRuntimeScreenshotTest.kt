@@ -92,6 +92,7 @@ class GuiRuntimeScreenshotTest {
         var rootClickable = true
         var actionAccepted = true
         var label = "before"
+        var rootLabel = "root"
         var missing = false
         var throwOnSubmit = false
         var permissionEnabled = true
@@ -121,7 +122,7 @@ class GuiRuntimeScreenshotTest {
                 shadowOf(this).setRefreshReturnValue(true)
                 shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; actionAccepted }
             }
-            val root = node("root").apply { isClickable = rootClickable }
+            val root = node(rootLabel).apply { isClickable = rootClickable }
             shadowOf(root).addChild(node(label))
             return root
         }
@@ -263,7 +264,7 @@ class GuiRuntimeScreenshotTest {
 
     @Test fun defaultGrantExpiresAndCannotBeUsedAfterStopDisconnectOrOwnerLoss() {
         val expired = defaultDelivery()
-        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11))
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(GUI_OBSERVATION_TTL_MILLIS + 1))
         rejected(GuiRuntime.action(session.lease, expired.action), "OBSERVATION_EXPIRED")
         assertNoActions()
         session.close()
@@ -531,6 +532,87 @@ class GuiRuntimeScreenshotTest {
             rejected(session.prepareExactActionFromUser(operation, ownerCurrent = { true }, onConfirmed = { false }), code)
         }
         assertTrue(session.lease.actions.isEmpty()); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun unchangedTargetRemainsValidAfterElevenSeconds() {
+        val observation = observe(); val action = approve(observation)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11))
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun selfStreamingContentDoesNotInvalidateAnUnchangedOriginalNode() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        platform.rootLabel = "streaming reply grew"
+        GuiRuntime.changed(service, contentOnly = true)
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        assertEquals(1, platform.nodeActions)
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun changedSelfWindowCannotReviveTheOriginalObservationWhenItReturns() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        GuiRuntime.changed(service, contentOnly = true)
+        platform.windowId++
+        rejected(GuiRuntime.action(session.lease, action), "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED")
+        platform.windowId--
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        assertNoActions()
+    }
+
+    @Test fun anUnreportedSelfWindowChangeCannotReviveTheOldActionGrant() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        platform.windowId++
+        rejected(GuiRuntime.action(session.lease, action), "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED")
+        platform.windowId--
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        assertNoActions()
+    }
+
+    @Test fun anUnreportedWindowChangeCannotReviveTheOldScreenshotObservation() {
+        val observation = observe()
+        platform.windowId++
+        rejected(screenshot(observation).completed(), "SCREENSHOT_WINDOW_CHANGED")
+        platform.windowId--
+        rejected(screenshot(observation).completed(), "OBSERVATION_REQUIRED")
+        assertTrue(platform.callbacks.isEmpty())
+    }
+
+    @Test fun selfContentChangeStillRejectsAChangedTargetAndAnyScreenshot() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        GuiRuntime.changed(service, contentOnly = true)
+        rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
+        platform.label = "different target"
+        rejected(GuiRuntime.action(session.lease, action), "TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED")
+        platform.label = "before"
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun externalContentAndSelfWindowChangesStillInvalidateTheObservation() {
+        val external = observe(); val externalAction = approve(external)
+        GuiRuntime.changed(service, contentOnly = true)
+        rejected(GuiRuntime.action(session.lease, externalAction), "OBSERVATION_STALE")
+        openSelf()
+        val self = observe(); val selfAction = approve(self)
+        GuiRuntime.changed(service)
+        rejected(GuiRuntime.action(session.lease, selfAction), "OBSERVATION_STALE")
+        assertNoActions()
+    }
+
+    @Test fun aTruncatedSelfReplyCanOnlyAuthorizeAnUnchangedUniqueOriginalNode() {
+        openSelf()
+        platform.rootLabel = "x".repeat(513)
+        val observation = observe(); assertTrue(observation.truncated)
+        val action = approve(observation)
+        GuiRuntime.changed(service, contentOnly = true)
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        assertEquals(1, platform.nodeActions)
     }
 
     @Test fun defaultExternalGlobalRouteRemainsOrdinaryAndDoesNotAcquireASelfException() {

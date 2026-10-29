@@ -153,36 +153,56 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             reportedReasoning = listOf(ReportedReasoning("r2", "second summary", 0, 0, blockOffset = 0)))
         var source by mutableStateOf(message(emptyList(), emptyList()).copy(status = RunStatus.RUNNING,
             historySegments = listOf(first, tail)))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-            val turn = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(source)), source).single() as ChatTurnUi.Assistant
-            AssistantTurn(turn, ChatScreenActions())
-        } } }
-        awaitHeader()
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
-        ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
-        ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
-        ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
-        mainThread { source = source.copy(historySegments = listOf(first,
-            tail.copy(blocks = listOf(MessageBlock.Text("answer", "answer")),
-                reportedReasoning = tail.reportedReasoning.map { it.frozen() }))) }
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("answer", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
-        ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
-        ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
-        ui.onNodeWithText("second summary", useUnmergedTree = true).assertIsDisplayed()
-        ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
-        mainThread { source = source.copy(status = RunStatus.COMPLETED,
-            historySegments = source.historySegments.map { part ->
-                part.copy(reportedReasoning = part.reportedReasoning.map { it.frozen() })
-            }) }
-        ui.waitUntil(5_000) { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
-            androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
-        ui.onNodeWithTag("work-process-header").performClick()
-        val key = mapped(source).listKey
-        ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r1").performClick()
-        ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r2").performClick()
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
-        ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
-        ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+        fun awaitFrame(condition: () -> Boolean) {
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(32)
+                condition()
+            }
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val turn = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(source)), source).single() as ChatTurnUi.Assistant
+                AssistantTurn(turn, ChatScreenActions())
+            } } }
+            awaitFrame {
+                ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size == 1 &&
+                    ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 &&
+                    ui.onNodeWithText("first summary", useUnmergedTree = true).isDisplayed()
+            }
+            ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+            ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
+            mainThread { source = source.copy(historySegments = listOf(first,
+                tail.copy(blocks = listOf(MessageBlock.Text("answer", "answer")),
+                    reportedReasoning = tail.reportedReasoning.map { it.frozen() }))) }
+            awaitFrame {
+                ui.onAllNodesWithText("answer", useUnmergedTree = true).fetchSemanticsNodes().size == 1 &&
+                    ui.onNodeWithText("first summary", useUnmergedTree = true).isDisplayed() &&
+                    ui.onNodeWithText("second summary", useUnmergedTree = true).isDisplayed()
+            }
+            ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
+            ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithText("second summary", useUnmergedTree = true).assertIsDisplayed()
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+            mainThread { source = source.copy(status = RunStatus.COMPLETED,
+                historySegments = source.historySegments.map { part ->
+                    part.copy(reportedReasoning = part.reportedReasoning.map { it.frozen() })
+                }) }
+            awaitFrame { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            val key = mapped(source).listKey
+            ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r1").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r2").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            awaitFrame { ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+            ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testToolOnlyRunningFlowStartsOpenAndManualOpenDoesNotPreventTerminalCollapse() {

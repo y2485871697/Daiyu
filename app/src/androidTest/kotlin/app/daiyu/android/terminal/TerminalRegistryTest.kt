@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
 
-/** No shell execution in these tests: unavailable paths and injected Process fault checks. */
+/** User commands never execute: backend rejection checks and injected Process faults. */
 @Suppress("DEPRECATION")
 class TerminalRegistryTest:InstrumentationTestCase() {
     private class FakeProcess(private val output:InputStream=ByteArrayInputStream("actual-output".toByteArray()),private val waiting:CountDownLatch?=null):Process() {
@@ -380,12 +380,32 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         val again=registry.execute("terminal_open",JSONObject().put("request_id","open1"))
         assertEquals("linux_backend_not_configured",again.getString("error"))
     }
-    fun testRootUnavailableIsExplicitAndNoCommandExecution() {
+    fun testMissingRootTransportIsExplicitAndNoCommandExecution() {
         val registry=TerminalRegistry(instrumentation.targetContext)
-        registry.configure(UUID.randomUUID().toString(),TerminalConfiguration(root=true,rootExecutable="/no-such-authorized-root-executable"))
-        val result=registry.execute("terminal_open",JSONObject().put("request_id","root1"))
-        assertFalse(result.getBoolean("ok")); assertEquals("root_unavailable",result.getString("error"))
-        assertEquals("not_executed",result.getString("execution"))
+        try {
+            registry.startProcess={ throw AssertionError("missing root transport must not start a user command") }
+            registry.startRootProcess={ _, _, _ -> throw AssertionError("missing root transport must not start a root command") }
+            registry.configure(UUID.randomUUID().toString(),TerminalConfiguration(root=true,rootExecutable="/no-such-authorized-root-executable"))
+            val result=registry.execute("terminal_open",JSONObject().put("request_id","missing-root1"))
+            assertFalse(result.getBoolean("ok")); assertEquals("backend_path_su_transport_identity_missing",result.getString("error"))
+            assertEquals("not_executed",result.getString("execution"))
+            assertFalse(result.has("session_id"))
+            assertEquals(0,registry.execute("terminal_list",JSONObject()).getJSONArray("jobs").length())
+        } finally { registry.close() }
+    }
+    fun testRootUnavailableIsExplicitAndNoCommandExecution() {
+        assertTrue("instrumentation must run as an application UID",android.os.Process.myUid()>=10000)
+        val registry=TerminalRegistry(instrumentation.targetContext)
+        try {
+            registry.startProcess={ throw AssertionError("non-root probe must not start a user command") }
+            registry.startRootProcess={ _, _, _ -> throw AssertionError("non-root probe must not start a root command") }
+            registry.configure(UUID.randomUUID().toString(),TerminalConfiguration(root=true,rootExecutable="/system/bin/sh"))
+            val result=registry.execute("terminal_open",JSONObject().put("request_id","root1"))
+            assertFalse(result.getBoolean("ok")); assertEquals("root_unavailable",result.getString("error"))
+            assertEquals("not_executed",result.getString("execution"))
+            assertFalse(result.has("session_id"))
+            assertEquals(0,registry.execute("terminal_list",JSONObject()).getJSONArray("jobs").length())
+        } finally { registry.close() }
     }
     fun testSchemasAndUnknownOwnershipRefusesStop() {
         val registry=TerminalRegistry(instrumentation.targetContext)

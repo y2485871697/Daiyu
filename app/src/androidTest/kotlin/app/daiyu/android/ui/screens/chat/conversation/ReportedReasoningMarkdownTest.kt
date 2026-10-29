@@ -125,6 +125,7 @@ class ReportedReasoningMarkdownTest : WiredActivityTestCase() {
             ui.onNodeWithText(first, useUnmergedTree = true).assertDoesNotExist()
             gates.getValue(first).release.countDown()
             awaitText("Cold first.")
+            await { ui.onNodeWithText("Cold first.", useUnmergedTree = true).isDisplayed() }
             mainThread { source = second }
             await { gates.getValue(second).entered.count == 0L }
             ui.onNodeWithText("Cold first.", useUnmergedTree = true).assertIsDisplayed()

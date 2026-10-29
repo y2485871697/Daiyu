@@ -26,7 +26,10 @@ import app.daiyu.android.ui.app.AgentAppTheme
 class ReportedReasoningCardTest : WiredActivityTestCase() {
 
     private fun prepareSummaries(vararg sources: String) {
-        runBlocking { projectMarkdown(sources.toList()) }
+        runBlocking {
+            projectMarkdown(sources.toList())
+            projectMarkdown(sources.toList(), parser = streamingMarkdownParser)
+        }
     }
 
     private fun awaitAnswer(text: String) {
@@ -431,10 +434,11 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         var now = 0L
         val clock = { now }
         var reported by mutableStateOf(listOf(ReportedReasoning("r", "live body", 0L, 0L)))
+        var generationComplete by mutableStateOf(false)
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    ReportedReasoningCard("lifecycle", reported, allowLiveTiming = true, nanoTime = clock)
+                    ReportedReasoningCard("lifecycle", reported, allowLiveTiming = true, generationComplete = generationComplete, nanoTime = clock)
                 }
             } }
             ui.mainClock.advanceTimeBy(32)
@@ -452,7 +456,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             ui.onNodeWithTag("reported-reasoning-header:lifecycle").performClick()
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("live body").assertIsDisplayed()
-            mainThread { reported = listOf(ReportedReasoning("r", "live body", 5_400L)) }
+            mainThread { reported = listOf(ReportedReasoning("r", "live body", 5_400L)); generationComplete = true }
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithText("5.4s").assertExists()
@@ -474,6 +478,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     fun testCompletedOffscreenSummaryDoesNotRestoreLiveExpansionOverride() {
         prepareSummaries("saved body")
         var reported by mutableStateOf(listOf(ReportedReasoning("r", "saved body", 0L, 0L)))
+        var generationComplete by mutableStateOf(false)
         var visible by mutableStateOf(true)
         ui.mainClock.autoAdvance = false
         try {
@@ -481,7 +486,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
                 val states = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     if (visible) states.SaveableStateProvider("row") {
-                        ReportedReasoningCard("restored-phase", reported, allowLiveTiming = true, nanoTime = { 0L })
+                        ReportedReasoningCard("restored-phase", reported, allowLiveTiming = true, generationComplete = generationComplete, nanoTime = { 0L })
                     }
                 }
             } }
@@ -493,7 +498,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("saved body").assertIsDisplayed()
             mainThread { visible = false }
             ui.mainClock.advanceTimeBy(32)
-            mainThread { reported = listOf(ReportedReasoning("r", "saved body", 300L)); visible = true }
+            mainThread { reported = listOf(ReportedReasoning("r", "saved body", 300L)); visible = true; generationComplete = true }
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("saved body").assertDoesNotExist()
             ui.onNodeWithTag("reported-reasoning-header:restored-phase").performClick()

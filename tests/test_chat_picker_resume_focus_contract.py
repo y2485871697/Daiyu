@@ -26,18 +26,31 @@ class ChatPickerResumeFocusContractTest(unittest.TestCase):
         for forbidden in ['Thread.sleep', 'SystemClock.sleep', 'advanceTimeBy', 'performSemanticsAction', 'repeat(']:
             self.assertNotIn(forbidden, body)
 
-    def test_close_waits_for_picker_entry_and_native_focus_before_single_system_back(self):
+    def test_close_waits_for_scrim_dismiss_and_host_focus_before_dismissing_ime(self):
         text = SOURCE.read_text(encoding='utf-8')
         body = text.split('private fun closeChatPicker()', 1)[1].split('private fun reopenChatPicker()', 1)[0]
-        ordered = ['val picker = node("chat-model-picker")', 'awaitDialogEnter(picker)',
-                   'awaitNodeWindowFocus(picker)', 'dismissIme()',
-                   'instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)',
-                   'ui.waitUntil(5_000)', 'fetchSemanticsNodes().isEmpty()']
+        scrim_click = (
+            'node("preview-dialog-scrim").performSemanticsAction(SemanticsActions.OnClick) '
+            '{ assertTrue(it()) }'
+        )
+        ordered = [
+            'val picker = node("chat-model-picker")',
+            'awaitDialogEnter(picker)',
+            'awaitNodeWindowFocus(picker)',
+            scrim_click,
+            'ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }',
+            'awaitNodeWindowFocus(node("chat-model"))',
+            'dismissIme()',
+        ]
+        for step in ordered:
+            self.assertIn(step, body)
         positions = [body.index(step) for step in ordered]
         self.assertEqual(sorted(positions), positions)
-        self.assertEqual(1, body.count('sendKeyDownUpSync'))
+        self.assertEqual(1, body.count(scrim_click))
+        self.assertEqual(1, body.count('performSemanticsAction'))
+        self.assertEqual(1, body.count('dismissIme()'))
         for forbidden in ['awaitChatPickerLoaded', 'awaitChatPickerReady', 'Thread.sleep',
-                          'SystemClock.sleep', 'repeat(', 'performSemanticsAction']:
+                          'SystemClock.sleep', 'repeat(', 'sendKeyDownUpSync', 'KEYCODE_BACK']:
             self.assertNotIn(forbidden, body)
 
     def test_pending_catalog_is_released_only_after_real_dismiss_and_retains_safety_oracles(self):

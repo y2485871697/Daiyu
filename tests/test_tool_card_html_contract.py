@@ -85,7 +85,8 @@ class ToolCardHtmlContractTest(unittest.TestCase):
     def test_terminal_step_dots_remain_emphasized_under_unified_workflow_header(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertNotIn('val terminalHeader', shell)
-        self.assertIn('Text(title, color = colors.text,', shell)
+        self.assertIn('Text(title, Modifier.fillMaxWidth(), color = colors.text,', shell)
+        self.assertIn('if (stacked) Text(progressSummary, Modifier.fillMaxWidth(), color = colors.muted,', shell)
         self.assertIn('Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,', shell)
         self.assertIn('val progressSummary = work.progressSummary', shell)
         self.assertEqual(2, shell.count('Text(progressSummary'))

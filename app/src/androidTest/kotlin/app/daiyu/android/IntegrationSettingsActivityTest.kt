@@ -225,9 +225,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val picker = node("chat-model-picker")
         awaitDialogEnter(picker)
         awaitNodeWindowFocus(picker)
-        dismissIme()
-        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        node("preview-dialog-scrim").performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        awaitNodeWindowFocus(node("chat-model"))
+        dismissIme()
     }
     private fun reopenChatPicker() {
         closeChatPicker()

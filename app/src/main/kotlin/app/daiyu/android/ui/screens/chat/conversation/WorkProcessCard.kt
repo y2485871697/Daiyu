@@ -72,10 +72,10 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                 Icon(ToolOperationIcons.operation("chain"),
                     null, Modifier.size(18.dp).testTag("work-process-icon"), tint = colors.accent)
                 Column(Modifier.weight(1f)) {
-                    Text(title, color = colors.text,
+                    Text(title, Modifier.fillMaxWidth(), color = colors.text,
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (stacked) Text(progressSummary, color = colors.muted,
+                    if (stacked) Text(progressSummary, Modifier.fillMaxWidth(), color = colors.muted,
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
                 }
                 if (!stacked) Text(progressSummary, Modifier.widthIn(max = summaryWidth),

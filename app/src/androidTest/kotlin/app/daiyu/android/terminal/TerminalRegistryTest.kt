@@ -380,32 +380,35 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         val again=registry.execute("terminal_open",JSONObject().put("request_id","open1"))
         assertEquals("linux_backend_not_configured",again.getString("error"))
     }
-    fun testMissingRootTransportIsExplicitAndNoCommandExecution() {
-        val registry=TerminalRegistry(instrumentation.targetContext)
+    fun testUntrustedRootTransportIsExplicitAndNoCommandExecution() {
+        val uid=android.os.Process.myUid()
+        assertTrue("instrumentation must run as an application UID",uid>=10000)
+        val root=File(instrumentation.targetContext.cacheDir,"untrusted-root-${UUID.randomUUID()}")
+        var registry:TerminalRegistry?=null
         try {
-            registry.startProcess={ throw AssertionError("missing root transport must not start a user command") }
-            registry.startRootProcess={ _, _, _ -> throw AssertionError("missing root transport must not start a root command") }
-            registry.configure(UUID.randomUUID().toString(),TerminalConfiguration(root=true,rootExecutable="/no-such-authorized-root-executable"))
-            val result=registry.execute("terminal_open",JSONObject().put("request_id","missing-root1"))
-            assertFalse(result.getBoolean("ok")); assertEquals("backend_path_su_transport_identity_missing",result.getString("error"))
+            assertTrue(root.mkdirs())
+            val executable=File(root,"su")
+            executable.writeText("# Untrusted transport fixture; never execute.\n")
+            assertTrue(executable.setExecutable(true,true))
+            val stat=android.system.Os.lstat(executable.absolutePath)
+            assertEquals(uid,stat.st_uid)
+            assertTrue(android.system.OsConstants.S_ISREG(stat.st_mode))
+            assertTrue(stat.st_mode and 0x49 != 0)
+            val subject=TerminalRegistry(isolatedContext(root))
+            registry=subject
+            subject.startProcess={ throw AssertionError("untrusted transport must not start a user command") }
+            subject.startRootProcess={ _, _, _ -> throw AssertionError("untrusted transport must not start a root command") }
+            subject.configure(UUID.randomUUID().toString(),TerminalConfiguration(root=true,rootExecutable=executable.absolutePath))
+            val result=subject.execute("terminal_open",JSONObject().put("request_id","untrusted-root1"))
+            assertFalse(result.getBoolean("ok"))
+            assertEquals("backend_path_su_transport_identity_untrusted",result.getString("error"))
             assertEquals("not_executed",result.getString("execution"))
-            assertFalse(result.has("session_id"))
-            assertEquals(0,registry.execute("terminal_list",JSONObject()).getJSONArray("jobs").length())
-        } finally { registry.close() }
-    }
-    fun testRootUnavailableIsExplicitAndNoCommandExecution() {
-        assertTrue("instrumentation must run as an application UID",android.os.Process.myUid()>=10000)
-        val registry=TerminalRegistry(instrumentation.targetContext)
-        try {
-            registry.startProcess={ throw AssertionError("non-root probe must not start a user command") }
-            registry.startRootProcess={ _, _, _ -> throw AssertionError("non-root probe must not start a root command") }
-            registry.configure(UUID.randomUUID().toString(),TerminalConfiguration(root=true,rootExecutable="/system/bin/sh"))
-            val result=registry.execute("terminal_open",JSONObject().put("request_id","root1"))
-            assertFalse(result.getBoolean("ok")); assertEquals("root_unavailable",result.getString("error"))
-            assertEquals("not_executed",result.getString("execution"))
-            assertFalse(result.has("session_id"))
-            assertEquals(0,registry.execute("terminal_list",JSONObject()).getJSONArray("jobs").length())
-        } finally { registry.close() }
+            assertFalse(result.has("session_id")); assertFalse(result.has("job_id"))
+            val listed=subject.execute("terminal_list",JSONObject())
+            assertTrue(listed.getBoolean("ok")); assertEquals(0,listed.getJSONArray("jobs").length())
+        } finally {
+            try { registry?.close() } finally { root.deleteRecursively() }
+        }
     }
     fun testSchemasAndUnknownOwnershipRefusesStop() {
         val registry=TerminalRegistry(instrumentation.targetContext)

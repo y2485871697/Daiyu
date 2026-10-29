@@ -34,7 +34,11 @@ class ReleaseRasterReceiptFixturesContractTest(unittest.TestCase):
         self.assertNotIn('{ 6.5.sp.toPx() }', text)
         for item in ('val image = captureScreenNode(', '[circleIndex]', 'fillMaxSize().statusBarsPadding()', 'contrast > .2f', '"Bullet must have actual painted pixels"',
                      '"Visible bullet must be round"', '"Painted ink must be vertically centered"',
-                     'assertCenteredUniformDots(titleNode, "$case step"), 1f)'):
+                     'assertTrue(heading.placeholderRects.isEmpty())',
+                     'assertCenteredUniformDots(titleNode, "$case step")',
+                     'val expectedInkDiameter = minOf(rect.width, rect.height) * .6f',
+                     'assertEquals("Visible bullet width must be 40 percent smaller", expectedInkDiameter, inkDiameter, 2f)',
+                     'assertEquals("Visible bullet height must be 40 percent smaller", expectedInkDiameter, (bottom - top + 1).toFloat(), 2f)'):
             self.assertIn(item, text)
     def test_crops_use_compose_screen_origin_and_line_oracles_remain_strict(self):
         helper = (ANDROID / 'ComposeActivityTestCase.kt').read_text().split('protected fun captureScreenNode', 1)[1].split('protected fun node(', 1)[0]

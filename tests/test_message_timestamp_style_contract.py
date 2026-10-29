@@ -45,7 +45,9 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
                         'showRegenerateAction = false', 'endAligned = true'):
             self.assertIn(setting, user)
         self.assertIn('if (actions.editingMessageKey != turn.listKey) MessageActionBar(', user)
-        self.assertIn('MessageActionBar(turn.listKey, actions, timestamp = turn.timestamp,', assistant)
+        self.assertIn('MessageActionBar(turn.actionKey, actions, timestamp = turn.timestamp,', assistant)
+        models = (CHAT / 'ChatScreenModels.kt').read_text(encoding='utf-8')
+        self.assertIn('val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey', models)
 
     def test_time_precision_and_format_are_not_changed_by_visual_fix(self):
         formatter = (CHAT / 'MessageTimestampFormatter.kt').read_text(encoding='utf-8')

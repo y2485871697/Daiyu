@@ -15,14 +15,16 @@ class MessageConfirmationContractTest(unittest.TestCase):
         return self.main.split(start, 1)[1].split(end, 1)[0]
 
     def test_both_callers_use_only_confirm_cancel_and_local_close_opt_out(self):
-        for start, end, title, action in (
-            ("onDeleteTurn = { id ->", "}, onRetryStep =", "删除这条消息及后面的内容？", "onDeleteTurn"),
-            ("onRegenerate = { id ->", "}, onSpeak =", "重新生成将删除此回复及后面的消息", "onRegenerate"),
+        for start, end, title, action, argument in (
+            ("onDeleteTurn = { id ->", "}, onRetryStep =", "删除这条消息及后面的内容？", "onDeleteTurn", "firstSourceKey"),
+            ("onRegenerate = { id ->", "}, onSpeak =", "重新生成将删除此回复及后面的消息", "onRegenerate", "id"),
         ):
             with self.subTest(action=action):
                 caller = self.callback(start, end)
                 self.assertIn(f'ConfirmPrompt("{title}", "", "确定",', caller)
-                self.assertIn(f"action = {{ messageCallbacks.{action}(id) }}", caller)
+                self.assertIn(f"action = {{ messageCallbacks.{action}({argument}) }}", caller)
+                if action == "onDeleteTurn":
+                    self.assertIn("val firstSourceKey = chatState.turns.firstOrNull { it.matchesKey(id) }?.listKey ?: id", caller)
                 self.assertIn("showCloseButton = false, secondaryCancel = true", caller)
                 for forbidden in ("ChoicePrompt(", "listOf(", "destructive = true", "deletionAppearance"):
                     self.assertNotIn(forbidden, caller)
@@ -30,7 +32,7 @@ class MessageConfirmationContractTest(unittest.TestCase):
     def test_regeneration_condition_and_immediate_branch_are_unchanged(self):
         caller = self.callback("onRegenerate = { id ->", "}, onSpeak =")
         for token in ("actionSnapshot?.renderedTargets?.get(id) ?: actionSnapshot?.targets?.get(id)",
-                      "it.listKey == id || it.id == id", "target != null && index >= 0",
+                      "val index = chatState.turns.indexOfFirst { it.matchesKey(id) }", "target != null && index >= 0",
                       "chatState.turns.drop(index + 1).any { it is ChatTurnUi.User }",
                       "else messageCallbacks.onRegenerate(id)"):
             self.assertIn(token, caller)

@@ -31,8 +31,16 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
         }
         instrumentation.addMonitor(monitor)
         try {
-            ui.onNodeWithContentDescription("附件").performClick()
-            ui.onNodeWithText("视频").performClick()
+            val attachment = node("chat-attach")
+            ui.waitUntil(5_000) { attachment.isDisplayed() &&
+                ui.onAllNodes(hasTestTag("chat-attach") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1 }
+            attachment.assertIsDisplayed().assertIsEnabled().performClick()
+            awaitUniqueTag("chat-selection-sheet")
+            val sheet = node("chat-selection-sheet")
+            awaitNodeWindowFocus(sheet)
+            awaitDialogEnter(sheet)
+            ui.onNodeWithText("视频").assertIsDisplayed().assertIsEnabled().performClick()
             ui.waitForIdle()
             assertEquals(1, launches.get())
         } finally { instrumentation.removeMonitor(monitor) }

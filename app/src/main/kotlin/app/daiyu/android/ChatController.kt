@@ -3922,10 +3922,11 @@ class ChatController internal constructor(private val application:Application,
             val ordinaryAssistant = if (ordinaryRun) checkNotNull(assistantStore.read(assistantContext.assistantId)).let {
                 it.copy(enabledSkillIds = it.enabledSkillIds.toList())
             } else null
-            val androidCommands = RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory)
+            val runMode = app.daiyu.android.runningmode.AndroidRunningModeStore.get(application).mode.value
+            val androidCommands = RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory, runMode)
             val ordinaryGeneration = if (ordinaryRun) try { GenerationSettingsStore(application).loadSnapshot() }
                 catch (_: GenerationSettingsException) { null } else null
-            val ordinaryShizuku = if (ordinaryRun && application is ChatApplication) shizukuAccess.refresh() else null
+            val ordinaryShizuku = if (ordinaryRun && androidCommands.backend == "shizuku" && application is ChatApplication) shizukuAccess.refresh() else null
             var ordinaryShizukuScope: RunOrdinaryShizukuTools? = null
             val liveMcp = if (mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
                 browserBinding == null && terminalRun == null && terminalJobRun == null && generation == null &&
@@ -4047,7 +4048,7 @@ class ChatController internal constructor(private val application:Application,
                                 checkNotNull(ordinaryBrowserSettings)) { binding -> ordinaryBrowserOpened(assistant, binding) })
                         scopes.add(RunOrdinaryGuiTools(realOwner, task, location))
                         ordinaryShizuku?.uid?.let { uid ->
-                            val scope = RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid)
+                            val scope = RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid, runMode)
                             ordinaryShizukuScope = scope
                             scopes.add(scope)
                         }

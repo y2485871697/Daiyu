@@ -19,6 +19,26 @@ class RunnerToolBoundaryTest {
         override fun save(message: Message) { writes += message }
     }
 
+    @Test fun unknownReceiptShowsOnlyWhitelistedCauseAndNeverContinuesModel() {
+        for (code in listOf("adapter_result_unconfirmed_io", "private-token-secret")) {
+            var rounds = 0; var executions = 0
+            val runner = ChatRunner(ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    rounds++; sink(ModelEvent.ToolReady(call))
+                }
+                override fun cancel() {}
+            } }, store(), BatteryTool { error("receipt executor required") }, RunnerOptions(
+                receiptBatchExecutor = ReceiptBatchToolExecutor { _, calls, _ ->
+                    executions++; calls.map { ToolDispatchResult(it.id, DispatchOutcome.Unknown(code)) }
+                })) {}
+            val result = runner.run(initial, emptyList())
+            assertEquals(RunStatus.FAILED, result.status); assertEquals(1, rounds); assertEquals(1, executions)
+            assertTrue(result.error!!.contains("禁止重放")); assertFalse(result.error!!.contains("private-token-secret"))
+            assertEquals(code == "adapter_result_unconfirmed_io", result.error!!.contains("adapter_result_unconfirmed_io"))
+            assertNull(result.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
+        }
+    }
+
     @Test fun succeededJournalEntryIsReusedWithoutExecutingTool() {
         val writes = mutableListOf<RunCheckpoint>()
         var opens = 0

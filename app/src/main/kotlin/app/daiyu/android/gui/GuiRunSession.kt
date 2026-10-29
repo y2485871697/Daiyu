@@ -64,13 +64,17 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
                 return resolved
         } else when (read) {
             is GuiResult.Unknown -> return read
-            is GuiResult.Rejected -> if (read.code !in setOf("NO_ACTIVE_EXTERNAL_WINDOW",
-                "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")) return read
+            is GuiResult.Rejected -> if (!canClarifyWindow(read.code)) return read
             else -> error("unreachable")
         }
         return GuiRuntime.showConfirmation(this, operation, text, ownerCurrent, onNotExecuted, onRevoked,
             onConfirmed, productDefaults = true)
     }
+    internal fun canClarifyWindow(code: String): Boolean = code in setOf(
+        "NO_ACTIVE_EXTERNAL_WINDOW", "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED", "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED",
+        "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED", "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED",
+        "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED", "APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED")
+
     internal fun previewWithProductDefaults(): GuiResult<GuiObservation> {
         editable()
         val granted = GuiRuntime.approveReads(lease, GuiReadApproval(1, 0))
@@ -161,10 +165,23 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
             }
         }
     }
-    internal fun dynamicScreenshot(observationId: String, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
-        val approval = onWorker(cancelled) { GuiRuntime.approveReads(lease, GuiReadApproval(0, 1)) }
-        if (approval !is GuiResult.Value) return approval as GuiResult.Rejected
-        return screenshot(observationId, cancelled)
+    internal fun dynamicScreenshot(observationId: String?, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
+        val selected: GuiResult<String> = onWorker(cancelled) {
+            check(dynamic)
+            val approval = GuiRuntime.approveReads(lease, GuiReadApproval(if (observationId == null) 1 else 0, 1))
+            if (approval !is GuiResult.Value) approval as GuiResult.Rejected
+            else if (observationId != null) GuiResult.Value(observationId)
+            else when (val observed = GuiRuntime.observe(lease)) {
+                is GuiResult.Value -> GuiResult.Value(observed.value.observationId)
+                is GuiResult.Rejected -> observed
+                is GuiResult.Unknown -> observed
+            }
+        }
+        return when (selected) {
+            is GuiResult.Value -> screenshot(selected.value, cancelled)
+            is GuiResult.Rejected -> selected
+            is GuiResult.Unknown -> selected
+        }
     }
     fun observe(cancelled: () -> Boolean): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease) }
     fun action(action: GuiAction, cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {

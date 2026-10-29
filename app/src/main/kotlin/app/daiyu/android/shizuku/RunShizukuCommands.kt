@@ -60,7 +60,7 @@ internal class RunShizukuCommands(
     }
 
     internal fun execute(context: ToolExecutionContext, script: String, timeout: Long, effect: WriteEffect): ExecutionReceipt {
-        val bound = synchronized(lock) {
+        val bound = try { synchronized(lock) {
             if (closed || !admission()) return ExecutionReceipt.NotExecuted("run_closed")
             val current = owner ?: return ExecutionReceipt.NotExecuted("shizuku_run_not_bound")
             if (context.owner !== current) return ExecutionReceipt.NotExecuted("tool_run_owner_mismatch")
@@ -76,12 +76,17 @@ internal class RunShizukuCommands(
             if (actual.text("script") != script || actualTimeout != timeout) return ExecutionReceipt.NotExecuted("tool_invocation_mismatch")
             active++
             current
+        } } catch (failure: Exception) {
+            if (failure is InterruptedException) Thread.currentThread().interrupt()
+            return ExecutionReceipt.NotExecuted(toolFailureCode(ToolFailureStage.SHIZUKU_PREFLIGHT, failure))
         }
         var sent = false
+        var stage = ToolFailureStage.SHIZUKU_PREPARE
         try {
             if (stopped(context)) return ExecutionReceipt.NotExecuted("cancelled_before_execution")
             val requestId = requestId(bound, context.invocation.id.value)
             val command = ShizukuCommand(requestId, script, timeout)
+            stage = ToolFailureStage.SHIZUKU_DISPATCH
             sent = true
             val handle = when (val result = backend.execute(command)) {
                 is ShizukuDispatch.NotExecuted -> return ExecutionReceipt.NotExecuted(result.reason)
@@ -98,6 +103,7 @@ internal class RunShizukuCommands(
                 if (stopped(context) || System.nanoTime() >= deadline) {
                     close(); return ExecutionReceipt.Unknown("shizuku_execution_interrupted")
                 }
+                stage = ToolFailureStage.SHIZUKU_POLL
                 val page = backend.poll(handle, offset, 16_384)
                 if (!page.validAt(offset, 16_384)) {
                     close(); return ExecutionReceipt.Unknown("shizuku_invalid_output_page")
@@ -111,6 +117,7 @@ internal class RunShizukuCommands(
                             close(); return ExecutionReceipt.Unknown("shizuku_output_incomplete")
                         }
                         if (offset == page.retainedBytes) {
+                            stage = ToolFailureStage.SHIZUKU_RESULT
                             val payload = JSONObject().put("ok", outcome.exitCode == 0).put("exit_code", outcome.exitCode)
                                 .put("output", output.toString(Charsets.UTF_8.name())).put("truncated", page.truncated)
                                 .put("backend", "shizuku").put("uid", backend.identity.uid).toString()
@@ -125,10 +132,10 @@ internal class RunShizukuCommands(
             close()
             return if (sent) ExecutionReceipt.Unknown("shizuku_execution_interrupted")
                 else ExecutionReceipt.NotExecuted("cancelled_before_execution")
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             close()
-            return if (sent) ExecutionReceipt.Unknown("shizuku_execution_unconfirmed")
-                else ExecutionReceipt.NotExecuted("shizuku_command_invalid")
+            val code = toolFailureCode(stage, failure)
+            return if (sent) ExecutionReceipt.Unknown(code) else ExecutionReceipt.NotExecuted(code)
         } finally {
             val notification = synchronized(lock) {
                 active--

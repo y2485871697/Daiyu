@@ -100,6 +100,8 @@ class GuiRuntimeScreenshotTest {
         val callbacks = mutableListOf<Pair<(GuiCaptureFrame) -> Unit, (Int) -> Unit>>()
         override fun enabled(current: GuiAccessibilityService) = permissionEnabled
         override fun unlocked(current: GuiAccessibilityService) = screenUnlocked
+        var listedWindows: (() -> List<AccessibilityWindowInfo>)? = null
+        override fun windows(current: GuiAccessibilityService) = listedWindows?.invoke().orEmpty()
         override fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? {
             rootReads++
             if (missing) return null
@@ -186,6 +188,64 @@ class GuiRuntimeScreenshotTest {
             ownerCurrent = current, onConfirmed = { delivered = it; true })
         assertTrue(result.toString(), result is GuiResult.Value)
         return checkNotNull(delivered)
+    }
+
+    private fun listedWindow(pkg: String = "external.app", id: Int = 7, active: Boolean = true,
+        focused: Boolean = false, layer: Int = 0): AccessibilityWindowInfo {
+        platform.pkg = pkg; platform.windowId = id; platform.active = active
+        val root = checkNotNull(platform.root(service))
+        return checkNotNull(root.window).also {
+            shadowOf(it).setRoot(root); shadowOf(it).setFocused(focused); shadowOf(it).setLayer(layer)
+        }
+    }
+
+    @Test fun ordinaryScreenshotWithoutIdObservesOnceAndExplicitStaleIdNeverReobserves() {
+        val owner = app.daiyu.android.integration.tools.runnerOwner(app.daiyu.android.domain.Message(
+            app.daiyu.android.domain.MessageId("m"), app.daiyu.android.domain.ConversationId("c"),
+            app.daiyu.android.domain.RunId("run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
+            emptyList(), app.daiyu.android.domain.RunStatus.RUNNING))
+        session.bindDynamic(owner, app.daiyu.android.domain.tools.TaskAuthorization("session", "run"))
+        val future = java.util.concurrent.FutureTask { session.dynamicScreenshot(null) { false } }
+        val thread = Thread(future); thread.start()
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
+        while (platform.callbacks.isEmpty() && !future.isDone && System.nanoTime() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5)
+        }
+        assertEquals(1, platform.callbacks.size)
+        platform.success(); worker.runAll()
+        val image = future.get(3, java.util.concurrent.TimeUnit.SECONDS) as GuiResult.Value
+        assertEquals(session.lease.observation!!.observationId, image.value.observationId)
+        assertEquals(0, session.lease.reads)
+        val reads = platform.rootReads
+        val stale = java.util.concurrent.FutureTask { session.dynamicScreenshot("stale") { false } }
+        Thread(stale).start()
+        while (!stale.isDone && System.nanoTime() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5)
+        }
+        rejected(stale.get(3, java.util.concurrent.TimeUnit.SECONDS), "OBSERVATION_ID_MISMATCH")
+        assertEquals(reads, platform.rootReads); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun focusedApplicationWindowCanBeObservedWithoutRootInActiveWindow() {
+        platform.listedWindows = { listOf(listedWindow(active = false, focused = true)) }
+        assertEquals("external.app", observe().packageName)
+        assertNoActions()
+    }
+
+    @Test fun ambiguousApplicationWindowsAreNotSelectedByTargetOrListOrder() {
+        openTarget("external.app")
+        platform.listedWindows = { listOf(listedWindow(id = 7), listedWindow("other.app", 8)) }
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun windowListSelectsActiveBeforeFocusedButNeverFallsThroughToRequestedBackgroundApp() {
+        openTarget("external.app")
+        platform.listedWindows = {
+            listOf(listedWindow(active = false, focused = true, layer = 10), listedWindow("other.app", 8))
+        }
+        rejected(session.previewFromUser(), "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED")
+        assertNoActions()
     }
 
     @Test fun productDefaultsIssueExactOriginalLeaseGrantWithoutUiOrExecutingActions() {
@@ -298,7 +358,7 @@ class GuiRuntimeScreenshotTest {
         val token = TaskSurfaceSelfTarget.foreground(service.packageName, owner) { true }
         openTarget(null, token, owner)
         platform.pkg = service.packageName
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
         platform.pkg = "external.app"
         assertEquals("external.app", observe().packageName)
         assertNoActions()
@@ -330,26 +390,26 @@ class GuiRuntimeScreenshotTest {
 
     @Test fun explicitExternalTargetMatchesExactlyAndDoesNotFallThroughToAnotherOrOwnPackage() {
         openTarget("chosen.app")
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED")
         platform.pkg = service.packageName
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
         platform.pkg = "chosen.app"
         val observation = observe()
         platform.pkg = "external.app"
         rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
         rejected(GuiRuntime.validateExactTarget(session.lease, GuiAction(observation.observationId, GuiOperation.TAP, 1)),
-            "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+            "OBSERVATION_REQUIRED")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
     @Test fun explicitExternalStillRequiresAnActiveDefaultDisplayApplication() {
         openTarget("external.app")
         platform.active = false
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
         platform.active = true; platform.windowType = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
         platform.windowType = AccessibilityWindowInfo.TYPE_APPLICATION; platform.displayId = 1
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
@@ -487,7 +547,7 @@ class GuiRuntimeScreenshotTest {
         val old = session; val observation = observe(); val action = approve(observation)
         openTarget(null)
         val replacement = session
-        rejected(replacement.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(replacement.previewFromUser(), "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
         rejected(GuiRuntime.action(old.lease, action), "FOREGROUND_BUSY")
         old.close() // must not clear a replacement lease's parameters
         platform.pkg = "external.app"
@@ -501,7 +561,7 @@ class GuiRuntimeScreenshotTest {
         GuiRuntime.disconnected(service); GuiRuntime.connected(service)
         rejected(GuiRuntime.action(old.lease, action), "GUI_AUTHORIZATION_REVOKED")
         openTarget(null)
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
         platform.pkg = "external.app"
         assertEquals("external.app", observe().packageName)
         assertNoActions()
@@ -528,7 +588,7 @@ class GuiRuntimeScreenshotTest {
         rejected(future.completed(), "GUI_AUTHORIZATION_REVOKED"); assertDisposed(frame)
         assertTrue(session.releaseConfirmed)
         openTarget(null)
-        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
         assertNoActions()
     }
 
@@ -554,8 +614,9 @@ class GuiRuntimeScreenshotTest {
     @Test fun movedDisplayOrUnavailableTreeCannotBeVerified() {
         val observation = observe(); platform.displayId = 1
         rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        assertNull(session.lease.observation)
         platform.displayId = 0; platform.missing = true
-        rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        rejected(screenshot(observation).completed(), "OBSERVATION_REQUIRED")
         assertTrue(platform.callbacks.isEmpty())
     }
 

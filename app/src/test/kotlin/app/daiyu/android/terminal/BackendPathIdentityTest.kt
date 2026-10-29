@@ -4,6 +4,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
@@ -19,6 +20,29 @@ class BackendPathIdentityTest {
     private fun virtualTransport(path: String): File = object : File(path) {
         override fun getPath(): String = path
         override fun toPath(): Path = throw NoSuchFileException(path)
+    }
+
+    @Test fun rootFixedTransportUsesTrustedIdentityWithoutNioAndDetectsReplacement() {
+        val file = virtualTransport("/system/bin/su")
+        val first = BackendSelection.pathIdentities(listOf(file), false, setOf(file.path), mapOf(file.path to "su")) { "trusted:1" }
+        assertEquals(listOf(BackendPathIdentity.ChrootTransport(file.path, "trusted:1")), first)
+        assertNotEquals(first, BackendSelection.pathIdentities(listOf(file), false, setOf(file.path)) { "trusted:2" })
+        val failure = assertThrows(BackendUnavailable::class.java) {
+            BackendSelection.pathIdentities(listOf(file), false, setOf(file.path), mapOf(file.path to "su")) {
+                throw SecurityException("private path detail")
+            }
+        }
+        assertEquals("backend_path_su_transport_identity_denied", failure.code)
+        assertEquals(failure.code, failure.message)
+    }
+
+    @Test fun cwdDiagnosticKeepsRoleAndStageWithoutLeakingPath() {
+        val missing = File(temporary.root, "private-missing-directory")
+        val failure = assertThrows(BackendUnavailable::class.java) {
+            BackendSelection.pathIdentities(listOf(missing), false, roles = mapOf(missing.path to "cwd"))
+        }
+        assertEquals("backend_path_cwd_realpath_missing", failure.code)
+        assertFalse(failure.message!!.contains("private-missing"))
     }
 
     @Test fun chrootFixedTransportsDoNotRequireNioRealpath() {
@@ -50,7 +74,7 @@ class BackendPathIdentityTest {
                 throw IllegalStateException("untrusted transport")
             }
         }
-        assertEquals("backend_path_unavailable", failure.code)
+        assertEquals("backend_path_path_transport_identity_unavailable", failure.code)
     }
 
     @Test fun transportPreflightFailureIsBackendUnavailableNotJournalUnknown() {
@@ -74,7 +98,7 @@ class BackendPathIdentityTest {
                 "trusted"
             }
         }
-        assertEquals("backend_path_unavailable", failure.code)
+        assertEquals("backend_path_path_realpath_missing", failure.code)
         assertEquals(false, inspected)
     }
 
@@ -86,7 +110,7 @@ class BackendPathIdentityTest {
                 "trusted"
             }
         }
-        assertEquals("backend_path_unavailable", failure.code)
+        assertEquals("backend_path_path_realpath_missing", failure.code)
         assertEquals(false, inspected)
     }
 
@@ -129,6 +153,6 @@ class BackendPathIdentityTest {
         val failure = assertThrows(BackendUnavailable::class.java) {
             BackendSelection.pathIdentities(listOf(file), chroot = true) { error("not a transport") }
         }
-        assertEquals("backend_path_unavailable", failure.code)
+        assertEquals("backend_path_path_realpath_missing", failure.code)
     }
 }

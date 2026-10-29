@@ -5,6 +5,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AssistantRunContextTest {
+    @Test fun everyCapturedAssistantKeepsOneExecutionPolicyRegardlessOfPersonalityOrMemory() {
+        val policy = AssistantRunContext.EXECUTION_POLICY
+        listOf(AssistantProfile("a", "A", "custom"), AssistantProfile("b", "B", "", memoryEnabled = false)).forEach { profile ->
+            val prompt = Store(profile).capture(profile.id, "memory").systemPrompt
+            assertTrue(prompt.endsWith(policy)); assertEquals(1, prompt.split(policy).size - 1)
+        }
+        listOf("Shizuku", "uiautomator", "结果未知", "只读", "Root 通道失败", "先观察当前窗口").forEach {
+            assertTrue(policy.contains(it))
+        }
+    }
+
     @Test fun explicitBindingNeverReadsGlobalSelection() {
         val first = AssistantProfile("first", "第一位", "第一人格")
         val second = AssistantProfile("second", "第二位", "第二人格")
@@ -14,7 +25,7 @@ class AssistantRunContextTest {
         assertEquals("第二位", context.name)
         assertEquals("第二人格", context.prompt)
         assertEquals("最终合并记忆", context.resolvedMemory)
-        assertEquals(AssistantPrompt.build(second.name, second.prompt) + "\n\n记忆：\n最终合并记忆", context.systemPrompt)
+        assertEquals(AssistantPrompt.build(second.name, second.prompt) + "\n\n记忆：\n最终合并记忆\n\n" + AssistantRunContext.EXECUTION_POLICY, context.systemPrompt)
     }
 
     @Test fun missingBlankAndDeletedBindingsFailWithoutFallback() {
@@ -57,13 +68,13 @@ class AssistantRunContextTest {
         val context = Store(profile).capture(profile.id, "不能发送的记忆")
         assertFalse(context.memoryEnabled)
         assertEquals("", context.resolvedMemory)
-        assertEquals(AssistantPrompt.build(profile.name, profile.prompt), context.systemPrompt)
+        assertEquals(AssistantPrompt.build(profile.name, profile.prompt) + "\n\n" + AssistantRunContext.EXECUTION_POLICY, context.systemPrompt)
     }
 
     @Test fun blankPersonalityUsesExistingIdentityAndEmptyMemoryAddsNothing() {
         val profile = AssistantProfile("bound", " ", " ", enabledSkillIds = emptyList())
         val context = AssistantRunContext.capture(Store(profile), profile.id, "")
-        assertEquals(AssistantPrompt.EMPTY_PROMPT, context.systemPrompt)
+        assertEquals(AssistantPrompt.EMPTY_PROMPT + "\n\n" + AssistantRunContext.EXECUTION_POLICY, context.systemPrompt)
         assertEquals(emptyList<String>(), context.enabledSkillIds)
     }
 

@@ -7,6 +7,9 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.DispatchOutcome
 import app.daiyu.android.domain.tools.jsonQuote
 import app.daiyu.android.domain.tools.BarrierOffer
+import app.daiyu.android.domain.tools.ToolFailureStage
+import app.daiyu.android.domain.tools.toolFailureCode
+import app.daiyu.android.domain.tools.toolFailureDiagnostic
 import app.daiyu.android.domain.tools.ExecutionReceipt
 import app.daiyu.android.domain.tools.ReceiptBatchStart
 import kotlin.coroutines.Continuation
@@ -1246,10 +1249,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             unknownOperations.add(it.name to it.arguments)
                         }
                         checkpoint()
-                        throw UnknownToolOutcomeException()
+                        throw UnknownToolOutcomeException(listOf(toolFailureCode(ToolFailureStage.BATCH, failure)))
                     }
                     val known = linkedMapOf<ToolCallId, String>()
-                    var uncertain = false
+                    val uncertainCodes = linkedSetOf<String>()
                     pending.zip(receipts).forEach { (call, receipt) ->
                         when (val outcome = receipt.outcome) {
                             is DispatchOutcome.Confirmed -> {
@@ -1266,7 +1269,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             is DispatchOutcome.Unknown -> {
                                 records[call.id] = ToolRecord(call, ToolDisposition.UNKNOWN)
                                 unknownOperations.add(call.name to call.arguments)
-                                uncertain = true
+                                uncertainCodes += outcome.code
                             }
                         }
                     }
@@ -1276,7 +1279,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         if (it is MessageBlock.Tool && it.invocation.id in known)
                             it.copy(result = known.getValue(it.invocation.id)) else it
                     }))
-                    if (uncertain) throw UnknownToolOutcomeException()
+                    if (uncertainCodes.isNotEmpty()) throw UnknownToolOutcomeException(uncertainCodes.toList())
                 } else if (batch != null) {
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
@@ -1375,7 +1378,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             val wasReserved = terminalInfo.first
             val status = terminalInfo.second
             val baseError = if (failure is PersistenceException) "保存失败，已显示内容可能未落盘" else
-                if (failure is UnknownToolOutcomeException) "工具结果未知；已停止，禁止重放，请仅使用只读方式核实" else
+                if (failure is UnknownToolOutcomeException) "工具结果未知；已停止，禁止重放，请仅使用只读方式核实" +
+                    failure.codes.mapNotNull(::toolFailureDiagnostic).distinct().take(4).joinToString("、").let { if (it.isEmpty()) "" else "（原因：$it）" } else
                 if (failure is TransportReconnectDeadlineException) failure.userMessage else
                 if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.userMessage else "请求失败，请检查模型设置或网络"
             val next = current.copy(status = status, error = if (status == RunStatus.STOPPED || status == RunStatus.COMPLETED) null else baseError)
@@ -1452,4 +1456,4 @@ private fun cancelSession(session: ModelSession?) {
 }
 
 private class RepetitiveOutputException(val surface: String) : RuntimeException("Repetitive model output")
-private class UnknownToolOutcomeException : RuntimeException("Unknown tool outcome")
+private class UnknownToolOutcomeException(val codes: List<String> = emptyList()) : RuntimeException("Unknown tool outcome")

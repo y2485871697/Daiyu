@@ -38,7 +38,7 @@ class OrdinaryToolWiringContract(unittest.TestCase):
         controller = (K / 'ChatController.kt').read_text()
         command = (K / 'integration/tools/RunCommandTools.kt').read_text()
         job = (K / 'integration/tools/RunOrdinaryJobTools.kt').read_text()
-        self.assertIn('RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory)', controller)
+        self.assertIn('RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory, runMode)', controller)
         self.assertIn('mutableMapOf("android" to androidCommands)', controller)
         self.assertIn('androidConfiguration = androidCommands, shizukuUid = ordinaryShizuku?.uid', controller)
         self.assertIn('androidConfiguration = frozen.takeIf { environment == "android" }', job)
@@ -62,6 +62,15 @@ class OrdinaryToolWiringContract(unittest.TestCase):
         self.assertIn('admit = { denial(it) ?: refused }', before)
         self.assertIn('require(it.backend != "shizuku")', plan)
         self.assertIn('.put("backend", config?.backend).put("shizuku_uid",', command)
+
+    def test_selected_mode_gates_shizuku_refresh_advertisement_and_scope(self):
+        controller = (K / 'ChatController.kt').read_text()
+        scope = (K / 'integration/tools/RunOrdinaryShizukuTools.kt').read_text()
+        self.assertIn('val runMode = app.daiyu.android.runningmode.AndroidRunningModeStore.get(application).mode.value', controller)
+        self.assertIn('ordinaryRun && androidCommands.backend == "shizuku"', controller)
+        self.assertIn('shizukuAccess, uid, runMode)', controller)
+        self.assertIn('if (mode != app.daiyu.android.runningmode.RunningMode.SHIZUKU) emptyList()', scope)
+        self.assertIn('mode != app.daiyu.android.runningmode.RunningMode.SHIZUKU || !live()', scope)
 
     def test_each_job_has_an_independent_transport_scope(self):
         job = (K / 'integration/tools/TerminalJobSession.kt').read_text()

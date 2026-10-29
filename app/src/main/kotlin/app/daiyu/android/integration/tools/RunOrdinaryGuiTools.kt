@@ -18,7 +18,7 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
     private val targetField = ArgumentField("target_package", ArgumentType.Text(256, minimumLength = 1), required = false)
     // Definitions stay identical to the finite GUI leaf, plus an explicit target routing parameter.
     override val tools = listOf(false, true).map { action -> object : RegisteredTool {
-        override val definition = (if (action) GuiScreenToolFactory.actionDefinition() else GuiScreenToolFactory.readDefinition())
+        override val definition = (if (action) GuiScreenToolFactory.actionDefinition() else GuiScreenToolFactory.readDefinition(allowImplicitObservation = true))
             .let { original -> ToolDefinition(original.name, original.version, original.description,
                 original.capability, original.effect, ToolSchema(original.schema.fields + targetField)) }
         override fun prepare(arguments: ToolArguments): PreparedTool {
@@ -26,9 +26,10 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             require(requestedTarget == null || GuiUserActionRequest.validTargetPackage(requestedTarget)) { "invalid_target_package" }
             if (!action) {
                 val screenshot = arguments.text("operation") == "screenshot"
-                require(screenshot == arguments.contains("observation_id")) { "invalid_arguments" }
+                require(screenshot || !arguments.contains("observation_id")) { "observation_id_not_allowed_for_observe" }
+                val observationId = if (arguments.contains("observation_id")) arguments.text("observation_id") else null
                 return read { context -> withSession(requestedTarget, context) { session ->
-                    if (screenshot) encode(session.dynamicScreenshot(arguments.text("observation_id"), context.cancelled)) { image ->
+                    if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled)) { image ->
                         JSONObject().put("observation_id", image.observationId).put("width", image.width).put("height", image.height)
                             .put("mime_type", "image/png").put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).toString()
                     } else encode(session.dynamicObserve(context.cancelled), GuiScreenToolFactory::observationJson)
@@ -52,10 +53,11 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             (route as? TaskSurfaceDecision.NotExecuted)?.code ?: "TASK_SURFACE_NOT_READY")
         if (route.surface != TaskSurface.FOREGROUND) return ExecutionReceipt.NotExecuted("TASK_SURFACE_BACKGROUND_UNSUPPORTED")
         val future = CompletableFuture<GuiResult<GuiRunSession>>()
+        val abandoned = java.util.concurrent.atomic.AtomicBoolean(false)
         beginCreation()
         if (!GuiRuntime.main.post {
             try {
-            if (!live() || context.cancelled()) future.complete(GuiResult.Rejected("CANCELLED_NOT_EXECUTED"))
+            if (abandoned.get() || !live() || context.cancelled()) future.complete(GuiResult.Rejected("CANCELLED_NOT_EXECUTED"))
             else {
                 val session = current
                 if (session != null && requested == target) future.complete(GuiResult.Value(session))
@@ -71,7 +73,9 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                             retain(held) { done -> observeGuiDrain(held, done) }
                             current = held; target = requested
                             held.bindDynamic(owner, authorization)
-                            if (!live()) held.close()
+                            if (abandoned.get() || !live() || context.cancelled()) {
+                                held.close(); current = null; target = null
+                            }
                         }
                         future.complete(opened)
                     }
@@ -80,7 +84,13 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             } catch (_: Exception) { future.complete(GuiResult.Unknown("GUI_OPERATION_UNCONFIRMED")) }
             finally { endCreation() }
         }) { endCreation(); return ExecutionReceipt.NotExecuted("GUI_HOST_UNAVAILABLE") }
-        return when (val opened = future.get()) {
+        val opened = try { future.get(5, java.util.concurrent.TimeUnit.SECONDS) }
+        catch (failure: Exception) {
+            abandoned.set(true)
+            if (failure is InterruptedException) Thread.currentThread().interrupt()
+            return ExecutionReceipt.NotExecuted("GUI_SESSION_PREPARATION_UNAVAILABLE_NOT_EXECUTED")
+        }
+        return when (opened) {
             is GuiResult.Rejected -> ExecutionReceipt.NotExecuted(opened.code)
             is GuiResult.Unknown -> ExecutionReceipt.Unknown(opened.code)
             is GuiResult.Value -> if (!live() || context.cancelled()) ExecutionReceipt.NotExecuted("CANCELLED_NOT_EXECUTED")

@@ -23,10 +23,16 @@ class AssistantRunContext private constructor(
     val enabledSkillIds: List<String> = Collections.unmodifiableList(ArrayList(enabledSkillIds))
     val systemPrompt: String = AssistantPrompt.build(name, prompt).let { personality ->
         val base = if (resolvedMemory.isEmpty()) personality else "$personality\n\n记忆：\n$resolvedMemory"
-        if (memoryReadPort == null) base else "$base\n\n${AssistantMemoryLimits.MODEL_POLICY}"
+        val withMemoryPolicy = if (memoryReadPort == null) base else "$base\n\n${AssistantMemoryLimits.MODEL_POLICY}"
+        "$withMemoryPolicy\n\n$EXECUTION_POLICY"
     }
 
     companion object {
+        const val EXECUTION_POLICY = "仅使用本轮提供的工具、选定执行身份和前后台位置；工具未执行、权限不足或后端不可用不授权换通道。" +
+            "屏幕任务先观察当前窗口，不沿用前一任务的应用包名；观察或屏幕准入失败后，不得改用 shell、Shizuku、su、input、screencap 或 uiautomator 绕过目标、显示器及位置限制。" +
+            "Root 通道失败不得换 Shizuku 或应用身份重试。结果未知表示可能已执行：立即停止，不重复、不改参数或换通道重放，仅以独立获准的只读方式核实。" +
+            "操作成功并达到用户目标后结束，不继续无关探测；只有确实需要读取后续界面或确认最终结果时才再次观察。"
+
         /** Preferred host entry: resolve exactly this binding, freeze its revision and core.
          * Disabled memory performs zero asset reads and exposes no memory port. */
         fun capture(store: AssistantStore, assistantId: String?, assets: AssistantAssets): AssistantRunContext {

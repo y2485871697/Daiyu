@@ -95,6 +95,7 @@ internal interface GuiRuntimeAccess {
         !current.getSystemService(KeyguardManager::class.java).isKeyguardLocked &&
             current.getSystemService(PowerManager::class.java).isInteractive
     fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? = current.rootInActiveWindow
+    fun windows(current: GuiAccessibilityService): List<android.view.accessibility.AccessibilityWindowInfo> = current.windows.orEmpty()
     @androidx.annotation.RequiresApi(30)
     fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit)
 }
@@ -337,25 +338,61 @@ internal object GuiRuntime {
     @Suppress("DEPRECATION")
     private fun externalRoot(lease: GuiLeaseGate.Lease, current: GuiAccessibilityService): GuiResult<AccessibilityNodeInfo> {
         targetRejection(lease)?.let { return it }
-        val binding = targetBinding!! // targetRejection proved the original lease owns these parameters
+        val binding = targetBinding!!
         val self = isSelfLease(lease)
-        val root = try { access.root(current) } catch (_: Exception) { null }
-            ?: return if (self) selfLost(lease) else GuiResult.Rejected("NO_ACTIVE_EXTERNAL_WINDOW")
-        val valid = try {
-            val window = root.window
-            try {
-                val pkg = root.packageName?.toString().orEmpty()
-                pkg.isNotBlank() && pkg.length <= 256 && (pkg != current.packageName || self) &&
-                    (binding.packageName == null || pkg == binding.packageName) &&
-                    window != null && window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION &&
-                    window.isActive && (Build.VERSION.SDK_INT < 30 || window.displayId == Display.DEFAULT_DISPLAY)
-            } finally { window?.recycle() }
-        } catch (_: Exception) { false }
-        if (!valid) {
-            root.recycle()
-            return if (self) selfLost(lease) else GuiResult.Rejected("EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        fun reject(code: String): GuiResult.Rejected {
+            if (self) return selfLost(lease)
+            gate.retireObservation(lease)
+            clearNodes()
+            return GuiResult.Rejected(code)
         }
-        return GuiResult.Value(root)
+        fun onDefaultDisplay(window: android.view.accessibility.AccessibilityWindowInfo): Boolean =
+            Build.VERSION.SDK_INT < 30 || window.displayId == Display.DEFAULT_DISPLAY
+        fun admit(node: AccessibilityNodeInfo, window: android.view.accessibility.AccessibilityWindowInfo): GuiResult<AccessibilityNodeInfo> {
+            val failure = try {
+                val pkg = node.packageName?.toString().orEmpty()
+                when {
+                    !onDefaultDisplay(window) -> "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED"
+                    window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION -> "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED"
+                    !window.isActive && !window.isFocused -> "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED"
+                    node.windowId != window.id -> "APPLICATION_WINDOW_ID_MISMATCH_NOT_EXECUTED"
+                    pkg.isBlank() || pkg.length > 256 -> "APPLICATION_PACKAGE_UNAVAILABLE_NOT_EXECUTED"
+                    pkg == current.packageName && !self -> "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED"
+                    binding.packageName != null && pkg != binding.packageName -> "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED"
+                    else -> null
+                }
+            } catch (_: Exception) { "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED" }
+            if (failure == null) return GuiResult.Value(node)
+            node.recycle()
+            return reject(failure)
+        }
+        val windows = try { access.windows(current) } catch (_: Exception) { emptyList() }
+        if (windows.isNotEmpty()) {
+            try {
+                if (windows.size > 64) return reject("APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED")
+                val applications = windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+                val local = applications.filter(::onDefaultDisplay)
+                if (local.isEmpty()) return reject(if (applications.isNotEmpty())
+                    "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED" else "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
+                val candidates = local.filter { it.isActive || it.isFocused }
+                if (candidates.isEmpty()) return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                fun rank(window: android.view.accessibility.AccessibilityWindowInfo): Int = if (window.isActive) 2 else 1
+                val selected = candidates.maxWithOrNull(compareBy<android.view.accessibility.AccessibilityWindowInfo>({ rank(it) }, { it.layer }))!!
+                if (candidates.count { rank(it) == rank(selected) && it.layer == selected.layer } != 1)
+                    return reject("APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED")
+                val node = selected.root ?: return reject("APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED")
+                return admit(node, selected)
+            } catch (_: Exception) { return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED") }
+            finally { windows.forEach { runCatching { it.recycle() } } }
+        }
+        val node = try { access.root(current) } catch (_: Exception) { null }
+            ?: return reject("NO_ACTIVE_EXTERNAL_WINDOW")
+        val window = try { node.window } catch (_: Exception) { null }
+        if (window == null) {
+            node.recycle()
+            return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED")
+        }
+        return try { admit(node, window) } finally { window.recycle() }
     }
 
     /** Reacquire the admitted application tree; do NOT publish a new observation/clear the approved one.

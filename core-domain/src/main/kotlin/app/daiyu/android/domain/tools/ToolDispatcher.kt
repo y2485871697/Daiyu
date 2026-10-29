@@ -124,26 +124,38 @@ class ToolDispatcher(
                     ToolDispatchResult(call.id, outcome)
                 })
             } else {
+                var enteredExecution = false
+                var stage = ToolFailureStage.ADMISSION
+                fun executePrepared(context: ToolExecutionContext?): ExecutionReceipt {
+                    stage = ToolFailureStage.ADAPTER
+                    enteredExecution = true
+                    return plans[index].execute(context)
+                }
                 try {
                     val plan = plans[index]
                     val context = contexts[index]
-                    if (plan.approveWrite == null) plan.execute(context)
+                    if (plan.approveWrite == null) executePrepared(context)
                     else {
                         val original = checkNotNull(context)
+                        stage = ToolFailureStage.APPROVAL
                         val approval = plan.approveWrite.invoke(original)
                         when {
                             approval == null -> ExecutionReceipt.NotExecuted("write_approval_denied")
                             approval.sessionId != task.sessionId || approval.taskId != task.taskId ||
-                                approval.allowedWrites != setOf(plan.writeEffect) ->
-                                ExecutionReceipt.NotExecuted("write_approval_mismatch")
+                                approval.allowedWrites != setOf(plan.writeEffect) -> ExecutionReceipt.NotExecuted("write_approval_mismatch")
                             cancelled() -> ExecutionReceipt.NotExecuted("cancelled_before_execution")
-                            else -> plan.admit(original) ?: plan.execute(ToolExecutionContext(
-                                original.owner, original.invocation, approval, cancelled))
+                            else -> {
+                                stage = ToolFailureStage.ADMISSION
+                                plan.admit(original) ?: executePrepared(ToolExecutionContext(
+                                    original.owner, original.invocation, approval, cancelled))
+                            }
                         }
                     }
+                } catch (failure: Exception) {
+                    if (failure is InterruptedException) Thread.currentThread().interrupt()
+                    val code = toolFailureCode(stage, failure)
+                    if (enteredExecution) ExecutionReceipt.Unknown(code) else ExecutionReceipt.NotExecuted(code)
                 }
-                // Once execution starts, exceptions (including interruption) do NOT prove non-execution.
-                catch (_: Exception) { ExecutionReceipt.Unknown("adapter_result_unconfirmed") }
             }
             val persisted = try { ledger.finish(entry, receipt); true } catch (_: Exception) { false }
             val outcome = when {

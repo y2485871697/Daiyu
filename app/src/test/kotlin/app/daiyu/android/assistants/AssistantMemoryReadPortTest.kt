@@ -38,7 +38,7 @@ class AssistantMemoryReadPortTest {
         assertEquals("", captured.resolvedMemory)
         assertNull(captured.memoryRevision)
         assertNull(captured.memoryReadPort)
-        assertEquals(AssistantPrompt.build("Off", ""), captured.systemPrompt)
+        assertEquals(AssistantPrompt.build("Off", "") + "\n\n" + AssistantRunContext.EXECUTION_POLICY, captured.systemPrompt)
         assertTrue(assets.reads.isEmpty())
     }
 

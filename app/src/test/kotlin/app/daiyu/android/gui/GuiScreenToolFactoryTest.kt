@@ -8,6 +8,21 @@ class GuiScreenToolFactoryTest {
     private val session = GuiRunSession(GuiLeaseGate.Lease(GuiOwner("s", "r")))
     private val tools = GuiScreenToolFactory.create(session).associateBy { it.definition.name }
 
+    @Test fun onlyRecoverableWindowRejectionsOfferExplicitTargetClarification() {
+        listOf("NO_ACTIVE_EXTERNAL_WINDOW", "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED", "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED",
+            "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED").forEach { assertTrue(session.canClarifyWindow(it)) }
+        listOf("SELF_APP_TARGET_LOST", "FOREGROUND_BUSY", "GUI_AUTHORIZATION_REVOKED", "SCREEN_LOCKED_NOT_EXECUTED",
+            "APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED").forEach { assertFalse(session.canClarifyWindow(it)) }
+    }
+
+    @Test fun onlyOrdinaryScreenshotDefinitionAllowsOneImplicitObservation() {
+        val ordinary = GuiScreenToolFactory.readDefinition(allowImplicitObservation = true)
+        assertNotNull(ordinary.schema.parse("{\"operation\":\"screenshot\"}"))
+        assertTrue(ordinary.description.contains("observation"))
+        assertFalse(GuiScreenToolFactory.readDefinition().description.contains("omit"))
+        assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
+    }
+
     @Test fun readAndWriteHaveSeparateFixedEffectsInExistingCatalogContract() {
         assertEquals(ToolEffect.READ_ONLY, tools.getValue("screen").definition.effect)
         assertEquals(ToolEffect.WRITE, tools.getValue("screen_action").definition.effect)

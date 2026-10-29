@@ -30,6 +30,34 @@ class ToolDispatcherTest {
     private fun outcome(dispatcher: ToolDispatcher, task: TaskAuthorization = task(), call: ToolInvocation = call()) = dispatcher.dispatch(task, listOf(call)).single().outcome
     private fun code(outcome: DispatchOutcome) = (outcome as DispatchOutcome.NotExecuted).code
 
+    @Test fun adapterExceptionPreservesSafeCategoryStopsBatchAndNeverReplays() {
+        var executions = 0; var reads = 0
+        val dispatcher = dispatcher(InMemoryToolLedgerStore(),
+            write { executions++; throw java.io.IOException("private-command-secret") },
+            read { reads++; ExecutionReceipt.Confirmed("read") })
+        val result = dispatcher.dispatch(task(), listOf(call(), call("read", "read_note", "{}")))
+        assertEquals("adapter_result_unconfirmed_io", (result[0].outcome as DispatchOutcome.Unknown).code)
+        assertEquals("batch_stopped_before_execution", code(result[1].outcome))
+        assertTrue(outcome(dispatcher, call = call("new-id")) is DispatchOutcome.Unknown)
+        assertEquals(1, executions); assertEquals(0, reads)
+        assertFalse(result.toString().contains("private-command-secret"))
+    }
+
+    @Test fun approvalExceptionIsNotExecutedAndDoesNotEnterAdapter() {
+        val owner = RunExecutionOwner.issue(Message(MessageId("m"), ConversationId("c"), RunId("task"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        var executions = 0
+        val tool = object : RegisteredTool {
+            override val definition = ToolDefinition("write_note", 1, "consent", "notes.write", ToolEffect.WRITE, writeSchema)
+            override fun prepare(arguments: ToolArguments) = PreparedTool.approvedWrite(effect(),
+                approve = { throw SecurityException("private-token") }, admit = { null },
+                execute = { executions++; ExecutionReceipt.Confirmed("written") })
+        }
+        val result = dispatcher(InMemoryToolLedgerStore(), tool).dispatchOwned(task(emptySet()), listOf(call()), owner)
+        assertEquals("write_approval_failed_security", code(result.single().outcome))
+        assertEquals(0, executions); assertFalse(result.toString().contains("private-token"))
+    }
+
     @Test fun freshConsentIsExactAndNeverMutatesTheRunGrantOrRepeatsOnReplay() {
         val owner = RunExecutionOwner.issue(Message(MessageId("m"), ConversationId("c"), RunId("task"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
@@ -166,7 +194,7 @@ class ToolDispatcherTest {
         val alternative = write("write_note_http") { executions++; ExecutionReceipt.Confirmed("must not run") }
         val dispatcher = dispatcher(store, original, alternative)
         val first = outcome(dispatcher) as DispatchOutcome.Unknown
-        assertEquals("adapter_result_unconfirmed", first.code)
+        assertEquals("adapter_result_unconfirmed_invalid_state", first.code)
         val restored = dispatcher(store, original, alternative)
         assertTrue(outcome(restored) is DispatchOutcome.Unknown)
         val equivalent = call("new-id", "write_note_http", "{ \"body\" : \"hello\", \"target\" : \" A \" }")

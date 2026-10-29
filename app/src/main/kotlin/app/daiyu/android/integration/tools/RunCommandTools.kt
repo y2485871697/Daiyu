@@ -52,8 +52,9 @@ internal class RunCommandTools(
 ) : AutoCloseable {
     companion object {
         const val CAPABILITY = "terminal.command.consent"
-        internal fun androidConfiguration(context: Context, workingDirectory: java.io.File): TerminalConfiguration =
-            androidConfiguration(app.daiyu.android.runningmode.AndroidRunningModeStore.get(context).mode.value,
+        internal fun androidConfiguration(context: Context, workingDirectory: java.io.File,
+            mode: app.daiyu.android.runningmode.RunningMode = app.daiyu.android.runningmode.AndroidRunningModeStore.get(context).mode.value): TerminalConfiguration =
+            androidConfiguration(mode,
                 workingDirectory, mapOf("HOME" to context.filesDir.path, "TMPDIR" to context.cacheDir.path,
                     "PATH" to "/system/bin:/system/xbin"))
 

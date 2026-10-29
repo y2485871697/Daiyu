@@ -7,11 +7,11 @@ import java.util.UUID
 
 internal class RunOrdinaryShizukuTools(owner: RunExecutionOwner, authorization: TaskAuthorization,
     private val capabilities: SessionCapabilities, private val access: ShizukuAuthorization,
-    private val uid: Int) : RunOwnedToolScope(owner, authorization) {
+    private val uid: Int, private val mode: app.daiyu.android.runningmode.RunningMode) : RunOwnedToolScope(owner, authorization) {
     private var attempted = false
     private var backend: ShizukuBackend? = null
     private val scope = UUID.randomUUID().toString()
-    override val tools = listOf(object : RegisteredTool {
+    override val tools: List<RegisteredTool> = if (mode != app.daiyu.android.runningmode.RunningMode.SHIZUKU) emptyList() else listOf(object : RegisteredTool {
         override val definition = ToolDefinition(RunShizukuCommands.TOOL_NAME, 1,
             "使用已授权的真实Shizuku身份执行script；不请求系统权限、不回退Root或普通shell，UNKNOWN禁止重发。",
             RunShizukuCommands.CAPABILITY, ToolEffect.WRITE, RunShizukuCommands.SCHEMA)
@@ -33,7 +33,7 @@ internal class RunOrdinaryShizukuTools(owner: RunExecutionOwner, authorization: 
     })
     /** Both ordinary entrypoints share one run-owned connection; connect() must not rotate it per tool. */
     @Synchronized internal fun backendForCommands(): ShizukuBackend? {
-        if (!live()) return null
+        if (mode != app.daiyu.android.runningmode.RunningMode.SHIZUKU || !live()) return null
         if (!attempted) {
             beginCreation()
             attempted = true

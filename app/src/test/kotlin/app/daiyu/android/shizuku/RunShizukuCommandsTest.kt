@@ -69,6 +69,26 @@ class RunShizukuCommandsTest {
         override fun close() = resources.close()
     }
 
+    @Test fun dispatchAndPollExceptionsKeepTheirSafeStageAndCannotReplay() {
+        for (pollFailure in listOf(false, true)) {
+            val backend = object : Backend() {
+                override fun execute(command: ShizukuCommand): ShizukuDispatch {
+                    if (!pollFailure) { commands.add(command); throw java.io.IOException("private-script-secret") }
+                    return super.execute(command)
+                }
+                override fun poll(handle: ShizukuCommandHandle, offset: Int, limit: Int): ShizukuCommandPage =
+                    throw SecurityException("private-token-secret")
+            }
+            Fixture(backend = backend, token = owner()).use { f ->
+                val first = f.dispatch() as DispatchOutcome.Unknown
+                assertEquals(if (pollFailure) "shizuku_poll_unconfirmed_security" else "shizuku_dispatch_unconfirmed_io", first.code)
+                assertTrue(f.dispatch(f.call("new-id")) is DispatchOutcome.Unknown)
+                assertEquals(1, backend.commands.size); assertTrue(backend.closes > 0)
+                assertFalse(first.toString().contains("secret"))
+            }
+        }
+    }
+
     @Test fun disabledCapabilityAndMissingExactGrantNeverExecute() {
         Fixture(enabled = false, token = owner()).use { f ->
             assertEquals(DispatchOutcome.NotExecuted("capability_disabled"), f.dispatch())

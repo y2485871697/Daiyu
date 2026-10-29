@@ -16,9 +16,13 @@ internal object GuiScreenToolFactory {
     private fun admission(session: GuiRunSession, context: ToolExecutionContext): ExecutionReceipt.NotExecuted? =
         session.admission(context.owner, context.authorization)?.let { ExecutionReceipt.NotExecuted(it.code) }
 
-    internal fun readDefinition(): ToolDefinition = ToolDefinition("screen", 1,
-            "Explicitly authorized, bounded accessibility observation or one explicitly requested platform screenshot. " +
-                "Observation IDs expire and cannot be reused after a UI change/action. No automatic screenshot.",
+    internal fun readDefinition(allowImplicitObservation: Boolean = false): ToolDefinition = ToolDefinition("screen", 1,
+            "Bounded accessibility observation or an explicitly requested screenshot. observe forbids observation_id. " +
+                (if (allowImplicitObservation) "screenshot accepts a current observation_id; if omitted, creates exactly one bounded observation in the same target session before capture. "
+                 else "screenshot requires observation_id from a successful observe in this session. ") +
+                "IDs expire after 10 seconds or a UI change/action. Never retry a stale ID automatically. " +
+                (if (allowImplicitObservation) "For the current screen omit any previous target_package. Self-app observation requires target_package=app.daiyu.android. " else "") +
+                "Window failures are not Android Root permission errors. Never use shell, input, screencap or uiautomator to bypass screen admission, target or location restrictions.",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("operation", ArgumentType.Text(16, setOf("observe", "screenshot"))),
                 ArgumentField("observation_id", ArgumentType.Text(64, minimumLength = 1), required = false),
@@ -42,7 +46,7 @@ internal object GuiScreenToolFactory {
     }
     internal fun actionDefinition(): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact user-confirmed accessibility node or global action, bound to the same observation_id. " +
-                "No coordinate fallback/retry. Android acceptance is not verified business success.",
+                "No coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("operation", ArgumentType.Text(32, GuiOperation.entries.map { it.name.lowercase() }.toSet())),
                 ArgumentField("observation_id", ArgumentType.Text(64, minimumLength = 1)),

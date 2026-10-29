@@ -128,8 +128,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             try {
                 selectedPaths?.let { if (BackendSelection.paths(context, configuration) != it) throw BackendUnavailable("backend_path_changed_not_executed") }
                 if (configuration.backend == "linux" && configuration.linux == null) throw BackendUnavailable("linux_backend_not_configured")
-                if (configuration.backend == "android" && configuration.root &&
-                    (!File(configuration.rootExecutable).isAbsolute || !File(configuration.rootExecutable).canExecute())) throw BackendUnavailable("root_unavailable")
+                if (configuration.backend == "android" && configuration.root)
+                    BackendSelection.requireRootExecutable(configuration.rootExecutable)
                 val before = BackendSelection.paths(context, configuration)
                 val fresh = BackendSelection.select(context, configuration)
                 val paths = BackendSelection.paths(context, configuration)

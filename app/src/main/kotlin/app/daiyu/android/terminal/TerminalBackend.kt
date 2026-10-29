@@ -105,33 +105,66 @@ internal sealed interface BackendPathIdentity {
 
 internal object BackendSelection {
     fun paths(context: Context, config: TerminalConfiguration): List<BackendPathIdentity> {
-        val paths = mutableListOf(config.workingDirectory ?: context.filesDir)
+        val paths = mutableListOf<File>()
+        val roles = mutableMapOf<String, String>()
+        fun add(file: File, role: String) { paths += file; roles[file.path] = role }
+        add(config.workingDirectory ?: context.filesDir, "cwd")
         when (config.backend) {
             "android" -> {
-                paths += File("/system/bin/sh")
-                if (config.root) paths += File(config.rootExecutable)
+                add(File("/system/bin/sh"), "shell")
+                if (config.root) add(File(config.rootExecutable), "su")
             }
             "linux" -> config.linux?.let { linux ->
-                linux.shellArgv.firstOrNull()?.let { paths += File(it) }
-                paths += linux.sharedMounts.keys.map(::File)
-                linux.rootScope?.let { root -> paths += chrootTransportFiles(); paths += root.rootfs }
+                linux.shellArgv.firstOrNull()?.let { add(File(it), "launcher") }
+                linux.sharedMounts.keys.forEach { add(File(it), "mount") }
+                linux.rootScope?.let { root ->
+                    chrootTransportFiles().forEach { add(it, "transport") }
+                    add(root.rootfs, "rootfs")
+                }
             }
         }
-        return pathIdentities(paths, config.backend == "linux" && config.linux?.rootScope != null)
+        val rootTransports = if (config.backend == "android" && config.root)
+            setOf("/system/bin/sh", config.rootExecutable) else emptySet()
+        return pathIdentities(paths, config.backend == "linux" && config.linux?.rootScope != null,
+            rootTransports, roles)
     }
 
     internal fun pathIdentities(paths: List<File>, chroot: Boolean,
-        transportIdentity: (File) -> String = RootScopeLaunch::trustedTransportIdentity): List<BackendPathIdentity> = try {
-        paths.map { file ->
-            if (chroot && RootScopeLaunch.isFixedTransport(file)) {
+        rootTransports: Set<String> = emptySet(), roles: Map<String, String> = emptyMap(),
+        transportIdentity: (File) -> String = ChrootTransportTrust::identity): List<BackendPathIdentity> = paths.map { file ->
+        var stage = "transport_identity"
+        try {
+            if ((chroot && RootScopeLaunch.isFixedTransport(file)) || file.path in rootTransports) {
                 BackendPathIdentity.ChrootTransport(file.path, transportIdentity(file))
             } else {
+                stage = "realpath"
                 val real = file.toPath().toRealPath()
+                stage = "attributes"
                 val attr = java.nio.file.Files.readAttributes(real, java.nio.file.attribute.BasicFileAttributes::class.java)
                 BackendPathIdentity.FileSystem(file.absolutePath, real.toString(), attr.fileKey()?.toString(), attr.creationTime())
             }
+        } catch (failure: Exception) { throw pathFailure(roles[file.path] ?: "path", stage, failure) }
+    }
+
+    internal fun requireRootExecutable(path: String) {
+        try { ChrootTransportTrust.identity(File(path)) }
+        catch (failure: Exception) { throw pathFailure("su", "transport_identity", failure) }
+    }
+
+    private fun pathFailure(role: String, stage: String, failure: Exception): BackendUnavailable {
+        val reason = when (failure) {
+            is java.nio.file.NoSuchFileException -> "missing"
+            is java.nio.file.AccessDeniedException, is SecurityException -> "denied"
+            is android.system.ErrnoException -> when (failure.errno) {
+                android.system.OsConstants.ENOENT -> "missing"
+                android.system.OsConstants.EACCES, android.system.OsConstants.EPERM -> "denied"
+                else -> "unavailable"
+            }
+            is IllegalArgumentException -> "untrusted"
+            else -> "unavailable"
         }
-    } catch (_: Exception) { throw BackendUnavailable("backend_path_unavailable") }
+        return BackendUnavailable("backend_path_${role}_${stage}_$reason")
+    }
 
     internal fun chrootTransportFiles(read: () -> List<File> = RootScopeLaunch::requireTrustedTransport): List<File> = try {
         read()
@@ -159,7 +192,7 @@ internal object BackendSelection {
             "android" -> {
                 if (!File("/system/bin/sh").canExecute()) throw BackendUnavailable("android_shell_unavailable")
                 val shell = if (config.root) listOf(config.rootExecutable, "-c", "/system/bin/sh") else listOf("/system/bin/sh")
-                if (config.root && (!File(config.rootExecutable).isAbsolute || config.rootExecutable.contains('\u0000') || !File(config.rootExecutable).canExecute())) throw BackendUnavailable("root_unavailable")
+                if (config.root) requireRootExecutable(config.rootExecutable)
                 val probe = if (config.root) listOf(config.rootExecutable, "-c", "/system/bin/id -u") else listOf("/system/bin/id", "-u")
                 val uid = probeUid(probe, env, cwd, if (config.root) "root_unavailable" else "identity_unavailable")
                 if (config.root && uid != 0) throw BackendUnavailable("root_unavailable")

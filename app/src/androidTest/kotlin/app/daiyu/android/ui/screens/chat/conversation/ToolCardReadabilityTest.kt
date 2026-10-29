@@ -233,7 +233,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val fontScale = if (large) 1.3f else .9f
             show(dark, scale, fontScale, narrow = narrow)
             assertTarget("work-process-header", scale, minimumHeight = 44f)
-            val heading = layout(ui.onNodeWithText("设备查询", useUnmergedTree = true))
+            val heading = layout(ui.onNodeWithText("工作流程", useUnmergedTree = true))
             assertEquals(13.sp, heading.layoutInput.style.fontSize)
             assertEquals(phoneDensity * scale, heading.layoutInput.density.density, .001f)
             assertEquals(fontScale, heading.layoutInput.density.fontScale, .001f)
@@ -305,19 +305,18 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         val stepTitle = "执行命令 · $target"
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) for (fontScale in listOf(.9f, 1.3f)) {
             show(dark = dark, scale = scale, fontScale = fontScale, narrow = true, compact = true, terminal = true)
-            val heading = layout(ui.onNodeWithText(target, useUnmergedTree = true))
+            val heading = layout(ui.onNodeWithText("工作流程", useUnmergedTree = true))
             assertEquals(13.sp, heading.layoutInput.style.fontSize)
-            assertEquals(toolHeaderText(target, true), heading.layoutInput.text)
+            assertEquals("工作流程", heading.layoutInput.text.text)
+            assertTrue(heading.placeholderRects.isEmpty())
             assertFalse(heading.hasVisualOverflow)
             val case = "dark=$dark scale=$scale fontScale=$fontScale"
-            val headingDiameter = assertCenteredUniformDots(ui.onNodeWithText(target, useUnmergedTree = true), "$case group")
             node("work-process-header").performClick()
             val titleNode = ui.onNodeWithText(stepTitle, useUnmergedTree = true).assertIsDisplayed()
             val measured = layout(titleNode)
             assertEquals(13.sp, measured.layoutInput.style.fontSize)
             assertEquals(toolHeaderText(stepTitle, true), measured.layoutInput.text)
-            assertEquals("Group and step bullets must have identical diameters", headingDiameter,
-                assertCenteredUniformDots(titleNode, "$case step"), 1f)
+            assertCenteredUniformDots(titleNode, "$case step")
             assertFalse(measured.hasVisualOverflow)
             for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
             assertEquals(stepTitle.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))

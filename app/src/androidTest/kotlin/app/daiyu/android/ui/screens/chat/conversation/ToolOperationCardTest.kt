@@ -92,7 +92,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
             if (!mixed) {
-                ui.onNodeWithText("终端命令").assertIsDisplayed()
+                ui.onNodeWithText("工作流程").assertIsDisplayed()
                 ui.onNodeWithTag("work-process-header").performClick()
             }
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
@@ -130,9 +130,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
             if (!mixed) {
-                ui.onNodeWithText(label).assertIsDisplayed()
-                assertEquals(toolHeaderText(label, true),
-                    ui.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.Text].single())
+                ui.onNodeWithText("工作流程").assertIsDisplayed()
+                ui.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
                 ui.onNodeWithTag("work-process-header").performClick()
             }
             val title = "${if (name == "terminal_job_read") "读取后台结果" else "执行命令"} · $label"
@@ -620,17 +619,20 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             }
         }
     }
-    fun testSameCategoryAndMixedToolChainsUseCategoryDrivenTitles() {
-        for ((names, heading) in listOf(
-            listOf("device_time", "network_status") to "设备查询",
-            listOf("terminal_pty_read", "terminal_pty_read") to "终端命令",
-            listOf("device_time", "terminal_pty_read", "future_tool") to "工具链")) {
+    fun testAllToolCategoriesUseUnifiedWorkflowTitle() {
+        for (names in listOf(
+            listOf("device_time", "network_status"),
+            listOf("browser_read", "browser_write"),
+            listOf("terminal_pty_read", "terminal_pty_read"),
+            listOf("terminal_job_read"),
+            listOf("device_time", "terminal_pty_read", "future_tool"))) {
             val key = names.joinToString("-")
             val message = Message(MessageId(key), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE,
                 names.mapIndexed { index, name -> MessageBlock.Tool(ToolInvocation(ToolCallId("chain-$index"), name, "{}"), "unique receipt $index") }, RunStatus.COMPLETED)
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions())
-            ui.onNodeWithText(heading).assertIsDisplayed()
+            ui.onNodeWithText("工作流程").assertIsDisplayed()
+            ui.onNodeWithText("已完成${names.size}步").assertIsDisplayed()
             ui.onNodeWithTag("work-process-header").performClick()
             names.indices.forEach { ui.onAllNodesWithTag("tool-step:chain-$it").assertCountEquals(1) }
         }

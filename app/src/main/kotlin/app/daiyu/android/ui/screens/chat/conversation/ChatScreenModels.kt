@@ -90,7 +90,19 @@ data class WorkProcessUi(
     val segments: List<WorkSegmentUi>,
     val summary: String,
     val running: Boolean = false,
-)
+    val controlActivity: ToolActivityUi? = null,
+) {
+    val title: String get() = "工作流程"
+    val completedStepCount: Int get() = segments.sumOf { segment ->
+        segment.steps.count { it.state == WorkStepState.OK } +
+            if (segment.reasoning?.let { it.activeSinceNanos == null && hasReportedReasoningText(it.text) } == true) 1 else 0
+    }
+    val progressSummary: String get() {
+        val completed = "已完成${completedStepCount}步"
+        val status = controlActivity?.label ?: summary
+        return if (!running && status == "已完成") completed else "$completed · $status"
+    }
+}
 
 data class WorkSegmentUi(
     val narration: String? = null,

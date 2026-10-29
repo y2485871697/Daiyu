@@ -5,6 +5,7 @@ import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.MessageHistory
 import app.daiyu.android.domain.MessageImageOwner
 import app.daiyu.android.domain.RunStatus
+import app.daiyu.android.domain.runtime.ExecutionPhase
 
 /** No clock, Android APIs or mutable state. Timestamp formatting belongs to the caller. */
 object ChatTurnMapper {
@@ -103,18 +104,31 @@ object ChatTurnMapper {
         return sources.takeIf { it.size == keys.size }.orEmpty()
     }
 
-    fun withStreamingOwner(turns: List<ChatTurnUi>, owner: Message?): List<ChatTurnUi> {
+    fun withStreamingOwner(turns: List<ChatTurnUi>, owner: Message?, phase: ExecutionPhase? = null,
+        pauseRequested: Boolean = false, stopRequested: Boolean = false): List<ChatTurnUi> {
         val live = owner?.takeIf { it.role == Message.ASSISTANT_ROLE && it.status == RunStatus.RUNNING }
         val last = if (live == null) -1 else turns.indexOfLast { turn ->
             turn is ChatTurnUi.Assistant && turn.ownerMessageId == live.id.value &&
                 turn.listKey == TurnOwner(live.conversationId.value, live.runId.value, turn.id).listKey(turn.segmentIndex)
         }
+        val controlActivity = when {
+            stopRequested -> ToolActivityUi.STOPPING
+            phase == ExecutionPhase.PAUSED -> ToolActivityUi.PAUSED
+            pauseRequested -> ToolActivityUi.PAUSING
+            phase == ExecutionPhase.WAITING_USER -> ToolActivityUi.WAITING
+            else -> null
+        }
+        val streaming = if (phase == null || phase == ExecutionPhase.STREAMING) last else -1
         if (turns.withIndex().none { (index, turn) ->
-                turn is ChatTurnUi.Assistant && turn.isStreaming != (index == last)
+                turn is ChatTurnUi.Assistant && (turn.isStreaming != (index == streaming) ||
+                    turn.workProcess?.controlActivity != controlActivity.takeIf { index == last && turn.workProcess != null })
             }) return turns
         return turns.mapIndexed { index, turn ->
-            if (turn is ChatTurnUi.Assistant && turn.isStreaming != (index == last)) {
-                turn.copy(isStreaming = index == last)
+            if (turn is ChatTurnUi.Assistant) {
+                val activity = controlActivity.takeIf { index == last }
+                val work = turn.workProcess?.let { if (it.controlActivity == activity) it else it.copy(controlActivity = activity) }
+                if (turn.isStreaming == (index == streaming) && work === turn.workProcess) turn
+                else turn.copy(isStreaming = index == streaming, workProcess = work)
             } else turn
         }
     }
@@ -232,8 +246,17 @@ object ChatTurnMapper {
             }
         }
         val running = message.status == RunStatus.RUNNING
+        val activities = segments.flatMap { it.steps }.filter { it.state == WorkStepState.PENDING }.map { it.activity }
         val summary = when {
-            running -> "进行中"
+            running -> when {
+                ToolActivityUi.STOPPING in activities -> ToolActivityUi.STOPPING.label
+                ToolActivityUi.PAUSING in activities -> ToolActivityUi.PAUSING.label
+                ToolActivityUi.PAUSED in activities -> ToolActivityUi.PAUSED.label
+                ToolActivityUi.RUNNING in activities -> "执行中"
+                ToolActivityUi.WAITING in activities -> ToolActivityUi.WAITING.label
+                segments.any { it.reasoning?.activeSinceNanos != null } -> "思考中"
+                else -> activities.lastOrNull()?.label ?: "进行中"
+            }
             message.status == RunStatus.FAILED || segments.any { segment ->
                 segment.steps.any { it.state == WorkStepState.FAILED }
             } -> "失败"
@@ -241,6 +264,7 @@ object ChatTurnMapper {
             message.status == RunStatus.INTERRUPTED -> "已中断"
             segments.any { it.steps.any { step -> step.state == WorkStepState.UNKNOWN } } -> "结果未确认"
             segments.any { it.steps.any { step -> step.state == WorkStepState.NOT_EXECUTED } } -> "含未执行步骤"
+            segments.any { it.reasoning?.activeSinceNanos != null || it.steps.any { step -> step.state == WorkStepState.PENDING } } -> "含未完成步骤"
             else -> "已完成"
         }
         return ChatTurnUi.Assistant(

@@ -100,19 +100,6 @@ class TerminalToolTargetTest {
         }
     }
 
-    @Test fun processTitlesRequireEveryStepToShareTheSameKnownTarget() {
-        fun step(target: String?, category: String = "terminal") = WorkStepUi("call", "执行", "", category = category,
-            executionTargetLabel = target)
-        assertEquals("Debian • root", ToolCardPresentations.processTitleForSteps(listOf(step("Debian • root"), step("Debian • root"))))
-        assertEquals("多环境终端", ToolCardPresentations.processTitleForSteps(listOf(step("Debian • root"), step("Android • user"))))
-        assertEquals("终端命令", ToolCardPresentations.processTitleForSteps(listOf(step("Debian • root"), step(null))))
-        assertEquals("终端命令", ToolCardPresentations.processTitleForSteps(listOf(step(null), step(null))))
-        assertEquals("工具链", ToolCardPresentations.processTitleForSteps(listOf(step("Debian • root"), step(null, "device_read"))))
-        assertEquals("设备查询", ToolCardPresentations.processTitleForSteps(listOf(step(null, "device_read"))))
-        assertEquals("Android • user", ToolCardPresentations.processTitleForSteps(listOf(step("Android • user", "background_job"))))
-        assertEquals("工具链", ToolCardPresentations.processTitleForSteps(emptyList()))
-    }
-
     @Test fun legalEscapedLogPagesKeepTargetLabelsWithoutChangingArgumentLimits() {
         val result = JSONObject().put("backend", "android").put("uid", 10444).put("root", false)
             .put("stdout", "\u0001".repeat(65_536)).put("stdout_base64", "A".repeat(87_384)).toString()

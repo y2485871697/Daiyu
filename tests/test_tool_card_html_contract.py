@@ -38,7 +38,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn("WorkStepState.entries", regression)
         self.assertIn("WorkStepState.UNKNOWN, withoutReceipt", regression)
 
-    def test_terminal_execution_target_is_receipt_driven_and_used_in_both_headers(self):
+    def test_terminal_execution_target_is_receipt_driven_and_kept_in_step_headers(self):
         target = (CHAT / "TerminalToolTarget.kt").read_text()
         self.assertIn('receipt.opt("backend")', target)
         self.assertIn('listOf("root", "host_root")', target)
@@ -47,8 +47,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertNotIn("Settings", target)
         presentation = (CHAT / "ToolCardPresentation.kt").read_text()
         self.assertIn("TerminalToolTarget.fromResult(toolName, result, output)", presentation)
-        self.assertIn("targets.all { it != null }", presentation)
-        self.assertIn("processTitleForSteps(steps)", (CHAT / "WorkProcessCard.kt").read_text())
+        self.assertNotIn("processTitleForSteps", (CHAT / "WorkProcessCard.kt").read_text())
         self.assertIn("executionTargetLabel = display.targetLabel", (CHAT / "ChatTurnMapper.kt").read_text())
         shizuku = (ROOT / "app/src/main/kotlin/app/daiyu/android/shizuku/RunShizukuCommands.kt").read_text()
         self.assertIn('.put("backend", "shizuku").put("uid", backend.identity.uid)', shizuku)
@@ -83,12 +82,13 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('ToolCardPresentations.categories + "future_category"', regression)
         self.assertIn('ui.onNodeWithText("工具回执未确认 · 不重放", useUnmergedTree = true).assertDoesNotExist()', regression)
 
-    def test_terminal_header_dots_are_emphasized_only_in_both_header_renderers(self):
+    def test_terminal_step_dots_remain_emphasized_under_unified_workflow_header(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
-        self.assertIn('val terminalHeader = steps.isNotEmpty() && steps.all { it.category in setOf("terminal", "background_job") }', shell)
-        self.assertIn('Text(toolHeaderText(title, terminalHeader), color = colors.text,', shell)
+        self.assertNotIn('val terminalHeader', shell)
+        self.assertIn('Text(title, color = colors.text,', shell)
         self.assertIn('Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,', shell)
-        self.assertIn('Text("$stepCount 项 · ${work.summary}"', shell)
+        self.assertIn('val progressSummary = work.progressSummary', shell)
+        self.assertEqual(2, shell.count('Text(progressSummary'))
 
     def test_environment_dots_share_centered_circle_content_and_preserve_source_text(self):
         helper = (CHAT / "ToolHeaderText.kt").read_text()
@@ -100,7 +100,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertNotIn("SpanStyle", helper)
         self.assertNotIn("BaselineShift", helper)
         shell = (CHAT / "WorkProcessCard.kt").read_text()
-        self.assertEqual(2, shell.count("inlineContent = toolHeaderInlineContent(colors.text)"))
+        self.assertEqual(1, shell.count("inlineContent = toolHeaderInlineContent(colors.text)"))
         regression = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt").read_text()
         self.assertIn("private fun assertCenteredUniformDots", regression)
         self.assertIn("val expectedInkDiameter = minOf(rect.width, rect.height) * .6f", regression)
@@ -108,12 +108,12 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn("measured.placeholderRects.forEachIndexed", regression)
         self.assertIn("measured.getLineTop(line) + measured.getLineBottom(line)", regression)
         self.assertIn('assertCenteredUniformDots(titleNode, "$case step")', regression)
-        self.assertIn("assertCenteredUniformDots(ui.onNodeWithText(target", regression)
+        self.assertIn('assertTrue(heading.placeholderRects.isEmpty())', regression)
 
     def test_compact_headers_adapt_locally_and_preserve_disclosure_ownership(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertEqual(2, shell.count("heightIn(min = 44.dp)"))
-        self.assertIn("val summaryWidth = maxWidth * .38f", shell)
+        self.assertIn("val summaryWidth = maxWidth * .56f", shell)
         self.assertIn("maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f", shell)
         self.assertIn("maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f", shell)
         self.assertIn('if (stacked) Text(stateLabel, Modifier.fillMaxWidth(), color = tint,', shell)
@@ -121,8 +121,8 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('Modifier.size(18.dp).testTag("tool-operation-icon:', shell)
         self.assertIn("fontSize = 13.sp, lineHeight = 18.sp", shell)
         self.assertIn("fontSize = 12.sp, lineHeight = 17.sp", shell)
-        self.assertIn("rememberSaveable(ownerKey)", shell)
-        self.assertEqual(1, shell.count("rememberSaveable(step.owner, step.toolCallId)"))
+        self.assertIn("rememberSaveable(ownerKey, work.running)", shell)
+        self.assertEqual(2, shell.count("rememberSaveable(step.owner, step.toolCallId, flowRunning)"))
         self.assertIn("key(ownerKey, step.owner, step.toolCallId)", shell)
         self.assertNotIn("graphicsLayer", shell)
         self.assertNotIn("CompositionLocalProvider(LocalDensity", shell)
@@ -136,7 +136,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         for removed in ('ToolDisclosureHeader("技术详情"', 'tool-step-technical:', 'var technical', '.rich?.technical'):
             self.assertNotIn(removed, shell)
         self.assertIn('AnimatedVisibility(expanded)', shell)
-        self.assertIn('expanded = !expanded', shell)
+        self.assertIn('expandedOverride = !expanded', shell)
         body = (CHAT / "ToolBodyLayout.kt").read_text()
         self.assertIn('if (category in setOf("terminal", "background_job"))', body)
         self.assertIn('"执行命令"', body)

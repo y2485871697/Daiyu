@@ -5,27 +5,6 @@ import org.json.JSONObject
 /** Display taxonomy, not a registry or an execution permission. */
 internal object ToolCardPresentations {
     val categories = setOf("memory", "skills", "delegation", "child_control", "workspace", "terminal", "background_job", "files", "image_read", "browser", "gui", "apps", "device_read", "personal_search", "system_action", "generation", "speech", "mcp", "context", "user_question", "generic")
-    private val categoryTitles = mapOf(
-        "memory" to "记忆", "skills" to "Skills", "delegation" to "子代理委派与结果", "child_control" to "子任务控制",
-        "workspace" to "工作区", "terminal" to "终端命令", "background_job" to "后台与守护任务", "files" to "文件操作",
-        "image_read" to "图片与视频封面", "browser" to "网页浏览器", "gui" to "手机屏幕与 GUI", "apps" to "应用",
-        "device_read" to "设备查询", "personal_search" to "个人数据检索", "system_action" to "系统动作",
-        "generation" to "图片与视频生成", "speech" to "语音", "mcp" to "MCP 外部工具",
-        "context" to "上下文与运行事件", "user_question" to "用户问答", "generic" to "未知工具回退",
-    )
-    fun processTitle(categories: List<String>): String =
-        categories.distinct().singleOrNull()?.let(categoryTitles::get) ?: "工具链"
-
-    fun processTitleForSteps(steps: List<WorkStepUi>): String {
-        val category = steps.map { it.category }.distinct().singleOrNull()
-        if (steps.isNotEmpty() && category in setOf("terminal", "background_job")) {
-            val targets = steps.map { it.executionTargetLabel }
-            if (targets.all { it != null }) return targets.distinct().singleOrNull()
-                ?: if (category == "terminal") "多环境终端" else "多环境后台任务"
-        }
-        return processTitle(steps.map { it.category })
-    }
-
     data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null)
     private val tools = buildMap {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }

@@ -176,29 +176,5 @@ internal object ToolOperationIcons {
             }.build()
         }
     }
-    private val categories = mapOf(
-        "memory" to "brain",
-        "skills" to "skill",
-        "delegation" to "network",
-        "child_control" to "controls",
-        "workspace" to "workspace",
-        "terminal" to "terminal",
-        "background_job" to "daemon",
-        "files" to "folder",
-        "image_read" to "image",
-        "browser" to "globe",
-        "gui" to "phone",
-        "apps" to "apps",
-        "device_read" to "chip",
-        "personal_search" to "personSearch",
-        "system_action" to "switches",
-        "generation" to "create",
-        "speech" to "waveform",
-        "mcp" to "plug",
-        "context" to "context",
-        "user_question" to "question",
-        "generic" to "generic",
-    )
     fun operation(key: String): ImageVector = vectors.getValue(if (key in vectors) key else "generic").value
-    fun category(key: String?): ImageVector = operation(if (key == null) "chain" else categories[key] ?: "generic")
 }

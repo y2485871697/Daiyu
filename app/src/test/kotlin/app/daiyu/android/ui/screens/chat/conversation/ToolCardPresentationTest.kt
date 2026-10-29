@@ -25,7 +25,7 @@ class ToolCardPresentationTest {
         val card = ToolCardPresentations.present("inspect_child_tasks", "{}",
             "{\"tasks\":[],\"current_configuration_available\":true}")
         assertTrue(card.details.fields.contains(ToolFieldUi("当前委派配置可用", "是")))
-        assertEquals("子任务控制", ToolCardPresentations.processTitle(listOf(card.category)))
+        assertEquals("child_control", card.category)
     }
 
     @Test fun taxonomyIncludesAllReservedCategoriesWithoutInventingRecords() {
@@ -121,15 +121,6 @@ class ToolCardPresentationTest {
             .fields.containsAll(listOf(ToolFieldUi("百分比", "0"), ToolFieldUi("已启用", "否"))))
     }
 
-    @Test fun processTitlesMatchCategoriesAndMixedCallsRemainAChain() {
-        assertEquals("设备查询", ToolCardPresentations.processTitle(listOf("device_read")))
-        assertEquals("终端命令", ToolCardPresentations.processTitle(listOf("terminal", "terminal")))
-        assertEquals("工具链", ToolCardPresentations.processTitle(listOf("terminal", "device_read")))
-        assertEquals("工具链", ToolCardPresentations.processTitle(emptyList()))
-        assertEquals("工具链", ToolCardPresentations.processTitle(listOf("future_category")))
-        ToolCardPresentations.categories.forEach { assertNotEquals("工具链", ToolCardPresentations.processTitle(listOf(it))) }
-    }
-
     @Test fun allRegisteredNamesAndClosedActionBranchesHaveSpecificPresentation() {
         val groups = mapOf(
             "memory" to listOf("assistant_memory_search", "assistant_memory_read"),
@@ -181,9 +172,6 @@ class ToolCardPresentationTest {
             assertEquals(if (length <= 65536) "browser" else "generic",
                 ToolCardPresentations.present("browser_write", args, null).category)
         }
-        mapOf("skills" to "Skills", "delegation" to "子代理委派与结果", "terminal" to "终端命令",
-            "background_job" to "后台与守护任务", "files" to "文件操作", "image_read" to "图片与视频封面")
-            .forEach { (category, title) -> assertEquals(title, ToolCardPresentations.processTitle(listOf(category))) }
     }
 
     @Test fun ordinaryCommandToolsUseTerminalPresentationWithoutChangingReceiptOrIdentity() {
@@ -199,7 +187,7 @@ class ToolCardPresentationTest {
             val mappedStates = WorkStepState.entries.map { state ->
                 val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> state }).single() as ChatTurnUi.Assistant
                 val process = turn.workProcess!!
-                assertEquals("终端命令", ToolCardPresentations.processTitle(process.segments.flatMap { it.steps }.map { it.category }))
+                assertEquals("工作流程", process.title)
                 val step = process.segments.flatMap { it.steps }.single()
                 assertEquals("terminal", step.category)
                 assertEquals(title, step.name)
@@ -217,7 +205,6 @@ class ToolCardPresentationTest {
             assertEquals(WorkStepState.UNKNOWN, withoutReceipt.workProcess!!.segments.flatMap { it.steps }.single().state)
             assertEquals(invocation, message.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation)
         }
-        assertEquals("工具链", ToolCardPresentations.processTitle(listOf("terminal", "device_read")))
         for (unknown in listOf("future_terminal_exec", "functions.terminal_exec", "terminal.exec")) {
             assertEquals("generic", ToolCardPresentations.present(unknown, "{}", null).category)
             assertEquals("generic", toolOperationGlyph(unknown, "{}"))

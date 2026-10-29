@@ -260,4 +260,50 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         assertTrue(received.single() != turn.listKey)
     }
 
+    fun testUnifiedHeaderTracksCompletedStepsAndCurrentPhaseWithoutReopening() {
+        prepare()
+        val before = ReportedReasoning("before", "first summary", blockOffset = 0)
+        val after = ReportedReasoning("after", "second summary", 0, 1, blockOffset = 1)
+        val source = message(listOf(tool("t1")), listOf(before)).copy(status = RunStatus.RUNNING)
+        fun project(message: Message, receipt: ToolReceiptUi) =
+            ChatTurnMapper.map(listOf(message), toolReceipt = { _, _ -> receipt }).single() as ChatTurnUi.Assistant
+        var turn by mutableStateOf(project(source, ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING)))
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(turn, ChatScreenActions())
+        } } }
+        awaitHeader()
+        ui.onNodeWithText("工作流程").assertIsDisplayed()
+        ui.onNodeWithText("已完成1步 · 执行中").assertIsDisplayed()
+        ui.onNodeWithTag("work-process-header").performClick()
+        val thinking = source.copy(reportedReasoning = listOf(before, after))
+        mainThread { turn = project(thinking, ToolReceiptUi(WorkStepState.OK)) }
+        ui.onNodeWithText("已完成2步 · 思考中").assertIsDisplayed()
+        assertDisclosure("work-process-header", expanded = false)
+        mainThread { turn = project(thinking.copy(status = RunStatus.COMPLETED,
+            reportedReasoning = listOf(before, after.copy(activeSinceNanos = null))), ToolReceiptUi(WorkStepState.OK)) }
+        ui.onNodeWithText("工作流程").assertIsDisplayed()
+        ui.onNodeWithText("已完成3步").assertIsDisplayed()
+        ui.onNodeWithText("已完成2步 · 思考中").assertDoesNotExist()
+        assertDisclosure("work-process-header", expanded = false)
+    }
+
+    fun testUnifiedHeaderKeepsFailureStopAndUnknownVisible() {
+        prepare()
+        for ((status, state, label) in listOf(
+            Triple(RunStatus.COMPLETED, WorkStepState.UNKNOWN, "结果未确认"),
+            Triple(RunStatus.COMPLETED, WorkStepState.FAILED, "失败"),
+            Triple(RunStatus.STOPPED, WorkStepState.UNKNOWN, "已停止"),
+            Triple(RunStatus.INTERRUPTED, WorkStepState.UNKNOWN, "已中断"))) {
+            val source = message(listOf(tool("t1")), listOf(ReportedReasoning("r1", "first summary"))).copy(status = status)
+            val turn = ChatTurnMapper.map(listOf(source), toolState = { _, _ -> state }).single() as ChatTurnUi.Assistant
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                AssistantTurn(turn, ChatScreenActions())
+            } } }
+            awaitHeader()
+            ui.onNodeWithText("工作流程").assertIsDisplayed()
+            ui.onNodeWithText("已完成1步 · $label").assertIsDisplayed()
+            ui.onNodeWithText("已完成2步").assertDoesNotExist()
+        }
+    }
+
 }

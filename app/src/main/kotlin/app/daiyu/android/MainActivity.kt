@@ -6819,7 +6819,8 @@ class MainActivity : ComponentActivity() {
             }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
             }, toolReceipt = app.daiyu.android.ui.RetainedToolOutcomes.projectionReader(controller.database, shown.map { it.second }, controller::runState, controller::runStopping)),
-                controlOwner?.takeIf { state?.phase == ExecutionPhase.STREAMING }),
+                controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
+                stopRequested = controlOwner?.let(controller::runStopping) == true),
             statusText = controller.problem ?: when { controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
                 messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
                     else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";

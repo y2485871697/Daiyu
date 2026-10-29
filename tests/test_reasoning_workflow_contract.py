@@ -51,7 +51,34 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
         self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
         self.assertIn('reasoningState.SaveableStateProvider(reported.itemId)', work)
-        self.assertIn('val steps = work.segments.flatMap { it.steps }', work)
+        self.assertIn('val progressSummary = work.progressSummary', work)
+
+    def test_outer_workflow_uses_one_title_icon_and_completed_progress(self):
+        model = (CHAT / 'ChatScreenModels.kt').read_text()
+        self.assertIn('val title: String get() = "工作流程"', model)
+        self.assertIn('segment.steps.count { it.state == WorkStepState.OK }', model)
+        self.assertIn('it.activeSinceNanos == null && hasReportedReasoningText(it.text)', model)
+        work = (CHAT / 'WorkProcessCard.kt').read_text()
+        self.assertIn('val title = work.title', work)
+        self.assertIn('ToolOperationIcons.operation("chain")', work)
+        self.assertEqual(2, work.count('Text(progressSummary'))
+        self.assertNotIn('processTitleForSteps', work)
+        self.assertNotIn('$stepCount 项', work)
+        presentation = (CHAT / 'ToolCardPresentation.kt').read_text()
+        self.assertNotIn('categoryTitles', presentation)
+        self.assertNotIn('fun processTitle', presentation)
+        icons = (CHAT / 'ToolOperationIcons.kt').read_text()
+        self.assertNotIn('fun category(', icons)
+        self.assertIn('ToolCategoryContent(step.category, it)', work)
+
+    def test_runtime_controls_use_the_exact_owner_even_after_tools_finish(self):
+        mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
+        self.assertIn('phase == ExecutionPhase.PAUSED -> ToolActivityUi.PAUSED', mapper)
+        self.assertIn('stopRequested -> ToolActivityUi.STOPPING', mapper)
+        self.assertIn('controlActivity.takeIf { index == last }', mapper)
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        self.assertIn('controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true', host)
+        self.assertIn('stopRequested = controlOwner?.let(controller::runStopping) == true', host)
 
 if __name__ == '__main__':
     unittest.main()

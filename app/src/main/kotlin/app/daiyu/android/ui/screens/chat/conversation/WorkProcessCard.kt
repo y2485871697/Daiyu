@@ -53,11 +53,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val expanded = expandedOverride ?: work.running
     val reasoningState = rememberSaveableStateHolder()
     val colors = conversationColors()
-    val steps = work.segments.flatMap { it.steps }
-    val stepCount = steps.size + work.segments.count { it.reasoning != null }
-    val category = steps.map { it.category }.distinct().singleOrNull()
-    val title = ToolCardPresentations.processTitleForSteps(steps)
-    val terminalHeader = steps.isNotEmpty() && steps.all { it.category in setOf("terminal", "background_job") }
+    val title = work.title
+    val progressSummary = work.progressSummary
     val shape = RoundedCornerShape(12.dp)
     Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
         drawContent()
@@ -65,23 +62,22 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx())
     }.border(1.dp, colors.line, shape).testTag("work-process-surface")) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val summaryWidth = maxWidth * .38f
+            val summaryWidth = maxWidth * .56f
             val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
             Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable { expandedOverride = !expanded }
                 .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
                 .padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(ToolOperationIcons.category(category),
+                Icon(ToolOperationIcons.operation("chain"),
                     null, Modifier.size(18.dp).testTag("work-process-icon"), tint = colors.accent)
                 Column(Modifier.weight(1f)) {
-                    Text(toolHeaderText(title, terminalHeader), color = colors.text,
-                        inlineContent = toolHeaderInlineContent(colors.text),
+                    Text(title, color = colors.text,
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (stacked) Text("$stepCount 项 · ${work.summary}", color = colors.muted,
+                    if (stacked) Text(progressSummary, color = colors.muted,
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
                 }
-                if (!stacked) Text("$stepCount 项 · ${work.summary}", Modifier.widthIn(max = summaryWidth),
+                if (!stacked) Text(progressSummary, Modifier.widthIn(max = summaryWidth),
                     color = colors.muted, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Icon(DaiyuIcons.ChevronRight,

@@ -7,7 +7,7 @@ import org.junit.Test
 
 class ToolHeaderTextTest {
     @Test fun bothSeparatorCharactersUseTheSameInlineBulletWithoutChangingText() {
-        for (text in listOf("Android • user", "执行命令 · Android • root", "读取输出 · Debian • root（PRoot）")) {
+        for (text in listOf("Android • user", "执行命令 · Android • root", "执行命令 · Android • Shizuku", "执行命令 · Alpine • root", "读取输出 · Debian • root（PRoot）")) {
             val styled = toolHeaderText(text, true)
             assertEquals(text, styled.text)
             assertTrue(styled.spanStyles.isEmpty())
@@ -21,7 +21,7 @@ class ToolHeaderTextTest {
         }
     }
 
-    @Test fun visibleBulletIsUniformAndCenteredWithoutEnlargingTheFontBox() {
+    @Test fun placeholderSpacingStaysUniformAndCenteredWithoutEnlargingTheFontBox() {
         assertEquals(.5.em, ToolHeaderSeparatorPlaceholder.width)
         assertEquals(ToolHeaderSeparatorPlaceholder.width, ToolHeaderSeparatorPlaceholder.height)
         assertEquals(PlaceholderVerticalAlign.Center, ToolHeaderSeparatorPlaceholder.placeholderVerticalAlign)

@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.em
 
 internal const val ToolHeaderSeparatorId = "tool-header-separator"
 
-// Match the large bullet's visible diameter, not its former 1.4em font box.
+// Keep the text spacing while drawing a smaller centered dot.
 internal val ToolHeaderSeparatorPlaceholder = Placeholder(.5.em, .5.em, PlaceholderVerticalAlign.Center)
 
 internal fun toolHeaderText(text: String, emphasizeSeparators: Boolean): AnnotatedString = buildAnnotatedString {
@@ -29,7 +29,7 @@ internal fun toolHeaderText(text: String, emphasizeSeparators: Boolean): Annotat
 internal fun toolHeaderInlineContent(color: Color): Map<String, InlineTextContent> = mapOf(
     ToolHeaderSeparatorId to InlineTextContent(ToolHeaderSeparatorPlaceholder) {
         Canvas(Modifier.fillMaxSize().testTag(ToolHeaderSeparatorId)) {
-            drawCircle(color, radius = size.minDimension / 2f, center = center)
+            drawCircle(color, radius = size.minDimension * .3f, center = center)
         }
     },
 )

@@ -165,12 +165,13 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         assertEquals(positions.size, measured.placeholderRects.size)
         // Inline placeholders use half of the resolved header font, not separately scaled 6.5sp.
         val headerFontPx = with(measured.layoutInput.density) { measured.layoutInput.style.fontSize.toPx() }
-        val expectedDiameter = ceil(headerFontPx * .5f)
+        val expectedPlaceholderSize = ceil(headerFontPx * .5f)
         val circles = ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true).fetchSemanticsNodes()
+        val paintedDiameters = mutableListOf<Float>()
         measured.placeholderRects.forEachIndexed { index, nullableRect ->
             val rect = checkNotNull(nullableRect) { "Visible separator must not be ellipsized" }
             val line = measured.getLineForOffset(positions[index])
-            assertEquals("Both dot characters must have the large bullet diameter; $case fontPx=$headerFontPx rect=$rect", expectedDiameter, rect.width, 1f)
+            assertEquals("Both dot characters must preserve their spacing; $case fontPx=$headerFontPx rect=$rect", expectedPlaceholderSize, rect.width, 1f)
             assertEquals("Bullet placeholder must stay square", rect.width, rect.height, 1f)
             assertEquals("Bullet must be vertically centered in its own text line",
                 (measured.getLineTop(line) + measured.getLineBottom(line)) / 2f, rect.center.y, 1f)
@@ -178,8 +179,8 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val circleIndex = circles.indices.single { kotlin.math.abs(circles[it].boundsInRoot.center.x - bounds.center.x) <= 1f &&
                 kotlin.math.abs(circles[it].boundsInRoot.center.y - bounds.center.y) <= 1f }
             val circle = circles[circleIndex].boundsInRoot
-            assertEquals("Drawn bullet must fill its placeholder", bounds.width, circle.width, 1f)
-            assertEquals("Drawn bullet must fill its placeholder", bounds.height, circle.height, 1f)
+            assertEquals("Canvas must preserve the placeholder bounds", bounds.width, circle.width, 1f)
+            assertEquals("Canvas must preserve the placeholder bounds", bounds.height, circle.height, 1f)
             val image = captureScreenNode(
                 ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true)[circleIndex]
             )
@@ -207,12 +208,16 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertTrue("Bullet must have actual painted pixels", ink.isNotEmpty())
             val left = ink.minOf { it.first }; val right = ink.maxOf { it.first }
             val top = ink.minOf { it.second }; val bottom = ink.maxOf { it.second }
-            assertEquals("Visible bullet width must retain the large-dot size", rect.width, (right - left + 1).toFloat(), 2f)
+            val expectedInkDiameter = minOf(rect.width, rect.height) * .6f
+            val inkDiameter = (right - left + 1).toFloat()
+            assertEquals("Visible bullet width must be 40 percent smaller", expectedInkDiameter, inkDiameter, 2f)
+            assertEquals("Visible bullet height must be 40 percent smaller", expectedInkDiameter, (bottom - top + 1).toFloat(), 2f)
+            paintedDiameters += inkDiameter
             assertEquals("Visible bullet must be round", (right - left).toFloat(), (bottom - top).toFloat(), 1f)
             assertEquals("Painted ink must be horizontally centered", (pixels.width - 1) / 2f, (left + right) / 2f, 1f)
             assertEquals("Painted ink must be vertically centered", (pixels.height - 1) / 2f, (top + bottom) / 2f, 1f)
         }
-        return checkNotNull(measured.placeholderRects.first()).width
+        return paintedDiameters.first()
     }
 
     private fun assertTarget(tag: String, scale: Float, minimumWidth: Boolean = false, reveal: Boolean = true, minimumHeight: Float = 48f) {

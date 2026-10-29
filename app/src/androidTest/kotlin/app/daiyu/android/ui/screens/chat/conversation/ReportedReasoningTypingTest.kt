@@ -39,10 +39,11 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
     }
 
     private fun assertLivePath(path: Path) {
+        val baseline = "首"
         val first = "首段思考" + "甲".repeat(180)
         val next = first + "乙".repeat(180)
         val afterResume = next + "丙".repeat(180)
-        prepare("", first, next, afterResume)
+        prepare("", baseline, first, next, afterResume)
         ui.mainClock.autoAdvance = false
         var value by mutableStateOf(turn(path, ""))
         var epoch by mutableStateOf(0L)
@@ -53,6 +54,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             }
         } }
         ui.mainClock.advanceTimeBy(32)
+        assertEquals(0, advances)
+        // Empty reasoning does not mount the visible body; its first mount is a silent baseline.
+        mainThread { value = turn(path, baseline) }
+        await { visibleText().contains(baseline) }
         assertEquals(0, advances)
         mainThread { value = turn(path, first) }
         await { advances > 0 }
@@ -102,6 +107,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertFalse(visibleText().contains(inFlight))
         val owner = if (path == Path.STANDALONE) "assistant" else "assistant:reasoning:r"
         ui.onNodeWithTag("reported-reasoning-header:$owner").performClick()
+        await {
+            ui.onNodeWithTag("reported-reasoning-header:$owner").fetchSemanticsNode()
+                .config[SemanticsProperties.StateDescription] == "已折叠"
+        }
         val paused = advances
         mainThread { value = turn(path, hidden) }
         ui.mainClock.advanceTimeBy(48)

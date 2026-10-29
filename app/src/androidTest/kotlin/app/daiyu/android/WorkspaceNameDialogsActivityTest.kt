@@ -2,10 +2,16 @@ package app.daiyu.android
 
 import android.view.KeyEvent
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -20,6 +26,8 @@ import app.daiyu.android.ui.components.WorkspaceEntryDialogs
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.floor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
     private val appearance = mutableStateOf(AppearanceSettings())
@@ -38,11 +46,13 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)
             activity.setContent {
                 AgentAppTheme(appearance.value, applyInterfaceScale = false) { key(visit) {
-                    if (open.value) {
-                        val confirm: (String) -> Unit = { confirmedName = it; confirmations.incrementAndGet(); open.value = false }
-                        val dismiss: () -> Unit = { dismissals.incrementAndGet(); open.value = false }
-                        if (rename) WorkspaceEntryDialogs("keep.txt", false, active::get, confirm, {}, dismiss)
-                        else WorkspaceCreateFolderDialog(confirm, dismiss)
+                    Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)) {
+                        if (open.value) {
+                            val confirm: (String) -> Unit = { confirmedName = it; confirmations.incrementAndGet(); open.value = false }
+                            val dismiss: () -> Unit = { dismissals.incrementAndGet(); open.value = false }
+                            if (rename) WorkspaceEntryDialogs("keep.txt", false, active::get, confirm, {}, dismiss)
+                            else WorkspaceCreateFolderDialog(confirm, dismiss)
+                        }
                     }
                 } }
             }
@@ -78,25 +88,42 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun assertColor(expected: Color, actual: Color) {
-        assertEquals(expected.red, actual.red, .02f)
-        assertEquals(expected.green, actual.green, .02f)
-        assertEquals(expected.blue, actual.blue, .02f)
+    private fun assertColor(expected: Color, actual: Color, case: String) {
+        assertEquals("$case red", expected.red, actual.red, .02f)
+        assertEquals("$case green", expected.green, actual.green, .02f)
+        assertEquals("$case blue", expected.blue, actual.blue, .02f)
     }
 
     private fun assertButtonRoles(rename: Boolean, dark: Boolean) {
         ui.waitForIdle()
         val colors = AssistantPreviewPalette(dark)
+        // Sample button ink and the exposed sheet underlay from the same frame.
+        val sheet = node("chat-selection-sheet")
+        val image = captureScreenNode(sheet).toPixelMap()
+        val sheetBounds = sheet.fetchSemanticsNode().boundsInRoot
+        val cancelBounds = node("dialog-cancel").assertIsEnabled().fetchSemanticsNode().boundsInRoot
+        val confirmBounds = node("dialog-confirm").assertIsEnabled().fetchSemanticsNode().boundsInRoot
+        val originX = floor(sheetBounds.left)
+        val originY = floor(sheetBounds.top)
+        val leftX = ((sheetBounds.left + cancelBounds.left) * .5f - originX).toInt()
+        val rightX = ((confirmBounds.right + sheetBounds.right) * .5f - originX).toInt()
+        assertTrue(leftX >= 0 && rightX < image.width && leftX < rightX)
         for ((tag, text, background, foreground) in listOf(
             ButtonRole("dialog-cancel", "取消", colors.secondaryContainer, colors.onSecondary),
             ButtonRole("dialog-confirm", if (rename) "保存" else "确定", colors.primary, colors.onPrimary))) {
-            val image = captureScreenNode(node(tag)).toPixelMap()
-            assertColor(background, image[(image.width * .2f).toInt(), image.height / 2])
+            val bounds = node(tag).fetchSemanticsNode().boundsInRoot
+            val x = (bounds.left + bounds.width * .2f - originX).toInt()
+            val y = (bounds.center.y - originY).toInt()
+            assertTrue(x in leftX..rightX && y in 0 until image.height)
+            val underlay = lerp(image[leftX, y], image[rightX, y],
+                (x - leftX).toFloat() / (rightX - leftX))
+            val case = "dark=$dark rename=$rename pureBlack=${appearance.value.pureBlackEnabled} tag=$tag x=$x y=$y underlay=$underlay"
+            assertColor(background.compositeOver(underlay), image[x, y], "$case background")
             val layouts = mutableListOf<TextLayoutResult>()
             ui.onNode(hasText(text) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertEquals(1, layouts.size)
-            assertColor(foreground, layouts.single().layoutInput.style.color)
+            assertColor(foreground, layouts.single().layoutInput.style.color, "$case foreground")
         }
     }
 

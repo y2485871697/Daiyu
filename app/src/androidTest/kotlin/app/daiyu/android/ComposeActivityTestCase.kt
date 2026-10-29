@@ -95,9 +95,8 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         try {
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
             fun sampleBounds(): androidx.compose.ui.geometry.Rect {
-                val location = IntArray(2)
-                view.getLocationOnScreen(location)
-                return node.boundsInRoot.translate(Offset(location[0].toFloat(), location[1].toFloat()))
+                val rootToScreen = node.positionOnScreen - node.positionInRoot
+                return node.boundsInRoot.translate(rootToScreen)
             }
             val bounds = awaitStableWindowFrame(view) {
                 if (view.windowToken != token || !node.layoutInfo.isPlaced ||

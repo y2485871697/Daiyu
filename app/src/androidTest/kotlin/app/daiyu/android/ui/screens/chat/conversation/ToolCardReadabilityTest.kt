@@ -8,6 +8,7 @@ import androidx.compose.ui.Alignment
 import app.daiyu.android.dismissDesktopEducationTooltip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
@@ -123,7 +124,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
                         interfaceScale = scale), applyInterfaceScale = true) {
-                        Box(Modifier.fillMaxSize()) {
+                        Box(Modifier.fillMaxSize().statusBarsPadding()) {
                             Column(Modifier.width(((if (narrow) 320f else 1216f / phoneDensity) / scale - 28f).dp)
                                 .verticalScroll(rememberScrollState()).testTag("readability-list")) {
                                 WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), if (compact) "已完成" else "已中断"),
@@ -179,7 +180,9 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val circle = circles[circleIndex].boundsInRoot
             assertEquals("Drawn bullet must fill its placeholder", bounds.width, circle.width, 1f)
             assertEquals("Drawn bullet must fill its placeholder", bounds.height, circle.height, 1f)
-            val image = ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true)[circleIndex].captureToImage()
+            val image = captureScreenNode(
+                ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true)[circleIndex]
+            )
             val pixels = image.toPixelMap()
             val background = pixels[0, 0]
             fun distance(color: Color): Float = kotlin.math.abs(color.red - background.red) +

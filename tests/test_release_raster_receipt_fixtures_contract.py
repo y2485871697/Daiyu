@@ -14,10 +14,11 @@ class ReleaseRasterReceiptFixturesContractTest(unittest.TestCase):
         self.assertNotIn('captureScreenNode(node("floating-body"))', text)
     def test_dialog_capture_retains_pre28_support_and_color_roles(self):
         text = (ANDROID / 'WorkspaceNameDialogsActivityTest.kt').read_text()
-        self.assertIn('captureScreenNode(node(tag))', text)
+        self.assertIn('captureScreenNode(sheet)', text)
+        self.assertIn('background.compositeOver(underlay)', text)
         self.assertNotIn('captureToImage()', text)
         for item in ('colors.secondaryContainer, colors.onSecondary', 'colors.primary, colors.onPrimary',
-                     'assertEquals(expected.red, actual.red, .02f)', 'pureBlackEnabled = !appearance.value.pureBlackEnabled'):
+                     'expected.red, actual.red, .02f', 'pureBlackEnabled = !appearance.value.pureBlackEnabled'):
             self.assertIn(item, text)
     def test_selected_rendered_colors_and_disabled_actions_stay_strict(self):
         text = (ANDROID / 'ui/screens/settings/SelectionAccentAppearanceTest.kt').read_text()
@@ -31,10 +32,24 @@ class ReleaseRasterReceiptFixturesContractTest(unittest.TestCase):
         self.assertIn('measured.layoutInput.style.fontSize.toPx()', text)
         self.assertIn('ceil(headerFontPx * .5f)', text)
         self.assertNotIn('{ 6.5.sp.toPx() }', text)
-        for item in ('[circleIndex].captureToImage()', 'contrast > .2f', '"Bullet must have actual painted pixels"',
+        for item in ('val image = captureScreenNode(', '[circleIndex]', 'fillMaxSize().statusBarsPadding()', 'contrast > .2f', '"Bullet must have actual painted pixels"',
                      '"Visible bullet must be round"', '"Painted ink must be vertically centered"',
                      'assertCenteredUniformDots(titleNode, "$case step"), 1f)'):
             self.assertIn(item, text)
+    def test_crops_use_compose_screen_origin_and_line_oracles_remain_strict(self):
+        helper = (ANDROID / 'ComposeActivityTestCase.kt').read_text().split('protected fun captureScreenNode', 1)[1].split('protected fun node(', 1)[0]
+        self.assertIn('node.positionOnScreen - node.positionInRoot', helper)
+        self.assertIn('node.boundsInRoot.translate(rootToScreen)', helper)
+        self.assertNotIn('view.getLocationOnScreen(location)', helper)
+        table = (ANDROID / 'ui/screens/chat/conversation/MarkdownTableStyleTest.kt').read_text()
+        for item in ('reveal first grid boundary', 'grid sample must be wholly inside viewport',
+                     'vertical physical width", stroke, vertical.size', 'horizontal physical width", stroke, horizontal.size'):
+            self.assertIn(item, table)
+        timeline = (ANDROID / 'ui/screens/chat/conversation/ChatTimelineDividerTest.kt').read_text()
+        self.assertIn('screenshot background mismatch', timeline)
+        self.assertIn('distance(pixels[x, above], background) <= .02f', timeline)
+        self.assertIn('coerceAtLeast(1), stripe.size)', timeline)
+
     def test_proot_receipt_has_consistent_host_flags_in_both_paths(self):
         text = (ANDROID / 'ui/screens/chat/conversation/ToolOperationCardTest.kt').read_text()
         self.assertIn('it.put("root", uid == 0 && !label.contains("PRoot"))', text)

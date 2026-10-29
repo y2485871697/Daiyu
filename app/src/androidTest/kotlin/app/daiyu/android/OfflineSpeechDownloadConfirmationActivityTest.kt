@@ -2,10 +2,16 @@ package app.daiyu.android
 
 import android.view.KeyEvent
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
@@ -19,6 +25,8 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
 import app.daiyu.android.ui.screens.settings.OfflineSpeechDownloadConfirmation
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.floor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** UI-only confirmation fixture: never invokes the real model downloader or microphone. */
 class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
@@ -36,9 +44,11 @@ class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
                     val current = LocalDensity.current
                     density = current.density
                     CompositionLocalProvider(LocalDensity provides Density(current.density, fontScale)) {
-                        if (open.value) OfflineSpeechDownloadConfirmation(
-                            onConfirm = { onConfirm(); open.value = false },
-                            onDismiss = { onDismiss(); open.value = false })
+                        Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)) {
+                            if (open.value) OfflineSpeechDownloadConfirmation(
+                                onConfirm = { onConfirm(); open.value = false },
+                                onDismiss = { onDismiss(); open.value = false })
+                        }
                     }
                 }
             }
@@ -79,11 +89,26 @@ class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
     private fun assertRoles(dark: Boolean) {
         ui.waitForIdle()
         val expected = AssistantPreviewPalette(dark)
+        val sheet = node("chat-selection-sheet")
+        val pixels = captureScreenNode(sheet).toPixelMap()
+        val sheetBounds = sheet.fetchSemanticsNode().boundsInRoot
+        val cancelBounds = node("dialog-cancel").fetchSemanticsNode().boundsInRoot
+        val confirmBounds = node("dialog-confirm").fetchSemanticsNode().boundsInRoot
+        val originX = floor(sheetBounds.left)
+        val originY = floor(sheetBounds.top)
+        val leftX = ((sheetBounds.left + cancelBounds.left) * .5f - originX).toInt()
+        val rightX = ((confirmBounds.right + sheetBounds.right) * .5f - originX).toInt()
+        assertTrue(leftX >= 0 && rightX < pixels.width && leftX < rightX)
         for ((tag, text, background, foreground) in listOf(
             ButtonRole("dialog-cancel", "取消", expected.secondaryContainer, expected.onSecondary),
             ButtonRole("dialog-confirm", "下载", expected.primary, expected.onPrimary))) {
-            val pixels = captureScreenNode(node(tag)).toPixelMap()
-            assertColor(background, pixels[(pixels.width * .2f).toInt(), pixels.height / 2])
+            val bounds = node(tag).fetchSemanticsNode().boundsInRoot
+            val x = (bounds.left + bounds.width * .2f - originX).toInt()
+            val y = (bounds.center.y - originY).toInt()
+            assertTrue(x in leftX..rightX && y in 0 until pixels.height)
+            val underlay = lerp(pixels[leftX, y], pixels[rightX, y],
+                (x - leftX).toFloat() / (rightX - leftX))
+            assertColor(background.compositeOver(underlay), pixels[x, y])
             val layouts = mutableListOf<TextLayoutResult>()
             ui.onNode(hasText(text) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }

@@ -2,8 +2,14 @@ package app.daiyu.android
 
 import android.view.KeyEvent
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -15,6 +21,10 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import java.util.UUID
+
+import kotlin.math.ceil
+import kotlin.math.floor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class MessageConfirmationActivityTest : WiredActivityTestCase() {
     private fun seed(): Pair<Conversation, List<Message>> {
@@ -130,34 +140,58 @@ class MessageConfirmationActivityTest : WiredActivityTestCase() {
             )
             mainThread { activity.setContent {
                 AgentAppTheme(appearance, applyInterfaceScale = false) {
-                    DaiyuConfirmDialog("确认操作", "", "确定", destructive = false,
-                        onConfirm = {}, onDismiss = {}, preview = true,
-                        showCloseButton = false, secondaryCancel = true)
+                    Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)) {
+                        DaiyuConfirmDialog("确认操作", "", "确定", destructive = false,
+                            onConfirm = {}, onDismiss = {}, preview = true,
+                            showCloseButton = false, secondaryCancel = true)
+                    }
                 }
             } }
             awaitUniqueTag("chat-selection-sheet")
             awaitNodeWindowFocus(node("chat-selection-sheet"))
             assertActions()
-            val actions = resolveAppearanceActions(dark)
-            assertButtonColors("dialog-confirm", actions.primary, actions.onPrimary)
-            assertButtonColors("dialog-cancel", actions.secondaryContainer, actions.onSecondary)
+            assertButtonColors(dark)
         }
         assertEquals(0, fixture.opens.get())
     }
 
-    private fun assertButtonColors(tag: String, background: Color, foreground: Color) {
-        val pixels = captureScreenNode(node(tag)).toPixelMap()
+    private fun assertButtonColors(dark: Boolean) {
+        val actions = resolveAppearanceActions(dark)
+        val sheet = node("chat-selection-sheet")
+        val pixels = captureScreenNode(sheet).toPixelMap()
+        val sheetBounds = sheet.fetchSemanticsNode().boundsInRoot
+        val cancelBounds = node("dialog-cancel").fetchSemanticsNode().boundsInRoot
+        val confirmBounds = node("dialog-confirm").fetchSemanticsNode().boundsInRoot
+        val originX = floor(sheetBounds.left)
+        val originY = floor(sheetBounds.top)
+        val leftX = ((sheetBounds.left + cancelBounds.left) * .5f - originX).toInt()
+        val rightX = ((confirmBounds.right + sheetBounds.right) * .5f - originX).toInt()
+        assertTrue(leftX >= 0 && rightX < pixels.width && leftX < rightX)
         fun near(actual: Color, expected: Color) =
             kotlin.math.abs(actual.red - expected.red) < .025f &&
                 kotlin.math.abs(actual.green - expected.green) < .025f &&
                 kotlin.math.abs(actual.blue - expected.blue) < .025f
-        var fill = 0
-        var text = 0
-        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
-            if (near(pixels[x, y], background)) fill++
-            if (near(pixels[x, y], foreground)) text++
+        for ((tag, background, foreground) in listOf(
+            Triple("dialog-confirm", actions.primary, actions.onPrimary),
+            Triple("dialog-cancel", actions.secondaryContainer, actions.onSecondary))) {
+            val bounds = node(tag).fetchSemanticsNode().boundsInRoot
+            val left = floor(bounds.left - originX).toInt()
+            val top = floor(bounds.top - originY).toInt()
+            val right = ceil(bounds.right - originX).toInt()
+            val bottom = ceil(bounds.bottom - originY).toInt()
+            assertTrue(left > leftX && right <= rightX)
+            assertTrue(top >= 0 && bottom <= pixels.height && top < bottom)
+            var fill = 0
+            var text = 0
+            for (y in top until bottom) for (x in left until right) {
+                val underlay = lerp(pixels[leftX, y], pixels[rightX, y],
+                    (x - leftX).toFloat() / (rightX - leftX))
+                if (near(pixels[x, y], background.compositeOver(underlay))) fill++
+                if (near(pixels[x, y], foreground)) text++
+            }
+            val area = (right - left) * (bottom - top)
+            assertTrue("$tag uses its theme background; dark=$dark fill=$fill area=$area", fill > area * .35f)
+            assertTrue("$tag uses its paired theme foreground; dark=$dark text=$text", text > 8)
         }
-        assertTrue("$tag uses its theme background", fill > pixels.width * pixels.height * .35f)
-        assertTrue("$tag uses its paired theme foreground", text > 8)
     }
 }

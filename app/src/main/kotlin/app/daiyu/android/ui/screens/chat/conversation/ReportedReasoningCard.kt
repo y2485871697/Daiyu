@@ -131,13 +131,15 @@ internal fun ReportedReasoningCard(
                     .padding(start = if (embedded) 0.dp else 11.dp, end = if (embedded) 0.dp else 11.dp, top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     summaryDisplays.filter { hasReportedReasoningText(it.reported.text) }.forEach { display ->
-                        val summary = display.reported
-                        val projection = display.projection
-                        val displayed = projection?.sources?.singleOrNull() ?: summary.text
-                        RevealedMessageMarkdown(
-                            displayed, projection?.blocks?.get(displayed), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
-                            generationComplete = generationComplete && projection != null && displayed == summary.text,
-                        )
+                        key(ownerKey, display.reported.itemId) {
+                            val summary = display.reported
+                            val projection = display.projection
+                            val displayed = projection?.sources?.singleOrNull() ?: summary.text
+                            RevealedMessageMarkdown(
+                                displayed, projection?.blocks?.get(displayed), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
+                                generationComplete = generationComplete && projection != null && displayed == summary.text,
+                            )
+                        }
                     }
                 }
             }

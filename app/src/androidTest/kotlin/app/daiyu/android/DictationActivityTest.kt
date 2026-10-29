@@ -402,11 +402,13 @@ class DictationActivityTest : WiredActivityTestCase() {
     fun testEditingPartialBackToOriginalStillRetiresRecognition() {
         for (original in listOf("", "base")) {
             setDraft(original)
-            setSelection(0, original.length)
+            if (original.isEmpty()) assertSelection(0, 0) else setSelection(0, original.length)
             voice()
             val attempt = platform.listeners.last()
             attempt.onPartialResults("临时识别")
             assertDraft("临时识别")
+            assertNotNull(host.state.value.target)
+            assertEquals(original, fixture.database.draft())
             setDraft(original)
             assertDraft(original)
             assertNull(host.state.value.target)

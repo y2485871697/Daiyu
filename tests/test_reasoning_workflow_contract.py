@@ -47,7 +47,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('if (!integratedReasoning) ReportedReasoningCard', source)
         self.assertIn('turn.isStreaming && turn.status == RunStatus.RUNNING', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
-        self.assertIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
+        self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
+        self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
         self.assertIn('reasoningState.SaveableStateProvider(reported.itemId)', work)
         self.assertIn('val steps = work.segments.flatMap { it.steps }', work)
 

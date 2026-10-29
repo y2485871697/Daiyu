@@ -27,12 +27,13 @@ class ReasoningTypewriterContract(unittest.TestCase):
         row = (CHAT / 'ReportedReasoningCard.kt').read_text().split('internal fun ReasoningStepRow(', 1)[1]
         self.assertIn('revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance', row)
 
-    def test_both_disclosures_reset_baseline_and_gate_exit_animation(self):
+    def test_child_disclosure_resets_baseline_and_parent_identity_survives_exit(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
         work = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertIn('key(ownerKey, summary.itemId, disclosureExpanded)', card)
         self.assertIn('streaming = allowLiveTiming && disclosureExpanded', card)
-        self.assertIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
+        self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
+        self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
         self.assertIn('onVisibleAdvance = { if (expanded) onVisibleAdvance() }', work)
         self.assertIn('revealResetEpoch = revealResetEpoch', work)
 

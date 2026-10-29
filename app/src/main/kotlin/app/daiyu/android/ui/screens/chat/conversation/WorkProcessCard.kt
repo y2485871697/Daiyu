@@ -104,7 +104,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
                         }
                         segment.reasoning?.let { reported ->
-                            key(ownerKey, "reasoning", reported.itemId, expanded) {
+                            key(ownerKey, "reasoning", reported.itemId) {
                                 reasoningState.SaveableStateProvider(reported.itemId) {
                                     ReasoningStepRow(ownerKey, reported,
                                         showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)

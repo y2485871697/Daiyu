@@ -4,6 +4,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -20,6 +21,10 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     private fun mapped(message: Message) = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
     private fun prepare() = runBlocking { projectMarkdown(listOf("first summary", "second summary", "answer")) }
     private fun awaitHeader() = ui.waitUntil(5_000) { ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size == 1 }
+    private fun assertDisclosure(tag: String, expanded: Boolean) {
+        ui.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(
+            SemanticsProperties.StateDescription, if (expanded) "已展开" else "已折叠"))
+    }
 
     fun testWorkflowOrderIndependentDisclosureAndNoDuplicateTopCard() {
         prepare()
@@ -42,10 +47,19 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onNodeWithText("first summary").assertDoesNotExist()
         ui.onNodeWithText("second summary").assertIsDisplayed()
         ui.onNodeWithText("answer").assertIsDisplayed()
+        assertDisclosure(first, expanded = false)
+        assertDisclosure(second, expanded = true)
         ui.onNodeWithTag("work-process-header").performClick()
+        assertDisclosure("work-process-header", expanded = false)
+        ui.onNodeWithText("second summary").assertDoesNotExist()
+        ui.onNodeWithText("answer").assertIsDisplayed()
         ui.onNodeWithTag("work-process-header").performClick()
-        ui.onNodeWithText("second summary").assertIsDisplayed()
+        assertDisclosure("work-process-header", expanded = true)
+        assertDisclosure(first, expanded = false)
+        assertDisclosure(second, expanded = true)
+        ui.onNodeWithText("second summary").assertExists().assertIsDisplayed()
         ui.onNodeWithText("first summary").assertDoesNotExist()
+        ui.onNodeWithText("answer").assertIsDisplayed()
     }
 
     fun testAppendingStepsKeepsTheExistingDisclosureIdentity() {

@@ -3917,11 +3917,11 @@ class ChatController internal constructor(private val application:Application,
         val ordinaryRun = platformAction == null && mcpPreparation == null && browserBinding == null &&
             browserPreparation == null && terminalRun == null && terminalJobRun == null && generation == null &&
             shizukuPreparation == null && shizukuAuthorization == null && virtualDisplay == null && gui == null && video == null
-        val ordinaryBrowserSettings = if (ordinaryRun) browserSettings.snapshot() else null
-        val ordinaryAssistant = if (ordinaryRun) checkNotNull(assistantStore.read(assistantContext.assistantId)).let {
-            it.copy(enabledSkillIds = it.enabledSkillIds.toList())
-        } else null
         val prepared = try {
+            val ordinaryBrowserSettings = if (ordinaryRun) browserSettings.snapshot() else null
+            val ordinaryAssistant = if (ordinaryRun) checkNotNull(assistantStore.read(assistantContext.assistantId)).let {
+                it.copy(enabledSkillIds = it.enabledSkillIds.toList())
+            } else null
             val androidCommands = RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory)
             val ordinaryGeneration = if (ordinaryRun) try { GenerationSettingsStore(application).loadSnapshot() }
                 catch (_: GenerationSettingsException) { null } else null

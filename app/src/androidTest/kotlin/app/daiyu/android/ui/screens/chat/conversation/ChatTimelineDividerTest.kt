@@ -68,6 +68,14 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
                 val center = (lineBounds.center.y - rowBounds.top).toInt()
                 assertTrue("$side sample outside capture: bounds=$lineBounds row=$rowBounds size=${pixels.width}x${pixels.height}",
                     x in 0 until pixels.width && center in 0 until pixels.height)
+                val above = center - 3
+                val below = center + 3
+                assertTrue("$side background samples outside capture", above >= 0 && below < pixels.height)
+                assertTrue("$side screenshot background mismatch; dark=$dark custom=$custom " +
+                    "row=$rowBounds line=$lineBounds capture=${pixels.width}x${pixels.height} " +
+                    "expectedBackground=$background above=${pixels[x, above]} below=${pixels[x, below]}",
+                    distance(pixels[x, above], background) <= .02f &&
+                        distance(pixels[x, below], background) <= .02f)
                 val stripe = (center - 3..center + 3).filter { it in 0 until pixels.height }
                     .map { pixels[x, it] }.filter { distance(it, background) > .02f }
                 assertEquals("$side line thickness; dark=$dark custom=$custom bounds=$lineBounds sample=$x,$center",

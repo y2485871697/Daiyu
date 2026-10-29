@@ -20,6 +20,12 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
     def test_summary_state_and_code_completion_are_bound_to_their_owner(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
         self.assertIn("key(ownerKey, summary.itemId, disclosureExpanded)", source)
+        rendered = source.split(
+            "summaryDisplays.filter { hasReportedReasoningText(it.reported.text) }.forEach { display ->", 1
+        )[1].split("private data class ReasoningSummaryDisplay", 1)[0]
+        self.assertIn("key(ownerKey, display.reported.itemId)", rendered)
+        self.assertLess(rendered.index("key(ownerKey, display.reported.itemId)"),
+                        rendered.index("RevealedMessageMarkdown("))
         self.assertIn("generationComplete = generationComplete", source)
         caller = (CHAT / "ChatMessageList.kt").read_text()
         card = caller.split("ReportedReasoningCard(", 1)[1].split("if (turn.content", 1)[0]

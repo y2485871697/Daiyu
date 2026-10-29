@@ -113,7 +113,11 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
         assertSame(grants, Fixture.field(devices, "capabilities"))
         assertSame(authorization, Fixture.field(devices, "authorization"))
         assertSame(owner, Fixture.field(devices, "owner"))
-        assertEquals(setOf(selected.capability), grants.enabled.filter { it.startsWith("platform.") }.toSet())
+        assertEquals(setOf(
+            selected.capability,
+            "platform.action.alarm", "platform.action.timer", "platform.action.volume",
+            "platform.action.media", "platform.action.wifi"
+        ), grants.enabled.filter { it.startsWith("platform.") }.toSet())
         assertTrue(AndroidToolRegistry.BATTERY_CAPABILITY in grants.enabled)
         val policy = Fixture.field(checkNotNull(devices.platformBackend), "resultPolicy") as DeviceResultPolicy
         assertFalse(policy.allowsShared(selected.toolName))

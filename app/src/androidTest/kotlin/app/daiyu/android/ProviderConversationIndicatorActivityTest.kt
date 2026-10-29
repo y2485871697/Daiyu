@@ -35,8 +35,12 @@ class ProviderConversationIndicatorActivityTest : WiredActivityTestCase() {
 
     private fun assertCurrent(slot: String) {
         reveal("provider-open-$slot", "模型提供商").assertIsDisplayed()
-        awaitUniqueTag("provider-current-$slot")
-        node("provider-current-$slot").assertIsDisplayed()
+        // The current icon belongs to a merged clickable row; inspect its child semantics.
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("provider-current-$slot", useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        ui.onNodeWithTag("provider-current-$slot", useUnmergedTree = true).assertIsDisplayed()
         ui.onAllNodesWithContentDescription("当前提供商", useUnmergedTree = true).assertCountEquals(1)
     }
 
@@ -50,7 +54,7 @@ class ProviderConversationIndicatorActivityTest : WiredActivityTestCase() {
         assertEquals(settings.model, fixture.controller.conversationModelEditing(null).second.settings.model)
         openProviderManagement()
         assertCurrent(binding.providerSlotId)
-        node("provider-current-primary").assertDoesNotExist()
+        ui.onNodeWithTag("provider-current-primary", useUnmergedTree = true).assertDoesNotExist()
         reveal("provider-open-primary", "模型提供商").performTouchInput { longClick() }
         node("provider-open-primary").assertIsOn()
         reveal("provider-open-${binding.providerSlotId}", "模型提供商").assertIsOff()
@@ -77,10 +81,10 @@ class ProviderConversationIndicatorActivityTest : WiredActivityTestCase() {
         assertCurrent(firstBinding.providerSlotId)
         mainThread { activity.select(second) }
         assertCurrent(other.providerSlotId)
-        node("provider-current-${firstBinding.providerSlotId}").assertDoesNotExist()
+        ui.onNodeWithTag("provider-current-${firstBinding.providerSlotId}", useUnmergedTree = true).assertDoesNotExist()
         mainThread { activity.select(first) }
         assertCurrent(firstBinding.providerSlotId)
-        node("provider-current-${other.providerSlotId}").assertDoesNotExist()
+        ui.onNodeWithTag("provider-current-${other.providerSlotId}", useUnmergedTree = true).assertDoesNotExist()
         assertEquals(firstBinding, fixture.database.modelBinding(first.id))
         assertEquals(other, fixture.database.modelBinding(second.id))
         assertEquals(draftBinding, fixture.database.modelBinding(null))

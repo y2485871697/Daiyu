@@ -74,8 +74,19 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
                 ui.runOnUiThread { scale = density; dark = isDark; direction = layout; appended = false }
                 ui.waitForIdle()
                 val label = "density=$density dark=$isDark layout=$layout"
-                assertSinglePaintGrid(background, foreground, density, layout, label)
                 val frame = ui.onNodeWithTag("markdown-table", useUnmergedTree = true)
+                // LocalDensity scales columns, not the physical window: reveal the first boundary.
+                val stroke = ceil(density).toInt()
+                val viewportWidth = frame.fetchSemanticsNode().boundsInRoot.width - 2 * stroke
+                val revealBoundary = (120f * density - viewportWidth / 2f).coerceAtLeast(0f)
+                if (revealBoundary > 0f) {
+                    frame.performSemanticsAction(SemanticsActions.ScrollBy) {
+                        assertTrue("$label reveal first grid boundary", it(revealBoundary, 0f))
+                    }
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                }
+                assertSinglePaintGrid(background, foreground, density, layout, label)
                 val before = frame.fetchSemanticsNode().boundsInRoot
                 val axis = frame.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
                 frame.performSemanticsAction(SemanticsActions.ScrollBy) { assertTrue(it(13f, 0f)) }
@@ -104,6 +115,9 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
             else header.left - bounds.left - (10f * density).roundToInt()
         val center = boundary.roundToInt()
         val clearY = top + stroke + 1
+        assertTrue("$label grid sample must be wholly inside viewport: center=$center clearY=$clearY capture=${pixels.width}x${pixels.height}",
+            center - stroke * 2 >= stroke && center + stroke * 2 < pixels.width - stroke &&
+                clearY in 0 until pixels.height)
         val vertical = (center - stroke * 2..center + stroke * 2).filter { difference(pixels[it, clearY], base) > .08f }
         val clearX = stroke + (4f * density).roundToInt()
         val horizontal = (top - stroke..top + stroke * 2).filter { difference(pixels[clearX, it], base) > .08f }

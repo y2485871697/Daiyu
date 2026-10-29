@@ -278,17 +278,37 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
     }
 
     fun testDeletedDuringPreparationRollsBackWithoutOpeningAndRetainsComposer() {
-        val opened=AtomicInteger()
+        val opened = AtomicInteger()
+        val factories = AtomicInteger()
         lateinit var f: Fixture
-        f=fresh(factory={ _, _ ->
-            f.controller.assistantStore.delete("default")
-            CatalogFixturePort { opened.incrementAndGet(); error("must never open") }
+        f = fresh(factory = { _, assistant ->
+            factories.incrementAndGet()
+            if (assistant.assistantId == "default") {
+                f.controller.assistantStore.delete("default")
+                CatalogFixturePort { opened.incrementAndGet(); error("must never open") }
+            } else port()
         })
-        f.controller.assistantStore.save(AssistantProfile("other","other",""))
+        f.controller.assistantStore.save(AssistantProfile("other", "other", ""))
         f.database.draft("keep")
-        assertNull(f.controller.send(null,"keep"))
-        assertEquals("keep",f.database.draft())
-        assertTrue(f.database.conversations().isEmpty()); assertEquals(0,opened.get())
+        assertNull(f.controller.send(null, "keep"))
+        assertEquals(1, factories.get())
+        assertNull(f.controller.active)
+        assertNotNull(f.controller.problem)
+        assertNull(f.controller.assistantStore.read("default"))
+        assertEquals("other", f.controller.assistantStore.selectedId.value)
+        assertEquals("keep", f.database.draft())
+        assertTrue(f.database.conversations().isEmpty())
+        assertEquals(0, opened.get())
+
+        // A new explicit send must work after the rejected preparation releases its lane.
+        f.controller.assistantStore.select("other")
+        val accepted = checkNotNull(f.controller.send(null, "keep"))
+        assertEquals("other", accepted.assistantId)
+        await(f) { f.controller.active == null }
+        assertEquals(2, factories.get())
+        assertEquals("", f.database.draft())
+        assertEquals(1, f.database.conversations().size)
+        assertEquals(0, opened.get())
     }
 
     fun testCommittedPetEventUsesAcceptanceTitleAndActualPersistedTransition() {

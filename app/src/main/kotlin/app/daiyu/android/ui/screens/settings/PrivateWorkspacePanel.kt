@@ -266,7 +266,7 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                     notice = "正在取消，等待当前读写结束"
                 }
             })
-        } else if (busy || request != null) SettingsNote("正在处理私有文件")
+        } else if (busy) SettingsNote("正在处理私有文件")
         if (listing == null && notice != null && !busy && request == null) SettingsCard {
             SettingsRow("重试读取目录", onClick = { load(null) }, tag = "workspace-private-retry")
         }

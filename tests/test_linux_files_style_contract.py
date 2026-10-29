@@ -134,6 +134,20 @@ class LinuxFilesStyleContract(unittest.TestCase):
                      '无需 Root，使用独立的私有 Linux 环境', '使用 Root 与独立挂载空间，保留已有环境']:
             self.assertNotIn(text, basic)
 
+    def test_file_scope_reads_are_silent_without_removing_operation_feedback(self):
+        private = read('PrivateWorkspacePanel.kt')
+        self.assertNotIn('else if (busy || request != null) SettingsNote("正在处理私有文件")', private)
+        self.assertIn('else if (busy) SettingsNote("正在处理私有文件")', private)
+        self.assertIn('SettingsNote(if (total == null) "正在传输：$copied" else "正在传输：$copied / $total")', private)
+        rootfs = read('LinuxRootfsPanel.kt')
+        self.assertNotIn('正在读取 Rootfs', rootfs)
+        self.assertIn('if (busy) SettingsNote("正在处理 Rootfs 文件")', rootfs)
+        shared = read('WorkspaceSettingsScreen.kt')
+        self.assertNotIn('if (busy || !loaded) SettingsNote("正在读取共享状态")', shared)
+        self.assertNotIn('正在读取目录', shared)
+        self.assertIn('if (busy) SettingsNote("正在读取共享状态")', shared)
+        self.assertIn('else if (loaded && request == null && grants.isEmpty())', shared)
+
     def test_empty_errors_confirmations_and_access_fences_remain(self):
         for name, texts in {
             'PrivateWorkspacePanel.kt': ['此私有目录为空', '仅显示前 100 项，请缩小目录范围',

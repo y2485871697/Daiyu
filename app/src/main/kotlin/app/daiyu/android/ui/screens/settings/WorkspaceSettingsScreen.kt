@@ -248,9 +248,8 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                 if (!integratedLinux) SettingsRow("刷新", onClick = { if (sharingCurrent()) refresh() }, tag = "workspace-refresh")
             }
             notice?.let { SettingsNote(it) }
-            if (busy || !loaded) SettingsNote("正在读取共享状态")
-            else if (request != null) SettingsNote("正在读取目录")
-            else if (grants.isEmpty()) {
+            if (busy) SettingsNote("正在读取共享状态")
+            else if (loaded && request == null && grants.isEmpty()) {
                 if (integratedLinux) LinuxFileEmptyState("还没有共享目录或文件")
                 else SettingsNote("还没有共享目录或文件")
             }

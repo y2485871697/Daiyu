@@ -145,7 +145,6 @@ internal fun rememberLinuxRootfsPanel(root: File?, parentVisit: AtomicBoolean = 
         else {
             notice?.let { SettingsNote(it) }
             if (busy) SettingsNote("正在处理 Rootfs 文件")
-            else if (request != null) SettingsNote("正在读取 Rootfs")
             listing?.let { shown ->
                 LinuxFileDirectoryHeader(shown.directory.relative, "linux-rootfs-parent",
                     onParent = if (shown.directory.relative.isNotEmpty()) ({ load(parent = true) }) else null,

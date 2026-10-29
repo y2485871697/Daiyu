@@ -21,6 +21,7 @@ internal class ActivityRemoteVoiceHost(
     private val runtime: ControllerVoiceRuntime,
     private val isEditorCurrent: (DictationDraftTarget) -> Boolean,
     private val applyDraft: (DictationDraftTarget, String) -> Unit,
+    private val applyPartialDraft: (DictationDraftTarget, String) -> Unit,
     private val requestPermission: () -> Unit,
 ) : AutoCloseable {
     private val gate = ActivityVoiceAudio.gate
@@ -47,13 +48,9 @@ internal class ActivityRemoteVoiceHost(
         if (prior != null) {
             try {
                 if (prior.target == target) {
-                    prior.input.repeatClick(
-                        cancel = {
-                            invalidate()
-                            mutable.value = "已取消连接豆包听写，草稿未更改"
-                        },
-                        finish = { prior.finishInput() },
-                    )
+                    prior.input.repeatClick {
+                        invalidate() // Explicit stop keeps the live draft; do not flush or accept a late final.
+                    }
                 } else invalidate()
             } catch (_: Exception) {
                 try { invalidate() } catch (_: Exception) { /* The shared gate retains failed release. */ }
@@ -124,7 +121,6 @@ internal class ActivityRemoteVoiceHost(
         var job: Job? = null
         val input = DictationInputState()
         val ended get() = input.ended
-        val finishing get() = input.finishing
         fun current() = !ended && attempt === this && isEditorCurrent(target) && runtime.current(config) &&
             lease?.let(gate::current) == true
         fun start() {
@@ -140,12 +136,12 @@ internal class ActivityRemoteVoiceHost(
                                     check(current())
                                     audio.open { scope.launch { fail() } }
                                     audio.startCapture { pcm ->
-                                        if (!frames.trySend(pcm).isSuccess && !finishing && !ended)
+                                        if (!frames.trySend(pcm).isSuccess && !ended)
                                             scope.launch { fail() }
                                     }
                                     input.capturing()
                                     if (current()) mutableListeningTarget.value = target
-                                    mutable.value = "正在豆包听写；再次点击语音结束录音，结果仅填入草稿"
+                                    mutable.value = "正在豆包听写；再次点击停止，保留已识别文字"
                                 }
                                 coroutineScope {
                                     val sender = launch {
@@ -159,7 +155,10 @@ internal class ActivityRemoteVoiceHost(
                                             withContext(Dispatchers.Main.immediate) {
                                                 check(current())
                                                 mutable.value = "豆包听写：${result.text}"
-                                                if (!result.final) mutablePreview.value = target to result.text
+                                                if (!result.final && result.text.isNotBlank()) {
+                                                    applyPartialDraft(target, result.text)
+                                                    if (current()) mutablePreview.value = target to result.text
+                                                }
                                                 if (result.final) {
                                                     complete()
                                                     // complete() fences audio/callbacks first. Its ended flag must not
@@ -181,16 +180,9 @@ internal class ActivityRemoteVoiceHost(
                 finally { if (!ended) complete() }
             }
         }
-        fun finishInput() {
-            if (!current() || !input.finishCapture()) return
-            // Stop capture before closing input; sender sends one final marker after draining frames.
-            mutableListeningTarget.value = null
-            audio.closeAndDrain(); frames.close()
-            mutable.value = "录音已结束，正在等待最终结果…"
-        }
         fun fail() {
             if (ended) return
-            complete(); mutable.value = "豆包听写失败或超时，草稿未更改；不会自动重试"
+            complete(); mutable.value = "豆包听写失败或超时，已有草稿已保留；不会自动重试"
         }
         fun complete() {
             if (ended) return
@@ -216,26 +208,16 @@ internal class ActivityRemoteVoiceHost(
 
     /** Local input lifecycle only; ownership remains exclusively with ActivityVoiceAudio.gate. */
     internal class DictationInputState {
-        private enum class Phase { CONNECTING, CAPTURING, FINISHING, ENDED }
+        private enum class Phase { CONNECTING, CAPTURING, ENDED }
         @Volatile private var phase = Phase.CONNECTING
         val ended get() = phase == Phase.ENDED
-        val finishing get() = phase == Phase.FINISHING
 
         fun capturing() {
             check(phase == Phase.CONNECTING)
             phase = Phase.CAPTURING
         }
-        fun repeatClick(cancel: () -> Unit, finish: () -> Unit) {
-            when (phase) {
-                Phase.CONNECTING -> cancel()
-                Phase.CAPTURING -> finish()
-                Phase.FINISHING, Phase.ENDED -> Unit
-            }
-        }
-        fun finishCapture(): Boolean {
-            if (phase != Phase.CAPTURING) return false
-            phase = Phase.FINISHING
-            return true
+        fun repeatClick(cancel: () -> Unit) {
+            if (phase != Phase.ENDED) cancel()
         }
         fun end() { phase = Phase.ENDED }
     }
@@ -243,11 +225,11 @@ internal class ActivityRemoteVoiceHost(
     internal companion object {
         /** Unit callback contract: the editor must throw if it cannot confirm the draft commit. */
         fun finalDraftStatus(text: String, isCurrent: () -> Boolean, commit: () -> Unit): String {
-            if (text.isBlank()) return "未识别到有效内容，草稿未更改"
+            if (text.isBlank()) return "未识别到有效内容，已有草稿已保留"
             return try {
                 check(isCurrent()) { "dictation_editor_changed" }
                 commit()
-                "听写已填入草稿，请检查后手动发送"
+                ""
             } catch (_: Exception) {
                 // Never retry or overwrite the editor to compensate for an unconfirmed commit.
                 "听写未填入草稿，原草稿已保留；请手动重试"

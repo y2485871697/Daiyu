@@ -31,7 +31,7 @@ class ActivityRemoteVoiceHostTest {
         }
         assertEquals(1, calls)
         assertEquals("recognized text", draft)
-        assertEquals("听写已填入草稿，请检查后手动发送", status)
+        assertEquals("", status)
     }
 
     @Test fun staleEditorDoesNotInvokeCommit() {
@@ -46,48 +46,31 @@ class ActivityRemoteVoiceHostTest {
         var calls = 0
         val status = ActivityRemoteVoiceHost.finalDraftStatus("  \n", { true }) { calls++ }
         assertEquals(0, calls)
-        assertTrue(status.contains("草稿未更改"))
+        assertTrue(status.contains("已有草稿已保留"))
         assertFalse(status.contains("已填入"))
     }
 
-    @Test fun connectingSecondClickCancelsInsteadOfFinishingUnopenedAudio() {
+    @Test fun connectingSecondClickCancelsInsteadOfOpeningAudio() {
         val input = ActivityRemoteVoiceHost.DictationInputState()
         var cancels = 0
-        var finishes = 0
-        var lateOpens = 0
-        input.repeatClick(cancel = { cancels++; input.end() }, finish = { finishes++ })
-        // Same fence used by Attempt.current() before audio.open on a late connection.
-        if (!input.ended) { lateOpens++; input.capturing() }
+        input.repeatClick { cancels++; input.end() }
         assertEquals(1, cancels)
-        assertEquals(0, finishes)
-        assertEquals(0, lateOpens)
         assertTrue(input.ended)
     }
 
-    @Test fun captureSecondClickFinishesExactlyOnceAndWaitingClickIsNoOp() {
+    @Test fun captureSecondClickCancelsOnce() {
         val input = ActivityRemoteVoiceHost.DictationInputState()
         var cancels = 0
-        var drains = 0
         input.capturing()
-        repeat(2) {
-            input.repeatClick(cancel = { cancels++ }, finish = {
-                if (input.finishCapture()) drains++
-            })
-        }
-        assertEquals(0, cancels)
-        assertEquals(1, drains)
-        assertTrue(input.finishing)
-        assertFalse(input.ended)
+        repeat(2) { input.repeatClick { cancels++; input.end() } }
+        assertEquals(1, cancels)
+        assertTrue(input.ended)
     }
 
-    @Test fun finishCaptureCannotCloseAudioDuringConnectionOrAfterEnd() {
+    @Test fun endedInputCannotCancelOrResume() {
         val input = ActivityRemoteVoiceHost.DictationInputState()
-        assertFalse(input.finishCapture())
-        assertFalse(input.finishing)
         input.end()
-        assertFalse(input.finishCapture())
-        input.repeatClick(cancel = { fail("ended input must not cancel again") },
-            finish = { fail("ended input must not finish") })
+        input.repeatClick { fail("ended input must not cancel again") }
         assertTrue(input.ended)
     }
 }

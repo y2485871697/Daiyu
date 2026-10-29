@@ -9,7 +9,7 @@ SRC = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 class DictationLiveComposerContractTest(unittest.TestCase):
     def test_preview_projection_is_pure_and_keeps_the_original_final_chain(self):
         main = (SRC / 'MainActivity.kt').read_text()
-        projection = main.split('private fun currentDictationProjection(', 1)[1].split('private fun applyRecognizedDraft(', 1)[0]
+        projection = main.split('private fun currentDictationProjection(', 1)[1].split('private fun applyRecognizedPartial(', 1)[0]
         for text in ('voiceEditorCurrent(target)', 'inlineMessageEditor != null', 'captured.second.preview(',
                      'original.edit(preview.text)', 'ComposerReferences(next).toSource(preview.cursor)'):
             self.assertIn(text, projection)
@@ -26,15 +26,16 @@ class DictationLiveComposerContractTest(unittest.TestCase):
                      'selectionStart = projection?.cursor', 'dictationPreview = projection != null'):
             self.assertIn(text, render)
         remote = (SRC / 'ActivityRemoteVoiceHost.kt').read_text()
-        self.assertIn('if (!result.final) mutablePreview.value = target to result.text', remote)
+        self.assertIn('if (!result.final && result.text.isNotBlank())', remote)
+        self.assertIn('applyPartialDraft(target, result.text)', remote)
         self.assertGreaterEqual(remote.count('mutablePreview.value = null'), 2)
 
     def test_real_edits_and_stale_preview_callbacks_are_fenced(self):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('currentDictationProjection() != dictationProjection', main)
         self.assertIn('(dictationProjection?.text ?: editor?.text ?: draft) != expected', main)
-        self.assertIn('selectionStart = dictationProjection.originalOffset(start)', main)
-        self.assertIn('selectionEnd = dictationProjection.originalOffset(end)', main)
+        self.assertIn('selectionStart = start.coerceIn(0, draft.length)', main)
+        self.assertIn('selectionEnd = end.coerceIn(0, draft.length)', main)
         self.assertIn('invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()\n                    updateDraft(next)', main)
         composer = (SRC / 'ui/screens/chat/conversation/ChatComposer.kt').read_text()
         self.assertIn('if (!state.dictationPreview && references.references.isEmpty() && projected.references.isEmpty())', composer)
@@ -56,16 +57,16 @@ class DictationLiveComposerContractTest(unittest.TestCase):
         self.assertIn('Toast.LENGTH_SHORT', notice)
 
 
-    def test_device_regressions_distinguish_visible_partial_from_saved_draft(self):
+    def test_device_regressions_persist_owned_partials_and_reject_stale_writes(self):
         offline = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/DictationActivityTest.kt').read_text()
-        for fragment in ('testLivePartialsRenderInComposerWithoutPersistingOrAppendingAndFinalCommitsOnce',
+        for fragment in ('testLivePartialsPersistWithoutAppendingAndFinalCorrectsTheCapturedRegion',
                          'testEditingPartialBackToOriginalStillRetiresRecognition',
                          'testStalePartialEditAndSendCallbacksCannotActOnTheNextHypothesis',
-                         'assertEquals("before OLD after", fixture.database.draft())'):
+                         'assertEquals("before $partial after", fixture.database.draft())'):
             self.assertIn(fragment, offline)
         callback = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/MainVoiceProductionCallbackTest.kt').read_text()
-        self.assertIn('testRemotePartialsRenderInComposerAndFinalPreservesReferencesWithoutNetworking', callback)
-        self.assertIn('testSystemPartialStateRendersInComposerWithoutPromotingItToFinal', callback)
+        self.assertIn('testRemotePartialsPersistAndFinalPreservesReferencesWithoutNetworking', callback)
+        self.assertIn('testSystemPartialPersistsAndSurvivesEditorDisposalWithoutSending', callback)
 
 
 if __name__ == '__main__':

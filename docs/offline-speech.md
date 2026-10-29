@@ -27,10 +27,10 @@ Implementation locations:
   flushing, 8-second no-text and 60-second capture deadlines. No recognizer-service
   intents, audio uploads/files, credential use or transcript logging.
 - `OfflineComposerHost` / `SpeechDraft`: target conversation/editor generation/draft
-  revision/session identity; captured selection; preview is not a final draft;
-  cancel and editor fences suppress queued late results. Only a final natural
-  completion writes the current captured draft, never a send API. Edit-then-undo
-  is fenced by revision, not merely text equality.
+  revision/session identity and captured selection. Each live hypothesis saves the
+  editable draft without becoming a final result; stop retains the saved text.
+  Cancel and editor fences suppress queued late results, never calling a send API.
+  Edit-then-undo is fenced by revision, not merely text equality.
 - Audio uses the existing process-wide `ActivityVoiceAudio.gate`, never a new gate.
   Preemption synchronously releases AudioRecord under its resource lock, without
   waiting for native load/main-thread callbacks. A canceled late model load cannot
@@ -103,3 +103,10 @@ model, test real Mandarin/English speech and permission revocation, audio/TTS
 preemption, lifecycle/editor switch while loading/capturing, and both API26 and
 API37.2/16-KiB devices. Source implementation and test seams alone are **not**
 evidence of successful production transcription or a passed build.
+
+## Composer draft parity
+
+- Each nonblank recognition hypothesis replaces the region captured at the start of that attempt and saves the editable draft immediately. Revised hypotheses replace that same region; they are not appended repeatedly. Literal reference tokens remain outside the editable body.
+- Explicit stop cancels capture without flushing a late final or rolling back recognized text. The next attempt captures the current saved text and cursor. Navigation, editor changes and lifecycle cancellation fence old callbacks while retaining already saved text.
+- Recognition-owned writes advance the editor revision through the ordinary draft save path without cancelling their own recorder. Only that captured target may follow the new revision; manual edits still invalidate it.
+- Dictation never sends a chat request. Successful completion is silent; permission, recognition and save failures retain their notices.

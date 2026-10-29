@@ -93,7 +93,7 @@ class MainVoiceProductionCallbackTest : WiredActivityTestCase() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun testRemotePartialsRenderInComposerAndFinalPreservesReferencesWithoutNetworking() {
+    fun testRemotePartialsPersistAndFinalPreservesReferencesWithoutNetworking() {
         val reference = "路径引用（未读取）：/workspace/keep.txt"
         lateinit var target: app.daiyu.android.voice.DictationDraftTarget
         lateinit var preview: kotlinx.coroutines.flow.MutableStateFlow<Pair<app.daiyu.android.voice.DictationDraftTarget, String>?>
@@ -106,14 +106,15 @@ class MainVoiceProductionCallbackTest : WiredActivityTestCase() {
             val host = (value("remoteVoice\$delegate") as Lazy<*>).value!!
             preview = host.javaClass.getDeclaredField("mutablePreview").apply { isAccessible = true }.get(host)
                 as kotlinx.coroutines.flow.MutableStateFlow<Pair<app.daiyu.android.voice.DictationDraftTarget, String>?>
+            invoke("applyRecognizedPartial", target, "语音")
             preview.value = target to "语音"
         }
         assertDraft("语音")
         assertSelection(2, 2)
-        assertEquals("旧正文\n$reference", fixture.database.draft())
-        mainThread { preview.value = target to "语音修订" }
+        assertEquals("语音\n$reference", fixture.database.draft())
+        mainThread { invoke("applyRecognizedPartial", target, "语音修订"); preview.value = target to "语音修订" }
         assertDraft("语音修订")
-        assertEquals("旧正文\n$reference", fixture.database.draft())
+        assertEquals("语音修订\n$reference", fixture.database.draft())
         mainThread { invoke("applyRecognizedDraft", target, "语音终稿") }
         assertDraft("语音终稿")
         assertEquals("语音终稿\n$reference", fixture.database.draft())
@@ -133,6 +134,7 @@ class MainVoiceProductionCallbackTest : WiredActivityTestCase() {
             val host = (value("remoteVoice\$delegate") as Lazy<*>).value!!
             preview = host.javaClass.getDeclaredField("mutablePreview").apply { isAccessible = true }.get(host)
                 as kotlinx.coroutines.flow.MutableStateFlow<Pair<app.daiyu.android.voice.DictationDraftTarget, String>?>
+            invoke("applyRecognizedPartial", target, "临时识别")
             preview.value = target to "临时识别"
         }
         assertDraft("临时识别")
@@ -149,7 +151,7 @@ class MainVoiceProductionCallbackTest : WiredActivityTestCase() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun testSystemPartialStateRendersInComposerWithoutPromotingItToFinal() {
+    fun testSystemPartialPersistsAndSurvivesEditorDisposalWithoutSending() {
         setDraft("leftOLDtail")
         setSelection(4, 7)
         mainThread {
@@ -159,13 +161,51 @@ class MainVoiceProductionCallbackTest : WiredActivityTestCase() {
             val host = (value("dictationHost\$delegate") as Lazy<*>).value!!
             val state = host.javaClass.getDeclaredField("mutableState").apply { isAccessible = true }.get(host)
                 as kotlinx.coroutines.flow.MutableStateFlow<app.daiyu.android.voice.ComposerDictationState>
+            invoke("applyRecognizedPartial", target, "系统识别")
             state.value = app.daiyu.android.voice.ComposerDictationState(target, preview = "系统识别")
         }
         assertDraft("left系统识别tail")
         assertSelection(8, 8)
-        assertEquals("leftOLDtail", fixture.database.draft())
+        assertEquals("left系统识别tail", fixture.database.draft())
         mainThread { activity.select(null) }
-        assertDraft("leftOLDtail")
+        assertDraft("left系统识别tail")
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testOwnedPartialsAdvanceRevisionButManualEditsRetireEveryOldCallback() {
+        setDraft("leftOLDtail")
+        setSelection(7, 4)
+        lateinit var target: app.daiyu.android.voice.DictationDraftTarget
+        mainThread {
+            target = app.daiyu.android.voice.DictationDraftTarget(null,
+                value("editorGeneration") as Long, value("draftRevision") as Long)
+            invoke("captureDictationDraft", target)
+            invoke("applyRecognizedPartial", target, "你")
+            assertTrue((value("draftRevision") as Long) > target.draftRevision)
+            invoke("applyRecognizedPartial", target, "你好")
+            invoke("applyRecognizedPartial", target, "您好")
+        }
+        assertDraft("left您好tail")
+        assertSelection(6, 6)
+        assertEquals("left您好tail", fixture.database.draft())
+        mainThread { invoke("invalidateConfiguredVoice") }
+        assertDraft("left您好tail")
+        mainThread {
+            val next = app.daiyu.android.voice.DictationDraftTarget(null,
+                value("editorGeneration") as Long, value("draftRevision") as Long)
+            invoke("captureDictationDraft", next)
+            invoke("applyRecognizedPartial", next, "世界")
+        }
+        assertDraft("left您好世界tail")
+        setDraft("manual edit")
+        mainThread {
+            try { invoke("applyRecognizedPartial", target, "late"); fail("retired partial accepted") }
+            catch (_: IllegalStateException) { }
+            try { invoke("applyRecognizedDraft", target, "late final"); fail("retired final accepted") }
+            catch (_: IllegalStateException) { }
+        }
+        assertDraft("manual edit")
+        assertEquals("manual edit", fixture.database.draft())
         assertEquals(0, fixture.opens.get())
     }
 

@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 internal interface OfflineSpeechAttempt : AutoCloseable { fun start() }
 
-/** Main-thread editor owner. A partial is presentation only, and nothing in this host can send. */
+/** Main-thread editor owner. Recognized text updates the editable draft; this host never sends. */
 internal class OfflineComposerHost(
     private val factory: (VoiceOwner, OfflineSpeechSession.Events) -> OfflineSpeechAttempt,
     private val enabled: () -> Boolean,
@@ -20,12 +20,14 @@ internal class OfflineComposerHost(
     private val current: (DictationDraftTarget) -> Boolean,
     private val currentText: () -> String,
     private val applyDraft: (DictationDraftTarget, String, Int) -> Unit,
+    private val applyPartialDraft: (DictationDraftTarget, String) -> Unit,
 ) : AutoCloseable {
     constructor(context: Context,
         requestPermission: () -> Unit,
         current: (DictationDraftTarget) -> Boolean,
         currentText: () -> String,
         applyDraft: (DictationDraftTarget, String, Int) -> Unit,
+        applyPartialDraft: (DictationDraftTarget, String) -> Unit,
         inputEnabled: () -> Boolean = { OfflineSpeechPack.state.value.enabled },
         ready: () -> Boolean = { OfflineSpeechPack.state.value.ready },
         sessionFactory: (VoiceOwner, () -> Boolean, OfflineSpeechSession.Events) -> OfflineSpeechAttempt =
@@ -36,6 +38,7 @@ internal class OfflineComposerHost(
         enabled = { inputEnabled() && ready() },
         permission = { context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED },
         requestPermission = requestPermission, current = current, currentText = currentText, applyDraft = applyDraft,
+        applyPartialDraft = applyPartialDraft,
     )
 
     data class State(val listening: Boolean = false, val preview: String = "", val status: String = "",
@@ -82,7 +85,7 @@ internal class OfflineComposerHost(
             private var captureStopped = false
             override fun listening() {
                 if (accepts(target, serial) && !captureStopped) mutable.value = mutable.value.copy(listening = true,
-                    status = "离线听写中；再次点击可取消（不会发送）")
+                    status = "离线听写中；再次点击停止，保留已识别文字")
             }
             override fun captureStopped() {
                 if (!accepts(target, serial)) return
@@ -90,13 +93,21 @@ internal class OfflineComposerHost(
                 mutable.value = mutable.value.copy(listening = false, status = "收音已结束，正在完成离线识别…")
             }
             override fun partial(text: String) {
-                if (accepts(target, serial)) mutable.value = mutable.value.copy(preview = text)
+                if (!accepts(target, serial) || text.isBlank()) return
+                if (draft.accept(currentText(), text) == null) { invalidate(); return }
+                try {
+                    applyPartialDraft(target, text)
+                    if (accepts(target, serial)) mutable.value = mutable.value.copy(preview = text)
+                } catch (_: Exception) {
+                    invalidate()
+                    mutable.value = State(status = "离线草稿保存失败，请重试")
+                }
             }
             override fun complete(text: String) {
                 if (!accepts(target, serial)) return
                 if (text.isBlank()) {
                     invalidate()
-                    mutable.value = State(status = "未识别到文本；草稿未更改")
+                    mutable.value = State(status = "未识别到更多文本；已有草稿已保留")
                     return
                 }
                 val next = draft.accept(currentText(), text)
@@ -105,18 +116,18 @@ internal class OfflineComposerHost(
                 if (next == null) return
                 try {
                     applyDraft(target, next, draft.cursor)
-                    mutable.value = State(status = "离线识别已填入捕获的草稿，请检查后手动发送")
+                    mutable.value = State()
                 } catch (_: Exception) { mutable.value = State(status = "离线草稿保存失败，请重试") }
             }
             override fun cancelled() {
                 if (!owns(target, serial)) return
                 invalidate()
-                mutable.value = State(status = "离线听写已停止；草稿未更改")
+                mutable.value = State(status = "离线听写已停止；已识别文字已保留")
             }
             override fun failed() {
                 if (!owns(target, serial)) return
                 invalidate()
-                mutable.value = State(status = "离线识别或音频释放失败；草稿未更改。若音频不可用，请重启应用")
+                mutable.value = State(status = "离线识别或音频释放失败；已有草稿已保留。若音频不可用，请重启应用")
             }
         }
         try {

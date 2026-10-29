@@ -28,7 +28,7 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         for source in (screen, messages):
             self.assertIn('speechMessageId: String? = null', source)
         self.assertIn('speechMessageId = speechMessageId', screen)
-        self.assertIn('speaking = speechMessageId == turn.listKey || speechMessageId == turn.id', messages)
+        self.assertIn('speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id', messages)
         self.assertIn('showCopyAction = hasTextActions, speaking = speaking', messages)
         self.assertNotIn('speechMessageId == turn.ownerMessageId', messages)
         self.assertIn('speechMessageId == turn.listKey', messages)

@@ -20,19 +20,21 @@ data class ComposerDictationState(
 /**
  * Main-thread Activity policy over the existing one-shot Android bridge. The Activity owns the
  * editor and permission launcher; this host never sends a message or requests a second microphone
- * session implicitly. A partial is separate presentation, never composer text or a final result.
+ * session implicitly. Partials update the editable draft without becoming a final result.
  */
 internal class ComposerDictationHost(
     private val factory: (DictationDraftTarget, DraftDictationHost, (DictationDraftTarget) -> Boolean) -> DraftDictationSession,
     private val isEditorCurrent: (DictationDraftTarget) -> Boolean,
     private val requestPermission: (DictationDraftTarget) -> Unit,
     private val applyDraft: (DictationDraftTarget, String) -> Unit,
+    private val applyPartialDraft: (DictationDraftTarget, String) -> Unit,
 ) : AutoCloseable {
     constructor(context: Context, gate: AudioOwnerGate,
         isEditorCurrent: (DictationDraftTarget) -> Boolean,
         requestPermission: (DictationDraftTarget) -> Unit,
-        applyDraft: (DictationDraftTarget, String) -> Unit) : this(
-        productionFactory(context, gate), isEditorCurrent, requestPermission, applyDraft)
+        applyDraft: (DictationDraftTarget, String) -> Unit,
+        applyPartialDraft: (DictationDraftTarget, String) -> Unit) : this(
+        productionFactory(context, gate), isEditorCurrent, requestPermission, applyDraft, applyPartialDraft)
 
     private var active: DictationDraftTarget? = null
     private var session: DraftDictationSession? = null
@@ -56,7 +58,11 @@ internal class ComposerDictationHost(
             }
         }
         override fun partial(target: DictationDraftTarget, text: String) {
-            if (current(target)) mutableState.value = mutableState.value.copy(preview = text)
+            if (!current(target) || text.isBlank()) return
+            try {
+                applyPartialDraft(target, text)
+                if (current(target)) mutableState.value = mutableState.value.copy(preview = text)
+            } catch (_: Exception) { invalidate(); failure("听写草稿未能保存，请重试") }
         }
         override fun finalDraft(target: DictationDraftTarget, transcript: ConfirmableTranscript) {
             if (!current(target) || !transcript.isDone()) return
@@ -66,7 +72,7 @@ internal class ComposerDictationHost(
             invalidate()
             try {
                 applyDraft(target, text)
-                mutableState.value = ComposerDictationState(status = "听写已填入草稿，请检查后手动发送")
+                mutableState.value = ComposerDictationState()
             } catch (_: Exception) { failure("听写草稿未能保存，请重试") }
         }
         override fun state(target: DictationDraftTarget, state: VoiceState) {
@@ -83,14 +89,14 @@ internal class ComposerDictationHost(
                     failure(when (state.detail) {
                         "recognizer_permission_denied" -> "未获得麦克风权限；授权后需再次点击语音"
                         "recognizer_unavailable" -> "系统语音识别服务不可用"
-                        "empty_recognition" -> "没有识别到最终文本；草稿未更改"
+                        "empty_recognition" -> "没有识别到最终文本；已有草稿已保留"
                         "recognizer_release_failed" -> "音频释放失败，已阻止继续使用语音；请重启应用"
-                        else -> "听写失败；草稿未更改，请手动重试"
+                        else -> "听写失败；已有草稿已保留，请手动重试"
                     })
                 }
                 VoicePhase.CANCELLED -> {
                     active = null; session = null
-                    mutableState.value = ComposerDictationState(status = "听写已停止；草稿未更改")
+                    mutableState.value = ComposerDictationState(status = "听写已停止；已识别文字已保留")
                 }
                 else -> Unit
             }

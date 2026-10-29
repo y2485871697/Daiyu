@@ -329,7 +329,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         platform.listeners.last().onPartialResults(result("not final"))
         instrumentation.waitForIdleSync()
         assertDraft("not final")
-        assertEquals("original", fixture.database.draft())
+        assertEquals("not final", fixture.database.draft())
         assertEquals("not final", host.state.value.preview)
         platform.listeners.last().onResults(result("editable result"))
         instrumentation.waitForIdleSync()
@@ -339,7 +339,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(1, platform.destroys)
     }
 
-    fun testLivePartialsRenderInComposerWithoutPersistingOrAppendingAndFinalCommitsOnce() {
+    fun testLivePartialsPersistWithoutAppendingAndFinalCorrectsTheCapturedRegion() {
         setDraft("before OLD after")
         setSelection(10, 7)
         voice()
@@ -350,7 +350,7 @@ class DictationActivityTest : WiredActivityTestCase() {
             attempt.onPartialResults(partial)
             assertDraft("before $partial after")
             assertSelection(7 + partial.length, 7 + partial.length)
-            assertEquals("before OLD after", fixture.database.draft())
+            assertEquals("before $partial after", fixture.database.draft())
             assertEquals(target, host.state.value.target)
             assertTrue(host.state.value.listening)
         }
@@ -367,7 +367,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(1, platform.destroys)
     }
 
-    fun testCancellingLivePartialRestoresOriginalDraftAndRejectsLateFinal() {
+    fun testCancellingLivePartialKeepsRecognizedDraftAndRejectsLateFinal() {
         setDraft("original")
         setSelection(0, 8)
         voice()
@@ -375,12 +375,37 @@ class DictationActivityTest : WiredActivityTestCase() {
         attempt.onReadyForSpeech(Bundle())
         attempt.onPartialResults("临时识别")
         assertDraft("临时识别")
-        assertEquals("original", fixture.database.draft())
+        assertEquals("临时识别", fixture.database.draft())
         voice(expectNewAttempt = false)
-        assertDraft("original")
+        assertDraft("临时识别")
         attempt.onResults("late final")
-        assertDraft("original")
-        assertEquals("original", fixture.database.draft())
+        assertDraft("临时识别")
+        assertEquals("临时识别", fixture.database.draft())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testStopThenRecordAgainKeepsBothRoundsAndCurrentCursor() {
+        setDraft("left😀tail")
+        setSelection(6, 4)
+        voice()
+        val first = platform.listeners.last()
+        first.onPartialResults("您好")
+        assertDraft("left您好tail")
+        voice(expectNewAttempt = false)
+        assertDraft("left您好tail")
+        assertSelection(6, 6)
+        assertEquals("left您好tail", fixture.database.draft())
+        voice()
+        val second = platform.listeners.last()
+        second.onPartialResults("世界")
+        assertDraft("left您好世界tail")
+        first.onResults("late from first")
+        assertDraft("left您好世界tail")
+        second.onResults("世界！")
+        assertDraft("left您好世界！tail")
+        assertSelection(9, 9)
+        assertEquals("left您好世界！tail", fixture.database.draft())
+        assertEquals("", host.state.value.status)
         assertEquals(0, fixture.opens.get())
     }
 
@@ -408,7 +433,7 @@ class DictationActivityTest : WiredActivityTestCase() {
             attempt.onPartialResults("临时识别")
             assertDraft("临时识别")
             assertNotNull(host.state.value.target)
-            assertEquals(original, fixture.database.draft())
+            assertEquals("临时识别", fixture.database.draft())
             setDraft(original)
             assertDraft(original)
             assertNull(host.state.value.target)
@@ -419,7 +444,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testMovingCursorInPartialRestoresOriginalWithoutPromotingTheHypothesis() {
+    fun testMovingCursorKeepsRecognizedTextAndRetiresTheRecorder() {
         setDraft("leftOLDtail")
         setSelection(4, 7)
         voice()
@@ -427,11 +452,11 @@ class DictationActivityTest : WiredActivityTestCase() {
         attempt.onPartialResults("语音")
         assertDraft("left语音tail")
         setSelection(0, 0)
-        assertDraft("leftOLDtail")
+        assertDraft("left语音tail")
         assertSelection(0, 0)
         assertNull(host.state.value.target)
         attempt.onResults("late overwrite")
-        assertEquals("leftOLDtail", fixture.database.draft())
+        assertEquals("left语音tail", fixture.database.draft())
         assertEquals(0, fixture.opens.get())
     }
 
@@ -450,7 +475,7 @@ class DictationActivityTest : WiredActivityTestCase() {
             stale.onSend("original")
         }
         assertDraft("最新识别")
-        assertEquals("original", fixture.database.draft())
+        assertEquals("最新识别", fixture.database.draft())
         assertNotNull(host.state.value.target)
         assertEquals(0, fixture.opens.get())
     }
@@ -520,7 +545,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testActivityNewSessionAndConversationDoNotAcceptOldFinalOrPromotePartial() {
+    fun testActivityNewSessionAndConversationRejectOldFinalAndKeepRecognizedDraft() {
         setDraft("base")
         voice()
         val old = platform.listeners.last()
@@ -534,7 +559,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         current.onPartialResults(result("preview only"))
         current.onResults(result(""))
         instrumentation.waitForIdleSync()
-        assertDraft("base")
+        assertDraft("basepreview only")
         voice()
         val oldConversation = platform.listeners.last()
         val other = fixture.database.create()

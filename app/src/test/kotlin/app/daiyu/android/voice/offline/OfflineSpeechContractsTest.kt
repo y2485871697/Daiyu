@@ -57,16 +57,18 @@ class OfflineSpeechContractsTest {
         override fun close() { closes++ }
     }
 
-    @Test fun hostPreviewsAreNotDraftsAndFinalReplacesOnlyCapturedSelection() {
+    @Test fun hostLiveTextAndFinalReplaceOnlyCapturedSelection() {
         val attempts = mutableListOf<Attempt>()
         var text = "before OLD after"
         var cursor = -1
         var commits = 0
+        val liveDraft = SpeechDraft(text, 7, 10)
         val target = DictationDraftTarget("chat", 2, 3)
         val host = OfflineComposerHost(
             factory = { _, events -> Attempt(events).also { attempts += it } },
             enabled = { true }, permission = { true }, requestPermission = { fail("unexpected permission") },
             current = { it == target }, currentText = { text },
+            applyPartialDraft = { _, recognized -> text = checkNotNull(liveDraft.accept(text, recognized)); cursor = liveDraft.cursor },
             applyDraft = { captured, next, position -> assertEquals(target, captured); text = next; cursor = position; commits++ })
         host.start(target, text, 7, 10)
         assertFalse(host.state.value.listening) // Loading a model / clicking is not capture.
@@ -75,7 +77,7 @@ class OfflineSpeechContractsTest {
         assertFalse(host.state.value.listening) // A partial alone is not the authoritative event.
         attempts.single().events.listening()
         assertTrue(host.state.value.listening)
-        assertEquals("before OLD after", text)
+        assertEquals("before preview after", text)
         assertEquals("preview", host.state.value.preview)
         attempts.single().events.complete("你好")
         assertEquals("before 你好 after", text)
@@ -89,6 +91,107 @@ class OfflineSpeechContractsTest {
         assertEquals(1, attempts.single().closes)
     }
 
+    @Test fun stopKeepsLiveTextAndNextAttemptAppendsAtTheCurrentCursor() {
+        val attempts = mutableListOf<Attempt>()
+        var text = "leftOLDtail"
+        var cursor = 4
+        var live = SpeechDraft(text, 7, 4)
+        val target = DictationDraftTarget(null, 2, 3)
+        val host = OfflineComposerHost(
+            factory = { _, events -> Attempt(events).also { attempts += it } },
+            enabled = { true }, permission = { true }, requestPermission = { fail("unexpected permission") },
+            current = { true }, currentText = { text },
+            applyPartialDraft = { _, recognized -> text = checkNotNull(live.accept(text, recognized)); cursor = live.cursor },
+            applyDraft = { _, next, position -> text = next; cursor = position })
+        host.start(target, text, 7, 4)
+        val first = attempts.single()
+        first.events.listening()
+        first.events.partial("你")
+        first.events.partial("你好")
+        first.events.partial("您好")
+        assertEquals("left您好tail", text)
+        host.start(target, text, cursor, cursor) // Same explicit repeat-click cancellation as the host API.
+        assertEquals("left您好tail", text)
+        assertEquals(6, cursor)
+        assertEquals(1, first.closes)
+        assertNull(host.state.value.target)
+        first.events.partial("late partial"); first.events.complete("late final")
+        assertEquals("left您好tail", text)
+        live = SpeechDraft(text, cursor, cursor)
+        host.start(target, text, cursor, cursor) // Reuse target deliberately: serial must still fence first.
+        val second = attempts.last()
+        second.events.partial("世界")
+        first.events.complete("stale after restart")
+        assertEquals("left您好世界tail", text)
+        second.events.complete("世界！")
+        assertEquals("left您好世界！tail", text)
+        assertEquals(9, cursor)
+        assertEquals("", host.state.value.status)
+        live = SpeechDraft(text, 8, 4) // A new reverse selection, not the previous recording region.
+        host.start(target, text, 8, 4)
+        attempts.last().events.partial("😀")
+        assertEquals("left😀！tail", text)
+        assertEquals(6, cursor)
+        attempts.last().events.complete("😀好")
+        assertEquals("left😀好！tail", text)
+        assertEquals(7, cursor)
+        host.close()
+    }
+
+    @Test fun cancellationFailureAndEmptyFinalKeepAlreadyRecognizedText() {
+        for (terminal in listOf("cancel", "failure", "empty", "invalidate")) {
+            var text = "已有😀"
+            var live = SpeechDraft(text, text.length, text.length)
+            lateinit var attempt: Attempt
+            val target = DictationDraftTarget("chat", 0, 0)
+            val host = OfflineComposerHost(
+                factory = { _, events -> Attempt(events).also { attempt = it } },
+                enabled = { true }, permission = { true }, requestPermission = { fail("unexpected permission") },
+                current = { true }, currentText = { text },
+                applyPartialDraft = { _, recognized -> text = checkNotNull(live.accept(text, recognized)) },
+                applyDraft = { _, next, _ -> text = next })
+            host.start(target, text, text.length, text.length)
+            attempt.events.partial("第一轮")
+            when (terminal) {
+                "cancel" -> attempt.events.cancelled()
+                "failure" -> attempt.events.failed()
+                "empty" -> attempt.events.complete("")
+                else -> host.invalidate()
+            }
+            assertEquals(terminal, "已有😀第一轮", text)
+            if (terminal == "failure") assertTrue(host.state.value.status.contains("失败"))
+            if (terminal == "empty") assertTrue(host.state.value.status.contains("未识别"))
+            attempt.events.partial("late"); attempt.events.complete("late")
+            assertEquals("已有😀第一轮", text)
+            assertEquals(1, attempt.closes)
+            host.close()
+        }
+    }
+
+    @Test fun changedEditorAndFailedPartialSaveRetireTheAttempt() {
+        var text = "original"
+        lateinit var attempt: Attempt
+        var writes = 0
+        val host = OfflineComposerHost(
+            factory = { _, events -> Attempt(events).also { attempt = it } },
+            enabled = { true }, permission = { true }, requestPermission = {}, current = { true },
+            currentText = { text }, applyPartialDraft = { _, _ -> writes++; error("save failed") },
+            applyDraft = { _, _, _ -> fail("retired final") })
+        val target = DictationDraftTarget(null, 0, 0)
+        host.start(target, text, 0, text.length)
+        attempt.events.partial("recognized")
+        assertEquals(1, writes)
+        assertEquals("original", text)
+        assertTrue(host.state.value.status.contains("保存失败"))
+        attempt.events.complete("late")
+        host.start(target, text, 0, text.length)
+        text = "user edited"
+        attempt.events.partial("stale")
+        assertEquals(1, writes)
+        assertNull(host.state.value.target)
+        host.close()
+    }
+
     @Test fun permissionNeverAutoStartsAndInvalidatedOrOtherEditorResultsCannotCommit() {
         val attempts = mutableListOf<Attempt>()
         var granted = false
@@ -99,7 +202,8 @@ class OfflineSpeechContractsTest {
         val host = OfflineComposerHost(
             factory = { _, events -> Attempt(events).also { attempts += it } },
             enabled = { true }, permission = { granted }, requestPermission = { requests++ },
-            current = { current }, currentText = { "draft" }, applyDraft = { _, _, _ -> commits++ })
+            current = { current }, currentText = { "draft" },
+            applyPartialDraft = { _, _ -> fail("unexpected partial") }, applyDraft = { _, _, _ -> commits++ })
         host.start(target, "draft", 0, 5)
         assertEquals(1, requests)
         assertTrue(attempts.isEmpty())
@@ -130,6 +234,7 @@ class OfflineSpeechContractsTest {
             factory = { _, events -> Attempt(events).also { attempts += it } },
             enabled = { true }, permission = { granted }, requestPermission = { requests++ },
             current = { it == currentTarget }, currentText = { "draft" },
+            applyPartialDraft = { _, _ -> fail("unexpected partial") },
             applyDraft = { _, _, _ -> fail("permission result cannot edit a draft") })
         host.start(target, "draft", 0, 5)
         host.start(target, "draft", 0, 5)
@@ -159,6 +264,7 @@ class OfflineSpeechContractsTest {
                 requests++
                 check(!failLaunch) { "launcher unavailable" }
             }, current = { it == target }, currentText = { "draft" },
+            applyPartialDraft = { _, _ -> fail("unexpected partial") },
             applyDraft = { _, _, _ -> fail("permission result cannot edit a draft") })
         host.start(target, "draft", 0, 5)
         assertTrue(host.state.value.status.contains("无法请求"))
@@ -185,6 +291,7 @@ class OfflineSpeechContractsTest {
             factory = { _, _ -> error("late permission cannot create a session") },
             enabled = { true }, permission = { false }, requestPermission = { requests++ },
             current = { it == target }, currentText = { "draft" },
+            applyPartialDraft = { _, _ -> fail("unexpected partial") },
             applyDraft = { _, _, _ -> fail("late permission cannot edit a draft") })
         host.start(target, "draft", 0, 5)
         host.invalidate()
@@ -300,6 +407,8 @@ class OfflineSpeechContractsTest {
         }
         var worker: Thread? = null
         var commits = 0
+        var text = "draft"
+        val liveDraft = SpeechDraft(text, 0, 5)
         val target = DictationDraftTarget("chat", 0, 0)
         val gate = AudioOwnerGate()
         val host = OfflineComposerHost(
@@ -307,7 +416,9 @@ class OfflineSpeechContractsTest {
                 Executor { task -> worker = Thread(task, "delayed-decoder-test").also { it.start() } },
                 { pending.add(it); Unit }) },
             enabled = { true }, permission = { true }, requestPermission = { fail("already granted") },
-            current = { it == target }, currentText = { "draft" }, applyDraft = { _, _, _ -> commits++ })
+            current = { it == target }, currentText = { text },
+            applyPartialDraft = { _, recognized -> text = checkNotNull(liveDraft.accept(text, recognized)) },
+            applyDraft = { _, next, _ -> text = next; commits++ })
         try {
             host.start(target, "draft", 0, 5)
             assertTrue(captured.await(5, java.util.concurrent.TimeUnit.SECONDS))
@@ -392,10 +503,14 @@ class OfflineSpeechContractsTest {
         val attempts = mutableListOf<Attempt>()
         val target = DictationDraftTarget("chat", 0, 0)
         var commits = 0
+        var text = "draft"
+        val liveDraft = SpeechDraft(text, 0, 5)
         val host = OfflineComposerHost(
             factory = { _, events -> Attempt(events).also { attempts += it } },
             enabled = { true }, permission = { true }, requestPermission = { fail("already granted") },
-            current = { it == target }, currentText = { "draft" }, applyDraft = { _, _, _ -> commits++ })
+            current = { it == target }, currentText = { text },
+            applyPartialDraft = { _, recognized -> text = checkNotNull(liveDraft.accept(text, recognized)) },
+            applyDraft = { _, next, _ -> text = next; commits++ })
         host.start(target, "draft", 0, 5)
         val old = attempts.single().events
         old.listening()

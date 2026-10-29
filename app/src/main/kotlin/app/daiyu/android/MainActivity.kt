@@ -419,21 +419,21 @@ class MainActivity : ComponentActivity() {
             virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending && pendingTextSend == null &&
             controller.textSendState() == null &&
             target.conversationId == selected?.id?.value &&
-            target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
+            target.editorGeneration == editorGeneration &&
+            (target.draftRevision == draftRevision ||
+                (dictationDraft?.first == target && dictationDraftRevision == draftRevision))
+    private var applyingDictationDraft = false
+    private var dictationDraftRevision: Long? = null
     private var dictationDraft: Pair<DictationDraftTarget, app.daiyu.android.voice.offline.SpeechDraft>? = null
     private fun captureDictationDraft(target: DictationDraftTarget) {
+        dictationDraftRevision = draftRevision
         val projection = ComposerReferences(draft)
         dictationDraft = target to app.daiyu.android.voice.offline.SpeechDraft(projection.text,
             projection.toVisible(selectionStart), projection.toVisible(selectionEnd))
     }
     private data class DictationProjection(
-        val target: DictationDraftTarget, val original: String,
-        val preview: app.daiyu.android.voice.offline.SpeechDraft.Preview,
-        val text: String, val cursor: Int,
-    ) {
-        fun originalOffset(offset: Int) = ComposerReferences(original).toSource(
-            preview.originalOffset(ComposerReferences(text).toVisible(offset)))
-    }
+        val target: DictationDraftTarget, val text: String, val cursor: Int,
+    )
     private fun currentDictationProjection(
         offline: app.daiyu.android.voice.offline.OfflineComposerHost.State = offlineHost.state.value,
         system: app.daiyu.android.voice.ComposerDictationState = dictationHost.state.value,
@@ -453,7 +453,21 @@ class MainActivity : ComponentActivity() {
         val original = ComposerReferences(draft)
         val preview = captured.second.preview(original.text, text) ?: return null
         val next = original.edit(preview.text)
-        return DictationProjection(target, draft, preview, next, ComposerReferences(next).toSource(preview.cursor))
+        return DictationProjection(target, next, ComposerReferences(next).toSource(preview.cursor))
+    }
+    private fun applyRecognizedPartial(target: DictationDraftTarget, recognized: String) {
+        if (recognized.isBlank()) return
+        val captured = dictationDraft?.takeIf { it.first == target }?.second
+        check(voiceEditorCurrent(target) && captured != null) { "dictation_editor_changed" }
+        val projection = ComposerReferences(draft)
+        val body = checkNotNull(captured.accept(projection.text, recognized)) { "dictation_draft_changed" }
+        val next = projection.edit(body)
+        // Only this owned recognition write may advance the draft without cancelling its recorder.
+        applyingDictationDraft = true
+        try { updateDraft(next) } finally { applyingDictationDraft = false }
+        check(draft == next) { "dictation_draft_not_saved" }
+        selectionStart = ComposerReferences(next).toSource(captured.cursor); selectionEnd = selectionStart
+        publishChat(rowsChanged = false)
     }
     private fun applyRecognizedDraft(target: DictationDraftTarget, recognized: String) {
         val captured = dictationDraft?.takeIf { it.first == target }?.second
@@ -462,6 +476,7 @@ class MainActivity : ComponentActivity() {
         val body = checkNotNull(captured.accept(projection.text, recognized)) { "dictation_draft_changed" }
         val next = projection.edit(body)
         dictationDraft = null
+        dictationDraftRevision = null
         updateDraft(next)
         check(draft == next) { "dictation_draft_not_saved" }
         selectionStart = ComposerReferences(next).toSource(captured.cursor); selectionEnd = selectionStart
@@ -469,7 +484,7 @@ class MainActivity : ComponentActivity() {
     }
     private val remoteVoice by lazy {
         ActivityRemoteVoiceHost(applicationContext, lifecycleScope, voiceRuntime, ::voiceEditorCurrent,
-            applyDraft = ::applyRecognizedDraft,
+            applyDraft = ::applyRecognizedDraft, applyPartialDraft = ::applyRecognizedPartial,
             requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) })
     }
     private val cascadeVoice by lazy {
@@ -484,6 +499,7 @@ class MainActivity : ComponentActivity() {
     private fun invalidatePreparedSpeech() {
         voiceRequestEpoch++
         dictationDraft = null
+        dictationDraftRevision = null
         voiceConsent?.dismiss(); voiceConsent = null; preparedSpeech = null
     }
     private fun invalidateConfiguredVoice() {
@@ -532,17 +548,9 @@ class MainActivity : ComponentActivity() {
     }
     private val dictationHost: ComposerDictationHost by lazy {
         ComposerDictationHost(applicationContext, audioGate,
-            isEditorCurrent = { target ->
-                activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-                    selectionReady && controller.ready && !controller.dataBusy &&
-                    !imageHost.sending && !shizukuWritesBlocked && terminalEditor == null &&
-                    virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending && pendingTextSend == null &&
-                    controller.textSendState() == null &&
-                    target.conversationId == selected?.id?.value &&
-                    target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
-            },
+            isEditorCurrent = ::voiceEditorCurrent,
             requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) },
-            applyDraft = ::applyRecognizedDraft)
+            applyDraft = ::applyRecognizedDraft, applyPartialDraft = ::applyRecognizedPartial)
     }
     @Volatile private var offlineSpeechReady: () -> Boolean = {
         app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready
@@ -570,19 +578,15 @@ class MainActivity : ComponentActivity() {
             },
             ready = { offlineSpeechReady() },
             sessionFactory = { owner, allowed, events -> offlineSpeechSessionFactory(owner, allowed, events) },
-            current = { target ->
-                activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-                    selectionReady && controller.ready && !controller.dataBusy && pendingTextSend == null &&
-                    controller.textSendState() == null && !imageHost.sending && !shizukuWritesBlocked &&
-                    terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
-                    target.conversationId == selected?.id?.value &&
-                    target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
-            },
+            current = ::voiceEditorCurrent,
             inputEnabled = { VoiceSettingsPreferences(applicationContext).enabled("input") &&
                 voiceRuntime.configuration.value?.dictation != "DOUBAO" },
             currentText = { ComposerReferences(draft).text },
-            applyDraft = { _, text, cursor ->
+            applyPartialDraft = ::applyRecognizedPartial,
+            applyDraft = { target, text, cursor ->
+                check(voiceEditorCurrent(target)) { "dictation_editor_changed" }
                 dictationDraft = null
+                dictationDraftRevision = null
                 val next = ComposerReferences(draft).edit(text)
                 updateDraft(next)
                 check(draft == next) { "offline_dictation_draft_not_saved" }
@@ -591,6 +595,11 @@ class MainActivity : ComponentActivity() {
             })
     }
     private fun startOfflineDictation() {
+        if (offlineHost.state.value.target?.let(::voiceEditorCurrent) == true) {
+            offlineHost.invalidate()
+            invalidatePreparedSpeech()
+            return
+        }
         invalidateConfiguredVoice()
         dictationHost.invalidate()
         val projection = ComposerReferences(draft)
@@ -1364,8 +1373,12 @@ class MainActivity : ComponentActivity() {
         }
     private var draftRevision = 0L
         set(value) {
-            if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelGenerationEditor(); messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) {
+                revokeChatReferencePick(); revokePlatformActionVisit(); cancelGenerationEditor(); messageActionHost.invalidate()
+                if (!applyingDictationDraft) { invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            }
             field = value
+            if (applyingDictationDraft) dictationDraftRevision = value
         }
     private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
         val ticket: ChatController.TextSendTicket = ChatController.TextSendTicket(),
@@ -3137,9 +3150,12 @@ class MainActivity : ComponentActivity() {
                             else voiceConfigurationToast("请先下载离线语音包")
                         }
                         "DOUBAO" -> {
-                            val ownedTarget = remoteVoice.dictationTarget?.takeIf(::voiceEditorCurrent) ?: target
-                            revokeUniversalVoice(); invalidatePreparedSpeech(); dictationHost.invalidate(); offlineHost.invalidate()
-                            captureDictationDraft(ownedTarget); remoteVoice.dictate(ownedTarget)
+                            val ownedTarget = remoteVoice.dictationTarget?.takeIf(::voiceEditorCurrent)
+                            if (ownedTarget != null) remoteVoice.dictate(ownedTarget)
+                            else {
+                                revokeUniversalVoice(); invalidatePreparedSpeech(); dictationHost.invalidate(); offlineHost.invalidate()
+                                captureDictationDraft(target); remoteVoice.dictate(target)
+                            }
                         }
                         else -> toast("听写未配置或凭据不可用，请打开语音设置")
                     }
@@ -3260,8 +3276,8 @@ class MainActivity : ComponentActivity() {
                 if (next == expected) {
                     if (start != dictationProjection.cursor || end != dictationProjection.cursor) {
                         invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
-                        selectionStart = dictationProjection.originalOffset(start)
-                        selectionEnd = dictationProjection.originalOffset(end)
+                        selectionStart = start.coerceIn(0, draft.length)
+                        selectionEnd = end.coerceIn(0, draft.length)
                         publishChat(rowsChanged = false)
                     }
                     true
@@ -3525,7 +3541,7 @@ class MainActivity : ComponentActivity() {
         app.daiyu.android.ui.components.DictationStatusNotice(
             app.daiyu.android.voice.ComposerDictationState(offline.target, offline.listening, status = offline.status),
             engineeringUi, tag = "offline-speech-status")
-        if (engineeringUi && offline.preview.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = "离线识别预览（尚未写入草稿）：${offline.preview}",
+        if (engineeringUi && offline.preview.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = "离线听写（已保留在草稿）：${offline.preview}",
             modifier = Modifier.testTag("offline-speech-preview"))
         val cascadeStatus by cascadeVoice.status.collectAsStateWithLifecycle()
         val conversationVoiceConfig by voiceRuntime.conversationConfiguration.collectAsStateWithLifecycle()
@@ -6289,8 +6305,7 @@ class MainActivity : ComponentActivity() {
         if (value == draft) return
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
-        dictationHost.invalidate()
-        offlineHost.invalidate()
+        if (!applyingDictationDraft) { dictationHost.invalidate(); offlineHost.invalidate() }
         cancelShizukuEditor()
         cancelBrowserEditor()
         cancelGuiEditor()

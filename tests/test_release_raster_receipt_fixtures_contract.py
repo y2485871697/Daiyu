@@ -50,6 +50,25 @@ class ReleaseRasterReceiptFixturesContractTest(unittest.TestCase):
         self.assertIn('distance(pixels[x, above], background) <= .02f', timeline)
         self.assertIn('coerceAtLeast(1), stripe.size)', timeline)
 
+    def test_timeline_background_is_immutable_and_geometry_matches_capture(self):
+        text = (ANDROID / 'ui/screens/chat/conversation/ChatTimelineDividerTest.kt').read_text()
+        method = text.split('fun testBothTimelineLinesUseReadableThemeColorWithoutChangingTheirGeometry()', 1)[1].split('\n    fun ', 1)[0]
+        for token in ('val fixtureBackground = colors.background', 'background = fixtureBackground',
+                      '.background(fixtureBackground)', 'compositeOver(fixtureBackground)',
+                      'val lineBoundsBySide =', 'val image = raster.captureToImage()',
+                      '.testTag("timeline-raster-fixture")',
+                      'val rowBounds = raster.fetchSemanticsNode().boundsInRoot',
+                      'timeline geometry changed during capture', 'line geometry changed during capture',
+                      'val lineBounds = lineBoundsBySide.getValue(side)',
+                      'distance(pixels[x, above], background) <= .02f',
+                      'distance(pixels[x, below], background) <= .02f',
+                      'coerceAtLeast(1), stripe.size)', 'distance(it, expected) < .035f',
+                      'distance(previous, background) + .04f'):
+            self.assertIn(token, method)
+        self.assertNotIn('.background(background)', method)
+        self.assertLess(method.index('val lineBoundsBySide ='), method.index('val image ='))
+        self.assertNotIn('Thread.sleep', method)
+
     def test_proot_receipt_has_consistent_host_flags_in_both_paths(self):
         text = (ANDROID / 'ui/screens/chat/conversation/ToolOperationCardTest.kt').read_text()
         self.assertIn('it.put("root", uid == 0 && !label.contains("PRoot"))', text)

@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
@@ -43,11 +44,13 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
                 ), applyInterfaceScale = false) {
                     density = LocalDensity.current
                     val colors = MiuixTheme.colorScheme
-                    background = colors.background
-                    expected = colors.onSurfaceVariantSummary.copy(alpha = .5f).compositeOver(background)
-                    previous = colors.outline.copy(alpha = .55f).compositeOver(background)
+                    val fixtureBackground = colors.background
+                    background = fixtureBackground
+                    expected = colors.onSurfaceVariantSummary.copy(alpha = .5f).compositeOver(fixtureBackground)
+                    previous = colors.outline.copy(alpha = .55f).compositeOver(fixtureBackground)
                     BoxWithConstraints(Modifier.fillMaxWidth().statusBarsPadding()) {
-                        Box(Modifier.width(minOf(maxWidth, 360.dp)).background(background)) { ChatTimelineDivider(entry) }
+                        Box(Modifier.width(minOf(maxWidth, 360.dp)).background(fixtureBackground)
+                            .testTag("timeline-raster-fixture")) { ChatTimelineDivider(entry) }
                     }
                 }
             } }
@@ -55,12 +58,23 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
             awaitVisualIdle()
             val timeline = ui.onNodeWithTag("timeline:contrast").assertIsDisplayed()
             ui.onNodeWithText("主代理 · 已压缩 49 条消息").assertIsDisplayed()
-            val pixels = captureScreenNode(timeline).toPixelMap()
-            val rowBounds = timeline.fetchSemanticsNode().boundsInRoot
+            val raster = ui.onNodeWithTag("timeline-raster-fixture").assertIsDisplayed()
+            val rowBounds = raster.fetchSemanticsNode().boundsInRoot
+            val lineBoundsBySide = listOf("left", "right").associateWith { side ->
+                ui.onNodeWithTag("timeline-line-$side:contrast")
+                    .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            }
+            val image = raster.captureToImage()
+            assertEquals("timeline geometry changed during capture", rowBounds,
+                raster.fetchSemanticsNode().boundsInRoot)
+            for ((side, before) in lineBoundsBySide) {
+                assertEquals("$side line geometry changed during capture", before,
+                    ui.onNodeWithTag("timeline-line-$side:contrast").fetchSemanticsNode().boundsInRoot)
+            }
+            val pixels = image.toPixelMap()
             fun distance(a: Color, b: Color): Float = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
             for (side in listOf("left", "right")) {
-                val lineBounds = ui.onNodeWithTag("timeline-line-$side:contrast")
-                    .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                val lineBounds = lineBoundsBySide.getValue(side)
                 assertTrue("$side line must have positive width", lineBounds.width > 0f)
                 assertEquals("$side geometry must keep half-dp height",
                     with(density) { .5.dp.roundToPx() }.coerceAtLeast(1).toFloat(), lineBounds.height, .01f)

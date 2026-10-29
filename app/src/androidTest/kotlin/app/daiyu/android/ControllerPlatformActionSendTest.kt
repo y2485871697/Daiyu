@@ -9,6 +9,7 @@ import app.daiyu.android.domain.tools.ExecutionReceipt
 import app.daiyu.android.domain.tools.TaskAuthorization
 import app.daiyu.android.integration.tools.PlatformActionScope
 import app.daiyu.android.integration.tools.RunCatalogTools
+import app.daiyu.android.integration.tools.SQLiteToolLedgerStore
 import app.daiyu.android.platform.actions.*
 import app.daiyu.android.storage.*
 import java.io.File
@@ -48,6 +49,7 @@ class ControllerPlatformActionSendTest : InstrumentationTestCase() {
         super.setUp()
         app = App(testContext(instrumentation.targetContext, "platform-actions-${UUID.randomUUID()}-"))
         db = ConversationDatabase(app)
+        SQLiteToolLedgerStore.createSchema(db.writableDatabase)
         alias = "app.daiyu.android.test.platform.${UUID.randomUUID()}"
         val settings = ModelSettingsStore(app, alias)
         settings.save(ModelSettings("https://example.invalid", "offline-fixture", "synthetic-key", false))

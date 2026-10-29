@@ -56,5 +56,21 @@ class PreparationDisclosureAlphaContract(unittest.TestCase):
                       'lastUserText == exactApprovalText.get()'):
             self.assertIn(token, fixture)
 
+    def test_negative_ledger_oracle_installs_real_schema_before_controller(self):
+        fixture = (TEST / 'ControllerPlatformActionSendTest.kt').read_text()
+        setup = fixture.split('override fun setUp()', 1)[1].split('override fun tearDown()', 1)[0]
+        install = setup.index('SQLiteToolLedgerStore.createSchema(db.writableDatabase)')
+        self.assertGreater(install, setup.index('db = ConversationDatabase(app)'))
+        self.assertLess(install, setup.index('controller = ChatController('))
+        rejected = fixture.split('fun testRejectAndOrdinarySendDoNotInheritPlatformApproval()', 1)[1].split('\n    fun ', 1)[0]
+        for token in ('SELECT 1 FROM tool_ledger WHERE call_id=?', 'arrayOf("exact-call")',
+                      'assertFalse("rejected exact invocation must not enter the ledger", it.moveToFirst())',
+                      'assertOrdinaryRun(', 'assertEquals(0, backendCalls.get())'):
+            self.assertIn(token, rejected)
+        approved = fixture.split('fun testExactApprovalUsesOriginalCasThenCatalogAndDurableReceipt()', 1)[1].split('\n    fun ', 1)[0]
+        self.assertIn('SELECT state,task_id FROM tool_ledger WHERE call_id=?', approved)
+        self.assertIn('assertEquals("CONFIRMED", it.getString(0))', approved)
+        self.assertIn('assertEquals(preview.runId.value, it.getString(1))', approved)
+
 if __name__ == '__main__':
     unittest.main()

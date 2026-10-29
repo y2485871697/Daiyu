@@ -403,7 +403,7 @@ class RunTerminalToolsTest {
 
     @Test fun throwingCancellationCheckDoesNotLeakDrainCount() {
         val f = Fixture(plan())
-        assertEquals(DispatchOutcome.Unknown("adapter_result_unconfirmed"), dispatchAtBinding(f) { error("cancel callback failed") })
+        assertEquals(DispatchOutcome.Unknown("adapter_result_unconfirmed_invalid_state"), dispatchAtBinding(f) { error("cancel callback failed") })
         assertEquals(0, f.calls.get())
         f.adapter.close()
         assertEquals(TerminalToolsCloseResult.Drained, f.adapter.awaitClose(1))

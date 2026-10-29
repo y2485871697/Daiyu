@@ -112,7 +112,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
                          'Scrolling never moves the divider', 'Scrolling never moves the footer',
                          'Hint and add centers', 'Text line box centers',
                          'assertEquals(before, prefs.all)', 'assertEquals(0, fixture.opens.get())',
-                         'node("subagent-config-window").assertDoesNotExist()', 'awaitNodeWindowFocus(done)'):
+                         'node("subagent-config-window").assertDoesNotExist()', 'awaitDialogTouchReady(done)'):
             self.assertIn(required, test)
         self.assertNotIn('node("subagent-collaboration-add-row").scrollToVisible()', test)
         for obsolete in ('Add row remains inside the scroll body', 'Last card gap stays 8dp',

@@ -14,12 +14,29 @@ class CollaborationDoneCompletionContractTest(unittest.TestCase):
         click = 'done.assertIsDisplayed().assertIsEnabled().performClick()'
         self.assertEqual(1, body.count(click))
         self.assertLess(body.index('node("subagent-config-window").assertDoesNotExist()'), body.index('val done = node("subagent-collaboration-done")'))
-        self.assertLess(body.index('awaitNodeWindowFocus(done)'), body.index(click))
+        ready = 'awaitDialogTouchReady(done)'
+        self.assertLess(body.index('val done = node("subagent-collaboration-done")'), body.index(ready))
+        self.assertLess(body.index(ready), body.index(click))
+        self.assertNotIn('awaitNodeWindowFocus(done)', body)
         self.assertLess(body.index(click), body.index('ui.waitUntil(5_000)'))
         self.assertIn('.fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()', body)
         self.assertLess(body.index('ui.waitUntil(5_000)'), body.index('node("subagent-collaboration-card").assertDoesNotExist()'))
         for forbidden in ['Thread.sleep', 'SystemClock.sleep', 'dismissIme', 'awaitImeFrame', 'repeat(', 'onNodeWithText("完成").performClick()']:
             self.assertNotIn(forbidden, body)
+
+    def test_touch_ready_keeps_enter_focus_and_native_stability(self):
+        base = SOURCE.with_name('ComposeActivityTestCase.kt').read_text(encoding='utf-8')
+        helper = base.split('protected fun awaitDialogTouchReady(target: SemanticsNodeInteraction) {', 1)[1].split('\n    }\n', 1)[0]
+        self.assertLess(helper.index('awaitDialogEnter(target)'), helper.index('awaitNodeWindowFocus(target)'))
+        self.assertLess(helper.index('awaitNodeWindowFocus(target)'), helper.index('awaitStableWindowFrame(view)'))
+        self.assertLess(helper.index('awaitStableWindowFrame(view)'), helper.index('target.assertIsDisplayed().assertIsEnabled()'))
+        for required in ('view.windowToken != token', '!current.layoutInfo.isPlaced',
+                         '!current.layoutInfo.coordinates.isAttached'):
+            self.assertIn(required, helper)
+        stable = base.split('protected fun <T : Any> awaitStableWindowFrame(', 1)[1].split('\n    }\n', 1)[0]
+        for required in ('android.view.Choreographer.FrameCallback',
+                         'android.view.ViewTreeObserver.OnPreDrawListener', 'next == previous', 'stableFrames >= 2'):
+            self.assertIn(required, stable)
 
     def test_original_geometry_preferences_and_zero_io_oracles_remain(self):
         body = self.body()

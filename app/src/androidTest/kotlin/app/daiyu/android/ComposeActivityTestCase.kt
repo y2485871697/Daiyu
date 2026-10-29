@@ -290,6 +290,24 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         }
         ui.waitForIdle()
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    protected fun awaitDialogTouchReady(target: SemanticsNodeInteraction) {
+        awaitDialogEnter(target)
+        awaitNodeWindowFocus(target)
+        val current = target.fetchSemanticsNode()
+        val view = (current.root as androidx.compose.ui.platform.ViewRootForTest).view
+        val token = view.windowToken
+        awaitStableWindowFrame(view) {
+            if (view.windowToken != token || !current.layoutInfo.isPlaced ||
+                !current.layoutInfo.coordinates.isAttached) null else {
+                val bounds = current.boundsInRoot.translate(current.positionOnScreen - current.positionInRoot)
+                bounds.takeIf { it.width > 0f && it.height > 0f &&
+                    listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() } }
+            }
+        }
+        target.assertIsDisplayed().assertIsEnabled()
+    }
+
     /** Observe completed traversals, not Compose virtual time or transient IME visibility. */
     protected fun <T : Any> awaitStableWindowFrame(view: android.view.View, sample: () -> T?): T {
         val accepted = java.util.concurrent.atomic.AtomicReference<T?>()

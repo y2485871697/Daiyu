@@ -298,9 +298,9 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
             }
         } }
         awaitUniqueTag("conversation-workspace-sheet")
+        awaitDialogEnter(node("conversation-workspace-sheet"))
         awaitNodeWindowFocus(node("conversation-workspace-sheet"))
-        ui.mainClock.advanceTimeBy(1_000)
-        awaitVisualIdle()
+        awaitDialogImeFrame(node("conversation-workspace-sheet"), visible = false)
     }
 
     fun testFirstPageHasFixedListAndAddOpensFolderPicker() {
@@ -434,14 +434,55 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(0, switches); assertEquals(0, saves); assertEquals(1, edits) }
     }
 
+    private data class WorkspaceFrame(
+        val sheet: androidx.compose.ui.geometry.Rect,
+        val footer: androidx.compose.ui.geometry.Rect,
+        val windowWidth: Int, val windowHeight: Int,
+        val windowX: Int, val windowY: Int,
+        val token: android.os.IBinder,
+        val systemBars: androidx.core.graphics.Insets,
+        val imeBottom: Int,
+    )
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun settledWorkspaceFrame(footerTag: String): WorkspaceFrame {
+        val sheet = node("conversation-workspace-sheet").fetchSemanticsNode()
+        val footer = node(footerTag).assertIsDisplayed().fetchSemanticsNode()
+        assertSame(sheet.root, footer.root)
+        val view = (sheet.root as androidx.compose.ui.platform.ViewRootForTest).view
+        return awaitStableWindowFrame(view) {
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+                ?: return@awaitStableWindowFrame null
+            val token = view.windowToken ?: return@awaitStableWindowFrame null
+            if (insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) ||
+                !sheet.layoutInfo.isPlaced || !sheet.layoutInfo.coordinates.isAttached ||
+                !footer.layoutInfo.isPlaced || !footer.layoutInfo.coordinates.isAttached)
+                return@awaitStableWindowFrame null
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            WorkspaceFrame(sheet.boundsInRoot, footer.boundsInRoot, view.width, view.height,
+                location[0], location[1], token,
+                insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars()),
+                insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom)
+        }
+    }
+
     fun testMultiDeleteIsOneCallbackAndFooterDoesNotMove() {
         showSheet()
-        val top = node("conversation-workspace-sheet").fetchSemanticsNode().boundsInRoot.top
-        val footerBottom = node("workspace-add").fetchSemanticsNode().boundsInRoot.bottom
+        val before = settledWorkspaceFrame("workspace-add")
         node("workspace-path-card:0").performTouchInput { longClick() }
         node("workspace-path-card:1").performClick()
-        assertEquals(top, node("conversation-workspace-sheet").fetchSemanticsNode().boundsInRoot.top, 1f)
-        assertEquals(footerBottom, node("workspace-delete").fetchSemanticsNode().boundsInRoot.bottom, 1f)
+        val after = settledWorkspaceFrame("workspace-delete")
+        val diagnostic = "before=$before after=$after"
+        assertEquals(diagnostic, before.windowWidth, after.windowWidth)
+        assertEquals(diagnostic, before.windowHeight, after.windowHeight)
+        assertEquals(diagnostic, before.windowX, after.windowX)
+        assertEquals(diagnostic, before.windowY, after.windowY)
+        assertEquals(diagnostic, before.token, after.token)
+        assertEquals(diagnostic, before.systemBars, after.systemBars)
+        assertEquals(diagnostic, before.imeBottom, after.imeBottom)
+        assertEquals(diagnostic, before.sheet.top, after.sheet.top, 1f)
+        assertEquals(diagnostic, before.footer.bottom, after.footer.bottom, 1f)
         ui.runOnIdle { assertEquals(setOf(0, 1), selectedIndices); assertEquals(0, switches) }
         node("workspace-delete").performClick()
         node("workspace-add").assertExists()

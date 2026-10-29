@@ -281,12 +281,15 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 }
                 assertEquals(before, prefs.all)
                 add.performTouchInput { click(androidx.compose.ui.geometry.Offset(2f * density, height / 2f)) }
-                node("subagent-config-window").assertIsDisplayed()
-                ui.onNodeWithText("取消").performClick()
+                val configuration = node("subagent-config-window").assertIsDisplayed()
+                awaitDialogEnter(configuration)
+                val cancel = ui.onNodeWithText("取消")
+                awaitDialogTouchReady(cancel)
+                cancel.performClick()
                 node("subagent-config-window").assertDoesNotExist()
                 assertEquals(before, prefs.all)
                 val done = node("subagent-collaboration-done")
-                awaitNodeWindowFocus(done)
+                awaitDialogTouchReady(done)
                 done.assertIsDisplayed().assertIsEnabled().performClick()
                 ui.waitUntil(5_000) {
                     ui.onAllNodesWithTag("subagent-collaboration-card")

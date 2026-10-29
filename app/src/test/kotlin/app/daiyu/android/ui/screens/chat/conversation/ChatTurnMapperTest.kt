@@ -100,7 +100,8 @@ class ChatTurnMapperTest {
 
     @Test fun retainsTrailingToolInsteadOfDroppingIt() {
         val turn = mapped(message(tool("one"), text("answer", "Partial answer"), tool("two", null), status = RunStatus.RUNNING))
-        assertEquals("Partial answer", turn.finalText)
+        assertEquals("", turn.finalText)
+        assertEquals("Partial answer", turn.workProcess!!.segments.firstNotNullOf { it.narration })
         assertEquals(listOf("one", "two"), turn.workProcess!!.segments.flatMap { it.steps }.map { it.id })
         assertEquals(WorkStepState.PENDING, turn.workProcess.segments.last().steps.last().state)
     }
@@ -132,7 +133,8 @@ class ChatTurnMapperTest {
 
         assertEquals(turns.size, turns.map { it.listKey }.toSet().size)
         assertEquals(singleKey, turns.first().listKey)
-        assertEquals(messages.map { it.id.value }, turns.map { it.id })
+        assertEquals(listOf(owner.id.value, legacyAlias.id.value, encodedAlias.id.value), turns.map { it.id })
+        assertEquals(4, turns.filterIsInstance<ChatTurnUi.Assistant>().flatMap { it.sourceListKeys }.toSet().size)
         assertTrue(turns.all { it.listKey != it.id })
     }
 
@@ -182,10 +184,12 @@ class ChatTurnMapperTest {
         val turns = ChatTurnMapper.map(listOf(owner))
         val assistantTurns = turns.filterIsInstance<ChatTurnUi.Assistant>()
 
-        assertEquals(listOf("assistant", "supplement", "assistant", "assistant"), turns.map { it.id })
-        assertEquals(4, turns.map { it.listKey }.toSet().size)
+        assertEquals(listOf("assistant", "supplement", "assistant"), turns.map { it.id })
+        assertEquals(3, turns.map { it.listKey }.toSet().size)
         assertEquals(listOf("0", "1", "2").map { "turn:12:conversation3:run9:assistant1:$it" },
-            assistantTurns.map { it.listKey })
+            assistantTurns.flatMap { it.sourceListKeys })
+        assertEquals(listOf(0, 1), assistantTurns.map { it.segmentIndex })
+        assertEquals("turn:12:conversation3:run9:assistant1:2", assistantTurns.last().actionKey)
         assertEquals(turns.map { it.listKey }, ChatTurnMapper.map(listOf(owner), timestamp = { "different timestamp" }).map { it.listKey })
     }
 
@@ -245,7 +249,8 @@ class ChatTurnMapperTest {
         val active = message(text("live", "answer"), status = RunStatus.RUNNING)
         val history = ChatTurnMapper.map(listOf(active.copy(blocks = listOf(text("old", "before"))), active))
         val live = ChatTurnMapper.withStreamingOwner(history, active)
-        assertEquals(listOf(false, true), live.filterIsInstance<ChatTurnUi.Assistant>().map { it.isStreaming })
+        assertEquals(listOf(true), live.filterIsInstance<ChatTurnUi.Assistant>().map { it.isStreaming })
+        assertEquals(listOf(0, 1), (live.single() as ChatTurnUi.Assistant).sourceSegmentIndices)
         assertEquals(history.map { it.listKey }, live.map { it.listKey })
         val paused = ChatTurnMapper.withStreamingOwner(live, null)
         assertTrue(paused.filterIsInstance<ChatTurnUi.Assistant>().none { it.isStreaming })

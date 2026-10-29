@@ -225,6 +225,10 @@ class VoiceHostTest {
         assertNull(voiceHostText(turns, "missing"))
         val updated = turns.map { if (it is ChatTurnUi.Assistant) it.copy(finalText = "latest answer") else it }
         assertEquals("latest answer", voiceHostText(updated, "assistant"))
+        val grouped = updated.map { if (it is ChatTurnUi.Assistant) it.copy(
+            sourceListKeys = listOf(it.listKey, "exact-tail"), sourceSegmentIndices = listOf(0, 1)) else it }
+        assertEquals("latest answer", voiceHostText(grouped, "exact-tail"))
+        assertNull(voiceHostText(grouped, "unrelated-tail"))
         val onlyTool = ChatTurnMapper.map(listOf(assistant.copy(blocks = listOf(tool))))
         assertEquals("", voiceHostText(onlyTool, "assistant"))
     }

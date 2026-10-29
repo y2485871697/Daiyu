@@ -28,14 +28,15 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('MessageContentUi.Reasoning(it)', source)
         self.assertIn('WorkSegmentUi(reasoning = it)', source)
         self.assertIn('.groupBy { it.blockOffset ?: 0 }', source)
-        self.assertIn('owner in workflowOwners', source)
-        self.assertIn('val orderedTail', source)
+        self.assertIn('val hasWorkflow = hasTools', source)
+        self.assertIn('val display = mutableListOf<DisplayMessage>()', source)
+        self.assertNotIn('val orderedTail', source)
 
     def test_integrated_card_reuses_disclosure_and_preserves_dedicated_tool_route(self):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
         self.assertIn('embedded: Boolean = false', source)
         self.assertIn('embedded = true', source)
-        self.assertIn('rememberMarkdownProjection(listOf(text), streaming = !generationComplete)', source)
+        self.assertIn('rememberMarkdownProjection(listOf(text), streaming = streamingProjection)', source)
         self.assertIn('generationComplete && projection != null && displayed == summary.text', source)
         self.assertIn('ReasoningDisclosureDurationMillis = 220', source)
         content = (CHAT / 'MessageContent.kt').read_text()

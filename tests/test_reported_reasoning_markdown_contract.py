@@ -8,7 +8,7 @@ CHAT = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class ReportedReasoningMarkdownContractTest(unittest.TestCase):
     def test_summary_uses_background_projection_and_shared_renderer(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn("rememberMarkdownProjection(listOf(text), streaming = !generationComplete)", source)
+        self.assertIn("rememberMarkdownProjection(listOf(text), streaming = streamingProjection)", source)
         self.assertIn("summary.text.takeIf(::hasReportedReasoningText).orEmpty()", source)
         self.assertIn("RevealedMessageMarkdown(", source)
         leaf = (CHAT / "MessageMarkdown.kt").read_text().split("internal fun RevealedMessageMarkdown(", 1)[1].split("@Composable", 1)[0]
@@ -19,9 +19,9 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
 
     def test_summary_state_and_code_completion_are_bound_to_their_owner(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn("key(ownerKey, summary.itemId, disclosureExpanded)", source)
+        self.assertIn("key(ownerKey, summary.itemId)", source)
         rendered = source.split(
-            "summaryDisplays.filter { hasReportedReasoningText(it.reported.text) }.forEach { display ->", 1
+            "summaryDisplays.filter { it.projection?.sources?.any(::hasReportedReasoningText) == true }.forEach { display ->", 1
         )[1].split("private data class ReasoningSummaryDisplay", 1)[0]
         self.assertIn("key(ownerKey, display.reported.itemId)", rendered)
         self.assertLess(rendered.index("key(ownerKey, display.reported.itemId)"),

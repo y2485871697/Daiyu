@@ -19,7 +19,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     private fun message(blocks: List<MessageBlock>, summaries: List<ReportedReasoning>) = Message(
         MessageId("a"), ConversationId("c"), RunId("r"), "assistant", blocks, RunStatus.COMPLETED, reportedReasoning = summaries)
     private fun mapped(message: Message) = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
-    private fun prepare() = runBlocking { projectMarkdown(listOf("first summary", "second summary", "answer")) }
+    private fun prepare() = runBlocking {
+        val sources = listOf("first summary", "second summary", "answer")
+        projectMarkdown(sources)
+        projectMarkdown(sources, parser = streamingMarkdownParser)
+    }
     private fun awaitHeader() = ui.waitUntil(5_000) { ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size == 1 }
     private fun assertDisclosure(tag: String, expanded: Boolean) {
         ui.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(
@@ -107,11 +111,12 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testLiveReasoningOpensItsWorkflowAndCollapsesAtCompletion() {
         prepare()
         var reported by mutableStateOf(ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 1))
+        var running by mutableStateOf(true)
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                val turn = mapped(message(listOf(tool("t1")), listOf(reported)).copy(status = RunStatus.RUNNING))
-                    .copy(isStreaming = true)
+                val turn = mapped(message(listOf(tool("t1")), listOf(reported)).copy(status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED))
+                    .copy(isStreaming = running)
                 AssistantTurn(turn, ChatScreenActions())
             } } }
             ui.mainClock.advanceTimeBy(300)
@@ -125,6 +130,13 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             mainThread { reported = reported.copy(elapsedMillis = 5_400L, activeSinceNanos = null) }
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+            ui.onNodeWithTag("reasoning-step-state:r1", useUnmergedTree = true).assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已思考"))
+            ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
+            mainThread { running = false }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
                 androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
             ui.onNodeWithTag("work-process-header").performClick()
             ui.mainClock.advanceTimeBy(300)
@@ -133,4 +145,119 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.onNodeWithText("first summary").assertDoesNotExist()
         } finally { ui.mainClock.autoAdvance = true }
     }
+    fun testProtocolTailAndThoughtCompletionKeepOneExpandedWorkflow() {
+        prepare()
+        val first = MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("t1")),
+            reportedReasoning = listOf(ReportedReasoning("r1", "first summary", 100, blockOffset = 0)))
+        val tail = MessageHistorySegment(MessageId("a"), "assistant", emptyList(),
+            reportedReasoning = listOf(ReportedReasoning("r2", "second summary", 0, 0, blockOffset = 0)))
+        var source by mutableStateOf(message(emptyList(), emptyList()).copy(status = RunStatus.RUNNING,
+            historySegments = listOf(first, tail)))
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val turn = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(source)), source).single() as ChatTurnUi.Assistant
+            AssistantTurn(turn, ChatScreenActions())
+        } } }
+        awaitHeader()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+        ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
+        ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+        ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
+        mainThread { source = source.copy(historySegments = listOf(first,
+            tail.copy(blocks = listOf(MessageBlock.Text("answer", "answer")),
+                reportedReasoning = tail.reportedReasoning.map { it.frozen() }))) }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("answer", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+        ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
+        ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithText("second summary", useUnmergedTree = true).assertIsDisplayed()
+        ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+        mainThread { source = source.copy(status = RunStatus.COMPLETED,
+            historySegments = source.historySegments.map { part ->
+                part.copy(reportedReasoning = part.reportedReasoning.map { it.frozen() })
+            }) }
+        ui.waitUntil(5_000) { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
+            androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
+        ui.onNodeWithTag("work-process-header").performClick()
+        val key = mapped(source).listKey
+        ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r1").performClick()
+        ui.onNodeWithTag("reported-reasoning-header:$key:reasoning:r2").performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
+        ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    fun testToolOnlyRunningFlowStartsOpenAndManualOpenDoesNotPreventTerminalCollapse() {
+        var source by mutableStateOf(message(listOf(tool("t1")), emptyList()).copy(status = RunStatus.RUNNING))
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(mapped(source), ChatScreenActions(), toolContent = { Text("unique tool detail") })
+        } } }
+        awaitHeader()
+        ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
+        ui.onNodeWithText("unique tool detail").assertIsDisplayed()
+        ui.onNodeWithTag("tool-step-header:t1").performClick()
+        ui.onNodeWithTag("tool-step-header:t1").performClick()
+        ui.onNodeWithTag("work-process-header").performClick()
+        mainThread { source = source.copy(status = RunStatus.COMPLETED) }
+        ui.waitUntil(5_000) { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
+            androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("terminal tool details stay collapsed") {
+            it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
+        })
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("unique tool detail").fetchSemanticsNodes().isEmpty() }
+    }
+
+    fun testMixedContentKeepsDisclosureAcrossPrefixChangesAndCollapsesOnlyAtTerminal() {
+        prepare()
+        val step = mapped(message(listOf(tool("t1")), emptyList())).workProcess!!.segments.single().steps.single()
+        val first = MessageContentUi.Reasoning(ReportedReasoning("r1", "first summary"))
+        val second = MessageContentUi.Reasoning(ReportedReasoning("r2", "second summary"))
+        val initial = listOf(first, MessageContentUi.Tool(step), second)
+        var content by mutableStateOf(initial)
+        var running by mutableStateOf(true)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            MessageContent(content, ChatScreenActions(), null, markdown = true, flowRunning = running,
+                toolContent = { Text("mixed tool detail") },
+                reasoningBody = { reasoning, connector -> ReasoningStepRow("mixed", reasoning, connector,
+                    generationComplete = !running) })
+        } } }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("second summary").fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText("mixed tool detail").assertIsDisplayed()
+        val firstHeader = "reported-reasoning-header:mixed:reasoning:r1"
+        val secondHeader = "reported-reasoning-header:mixed:reasoning:r2"
+        ui.onNodeWithTag(firstHeader).performClick()
+        ui.onNodeWithTag("tool-step-header:t1").performClick()
+        mainThread { content = listOf(MessageContentUi.Text("prefix", "prefix")) + initial }
+        assertDisclosure(firstHeader, false)
+        assertDisclosure(secondHeader, true)
+        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("same tool stays collapsed") {
+            it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
+        })
+        mainThread { content = initial }
+        assertDisclosure(firstHeader, false)
+        assertDisclosure(secondHeader, true)
+        ui.onNodeWithTag("tool-step-header:t1").performClick()
+        mainThread { running = false }
+        assertDisclosure(firstHeader, false)
+        assertDisclosure(secondHeader, false)
+        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("terminal mixed tool collapses") {
+            it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
+        })
+    }
+
+    fun testGroupedReplyActionBarAddressesTheExactFinalSource() {
+        prepare()
+        val source = message(emptyList(), emptyList()).copy(historySegments = listOf(
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("t1"))),
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(MessageBlock.Text("answer", "answer")))))
+        val turn = mapped(source)
+        val received = mutableListOf<String>()
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(turn, ChatScreenActions(onBranch = { received += it }))
+        } } }
+        ui.waitUntil(5_000) { ui.onAllNodesWithContentDescription("分支").fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithContentDescription("分支").performClick()
+        assertEquals(listOf(turn.sourceListKeys.last()), received)
+        assertTrue(received.single() != turn.listKey)
+    }
+
 }

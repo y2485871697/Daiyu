@@ -107,4 +107,25 @@ class ResponsesReasoningProgressTest {
             assertEquals(reasoning(states[1]).elapsedMillis, reasoning(result).elapsedMillis)
         }
     }
+    @Test fun emptyTerminalMetadataCannotEraseAcceptedPublicSummary() {
+        val blank = item("")
+        val hidden = item("ignored").put("summary", JSONArray().put(event("redacted")))
+        for (done in listOf(blank, hidden)) {
+            val seen = mutableListOf<Message>()
+            val result = run(frames(summary("response.reasoning_summary_text.delta", 0, "streamed"),
+                event("response.output_item.done").put("item", done), terminal(done)), seen)
+            assertEquals("streamed", reasoning(result).text)
+            assertNull(reasoning(result).activeSinceNanos)
+            assertTrue(seen.filter { it.historySegments.isNotEmpty() }.all { reasoning(it).text == "streamed" })
+        }
+    }
+
+    @Test fun emptyPartDonePreservesItsAcceptedTextButNonemptyCorrectionStillReplacesIt() {
+        for (replacement in listOf("", "short")) {
+            val result = run(frames(summary("response.reasoning_summary_text.delta", 0, "long streamed summary"),
+                summary("response.reasoning_summary_text.done", 0, replacement), terminal()), mutableListOf())
+            assertEquals(if (replacement.isEmpty()) "long streamed summary" else "short", reasoning(result).text)
+        }
+    }
+
 }

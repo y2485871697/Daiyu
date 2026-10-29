@@ -34,9 +34,10 @@ data class ChatScrollRequest(
 
 /** A missing exact target stays pending; it must never fall back to the owner's first segment. */
 internal fun ChatScrollRequest.targetIndex(turns: List<ChatTurnUi>): Int = when {
-    listKey != null -> turns.indexOfFirst { it.listKey == listKey }
+    listKey != null -> turns.indexOfFirst { it.listKey == listKey || it is ChatTurnUi.Assistant && listKey in it.sourceListKeys }
     messageId != null -> turns.indexOfFirst {
-        it.id == messageId && (segmentIndex == null || it.segmentIndex == segmentIndex)
+        it.id == messageId && (segmentIndex == null || it.segmentIndex == segmentIndex ||
+            it is ChatTurnUi.Assistant && segmentIndex in it.sourceSegmentIndices)
     }
     else -> -1
 }
@@ -49,6 +50,8 @@ sealed interface ChatTurnUi {
     /** Database window identity only; actions and navigation still use id. */
     val ownerMessageId: String get() = id
     val segmentIndex: Int get() = 0
+    fun matchesKey(key: String): Boolean = listKey == key || id == key ||
+        this is Assistant && key in sourceListKeys
 
     data class User(
         override val id: String,
@@ -74,7 +77,13 @@ sealed interface ChatTurnUi {
         val reportedReasoning: List<app.daiyu.android.domain.ReportedReasoning> = emptyList(),
         val assistantIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null,
         val isStreaming: Boolean = false,
-    ) : ChatTurnUi
+        /** Exact presentation aliases; persisted/action segment identities are unchanged. */
+        val sourceListKeys: List<String> = emptyList(),
+        val sourceSegmentIndices: List<Int> = emptyList(),
+    ) : ChatTurnUi {
+        /** Reply actions address the final source, never the stable group identity. */
+        val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey
+    }
 }
 
 data class WorkProcessUi(

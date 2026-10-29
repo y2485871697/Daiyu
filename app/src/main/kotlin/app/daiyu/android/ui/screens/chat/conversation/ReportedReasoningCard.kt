@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.withFrameNanos
@@ -45,6 +46,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import app.daiyu.android.domain.ReportedReasoning
 import app.daiyu.android.ui.icons.ChatPreviewIcons
+import app.daiyu.android.ui.icons.DaiyuIcons
+import androidx.compose.ui.graphics.Color
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -68,22 +71,28 @@ internal fun ReportedReasoningCard(
     val hasSummary = summaries.isNotEmpty()
     val colors = conversationColors()
     val shape = RoundedCornerShape(14.dp)
-    var expandedOverride by rememberSaveable(ownerKey, isThinking) { mutableStateOf<Boolean?>(null) }
-    var overridePhase by rememberSaveable(ownerKey, isThinking) { mutableStateOf(isThinking) }
-    val disclosureExpanded = expandedOverride?.takeIf { overridePhase == isThinking } ?: isThinking
-    val expanded = hasSummary && disclosureExpanded
+    val disclosureActive = !generationComplete
+    var expandedOverride by rememberSaveable(ownerKey, disclosureActive) { mutableStateOf<Boolean?>(null) }
+    var overridePhase by rememberSaveable(ownerKey, disclosureActive) { mutableStateOf(disclosureActive) }
+    val disclosureExpanded = expandedOverride?.takeIf { overridePhase == disclosureActive } ?: disclosureActive
     val summaryDisplays = reported.map { summary ->
-        key(ownerKey, summary.itemId, disclosureExpanded) {
+        key(ownerKey, summary.itemId) {
             val text = summary.text.takeIf(::hasReportedReasoningText).orEmpty()
-            val projection = rememberMarkdownProjection(listOf(text), streaming = !generationComplete)
+            // Keep the parser lane and reveal owner through thought/tool/terminal transitions.
+            val streamingProjection = remember(ownerKey, summary.itemId) { !generationComplete }
+            val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection)
             val reveal = rememberMarkdownReveal(
                 listOf(MarkdownTypingSource(summary.itemId, text)), projection,
                 streaming = allowLiveTiming && disclosureExpanded, terminal = generationComplete,
                 resetEpoch = revealResetEpoch,
-                onVisibleAdvance = { if (expanded) onVisibleAdvance() },
+                onVisibleAdvance = { if (disclosureExpanded) onVisibleAdvance() },
             )
             ReasoningSummaryDisplay(summary, projection, reveal)
         }
+    }
+    // Do not mount a blank body or a generic message-loading placeholder before its first parse.
+    val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->
+        display.projection?.sources?.any(::hasReportedReasoningText) == true
     }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
@@ -95,7 +104,7 @@ internal fun ReportedReasoningCard(
         Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey")
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
-            ) { overridePhase = isThinking; expandedOverride = !expanded }.semantics {
+            ) { overridePhase = disclosureActive; expandedOverride = !disclosureExpanded }.semantics {
                 stateDescription = if (expanded) "已展开" else "已折叠"
             } else Modifier.semantics(mergeDescendants = true) {})
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
@@ -126,11 +135,11 @@ internal fun ReportedReasoningCard(
                 if (!embedded) HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.testTag("reported-reasoning-content:$ownerKey")
                     .conversationClickable(onClickLabel = "收起思考摘要") {
-                        overridePhase = isThinking; expandedOverride = false
+                        overridePhase = disclosureActive; expandedOverride = false
                     }
                     .padding(start = if (embedded) 0.dp else 11.dp, end = if (embedded) 0.dp else 11.dp, top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    summaryDisplays.filter { hasReportedReasoningText(it.reported.text) }.forEach { display ->
+                    summaryDisplays.filter { it.projection?.sources?.any(::hasReportedReasoningText) == true }.forEach { display ->
                         key(ownerKey, display.reported.itemId) {
                             val summary = display.reported
                             val projection = display.projection
@@ -210,7 +219,13 @@ internal fun ReasoningStepRow(
             Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp)) {
-            Box(Modifier.size(10.dp).border(1.5.dp, colors.accent, CircleShape))
+            val complete = reported.activeSinceNanos == null
+            Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
+                .semantics { stateDescription = if (complete) "已思考" else "正在思考" }
+                .clip(CircleShape).then(if (complete) Modifier.background(colors.success)
+                    else Modifier.border(1.5.dp, colors.accent, CircleShape)), contentAlignment = Alignment.Center) {
+                if (complete) Icon(DaiyuIcons.Check, "思考完成", Modifier.size(8.dp), tint = Color.White)
+            }
         }
         Column(Modifier.weight(1f)) {
             ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),

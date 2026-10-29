@@ -32,8 +32,8 @@ class ReasoningProgressContractTest(unittest.TestCase):
 
     def test_disclosure_completion_invalidates_live_override_and_body_collapses(self):
         source = (APP / "ui/screens/chat/conversation/ReportedReasoningCard.kt").read_text()
-        self.assertIn("rememberSaveable(ownerKey, isThinking)", source)
-        self.assertIn("overridePhase == isThinking", source)
+        self.assertIn("rememberSaveable(ownerKey, disclosureActive)", source)
+        self.assertIn("overridePhase == disclosureActive", source)
         body = source.split('testTag("reported-reasoning-content:$ownerKey")', 1)[1]
         self.assertIn('conversationClickable(onClickLabel = "收起思考摘要")', body)
         self.assertIn("expandedOverride = false", body)

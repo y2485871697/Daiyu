@@ -97,7 +97,8 @@ internal object ResponsesStream {
             val index=index(event, "summary_index", index(event, "content_index"))
             checkProtocol(index>=0)
             val content=summaries.getOrPut(id) {sortedMapOf()}
-            content[index]=if(final) value else content.getOrDefault(index,"")+value
+            content[index]=if(final) value.takeUnless { it.isBlank() && content[index]?.isNotBlank() == true }
+                ?: content.getValue(index) else content.getOrDefault(index,"")+value
             val combined=content.values.joinToString("")
             checkProtocol(combined.length<=2_000_000)
             sink(ModelEvent.ReasoningDelta(id,combined, cumulative = true))
@@ -115,10 +116,12 @@ internal object ResponsesStream {
                 val part=parts.getJSONObject(i)
                 if (part.optString("type") == "summary_text") content[i]=part.getString("text")
             }
-            val combined=content.values.joinToString("")
-            checkProtocol(combined.length<=2_000_000)
             val id=item.getString("id")
-            summaries[id]=content
+            // Empty/redacted terminal metadata closes the item; it is not a text correction.
+            val finalContent = if (content.values.none { it.isNotBlank() }) summaries[id] ?: content else content
+            val combined=finalContent.values.joinToString("")
+            checkProtocol(combined.length<=2_000_000)
+            summaries[id]=finalContent
             sink(ModelEvent.ReasoningFinal(id,combined))
         }
         SseReader.read(reader) { data ->

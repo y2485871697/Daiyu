@@ -10,7 +10,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
         for token in ['val reveal = rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text)',
                       'RevealedMessageMarkdown(', 'display.reveal, summary.itemId',
-                      'resetEpoch = revealResetEpoch', 'onVisibleAdvance = { if (expanded) onVisibleAdvance() }']:
+                      'resetEpoch = revealResetEpoch', 'onVisibleAdvance = { if (disclosureExpanded) onVisibleAdvance() }']:
             self.assertIn(token, source)
         self.assertNotIn('ProjectedMessageMarkdown(', source)
         for forbidden in ['TouchHaptics', 'Vibrator', 'HapticsRuntime', 'delay(']:
@@ -30,7 +30,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
     def test_child_disclosure_resets_baseline_and_parent_identity_survives_exit(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
         work = (CHAT / 'WorkProcessCard.kt').read_text()
-        self.assertIn('key(ownerKey, summary.itemId, disclosureExpanded)', card)
+        self.assertIn('key(ownerKey, summary.itemId)', card)
         self.assertIn('streaming = allowLiveTiming && disclosureExpanded', card)
         self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
         self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)

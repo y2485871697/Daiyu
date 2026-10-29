@@ -378,7 +378,7 @@ internal fun ChatMessageList(
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
                             AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent,
-                                speaking = speechMessageId == turn.listKey || speechMessageId == turn.id,
+                                speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id,
                                 revealResetEpoch = revealResetEpoch,
                                 onVisibleAdvance = {
                                     val layout = listState.layoutInfo
@@ -518,6 +518,7 @@ internal fun AssistantTurn(
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(displayedTurn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent,
+                flowRunning = turn.status == RunStatus.RUNNING,
                 reasoningBody = { reported, connector ->
                     ReasoningStepRow(turn.listKey, reported, connector,
                         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
@@ -541,7 +542,7 @@ internal fun AssistantTurn(
             val hasTextActions = turn.content.isEmpty() || turn.content.any {
                 it is MessageContentUi.Text && it.text.isNotBlank()
             }
-            MessageActionBar(turn.listKey, actions, timestamp = turn.timestamp,
+            MessageActionBar(turn.actionKey, actions, timestamp = turn.timestamp,
                 allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking)
         }
     }

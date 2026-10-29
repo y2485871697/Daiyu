@@ -40,13 +40,18 @@ class ReasoningWorkflowMapperTest {
         assertEquals(listOf(null, "validated"), turn.content.filterIsInstance<MessageContentUi.Tool>().map { it.step.dedicatedKey })
         assertTrue(turn.content.filterIsInstance<MessageContentUi.Tool>().all { it.step.owner == WorkStepOwnerUi("c", "r", "a") })
     }
-    @Test fun answerAndTrailingEventsAreNotPulledBackInFrontOfTheAnswer() {
+    @Test fun answerAndTrailingEventsKeepOneOrderedWorkflowContainer() {
         val turn = mapped(message(listOf(tool("t1"), MessageBlock.Text("a", "answer"), tool("t2")),
             listOf(ReportedReasoning("r", "after answer", blockOffset = 2))))
-        assertEquals(listOf(MessageContentUi.Tool::class, MessageContentUi.Text::class, MessageContentUi.Reasoning::class, MessageContentUi.Tool::class), turn.content.map { it::class })
+        assertTrue(turn.content.isEmpty())
+        assertEquals("", turn.finalText)
+        assertEquals(listOf("t1", "r", "t2"), sequence(turn))
+        assertEquals("answer", turn.workProcess!!.segments.firstNotNullOf { it.narration })
         val thoughtAfterAnswer = mapped(message(listOf(tool("t1"), MessageBlock.Text("a", "answer")),
             listOf(ReportedReasoning("r", "tail", blockOffset = 2))))
-        assertTrue(thoughtAfterAnswer.content.last() is MessageContentUi.Reasoning)
+        assertTrue(thoughtAfterAnswer.content.isEmpty())
+        assertEquals("", thoughtAfterAnswer.finalText)
+        assertEquals(listOf("t1", "r"), sequence(thoughtAfterAnswer))
     }
     @Test fun noToolsKeepsStandaloneReasoningAndLegacyOffsetsStayExplicitlyUnknown() {
         val summary = ReportedReasoning("r", "legacy")
@@ -63,18 +68,65 @@ class ReasoningWorkflowMapperTest {
             ReportedReasoning("active", "", 0, 1, blockOffset = 0), ReportedReasoning("r2", "second", blockOffset = 0))))
         assertEquals(listOf("active", "r2", "t"), sequence(turn))
     }
-    @Test fun reasoningOnlyTailOfAToolOwnerStillUsesWorkflowRows() {
+    @Test fun terminalReasoningTailSharesItsExistingToolWorkflow() {
         val source = message(emptyList(), emptyList()).copy(historySegments = listOf(
             MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("t"))),
             MessageHistorySegment(MessageId("a"), "assistant", emptyList(), reportedReasoning = listOf(ReportedReasoning("r", "tail", blockOffset = 0)))))
         val turns = ChatTurnMapper.map(listOf(source)).filterIsInstance<ChatTurnUi.Assistant>()
-        assertEquals("r", turns.last().workProcess!!.segments.single().reasoning!!.itemId)
-        assertEquals(0, turns.last().workProcess!!.segments.sumOf { it.steps.size })
-        val afterText = source.copy(historySegments = source.historySegments.dropLast(1) +
-            source.historySegments.last().copy(blocks = listOf(MessageBlock.Text("tail", "stage answer")),
-                reportedReasoning = listOf(ReportedReasoning("r", "tail", blockOffset = 1))))
-        val tail = ChatTurnMapper.map(listOf(afterText)).last() as ChatTurnUi.Assistant
-        assertEquals(listOf(MessageContentUi.Text::class, MessageContentUi.Reasoning::class), tail.content.map { it::class })
+        assertEquals(1, turns.size)
+        assertEquals(listOf("t", "r"), sequence(turns.single()))
+    }
+
+    @Test fun liveProtocolTailStaysInTheSameFlowUntilTheFinalSnapshot() {
+        val first = MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("t")),
+            reportedReasoning = listOf(ReportedReasoning("r1", "first", blockOffset = 0)))
+        val tail = MessageHistorySegment(MessageId("a"), "assistant", emptyList(),
+            reportedReasoning = listOf(ReportedReasoning("r2", "second", 0, 1, blockOffset = 0)))
+        fun owner(t: MessageHistorySegment) = message(emptyList(), emptyList()).copy(status = RunStatus.RUNNING,
+            historySegments = listOf(first, t))
+        val initial = mapped(owner(tail))
+        assertEquals(listOf("r1", "t", "r2"), sequence(initial))
+        assertEquals(listOf(0, 1), initial.sourceSegmentIndices)
+        assertTrue(initial.content.isEmpty())
+        val body = tail.copy(blocks = listOf(MessageBlock.Text("answer", "answer")))
+        val next = mapped(owner(body))
+        assertEquals(initial.listKey, next.listKey)
+        assertEquals("answer", next.finalText)
+        assertEquals(sequence(initial), sequence(next))
+        for (status in listOf(RunStatus.COMPLETED, RunStatus.STOPPED, RunStatus.FAILED)) {
+            val complete = mapped(owner(body).copy(status = status, error = if (status == RunStatus.FAILED) "offline" else null,
+                historySegments = listOf(first, body.copy(reportedReasoning = body.reportedReasoning.map { it.frozen() }))))
+            assertEquals(initial.listKey, complete.listKey)
+            assertEquals(initial.sourceListKeys, complete.sourceListKeys)
+            assertEquals(initial.sourceSegmentIndices, complete.sourceSegmentIndices)
+            assertEquals(initial.sourceListKeys.last(), complete.actionKey)
+            assertEquals(sequence(initial), sequence(complete))
+            assertEquals("answer", complete.finalText)
+            assertEquals(status, complete.status)
+            assertFalse(complete.workProcess!!.running)
+            assertFalse(complete.isStreaming)
+        }
+        assertEquals(0, ChatScrollRequest(1, "a", false, 1).targetIndex(listOf(next)))
+        assertEquals(0, ChatScrollRequest(1, listKey = next.sourceListKeys.last()).targetIndex(listOf(next)))
+        assertEquals(-1, ChatScrollRequest(1, "a", false, 2).targetIndex(listOf(next)))
+        assertTrue((ChatTurnMapper.withStreamingOwner(listOf(next), owner(body)).single() as ChatTurnUi.Assistant).isStreaming)
+    }
+
+    @Test fun userAndTimelineBoundariesNeverGetCrossed() {
+        val first = MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("t")))
+        val tail = MessageHistorySegment(MessageId("a"), "assistant", emptyList(),
+            reportedReasoning = listOf(ReportedReasoning("r", "tail", blockOffset = 0)))
+        val source = message(emptyList(), emptyList()).copy(status = RunStatus.RUNNING,
+            historySegments = listOf(first, tail))
+        val grouped = mapped(source)
+        val separate = ChatTurnMapper.map(listOf(source), boundariesAfter = setOf(grouped.listKey))
+        assertEquals(2, separate.size)
+        assertEquals(listOf(0, 1), separate.map { it.segmentIndex })
+        val supplemented = source.copy(historySegments = listOf(first,
+            MessageHistorySegment(MessageId("u"), "user", listOf(MessageBlock.Text("u", "supplement"))), tail))
+        val ordered = ChatTurnMapper.map(listOf(supplemented))
+        assertEquals(listOf("a", "u", "a"), ordered.map { it.id })
+        assertNull((ordered.last() as ChatTurnUi.Assistant).workProcess)
     }
     @Test fun leadingNarrationDoesNotSplitARunningWorkflowIntoUnframedRows() {
         val turn = mapped(message(listOf(MessageBlock.Text("n", "checking now"), tool("t1"), tool("t2")),
@@ -84,4 +136,101 @@ class ReasoningWorkflowMapperTest {
         assertEquals("checking now", turn.workProcess!!.segments.firstNotNullOf { it.narration })
         assertEquals(listOf("r1", "t1", "r2", "t2"), sequence(turn))
     }
+    @Test fun everyAnchoredSourceKeepsItsOwnVisibleListKey() {
+        val parts = listOf(
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("first"))),
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("middle"))),
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(MessageBlock.Text("last", "answer"))))
+        val source = message(emptyList(), emptyList()).copy(status = RunStatus.RUNNING, historySegments = parts)
+        val allKeys = mapped(source).sourceListKeys
+        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED, RunStatus.STOPPED, RunStatus.FAILED)) for (anchored in allKeys) {
+            val turns = ChatTurnMapper.map(listOf(source.copy(status = status)), boundariesAfter = setOf(anchored))
+            assertEquals(1, turns.count { it.listKey == anchored })
+            assertEquals(allKeys, turns.filterIsInstance<ChatTurnUi.Assistant>().flatMap { it.sourceListKeys })
+            val anchoredTurn = turns.single { it.listKey == anchored } as ChatTurnUi.Assistant
+            assertEquals(listOf(anchored), anchoredTurn.sourceListKeys)
+        }
+    }
+
+    @Test fun groupedReplyActionsAndCopyResolveEveryExactSourceIncludingImageOnlySegments() {
+        val imageOwner = MessageImageOwner("c", "a")
+        val image = MessageBlock.Image(MessageImageReference(imageOwner,
+            "00000000-0000-0000-0000-000000000001", "image/png", 1, "0".repeat(64), 1, 1))
+        val source = message(emptyList(), emptyList()).copy(historySegments = listOf(
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(tool("t"))),
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(image)),
+            MessageHistorySegment(MessageId("a"), "assistant", listOf(MessageBlock.Text("last", "answer")))))
+        val turn = mapped(source)
+        assertEquals(3, turn.sourceListKeys.size)
+        assertEquals(turn.sourceListKeys.last(), turn.actionKey)
+        assertNotEquals(turn.listKey, turn.actionKey)
+        assertTrue(turn.matchesKey(turn.actionKey))
+        assertFalse(turn.matchesKey("unrelated"))
+        val originals = ChatTurnMapper.sourceMessages(turn, listOf(source))
+        assertEquals(source.historySegments.flatMap { it.blocks }, originals.flatMap { it.blocks })
+        assertEquals(listOf(image), originals[1].blocks)
+        assertTrue(ChatTurnMapper.sourceMessages(turn, listOf(source.copy(runId = RunId("different")))).isEmpty())
+        assertTrue(ChatTurnMapper.sourceMessages(turn, listOf(source.copy(historySegments = source.historySegments.dropLast(1)))).isEmpty())
+    }
+
+    @Test fun realRunnerProtocolAndRawFreeTailKeepOneWorkflowAtEveryTerminalStatus() {
+        for (terminal in listOf(RunStatus.COMPLETED, RunStatus.STOPPED, RunStatus.FAILED)) {
+            val published = mutableListOf<Message>()
+            lateinit var runner: ChatRunner
+            var requests = 0
+            var executions = 0
+            val call = ToolInvocation(ToolCallId("t"), "lookup", "{}")
+            val model = ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    if (++requests == 1) {
+                        sink(ModelEvent.ReasoningFinal("r1", "first"))
+                        sink(ModelEvent.ToolReady(call))
+                        sink(ModelEvent.ProtocolOutput(listOf("raw-prefix")))
+                    } else {
+                        sink(ModelEvent.ReasoningDelta("r2", "second"))
+                        sink(ModelEvent.TextDelta("answer", "answer"))
+                        when (terminal) {
+                            RunStatus.STOPPED -> runner.stop()
+                            RunStatus.FAILED -> throw ModelRequestException(ModelFailure.INCOMPLETE)
+                            else -> sink(ModelEvent.TextFinal("answer", "answer"))
+                        }
+                    }
+                }
+                override fun cancel() {}
+            } }
+            runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+                BatteryTool { executions++; "done" }, { published += it })
+            val result = runner.run(message(emptyList(), emptyList()).copy(status = RunStatus.RUNNING), emptyList())
+            assertEquals(terminal, result.status)
+            assertEquals(1, executions)
+            val live = published.last { it.status == RunStatus.RUNNING &&
+                it.historySegments.lastOrNull()?.blocks?.any { block -> block is MessageBlock.Text } == true }
+            val liveTurn = mapped(live)
+            for (sample in listOf(live, result)) {
+                assertEquals(2, sample.historySegments.size)
+                assertEquals(listOf("raw-prefix"), sample.historySegments.first().protocolItems)
+                assertTrue(sample.historySegments.last().protocolItems.isEmpty())
+                assertEquals(listOf("r1", "r2"), sample.historySegments.flatMap { it.reportedReasoning }.map { it.itemId })
+                assertEquals(0, sample.historySegments.last().reportedReasoning.single().blockOffset)
+                val expanded = MessageHistory.expand(listOf(sample))
+                assertEquals(2, expanded.size)
+                assertTrue(expanded.all { it.status == sample.status })
+                val turn = mapped(sample)
+                assertEquals(listOf("r1", "t", "r2"), sequence(turn))
+                assertEquals("answer", turn.finalText)
+                assertEquals(liveTurn.listKey, turn.listKey)
+                assertEquals(liveTurn.sourceListKeys, turn.sourceListKeys)
+                assertEquals(listOf(0, 1), turn.sourceSegmentIndices)
+                assertEquals(turn.sourceListKeys.last(), turn.actionKey)
+                assertEquals(sample.status == RunStatus.RUNNING, turn.workProcess!!.running)
+                val marked = ChatTurnMapper.withStreamingOwner(listOf(turn), sample).single() as ChatTurnUi.Assistant
+                assertEquals(sample.status == RunStatus.RUNNING, marked.isStreaming)
+                for (sourceKey in turn.sourceListKeys) {
+                    assertEquals(0, ChatScrollRequest(1, listKey = sourceKey).targetIndex(listOf(turn)))
+                }
+            }
+            assertTrue(result.historySegments.flatMap { it.reportedReasoning }.all { it.activeSinceNanos == null })
+        }
+    }
+
 }

@@ -15,44 +15,92 @@ object ChatTurnMapper {
         dedicatedTool: (Message, MessageBlock.Tool) -> String? = { _, _ -> null },
         toolReceipt: (Message, MessageBlock.Tool) -> ToolReceiptUi? = { _, _ -> null },
         timestamp: (Message) -> String = { "" },
+        boundariesAfter: Set<String> = emptySet(),
         assistantIdentity: (Message, String) -> app.daiyu.android.assistants.AssistantReplyIdentity? = { _, _ -> null },
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
-        val states: (Message, MessageBlock.Tool) -> WorkStepState? = { message, block -> toolReceipt(message, block)?.state ?: toolState(message, block) }
-        val activity: (Message, MessageBlock.Tool) -> ToolActivityUi? = { message, block -> toolReceipt(message, block)?.activity }
         val history = if (messages.any { it.historySegments.isNotEmpty() }) MessageHistory.expand(messages) else messages
+        val toolSources = history.flatMap { source -> source.blocks.filterIsInstance<MessageBlock.Tool>().map {
+            (TurnOwner(source.conversationId.value, source.runId.value, source.id.value) to it.invocation.id.value) to source
+        } }.toMap()
+        fun source(message: Message, block: MessageBlock.Tool): Message = toolSources[
+            TurnOwner(message.conversationId.value, message.runId.value, message.id.value) to block.invocation.id.value] ?: message
+        val errors: (Message, MessageBlock.Tool) -> Boolean? = { message, block -> confirmedToolError(source(message, block), block) }
+        val dedicated: (Message, MessageBlock.Tool) -> String? = { message, block -> dedicatedTool(source(message, block), block) }
+        val states: (Message, MessageBlock.Tool) -> WorkStepState? = { message, block ->
+            val original = source(message, block)
+            toolReceipt(original, block)?.state ?: toolState(original, block)
+        }
+        val activity: (Message, MessageBlock.Tool) -> ToolActivityUi? = { message, block -> toolReceipt(source(message, block), block)?.activity }
         val databaseOwners = messages.flatMap { owner -> owner.historySegments.map { segment ->
             TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
         } }.toMap()
-        val workflowOwners = history.filter { it.role == Message.ASSISTANT_ROLE && it.blocks.any { block -> block is MessageBlock.Tool } }
-            .map { TurnOwner(it.conversationId.value, it.runId.value, it.id.value) }.toSet()
         val nextSegment = mutableMapOf<TurnOwner, Int>()
-        return history.mapNotNull { message ->
-            if (message.role != Message.USER_ROLE && message.role != Message.ASSISTANT_ROLE) return@mapNotNull null
+        val display = mutableListOf<DisplayMessage>()
+        history.forEach { message ->
             val owner = TurnOwner(message.conversationId.value, message.runId.value, message.id.value)
             val segment = nextSegment[owner] ?: 0
             nextSegment[owner] = segment + 1
-            val listKey = owner.listKey(segment)
+            val previous = display.lastOrNull()
+            // Protocol snapshots and their raw-free live tail are one visual workflow, not
+            // separate model replies. Keep durable history/action targets unchanged.
+            val joins = previous != null && message.role == Message.ASSISTANT_ROLE &&
+                previous.message.status == message.status &&
+                previous.message.role == message.role && previous.owner == owner &&
+                previous.keys.last() !in boundariesAfter && owner.listKey(segment) !in boundariesAfter
+            if (joins) {
+                val prior = checkNotNull(previous)
+                val offset = prior.message.blocks.size
+                display[display.lastIndex] = prior.copy(
+                    message = prior.message.copy(blocks = prior.message.blocks + message.blocks,
+                        reportedReasoning = prior.message.reportedReasoning + message.reportedReasoning.map {
+                            it.copy(blockOffset = (it.blockOffset ?: 0) + offset)
+                        }),
+                    segments = prior.segments + segment, keys = prior.keys + owner.listKey(segment))
+            } else display += DisplayMessage(message, owner, listOf(segment), listOf(owner.listKey(segment)))
+        }
+        return display.mapNotNull { source ->
+            val message = source.message
+            if (message.role != Message.USER_ROLE && message.role != Message.ASSISTANT_ROLE) return@mapNotNull null
+            val owner = source.owner
+            val segment = source.segments.first()
+            val listKey = source.keys.first()
             when (message.role) {
                 Message.USER_ROLE -> ChatTurnUi.User(
                     id = message.id.value,
                     text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text },
                     timestamp = timestamp(message),
-                    content = mixedContent(message, confirmedToolError, states, dedicatedTool, activity),
+                    content = mixedContent(message, errors, states, dedicated, activity),
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
                 )
-                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), confirmedToolError, states, dedicatedTool, activity, owner in workflowOwners).copy(
+                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), errors, states, dedicated, activity).copy(
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
                     assistantIdentity = assistantIdentity(message, databaseOwners[owner] ?: message.id.value),
+                    sourceListKeys = source.keys, sourceSegmentIndices = source.segments,
                 )
                 else -> null
             }
         }
+    }
+
+    /** Resolve all exact source occurrences for non-destructive whole-reply copy. */
+    fun sourceMessages(turn: ChatTurnUi, messages: List<Message>): List<Message> {
+        val keys = (turn as? ChatTurnUi.Assistant)?.sourceListKeys?.takeIf { it.isNotEmpty() }
+            ?: listOf(turn.listKey)
+        val wanted = keys.toSet()
+        val nextSegment = mutableMapOf<TurnOwner, Int>()
+        val sources = MessageHistory.expand(messages).filter { message ->
+            val owner = TurnOwner(message.conversationId.value, message.runId.value, message.id.value)
+            val segment = nextSegment[owner] ?: 0
+            nextSegment[owner] = segment + 1
+            owner.listKey(segment) in wanted
+        }
+        return sources.takeIf { it.size == keys.size }.orEmpty()
     }
 
     fun withStreamingOwner(turns: List<ChatTurnUi>, owner: Message?): List<ChatTurnUi> {
@@ -70,6 +118,9 @@ object ChatTurnMapper {
             } else turn
         }
     }
+
+    private data class DisplayMessage(val message: Message, val owner: TurnOwner,
+        val segments: List<Int>, val keys: List<String>)
 
     /**
      * Count segments within their conversation/run/message identity, never within the loaded
@@ -91,11 +142,7 @@ object ChatTurnMapper {
         dedicatedTool: (Message, MessageBlock.Tool) -> String?,
         activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
         integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool }): List<MessageContentUi> {
-        val lastText = workflowFinalTextIndex(message)
-        val orderedTail = integrateReasoning && lastText >= 0 && (
-            message.blocks.drop(lastText + 1).any { it is MessageBlock.Tool } ||
-                message.reportedReasoning.any { (it.blockOffset ?: 0) > lastText })
-        if (!orderedTail && message.blocks.none { it is MessageBlock.Image ||
+        if (message.blocks.none { it is MessageBlock.Image ||
                 it is MessageBlock.Tool && dedicatedTool(message, it) != null }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
         val reasoning = if (integrateReasoning) reasoningAtBoundaries(message) else emptyMap()
@@ -116,10 +163,10 @@ object ChatTurnMapper {
 
     private fun workflowFinalTextIndex(message: Message): Int {
         val index = message.blocks.indexOfLast { it is MessageBlock.Text }
-        val trailingTool = message.blocks.drop(index + 1).any { it is MessageBlock.Tool }
-        val priorTool = message.blocks.take(index.coerceAtLeast(0)).any { it is MessageBlock.Tool }
-        // Before the first tool, text is workflow narration, not a prematurely final answer.
-        return if (trailingTool && !priorTool) -1 else index
+        // A text followed by another workflow event is narration. It must not switch
+        // the whole reply between a process card and unframed mixed-content rows.
+        return if (message.blocks.drop(index + 1).any { it is MessageBlock.Tool } ||
+            message.reportedReasoning.any { (it.blockOffset ?: 0) > index }) -1 else index
     }
 
     private fun reasoningAtBoundaries(message: Message) = message.reportedReasoning
@@ -154,10 +201,9 @@ object ChatTurnMapper {
         confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
         toolState: (Message, MessageBlock.Tool) -> WorkStepState?,
         dedicatedTool: (Message, MessageBlock.Tool) -> String?,
-        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
-        ownerHasWorkflow: Boolean): ChatTurnUi.Assistant {
+        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
-        val hasWorkflow = hasTools || ownerHasWorkflow && reasoningAtBoundaries(message).isNotEmpty()
+        val hasWorkflow = hasTools
         val lastText = workflowFinalTextIndex(message)
         val finalText = if (hasWorkflow) {
             (message.blocks.getOrNull(lastText) as? MessageBlock.Text)?.text.orEmpty()

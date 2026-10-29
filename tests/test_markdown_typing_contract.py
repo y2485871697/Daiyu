@@ -20,7 +20,7 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_exact_runtime_phase_updates_even_when_rows_are_reused(self):
         host = (APP / "MainActivity.kt").read_text().split("private fun publishChat(rowsChanged: Boolean", 1)[1].split("private fun requestScroll", 1)[0]
-        self.assertIn("ChatTurnMapper.withStreamingOwner(if (!rowsChanged) chatState.turns else", host)
+        self.assertIn("ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns else", host)
         self.assertIn("controlOwner?.takeIf { state?.phase == ExecutionPhase.STREAMING }", host)
         mapper = (BASE / "ChatTurnMapper.kt").read_text().split("fun withStreamingOwner", 1)[1].split("/**", 1)[0]
         for token in ["turns.indexOfLast", "ownerMessageId == live.id.value", "live.conversationId.value, live.runId.value, turn.id", "listKey(turn.segmentIndex)", "turn.copy(isStreaming = index == last)"]:

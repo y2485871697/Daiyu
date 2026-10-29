@@ -44,6 +44,7 @@ internal fun MessageContent(
     markdown: Boolean,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
+    flowRunning: Boolean = false,
     reasoningBody: @Composable (app.daiyu.android.domain.ReportedReasoning, Boolean) -> Unit = { _, _ -> },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
@@ -66,7 +67,7 @@ internal fun MessageContent(
                     is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                     is MessageContentUi.Tool -> {
                         key(block.step.owner, block.step.toolCallId) {
-                            if (!dedicatedTool(block.step)) WorkStepRow(block.step, showConnector = content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning }, toolContent = toolContent)
+                            if (!dedicatedTool(block.step)) WorkStepRow(block.step, showConnector = content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning }, toolContent = toolContent, flowRunning = flowRunning)
                         }
                     }
                 }

@@ -49,9 +49,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
-    var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
-    val thinking = allowLiveTiming && work.segments.any { it.reasoning?.activeSinceNanos != null }
-    val expanded = expandedOverride ?: thinking
+    var expandedOverride by rememberSaveable(ownerKey, work.running) { mutableStateOf<Boolean?>(null) }
+    val expanded = expandedOverride ?: work.running
     val reasoningState = rememberSaveableStateHolder()
     val colors = conversationColors()
     val steps = work.segments.flatMap { it.steps }
@@ -119,7 +118,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                             key(ownerKey, step.owner, step.toolCallId) {
                                 val laterStep = index < segment.steps.lastIndex ||
                                     work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
-                                WorkStepRow(step, showConnector = laterStep, toolContent = toolContent)
+                                WorkStepRow(step, showConnector = laterStep, toolContent = toolContent, flowRunning = work.running)
                             }
                         }
                     }
@@ -131,9 +130,11 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 
 /** A single compact timeline row shared by work summaries and ordered mixed content. */
 @Composable
-internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
-    var expanded by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
+    var expandedOverride by rememberSaveable(step.owner, step.toolCallId, flowRunning) { mutableStateOf<Boolean?>(null) }
+    var overridePhase by rememberSaveable(step.owner, step.toolCallId, flowRunning) { mutableStateOf(flowRunning) }
+    val expanded = expandedOverride?.takeIf { overridePhase == flowRunning } ?: flowRunning
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error
@@ -166,7 +167,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
         Column(Modifier.weight(1f)) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val stacked = maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f
-                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").heightIn(min = 44.dp).conversationClickable { expanded = !expanded }
+                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").heightIn(min = 44.dp).conversationClickable { overridePhase = flowRunning; expandedOverride = !expanded }
                     .semantics { stateDescription = "$stateLabel · ${if (expanded) "已展开" else "已折叠"}" }
                     .padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {

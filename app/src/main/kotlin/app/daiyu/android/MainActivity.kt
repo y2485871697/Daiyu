@@ -3213,7 +3213,7 @@ class MainActivity : ComponentActivity() {
         },
         onRegenerate = { id ->
             val target = actionSnapshot?.renderedTargets?.get(id) ?: actionSnapshot?.targets?.get(id)
-            val index = chatState.turns.indexOfFirst { it.listKey == id || it.id == id }
+            val index = chatState.turns.indexOfFirst { it.matchesKey(id) }
             if (target != null && index >= 0 && chatState.turns.drop(index + 1).any { it is ChatTurnUi.User }) {
                 prompt = ConfirmPrompt("重新生成将删除此回复及后面的消息", "", "确定",
                     action = { messageCallbacks.onRegenerate(id) }, showCloseButton = false, secondaryCancel = true)
@@ -3240,8 +3240,9 @@ class MainActivity : ComponentActivity() {
             clearInlineMessageEditor(); publishChat(rowsChanged = false)
         } },
         onDeleteTurn = { id ->
+            val firstSourceKey = chatState.turns.firstOrNull { it.matchesKey(id) }?.listKey ?: id
             prompt = ConfirmPrompt("删除这条消息及后面的内容？", "", "确定",
-                action = { messageCallbacks.onDeleteTurn(id) }, showCloseButton = false, secondaryCancel = true)
+                action = { messageCallbacks.onDeleteTurn(firstSourceKey) }, showCloseButton = false, secondaryCancel = true)
         }, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { text -> if (editorMatches() && currentDictationProjection() == null) {
             val editor = inlineMessageEditor
@@ -6798,13 +6799,21 @@ class MainActivity : ComponentActivity() {
             !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
         val allowed = composerAvailable && !controller.dataBusy
         val messageEditBlocked = inlineMessageEditor?.let { !messageEditTargetCurrent(it) } == true
+        val visibleTimeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty()
+        val visibleCompressions = controller.compressionActivities.filter { it.conversationId == selected?.id?.value }
+        val workflowBoundaries = visibleTimeline.map { it.anchor.listKey }.toSet() +
+            app.daiyu.android.timeline.compressionActivitiesByAnchor(visibleCompressions, visibleTimeline).keys.filterNotNull()
+        val oldBoundaries = chatState.timeline.map { it.anchor.listKey }.toSet() +
+            app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
+        val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             scrollRequest = scrollRequest,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
             timeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty(),
             compressionActivity = null,
-            compressionActivities = controller.compressionActivities.filter { it.conversationId == selected?.id?.value },
-            turns = ChatTurnMapper.withStreamingOwner(if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
+            compressionActivities = visibleCompressions,
+            turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns else ChatTurnMapper.map(shown.map { it.second },
+                boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->
@@ -6865,10 +6874,10 @@ class MainActivity : ComponentActivity() {
     }
     private fun copyMessage(id: String) {
         val turns = chatState.turns
-        val turn = turns.firstOrNull { it.listKey == id || it.id == id } ?: return
-        val history = app.daiyu.android.domain.MessageHistory.expand(shown.map { it.second })
-        val message = history.filter { it.id.value == turn.id }.getOrNull(turn.segmentIndex) ?: return
-        val text = copyableImageHostText(message) ?: return
+        val turn = turns.firstOrNull { it.matchesKey(id) } ?: return
+        val sources = ChatTurnMapper.sourceMessages(turn, shown.map { it.second })
+        val first = sources.firstOrNull() ?: return
+        val text = copyableImageHostText(first.copy(blocks = sources.flatMap { it.blocks })) ?: return
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", text))
     }
 
@@ -7730,7 +7739,7 @@ internal fun copyableImageHostText(message: Message): String? {
 
 /** Only the current assistant's visible answer; never flatten work-process/tool payloads. */
 internal fun voiceHostText(turns: List<ChatTurnUi>, id: String): String? =
-    turns.filterIsInstance<ChatTurnUi.Assistant>().firstOrNull { it.listKey == id || it.id == id }?.finalText
+    turns.filterIsInstance<ChatTurnUi.Assistant>().firstOrNull { it.matchesKey(id) }?.finalText
 
 internal fun voiceHostIsActive(state: SpeechPlaybackState) = state.phase in setOf(
     SpeechPhase.INITIALIZING, SpeechPhase.QUEUED, SpeechPhase.SPEAKING,

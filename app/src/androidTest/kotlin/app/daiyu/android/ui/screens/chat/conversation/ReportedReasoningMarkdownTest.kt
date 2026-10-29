@@ -121,7 +121,7 @@ class ReportedReasoningMarkdownTest : WiredActivityTestCase() {
                 }
             } }
             await { gates.getValue(first).entered.count == 0L }
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertExists()
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             ui.onNodeWithText(first, useUnmergedTree = true).assertDoesNotExist()
             gates.getValue(first).release.countDown()
             awaitText("Cold first.")
@@ -164,13 +164,13 @@ class ReportedReasoningMarkdownTest : WiredActivityTestCase() {
             mainThread { item = "item-b"; source = sources[1] }
             await { gates.getValue(sources[1]).entered.count == 0L }
             ui.onNodeWithText("prefix", useUnmergedTree = true).assertDoesNotExist()
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertExists()
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             gates.getValue(sources[1]).release.countDown()
             awaitText("prefix second")
             mainThread { owner = "owner-b"; source = sources[2] }
             await { gates.getValue(sources[2]).entered.count == 0L }
             ui.onNodeWithText("prefix second", useUnmergedTree = true).assertDoesNotExist()
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertExists()
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             gates.getValue(sources[2]).release.countDown()
             awaitText("prefix second third")
         } finally {

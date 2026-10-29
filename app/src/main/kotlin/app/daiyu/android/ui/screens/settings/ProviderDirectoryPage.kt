@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
@@ -177,7 +178,7 @@ internal fun ProviderDirectoryPage(
                 val accents = resolveAppearanceActions(LocalAppearanceDark.current)
                 TextButton(text = "取消", enabled = enabled, onClick = onCancelSelection,
                     colors = ButtonDefaults.textButtonColors(
-                        color = accents.secondaryContainer, textColor = accents.onSecondary),
+                        color = accents.secondaryContainer.compositeOver(settingsPageBackground()), textColor = accents.onSecondary),
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-cancel-selection")
                         .semantics { this[RetainedListSelectionAction] = onCancelSelection })
                 TextButton(text = "删除", enabled = enabled && selectedSlots.isNotEmpty(), onClick = onDeleteSelected,

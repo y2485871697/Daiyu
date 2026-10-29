@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -405,7 +406,7 @@ internal fun <T> LocalCatalogModelsScreen(
                 }
                 TextButton(text = "取消", enabled = editorEnabled,
                     onClick = cancelSelection,
-                    colors = ButtonDefaults.textButtonColors(color = accents.secondaryContainer, textColor = accents.onSecondary),
+                    colors = ButtonDefaults.textButtonColors(color = accents.secondaryContainer.compositeOver(settingsPageBackground()), textColor = accents.onSecondary),
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("local-model-cancel-selection")
                         .semantics { this[RetainedListSelectionAction] = cancelSelection })
                 TextButton(text = "删除", enabled = editorEnabled && selection.isNotEmpty(),

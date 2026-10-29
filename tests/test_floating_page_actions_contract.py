@@ -27,6 +27,21 @@ class FloatingPageActionsContract(unittest.TestCase):
                 self.assertIn("colors = deletionButtonColors()", text)
                 self.assertIn("color = accents.secondaryContainer", text)
 
+    def test_cancel_fill_is_precomposited_only_on_both_floating_pages(self):
+        for filename in ("ProviderDirectoryPage.kt", "LocalCatalogModelsScreen.kt"):
+            text = (UI / "screens/settings" / filename).read_text()
+            cancel = text.split('TextButton(text = "取消"', 1)[1].split('TextButton(text = "删除"', 1)[0]
+            with self.subTest(filename=filename):
+                self.assertIn("color = accents.secondaryContainer.compositeOver(settingsPageBackground())", cancel)
+                self.assertIn("textColor = accents.onSecondary", cancel)
+                self.assertIn("import androidx.compose.ui.graphics.compositeOver", text)
+                self.assertNotIn("copy(alpha = 1", cancel)
+                self.assertNotIn(".background(", cancel)
+        android = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/FloatingPageActionsActivityTest.kt"
+        for entry in ("testCancelFillIsOpaqueButKeepsItsSoftColorAcrossUnderlyingContent", "Color.Green",
+                      "pureBlackEnabled", "expectedFill", "uncompositedFill", "compositeOver(settingsPageBackground())"):
+            self.assertIn(entry, android.read_text())
+
     def test_clearance_reuses_the_existing_scrollable_spacer_without_double_navigation_inset(self):
         settings = (UI / "screens/settings/SettingsScaffold.kt").read_text()
         scaffold = (UI / "components/MiuixScaffoldPage.kt").read_text()

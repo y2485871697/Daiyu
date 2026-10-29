@@ -190,5 +190,16 @@ class ToolCardHtmlContractTest(unittest.TestCase):
             self.assertIn("65_536", (CHAT / filename).read_text())
 
 
+    def test_outcome_count_headers_wrap_and_have_real_layout_regression(self):
+        shell = (CHAT / "WorkProcessCard.kt").read_text()
+        self.assertIn('val stacked = work.failedStepCount > 0 || work.unconfirmedStepCount > 0 ||', shell)
+        readability = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt').read_text()
+        self.assertIn('fun testFailedAndUnconfirmedHeaderCountsNeverEllipsize', readability)
+        self.assertIn('measured.hasVisualOverflow', readability)
+        self.assertIn('measured.isLineEllipsized(line)', readability)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text()
+        self.assertIn('fun testMixedResultCountsUpdateWithoutReopeningOrDuplicatingRows', regression)
+        self.assertIn('已完成3步 · 1步失败 · 1步待确认', regression)
+
 if __name__ == "__main__":
     unittest.main()

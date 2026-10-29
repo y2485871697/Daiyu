@@ -97,11 +97,23 @@ data class WorkProcessUi(
         segment.steps.count { it.state == WorkStepState.OK } +
             if (segment.reasoning?.let { it.activeSinceNanos == null && hasReportedReasoningText(it.text) } == true) 1 else 0
     }
-    val progressSummary: String get() {
-        val completed = "已完成${completedStepCount}步"
-        val status = controlActivity?.label ?: summary
-        return if (!running && status == "已完成") completed else "$completed · $status"
+    val failedStepCount: Int get() = segments.sumOf { segment ->
+        segment.steps.count { it.state == WorkStepState.FAILED }
     }
+    val unconfirmedStepCount: Int get() = segments.sumOf { segment ->
+        segment.steps.count { it.state == WorkStepState.UNKNOWN }
+    }
+    val progressSummary: String get() = buildList {
+        add("已完成${completedStepCount}步")
+        val failed = failedStepCount
+        val unconfirmed = unconfirmedStepCount
+        if (failed > 0) add("${failed}步失败")
+        if (unconfirmed > 0) add("${unconfirmed}步待确认")
+        val status = controlActivity?.label ?: summary
+        if ((running || status != "已完成") &&
+            !(status == "失败" && failed > 0) &&
+            !(status == "结果未确认" && unconfirmed > 0)) add(status)
+    }.joinToString(" · ")
 }
 
 data class WorkSegmentUi(

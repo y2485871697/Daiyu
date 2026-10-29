@@ -370,4 +370,29 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         }
         assertEquals(0, actionCount)
     }
+
+    fun testFailedAndUnconfirmedHeaderCountsNeverEllipsize() {
+        val states = listOf(WorkStepState.OK, WorkStepState.OK, WorkStepState.OK,
+            WorkStepState.FAILED, WorkStepState.UNKNOWN)
+        val work = WorkProcessUi(listOf(WorkSegmentUi(steps = states.mapIndexed { index, state ->
+            WorkStepUi("outcome-$index", "operation", "", state)
+        })), "已暂停", running = true, controlActivity = ToolActivityUi.PAUSED)
+        val expected = "已完成3步 · 1步失败 · 1步待确认 · 已暂停"
+        for (width in listOf(272, 300, 360)) for (fontScale in listOf(1f, 1.3f)) {
+            mainThread { activity.setContent {
+                CompositionLocalProvider(LocalDensity provides Density(phoneDensity, fontScale)) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        Box(Modifier.width(width.dp)) { WorkProcessCard(work, ownerKey = "outcome-header") }
+                    }
+                }
+            } }
+            val node = ui.onNodeWithText(expected, useUnmergedTree = true).assertIsDisplayed()
+            val measured = layout(node)
+            assertFalse("width=$width fontScale=$fontScale", measured.hasVisualOverflow)
+            for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
+            assertEquals(expected.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))
+            val titleBounds = ui.onNodeWithText("工作流程", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue(node.fetchSemanticsNode().boundsInRoot.top >= titleBounds.bottom - 1f)
+        }
+    }
 }

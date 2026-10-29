@@ -80,5 +80,25 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true', host)
         self.assertIn('stopRequested = controlOwner?.let(controller::runStopping) == true', host)
 
+    def test_failed_and_unconfirmed_counts_are_independent_and_do_not_replace_controls(self):
+        model = (CHAT / 'ChatScreenModels.kt').read_text()
+        self.assertIn('val failedStepCount: Int get()', model)
+        self.assertIn('val unconfirmedStepCount: Int get()', model)
+        self.assertIn('segment.steps.count { it.state == WorkStepState.FAILED }', model)
+        self.assertIn('segment.steps.count { it.state == WorkStepState.UNKNOWN }', model)
+        self.assertIn('if (failed > 0) add("${failed}步失败")', model)
+        self.assertIn('if (unconfirmed > 0) add("${unconfirmed}步待确认")', model)
+        self.assertIn('val status = controlActivity?.label ?: summary', model)
+        mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
+        self.assertIn('message.status == RunStatus.FAILED -> "流程失败"', mapper)
+        self.assertLess(mapper.index('message.status == RunStatus.STOPPED -> "已停止"'),
+                        mapper.index('segments.any { segment -> segment.steps.any { it.state == WorkStepState.FAILED } } -> "失败"'))
+        regression = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkProcessProgressTest.kt').read_text()
+        for name in ('screenshotShapeCountsOnlyThreeClosedReasoningSteps',
+                     'failedAndUnknownReceiptsRemainVisibleDuringAllControlStates',
+                     'failedRunWithoutFailedToolIsNotInventedAsToolFailure',
+                     'resultCountsAccumulateAcrossSegmentsRatherThanBecomingFlags'):
+            self.assertIn('fun ' + name, regression)
+
 if __name__ == '__main__':
     unittest.main()

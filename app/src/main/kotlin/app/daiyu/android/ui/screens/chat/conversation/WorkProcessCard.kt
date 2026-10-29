@@ -63,7 +63,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     }.border(1.dp, colors.line, shape).testTag("work-process-surface")) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val summaryWidth = maxWidth * .56f
-            val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
+            val stacked = work.failedStepCount > 0 || work.unconfirmedStepCount > 0 ||
+                maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
             Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable { expandedOverride = !expanded }
                 .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
                 .padding(horizontal = 10.dp, vertical = 5.dp),

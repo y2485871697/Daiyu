@@ -885,6 +885,25 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertEquals(listOf("https://example.test"), opened.toList())
     }
 
+    fun testCodeHeaderDefaultsMissingLanguageToTextAndPreservesExplicitLabels() {
+        var markdown by mutableStateOf("")
+        show { Column(Modifier.width(300.dp)) { MessageMarkdown(markdown) } }
+        val cases = listOf("" to "text", " \t " to "text", "text" to "text", "sh" to "sh", "python" to "python")
+        cases.forEachIndexed { index, (language, expected) ->
+            val code = "payload-$index"
+            mainThread { markdown = "```$language\n$code\n```" }
+            awaitNodes(hasTestTag("markdown-code-text") and hasText(code))
+            val label = hasAnyAncestor(hasTestTag("markdown-code-header")) and hasText(expected)
+            awaitNodes(label)
+            ui.onNode(label, useUnmergedTree = true).assertTextEquals(expected).assertIsDisplayed()
+        }
+        mainThread { markdown = "    indented code" }
+        awaitNodes(hasTestTag("markdown-code-text") and hasText("indented code"))
+        val label = hasAnyAncestor(hasTestTag("markdown-code-header")) and hasText("text")
+        awaitNodes(label)
+        ui.onNode(label, useUnmergedTree = true).assertTextEquals("text").assertIsDisplayed()
+    }
+
     fun testCodeBlocksAreCenteredAndCopyTheirExactCodeFromTheTopRightAction() {
         val first = "  echo \"代鱼\"\nls -la\n"
         val second = "println(\"second\")\n"

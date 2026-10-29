@@ -53,6 +53,10 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn("conversationClickable", self.code)
         self.assertNotIn("TextButton", self.code)
 
+    def test_blank_language_header_defaults_to_text(self):
+        header = self.code.split('testTag("markdown-code-header")', 1)[1].split("CodeAction(", 1)[0]
+        self.assertIn('BasicText(block.language.ifBlank { "text" }', header)
+
     def test_copy_uses_full_code_not_revealed_text(self):
         self.assertIn('clipboard.setText(AnnotatedString(block.text))', self.code)
         self.assertNotIn('clipboard.setText(AnnotatedString(text))', self.code)

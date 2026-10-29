@@ -138,7 +138,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                 .background(colors.soft).border(1.dp, colors.line, shape).testTag("markdown-code-block")) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp).testTag("markdown-code-header"),
                     verticalAlignment = Alignment.CenterVertically) {
-                    BasicText(block.language, Modifier.weight(1f).padding(end = 4.dp),
+                    BasicText(block.language.ifBlank { "text" }, Modifier.weight(1f).padding(end = 4.dp),
                         style = TextStyle(fontSize = 11.sp, lineHeight = 16.sp, color = colors.muted), maxLines = 1)
                     CodeAction(CodeBlockIcons.Download, "下载代码", "markdown-code-download", enabled = pendingDownload == null) {
                         pendingDownload = block.text

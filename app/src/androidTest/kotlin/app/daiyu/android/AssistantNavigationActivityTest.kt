@@ -135,7 +135,6 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
             }
             val list = node("assistant-list")
             awaitDialogTouchReady(list)
-            awaitDialogImeFrame(list, visible = false)
             list.performScrollToKey(created.id)
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()

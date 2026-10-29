@@ -126,6 +126,25 @@ class AssistantNavigationContractTest(unittest.TestCase):
         self.assertIn('assertEquals(before, fixture.database.exportBackup())', oracle)
         self.assertIn('assertEquals(0, fixture.opens.get())', oracle)
 
+    def test_saved_assistant_scroll_requires_ready_list_not_hidden_keyboard(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/AssistantNavigationActivityTest.kt').read_text()
+        body = source.split('fun testNewAssistantOpensEditorAndSavesWithoutChangingBinding()', 1)[1].split('fun testNewAssistantCancelAndOutsideKeepCreatedDefaultsWithoutSavingDraft()', 1)[0]
+        ready = body.index('awaitDialogTouchReady(list)')
+        scroll = body.index('list.performScrollToKey(created.id)')
+        self.assertLess(ready, scroll)
+        self.assertNotIn('awaitDialogImeFrame', body)
+        for token in ('node("assistant-item-${created.id}").assertIsDisplayed()',
+                      'node("assistant-item-${created.id}").assert(hasText(name))',
+                      'assertEquals(created.copy(name = name), restored.read(created.id))',
+                      'assertEquals(selected, restored.selectedId.value)',
+                      'assertEquals(before.size + 1, restored.list().size)',
+                      'assertEquals(bindings, fixture.database.conversations().associate',
+                      'assertEquals(0, fixture.opens.get())'):
+            self.assertIn(token, body)
+        back = source.split('private fun back(system: Boolean)', 1)[1].split('private fun selectBoundConversation()', 1)[0]
+        self.assertIn('awaitDialogImeFrame(current, visible = false)', back)
+        self.assertLess(back.index('awaitDialogImeFrame'), back.index('instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)'))
+
     def test_device_regressions_cover_outside_reopen_background_avatar_and_transparency(self):
         tests = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
         navigation = (tests / 'AssistantNavigationActivityTest.kt').read_text()

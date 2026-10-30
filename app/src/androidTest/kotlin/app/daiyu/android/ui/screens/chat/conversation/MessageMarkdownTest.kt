@@ -1475,6 +1475,45 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue(opened.isEmpty())
     }
 
+    fun testAcceptedNetworkTargetsKeepCompletedParagraphAndCellLayouts() {
+        val prefix = "Stable **network paragraph**.\n\nH1 | H2\n--- | ---\ncell-one | cell-two\n\n"
+        val parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser
+        var source by mutableStateOf(prefix + "Tail")
+        var projected by mutableStateOf<MarkdownProjection?>(null)
+        var currentBudget: androidx.compose.runtime.State<Int>? = null
+        val cache = markdownProjectionCache
+        fun prepare(text: String, previous: MarkdownProjection?): MarkdownProjection = kotlinx.coroutines.runBlocking {
+            projectMarkdown(listOf(text), parser, cache, previous)
+        }
+        projected = prepare(source, null)
+        show { Column(Modifier.width(320.dp).height(420.dp).verticalScroll(rememberScrollState()).testTag("network-budget")) {
+            val reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("body", source)), projected,
+                streaming = true, terminal = false, enabled = false)
+            SideEffect { currentBudget = reveal.visibility("body") }
+            RevealedMessageMarkdown(source, projected?.blocks?.get(source), reveal, "body", generationComplete = false,
+                deferBlockReveal = true)
+        } }
+        val paragraph = body("network-budget", "Stable network paragraph.")
+        val cell = body("network-budget", "cell-one")
+        fun layout(node: SemanticsNodeInteraction): TextLayoutResult {
+            val results = mutableListOf<TextLayoutResult>()
+            node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
+            return results.single()
+        }
+        val budget = currentBudget
+        val shapedParagraph = layout(paragraph).multiParagraph
+        val shapedCell = layout(cell).multiParagraph
+        repeat(8) { index ->
+            val next = prefix + "Tail" + " incoming".repeat(index + 1)
+            val nextProjection = prepare(next, projected)
+            mainThread { source = next; projected = nextProjection }
+            assertSame("Accepted targets must keep the existing leaf budget", budget, currentBudget)
+            assertSame("Completed paragraph shaping survives network appends", shapedParagraph, layout(paragraph).multiParagraph)
+            assertSame("Completed cell shaping survives network appends", shapedCell, layout(cell).multiParagraph)
+        }
+        assertTrue(opened.isEmpty())
+    }
+
     fun testAnimationFramesDoNotRecomposeTheRevealOwnerOrReplayItsCards() {
         val plain = ("LEAF " + "word ".repeat(150)).trimEnd()
         val source = "**$plain**"

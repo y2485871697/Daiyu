@@ -32,8 +32,8 @@ class MarkdownEntryContract(unittest.TestCase):
 
     def test_first_composition_composes_only_exact_ready_source_and_parser(self):
         cache = (BASE / 'MarkdownProjectionCache.kt').read_text().split('fun getPrepared(', 1)[1].split('fun preparationSources', 1)[0]
-        self.assertIn('getBlocks(source, parser) ?: return null', cache)
-        self.assertIn('MarkdownProjection(sources.toList(), blocks, parser)', cache)
+        self.assertIn('sourceProjection(source, parser) ?: return null', cache)
+        self.assertIn('MarkdownProjection(sources.toList(), blocks, parser, displayText)', cache)
         ui = (BASE / 'MessageMarkdown.kt').read_text().split('internal fun rememberMarkdownProjection', 1)[1].split('internal fun ProjectedMessageMarkdown', 1)[0]
         self.assertIn('markdownProjectionCache.getPrepared(sources, parser)', ui)
         self.assertNotIn('MarkdownParser.parse', ui)

@@ -22,19 +22,27 @@ internal class MarkdownProjectionCache(
     fun get(sources: List<String>, parser: (String) -> List<MarkdownBlock>): MarkdownProjection? =
         entries[Key(sources, MarkdownParserIdentity(parser))]?.projection
 
-    @Synchronized
-    fun getBlocks(source: String, parser: (String) -> List<MarkdownBlock>): List<MarkdownBlock>? {
+    private fun sourceProjection(source: String, parser: (String) -> List<MarkdownBlock>): MarkdownProjection? {
         val key = entries.entries.lastOrNull {
             it.value.projection.parser === parser && it.value.projection.blocks.containsKey(source)
         }?.key ?: return null
-        return entries[key]?.projection?.blocks?.get(source)
+        return entries[key]?.projection
     }
+
+    @Synchronized
+    fun getBlocks(source: String, parser: (String) -> List<MarkdownBlock>): List<MarkdownBlock>? =
+        sourceProjection(source, parser)?.blocks?.get(source)
 
     @Synchronized
     fun getPrepared(sources: List<String>, parser: (String) -> List<MarkdownBlock>): MarkdownProjection? {
         val blocks = linkedMapOf<String, List<MarkdownBlock>>()
-        for (source in sources.distinct()) blocks[source] = getBlocks(source, parser) ?: return null
-        return MarkdownProjection(sources.toList(), blocks, parser)
+        val displayText = linkedMapOf<String, String>()
+        for (source in sources.distinct()) {
+            val prepared = sourceProjection(source, parser) ?: return null
+            blocks[source] = prepared.blocks.getValue(source)
+            displayText[source] = prepared.displayText.getValue(source)
+        }
+        return MarkdownProjection(sources.toList(), blocks, parser, displayText)
     }
 
     fun preparationSources(sources: List<String>): List<String> {
@@ -53,7 +61,7 @@ internal class MarkdownProjectionCache(
     fun put(projection: MarkdownProjection) {
         val chars = projection.sources.sumOf { it.length.toLong() }
         if (chars > maxSourceChars) return
-        val snapshot = MarkdownProjection(projection.sources.toList(), projection.blocks, projection.parser)
+        val snapshot = MarkdownProjection(projection.sources.toList(), projection.blocks, projection.parser, projection.displayText)
         val key = Key(snapshot.sources, MarkdownParserIdentity(snapshot.parser))
         entries.remove(key)?.let { sourceChars -= it.sourceChars }
         entries[key] = Entry(snapshot, chars)

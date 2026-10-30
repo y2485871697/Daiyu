@@ -50,5 +50,5 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         cases = Path(__file__).resolve().parents[1] / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/StreamingScrollTest.kt'
         source = cases.read_text()
         self.assertNotIn('click(center)', source)
-        self.assertEqual(1, source.count('down(Offset('))
+        self.assertEqual(2, source.count('down(Offset('))
         self.assertLess(source.index('down(Offset('), source.index('text = appended'))

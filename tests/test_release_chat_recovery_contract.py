@@ -11,7 +11,7 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('val prefixProjection = remember(projection, requested.size, acceptsProjection)', source)
         self.assertIn('projection?.takeIf { acceptsProjection }?.let { parsed ->', source)
         self.assertIn('if (requested.size >= parsed.sources.size) parsed', source)
-        self.assertIn('else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser)', source)
+        self.assertIn('else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser, parsed.displayText)', source)
         self.assertNotIn('text.all { it in parsed.blocks }', source)
         self.assertIn('projection?.sources == sources.map { it.text }', source)
         test = (DEVICE / 'ChatResumeScrollTest.kt').read_text()

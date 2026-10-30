@@ -12,10 +12,25 @@ class MarkdownStreamOptimizationContract(unittest.TestCase):
         self.assertIn("val frame = produceState(", typing)
         self.assertNotIn("val frame by produceState(", typing)
         self.assertIn("private val completion = derivedStateOf", typing)
-        self.assertIn("remember(target, frame, exact)", typing)
+        self.assertIn("remember(identity, resetEpoch, frame) { MarkdownRevealBudgets(currentTarget, frame) }", typing)
+        self.assertIn("remember(target, frame, exact, budgets)", typing)
         self.assertNotIn("reveal.limit(", chat)
         self.assertIn("reveal.limit(partId)", ui)
         self.assertIn("val revealSettled = reveal.settled", chat)
+
+    def test_network_target_keeps_budgets_and_uses_worker_prepared_coordinates(self):
+        typing = (BASE / "MarkdownTyping.kt").read_text()
+        projection = (BASE / "MarkdownProjection.kt").read_text()
+        cache = (BASE / "MarkdownProjectionCache.kt").read_text()
+        self.assertIn("val displayText: Map<String, String>", projection)
+        self.assertNotIn("markdownBlocksDisplayText(blocks)", typing)
+        self.assertNotIn("markdownBlocksLength(", typing)
+        self.assertIn("parsed.displayText.getValue(displayed.text)", typing)
+        self.assertIn("sourceProjection(source, parser)", cache)
+        self.assertIn("projection.parser, projection.displayText", cache)
+        budget = typing.split("internal class MarkdownRevealBudgets(", 1)[1].split("private val hidden", 1)[0]
+        self.assertIn("parts.getOrPut(id)", budget)
+        self.assertIn("progress.target === current", budget)
 
     def test_complete_layout_is_cached_but_semantics_never_return_hidden_text(self):
         code = (BASE / "MarkdownCodeReveal.kt").read_text()

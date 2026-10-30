@@ -57,7 +57,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         typing = (BASE / 'MarkdownTyping.kt').read_text()
         self.assertIn('MarkdownTypingSource(id, parsed.sources[index])', typing)
         self.assertIn('partIds.take(parsed.sources.size).mapIndexed', typing)
-        self.assertIn('parsed.blocks.getValue(displayed.text)', typing)
+        self.assertIn('parsed.displayText.getValue(displayed.text)', typing)
         self.assertIn('projection?.sources == sources.map { it.text }', typing)
         reasoning = (BASE / 'ReportedReasoningCard.kt').read_text()
         self.assertIn('displayed, projection?.blocks?.get(displayed)', reasoning)

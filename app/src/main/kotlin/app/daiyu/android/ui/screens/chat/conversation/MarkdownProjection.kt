@@ -18,6 +18,7 @@ internal class MarkdownProjection(
     val sources: List<String>,
     val blocks: Map<String, List<MarkdownBlock>>,
     val parser: (String) -> List<MarkdownBlock>,
+    val displayText: Map<String, String> = blocks.mapValues { markdownBlocksDisplayText(it.value) },
 )
 
 internal data class MarkdownBodySnapshot(val text: String, val blocks: List<MarkdownBlock>)

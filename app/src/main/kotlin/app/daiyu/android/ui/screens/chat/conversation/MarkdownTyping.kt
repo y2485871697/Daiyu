@@ -16,12 +16,13 @@ internal class MarkdownReveal(
     private val target: MarkdownTypingTarget?,
     private val frame: State<MarkdownTypingFrame>,
     exact: Boolean,
+    budgets: MarkdownRevealBudgets = MarkdownRevealBudgets(derivedStateOf { target }, frame),
 ) {
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
     val settled: Boolean get() = completion.value
     private fun visible(): Int = frame.value.let { if (it.target === target) it.visible else target?.start ?: 0 }
     private val limits = target?.let { current -> current.parts.associate { part ->
-        part.source.id to derivedStateOf { current.limit(part.source.id, visible()) }
+        part.source.id to budgets.visibility(part.source.id)
     } }.orEmpty()
     fun limit(id: String): Int = limits[id]?.value ?: 0
     fun visibility(id: String): State<Int> = limits[id] ?: hiddenMarkdownVisibility
@@ -29,6 +30,22 @@ internal class MarkdownReveal(
         part.source.id to (part.source.text to derivedStateOf { limit(part.source.id) >= part.length })
     }.orEmpty()
     fun ready(id: String, text: String): Boolean = readiness[id]?.let { (source, state) -> source == text && state.value } == true
+}
+
+/** Keep leaf State identities across accepted network snapshots, not just reveal frames. */
+@Stable
+internal class MarkdownRevealBudgets(
+    private val target: State<MarkdownTypingTarget?>,
+    private val frame: State<MarkdownTypingFrame>,
+) {
+    private val parts = mutableMapOf<String, State<Int>>()
+    fun visibility(id: String): State<Int> = parts.getOrPut(id) {
+        derivedStateOf {
+            val current = target.value
+            val progress = frame.value
+            current?.limit(id, if (progress.target === current) progress.visible else current.start) ?: 0
+        }
+    }
 }
 
 private val hiddenMarkdownVisibility: State<Int> = derivedStateOf { 0 }
@@ -54,7 +71,7 @@ internal fun rememberMarkdownReveal(
     val prefixProjection = remember(projection, requested.size, acceptsProjection) {
         projection?.takeIf { acceptsProjection }?.let { parsed ->
             if (requested.size >= parsed.sources.size) parsed
-            else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser)
+            else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser, parsed.displayText)
         }
     }
     return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming,
@@ -87,8 +104,8 @@ internal fun rememberMarkdownReveal(
     val parts = remember(partIds, projection, compatible) {
         projection?.takeIf { compatible }?.let { parsed -> partIds.take(parsed.sources.size).mapIndexed { index, id ->
             val displayed = MarkdownTypingSource(id, parsed.sources[index])
-            val blocks = parsed.blocks.getValue(displayed.text)
-            MarkdownTypingPart(displayed, markdownBlocksLength(blocks), markdownBlocksDisplayText(blocks))
+            val displayText = parsed.displayText.getValue(displayed.text)
+            MarkdownTypingPart(displayed, displayText.length, displayText)
         } }
     }
     val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
@@ -107,7 +124,9 @@ internal fun rememberMarkdownReveal(
     }
     val exact = projection?.sources == sources.map { it.text } && baselineLength != null && target != null &&
         target.parts == parts && target.parts.map { it.source } == sources
-    return remember(target, frame, exact) { MarkdownReveal(target, frame, exact) }
+    val currentTarget = rememberUpdatedState(target)
+    val budgets = remember(identity, resetEpoch, frame) { MarkdownRevealBudgets(currentTarget, frame) }
+    return remember(target, frame, exact, budgets) { MarkdownReveal(target, frame, exact, budgets) }
 }
 
 internal fun markdownTypingBaselineLength(
@@ -115,6 +134,6 @@ internal fun markdownTypingBaselineLength(
     baseline: List<String>,
     allowPrefix: Boolean,
 ): Int? = projection?.takeIf { it.sources == baseline || (allowPrefix && isMarkdownAppend(it.sources, baseline)) }?.let { parsed ->
-    parsed.sources.sumOf { markdownBlocksLength(parsed.blocks.getValue(it)).toLong() }
+    parsed.sources.sumOf { parsed.displayText.getValue(it).length.toLong() }
         .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }

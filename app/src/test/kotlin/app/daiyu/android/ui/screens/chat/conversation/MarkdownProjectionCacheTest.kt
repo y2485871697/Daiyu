@@ -33,6 +33,27 @@ class MarkdownProjectionCacheTest {
         assertNull(cache.get(listOf("**fir"), parse))
     }
 
+    @Test fun cachedDisplayCoordinatesNeverWalkTheAstOnTheConsumerThread() = runBlocking {
+        val reads = AtomicInteger()
+        val parse: (String) -> List<MarkdownBlock> = { source ->
+            val blocks = parser(source)
+            object : List<MarkdownBlock> by blocks {
+                override fun iterator(): Iterator<MarkdownBlock> { reads.incrementAndGet(); return blocks.iterator() }
+            }
+        }
+        val cache = MarkdownProjectionCache()
+        val source = "Stable **paragraph**.\n\nH1 | H2\n--- | ---\na | b\n\nTail"
+        val projected = projectMarkdown(listOf(source), parse, cache)
+        val before = reads.get()
+        repeat(100) {
+            val prepared = cache.getPrepared(listOf(source), parse)!!
+            assertSame(projected.displayText.getValue(source), prepared.displayText.getValue(source))
+            assertEquals(projected.displayText.getValue(source).length,
+                markdownTypingBaselineLength(prepared, listOf(source), allowPrefix = false))
+        }
+        assertEquals("Cache lookup and baseline preparation must not traverse the AST", before, reads.get())
+    }
+
     @Test fun parserIdentityDoesNotBorrowAnEqualParsersAst() {
         class EqualParser : (String) -> List<MarkdownBlock> {
             override fun invoke(source: String) = parser(source)

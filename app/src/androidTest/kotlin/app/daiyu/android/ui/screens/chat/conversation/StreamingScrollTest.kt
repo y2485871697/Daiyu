@@ -27,6 +27,75 @@ class StreamingScrollTest : WiredActivityTestCase() {
     fun testBodyRevealKeepsDraggingAndFlingingWithoutWalkingTheDocument() = verifyScroll(false)
     fun testThoughtRevealKeepsDraggingAndFlingingWithoutWalkingTheDocument() = verifyScroll(true)
 
+    fun testNetworkBodyAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(false)
+    fun testNetworkThoughtAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(true)
+
+    private fun verifyNetworkScroll(thought: Boolean) {
+        val baseline = (0..17).joinToString("\n\n") { "Stable **paragraph $it** with selectable text." } + "\n\nTAIL network"
+        var text by mutableStateOf(baseline)
+        val parses = AtomicInteger()
+        val offMain = java.util.concurrent.atomic.AtomicBoolean(true)
+        val parsedSource = java.util.concurrent.atomic.AtomicReference("")
+        val advances = AtomicInteger()
+        val parser: (String) -> List<MarkdownBlock> = { source ->
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) offMain.set(false)
+            val blocks = MarkdownParser.parse(source)
+            parses.incrementAndGet()
+            parsedSource.set(source)
+            blocks
+        }
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    Box(Modifier.size(320.dp, 360.dp)) {
+                        val tail = ChatTurnUi.Assistant("network-tail", status = RunStatus.RUNNING, isStreaming = true,
+                            finalText = if (thought) "" else text,
+                            reportedReasoning = if (thought) listOf(ReportedReasoning("thought", text, 0L, 1L)) else emptyList())
+                        ChatMessageList(listOf(tail), ChatScreenActions(onVisibleTextAdvance = { advances.incrementAndGet() }),
+                            scrollRequest = ChatScrollRequest(1))
+                    }
+                }
+            }
+        } }
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasText("TAIL network"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        ui.waitForIdle()
+        val list = ui.onNodeWithTag("chat-messages")
+        list.performTouchInput { down(Offset(width * .5f, height * .25f)) }
+        ui.mainClock.autoAdvance = false
+        try {
+            fun scrollValue(): Float = list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+            val beforeScroll = scrollValue()
+            val beforeAdvances = advances.get()
+            repeat(6) { index ->
+                val next = baseline + " incoming".repeat(30 * (index + 1))
+                ui.runOnUiThread { text = next }
+                ui.mainClock.advanceTimeBy(64)
+                ui.waitUntil(5_000) { parsedSource.get() == next }
+                ui.mainClock.advanceTimeBy(64)
+                ui.waitForIdle()
+                val parsed = parses.get()
+                list.performTouchInput {
+                    moveTo(Offset(width * .5f, height * (.35f + index * .08f)), delayMillis = 16)
+                }
+                repeat(3) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                assertEquals("Pointer/reveal frames cannot start another parse", parsed, parses.get())
+            }
+            list.performTouchInput { up() }
+            ui.mainClock.advanceTimeBy(32)
+            ui.waitForIdle()
+            assertTrue("Continuous incoming text must yield to the drag", scrollValue() < beforeScroll)
+            val afterDrag = scrollValue()
+            repeat(8) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+            assertTrue("Network appends cannot pull a fling back to the tail", scrollValue() <= afterDrag)
+            assertTrue("New text continues revealing throughout network/drag updates", advances.get() > beforeAdvances)
+            assertTrue("Cold network snapshots must actually be parsed", parses.get() >= 7)
+            assertTrue("Network parsing must remain off the main thread", offMain.get())
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
     private fun verifyScroll(thought: Boolean) {
         val prefix = (0..17).joinToString("\n\n") { "Stable **paragraph $it** with selectable text." } +
             "\n\nH1 | H2\n--- | ---\ncell-one | cell-two\n\n"

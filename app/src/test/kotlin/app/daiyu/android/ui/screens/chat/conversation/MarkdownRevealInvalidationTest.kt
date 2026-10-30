@@ -150,6 +150,42 @@ class MarkdownRevealInvalidationTest {
         } finally { observer.stop(); observer.clear() }
     }
 
+    @Test fun acceptedNetworkSnapshotsKeepCompletedLeafBudgetsAndSubscriptions() {
+        fun target(size: Int) = MarkdownTypingTarget(listOf(
+            MarkdownTypingPart(MarkdownTypingSource("body", "x".repeat(size)), size),
+        ), start = 100, streaming = true, terminal = false)
+        val current = mutableStateOf<MarkdownTypingTarget?>(target(200))
+        val frame = mutableStateOf(MarkdownTypingFrame(current.value, 100))
+        val budgets = MarkdownRevealBudgets(current, frame)
+        val parent = budgets.visibility("body")
+        val completed = markdownVisibility(parent, 0, 50)
+        val active = markdownVisibility(parent, 50, 10_000)
+        val observer = SnapshotStateObserver { it() }
+        var completedChanges = 0
+        observer.start()
+        Snapshot.sendApplyNotifications()
+        try {
+            observer.observeReads("completed", { _: String -> completedChanges++ }) { completed.value }
+            repeat(100) { index ->
+                val next = target(201 + index)
+                current.value = next
+                val reveal = MarkdownReveal(next, frame, exact = true, budgets = budgets)
+                assertSame("Network snapshots must not replace all block States", parent, reveal.visibility("body"))
+                Snapshot.sendApplyNotifications()
+                assertEquals(50, completed.value)
+                frame.value = MarkdownTypingFrame(next, 101 + index)
+                Snapshot.sendApplyNotifications()
+                assertEquals(51 + index, active.value)
+                assertFalse(reveal.settled)
+            }
+            assertEquals("Completed leaves must not invalidate on network targets", 0, completedChanges)
+            current.value = null
+            Snapshot.sendApplyNotifications()
+            assertEquals(0, parent.value)
+            assertEquals(0, completed.value)
+        } finally { observer.stop(); observer.clear() }
+    }
+
     @Test fun oldFrameAndMismatchedSourceCannotOpenTheNextContent() {
         val old = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("id", "old"), 3)),
             start = 0, streaming = true, terminal = false)

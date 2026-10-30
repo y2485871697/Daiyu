@@ -139,7 +139,8 @@ class GuiRuntimeScreenshotTest {
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, windowId))
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, windowType))
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setActive", ClassParameter.from(Boolean::class.javaPrimitiveType!!, active))
-            ReflectionHelpers.callInstanceMethod<Unit>(window, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, displayId))
+            if (android.os.Build.VERSION.SDK_INT >= 30)
+                ReflectionHelpers.callInstanceMethod<Unit>(window, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, displayId))
             fun node(text: String): AccessibilityNodeInfo = AccessibilityNodeInfo.obtain().apply {
                 packageName = pkg; className = "View"; this.text = text
                 isEnabled = true; isVisibleToUser = true; isClickable = true
@@ -604,6 +605,215 @@ class GuiRuntimeScreenshotTest {
             assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
             assertEquals(before + 1, platform.nodeActions)
         }
+    }
+
+    private fun contentEvent(type: Int, pkg: String?, window: Int): AccessibilityEvent =
+        AccessibilityEvent.obtain(type).apply {
+            packageName = pkg
+            ReflectionHelpers.callInstanceMethod<Unit>(this, "setWindowId",
+                ClassParameter.from(Int::class.javaPrimitiveType!!, window))
+        }
+
+    @Test fun unlabelledContentInTheObservedSelfWindowStillUsesExactLocalValidation() {
+        for (type in listOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)) {
+            platform.savedRoot = null; platform.savedTarget = null; platform.descendants = 2000
+            openSelf(); val observation = observe(); val action = approve(observation)
+            service.onAccessibilityEvent(contentEvent(type, null, observation.windowId))
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        }
+        assertEquals(4, platform.nodeActions)
+    }
+
+    @Test fun foreignWindowContentDoesNotRetireTheSelfTargetBeforeActionApproval() {
+        for (truncated in listOf(false, true)) for (pkg in listOf(null, "com.android.systemui")) {
+            platform.savedRoot = null; platform.savedTarget = null; platform.descendants = if (truncated) 2000 else 0
+            openSelf(); val observation = observe(); assertEquals(truncated, observation.truncated)
+            val action = GuiAction(observation.observationId, GuiOperation.TAP, 1)
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                pkg, observation.windowId + 1))
+            assertEquals(observation.observationId, session.lease.observation!!.observationId)
+            assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+            rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
+            val actions = platform.nodeActions
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+            assertEquals(actions + 1, platform.nodeActions)
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+            assertEquals(actions + 1, platform.nodeActions)
+        }
+        assertEquals(4, platform.nodeActions)
+    }
+
+    @Test fun ownOtherWindowContentRemainsDirtyWithoutReadingOrReplacingTheObservedTarget() {
+        openSelf(); val observation = observe(); val action = approve(observation)
+        val reads = platform.rootReads
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            service.packageName, observation.windowId + 1))
+        assertEquals(reads, platform.rootReads)
+        assertEquals(observation.observationId, session.lease.observation!!.observationId)
+        rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun contentWithoutAnyWindowOrPackageEvidenceAndForeignSameWindowStillRetires() {
+        for ((pkg, window) in listOf(null to -1, "com.android.systemui" to -1,
+            "com.android.systemui" to platform.windowId)) {
+            openSelf(); val observation = observe(); val action = approve(observation)
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, pkg, window))
+            rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        }
+        assertNoActions()
+    }
+
+    @Test fun foreignWindowContentDoesNotSoftenWindowClickFocusOrSelectionEvents() {
+        for (type in listOf(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_CLICKED, AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_FOCUSED, AccessibilityEvent.TYPE_VIEW_SELECTED)) {
+            openSelf(); val observation = observe(); val action = approve(observation)
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                "com.android.systemui", observation.windowId + 1))
+            service.onAccessibilityEvent(contentEvent(type, service.packageName, observation.windowId))
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                service.packageName, observation.windowId))
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+        }
+        assertNoActions()
+    }
+
+    @Test fun foreignWindowContentCannotHideLossOfTheActualSelfSurface() {
+        openSelf(); val observation = observe(); val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            "com.android.systemui", observation.windowId + 1))
+        platform.pkg = "another.app"; platform.savedRoot = null
+        rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
+        platform.pkg = service.packageName; platform.savedRoot = null
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+        assertNoActions()
+    }
+
+    @Test fun newlyScopedContentStillRejectsTrueTargetChangesWithoutRetry() {
+        openSelf(); val observation = observe(); val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            "com.android.systemui", observation.windowId + 1))
+        platform.targetBounds = Rect(0, 25, 100, 125)
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun anExternalLeaseDoesNotBorrowTheSelfEventScope() {
+        val observation = observe(); val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            "com.android.systemui", observation.windowId + 1))
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        assertNoActions()
+    }
+
+    @Test fun staleDiagnosticsKeepOnlyTheFirstRetiringEventAndNeverCopyEventText() {
+        org.robolectric.shadows.ShadowLog.clear()
+        openSelf(); val observation = observe(); val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            service.packageName, observation.windowId).apply { text.add("private-chat-secret") })
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            "private.package", observation.windowId).apply { contentDescription = "credential-secret" })
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        val logs = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui")
+        assertEquals(1, logs.size)
+        val line = logs.single().msg
+        assertTrue(line.contains("stage=validate_target"))
+        assertTrue(line.contains("event_type=${AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED}"))
+        assertTrue(line.contains("origin=self"))
+        assertFalse(line.contains("private")); assertFalse(line.contains("credential"))
+        assertFalse(line.contains(service.packageName)); assertFalse(line.contains(observation.observationId))
+        assertTrue(line.length < 256)
+        assertNoActions()
+    }
+
+    @Test fun staleDiagnosticsRecordContentThatActuallyRetiresAnExternalLease() {
+        org.robolectric.shadows.ShadowLog.clear()
+        val observation = observe(); val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            "com.android.systemui", observation.windowId + 1))
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        val line = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui").single().msg
+        assertTrue(line.contains("event_type=${AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED}"))
+        assertTrue(line.contains("origin=other"))
+        assertNoActions()
+    }
+
+    @Test fun staleAtApprovalLogsOnceBeforeAnyActionIsAttempted() {
+        org.robolectric.shadows.ShadowLog.clear()
+        openSelf(); val observation = observe()
+        val action = GuiAction(observation.observationId, GuiOperation.TAP, 1)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            service.packageName, observation.windowId))
+        rejected(session.approveExactActionFromUser(action), "OBSERVATION_STALE")
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        val line = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui").single().msg
+        assertTrue(line.contains("stage=approve_action"))
+        assertTrue(line.contains("event_type=${AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED}"))
+        assertNoActions()
+    }
+
+    @Test fun dirtyScreenshotLogsItsContentCauseWithoutRetiringTheExactNode() {
+        org.robolectric.shadows.ShadowLog.clear()
+        openSelf(); val observation = observe(); val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            null, observation.windowId))
+        rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
+        rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
+        val line = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui").single().msg
+        assertTrue(line.contains("stage=validate_screenshot"))
+        assertTrue(line.contains("event_type=${AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED}"))
+        assertTrue(line.contains("origin=unspecified"))
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun screenshotCallbackLogsAFirstHardEventEvenAfterEarlierContentDirtiness() {
+        org.robolectric.shadows.ShadowLog.clear()
+        openSelf(); val observation = observe(); val future = screenshot(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            null, observation.windowId))
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            service.packageName, observation.windowId))
+        val frame = platform.success()
+        rejected(future.completed(), "OBSERVATION_STALE")
+        assertDisposed(frame); assertEquals(0, frame.encoded)
+        val line = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui").single().msg
+        assertTrue(line.contains("stage=capture_callback"))
+        assertTrue(line.contains("event_type=${AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED}"))
+        assertTrue(line.contains("origin=self"))
+        assertNoActions()
+    }
+
+    @Test @Config(sdk = [26])
+    fun api26EventDiagnosticsDoNotReadNewerFrameworkWindowChanges() {
+        org.robolectric.shadows.ShadowLog.clear()
+        openSelf(); val observation = observe(); val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            service.packageName, observation.windowId))
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        val line = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui").single().msg
+        assertTrue(line.contains("window_changes=0"))
+        assertTrue(line.contains("event_type=${AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED}"))
+        assertNoActions()
+    }
+
+    @Test fun aNewObservationResetsTheCauseAndItsSingleLogBudget() {
+        org.robolectric.shadows.ShadowLog.clear()
+        openSelf()
+        for (type in listOf(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_VIEW_FOCUSED)) {
+            val observation = observe(); val action = approve(observation)
+            service.onAccessibilityEvent(contentEvent(type, service.packageName, observation.windowId))
+            rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        }
+        val logs = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui")
+        assertEquals(2, logs.size)
+        assertTrue(logs[0].msg.contains("event_type=${AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED}"))
+        assertTrue(logs[1].msg.contains("event_type=${AccessibilityEvent.TYPE_VIEW_FOCUSED}"))
+        assertNoActions()
     }
 
     @Test fun anIncompleteTargetSubtreeNeverUsesTheLongChatException() {

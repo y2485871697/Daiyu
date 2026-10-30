@@ -74,11 +74,7 @@ class GuiAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_FOCUSED or AccessibilityEvent.TYPE_VIEW_SELECTED or AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
                 AccessibilityEvent.TYPE_VIEW_SCROLLED or AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or
-                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) != 0) GuiRuntime.changed(this,
-                    contentOnly = event.eventType in setOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-                        AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) &&
-                        event.packageName?.toString() == packageName)
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) != 0) GuiRuntime.changed(this, event)
         // Do not retain event text or continuously collect a UI tree.
     }
     override fun onInterrupt() { GuiRuntime.disconnected(this) }
@@ -252,6 +248,55 @@ internal object GuiRuntime {
         generation++; clearNodes()
         confirmation?.revoke("SCREEN_LOCKED_NOT_EXECUTED")
     }
+    private data class StaleEvent(val observationId: String, val type: Int, val window: Int,
+        val windowChanges: Int, val origin: String)
+    private var staleEvent: StaleEvent? = null
+    private var staleLoggedFor: String? = null
+
+    internal fun changed(value: GuiAccessibilityService, event: AccessibilityEvent) {
+        onMain()
+        if (service !== value) return
+        val observed = targetBinding?.lease?.observation
+        val pkg = event.packageName?.toString()
+        val content = event.eventType in setOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)
+        val sameWindow = observed != null && event.windowId == observed.windowId
+        val otherWindow = observed != null && event.windowId >= 0 && event.windowId != observed.windowId
+        // Scope content evidence to its framework window, not every notification/system UI update.
+        // The self lease still validates the active root and original target twice before delivery.
+        val localContent = content && (pkg == value.packageName || pkg == null && sameWindow || otherWindow)
+        val previousGeneration = generation
+        changed(value, contentOnly = localContent)
+        if (observed != null && observed.generation == previousGeneration &&
+            (generation != previousGeneration || staleEvent == null)) {
+            staleEvent = StaleEvent(observed.observationId, event.eventType, event.windowId,
+                if (Build.VERSION.SDK_INT >= 28) event.windowChanges else 0,
+                if (pkg == value.packageName) "self" else if (pkg == null) "unspecified" else "other")
+        }
+    }
+
+    private fun validateObservation(lease: GuiLeaseGate.Lease, id: String, stage: String): GuiResult.Rejected? {
+        val rejection = gate.validateObservation(lease, id, generation) ?: return null
+        return recordObservationRejection(lease, id, stage, rejection)
+    }
+
+    private fun recordObservationRejection(lease: GuiLeaseGate.Lease, id: String, stage: String,
+        rejection: GuiResult.Rejected): GuiResult.Rejected {
+        if (rejection.code == "OBSERVATION_STALE" && staleLoggedFor != id) {
+            staleLoggedFor = id
+            val observed = lease.observation
+            val cause = staleEvent?.takeIf { it.observationId == id }
+            // One bounded metadata line per rejected observation; no event text, package, observation IDs or UI tree.
+            runCatching { android.util.Log.i("DaiyuGui", "observation_stale stage=$stage" +
+                " event_type=${cause?.type ?: 0} event_window=${cause?.window ?: -1}" +
+                " window_changes=${cause?.windowChanges ?: 0} origin=${cause?.origin ?: "runtime"}" +
+                " observed_window=${observed?.windowId ?: -1}" +
+                " generation=${observed?.generation ?: -1}:$generation") }
+        }
+        return rejection
+    }
+
     fun changed(value: GuiAccessibilityService, contentOnly: Boolean = false) {
         onMain()
         if (service !== value) return
@@ -396,7 +441,9 @@ internal object GuiRuntime {
     internal fun approveAction(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<Unit> {
         onMain(); operationRejection(lease, action.operation)?.let { return it }
         selfRootRejection(lease)?.let { return it }
-        return gate.approveAction(lease, action, generation)
+        return gate.approveAction(lease, action, generation).also {
+            if (it is GuiResult.Rejected) recordObservationRejection(lease, action.observationId, "approve_action", it)
+        }
     }
     internal fun approvedActions(lease: GuiLeaseGate.Lease): Set<GuiAction> {
         onMain(); if (targetRejection(lease) != null) return emptySet()
@@ -491,8 +538,10 @@ internal object GuiRuntime {
     }
 
     private fun rejectChangedTarget(lease: GuiLeaseGate.Lease, code: String): GuiResult.Rejected {
+        val rejection = GuiResult.Rejected(code)
+        lease.observation?.let { recordObservationRejection(lease, it.observationId, "target_changed", rejection) }
         gate.retireObservation(lease); clearNodes()
-        return GuiResult.Rejected(code)
+        return rejection
     }
 
     /** Reacquire the admitted application tree; do NOT publish a new observation/clear the approved one.
@@ -501,9 +550,10 @@ internal object GuiRuntime {
     internal fun validateExactTarget(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<Unit> {
         onMain(); operationRejection(lease, action.operation)?.let { return it }
         screenRejection()?.let { return it }; selfRootRejection(lease)?.let { return it }
-        gate.validateObservation(lease, action.observationId, generation)?.let { return it }
+        validateObservation(lease, action.observationId, "validate_target")?.let { return it }
         val observed = lease.observation!!
-        if (contentChanged && action.nodeId == null) return GuiResult.Rejected("OBSERVATION_STALE")
+        if (contentChanged && action.nodeId == null) return recordObservationRejection(lease,
+            action.observationId, "validate_target", GuiResult.Rejected("OBSERVATION_STALE"))
         val fetched = externalRoot(lease, service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
         val root = fetched.value
@@ -600,6 +650,7 @@ internal object GuiRuntime {
 
     internal fun observe(lease: GuiLeaseGate.Lease): GuiResult<GuiObservation> {
         onMain(); targetRejection(lease)?.let { return it }
+        staleEvent = null; staleLoggedFor = null
         gate.retireObservation(lease); clearNodes()
         screenRejection()?.let { return it }
         val permit = gate.consumeRead(lease, screenshot = false)
@@ -620,8 +671,9 @@ internal object GuiRuntime {
     private fun validateScreenshot(lease: GuiLeaseGate.Lease, observationId: String): GuiResult.Rejected? {
         onMain(); targetRejection(lease)?.let { return it }; screenRejection()?.let { return it }
         selfRootRejection(lease)?.let { return it }
-        gate.validateObservation(lease, observationId, generation)?.let { return it }
-        if (contentChanged) return GuiResult.Rejected("OBSERVATION_STALE")
+        validateObservation(lease, observationId, "validate_screenshot")?.let { return it }
+        if (contentChanged) return recordObservationRejection(lease, observationId,
+            "validate_screenshot", GuiResult.Rejected("OBSERVATION_STALE"))
         val binding = screenshotBinding?.takeIf { it.first == observationId }?.second
             ?: return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
         if (!binding.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
@@ -705,7 +757,7 @@ internal object GuiRuntime {
         fun rejected(code: String) = CompletableFuture.completedFuture<GuiResult<GuiScreenshot>>(GuiResult.Rejected(code))
         targetRejection(lease)?.let { return rejected(it.code) }; screenRejection()?.let { return rejected(it.code) }
         selfRootRejection(lease)?.let { return rejected(it.code) }
-        gate.validateObservation(lease, observationId, generation)?.let { return rejected(it.code) }
+        validateObservation(lease, observationId, "capture")?.let { return rejected(it.code) }
         if (Build.VERSION.SDK_INT < 30) return rejected("SCREENSHOT_UNSUPPORTED_API")
         validateScreenshot(lease, observationId)?.let { return rejected(it.code) }
         val permit = gate.consumeRead(lease, screenshot = true)
@@ -726,7 +778,7 @@ internal object GuiRuntime {
                 }
                 try {
                     val rejection = targetRejection(lease) ?: screenRejection() ?: selfRootRejection(lease) ?:
-                        gate.validateObservation(lease, observationId, generation)
+                        validateObservation(lease, observationId, "capture_callback")
                     if (future.isDone || rejection != null) {
                         if (rejection != null) future.complete(rejection)
                         dispose(); return@success

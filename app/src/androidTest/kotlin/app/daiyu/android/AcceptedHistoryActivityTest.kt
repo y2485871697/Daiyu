@@ -45,6 +45,66 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
         return conversation
     }
 
+    fun testControllerBurstIsCoalescedAndRemovedObserverIsNotDelivered() {
+        val calls = AtomicInteger()
+        val retiredCalls = AtomicInteger()
+        val observer: () -> Unit = { calls.incrementAndGet(); Unit }
+        val retired: () -> Unit = { retiredCalls.incrementAndGet(); Unit }
+        val notify = ChatController::class.java.getDeclaredMethod("notifyChanged").apply { isAccessible = true }
+        try {
+            mainThread {
+                fixture.controller.observe(observer)
+                fixture.controller.observe(retired)
+                repeat(100) { notify.invoke(fixture.controller) }
+                assertEquals(0, calls.get())
+                fixture.controller.unobserve(retired)
+            }
+            awaitControl("coalesced notification") { calls.get() > 0 }
+            assertEquals(1, calls.get())
+            assertEquals(0, retiredCalls.get())
+        } finally {
+            mainThread { fixture.controller.unobserve(observer); fixture.controller.unobserve(retired) }
+        }
+    }
+
+    fun testStreamingDeltasDoNotReloadHistoryAndFinalTextStillReconciles() {
+        val session = fixture.session(" final", holdSeconds = 120)
+        setDraft("stream refresh regression")
+        mainThread { retainedControls(activity).onSend("stream refresh regression") }
+        awaitTextSendResult(activity)
+        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        val owner = checkNotNull(fixture.controller.active)
+        awaitShown { rows -> rows.any { it.second.id == owner.id } }
+        ui.waitUntil(5_000) {
+            var idle = false
+            mainThread { idle = field("refreshHistoryLoading") == false && field("refreshHistoryPending") == false }
+            idle
+        }
+        @Suppress("UNCHECKED_CAST")
+        val original = field("loadedWindowReader") as (ConversationId, Long, Int) -> List<Pair<Long, Message>>
+        val calls = AtomicInteger()
+        val reader: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, count ->
+            calls.incrementAndGet(); original(id, before, count)
+        }
+        try {
+            mainThread { setField("loadedWindowReader", reader) }
+            repeat(12) { index ->
+                checkNotNull(session.sink.get())(ModelEvent.TextDelta("body", "delta$index "))
+                awaitShown { rows -> rows.any { it.second.id == owner.id &&
+                    it.second.blocks.filterIsInstance<MessageBlock.Text>().any { block -> block.text.contains("delta$index ") } } }
+            }
+            assertEquals("live deltas must not decode the whole history window", 0, calls.get())
+            session.release.countDown()
+            awaitControl("stream completed") { fixture.controller.active == null }
+            awaitShown { rows -> rows.any { it.second.id == owner.id && it.second.status == RunStatus.COMPLETED &&
+                it.second.blocks.filterIsInstance<MessageBlock.Text>().any { block -> block.text.endsWith(" final") } } }
+            assertTrue("terminal state must reconcile stored history", calls.get() > 0)
+        } finally {
+            session.release.countDown()
+            mainThread { setField("loadedWindowReader", original) }
+        }
+    }
+
     fun testRefreshReadsOffMainSingleFlightAndRetainsExpandedWindow() {
         val conversation = seedHistory("refresh-window", 70)
         mainThread { activity.select(conversation) }

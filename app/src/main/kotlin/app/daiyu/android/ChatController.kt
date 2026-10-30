@@ -2228,10 +2228,11 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {
             if (closed || changedDispatchPending) return
             changedDispatchPending = true
-            handler.post {
+            // Batch model chunks, not reveal frames; Handler also delivers while the display is off.
+            handler.postDelayed({
                 synchronized(this) { changedDispatchPending = false }
                 dispatchChanged()
-            }
+            }, 16L)
         }
     }
 

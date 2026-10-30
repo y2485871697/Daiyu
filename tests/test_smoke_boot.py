@@ -238,6 +238,31 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source.verify(env, dict(record, attempt='2'), run, jobs, [])
 
+    def test_compile_source_requires_same_sha_and_explicit_targeted_scope(self):
+        env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123', SOURCE_VARIANT='compile',
+                   GITHUB_SHA='a' * 40, SMOKE_TEST_CLASSES='app.daiyu.android.AcceptedHistoryActivityTest')
+        record = dict(source_sha='a' * 40, run_id='123', attempt='1',
+                      application_id='app.daiyu.android', test_application_id='app.daiyu.android.test',
+                      variant='release', debuggable=False, production_delivery=True, profileable=False,
+                      validation_scope='compile-only', full_regression_passed=False,
+                      unit_tests_run=False, instrumentation_run=False)
+        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main',
+                   workflow_id=397560064, status='completed', conclusion='success')
+        jobs = [dict(name='增量Release编译（不运行全量）', conclusion='success')]
+        source.verify(env, record, run, jobs, [])
+        for wrong in (dict(env, GITHUB_SHA='b' * 40), dict(env, SMOKE_TEST_CLASSES=''),
+                      dict(env, SOURCE_VARIANT='release')):
+            with self.assertRaises(ValueError):
+                source.verify(wrong, record, run, jobs, [])
+        for key, value in (('validation_scope', 'full'), ('full_regression_passed', True),
+                           ('unit_tests_run', True), ('instrumentation_run', True), ('debuggable', True)):
+            with self.assertRaises(ValueError):
+                source.verify(env, dict(record, **{key: value}), run, jobs, [])
+        with self.assertRaises(ValueError):
+            source.verify(env, record, run, [dict(name='增量Release编译（不运行全量）', conclusion='failure')], [])
+        smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
+        self.assertIn("inputs.source_variant == 'compile') && '代鱼增量Release包'", smoke)
+
     def test_daily_source_is_release_but_cannot_be_relabelled_full(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123', SOURCE_VARIANT='daily')
         record = dict(source_sha='a' * 40, run_id='123', attempt='1',

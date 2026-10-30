@@ -5310,6 +5310,7 @@ class MainActivity : ComponentActivity() {
         loadAcceptedHistory(receipt.conversation)
     }
 
+    private val streamingHistoryRefresh = app.daiyu.android.ui.screens.chat.conversation.StreamingHistoryRefresh()
     private var refreshHistoryLoading = false
     private var refreshHistoryPending = false
     private var refreshHistoryRequestSerial = 0L
@@ -5366,16 +5367,19 @@ class MainActivity : ComponentActivity() {
                     refreshHistoryPending = true
                     return@launch
                 }
-                if (rows == null) { toast("历史读取失败；原数据保留"); return@launch }
+                if (rows == null) { streamingHistoryRefresh.invalidate(); toast("历史读取失败；原数据保留"); return@launch }
                 if (reloadTail) refreshHistoryTailConversation = null
                 val active = controller.active?.takeIf { it.conversationId == id }
                 val currentOwner = loadedHistoryOwner(id)
-                shown = rows.map { entry ->
+                val refreshed = rows.map { entry ->
                     if (active != null && Triple(entry.second.conversationId, entry.second.id, entry.second.runId) == currentOwner)
                         entry.first to active else entry
-                }.toMutableList()
-                prepareMessageActionSnapshot()
-                publishChat()
+                }
+                if (refreshed != shown) {
+                    shown = refreshed.toMutableList()
+                    prepareMessageActionSnapshot()
+                    publishChat()
+                }
             } finally {
                 refreshHistoryLoading = false
                 if (refreshHistoryPending && activityUsable()) selected?.let(::loadRefreshedHistory)
@@ -6705,7 +6709,13 @@ class MainActivity : ComponentActivity() {
             }
             prepareMessageActionSnapshot()
             publishChat()
-            selected?.let(::loadRefreshedHistory)
+            selected?.let { conversation ->
+                val loaded = active != null && shown.any { (_, message) ->
+                    message.conversationId == active.conversationId && message.id == active.id && message.runId == active.runId
+                }
+                if (streamingHistoryRefresh.needsRead(active, loaded, controller.dataRevision, editorGeneration,
+                        force = refreshHistoryTailConversation == conversation.id)) loadRefreshedHistory(conversation)
+            }
             if (sidebarVisible || retainedPage == "manage" || paneSnapshotRevision != currentPaneRevision())
                 requestPaneRefresh(invalidate = false)
         }

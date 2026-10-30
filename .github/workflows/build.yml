@@ -55,7 +55,7 @@ on:
       source_variant:
         description: 仅smoke补检使用的源包变体（不重新打包）
         type: choice
-        options: [debug, release, candidate, daily]
+        options: [debug, release, candidate, daily, compile]
         default: debug
 env:
   SKIP_JDK_VERSION_CHECK: "true"
@@ -543,7 +543,7 @@ jobs:
           if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: ${{ (inputs.mode == 'daily' || (inputs.mode == 'smoke' && inputs.source_variant == 'daily')) && '代鱼日常Release包-daily' || (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && '代鱼定向候选包-filtered' || (inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包' }}
+          name: ${{ (inputs.mode == 'smoke' && inputs.source_variant == 'compile') && '代鱼增量Release包' || (inputs.mode == 'daily' || (inputs.mode == 'smoke' && inputs.source_variant == 'daily')) && '代鱼日常Release包-daily' || (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && '代鱼定向候选包-filtered' || (inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包' }}
           path: delivery
           run-id: ${{ inputs.mode == 'smoke' && inputs.source_run_id || github.run_id }}
           github-token: ${{ github.token }}

@@ -308,7 +308,7 @@ class CandidateSourceTests(unittest.TestCase):
         self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}", smoke)
         self.assertNotIn('gradlew', smoke)
         self.assertIn('target: ${{ matrix.target }}', smoke)
-        self.assertIn('options: [debug, release, candidate, daily]', self.current)
+        self.assertIn('options: [debug, release, candidate, daily, compile]', self.current)
         with self.assertRaises(ValueError):
             source.verify(self.env, {}, self.run, self.jobs, [])
 

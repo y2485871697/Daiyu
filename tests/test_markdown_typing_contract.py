@@ -55,7 +55,7 @@ class MarkdownTypingContract(unittest.TestCase):
         text_body = self.chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
                       'RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),',
-                      'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value)'):
+                      'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)'):
             self.assertIn(token, text_body)
         self.assertEqual(2, assistant.count('textBody = textBody'))
         self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", self.ui)
@@ -85,10 +85,10 @@ class MarkdownTypingContract(unittest.TestCase):
     def test_full_annotation_is_remembered_independently_of_visible_prefix(self):
         inline = self.ui.split("private fun MarkdownInlineText(", 1)[1].split("private fun MarkdownBlocks", 1)[0]
         self.assertIn("remember(content, linkColor, openLink)", inline)
-        self.assertIn("boundaries.end(visibleCharacters)", inline)
+        self.assertIn("boundaries.end(limit)", inline)
         self.assertIn("val visible = remember(body, end)", inline)
         self.assertIn("body.subSequence(0, end)", inline)
-        self.assertLess(inline.index("boundaries.end(visibleCharacters)"), inline.index("val visible = remember(body, end)"))
+        self.assertLess(inline.index("boundaries.end(limit)"), inline.index("val visible = remember(body, end)"))
         self.assertNotIn("remember(content, linkColor, openLink, visibleCharacters)", inline)
         for token in ["BreakIterator.getCharacterInstance(Locale.ROOT)", "characters.following(limit)", "isHighSurrogate()", "isLowSurrogate()"]:
             self.assertIn(token, self.reveal)
@@ -98,7 +98,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertNotIn("renderInline", table)
         self.assertNotIn("IntrinsicSize", self.ui)
         for token in ["MarkdownText.tableColumnWidthEms(table.header)", "style.fontSize.toDp()", "remember(columnEms, em)",
-                      "table.header.size > 32", "horizontalScroll(rememberScrollState())", "Row(Modifier.drawWithCache", "visibleCharacters - offsets[rowIndex][column]"]:
+                      "table.header.size > 32", "horizontalScroll(rememberScrollState())", "Row(Modifier.drawWithCache", "rememberMarkdownVisibility(visibility, offsets[column], lengths[column])"]:
             self.assertIn(token, table)
         hints = (APP / "MarkdownText.kt").read_text().split("internal fun tableCellWidthEm", 1)[1].split("internal fun renderInline", 1)[0]
         self.assertIn("var charactersLeft = 32", hints)

@@ -15,7 +15,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
 
     def test_code_block_keeps_symmetric_card_and_left_aligned_body(self):
         branch = self.markdown.split("is MarkdownBlock.Code ->", 1)[1].split("is MarkdownBlock.Quote ->", 1)[0]
-        self.assertIn("MarkdownCodeBlock(block, visible, generationComplete)", branch)
+        self.assertIn("MarkdownCodeBlock(block, visibility.value, generationComplete)", branch)
         for token in ["Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center)",
                       "Modifier.fillMaxWidth().padding(horizontal = 4.dp)", "RoundedCornerShape(8.dp)",
                       "textAlign = TextAlign.Left", 'testTag("markdown-code-block")', 'testTag("markdown-code-text")']:
@@ -94,11 +94,11 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertEqual(2, chat.count("generationComplete = turn.status != RunStatus.RUNNING"))
         self.assertIn("turn.status != RunStatus.RUNNING && contentReady", chat)
         self.assertIn("val currentComplete = rememberUpdatedState(generationComplete)", chat)
-        self.assertIn("generationComplete = currentComplete.value)", chat)
+        self.assertIn("generationComplete = currentComplete.value, deferBlockReveal = true)", chat)
         self.assertEqual(3, chat.count("textBody = textBody"))
         self.assertIn("generationComplete && body.text == text", self.markdown)
-        self.assertIn("MarkdownBlocks(block.blocks, openLink, visible, generationComplete)", self.markdown)
-        self.assertIn("MarkdownBlocks(item.blocks, openLink, itemVisible, generationComplete)", self.markdown)
+        self.assertIn("MarkdownBlocks(block.blocks, openLink, visibility, generationComplete)", self.markdown)
+        self.assertIn("MarkdownBlocks(item.blocks, openLink, visibility, generationComplete)", self.markdown)
 
     def test_expansion_reuses_shared_output_dialog_without_a_close_cross(self):
         for token in ["LocalToolOutputContext provides null", "ToolDisclosureUi(block.language, block.text, code = true)",

@@ -93,6 +93,63 @@ class MarkdownRevealInvalidationTest {
         } finally { observer.stop(); observer.clear() }
     }
 
+    @Test fun visibilityStateDoesNotSubscribeTheBodyHost() {
+        val target = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("body", "x".repeat(300)), 300)),
+            start = 0, streaming = true, terminal = false)
+        val frame = mutableStateOf(MarkdownTypingFrame(target, 0))
+        val reveal = MarkdownReveal(target, frame, exact = true)
+        val observer = SnapshotStateObserver { it() }
+        var hostInvalidations = 0
+        var budget: androidx.compose.runtime.State<Int>? = null
+        observer.start()
+        try {
+            observer.observeReads("host", { _: String -> hostInvalidations++ }) { budget = reveal.visibility("body") }
+            assertEquals(0, budget!!.value)
+            repeat(300) { visible ->
+                frame.value = MarkdownTypingFrame(target, visible + 1)
+                Snapshot.sendApplyNotifications()
+            }
+            assertEquals(300, budget!!.value)
+            assertEquals(0, hostInvalidations)
+            assertEquals(0, reveal.visibility("missing").value)
+        } finally { observer.stop(); observer.clear() }
+    }
+
+    @Test fun completedBlocksAndHiddenCellsDoNotSubscribeToTheActiveFrontier() {
+        val progress = mutableStateOf(1000)
+        val paragraph = markdownVisibility(progress, 0, 1000)
+        val table = markdownVisibility(progress, 1000, 1000)
+        val header = markdownVisibility(table, 0, 20)
+        val active = markdownVisibility(table, 20, 200)
+        val hidden = markdownVisibility(table, 220, 50)
+        progress.value = 1020
+        Snapshot.sendApplyNotifications()
+        val observer = SnapshotStateObserver { it() }
+        val states = mapOf("paragraph" to paragraph, "header" to header, "active" to active, "hidden" to hidden)
+        val changes = states.keys.associateWith { 0 }.toMutableMap()
+        val changed: (String) -> Unit = { changes[it] = changes.getValue(it) + 1 }
+        fun observe() = states.forEach { (id, state) -> observer.observeReads(id, changed) { state.value } }
+        observer.start()
+        try {
+            observe()
+            for (end in 1021..1220) {
+                progress.value = end
+                Snapshot.sendApplyNotifications()
+                observe()
+            }
+            assertEquals(mapOf("paragraph" to 0, "header" to 0, "active" to 200, "hidden" to 0), changes)
+            progress.value = 1221
+            Snapshot.sendApplyNotifications()
+            assertEquals(1, changes.getValue("hidden"))
+            assertEquals(200, active.value)
+            progress.value = 0
+            Snapshot.sendApplyNotifications()
+            assertEquals(0, paragraph.value)
+            assertEquals(0, header.value)
+            assertEquals(0, active.value)
+        } finally { observer.stop(); observer.clear() }
+    }
+
     @Test fun oldFrameAndMismatchedSourceCannotOpenTheNextContent() {
         val old = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("id", "old"), 3)),
             start = 0, streaming = true, terminal = false)

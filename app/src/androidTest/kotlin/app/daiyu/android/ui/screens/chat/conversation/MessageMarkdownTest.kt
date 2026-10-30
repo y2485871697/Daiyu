@@ -1440,6 +1440,41 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         }
     }
 
+    fun testCompletedParagraphsAndTableCellsKeepTheirLayoutWhileTheTailReveals() {
+        val first = "Stable **paragraph**."
+        val source = "$first\n\nH1 | H2\n--- | ---\ncell-one | cell-two\n\n" + "Tail ".repeat(200)
+        val parsed = MarkdownParser.parse(source)
+        val visits = AtomicInteger()
+        val blocks = object : List<MarkdownBlock> by parsed {
+            override fun iterator(): Iterator<MarkdownBlock> { visits.incrementAndGet(); return parsed.iterator() }
+        }
+        val prefix = markdownBlocksLength(parsed.dropLast(1))
+        val tail = markdownBlocksDisplayText(parsed.takeLast(1))
+        val progress = mutableStateOf(prefix + 10)
+        show { Column(Modifier.width(320.dp).height(420.dp).verticalScroll(rememberScrollState()).testTag("budget-body")) {
+            ProjectedMessageMarkdown(source, blocks, generationComplete = false, visibility = progress)
+        } }
+        val paragraph = body("budget-body", "Stable paragraph.")
+        val cell = body("budget-body", "cell-one")
+        fun layout(node: SemanticsNodeInteraction): TextLayoutResult {
+            val results = mutableListOf<TextLayoutResult>()
+            node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
+            return results.single()
+        }
+        val paragraphLayout = layout(paragraph)
+        val cellLayout = layout(cell)
+        val before = visits.get()
+        repeat(20) { index ->
+            mainThread { progress.value = prefix + 11 + index }
+            assertSame("Completed paragraph must retain its shaped text", paragraphLayout, layout(paragraph))
+            assertSame("Completed cell must retain its shaped text", cellLayout, layout(cell))
+        }
+        assertEquals("Reveal frames must not walk the whole document", before, visits.get())
+        mainThread { progress.value = Int.MAX_VALUE }
+        body("budget-body", tail).assertExists()
+        assertTrue(opened.isEmpty())
+    }
+
     fun testAnimationFramesDoNotRecomposeTheRevealOwnerOrReplayItsCards() {
         val plain = ("LEAF " + "word ".repeat(150)).trimEnd()
         val source = "**$plain**"

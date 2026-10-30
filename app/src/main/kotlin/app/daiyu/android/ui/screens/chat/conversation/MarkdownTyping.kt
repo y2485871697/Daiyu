@@ -24,11 +24,14 @@ internal class MarkdownReveal(
         part.source.id to derivedStateOf { current.limit(part.source.id, visible()) }
     } }.orEmpty()
     fun limit(id: String): Int = limits[id]?.value ?: 0
+    fun visibility(id: String): State<Int> = limits[id] ?: hiddenMarkdownVisibility
     private val readiness = target?.parts?.associate { part ->
         part.source.id to (part.source.text to derivedStateOf { limit(part.source.id) >= part.length })
     }.orEmpty()
     fun ready(id: String, text: String): Boolean = readiness[id]?.let { (source, state) -> source == text && state.value } == true
 }
+
+private val hiddenMarkdownVisibility: State<Int> = derivedStateOf { 0 }
 
 internal data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
 

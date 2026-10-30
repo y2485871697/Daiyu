@@ -591,7 +591,7 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, projection: 
             color = conversationColors().muted,
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
         else RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),
-            currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value)
+            currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)
     } }
 }
 

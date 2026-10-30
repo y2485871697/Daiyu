@@ -46,7 +46,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         leaf = chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ['rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
                       'rememberUpdatedState(generationComplete)', 'currentProjection.value?.blocks?.get(text.text)',
-                      'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value)']:
+                      'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)']:
             self.assertIn(token, leaf)
         workflow = chat.split('private fun AssistantWorkflow(', 1)[1]
         self.assertIn('WorkProcessCard(work, ownerKey,', workflow)

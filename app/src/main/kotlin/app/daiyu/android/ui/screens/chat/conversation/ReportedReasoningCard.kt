@@ -166,6 +166,7 @@ internal fun ReportedReasoningCard(
                             RevealedMessageMarkdown(
                                 displayed, projection?.blocks?.get(displayed), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
                                 generationComplete = generationComplete && projection != null && displayed == summary.text,
+                                deferBlockReveal = true,
                             )
                         }
                     }

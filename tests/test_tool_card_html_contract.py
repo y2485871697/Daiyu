@@ -122,7 +122,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('Modifier.size(18.dp).testTag("tool-operation-icon:', shell)
         self.assertIn("fontSize = 13.sp, lineHeight = 18.sp", shell)
         self.assertIn("fontSize = 12.sp, lineHeight = 17.sp", shell)
-        self.assertIn("rememberSaveable(ownerKey, finished, stopped)", shell)
+        self.assertIn("rememberSaveable(ownerKey, finishing, stopped)", shell)
         self.assertIn("rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }", shell)
         self.assertIn("key(ownerKey, step.owner, step.toolCallId)", shell)
         self.assertNotIn("graphicsLayer", shell)

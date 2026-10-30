@@ -1466,8 +1466,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val before = visits.get()
         repeat(20) { index ->
             mainThread { progress.value = prefix + 11 + index }
-            assertSame("Completed paragraph must retain its shaped text", paragraphLayout, layout(paragraph))
-            assertSame("Completed cell must retain its shaped text", cellLayout, layout(cell))
+            assertSame("Completed paragraph must retain its shaped text", paragraphLayout.multiParagraph, layout(paragraph).multiParagraph)
+            assertSame("Completed cell must retain its shaped text", cellLayout.multiParagraph, layout(cell).multiParagraph)
         }
         assertEquals("Reveal frames must not walk the whole document", before, visits.get())
         mainThread { progress.value = Int.MAX_VALUE }

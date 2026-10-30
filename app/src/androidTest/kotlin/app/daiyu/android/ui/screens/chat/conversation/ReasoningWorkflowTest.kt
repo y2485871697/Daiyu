@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
@@ -120,6 +121,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         awaitHeader()
         ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithTag("reported-reasoning-header:${turn.listKey}:reasoning:r1").performClick()
+        ui.onNodeWithText("first summary").assertIsDisplayed()
         mainThread { turn = mapped(first.copy(blocks = first.blocks + tool("t2"), reportedReasoning = first.reportedReasoning +
             ReportedReasoning("r2", "second summary", blockOffset = 1))) }
         ui.onNodeWithText("first summary").assertIsDisplayed()
@@ -245,7 +247,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 }) }
             awaitFrame { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
                 androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
-            ui.mainClock.advanceTimeBy(300)
+            awaitFrame { ui.onNodeWithText("answer", useUnmergedTree = true).isDisplayed() }
             ui.onNodeWithText("answer", useUnmergedTree = true).assertIsDisplayed()
             ui.onNodeWithTag("work-process-header").performClick()
             ui.mainClock.advanceTimeBy(300)
@@ -279,10 +281,10 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
             androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
         ui.onNodeWithTag("work-process-header").performClick()
-        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("terminal tool details stay collapsed") {
-            it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
+        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("terminal retains explicit tool disclosure") {
+            it.config[SemanticsProperties.StateDescription].endsWith("已展开")
         })
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("unique tool detail").fetchSemanticsNodes().isEmpty() }
+        ui.onNodeWithText("unique tool detail").assertIsDisplayed()
         mainThread { source = source.copy(error = "updated terminal receipt") }
         assertDisclosure("work-process-header", expanded = true)
     }
@@ -590,10 +592,12 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 ui.onNodeWithText("answer").assertDoesNotExist()
                 ui.waitUntil(5_000) {
                     ui.mainClock.advanceTimeByFrame()
-                    if (ui.onAllNodesWithTag("tool-step:$id").fetchSemanticsNodes().isNotEmpty()) {
-                        ui.onNodeWithText("answer").assertDoesNotExist()
-                        false
-                    } else ui.onNodeWithText("answer").isDisplayed()
+                    val nodes = ui.onAllNodes(hasTestTag("tool-step:$id") or hasText("answer"),
+                        useUnmergedTree = true).fetchSemanticsNodes()
+                    val hasTool = nodes.any { it.config.getOrNull(SemanticsProperties.TestTag) == "tool-step:$id" }
+                    val hasAnswer = nodes.any { it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "answer" } == true }
+                    assertFalse("Answer cannot mount before the tool exit", hasTool && hasAnswer)
+                    !hasTool && hasAnswer
                 }
                 ui.onNodeWithTag("work-process-header").performClick()
                 ui.mainClock.advanceTimeBy(300)

@@ -6,11 +6,11 @@ BASE = Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/andr
 
 
 class MarkdownBodyVisibilityContract(unittest.TestCase):
-    def test_only_body_uses_deferred_read_and_thought_entry_is_unchanged(self):
+    def test_body_and_thought_both_defer_frame_reads_to_markdown_leaves(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         reasoning = (BASE / 'ReportedReasoningCard.kt').read_text()
         self.assertIn('generationComplete = currentComplete.value, deferBlockReveal = true)', chat)
-        self.assertNotIn('deferBlockReveal', reasoning)
+        self.assertIn('deferBlockReveal = true', reasoning)
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         self.assertIn('visibility = reveal.visibility(partId)', ui)
         self.assertIn('else ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)', ui)
@@ -36,3 +36,12 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('SelectionContainer {', ui)
         helper = (BASE / 'MarkdownVisibility.kt').read_text()
         self.assertIn('derivedStateOf { (parent.value - start).coerceIn(0, length) }', helper)
+
+    def test_scroll_regressions_exercise_both_paths_with_live_reveal_and_real_pointer_input(self):
+        cases = Path(__file__).resolve().parents[1] / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/StreamingScrollTest.kt'
+        source = cases.read_text()
+        for token in ('verifyScroll(false)', 'verifyScroll(true)', 'ChatMessageList(',
+                      'down(Offset(', 'moveTo(Offset(', 'performTouchInput { up() }',
+                      'advances.get() > beforeAdvances', 'beforeWalks, walks.get()',
+                      'beforeParses, parses.get()', 'scrollValue() < beforeScroll'):
+            self.assertIn(token, source)

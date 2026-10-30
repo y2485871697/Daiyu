@@ -54,11 +54,12 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val reasoning = work.segments.mapNotNull { it.reasoning }
     val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
     val reasoningReady = stopped || sequence.ready(reasoning)
-    val finished = (!work.running || answerPending) && reasoningReady
-    var expandedOverride by rememberSaveable(ownerKey, finished, stopped) { mutableStateOf<Boolean?>(null) }
-    var overrideFinished by rememberSaveable(ownerKey) { mutableStateOf(finished) }
+    val finishing = !work.running || answerPending
+    val finished = finishing && reasoningReady
+    var expandedOverride by rememberSaveable(ownerKey, finishing, stopped) { mutableStateOf<Boolean?>(null) }
+    var overrideFinished by rememberSaveable(ownerKey) { mutableStateOf(finishing) }
     var overrideStopped by rememberSaveable(ownerKey) { mutableStateOf(stopped) }
-    val currentOverride = expandedOverride.takeIf { overrideFinished == finished && overrideStopped == stopped }
+    val currentOverride = expandedOverride.takeIf { overrideFinished == finishing && overrideStopped == stopped }
     val expanded = currentOverride ?: (!stopped && !finished)
     val visibility = remember(ownerKey, stopped) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
@@ -85,7 +86,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             val stacked = work.failedStepCount > 0 || work.unconfirmedStepCount > 0 ||
                 maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
             Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable {
-                overrideFinished = finished; overrideStopped = stopped; expandedOverride = !expanded
+                overrideFinished = finishing; overrideStopped = stopped; expandedOverride = !expanded
             }
                 .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
                 .padding(horizontal = 10.dp, vertical = 5.dp),

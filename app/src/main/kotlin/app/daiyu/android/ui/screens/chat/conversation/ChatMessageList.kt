@@ -142,6 +142,8 @@ internal fun ChatMessageList(
     val currentFollowClearancePx by rememberUpdatedState(with(density) { 16.dp.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
+    val assistantTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
+    val currentAssistants by rememberUpdatedState(assistantTurns)
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val displayedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val revealedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
@@ -324,8 +326,8 @@ internal fun ChatMessageList(
                 it.size > 0 && it.offset < visibleBottom &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
             }.map { it.key }.toSet()
-            currentReadAction to currentTurns.filterIsInstance<ChatTurnUi.Assistant>()
-                .filter { !initialPositionPending && it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it }
+            currentReadAction to if (initialPositionPending) emptyList() else
+                completedVisibleTurns(visibleKeys, currentAssistants, readyTurns, revealedTurns)
         }.collect { (readAction, completed) ->
             if (!initialPositionPending && completed.isNotEmpty()) {
                 // Wait for the formatted terminal body, not a shorter raw-text placeholder.
@@ -337,7 +339,7 @@ internal fun ChatMessageList(
                     it.size > 0 && it.offset < visibleBottom &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
                 }.map { it.key }.toSet()
-                val current = currentTurns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
+                val current = currentAssistants
                 readAction(completed.filter {
                     !initialPositionPending && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
                 }.map { it.listKey }.toSet())

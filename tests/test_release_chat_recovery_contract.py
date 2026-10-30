@@ -77,7 +77,7 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('onDisclosureHandoffReady = { if (it) onAnswerReleased() }', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertIn('reasoningReady && fullyClosed', work)
-        self.assertIn('val finished = (!work.running || answerPending) && reasoningReady', work)
+        self.assertIn('val finished = finishing && reasoningReady', work)
         self.assertNotIn('work.running || currentOverride == true || fullyClosed', work)
         self.assertIn('val canReleaseWithoutWorkflow = work == null && reasoningReady', source)
         self.assertIn('onAnswerReleased = { if (reasoningReady && answerPending) answerReleased = true }', source)
@@ -100,6 +100,7 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('assertEquals(RunStatus.RUNNING, source.status)', cases)
         self.assertIn('for (mixed in listOf(false, true))', cases)
         self.assertGreaterEqual(cases.count('ui.onNodeWithText("answer").assertDoesNotExist()'), 6)
-        self.assertIn('if (ui.onAllNodesWithTag("tool-step:$id").fetchSemanticsNodes().isNotEmpty())', cases)
+        self.assertIn('hasTestTag("tool-step:$id") or hasText("answer")', cases)
+        self.assertIn('assertFalse("Answer cannot mount before the tool exit", hasTool && hasAnswer)', cases)
 if __name__ == '__main__':
     unittest.main()

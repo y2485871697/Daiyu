@@ -11,6 +11,7 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         self.assertIn("rememberMarkdownProjection(listOf(text), streaming = streamingProjection)", source)
         self.assertIn("summary.text.takeIf(::hasReportedReasoningText).orEmpty()", source)
         self.assertIn("RevealedMessageMarkdown(", source)
+        self.assertIn("deferBlockReveal = true", source)
         leaf = (CHAT / "MessageMarkdown.kt").read_text().split("internal fun RevealedMessageMarkdown(", 1)[1].split("@Composable", 1)[0]
         self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", leaf)
         self.assertIn("projection?.blocks?.get(displayed)", source)

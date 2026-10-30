@@ -37,7 +37,9 @@ class ReasoningStreamCostContract(unittest.TestCase):
         self.assertIn('conversation_id=? AND message_id=? AND run_id=? AND token=?', marker)
         observer = (SRC / 'ui/screens/chat/conversation/ChatMessageList.kt').read_text().split('// Read confirmation observes', 1)[1].split('Box(modifier.fillMaxSize())', 1)[0]
         self.assertEqual(2, observer.count('withFrameNanos { }'))
-        self.assertIn('currentReadAction to currentTurns', observer)
+        self.assertIn('completedVisibleTurns(visibleKeys, currentAssistants, readyTurns, revealedTurns)', observer)
+        self.assertNotIn('currentTurns.filterIsInstance', observer)
+        self.assertIn('val current = currentAssistants', observer)
         self.assertIn('revealedTurns[it.listKey] == it', observer)
 
     def test_timer_inputs_exclude_text_without_changing_domain_elapsed_arithmetic(self):

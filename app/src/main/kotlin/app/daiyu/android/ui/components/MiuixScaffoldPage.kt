@@ -49,6 +49,7 @@ fun MiuixScaffoldPage(
     bottomSpacerMinHeight: Dp = 0.dp,
     content: LazyListScope.() -> Unit,
 ) {
+    app.daiyu.android.diagnostics.ObserveFrameContext("screen", title)
     val pageScrollConnection = remember(scrollBehavior, editorScrollIsolation) {
         editorScrollIsolation?.gate(scrollBehavior.nestedScrollConnection) ?: scrollBehavior.nestedScrollConnection
     }
@@ -120,6 +121,7 @@ fun MiuixScaffold(
         sidePadding: Dp,
     ) -> Unit,
 ) {
+    app.daiyu.android.diagnostics.ObserveFrameContext("screen", title)
     val scrollBehavior = MiuixScrollBehavior()
     val backdrop = rememberTopBarBackdrop(containerColor)
     val topBarColor = topBarContainerColor(backdrop, containerColor)

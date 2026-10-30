@@ -78,6 +78,7 @@ internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boole
         val original = selection
         var field by remember(active, original) { mutableStateOf(original ?: RequestBodyField("", RequestBodyValueType.STRING, "")) }
         WindowDialog(show = true, title = if (original == null) "添加字段" else "编辑字段", onDismissRequest = { close(active) }) {
+            app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp).testTag("model-body-field-editor-list")) {
                 item {
                     SettingsTextField("字段名", field.name, { field = field.copy(name = it) }, enabled = enabled)
@@ -111,6 +112,7 @@ internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boole
             }
         }
     } else WindowDialog(show = true, title = "请求体字段", onDismissRequest = { close(active) }) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp).testTag("model-body-fields-list")) {
             fields.fold(onSuccess = { rows ->
                 itemsIndexed(rows) { index, field ->

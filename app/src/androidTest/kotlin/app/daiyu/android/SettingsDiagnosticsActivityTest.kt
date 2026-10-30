@@ -35,7 +35,7 @@ class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
     }
     private fun assertActionSummaries() {
         for ((title, summary) in listOf(
-            "导出日志" to "导出诊断事件JSON",
+            "导出日志" to "导出页面性能与诊断事件JSON",
             "清除日志" to "清理所有日志",
         )) {
             row(title)

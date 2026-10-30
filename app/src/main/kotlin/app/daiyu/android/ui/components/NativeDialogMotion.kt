@@ -11,4 +11,5 @@ internal fun Window.usePlatformDialogFade() {
 
 internal fun Dialog.prepareDaiyuCenterMotion() {
     window?.usePlatformDialogFade()
+    window?.let(app.daiyu.android.diagnostics.WindowFramePerformance::watchNative)
 }

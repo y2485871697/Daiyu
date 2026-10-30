@@ -34,7 +34,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable internal fun SubAgentConfigurationWindow(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     if (!LocalConversationAgentStyle.current) {
-        WindowDialog(show = true, title = title, onDismissRequest = onDismiss) { Column { content() } }
+        WindowDialog(show = true, title = title, onDismissRequest = onDismiss) { app.daiyu.android.diagnostics.ObserveDialogFrames("dialog"); Column { content() } }
         return
     }
     val maximumHeight = (appWindowSize().height - 32.dp).coerceAtLeast(0.dp)

@@ -384,6 +384,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             val draft = newProvider.draft
             val creationTitle = if (newProvider.oauthOnly) "新建提供商" else "添加提供商"
             var modelTab by newProvider.pageUi.modelTab
+            app.daiyu.android.diagnostics.ObserveFrameContext("provider-tab", if (modelTab) "models" else "connection")
             val tabs: LazyListScope.() -> Unit = {
                 if (!newProvider.oauthOnly) item("provider-tabs") { ProviderSettingsTabs(modelTab, enabled) {
                     if (current(p) && enabled && creating === newProvider) modelTab = it
@@ -602,6 +603,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }
             if (d.catalogIdentity == null) {
                 var modelTab by d.pageUi.modelTab
+                app.daiyu.android.diagnostics.ObserveFrameContext("provider-tab", if (modelTab) "models" else "connection")
                 val tabs: LazyListScope.() -> Unit = {
                     item(key = "provider-tabs") {
                         ProviderSettingsTabs(modelTab, enabled) { selected ->

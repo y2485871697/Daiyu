@@ -107,6 +107,7 @@ internal fun MessageImage(image: MessageImageUi, number: Int, loader: MessageIma
     val ready = result as? MessageImageLoadResult.Ready
     if (expanded && ready != null) {
         WindowDialog(show = true, title = "消息图片 $number", onDismissRequest = { expanded = false }) {
+            app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Image(ready.bitmap, contentDescription = "放大消息图片 $number",
                     modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp).testTag("message-image-expanded:$number"),

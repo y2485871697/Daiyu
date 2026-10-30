@@ -2154,6 +2154,7 @@ class MainActivity : ComponentActivity() {
         taskRecordsConversationId = state?.getString("task-records-conversation")
         if (taskRecordsConversationId != null) retainedPage = "child-tasks"
         if (intent?.action == ChatApplication.OPEN_PET_SETTINGS) retainedPage = "pet-settings"
+        app.daiyu.android.diagnostics.WindowFramePerformance.install(this, controller.diagnostics)
         setContent {
             app.daiyu.android.ui.screens.settings.ApplicationPetMount(pets, this@MainActivity, Modifier.fillMaxSize()) {
             AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
@@ -2162,6 +2163,8 @@ class MainActivity : ComponentActivity() {
                 val keyboard = LocalSoftwareKeyboardController.current
                 val view = LocalView.current
                 val balanceState = balanceRuntime?.state?.collectAsStateWithLifecycle()?.value
+                if (retainedPage == "chat") app.daiyu.android.diagnostics.ObserveFrameContext(
+                    "chat-session", if (chatState.conversationKey == null) "new" else "selected", chatState.conversationKey)
                 val chatPageState = rememberSaveableStateHolder()
                 val settingsPageState = rememberSaveableStateHolder()
                 val settingsScrollBehavior = top.yukonga.miuix.kmp.basic.MiuixScrollBehavior()

@@ -149,6 +149,7 @@ internal fun HapticsSettingsScreen(
     }
     top.yukonga.miuix.kmp.window.WindowDialog(show = intensityDialog, title = "震动幅度",
         onDismissRequest = { intensityDialog = false }) {
+            app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 DaiyuIcon(DaiyuIcons.Vibration, contentDescription = null, size = 32.dp,
                     tint = intensityAccent, modifier = Modifier.padding(top = 6.dp))

@@ -93,6 +93,7 @@ private fun TrustedMediaItem(item: TrustedToolMediaUi, step: WorkStepUi, onActio
     ToolMediaSurface(step, item.thumbnail, video, meta.durationMs, item.key, onAction = onAction,
         onPreview = if (!video && item.thumbnail != null) ({ expanded = true }) else null)
     if (expanded) WindowDialog(show = true, title = "图片", onDismissRequest = { expanded = false }) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item.thumbnail?.let { Image(it.asImageBitmap(), "图片", Modifier.fillMaxWidth().heightIn(max = 520.dp), contentScale = ContentScale.Fit) }
             TextButton(text = "保存原件", onClick = { onAction(step.actionRequest(ToolCardAction.SAVE_MEDIA, item.key)) })

@@ -104,6 +104,9 @@ fun TerminalScreenContent(
     onOpenTasks: (() -> Unit)? = null,
 ) {
     var input by remember { mutableStateOf("") }
+    app.daiyu.android.diagnostics.ObserveFrameContext("terminal-mode",
+        (if (state.linuxSelected) "linux-" else "android-") + (if (state.simple) "simple" else "console"))
+    app.daiyu.android.diagnostics.ObserveFrameContext("terminal-session", "selected", state.activeSessionId)
     var sessions by remember { mutableStateOf(false) }
     val current = state.active
     val linuxLabel = state.linux.distribution?.replaceFirstChar { it.uppercase() }

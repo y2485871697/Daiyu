@@ -58,6 +58,8 @@ class OpenAttachmentActivity : ComponentActivity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         if (state != null) { finish(); return } // Never replay a partially received external Intent.
+        app.daiyu.android.diagnostics.WindowFramePerformance.install(this,
+            (application as ChatApplication).controller.diagnostics, "attachment-receive")
         setContentView(TextView(this).apply { text = "正在添加附件…"; gravity = android.view.Gravity.CENTER })
         val sources = try { OpenedFileIntents.uris(intent) } catch (_: Exception) {
             notice("文件打开失败；请选择有效文件后重试"); finish(); return

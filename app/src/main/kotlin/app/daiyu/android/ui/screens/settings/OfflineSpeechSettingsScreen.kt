@@ -106,6 +106,7 @@ internal fun OfflineSpeechSettingsScreen(context: Context, onBack: () -> Unit, o
         item { SettingsCard { SettingsRow("关于离线语音", onClick = { if (ownerCurrent()) about = true }) } }
     }
     if (about) WindowDialog(show = true, title = "关于离线语音", onDismissRequest = { about = false }) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
         Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
             SettingsNote("引擎：sherpa-ncnn（Apache-2.0）。识别模型支持中文和英语，不随应用分发；模型权重授权尚未明确。")
             SettingsNote("仅主动点击麦克风才会录音；识别不联网、不保存音频。切换页面或进入后台会停止听写。")

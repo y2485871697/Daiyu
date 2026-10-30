@@ -69,6 +69,7 @@ internal fun DaiyuTextInputDialog(
         return
     }
     WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames("text-input")
         Column(Modifier.fillMaxWidth()) {
             TextField(
                 value = value,
@@ -110,6 +111,7 @@ internal fun DaiyuConfirmDialog(
         return
     }
     WindowDialog(show = true, title = title, summary = message, onDismissRequest = onDismiss) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames("confirmation")
         MiuixDialogActions(
             confirmText = confirmText,
             destructive = destructive,

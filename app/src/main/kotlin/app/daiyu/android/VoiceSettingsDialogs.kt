@@ -150,6 +150,7 @@ internal fun VoiceTextDialog(title: String, initial: String, password: Boolean =
     multiline: Boolean = false, onSave: (String) -> Unit, onDismiss: () -> Unit) {
     var value by remember { mutableStateOf(initial) }
     WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
         Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
             SettingsTextField(title, value, { value = it }, password = password, multiline = multiline)
             MiuixDialogActions("保存", onCancel = onDismiss, onConfirm = { onSave(value) })

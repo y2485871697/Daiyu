@@ -37,6 +37,8 @@ class CodexLoginActivity : ComponentActivity() {
         val attempt = intent.getStringExtra("attempt")
         if (savedInstanceState != null || runCatching { UUID.fromString(attempt).toString() == attempt }.getOrDefault(false).not()) { finish(); return }
         setResult(Activity.RESULT_CANCELED, Intent().putExtra("attempt", attempt))
+        app.daiyu.android.diagnostics.WindowFramePerformance.install(this,
+            (application as app.daiyu.android.ChatApplication).controller.diagnostics, "oauth-login")
         CodexOAuthRuntime.initialize(this)
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val close = Button(this).apply { text = "取消登录"; setHapticClickListener { finish() } }

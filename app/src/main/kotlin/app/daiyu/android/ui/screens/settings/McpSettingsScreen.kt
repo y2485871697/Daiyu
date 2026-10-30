@@ -250,6 +250,7 @@ import kotlinx.coroutines.withContext
         }
         if (editing) WindowDialog(show = true, title = if (selected == null) "添加服务器" else "连接设置",
             onDismissRequest = { editing = false; bearer = "" }) {
+                app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
             val colors = conversationAgentColors()
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("mcp-settings-form"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {

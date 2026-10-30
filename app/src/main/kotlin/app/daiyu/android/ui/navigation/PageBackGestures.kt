@@ -300,6 +300,7 @@ internal fun PageBackGestureHost(
     val stackPath = remember(stack) { PageBackStackPath(stack) }
     stack.freezeCurrent = { layers.freezeCurrent() }
     val visualRouteKey = stack.routeKey(routeKey)
+    app.daiyu.android.diagnostics.ObservePageFrames(visualRouteKey)
     val visualBackTargetKey = stack.targetKey(routeKey, backTargetKey)
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     val departure = remember(layers, visualRouteKey) {

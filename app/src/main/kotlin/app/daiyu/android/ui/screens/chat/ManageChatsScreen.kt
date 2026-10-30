@@ -177,6 +177,7 @@ internal fun ManageChatsScreen(
             summary = stringResource(R.string.history_page_delete_all_message),
             onDismissRequest = { showDeleteAll = false },
         ) {
+            app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
             MiuixDialogActions(
                 confirmText = stringResource(R.string.action_delete),
                 destructive = true, deletionAppearance = true,

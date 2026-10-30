@@ -27,6 +27,7 @@ internal class DiagnosticLogStore(
     private val clock: () -> Long = System::currentTimeMillis,
     private val write: (File, ByteArray) -> Unit = ::writeDiagnosticFile,
 ) {
+    val frames = FramePerformanceLog(File(file.parentFile, "page-frames"))
     private val lock = Any()
     private var entries = emptyList<DiagnosticEntry>()
     private var initialized = false
@@ -42,6 +43,7 @@ internal class DiagnosticLogStore(
     fun setEnabled(enabled: Boolean) = synchronized(lock) {
         requireReadable()
         persist(enabled, entries)
+        frames.setEnabled(enabled)
     }
 
     /** Worker-only. Diagnostics failure does not determine a request or persistence outcome. */
@@ -59,15 +61,17 @@ internal class DiagnosticLogStore(
         // An explicit clear can recover an unreadable file; unknown enablement resets to off.
         val enabled = try { readOnce(); if (readable) mutableState.value.enabled else false }
             catch (_: Exception) { false }
+        frames.clear()
         persist(enabled, emptyList())
     }
 
     fun exportSnapshot(): ByteArray = synchronized(lock) {
         requireReadable()
-        JSONObject().put("format", "daiyu-diagnostics").put("version", 1)
+        JSONObject().put("format", "daiyu-diagnostics").put("version", 2)
             .put("enabled", mutableState.value.enabled).put("events", encodeEntries(entries))
-            .put("privacy", "Only event categories and timestamps; no chat, keys, paths or device identifiers.")
-            .toString(2).toByteArray(Charsets.UTF_8)
+            .put("frame_performance", frames.export())
+            .put("privacy", "Only fixed page/window categories, frame timings and event timestamps; no chat, keys, paths or device identifiers.")
+            .toString().toByteArray(Charsets.UTF_8)
     }
 
     private fun requireReadable() {
@@ -115,6 +119,7 @@ internal class DiagnosticLogStore(
         }
         entries = loaded; initialized = true; readable = true
         mutableState.value = DiagnosticLogState(true, enabled, loaded.size)
+        frames.setEnabled(enabled)
     }
     private fun persist(enabled: Boolean, next: List<DiagnosticEntry>) {
         val bytes = JSONObject().put("version", 1).put("enabled", enabled)
@@ -126,6 +131,7 @@ internal class DiagnosticLogStore(
         mutableState.value = DiagnosticLogState(true, enabled, next.size)
     }
     private fun markUnavailable() {
+        frames.setEnabled(false)
         readable = false
         mutableState.value = mutableState.value.copy(loaded = true, unavailable = true)
     }

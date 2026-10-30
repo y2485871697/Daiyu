@@ -14,7 +14,7 @@ class SettingsDiagnosticSummariesContractTest(unittest.TestCase):
 
     def test_export_summary_is_the_fixed_action_description(self):
         action = self.row.split('"export_logs" ->', 1)[1].split('"clear_logs" ->', 1)[0]
-        self.assertIn('summary = "导出诊断事件JSON"', action)
+        self.assertIn('summary = "导出页面性能与诊断事件JSON"', action)
         self.assertNotRegex(action, r"summary\s*=\s*(?:status|ui\.)")
 
     def test_clear_summary_is_the_fixed_action_description(self):
@@ -25,7 +25,7 @@ class SettingsDiagnosticSummariesContractTest(unittest.TestCase):
     def test_logging_row_still_displays_status_and_operation_notices(self):
         logging = self.row.split('"logging" ->', 1)[1].split('"export_logs" ->', 1)[0]
         self.assertIn("summary = status ?: ", logging)
-        self.assertIn('summary = status ?: "记录状态与故障"', logging)
+        self.assertIn('summary = status ?: "记录页面帧率、帧耗时与故障"', logging)
         self.assertIn("else -> ui.notice", self.row)
         for status in ("正在读取诊断日志…", "诊断日志不可用；可清除后重新记录"):
             self.assertIn(status, self.row)
@@ -35,7 +35,7 @@ class SettingsDiagnosticSummariesContractTest(unittest.TestCase):
         status = self.row.split("val status = when {", 1)[1].split("when (entry.id)", 1)[0]
         self.assertNotIn("正在处理诊断日志", self.source)
         self.assertNotIn("ui.busy", status)
-        self.assertIn('summary = status ?: "记录状态与故障"', self.row)
+        self.assertIn('summary = status ?: "记录页面帧率、帧耗时与故障"', self.row)
         self.assertIn("enabled = available", self.row)
         self.assertIn("if (!admitted() || busy || pickerPending || store == null) return", self.source)
         self.assertIn("busy = true; notice = null", self.source)

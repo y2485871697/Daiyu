@@ -123,10 +123,10 @@ internal fun SettingsDiagnosticRow(entry: SettingsEntry, ui: SettingsDiagnostics
     }
     when (entry.id) {
         "logging" -> SettingsSwitchRow(entry.title, ui.state.enabled, enabled = available,
-            tag = "settings-row:${entry.title}", summary = status ?: "记录状态与故障",
+            tag = "settings-row:${entry.title}", summary = status ?: "记录页面帧率、帧耗时与故障",
             leading = { SettingsIcon(entry.icon) }, onCheckedChange = ui.toggle)
         "export_logs" -> SettingsRow(entry.title, leading = { SettingsIcon(entry.icon) }, showChevron = true, onClick = if (available) ui.export else null,
-            summary = "导出诊断事件JSON")
+            summary = "导出页面性能与诊断事件JSON")
         "clear_logs" -> SettingsRow(entry.title, leading = { SettingsIcon(entry.icon) },
             showChevron = true, onClick = if (ui.state.loaded && !ui.busy) ui.clear else null,
             summary = "清理所有日志")

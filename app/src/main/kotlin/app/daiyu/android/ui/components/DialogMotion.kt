@@ -220,6 +220,7 @@ internal fun DaiyuDialog(
     ComposeDialog(onDismissRequest = {
         motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismissRequest()
     }, properties = properties) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames(if (bottomSheet) "sheet" else "dialog")
         DialogMotionProvider(motion, onDismissRequest) {
             if (bottomSheet) DisablePlatformDialogAnimation() else PlatformDialogFade()
             val contentMotion = if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier
@@ -247,7 +248,7 @@ internal fun DaiyuAlertDialog(
 ) {
     MaterialAlertDialog(
         onDismissRequest = onDismissRequest,
-        confirmButton = { PlatformDialogFade(); confirmButton() },
+        confirmButton = { app.daiyu.android.diagnostics.ObserveDialogFrames("alert"); PlatformDialogFade(); confirmButton() },
         modifier = modifier,
         dismissButton = dismissButton, icon = icon, title = title, text = text,
         shape = shape, containerColor = containerColor, iconContentColor = iconContentColor,

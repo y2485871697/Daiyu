@@ -67,6 +67,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     val otherInstallation = if (mode == LinuxExecutionMode.CHROOT) proot else chroot
     var message by remember(page) { mutableStateOf<String?>(null) }
     var tab by remember(page, filesOnly) { mutableStateOf(if (filesOnly) LinuxSettingsTab.FILES else LinuxSettingsTab.BASIC) }
+    app.daiyu.android.diagnostics.ObserveFrameContext("linux-tab", if (tab == LinuxSettingsTab.FILES) "files" else "basic")
     var tabScope by remember(page) { mutableStateOf(Any()) }
     val renderedTabScope = tabScope
     var fileOperationBusy by remember(page) { mutableStateOf(false) }

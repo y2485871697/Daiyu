@@ -30,6 +30,7 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
     },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = dismissEnabled, dismissOnClickOutside = dismissEnabled)) {
+        app.daiyu.android.diagnostics.ObserveDialogFrames(if (bottomSheet) "sheet" else "dialog")
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         val dimAmount = remember(window) { window?.attributes?.dimAmount ?: 0f }
         SideEffect {

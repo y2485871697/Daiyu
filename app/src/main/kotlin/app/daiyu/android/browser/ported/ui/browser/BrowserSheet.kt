@@ -120,6 +120,10 @@ internal fun BrowserSheet(
     var showHistory by uiState::showHistory
     var showSettings by uiState::showSettings
     var showDownloads by uiState::showDownloads
+    app.daiyu.android.diagnostics.ObserveFrameContext("browser-tab", "selected", selectedTabId)
+    app.daiyu.android.diagnostics.ObserveFrameContext("browser-panel", when {
+        showDownloads -> "downloads"; showHistory -> "history"; showSettings -> "settings"; else -> "content"
+    })
     val downloadEntries by tabPool.downloads.collectAsState()
 
     LaunchedEffect(tabPool) {

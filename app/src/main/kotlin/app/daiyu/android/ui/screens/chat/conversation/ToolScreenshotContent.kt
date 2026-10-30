@@ -53,6 +53,7 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
                 .clip(shape).border(1.dp, conversationColors().line, shape)
                 .conversationClickable(onClickLabel = "放大已保存截图") { expanded = true }, contentScale = ContentScale.Crop)
             if (expanded) WindowDialog(show = true, title = "已保存截图", onDismissRequest = { expanded = false }) {
+                app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
                 Image(bitmap.asImageBitmap(), "放大已保存截图", Modifier.fillMaxWidth().heightIn(max = 520.dp), contentScale = ContentScale.Fit)
                 TextButton(text = "关闭", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { expanded = false })
             }

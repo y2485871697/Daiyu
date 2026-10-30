@@ -203,6 +203,41 @@ class ChatRunnerTransportResumeTest {
         assertTrue(runtime.writes.none { it.transport?.sequence == 99L })
     }
 
+    @Test fun ordinaryCheckpointedPauseResumesTheOriginalCursorWithoutReconnect() {
+        for (interrupted in listOf(false, true)) {
+            val runtime = Runtime()
+            lateinit var runner: ChatRunner
+            var opens = 0; var resumes = 0; var budgets = 0
+            var stale: ((ModelEventBatch) -> ModelDeliveryAck)? = null
+            val session = object : Session() {
+                override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                    stale = sink
+                    assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(0, listOf(ModelEvent.TextDelta("m", "prefix")))))
+                    assertTrue(runner.pause()); assertTrue(runner.resume())
+                    throw ModelRequestException(ModelFailure.NETWORK, transportInterrupted = interrupted)
+                }
+                override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                    resumes++
+                    assertEquals(ModelDeliveryAck.REJECTED, checkNotNull(stale)(batch(99, listOf(ModelEvent.TextFinal("m", "late")))))
+                    assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(1, listOf(ModelEvent.TextFinal("m", "prefix continued")))))
+                }
+            }
+            val policy = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _, _ -> budgets++; Budget() })
+            runner = ChatRunner(ModelPort { opens++; session },
+                object : ConversationStore { override fun save(message: Message) = error("atomic only") },
+                BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = runtime, reconnect = policy)) {}
+            val result = runner.run(initial(), emptyList())
+            assertEquals(RunStatus.COMPLETED, result.status)
+            assertEquals(1, opens); assertEquals(1, resumes); assertEquals(0, budgets)
+            assertTrue(runtime.writes.none { it.phase == ExecutionPhase.RECONNECTING || it.transport?.sequence == 99L })
+            val requests = runtime.writes.mapNotNull { it.request }.filter { it.operation != RequestOperation.OPEN }
+            assertEquals(1, requests.map { it.requestId }.distinct().size)
+            assertEquals(RequestOperation.RESUME, requests.last().operation)
+            assertEquals(1L, runtime.writes.last().transport!!.sequence)
+            assertEquals(listOf("prefix continued"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+        }
+    }
+
     @Test(timeout = 10000) fun finalStopRejectsLateCallbackAndNeverContinues() {
         val entered = CountDownLatch(1)
         val disconnected = CountDownLatch(1)

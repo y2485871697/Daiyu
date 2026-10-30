@@ -12,6 +12,71 @@ class ReconnectRunnerTimelineTest {
         override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no process recovery")
     }
 
+    @Test fun ordinaryPauseProducesNoDividerAndOnlyALaterRealFailureStartsReconnect() {
+        for (realFailure in listOf(false, true)) {
+            val events = java.util.Collections.synchronizedList(mutableListOf<ReconnectChanged>())
+            val policy = FrozenReconnectAdapter.freeze(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S),
+                ProviderProtocol.RESPONSES).runnerPolicyWithDiagnostics(events::add).copy(delayMillis = 0)
+            lateinit var runner: ChatRunner
+            var resumes = 0
+            val session = object : RequestRetryModelSession {
+                override val canResume = true
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    assertTrue(runner.pause()); assertTrue(runner.resume())
+                    throw ModelRequestException(ModelFailure.NETWORK, transportInterrupted = true)
+                }
+                override fun resume(sink: (ModelEvent) -> Unit) {
+                    resumes++
+                    if (resumes == 1) {
+                        assertTrue("ordinary pause must not publish reconnect", events.isEmpty())
+                        if (realFailure) throw ModelRequestException(ModelFailure.SERVER, ModelRequestDiagnostic(503))
+                    }
+                    sink(ModelEvent.TextFinal("answer", "continued"))
+                }
+                override fun disconnectTransport() {}
+                override fun cancel() {}
+            }
+            runner = ChatRunner(ModelPort { session },
+                object : ConversationStore { override fun save(message: Message) = error("atomic only") },
+                BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = Runtime(), reconnect = policy)) {}
+            val result = runner.run(Message(MessageId("a"), ConversationId("c"), RunId("r"),
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
+            assertEquals(RunStatus.COMPLETED, result.status)
+            assertEquals(if (realFailure) 2 else 1, resumes)
+            if (realFailure) {
+                assertEquals(1, events.map { it.reconnectId }.distinct().size)
+                assertTrue(events.all { it.reason == ModelFailure.SERVER && it.diagnostic?.httpStatus == 503 })
+                assertEquals("succeeded", events.last().status)
+            } else assertTrue(events.isEmpty())
+        }
+    }
+
+    @Test fun actualHttpFailureAfterFastPauseIsNotHiddenAsControlCancellation() {
+        val events = java.util.Collections.synchronizedList(mutableListOf<ReconnectChanged>())
+        val policy = FrozenReconnectAdapter.freeze(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S),
+            ProviderProtocol.RESPONSES).runnerPolicyWithDiagnostics(events::add).copy(delayMillis = 0)
+        lateinit var runner: ChatRunner
+        val session = object : RequestRetryModelSession {
+            override val canResume = true
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                assertTrue(runner.pause()); assertTrue(runner.resume())
+                throw ModelRequestException(ModelFailure.SERVER, ModelRequestDiagnostic(503))
+            }
+            override fun resume(sink: (ModelEvent) -> Unit) { sink(ModelEvent.TextFinal("answer", "continued")) }
+            override fun disconnectTransport() {}
+            override fun cancel() {}
+        }
+        runner = ChatRunner(ModelPort { session },
+            object : ConversationStore { override fun save(message: Message) = error("atomic only") },
+            BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = Runtime(), reconnect = policy)) {}
+        val result = runner.run(Message(MessageId("a"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(1, events.map { it.reconnectId }.distinct().size)
+        assertTrue(events.all { it.reason == ModelFailure.SERVER && it.diagnostic?.httpStatus == 503 })
+        assertEquals("succeeded", events.last().status)
+    }
+
     @Test fun actualRunnerPreservesOneErrorAcrossPauseAndRefreshesItBeforeAnUnrecoverableFailure() {
         val events = mutableListOf<ReconnectChanged>()
         val policy = FrozenReconnectAdapter.freeze(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S),

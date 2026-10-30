@@ -33,9 +33,9 @@ class ChatRunnerRequestRetryTest {
         override fun open(history: List<Message>, definitions: List<ToolDefinition>) = session
     }
     private fun runner(session: ModelSession, runtime: Runtime, tools: BatteryTool = BatteryTool { error("no tools") },
-        budget: () -> TransportReconnectBudget = { Budget() }) = ChatRunner(port(session),
+        delayMillis: Long = 0, budget: () -> TransportReconnectBudget = { Budget() }) = ChatRunner(port(session),
         object : ConversationStore { override fun save(message: Message) = error("atomic only") }, tools,
-        RunnerOptions(runtimeStore = runtime, reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _, _ -> budget() }))) {}
+        RunnerOptions(runtimeStore = runtime, reconnect = ReconnectPolicy(delayMillis = delayMillis, budgetFactory = TransportReconnectBudgetFactory { _, _, _ -> budget() }))) {}
 
     @Test fun currentRequestRetriesBeyondTwentyWithoutAppendingFailedAttempts() {
         var retries = 0; var budgets = 0
@@ -102,7 +102,7 @@ class ChatRunnerRequestRetryTest {
                 }
                 if (checkpoint.phase == ExecutionPhase.PAUSED) paused.countDown()
             }
-            runner = runner(session, runtime, budget = { budgets++; Budget() })
+            runner = runner(session, runtime, delayMillis = 60_000, budget = { budgets++; Budget() })
             val result = AtomicReference<Message>(); val failure = AtomicReference<Throwable>()
             val worker = thread { try { result.set(runner.run(initial(), emptyList())) } catch (error: Throwable) { failure.set(error) } }
             try {
@@ -117,6 +117,7 @@ class ChatRunnerRequestRetryTest {
         val runtime = Runtime()
         lateinit var runner: ChatRunner
         var resumes = 0
+        var budgets = 0
         val session = object : Session() {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                 sink(ModelEvent.TextDelta("m", "discard"))
@@ -130,11 +131,49 @@ class ChatRunnerRequestRetryTest {
                 sink(ModelEvent.TextFinal("replacement", "fresh"))
             }
         }
-        runner = runner(session, runtime)
+        runner = runner(session, runtime, delayMillis = 60_000, budget = { budgets++; Budget() })
         val result = runner.run(initial(), emptyList())
         assertEquals(RunStatus.COMPLETED, result.status)
         assertEquals(1, resumes)
+        assertEquals(0, budgets)
+        assertTrue(runtime.writes.none { it.phase == ExecutionPhase.RECONNECTING })
         assertEquals(listOf("fresh"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+    }
+
+    @Test(timeout = 15000) fun ordinaryPauseCancellationWaitsWithoutStartingReconnectOrBackoff() {
+        for (kind in listOf("network", "timeout", "interrupted")) {
+            val runtime = Runtime()
+            val paused = CountDownLatch(1)
+            lateinit var runner: ChatRunner
+            var resumes = 0; var budgets = 0
+            runtime.onCommit = { if (it.phase == ExecutionPhase.PAUSED) paused.countDown() }
+            val session = object : Session() {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    sink(ModelEvent.TextDelta("m", "partial"))
+                    assertTrue(runner.pause())
+                    throw ModelRequestException(if (kind == "timeout") ModelFailure.TIMEOUT else ModelFailure.NETWORK,
+                        transportInterrupted = kind == "interrupted")
+                }
+                override fun resume(sink: (ModelEvent) -> Unit) {
+                    resumes++; sink(ModelEvent.TextFinal("replacement", "fresh"))
+                }
+            }
+            runner = runner(session, runtime, delayMillis = 60_000, budget = { budgets++; Budget() })
+            val result = AtomicReference<Message>(); val failure = AtomicReference<Throwable>()
+            val worker = thread { try { result.set(runner.run(initial(), emptyList())) } catch (e: Throwable) { failure.set(e) } }
+            try {
+                assertTrue(kind, paused.await(3, TimeUnit.SECONDS))
+                assertEquals(kind, 0, resumes)
+                assertTrue(runner.resume())
+                worker.join(3000); assertFalse(kind, worker.isAlive)
+                failure.get()?.let { throw AssertionError(it) }
+                assertEquals(kind, RunStatus.COMPLETED, result.get().status)
+                assertEquals(kind, 1, resumes); assertEquals(kind, 0, budgets)
+                assertTrue(kind, runtime.writes.none { it.phase == ExecutionPhase.RECONNECTING })
+                assertEquals(kind, listOf("fresh"), result.get().blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+                assertEquals(kind, 2, runtime.writes.last().usageRequests.size)
+            } finally { runner.stop(); worker.join(3000) }
+        }
     }
 
     @Test fun stopAtReconnectCheckpointNeverStartsRetryOrAcceptsLateEvents() {

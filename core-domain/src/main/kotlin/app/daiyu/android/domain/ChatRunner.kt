@@ -1083,23 +1083,25 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val canResume = try { resumable?.canResume == true } catch (_: Exception) { false }
                             if ((factory == null && attempt >= options.reconnect.maxAttempts) ||
                                 classified !in options.reconnect.failures || !canResume) throw failure
+                            val pauseContinuation = controlInterruption && factory != null
                             replayRequest = (active as? RequestRetryModelSession)?.retriesCurrentRequest == true
                             segmentHistory.finishReasoning()
                             apply(current)
-                            if (factory != null) {
-                                if (reconnectBudget == null) reconnectBudget = factory.create(round, checkNotNull(classified), reported?.diagnostic)
-                                val budget = checkNotNull(reconnectBudget)
-                                syncReconnectPause()
-                                budget.check()
-                                if (pauseRequested) awaitPause()
-                                budget.check()
-                            }
+                            // A user-cancelled transport still resumes through the original request boundary,
+                            // but only a real failure may create a reconnect notice or start its budget.
+                            if (factory != null && !pauseContinuation && reconnectBudget == null)
+                                reconnectBudget = factory.create(round, checkNotNull(classified), reported?.diagnostic)
+                            syncReconnectPause()
+                            reconnectBudget?.check()
+                            if (pauseRequested) awaitPause()
+                            reconnectBudget?.check()
                             synchronized(terminalLock) {
                                 if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
-                                setPhase(ExecutionPhase.RECONNECTING, ++attempt)
+                                setPhase(if (pauseContinuation && reconnectBudget == null) ExecutionPhase.STREAMING
+                                    else ExecutionPhase.RECONNECTING, ++attempt)
                             }
                             checkpoint()
-                            if (options.reconnect.delayMillis > 0) {
+                            if (!pauseContinuation && options.reconnect.delayMillis > 0) {
                                 // A deadline park is outside the control lock and is interruptible
                                 // by stop/resume's unpark; unlike sleep it does not add stop latency.
                                 val deadline = System.nanoTime() + options.reconnect.delayMillis * 1_000_000L

@@ -64,6 +64,13 @@ class ActivityTest : WiredActivityTestCase() {
         node("chat-messages").performTouchInput { click(center) }
         mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", "点击后正文\n".repeat(160))))) }
         refresh()
+        // refresh starts an IO history read and Markdown parses off-main; wait for that exact update,
+        // not the previously settled 100-line snapshot, before asserting touch ownership.
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasText("点击后正文", substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+        }
+        ui.waitForIdle()
         val touchedRange = node("chat-messages").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
         assertTrue("a down without a drag also stops follow", touchedRange.value() < touchedRange.maxValue())
         mainThread { activity.select(null) }

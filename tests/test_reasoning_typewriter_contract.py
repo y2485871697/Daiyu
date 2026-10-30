@@ -13,7 +13,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
                       'resetEpoch = revealResetEpoch', 'onVisibleAdvance = onVisibleAdvance']:
             self.assertIn(token, source)
         self.assertNotIn('ProjectedMessageMarkdown(', source)
-        timer = source.split('private fun ReasoningElapsedTime(', 1)[1].split('internal fun hasReportedReasoningText', 1)[0]
+        timer = source.split('internal fun rememberReasoningElapsed(', 1)[1].split('internal fun hasReportedReasoningText', 1)[0]
         self.assertIn('delay(100L)', timer)
         self.assertNotIn('withFrameNanos', timer)
         for forbidden in ['TouchHaptics', 'Vibrator', 'HapticsRuntime']:

@@ -202,8 +202,8 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Un
 ) {
     val lengths = remember(blocks) { blocks.map(::markdownBlockLength) }
     var remaining = visibleCharacters
-    blocks.forEachIndexed { blockIndex, block ->
-        if (remaining <= 0) return@forEachIndexed
+    for ((blockIndex, block) in blocks.withIndex()) {
+        if (remaining <= 0) break
         val visible = minOf(remaining, lengths[blockIndex])
         remaining = (remaining - lengths[blockIndex]).coerceAtLeast(0)
         when (block) {
@@ -228,19 +228,18 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Un
             is MarkdownBlock.Items -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val itemLengths = remember(block) { block.items.map { markdownBlocksLength(it.blocks).coerceAtLeast(1) } }
                 var itemRemaining = visible
-                block.items.forEachIndexed { index, item ->
-                    if (itemRemaining > 0) {
-                        val itemVisible = minOf(itemRemaining, itemLengths[index])
-                        itemRemaining = (itemRemaining - itemLengths[index]).coerceAtLeast(0)
-                        Row {
-                            val bullet = when (item.checked) {
-                                true -> "☑"; false -> "☐"
-                                null -> if (block.ordered) "${block.start + index}." else "•"
-                            }
-                            BasicText(bullet, Modifier.widthIn(min = 24.dp).padding(end = 6.dp), messageBodyStyle())
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                MarkdownBlocks(item.blocks, openLink, itemVisible, generationComplete)
-                            }
+                for ((index, item) in block.items.withIndex()) {
+                    if (itemRemaining <= 0) break
+                    val itemVisible = minOf(itemRemaining, itemLengths[index])
+                    itemRemaining = (itemRemaining - itemLengths[index]).coerceAtLeast(0)
+                    Row {
+                        val bullet = when (item.checked) {
+                            true -> "☑"; false -> "☐"
+                            null -> if (block.ordered) "${block.start + index}." else "•"
+                        }
+                        BasicText(bullet, Modifier.widthIn(min = 24.dp).padding(end = 6.dp), messageBodyStyle())
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MarkdownBlocks(item.blocks, openLink, itemVisible, generationComplete)
                         }
                     }
                 }

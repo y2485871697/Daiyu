@@ -131,7 +131,7 @@ internal fun ReportedReasoningCard(
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
             Text(if (isThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
-            ReasoningElapsedTime(ownerKey, reported, isThinking, nanoTime, embedded)
+            ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking, nanoTime, embedded)
             if (hasSummary) {
                 Icon(ChatPreviewIcons.Chevron,
                     if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
@@ -181,6 +181,32 @@ private data class ReasoningSummaryDisplay(
     val reveal: MarkdownReveal,
 )
 
+/** Text and block positions do not change the elapsed-time producer's identity. */
+@Composable
+internal fun rememberReasoningTiming(reported: List<ReportedReasoning>): List<ReportedReasoning> {
+    val timing = reported.map { ReportedReasoning(it.itemId, "", it.elapsedMillis, it.activeSinceNanos) }
+    return remember(timing) { timing }
+}
+
+@Composable
+internal fun rememberReasoningElapsed(reported: List<ReportedReasoning>, live: Boolean, nanoTime: () -> Long): androidx.compose.runtime.State<Long?> {
+    fun elapsed(now: Long): Long? {
+        if (reported.any { it.elapsedMillis == null }) return null
+        return reported.fold(0L) { total, item ->
+            total + checkNotNull(item.elapsedAt(now)).coerceAtMost(Long.MAX_VALUE - total)
+        }
+    }
+    return produceState(elapsed(nanoTime()), reported, live, nanoTime) {
+        value = elapsed(nanoTime())
+        if (live) {
+            while (true) {
+                delay(100L)
+                value = elapsed(nanoTime())
+            }
+        }
+    }
+}
+
 /** The elapsed-time sampler is independent of Markdown reveal frames. */
 @Composable
 private fun ReasoningElapsedTime(
@@ -190,21 +216,7 @@ private fun ReasoningElapsedTime(
     nanoTime: () -> Long,
     embedded: Boolean
 ) {
-    fun elapsed(now: Long): Long? {
-        if (reported.any { it.elapsedMillis == null }) return null
-        return reported.fold(0L) { total, item ->
-            total + checkNotNull(item.elapsedAt(now)).coerceAtMost(Long.MAX_VALUE - total)
-        }
-    }
-    val millis by produceState(elapsed(nanoTime()), reported, live, nanoTime) {
-        value = elapsed(nanoTime())
-        if (live) {
-            while (true) {
-                delay(100L)
-                value = elapsed(nanoTime())
-            }
-        }
-    }
+    val millis by rememberReasoningElapsed(reported, live, nanoTime)
     millis?.let { duration ->
         Text("${duration / 1_000}.${duration / 100 % 10}s",
             Modifier.testTag("reported-reasoning-duration:$ownerKey"), color = conversationColors().text,

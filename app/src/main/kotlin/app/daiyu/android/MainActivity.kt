@@ -2692,14 +2692,17 @@ class MainActivity : ComponentActivity() {
                             val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
                                 controller, selected?.id, contextReceiptRevision, controller.dataRevision,
                                 contextModelRevision, chatState.composer.phase, ready = controller.ready)
+                            val usageConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
+                            val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
+                            val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)
                             BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
                                         automaticCompression = automaticCompression, automaticCompressionPending = automaticCompressionPending,
                                         composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
-                                            contextFraction = contextUsage.fraction, contextUsageText = contextUsage.label(),
-                                            contextTokensText = contextUsage.tokensLabel(),
+                                            contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
+                                            contextTokensText = contextUsageLabels.second,
                                             voiceModes = buildSet {
                                                 val voiceSettings = VoiceSettingsPreferences(applicationContext)
                                                 if (voiceSettings.enabled("input")) add(ChatMenuAction.VOICE_INPUT)
@@ -2708,7 +2711,7 @@ class MainActivity : ComponentActivity() {
                                             },
                                             videoSendAvailable = inlineMessageEditor == null && videoComposerControls?.canSubmit == true,
                                             videoSendBlocked = inlineMessageEditor == null && (videoComposerControls?.blocked == true ||
-                                                videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true))), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
+                                                videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true))), chatActions(completionReadAction()), modifier = Modifier.weight(1f), turnExtras = { turn ->
                                         if (turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
                                         }
@@ -3050,7 +3053,7 @@ class MainActivity : ComponentActivity() {
         controller.isAppearanceLightNavigationBars = lightBars
     }
 
-    private fun chatActions(): ChatScreenActions {
+    private fun chatActions(onVisibleCompleted: (Set<String>) -> Unit): ChatScreenActions {
         val dictationProjection = currentDictationProjection()
         val renderedOwner = controlOwner
         val renderedConversation = chatState.conversationKey
@@ -3189,7 +3192,7 @@ class MainActivity : ComponentActivity() {
                 openComposerShortcut(trigger, expected)
         },
         onCycleGptSpeed = { cycleChatGptSpeed(renderedSpeed, renderedSpeedConversation) },
-        onVisibleCompleted = completionReadAction(),
+        onVisibleCompleted = onVisibleCompleted,
         onVisibleTextAdvance = { key ->
             val active = controller.active
             val turn = renderedRevealTurns[key]
@@ -3477,20 +3480,27 @@ class MainActivity : ComponentActivity() {
                 universalEditor == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision))
     }
 
-    private fun completionReadAction(): (Set<String>) -> Unit {
-        // Capture the exact event BEFORE the measured-frame callback. Never fetch a newer token there.
-        val receipt = if (completionPageReadable()) selected?.id?.let { id ->
-            app.daiyu.android.storage.ConversationCompletionMarkers.read(controller.database.readableDatabase, id)
-                ?.takeIf(::completionShown)
-        } else null
+    @Composable private fun completionReadAction(): (Set<String>) -> Unit {
         val generation = editorGeneration
         val revision = controller.dataRevision
+        val id = selected?.id
+        val completed = shown.mapNotNull { (_, message) ->
+            if (message.conversationId == id && message.role == Message.ASSISTANT_ROLE && message.status == RunStatus.COMPLETED)
+                message.id.value to message.runId.value else null
+        }.toSet()
+        val owner = if (completionPageReadable() && id != null && completed.isNotEmpty())
+            app.daiyu.android.ui.screens.chat.conversation.CompletionReadOwner(id, generation, revision, completed) else null
+        // Capture the exact event off the UI thread, before the measured-frame callback.
+        val receiptState = app.daiyu.android.ui.screens.chat.conversation.rememberCompletionReceipt(owner) { conversation ->
+            app.daiyu.android.storage.ConversationCompletionMarkers.read(controller.database.readableDatabase, conversation)
+        }
+        val receipt = receiptState.value?.takeIf(::completionShown)
         // An earlier segment of the same physical owner is not its newly completed final segment.
         val finalKey = receipt?.let { expected -> chatState.turns.filterIsInstance<ChatTurnUi.Assistant>()
             .lastOrNull { it.ownerMessageId == expected.messageId && it.status == RunStatus.COMPLETED }?.listKey }
         return { visibleKeys ->
-            if (receipt != null && finalKey != null && finalKey in visibleKeys)
-                acknowledgeCompletion(receipt, generation, revision)
+            if (receipt != null && finalKey != null && finalKey in visibleKeys &&
+                acknowledgeCompletion(receipt, generation, revision)) receiptState.value = null
         }
     }
     private fun completionPageReadable() = activityUsable() && voiceForeground && retainedPage == "chat" &&
@@ -3503,13 +3513,16 @@ class MainActivity : ComponentActivity() {
                 message.status == RunStatus.COMPLETED
         }
     private fun acknowledgeCompletion(receipt: app.daiyu.android.storage.ConversationCompletionMarkers.Receipt,
-        generation: Long, revision: Long) {
+        generation: Long, revision: Long): Boolean {
         if (!completionPageReadable() || editorGeneration != generation || controller.dataRevision != revision ||
-            !completionShown(receipt)) return
+            !completionShown(receipt)) return false
+        var acknowledged = false
         guard {
-            if (app.daiyu.android.storage.ConversationCompletionMarkers.acknowledge(
-                    controller.database.writableDatabase, receipt)) updatePane()
+            acknowledged = app.daiyu.android.storage.ConversationCompletionMarkers.acknowledge(
+                controller.database.writableDatabase, receipt)
+            if (acknowledged) updatePane()
         }
+        return acknowledged
     }
 
     @Composable private fun DictationComposerEntry() {

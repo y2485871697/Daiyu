@@ -105,7 +105,9 @@ class ContextUsageWiringContractTest(unittest.TestCase):
 
     def test_production_composer_gets_fraction_and_unclamped_decimal_label(self):
         main = text('MainActivity.kt')
-        self.assertIn('contextFraction = contextUsage.fraction, contextUsageText = contextUsage.label()', main)
+        self.assertIn('contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first', main)
+        self.assertIn('contextTokensText = contextUsageLabels.second', main)
+        self.assertIn('rememberChatContextUsageLabels(contextUsage, usageLocale)', main)
         self.assertIn('rememberChatContextUsage(', main)
         helper = text('ui/screens/chat/conversation/ChatContextUsage.kt')
         self.assertIn('withContext(Dispatchers.IO)', helper)
@@ -119,7 +121,7 @@ class ContextUsageWiringContractTest(unittest.TestCase):
 
     def test_actual_label_and_window_use_provider_settings_even_during_a_run(self):
         main = text('MainActivity.kt')
-        self.assertIn('contextTokensText = contextUsage.tokensLabel()', main)
+        self.assertIn('contextTokensText = contextUsageLabels.second', main)
         controller = text('ChatController.kt')
         binding = controller.split('bindContextUsage(assistant,', 1)[1].split('val owned = ChatRunner', 1)[0]
         self.assertIn('provider.contextWindowOverride?.toLong()', binding)

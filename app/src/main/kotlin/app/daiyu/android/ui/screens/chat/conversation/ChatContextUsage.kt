@@ -28,3 +28,7 @@ internal fun rememberChatContextUsage(controller: ChatController, conversation: 
     }
     return usage
 }
+
+@Composable
+internal fun rememberChatContextUsageLabels(usage: CloudContextUsageUi, locale: java.util.Locale): Pair<String, String> =
+    remember(usage.inputTokens, usage.windowTokens, locale) { usage.label(locale) to usage.tokensLabel(locale) }

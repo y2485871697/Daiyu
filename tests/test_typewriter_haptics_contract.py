@@ -29,7 +29,7 @@ class TypewriterHapticsContract(unittest.TestCase):
 
     def test_production_host_freezes_owner_and_supports_normal_terminal_drain(self):
         main = (APP / "MainActivity.kt").read_text()
-        setup = main.split("private fun chatActions()", 1)[1].split("fun editorMatches()", 1)[0]
+        setup = main.split("private fun chatActions(onVisibleCompleted:", 1)[1].split("fun editorMatches()", 1)[0]
         self.assertIn("onVisibleTextAdvance = { key ->", main)
         call = main.split("onVisibleTextAdvance = { key ->", 1)[1].split("onInteractiveModeChange", 1)[0]
         for token in ["renderedRevealOwner", "associateBy { it.listKey }", "hapticsHost?.revealAdvance(renderedConversation)"]:

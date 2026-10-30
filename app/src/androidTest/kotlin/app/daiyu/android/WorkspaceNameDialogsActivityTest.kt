@@ -63,6 +63,7 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testCreationAndRenameShareFilledFieldHintGeometryAndNoClose() {
         for (dark in listOf(false, true)) {
             var creationWidth = 0f
@@ -73,13 +74,28 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
                 ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
                 if (rename) node("prompt-input").assertTextContains("keep.txt")
                 node("prompt-input").performTextClearance()
+                awaitDialogEnter(node("prompt-input"))
                 ui.onAllNodesWithText("文件夹名称").assertCountEquals(1)
                 ui.onNodeWithText("名称").assertDoesNotExist()
                 val field = node("prompt-input").fetchSemanticsNode().boundsInRoot
                 if (!rename) { creationWidth = field.width; creationHeight = field.height }
                 else { assertEquals(creationWidth, field.width, 1f); assertEquals(creationHeight, field.height, 1f) }
-                val cancel = node("dialog-cancel").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
-                val confirm = node("dialog-confirm").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+                node("dialog-cancel").assertHeightIsAtLeast(48.dp)
+                node("dialog-confirm").assertHeightIsAtLeast(48.dp)
+                val buttons = ui.onAllNodes(
+                    hasTestTag("dialog-cancel") or hasTestTag("dialog-confirm")
+                ).fetchSemanticsNodes()
+                val cancelNode = buttons.single { hasTestTag("dialog-cancel").matches(it) }
+                val confirmNode = buttons.single { hasTestTag("dialog-confirm").matches(it) }
+                val view = (cancelNode.root as androidx.compose.ui.platform.ViewRootForTest).view
+                check((confirmNode.root as androidx.compose.ui.platform.ViewRootForTest).view === view)
+                val token = view.windowToken
+                val (cancel, confirm) = awaitStableWindowFrame(view) {
+                    if (view.windowToken != token || buttons.any {
+                            !it.layoutInfo.isPlaced || !it.layoutInfo.coordinates.isAttached
+                        }) null
+                    else cancelNode.boundsInRoot to confirmNode.boundsInRoot
+                }
                 assertEquals(cancel.width, confirm.width, 1f)
                 assertEquals(cancel.height, confirm.height, 1f)
                 assertEquals(cancel.top, confirm.top, 1f)

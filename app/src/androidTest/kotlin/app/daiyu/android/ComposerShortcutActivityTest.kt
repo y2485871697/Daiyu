@@ -56,7 +56,13 @@ class ComposerShortcutActivityTest : WiredActivityTestCase() {
         val file = "文件引用（未读取）：content://fixture/file"
         type("$file\n@")
         awaitUniqueTag("reference-picker-item:$source")
-        node("reference-picker-item:$source").performClick()
+        val entry = node("reference-picker-item:$source")
+        awaitDialogTouchReady(entry)
+        entry.performClick()
+        ui.waitUntil(5_000) {
+            val raw = fixture.database.conversations().first { it.id.value == current }.draft
+            ComposerReferences(raw).text.isEmpty()
+        }
         val raw = fixture.database.conversations().first { it.id.value == current }.draft
         val projection = ComposerReferences(raw)
         assertEquals("", projection.text)

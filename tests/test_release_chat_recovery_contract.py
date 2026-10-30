@@ -33,6 +33,9 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         typing = (CHAT / 'MarkdownTyping.kt').read_text()
         self.assertIn('allowPrefix = sources == baseline && allowBaselinePrefix', typing)
         self.assertIn('allowBaselinePrefix || isMarkdownAppend(baseline.map { it.text }, it.sources)', typing)
+        self.assertIn('!markdownTypingAppends(baseline, sources)', typing)
+        self.assertIn('testHistoricalExpandAndUpdateAreSilent', (DEVICE / 'ReportedReasoningTypingTest.kt').read_text())
+        self.assertIn('testSameLiveItemReplacementIsSilentAndLaterAppendStillTypes', (DEVICE / 'ReportedReasoningTypingTest.kt').read_text())
         self.assertIn('testColdFirstSummaryAndHiddenAppendReopenUseSilentBaselines', (DEVICE / 'ReportedReasoningTypingTest.kt').read_text())
         self.assertLess(source.index('val summaryDisplays'), source.index('AnimatedVisibility('))
         self.assertNotIn('withFrameNanos', source)
@@ -41,6 +44,20 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('testMixedInnerCollapseAndReopenDoNotReplayButLaterAppendStillTypes', test)
         self.assertIn('assertEquals(paused, advances)', test)
         self.assertIn('await { visibleText().contains(next) }', test)
+    def test_dialog_regressions_use_real_entry_and_joint_native_frames(self):
+        device = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
+        geometry = (device / 'WorkspaceNameDialogsActivityTest.kt').read_text()
+        self.assertIn('awaitDialogEnter(node("prompt-input"))', geometry)
+        self.assertIn('val (cancel, confirm) = awaitStableWindowFrame(view)', geometry)
+        self.assertIn('else cancelNode.boundsInRoot to confirmNode.boundsInRoot', geometry)
+        self.assertIn('assertEquals(cancel.top, confirm.top, 1f)', geometry)
+        self.assertIn('assertTrue(cancel.right < confirm.left)', geometry)
+        shortcut = (device / 'ComposerShortcutActivityTest.kt').read_text().split('fun testPastedReferenceAndShortcutUseVisibleCoordinates()', 1)[1].split('fun testCancel', 1)[0]
+        self.assertIn('awaitDialogTouchReady(entry)', shortcut)
+        self.assertEqual(1, shortcut.count('entry.performClick()'))
+        self.assertIn('ComposerReferences(raw).text.isEmpty()', shortcut)
+        self.assertIn('assertEquals("", projection.text)', shortcut)
+        self.assertIn('assertEquals(0, fixture.opens.get())', shortcut)
     def test_legacy_answer_waits_for_workflow_exit_and_stays_released(self):
         source = (CHAT / 'ChatMessageList.kt').read_text().split('private fun AssistantTextContent', 1)[1]
         self.assertIn('onDisclosureHandoffReady = { ready ->', source)

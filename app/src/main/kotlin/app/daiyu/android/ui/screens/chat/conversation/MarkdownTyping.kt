@@ -75,7 +75,8 @@ internal fun rememberMarkdownReveal(
         markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix)
     }
     val parts = remember(sources, projection, baseline, allowBaselinePrefix) {
-        projection?.takeIf { allowBaselinePrefix || isMarkdownAppend(baseline.map { it.text }, it.sources) }?.let { parsed -> sources.take(parsed.sources.size).mapIndexed { index, source ->
+        projection?.takeIf { allowBaselinePrefix || isMarkdownAppend(baseline.map { it.text }, it.sources) ||
+            !markdownTypingAppends(baseline, sources) }?.let { parsed -> sources.take(parsed.sources.size).mapIndexed { index, source ->
             val displayed = source.copy(text = parsed.sources[index])
             val blocks = parsed.blocks.getValue(displayed.text)
             MarkdownTypingPart(displayed, markdownBlocksLength(blocks), markdownBlocksDisplayText(blocks))

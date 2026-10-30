@@ -17,7 +17,8 @@ internal object RunCheckpointCodec {
     }
     fun encode(value: RunCheckpoint): String {
         validate(value)
-        fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
+        check(MAX_BYTES.toLong() <= ArchiveCodec.MAX_ARCHIVE_BYTES)
+        fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)
         fun projectedHistory(rows: List<Message>): JSONArray {
             require(rows.size <= ArchiveCodec.MAX_MESSAGES)
             return JSONArray().apply { rows.forEach { row ->

@@ -90,7 +90,20 @@ object ArchiveCodec {
      * Keep this method byte-for-byte compatible with the legacy encoder when all
      * historySegments are empty.  In particular, do not emit an empty member.
      */
-    fun encode(messages: List<Message>): ByteArray {
+    fun encode(messages: List<Message>): ByteArray = archiveBytes(buildArray(messages))
+
+    // The complete checkpoint enforces the same or a smaller byte ceiling before returning.
+    internal fun checkpointArray(messages: List<Message>): JSONArray {
+        val value = buildArray(messages)
+        return if (hasUnpairedSurrogate(value))
+            JSONArray(String(archiveBytes(value), Charsets.UTF_8)) else value
+    }
+
+    private fun archiveBytes(value: JSONArray): ByteArray = value.toString().toByteArray(Charsets.UTF_8).also {
+        require(it.size.toLong() <= MAX_ARCHIVE_BYTES) { "归档超过大小上限" }
+    }
+
+    private fun buildArray(messages: List<Message>): JSONArray {
         require(messages.size <= MAX_MESSAGES) { "归档消息数量超限" }
         MessageHistory.validate(messages)
         val value = JSONArray()
@@ -110,9 +123,25 @@ object ArchiveCodec {
             MessageTimeCodec.write(item, message.createdAt)
             value.put(item)
         }
-        return value.toString().toByteArray(Charsets.UTF_8).also {
-            require(it.size.toLong() <= MAX_ARCHIVE_BYTES) { "归档超过大小上限" }
+        return value
+    }
+
+    private fun hasUnpairedSurrogate(value: Any?): Boolean = when (value) {
+        is String -> {
+            var index = 0
+            var malformed = false
+            while (index < value.length && !malformed) {
+                val char = value[index++]
+                if (Character.isHighSurrogate(char)) {
+                    if (index == value.length || !Character.isLowSurrogate(value[index])) malformed = true
+                    else index++
+                } else if (Character.isLowSurrogate(char)) malformed = true
+            }
+            malformed
         }
+        is JSONArray -> (0 until value.length()).any { hasUnpairedSurrogate(value.get(it)) }
+        is JSONObject -> value.keys().asSequence().any { hasUnpairedSurrogate(it) || hasUnpairedSurrogate(value.get(it)) }
+        else -> false
     }
 
     fun blocks(values: List<MessageBlock>): JSONArray {

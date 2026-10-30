@@ -11,7 +11,7 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('else db.beginTransactionNonExclusive()', read)
         self.assertLess(read.index('val raw = try'), read.index('SQLiteText.read('))
         self.assertLess(read.index('SQLiteText.read('), read.index('if (ownTransaction) db.endTransaction()'))
-        self.assertLess(read.index('db.endTransaction()'), read.index('RunCheckpointCodec.decode(payload)'))
+        self.assertLess(read.index('db.endTransaction()'), read.index('RunCheckpointCodec.decodeWithRecovery(payload)'))
         self.assertIn('检查点元数据不匹配', read)
     def test_the_ui_publisher_uses_only_a_worker_prepared_immutable_snapshot(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()

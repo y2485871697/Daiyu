@@ -2,6 +2,7 @@ package app.daiyu.android.storage
 
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
+import app.daiyu.android.context.CheckpointPreservation
 import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.*
@@ -22,6 +23,7 @@ internal class SQLiteRuntimeStore private constructor(
     private val contextService: app.daiyu.android.context.ContextService?
 ) : AtomicSupplementRuntimeStore, PreparationRuntimeStore, AutoCloseable {
     private val processOwner = UUID.randomUUID().toString()
+    private val checkpointReuse = RuntimeCheckpointReuse()
     private var contextUsageBinding: Pair<Message, app.daiyu.android.ui.model.ContextUsageModel>? = null
     @Volatile internal var contextUsageRevision = 0L; private set
     @Synchronized internal fun bindContextUsage(initial: Message, model: app.daiyu.android.ui.model.ContextUsageModel) {
@@ -126,48 +128,62 @@ internal class SQLiteRuntimeStore private constructor(
             checkpoint.supplements.single { it.id == supplement.id } == supplement)
         commit(checkpoint, supplement)
     }
-    private fun commit(checkpoint: RunCheckpoint, supplement: Message?) {
+    private fun commit(input: RunCheckpoint, supplement: Message?) {
         available(); check(recovered)
+        val checkpoint = CheckpointPreservation.freeze(input)
         require(checkpoint.usage.all { it.source == UsageRequestSource.MAIN || it.source == UsageRequestSource.SUMMARY }) {
             "additional_usage_must_not_modify_parent_checkpoint"
         }
         val encoded = RunCheckpointCodec.encode(checkpoint)
         var contextChanged = false
-        transactions.run { db ->
-            val m = checkpoint.message
-            val prior = db.rawQuery("SELECT owner,revision,phase,process_owner,conversation_id,run_id FROM runtime_checkpoints WHERE message_id=?",
-                arrayOf(m.id.value)).use { c -> if (!c.moveToFirst()) null else {
-                check(c.getString(0) == checkpoint.owner && c.getLong(1) == checkpoint.revision - 1 &&
-                    c.getString(2) != ExecutionPhase.TERMINAL.name && c.getString(3) == processOwner &&
-                    c.getString(4) == m.conversationId.value && c.getString(5) == m.runId.value) { "拒绝过期或异主检查点" }
-                c.getLong(1)
-            } }
-            if (prior == null) {
-                check(checkpoint.revision == 1L) { "首个检查点版本必须为1" }
-                preparations.transfer(db, checkpoint)
-            } else preparations.preserve(requireNotNull(read(db, m.id.value)).value, checkpoint)
-            val persisted = database.runtimeMessage(db, m)
-            check(persisted.status == RunStatus.RUNNING) { "消息已终结，不允许接管运行" }
-            if (supplement != null) database.insertRuntimeSupplement(db, m, supplement)
-            val values = values(checkpoint, encoded)
-            if (prior == null) db.insertOrThrow("runtime_checkpoints", null, values)
-            else check(db.update("runtime_checkpoints", values,
-                "message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?",
-                arrayOf(m.id.value, checkpoint.owner, prior.toString(), processOwner)) == 1)
-            database.writeRuntimeMessage(db, m)
-            app.daiyu.android.timeline.ChatTimelineStore.contextLimit(checkpoint)?.let {
-                app.daiyu.android.timeline.ChatTimelineStore.write(db, it)
+        try {
+            transactions.run { db ->
+                val m = checkpoint.message
+                val prior = db.rawQuery("SELECT owner,revision,phase,process_owner,conversation_id,run_id,CAST(payload AS BLOB)=CAST(? AS BLOB) FROM runtime_checkpoints WHERE message_id=?",
+                    arrayOf(checkpointReuse.expectedPayload(m.id.value), m.id.value)).use { c -> if (!c.moveToFirst()) null else {
+                    require(c.getType(1) == android.database.Cursor.FIELD_TYPE_INTEGER)
+                    check(c.getString(0) == checkpoint.owner && c.getLong(1) == checkpoint.revision - 1 &&
+                        c.getString(2) != ExecutionPhase.TERMINAL.name && c.getString(3) == processOwner &&
+                        c.getString(4) == m.conversationId.value && c.getString(5) == m.runId.value) { "拒绝过期或异主检查点" }
+                    val stamp = RuntimeCheckpointStamp(m.id.value, c.getString(4), c.getString(5), c.getString(0),
+                        c.getString(3), c.getLong(1), c.getString(2))
+                    stamp to checkpointReuse.preservation(stamp, c.getInt(6) == 1)
+                } }
+                if (prior == null) {
+                    check(checkpoint.revision == 1L) { "首个检查点版本必须为1" }
+                    preparations.transfer(db, checkpoint)
+                } else {
+                    val preserved = prior.second
+                    if (preserved != null) preparations.preserve(preserved, checkpoint)
+                    else preparations.preserve(requireNotNull(read(db, m.id.value)).value, checkpoint)
+                }
+                val persisted = database.runtimeMessage(db, m)
+                check(persisted.status == RunStatus.RUNNING) { "消息已终结，不允许接管运行" }
+                if (supplement != null) database.insertRuntimeSupplement(db, m, supplement)
+                val values = values(checkpoint, encoded)
+                if (prior == null) db.insertOrThrow("runtime_checkpoints", null, values)
+                else check(db.update("runtime_checkpoints", values,
+                    "message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?",
+                    arrayOf(m.id.value, checkpoint.owner, prior.first.revision.toString(), processOwner)) == 1)
+                database.writeRuntimeMessage(db, m)
+                app.daiyu.android.timeline.ChatTimelineStore.contextLimit(checkpoint)?.let {
+                    app.daiyu.android.timeline.ChatTimelineStore.write(db, it)
+                }
+                val boundContext = contextUsageBinding?.takeIf { it.first.id == m.id && it.first.runId == m.runId &&
+                    it.first.conversationId == m.conversationId }
+                ConversationUsageStore.record(db, checkpoint, boundContext?.second?.windowTokens)
+                boundContext?.let { (_, model) ->
+                    contextChanged = CloudContextUsageStore.record(db, checkpoint, model)
+                }
+                val summaryIdentity = compressionModel?.takeIf { it.first.id == m.id && it.first.runId == m.runId &&
+                    it.first.conversationId == m.conversationId }?.second
+                contextService?.publishRunCompression(db, checkpoint, summaryIdentity)
+                if (checkpoint.phase == ExecutionPhase.TERMINAL) contextService?.publishRunArchive(db, checkpoint)
             }
-            val boundContext = contextUsageBinding?.takeIf { it.first.id == m.id && it.first.runId == m.runId &&
-                it.first.conversationId == m.conversationId }
-            ConversationUsageStore.record(db, checkpoint, boundContext?.second?.windowTokens)
-            boundContext?.let { (_, model) ->
-                contextChanged = CloudContextUsageStore.record(db, checkpoint, model)
-            }
-            val summaryIdentity = compressionModel?.takeIf { it.first.id == m.id && it.first.runId == m.runId &&
-                it.first.conversationId == m.conversationId }?.second
-            contextService?.publishRunCompression(db, checkpoint, summaryIdentity)
-            if (checkpoint.phase == ExecutionPhase.TERMINAL) contextService?.publishRunArchive(db, checkpoint)
+            checkpointReuse.committed(checkpoint, processOwner, encoded)
+        } catch (failure: Throwable) {
+            checkpointReuse.clear()
+            throw failure
         }
         if (contextChanged) contextUsageRevision++
     }
@@ -249,6 +265,7 @@ internal class SQLiteRuntimeStore private constructor(
     @Synchronized override fun close() {
         if (!closed) {
             closed = true
+            checkpointReuse.clear()
             try { lock.release() } finally { try { file.close() } finally { synchronized(leases) { leases.remove(path) } } }
         }
     }
@@ -280,9 +297,9 @@ internal class SQLiteRuntimeStore private constructor(
                 if (ownTransaction) db.endTransaction()
             }
             val (metadata, payload) = raw
-            val value = RunCheckpointCodec.decode(payload)
-            val json = org.json.JSONObject(payload)
-            val recoveryOwner = if (json.has("recovery_source_owner")) json.getString("recovery_source_owner") else null
+            val decoded = RunCheckpointCodec.decodeWithRecovery(payload)
+            val value = decoded.checkpoint
+            val recoveryOwner = decoded.recoverySourceOwner
             check(value.message.id.value == messageId && value.message.conversationId.value == metadata[0] &&
                 value.message.runId.value == metadata[1] && value.owner == metadata[2] &&
                 value.revision.toString() == metadata[3] && value.phase.name == metadata[4]) { "检查点元数据不匹配" }

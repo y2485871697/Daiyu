@@ -70,7 +70,11 @@ internal object RunCheckpointCodec {
                 checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)
             }
     }
-    fun decode(text: String): RunCheckpoint {
+    internal data class Decoded(val checkpoint: RunCheckpoint, val recoverySourceOwner: String?)
+
+    fun decode(text: String): RunCheckpoint = decodeWithRecovery(text).checkpoint
+
+    internal fun decodeWithRecovery(text: String): Decoded {
         require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES)
         val parser = JSONTokener(text)
         val value = parser.nextValue()
@@ -162,7 +166,7 @@ internal object RunCheckpointCodec {
         val outputs = value.getJSONArray("outputs")
         require(tools.length() <= 10_000 && outputs.length() <= 10_000)
         val round = integer(value, "round"); require(round in 0..100)
-        return RunCheckpoint(message, if (context != null) projectedHistory() else messages("history"), ExecutionPhase.valueOf(string(value, "phase")),
+        return Decoded(RunCheckpoint(message, if (context != null) projectedHistory() else messages("history"), ExecutionPhase.valueOf(string(value, "phase")),
             (0 until tools.length()).map { i -> val t = tools.getJSONObject(i)
                 fields(t, "id", "name", "arguments", "disposition", "result")
                 ToolRecord(ToolInvocation(ToolCallId(string(t, "id")), string(t, "name"), string(t, "arguments")),
@@ -170,7 +174,7 @@ internal object RunCheckpointCodec {
             (0 until outputs.length()).map { i -> val o = outputs.getJSONObject(i)
                 fields(o, "id", "output"); ToolOutput(ToolCallId(string(o, "id")), string(o, "output")) },
             messages("supplements"), round.toInt(), boolean(value, "request_unconfirmed"), boolean(value, "message_reconciled"),
-            string(value, "owner"), integer(value, "revision"), pending, request, usage, usageRequests, transport, context).also(::validate)
+            string(value, "owner"), integer(value, "revision"), pending, request, usage, usageRequests, transport, context).also(::validate), recoveryOwner)
     }
     private fun validate(value: RunCheckpoint) {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)

@@ -182,21 +182,9 @@ internal class SQLitePreparationRuntime(
     }
 
     /** Later main-run snapshots cannot drop, change, or impersonate sealed summary usage. */
-    fun preserve(prior: RunCheckpoint, next: RunCheckpoint) {
-        check(prior.usageRequests.all { old -> next.usageRequests.any {
-            it.owner == old.owner && it.requestId == old.requestId
-        } }) { "main_request_coverage_dropped" }
-        check(prior.usage.filter { it.source == UsageRequestSource.SUMMARY && it.request.owner != prior.owner } ==
-            next.usage.filter { it.source == UsageRequestSource.SUMMARY && it.request.owner != next.owner }) {
-            "summary_usage_changed_after_handoff"
-        }
-        check((next.context?.compactions ?: 0) >= (prior.context?.compactions ?: 0)) { "runtime_compaction_dropped" }
-        check(prior.context?.summaries.orEmpty().all { it in next.context?.summaries.orEmpty() }) {
-            "runtime_summary_admission_dropped"
-        }
-        next.usage.filter { it.source == UsageRequestSource.SUMMARY && it.request.owner == next.owner }
-            .forEach { check(it.request in next.context?.summaries.orEmpty()) { "runtime_summary_without_admission" } }
-    }
+    fun preserve(prior: RunCheckpoint, next: RunCheckpoint) = CheckpointPreservation.capture(prior).preserve(next)
+
+    internal fun preserve(prior: CheckpointPreservation, next: RunCheckpoint) = prior.preserve(next)
 
     fun recover(db: SQLiteDatabase) {
         db.rawQuery("SELECT message_id FROM $TABLE WHERE state IN ('ADMITTED','READY')", null).use { rows ->

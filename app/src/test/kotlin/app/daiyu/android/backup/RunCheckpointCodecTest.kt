@@ -56,6 +56,24 @@ class RunCheckpointCodecTest {
         val unknown=checkpoint().copy(tools=listOf(ToolRecord(call,ToolDisposition.UNKNOWN)),outputs=emptyList())
         assertEquals(unknown,RunCheckpointCodec.decode(RunCheckpointCodec.encode(unknown)))
     }
+    @Test fun singleParseReturnsTheSameValidatedRecoveryEnvelope() {
+        val ordinary = checkpoint()
+        val wire = RunCheckpointCodec.encode(ordinary)
+        val decoded = RunCheckpointCodec.decodeWithRecovery(wire)
+        assertEquals(ordinary, decoded.checkpoint)
+        assertNull(decoded.recoverySourceOwner)
+        val recovered = ProcessRecovery.interrupt(ordinary).copy(owner = "recovery-test", revision = 5, messageReconciled = true)
+        val envelope = JSONObject(RunCheckpointCodec.encode(recovered)).put("recovery_source_owner", ordinary.owner).toString()
+        val read = RunCheckpointCodec.decodeWithRecovery(envelope)
+        assertEquals(recovered, read.checkpoint)
+        assertEquals(ordinary.owner, read.recoverySourceOwner)
+        for (bad in listOf(wire + " []", "{", JSONObject(wire).put("extra", true).toString(),
+            JSONObject(wire).put("recovery_source_owner", "invalid-live-recovery").toString())) {
+            reject { RunCheckpointCodec.decodeWithRecovery(bad) }
+            reject { RunCheckpointCodec.decode(bad) }
+        }
+    }
+
     @Test fun recoverySourceIsStrictReadOnlyStorageMetadata() {
         val recovered = ProcessRecovery.interrupt(checkpoint()).copy(owner = "recovery-test", revision = 5, messageReconciled = true)
         val text = RunCheckpointCodec.encode(recovered)

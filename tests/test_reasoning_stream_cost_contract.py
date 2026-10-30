@@ -49,15 +49,19 @@ class ReasoningStreamCostContract(unittest.TestCase):
         self.assertIn('delay(100L)', source)
         self.assertIn('rememberReasoningElapsed(reported, live, nanoTime)', source)
 
-    def test_reveal_traversal_stops_at_hidden_tail_and_preserves_node_budgets(self):
+    def test_reveal_traversal_stays_at_active_leaf_and_preserves_node_budgets(self):
         source = (SRC / 'ui/screens/chat/conversation/MessageMarkdown.kt').read_text()
-        self.assertIn('for ((blockIndex, block) in blocks.withIndex())', source)
-        self.assertIn('if (remaining <= 0) break', source)
+        host = source.split('private fun MarkdownBlocks(', 1)[1].split('private fun MarkdownBlockBody(', 1)[0]
+        self.assertIn('for ((index, block) in blocks.withIndex())', host)
+        self.assertNotIn('visibility.value', host)
+        self.assertIn('rememberMarkdownVisibility(visibility, offset, lengths[index])', host)
         self.assertIn('for ((index, item) in block.items.withIndex())', source)
-        self.assertIn('if (itemRemaining <= 0) break', source)
-        self.assertIn('minOf(remaining, lengths[blockIndex])', source)
-        self.assertIn('minOf(itemRemaining, itemLengths[index])', source)
+        self.assertIn('derivedStateOf { visibility.value > 0 }', source)
+        self.assertIn('if (!shown.value) return', source)
+        self.assertIn('rememberMarkdownVisibility(visibility, offset, lengths[index])', source)
         self.assertIn('markdownBlocksLength(it.blocks).coerceAtLeast(1)', source)
+        helper = (SRC / 'ui/screens/chat/conversation/MarkdownVisibility.kt').read_text()
+        self.assertIn('(parent.value - start).coerceIn(0, length)', helper)
         self.assertNotIn('return@forEachIndexed', source)
 
     def test_context_strings_are_remembered_by_numbers_and_locale(self):

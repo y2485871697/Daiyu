@@ -21,10 +21,10 @@ class ThinkingJankContract(unittest.TestCase):
 
     def test_inline_prefix_is_cached_by_actual_grapheme_end(self):
         markdown = (APP / 'ui/screens/chat/conversation/MessageMarkdown.kt').read_text()
-        self.assertIn('boundaries.end(visibleCharacters)', markdown)
+        self.assertIn('boundaries.end(limit)', markdown)
         self.assertIn('val visible = remember(body, end)', markdown)
         self.assertIn('body.subSequence(0, end)', markdown)
-        self.assertNotIn('body.subSequence(0, boundaries.end(visibleCharacters))', markdown)
+        self.assertNotIn('body.subSequence(0, boundaries.end(limit))', markdown)
 
 if __name__ == '__main__':
     unittest.main()

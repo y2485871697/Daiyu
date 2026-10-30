@@ -137,13 +137,13 @@ class ReleasePackageTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         release = workflow.split('  release:\n', 1)[1].split('  synthetic:\n', 1)[0]
         smoke = workflow.split('  smoke:\n', 1)[1]
-        self.assertIn("if: (inputs.mode == 'release' || inputs.mode == 'daily') && github.ref == 'refs/heads/main'", release)
+        self.assertIn("if: (inputs.mode == 'release' || inputs.mode == 'daily' || inputs.mode == 'compile') && github.ref == 'refs/heads/main'", release)
         self.assertIn(':core-domain:test :app:testReleaseUnitTest :app:lintRelease', release)
         self.assertIn('-PdaiyuProductionRelease=true :app:assembleRelease :app:assembleReleaseAndroidTest', release)
         self.assertNotIn('daiyuSyntheticApplication', release)
         self.assertIn('scripts/verify_release_package.py --apkanalyzer', release)
         self.assertIn('scripts/verify_license_bundle.py', release)
-        self.assertIn("name: ${{ inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}", release)
+        self.assertIn("name: ${{ inputs.mode == 'compile' && '代鱼增量Release包' || inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}", release)
         self.assertLess(release.index('scripts/verify_release_package.py'), release.index('name: 上传生产Release候选包'))
         self.assertIn('needs: [build, release, candidate]', smoke)
         self.assertIn("(inputs.mode == 'release' || inputs.mode == 'daily') && needs.release.result == 'success'", smoke)

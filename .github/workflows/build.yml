@@ -1,12 +1,13 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'daily' && format('代鱼日常Release {0}-targeted', inputs.check_id) || inputs.mode == 'candidate' && format('代鱼定向候选 {0}-filtered', inputs.check_id) || inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
+run-name: ${{ inputs.mode == 'compile' && format('代鱼增量Release编译 {0}', inputs.check_id) || inputs.mode == 'daily' && format('代鱼日常Release {0}-targeted', inputs.check_id) || inputs.mode == 'candidate' && format('代鱼定向候选 {0}-filtered', inputs.check_id) || inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: daily日常Release快速验证；release稳定版全量；或其它检查
+        description: compile仅编译Release（默认）；daily日常验证；release显式全量；或其它检查
         type: choice
         options:
+          - compile
           - build
           - candidate
           - checks
@@ -15,7 +16,7 @@ on:
           - performance
           - daily
           - release
-        default: build
+        default: compile
         required: true
       smoke_api:
         description: smoke/candidate目标API（正式构建始终双API）
@@ -221,8 +222,8 @@ jobs:
           path: delivery/
           if-no-files-found: error
   release:
-    name: 单测、检查与生产Release
-    if: (inputs.mode == 'release' || inputs.mode == 'daily') && github.ref == 'refs/heads/main'
+    name: ${{ inputs.mode == 'compile' && '增量Release编译（不运行全量）' || '单测、检查与生产Release' }}
+    if: (inputs.mode == 'release' || inputs.mode == 'daily' || inputs.mode == 'compile') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
@@ -258,7 +259,7 @@ jobs:
         run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
       - name: 校验独立边界
         run: |
-          python3 scripts/acceptance/record_tool_tests.py --python python3
+          if test "$SMOKE_MODE" != compile; then python3 scripts/acceptance/record_tool_tests.py --python python3; fi
           python3 scripts/verify_boundaries.py
       - name: 准备固定离线语音 JNI（不打包）
         run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
@@ -270,6 +271,7 @@ jobs:
           DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
         run: python3 scripts/prepare_signing.py
       - name: 单测与 Lint
+        if: inputs.mode != 'compile'
         env:
           DAIYU_REQUIRE_SIGNING: 'true'
           DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
@@ -302,6 +304,9 @@ jobs:
             cp daily-plan.json delivery/daily-plan.json
             python3 scripts/daily_release.py bind --directory delivery
           fi
+          if test "$SMOKE_MODE" = compile; then
+            python3 -c 'import json; from pathlib import Path; p=Path("delivery/构建记录.json"); r=json.loads(p.read_text()); r.update(validation_scope="compile-only", full_regression_passed=False, unit_tests_run=False, instrumentation_run=False); p.write_text(json.dumps(r, ensure_ascii=False)+"\n", encoding="utf-8")'
+          fi
           (cd delivery && sha256sum *.apk tests/*.apk > SHA256SUMS)
       - name: 上传测试报告
         if: always()
@@ -320,7 +325,7 @@ jobs:
       - name: 上传生产Release候选包
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: ${{ inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}
+          name: ${{ inputs.mode == 'compile' && '代鱼增量Release包' || inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}
           path: delivery/
           if-no-files-found: error
   synthetic:

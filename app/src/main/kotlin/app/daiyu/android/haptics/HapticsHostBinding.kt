@@ -94,6 +94,9 @@ class HapticsHostBinding(
         fun output(graphemes: Int, reasoning: Boolean = false) = deliver {
             session.backgroundOutput(graphemes, reasoning)
         }
+        internal fun output(reasoning: Boolean = false, graphemes: () -> Int) = deliver {
+            session.backgroundOutput(reasoning, graphemes)
+        }
         /** Call only when the actual visible text/reasoning reveal advances, not on recomposition. */
         fun visibleAdvance() = deliver { session.visibleAdvance() }
         fun toolAppeared(stableCallId: String) = deliver {

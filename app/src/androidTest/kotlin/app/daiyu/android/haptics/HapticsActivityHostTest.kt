@@ -197,6 +197,40 @@ class HapticsActivityHostTest : InstrumentationTestCase() {
         }
     }
 
+    fun testVisibleReasoningHistoryIsNotReplayedAfterHidingAndJoiningACluster() = withHost { f ->
+        f.sync()
+        val current = f.bindings.single().beginRun("r", "m")
+        val forwarder = HapticsReasoningForwarder { current }
+        val message = Message(MessageId("m"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        forwarder.accept(message, ModelEvent.ReasoningDelta("reason", "思考".repeat(500) + "e"))
+        f.sync(visible = false)
+        // Extending the last visible cluster adds no new grapheme; only z adds one.
+        forwarder.accept(message, ModelEvent.ReasoningDelta("reason", "\u0301"))
+        forwarder.accept(message, ModelEvent.ReasoningDelta("reason", "z"))
+        f.afterDrain = {
+            assertEquals(1, f.ports.sumOf { it.plays })
+            forwarder.close()
+        }
+    }
+
+    fun testLazyReasoningCountRespectsVisibilityAndRunRevocation() = withHost { f ->
+        f.sync()
+        val binding = f.bindings.single()
+        val first = binding.beginRun("r", "m")
+        var scans = 0
+        first.output(reasoning = true) { scans++; 1 }
+        assertEquals(0, scans)
+        f.sync(visible = false)
+        first.output(reasoning = true) { scans++; 1 }
+        assertEquals(1, scans)
+        val next = binding.beginRun("r2", "m2")
+        first.output(reasoning = true) { fail("Replaced run evaluated text"); 1 }
+        next.stop()
+        next.output(reasoning = true) { fail("Stopped run evaluated text"); 1 }
+        assertEquals(1, scans)
+    }
+
     fun testOngoingCumulativeReasoningDoesNotEmitCompletionPulse() = withHost { f ->
         f.sync(visible = false)
         val current = f.bindings.single().beginRun("r", "m")

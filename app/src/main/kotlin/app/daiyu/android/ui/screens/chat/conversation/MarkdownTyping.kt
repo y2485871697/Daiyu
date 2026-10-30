@@ -20,7 +20,10 @@ internal class MarkdownReveal(
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
     val settled: Boolean get() = completion.value
     private fun visible(): Int = frame.value.let { if (it.target === target) it.visible else target?.start ?: 0 }
-    fun limit(id: String): Int = target?.limit(id, visible()) ?: 0
+    private val limits = target?.let { current -> current.parts.associate { part ->
+        part.source.id to derivedStateOf { current.limit(part.source.id, visible()) }
+    } }.orEmpty()
+    fun limit(id: String): Int = limits[id]?.value ?: 0
     private val readiness = target?.parts?.associate { part ->
         part.source.id to (part.source.text to derivedStateOf { limit(part.source.id) >= part.length })
     }.orEmpty()

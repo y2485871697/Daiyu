@@ -127,11 +127,17 @@ class HapticEngine(private val clock: HapticClock) {
     }
 
     /** Call once per newly arrived grapheme batch, not once per UI rebind. */
-    fun backgroundOutput(owner: Owner, graphemes: Int, reasoning: Boolean = false) {
+    fun backgroundOutput(owner: Owner, graphemes: Int, reasoning: Boolean = false) =
+        backgroundOutput(owner, reasoning) { graphemes }
+
+    /** Visible output has its own reveal clock; do not scan network text that cannot emit a tick. */
+    fun backgroundOutput(owner: Owner, reasoning: Boolean = false, graphemes: () -> Int) {
         val host = hosts[owner] ?: return
-        if (graphemes <= 0 || !allowed(host, reasoning) || backgroundVisible(host.conversation)) return
+        if (!allowed(host, reasoning) || backgroundVisible(host.conversation)) return
+        val count = graphemes()
+        if (count <= 0) return
         val room = 36 - pending.count { it.background }
-        repeat(graphemes.coerceAtMost(room.coerceAtLeast(0))) {
+        repeat(count.coerceAtMost(room.coerceAtLeast(0))) {
             pending.addLast(Pending(owner, reasoning, true))
         }
         schedule(background = true)

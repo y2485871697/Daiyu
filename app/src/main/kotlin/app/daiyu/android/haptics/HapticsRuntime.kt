@@ -129,6 +129,9 @@ class HapticsRuntime internal constructor(
         fun backgroundOutput(graphemes: Int, reasoning: Boolean = false) = dispatch {
             if (!disposed) engine.backgroundOutput(owner, graphemes, reasoning)
         }
+        internal fun backgroundOutput(reasoning: Boolean = false, graphemes: () -> Int) = dispatch {
+            if (!disposed) engine.backgroundOutput(owner, reasoning, graphemes)
+        }
         fun toolAppeared(id: String) = dispatch { if (!disposed) engine.toolAppeared(owner, id) }
         fun reasoningCompleted(id: String) = dispatch { if (!disposed) engine.reasoningCompleted(owner, id) }
         override fun close() {

@@ -69,7 +69,10 @@ class MarkdownTypingContract(unittest.TestCase):
     def test_full_annotation_is_remembered_independently_of_visible_prefix(self):
         inline = self.ui.split("private fun MarkdownInlineText(", 1)[1].split("private fun MarkdownBlocks", 1)[0]
         self.assertIn("remember(content, linkColor, openLink)", inline)
-        self.assertIn("body.subSequence(0, boundaries.end(visibleCharacters))", inline)
+        self.assertIn("boundaries.end(visibleCharacters)", inline)
+        self.assertIn("val visible = remember(body, end)", inline)
+        self.assertIn("body.subSequence(0, end)", inline)
+        self.assertLess(inline.index("boundaries.end(visibleCharacters)"), inline.index("val visible = remember(body, end)"))
         self.assertNotIn("remember(content, linkColor, openLink, visibleCharacters)", inline)
         for token in ["BreakIterator.getCharacterInstance(Locale.ROOT)", "characters.following(limit)", "isHighSurrogate()", "isLowSurrogate()"]:
             self.assertIn(token, self.reveal)

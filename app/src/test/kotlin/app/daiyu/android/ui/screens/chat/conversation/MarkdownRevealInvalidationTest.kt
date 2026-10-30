@@ -53,6 +53,46 @@ class MarkdownRevealInvalidationTest {
         } finally { observer.stop(); observer.clear() }
     }
 
+    @Test fun onlyThePartWhoseVisibleLimitChangesInvalidatesItsLeaf() {
+        val target = MarkdownTypingTarget(listOf(
+            MarkdownTypingPart(MarkdownTypingSource("first", "abcdefghijkl"), 12),
+            MarkdownTypingPart(MarkdownTypingSource("second", "mnopqrst"), 8),
+        ), start = 0, streaming = true, terminal = false)
+        val frame = mutableStateOf(MarkdownTypingFrame(target, 0))
+        val reveal = MarkdownReveal(target, frame, exact = true)
+        Snapshot.sendApplyNotifications()
+        val observer = SnapshotStateObserver { it() }
+        val invalidations = mutableMapOf("first" to 0, "second" to 0, "missing" to 0)
+        val changed: (String) -> Unit = { invalidations[it] = invalidations.getValue(it) + 1 }
+        fun observe() = invalidations.keys.forEach { id ->
+            observer.observeReads(id, changed) { reveal.limit(id) }
+        }
+        observer.start()
+        try {
+            observe()
+            for (visible in 1..12) {
+                frame.value = MarkdownTypingFrame(target, visible)
+                Snapshot.sendApplyNotifications()
+                observe()
+            }
+            assertEquals(12, invalidations.getValue("first"))
+            assertEquals("The next part must not subscribe to earlier output", 0, invalidations.getValue("second"))
+            assertEquals(0, invalidations.getValue("missing"))
+            invalidations.keys.forEach { invalidations[it] = 0 }
+            for (visible in 13..20) {
+                frame.value = MarkdownTypingFrame(target, visible)
+                Snapshot.sendApplyNotifications()
+                observe()
+            }
+            assertEquals("Completed text must stay idle while another part types", 0, invalidations.getValue("first"))
+            assertEquals(8, invalidations.getValue("second"))
+            assertEquals(0, invalidations.getValue("missing"))
+            assertEquals(12, reveal.limit("first"))
+            assertEquals(8, reveal.limit("second"))
+            assertTrue(reveal.settled)
+        } finally { observer.stop(); observer.clear() }
+    }
+
     @Test fun oldFrameAndMismatchedSourceCannotOpenTheNextContent() {
         val old = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("id", "old"), 3)),
             start = 0, streaming = true, terminal = false)

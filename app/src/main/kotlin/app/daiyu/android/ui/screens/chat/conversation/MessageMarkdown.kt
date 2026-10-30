@@ -181,9 +181,12 @@ private fun MarkdownInlineText(
         }
     }
     CompositionLocalProvider(LocalViewConfiguration provides preciseLinkConfiguration) {
-        val visible = if (visibleCharacters >= body.length) body else {
+        val end = if (visibleCharacters >= body.length) body.length else {
             val boundaries = remember(body.text) { MarkdownTextBoundaries(body.text) }
-            body.subSequence(0, boundaries.end(visibleCharacters))
+            boundaries.end(visibleCharacters)
+        }
+        val visible = remember(body, end) {
+            if (end >= body.length) body else body.subSequence(0, end)
         }
         BasicText(visible, modifier, style)
     }

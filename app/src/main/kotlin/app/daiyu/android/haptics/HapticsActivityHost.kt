@@ -117,13 +117,17 @@ internal class HapticsReasoningForwarder(
                 val old = text[event.itemId].orEmpty()
                 val next = if (event.cumulative) event.text else old + event.text
                 text[event.itemId] = next
-                current.output((graphemes(next) - graphemes(old)).coerceAtLeast(0), reasoning = true)
+                current.output(reasoning = true) {
+                    (graphemes(next) - graphemes(old)).coerceAtLeast(0)
+                }
             }
             is ModelEvent.ReasoningFinal -> {
                 if (!completed.add(event.itemId)) return
                 val old = text.put(event.itemId, event.text).orEmpty()
                 if (event.text.startsWith(old)) {
-                    current.output((graphemes(event.text) - graphemes(old)).coerceAtLeast(0), reasoning = true)
+                    current.output(reasoning = true) {
+                        (graphemes(event.text) - graphemes(old)).coerceAtLeast(0)
+                    }
                 }
                 current.reasoningCompleted(event.itemId)
             }

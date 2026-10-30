@@ -116,6 +116,60 @@ class HapticEngineTest {
         assertEquals(258, f.engine.pendingCount())
     }
 
+    @Test fun visibleThinkingNeverScansNetworkTextAndCannotReplayItInBackground() {
+        val f = Fixture()
+        var scans = 0
+        repeat(1_000) { f.engine.backgroundOutput(f.owner, reasoning = true) { scans++; 12 } }
+        assertEquals(0, scans)
+        assertEquals(0, f.engine.pendingCount())
+        f.engine.lifecycle(f.owner, resumed = false, visible = false)
+        f.engine.setForeground(false)
+        f.engine.backgroundOutput(f.owner, reasoning = true) { scans++; 2 }
+        assertEquals(1, scans)
+        assertEquals(2, f.engine.pendingCount())
+        f.advance(); f.advance()
+        assertEquals(2, f.port.requests.size)
+    }
+
+    @Test fun rejectedLazyOutputDoesNotCountDisabledRevokedOrReplacedSources() {
+        val f = Fixture()
+        val expensive: () -> Int = { fail("Rejected output must not scan its accumulated source"); 1 }
+        f.engine.lifecycle(f.owner, resumed = false, visible = false, enabled = false)
+        f.engine.backgroundOutput(f.owner, reasoning = true, graphemes = expensive)
+        f.engine.lifecycle(f.owner, resumed = true, visible = false)
+        for (settings in listOf(HapticSettings(touch = false), HapticSettings(generation = false))) {
+            f.engine.updateSettings(settings)
+            f.engine.backgroundOutput(f.owner, reasoning = true, graphemes = expensive)
+        }
+        f.engine.setForeground(false)
+        for (settings in listOf(HapticSettings(background = false), HapticSettings(backgroundReasoning = false))) {
+            f.engine.updateSettings(settings)
+            f.engine.backgroundOutput(f.owner, reasoning = true, graphemes = expensive)
+        }
+        f.engine.updateSettings(HapticSettings())
+        f.engine.attach("replacement", Port(), resumed = true, visible = false)
+        f.engine.backgroundOutput(f.owner, reasoning = true, graphemes = expensive)
+        f.engine.detach(f.owner)
+        f.engine.backgroundOutput(f.owner, reasoning = true, graphemes = expensive)
+        assertEquals(0, f.engine.pendingCount())
+    }
+
+    @Test fun lazyCountsUseTheExistingQueueCapAndNonPositiveRules() {
+        val f = Fixture()
+        f.engine.lifecycle(f.owner, resumed = false, visible = false)
+        f.engine.setForeground(false)
+        var scans = 0
+        for (count in listOf(-1, 0, 40)) {
+            f.engine.backgroundOutput(f.owner, reasoning = true) { scans++; count }
+        }
+        assertEquals(3, scans)
+        assertEquals(36, f.engine.pendingCount())
+        f.advance(31)
+        assertTrue(f.port.requests.isEmpty())
+        f.advance(1)
+        assertEquals(1, f.port.requests.size)
+    }
+
     @Test fun backgroundIsCappedAndLateCallbacksDoNotReplayInForeground() {
         val f = Fixture()
         f.engine.lifecycle(f.owner, resumed = false, visible = false)

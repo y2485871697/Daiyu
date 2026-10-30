@@ -188,7 +188,7 @@ object ChatTurnMapper {
         // A text followed by another workflow event is narration. It must not switch
         // the whole reply between a process card and unframed mixed-content rows.
         return if (message.blocks.drop(index + 1).any { it is MessageBlock.Tool } ||
-            message.reportedReasoning.any { (it.blockOffset ?: 0) > index }) -1 else index
+            message.reportedReasoning.any { (hasReportedReasoningText(it.text) || it.activeSinceNanos != null) && (it.blockOffset ?: 0) > index }) -1 else index
     }
 
     private fun reasoningAtBoundaries(message: Message) = message.reportedReasoning
@@ -228,7 +228,7 @@ object ChatTurnMapper {
         activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
         presentations: ToolPresentationCache?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
-        val hasWorkflow = hasTools || message.status == RunStatus.STOPPED && message.reportedReasoning.isNotEmpty()
+        val hasWorkflow = hasTools || message.reportedReasoning.any { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
         val lastText = workflowFinalTextIndex(message)
         val finalText = if (hasWorkflow) {
             (message.blocks.getOrNull(lastText) as? MessageBlock.Text)?.text.orEmpty()

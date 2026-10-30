@@ -162,7 +162,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         mainThread { value = turn(path, inFlight) }
         await { advances > 0 }
         assertFalse(visibleText().contains(inFlight))
-        val owner = if (path == Path.STANDALONE) "assistant" else "assistant:reasoning:r"
+        val owner = "assistant:reasoning:r"
         ui.onNodeWithTag("reported-reasoning-header:$owner").performClick()
         await {
             ui.onNodeWithTag("reported-reasoning-header:$owner").fetchSemanticsNode()
@@ -233,7 +233,9 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 AssistantTurn(value, ChatScreenActions(), onVisibleAdvance = { advances++ })
             }
         } }
-        ui.onNodeWithTag("reported-reasoning-header:assistant").performClick()
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.mainClock.advanceTimeBy(300)
+        ui.onNodeWithTag("reported-reasoning-header:assistant:reasoning:r").performClick()
         await { visibleText().contains(first) }
         assertEquals(0, advances)
         mainThread { value = turn(Path.STANDALONE, replacement, live = false) }

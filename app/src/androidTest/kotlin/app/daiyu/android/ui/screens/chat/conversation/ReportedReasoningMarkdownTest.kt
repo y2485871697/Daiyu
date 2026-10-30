@@ -78,6 +78,7 @@ class ReportedReasoningMarkdownTest : WiredActivityTestCase() {
                 }
             }
         } }
+        ui.onNodeWithTag("work-process-header").assertExists().performClick()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
         val text = ui.onNodeWithText("Planning concise warm Chinese story answer italic **literal**", useUnmergedTree = true)
         val rendered = text.assertIsDisplayed().fetchSemanticsNode().config[SemanticsProperties.Text].single()

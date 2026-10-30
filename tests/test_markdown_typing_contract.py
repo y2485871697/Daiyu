@@ -41,10 +41,26 @@ class MarkdownTypingContract(unittest.TestCase):
         for token in ["remember(identity, resetEpoch) { sources.toList() }", "MarkdownTypingSource(it.itemId, it.text)",
                       "rememberMarkdownProjection(baseline.map { it.text },", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
             self.assertIn(token, self.typing)
-        self.assertIn('RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final"', self.chat)
-        self.assertIn('RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId', self.chat)
+        workflow = (BASE / "AssistantWorkflowContent.kt").read_text()
+        fallback = workflow.split('    val narration = mutableSetOf<String>()', 1)[1].split(
+            '\ninternal fun MessageContentUi.workflowKey', 1)[0]
+        self.assertIn(
+            'val body = if (finalText.isBlank()) emptyList() else listOf(MessageContentUi.Text("final", finalText))',
+            fallback)
+        self.assertIn('return AssistantWorkflowContent(work, steps, body, narration)', fallback)
+        self.assertIn('is MessageContentUi.Text -> "text:$itemId"', workflow)
+        assistant = self.chat.split('private fun AssistantTextContent(', 1)[1].split(
+            '\n@Composable\ninternal fun UserMessageText', 1)[0]
+        text_body = assistant.split(
+            'val textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit =', 1)[1].split(
+            '    work?.let', 1)[0]
+        self.assertIn(
+            'RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId',
+            text_body)
+        self.assertEqual(2, assistant.count('textBody = textBody'))
         self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", self.ui)
         content = (BASE / "MessageContent.kt").read_text()
+        self.assertIn('key(block.workflowKey(index))', content)
         self.assertIn("textBody: @Composable (MessageContentUi.Text, Modifier)", content)
         self.assertIn("textBody(block, Modifier.testTag", content)
         self.assertIn("UserMessageText(text.text, modifier)", self.chat)

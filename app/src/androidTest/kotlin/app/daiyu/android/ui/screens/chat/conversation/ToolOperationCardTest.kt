@@ -42,6 +42,14 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         } }
         ui.waitForIdle()
     }
+    private fun openWorkflow() {
+        val header = ui.onNodeWithTag("work-process-header").assertExists()
+        if (header.fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已折叠") {
+            header.scrollToVisible().performClick()
+        }
+        header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+    }
+
     private fun source(mixed: Boolean, fixtureKey: String = ""): Message {
         val messageId = "message$fixtureKey"
         val owner = MessageImageOwner("conversation", messageId)
@@ -60,7 +68,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val turn = ChatTurnMapper.map(listOf(source(mixed)), toolState = { _, _ -> WorkStepState.FAILED }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
             val workflows = ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes()
-            if (!mixed) assertEquals(1, workflows.size)
+            assertEquals(1, workflows.size)
             assertTrue(workflows.size <= 1)
             workflows.singleOrNull()?.let { workflow ->
                 val state = workflow.config[SemanticsProperties.StateDescription]
@@ -106,10 +114,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
-            if (!mixed) {
-                ui.onNodeWithText("工作流程").assertIsDisplayed()
-                ui.onNodeWithTag("work-process-header").performClick()
-            }
+            ui.onNodeWithText("工作流程").assertIsDisplayed()
+            openWorkflow()
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
             ui.onNodeWithTag("tool-step-header:card-callordinary-$name-$mixed").scrollToVisible().assertIsDisplayed().assertTextContains(title).performClick()
             ui.onNodeWithText("ordinary-output").scrollToVisible().assertIsDisplayed()
@@ -144,11 +150,9 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
-            if (!mixed) {
-                ui.onNodeWithText("工作流程").assertIsDisplayed()
-                ui.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
-                ui.onNodeWithTag("work-process-header").performClick()
-            }
+            ui.onNodeWithText("工作流程").assertIsDisplayed()
+            ui.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
+            openWorkflow()
             val title = "${if (name == "terminal_job_read") "读取后台结果" else "执行命令"} · $label"
             ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed()
             assertEquals(toolHeaderText(title, true),
@@ -170,6 +174,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 listOf(ToolDetailSectionUi("结果摘要", "结果未确认，不恢复执行权")))
             show(ChatTurnUi.Assistant("historical-$category", content = listOf(MessageContentUi.Tool(step))),
                 ChatScreenActions(onRetryStep = { executions++ }))
+            openWorkflow()
             ui.onNodeWithText("fixture-$category").performClick()
             ui.onNodeWithText("结果未确认，不恢复执行权").assertIsDisplayed()
             ui.onNodeWithContentDescription("重试 fixture-$category").assertDoesNotExist()
@@ -196,7 +201,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                     else ChatTurnUi.Assistant(title, workProcess = WorkProcessUi(
                         listOf(WorkSegmentUi(steps = listOf(step))), "已停止"))
                 show(turn, ChatScreenActions(onRetryStep = { executions++ }))
-                if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+                openWorkflow()
                 val header = ui.onNodeWithTag("tool-step-header:${step.id}")
                 header.scrollToVisible().assertTextContains(stateLabel)
                 ui.onNodeWithText("工具回执未确认 · 不重放", useUnmergedTree = true).assertDoesNotExist()
@@ -224,7 +229,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
-            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+            openWorkflow()
             val header = ui.onNodeWithTag("tool-step-header:card-callmemory-$mixed")
             header.scrollToVisible().performClick()
             ui.onAllNodesWithText("memory body", useUnmergedTree = true).assertCountEquals(1)
@@ -246,6 +251,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 WorkStepOwnerUi("chat", "run", category), "fixture-only", category,
                 categoryDetails = details)
             show(ChatTurnUi.Assistant("typed-$category", content = listOf(MessageContentUi.Tool(step))), ChatScreenActions())
+            openWorkflow()
             ui.onNodeWithTag("tool-category:$category").assertDoesNotExist()
             ui.onNodeWithText("typed-$category").performClick()
             ui.onNodeWithTag("tool-category:$category").assertIsDisplayed()
@@ -269,7 +275,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
-            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+            openWorkflow()
             ui.onNodeWithText(if (device) "查询时间" else "切换 Wi-Fi").scrollToVisible().performClick()
             ui.onNodeWithText(if (device) "2026-04-18 21:22:00\nAsia/Shanghai · UTC+08:00" else "系统已记录请求").assertIsDisplayed()
             ui.onNodeWithText("时间戳").assertDoesNotExist()
@@ -472,7 +478,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
-            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+            openWorkflow()
             ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
             ui.onAllNodesWithText("trusted-host-slot").assertCountEquals(1)
             ui.onNodeWithText(body).assertDoesNotExist()
@@ -529,7 +535,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
-            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+            openWorkflow()
             ui.onNodeWithTag("tool-step-header:card-call$key").scrollToVisible().performClick()
             ui.onNodeWithText(if (private) "结果未获展示授权" else "本次调用未完成").assertIsDisplayed()
             ui.onNodeWithText("restricted-host-content").assertDoesNotExist()
@@ -543,6 +549,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
     }
 
     fun testDedicatedQuestionIsVisibleAtCallPositionInBothPathsAndMissingHostFallsBack() {
+        var executions = 0
         for (mixed in listOf(false, true)) {
             val original = source(mixed).copy(blocks = source(mixed).blocks.map { block ->
                 if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = "ask_user")) else block
@@ -552,7 +559,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        AssistantTurn(turn, ChatScreenActions(), dedicatedTool = { step ->
+                        AssistantTurn(turn, ChatScreenActions(onRetryStep = { executions++ }), dedicatedTool = { step ->
                             if (step.dedicatedKey == "validated-question") {
                                 top.yukonga.miuix.kmp.basic.Text("Dedicated question")
                                 true
@@ -562,12 +569,21 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
+            openWorkflow()
             ui.onAllNodesWithText("Dedicated question").assertCountEquals(1)
             ui.onNodeWithText("Dedicated question").assertIsDisplayed()
-            ui.onNodeWithTag("work-process-header").assertDoesNotExist()
+            ui.onNodeWithTag("work-process-header").assertIsDisplayed()
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(0)
-            show(turn, ChatScreenActions())
+            val before = ui.onNodeWithText("before operation").fetchSemanticsNode().boundsInRoot.top
+            val question = ui.onNodeWithText("Dedicated question").fetchSemanticsNode().boundsInRoot.top
+            val answer = ui.onNodeWithText("final answer").fetchSemanticsNode().boundsInRoot.top
+            assertTrue(before < question && question < answer)
+            if (mixed) assertTrue(ui.onNodeWithTag("message-image:1").fetchSemanticsNode().boundsInRoot.top < question)
+            show(turn, ChatScreenActions(onRetryStep = { executions++ }))
+            openWorkflow()
+            ui.onNodeWithText("Dedicated question").assertDoesNotExist()
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
+            assertEquals(0, executions)
         }
     }
 

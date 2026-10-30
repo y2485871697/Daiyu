@@ -91,9 +91,10 @@ class MarkdownCodeBlockContract(unittest.TestCase):
                       "sawOutput = false", "withFrameNanos { }", "vertical.scrollTo(vertical.maxValue)", "vertical.animateScrollTo(0, tween(300))", "horizontal.animateScrollTo(0, tween(300))"]:
             self.assertIn(token, self.code)
         chat = (BASE / "ChatMessageList.kt").read_text()
-        self.assertEqual(4, chat.count("generationComplete = turn.status != RunStatus.RUNNING"))
+        self.assertEqual(3, chat.count("generationComplete = turn.status != RunStatus.RUNNING"))
         self.assertIn("turn.status != RunStatus.RUNNING && contentReady", chat)
-        self.assertEqual(2, chat.count("generationComplete = generationComplete)"))
+        self.assertEqual(1, chat.count("generationComplete = generationComplete)"))
+        self.assertEqual(2, chat.count("textBody = textBody"))
         self.assertIn("generationComplete && body.text == text", self.markdown)
         self.assertIn("MarkdownBlocks(block.blocks, openLink, visible, generationComplete)", self.markdown)
         self.assertIn("MarkdownBlocks(item.blocks, openLink, itemVisible, generationComplete)", self.markdown)

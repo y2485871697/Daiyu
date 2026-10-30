@@ -32,9 +32,23 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         for token in ['val contentReady = projection?.sources == sources',
                       'turn.status != RunStatus.RUNNING && contentReady',
                       'content.copy(text = projection.sources.getOrNull(textIndex++) ?: "")',
-                      'MessageContent(displayedTurn.content',
                       'AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete']:
             self.assertIn(token, chat)
+        assistant = chat.split('private fun AssistantTextContent(', 1)[1].split(
+            '\n@Composable\ninternal fun UserMessageText', 1)[0]
+        for token in [
+            'val ordered = remember(turn) { turn.workflowContent() }',
+            'val textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit',
+            'else RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId, modifier,',
+            'generationComplete = generationComplete)',
+            'work?.let { WorkProcessCard(it, turn.listKey,',
+            'MessageContent(ordered.steps, actions, imageLoader, markdown = true',
+            'MessageContent(ordered.body, actions, imageLoader, markdown = true',
+        ]:
+            self.assertIn(token, assistant)
+        self.assertEqual(2, assistant.count('textBody = textBody'))
+        self.assertNotIn('MessageContent(turn.content', assistant)
+        self.assertNotIn('ReportedReasoningCard(', assistant)
         typing = (BASE / 'MarkdownTyping.kt').read_text()
         self.assertIn('MarkdownTypingSource(id, parsed.sources[index])', typing)
         self.assertIn('partIds.take(parsed.sources.size).mapIndexed', typing)

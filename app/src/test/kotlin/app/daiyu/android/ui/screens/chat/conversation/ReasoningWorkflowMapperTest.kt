@@ -90,10 +90,10 @@ class ReasoningWorkflowMapperTest {
         assertFalse(mapped(source.copy(status = RunStatus.COMPLETED)).reasoningStopped)
     }
 
-    @Test fun noToolsKeepsStandaloneReasoningAndLegacyOffsetsStayExplicitlyUnknown() {
+    @Test fun noToolsStillUsesTheWorkflowAndLegacyOffsetsStayExplicitlyUnknown() {
         val summary = ReportedReasoning("r", "legacy")
         val noTool = mapped(message(listOf(MessageBlock.Text("a", "answer")), listOf(summary)))
-        assertNull(noTool.workProcess)
+        assertEquals(listOf("r"), sequence(noTool))
         assertTrue(noTool.content.isEmpty())
         assertEquals(listOf(summary), noTool.reportedReasoning)
         val legacy = mapped(message(listOf(tool("t")), listOf(summary)))
@@ -163,7 +163,7 @@ class ReasoningWorkflowMapperTest {
             MessageHistorySegment(MessageId("u"), "user", listOf(MessageBlock.Text("u", "supplement"))), tail))
         val ordered = ChatTurnMapper.map(listOf(supplemented))
         assertEquals(listOf("a", "u", "a"), ordered.map { it.id })
-        assertNull((ordered.last() as ChatTurnUi.Assistant).workProcess)
+        assertEquals(listOf("r"), sequence(ordered.last() as ChatTurnUi.Assistant))
     }
     @Test fun leadingNarrationDoesNotSplitARunningWorkflowIntoUnframedRows() {
         val turn = mapped(message(listOf(MessageBlock.Text("n", "checking now"), tool("t1"), tool("t2")),

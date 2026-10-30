@@ -19,16 +19,31 @@ class ReasoningTypewriterContract(unittest.TestCase):
         for forbidden in ['TouchHaptics', 'Vibrator', 'HapticsRuntime']:
             self.assertNotIn(forbidden, source)
 
-    def test_all_three_production_paths_forward_feedback_and_resume(self):
+    def test_unified_and_fallback_hosts_forward_feedback_and_resume(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
-        for start, end in [('if (!integratedReasoning || closingStandalone) ReportedReasoningCard', 'if (closingStandalone)'),
-                           ('reasoningBody =', '}) { text, modifier ->'),
-                           ('work?.let { WorkProcessCard', 'val canReleaseWithoutWorkflow')]:
-            section = source.split(start, 1)[1].split(end, 1)[0]
-            self.assertIn('revealResetEpoch = revealResetEpoch', section)
-            self.assertIn('onVisibleAdvance = onVisibleAdvance', section)
-        row = (CHAT / 'ReportedReasoningCard.kt').read_text().split('internal fun ReasoningStepRow(', 1)[1]
+
+        def section(text, start, end):
+            self.assertIn(start, text)
+            tail = text.partition(start)[2]
+            self.assertIn(end, tail)
+            return tail.partition(end)[0]
+
+        outer = section(source, 'work?.let { WorkProcessCard', 'content = { expanded ->')
+        self.assertIn('revealResetEpoch = revealResetEpoch', outer)
+        self.assertIn('onVisibleAdvance = onVisibleAdvance', outer)
+        reasoning = section(source, 'reasoningBody = { reported, connector ->', 'entryBody = { key, body ->')
+        self.assertIn('ReasoningStepRow(turn.listKey, reported, connector,', reasoning)
+        self.assertIn('revealResetEpoch = revealResetEpoch', reasoning)
+        self.assertIn('onVisibleAdvance = { if (expanded) onVisibleAdvance() }', reasoning)
+        self.assertIn('onHandoffReady = { if (it) handoff.complete(reported) }', reasoning)
+        fallback = section((CHAT / 'WorkProcessCard.kt').read_text(),
+                           'ReasoningStepRow(ownerKey, reported,', 'if (!stopped && segment.reasoning')
+        self.assertIn('revealResetEpoch = revealResetEpoch', fallback)
+        self.assertIn('onVisibleAdvance = { if (expanded) onVisibleAdvance() }', fallback)
+        row = (CHAT / 'ReportedReasoningCard.kt').read_text().partition('internal fun ReasoningStepRow(')[2]
+        self.assertTrue(row)
         self.assertIn('revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance', row)
+        self.assertIn('onHandoffReady = onHandoffReady', row)
 
     def test_child_disclosure_resets_baseline_and_parent_identity_survives_exit(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
@@ -39,6 +54,11 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
         self.assertIn('onVisibleAdvance = { if (expanded) onVisibleAdvance() }', work)
         self.assertIn('revealResetEpoch = revealResetEpoch', work)
+        content = (CHAT / 'MessageContent.kt').read_text()
+        self.assertIn('key(block.workflowKey(index))', content)
+        self.assertIn('key(block.step.owner, block.step.toolCallId)', content)
+        self.assertIn('reasoningState.SaveableStateProvider("ordered-content")', work)
+        self.assertIn('MessageContent(ordered.steps,', (CHAT / 'ChatMessageList.kt').read_text())
 
     def test_live_empty_item_observes_first_output_before_visibility(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()

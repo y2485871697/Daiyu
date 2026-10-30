@@ -50,7 +50,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, onExpandedChange: (Boolean) -> Unit = {}, content: (@Composable (Boolean) -> Unit)? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val reasoning = work.segments.mapNotNull { it.reasoning }
     val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
     val reasoningReady = stopped || sequence.ready(reasoning)
@@ -64,7 +64,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     visibility.targetState = expanded
     val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
     val disclosureHandoffReady = reasoningReady && (work.running || currentOverride == true || fullyClosed)
-    androidx.compose.runtime.SideEffect { onDisclosureHandoffReady(disclosureHandoffReady) }
+    androidx.compose.runtime.SideEffect { onDisclosureHandoffReady(disclosureHandoffReady); onExpandedChange(expanded) }
     val manuallyClosed = currentOverride == false && fullyClosed
     androidx.compose.runtime.SideEffect {
         if (stopped) reasoning.forEach(sequence::complete)
@@ -110,37 +110,40 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             Column {
                 HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 3.dp, bottom = 4.dp)) {
-                    var precedingReady = true
-                    work.segments.forEachIndexed { segmentIndex, segment ->
-                        if (!precedingReady) return@forEachIndexed
-                        if (!segment.narration.isNullOrBlank()) {
-                            val narrationConnector = work.segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null } &&
-                                work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }
-                            Text(segment.narration, Modifier.fillMaxWidth().drawBehind {
-                                if (narrationConnector) drawLine(colors.line, Offset(5.dp.toPx(), 0f),
-                                    Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
-                            }.padding(start = if (narrationConnector) 18.dp else 0.dp), color = colors.muted,
-                                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
-                        }
-                        segment.reasoning?.let { reported ->
-                            key(ownerKey, "reasoning", reported.itemId) {
-                                reasoningState.SaveableStateProvider(reported.itemId) {
-                                    ReasoningStepRow(ownerKey, reported,
-                                        showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
-                                            .any { it.steps.isNotEmpty() || it.reasoning != null },
-                                        allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped,
-                                        revealResetEpoch = revealResetEpoch,
-                                        onVisibleAdvance = { if (expanded) onVisibleAdvance() },
-                                        onHandoffReady = { if (it) sequence.complete(reported) })
+                    if (content != null) reasoningState.SaveableStateProvider("ordered-content") { content(expanded) }
+                    else {
+                        var precedingReady = true
+                        work.segments.forEachIndexed { segmentIndex, segment ->
+                            if (!precedingReady) return@forEachIndexed
+                            if (!segment.narration.isNullOrBlank()) {
+                                val narrationConnector = work.segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null } &&
+                                    work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }
+                                Text(segment.narration, Modifier.fillMaxWidth().drawBehind {
+                                    if (narrationConnector) drawLine(colors.line, Offset(5.dp.toPx(), 0f),
+                                        Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
+                                }.padding(start = if (narrationConnector) 18.dp else 0.dp), color = colors.muted,
+                                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
+                            }
+                            segment.reasoning?.let { reported ->
+                                key(ownerKey, "reasoning", reported.itemId) {
+                                    reasoningState.SaveableStateProvider(reported.itemId) {
+                                        ReasoningStepRow(ownerKey, reported,
+                                            showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
+                                                .any { it.steps.isNotEmpty() || it.reasoning != null },
+                                            allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped,
+                                            revealResetEpoch = revealResetEpoch,
+                                            onVisibleAdvance = { if (expanded) onVisibleAdvance() },
+                                            onHandoffReady = { if (it) sequence.complete(reported) })
+                                    }
                                 }
                             }
-                        }
-                        if (!stopped && segment.reasoning?.let { !sequence.ready(it) } == true) precedingReady = false
-                        if (precedingReady) segment.steps.forEachIndexed { index, step ->
-                            key(ownerKey, step.owner, step.toolCallId) {
-                                val laterStep = index < segment.steps.lastIndex ||
-                                    work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
-                                WorkStepRow(step, showConnector = laterStep, toolContent = toolContent, flowRunning = work.running)
+                            if (!stopped && segment.reasoning?.let { !sequence.ready(it) } == true) precedingReady = false
+                            if (precedingReady) segment.steps.forEachIndexed { index, step ->
+                                key(ownerKey, step.owner, step.toolCallId) {
+                                    val laterStep = index < segment.steps.lastIndex ||
+                                        work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
+                                    WorkStepRow(step, showConnector = laterStep, toolContent = toolContent, flowRunning = work.running)
+                                }
                             }
                         }
                     }

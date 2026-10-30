@@ -26,10 +26,20 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         self.assertIn("key(ownerKey, display.reported.itemId)", rendered)
         self.assertLess(rendered.index("key(ownerKey, display.reported.itemId)"),
                         rendered.index("RevealedMessageMarkdown("))
-        self.assertIn("generationComplete = generationComplete", source)
+        self.assertIn("generationComplete = generationComplete && projection != null && displayed == summary.text", source)
         caller = (CHAT / "ChatMessageList.kt").read_text()
-        card = caller.split("ReportedReasoningCard(", 1)[1].split("if (turn.content", 1)[0]
-        self.assertIn("generationComplete = turn.status != RunStatus.RUNNING", card)
+        ordered = caller.split("private fun AssistantTextContent", 1)[1]
+        self.assertNotIn("ReportedReasoningCard(", ordered)
+        self.assertIn("MessageContent(ordered.steps, actions, imageLoader, markdown = true", ordered)
+        self.assertIn("ReasoningStepRow(turn.listKey, reported, connector,", ordered)
+        row = ordered.split("ReasoningStepRow(", 1)[1].split("}, entryBody", 1)[0]
+        self.assertIn("generationComplete = turn.status != RunStatus.RUNNING", row)
+        self.assertIn("stopped = turn.reasoningStopped", row)
+        self.assertIn("onHandoffReady = { if (it) handoff.complete(reported) }", row)
+        step = source.split("internal fun ReasoningStepRow(", 1)[1]
+        self.assertIn('ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),', step)
+        self.assertIn("generationComplete = generationComplete, stopped = stopped, embedded = true", step)
+        self.assertIn("onHandoffReady = onHandoffReady", step)
 
     def test_plain_progress_does_not_install_disabled_button_semantics(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()

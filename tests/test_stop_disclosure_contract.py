@@ -6,7 +6,12 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class StopDisclosureContractTest(unittest.TestCase):
     def test_stopped_thinking_is_retained_in_the_workflow_even_without_a_tool(self):
         source = (CHAT / 'ChatTurnMapper.kt').read_text()
-        self.assertIn('message.status == RunStatus.STOPPED && message.reportedReasoning.isNotEmpty()', source)
+        self.assertIn('val hasWorkflow = hasTools || message.reportedReasoning.any { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }', source)
+        self.assertIn('reasoning[index].orEmpty().forEach { segments += WorkSegmentUi(reasoning = it) }', source)
+        self.assertIn('workProcess = if (hasWorkflow) WorkProcessUi(segments, summary, running) else null', source)
+        self.assertIn('integrateReasoning = hasWorkflow', source)
+        self.assertIn('message.status == RunStatus.STOPPED -> "已停止"', source)
+        self.assertIn('status = message.status', source)
         self.assertIn('stopRequested && live != null && turn.ownerMessageId == live.id.value', source)
         self.assertIn('!stopRequested && (phase == null || phase == ExecutionPhase.STREAMING)', source)
 
@@ -17,7 +22,20 @@ class StopDisclosureContractTest(unittest.TestCase):
                        '?: (!stopped && (isThinking || observedLive && !settled))'):
             self.assertIn(marker, card)
         chat = (CHAT / 'ChatMessageList.kt').read_text()
-        self.assertIn('!turn.reasoningStopped && !handoff.ready(leadingReasoning)', chat)
+        assistant = chat.split('internal fun AssistantTurn(', 1)[1].split('private fun AssistantTextContent', 1)[0]
+        self.assertIn('turn.reportedReasoning.filter { turn.reasoningStopped ||', assistant)
+        self.assertIn('.forEach(handoff::complete)', assistant)
+        self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)', assistant)
+        ordered = chat.split('private fun AssistantTextContent', 1)[1]
+        self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(workReasoning)', ordered)
+        self.assertIn('reasoningReady = { turn.reasoningStopped || handoff.ready(it) }', ordered)
+        self.assertIn('onHandoffReady = { if (it) handoff.complete(reported) }', ordered)
+        content = (CHAT / 'MessageContent.kt').read_text()
+        self.assertIn('if (visible && block is MessageContentUi.Reasoning) precedingReady = reasoningReady(block.reported)', content)
+        entry = (CHAT / 'WorkflowEntry.kt').read_text()
+        self.assertIn('entrances.enter(key, animate && !stopped)', entry)
+        self.assertIn('val visibility = remember(key, stopped)', entry)
+        self.assertIn('MutableTransitionState(!enter || stopped).apply { targetState = true }', entry)
         self.assertGreaterEqual(chat.count('stopped = turn.reasoningStopped'), 3)
 
     def test_workflow_lifetime_is_independent_of_each_thought_and_leaf_details(self):

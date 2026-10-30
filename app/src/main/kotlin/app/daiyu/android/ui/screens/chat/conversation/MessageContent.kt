@@ -47,42 +47,39 @@ internal fun MessageContent(
     flowRunning: Boolean = false,
     reasoningReady: (app.daiyu.android.domain.ReportedReasoning) -> Boolean = { true },
     reasoningBody: @Composable (app.daiyu.android.domain.ReportedReasoning, Boolean) -> Unit = { _, _ -> },
+    imageOffset: Int = 0,
+    entryBody: @Composable (String, @Composable () -> Unit) -> Unit = { _, body -> body() },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        var imageNumber = 0
+        var imageNumber = imageOffset
         var precedingReady = true
         content.forEachIndexed { index, block ->
-            if (!precedingReady) {
-                if (block is MessageContentUi.Tool && block.step.dedicatedKey != null) {
-                    key(block.step.owner, block.step.toolCallId) { dedicatedTool(block.step) }
-                }
-                return@forEachIndexed
-            }
-            val itemKey = when (block) {
-                is MessageContentUi.Text -> "text:${block.itemId}"
-                is MessageContentUi.Reasoning -> "reasoning:${block.reported.itemId}"
-                is MessageContentUi.Tool -> "tool:${block.step.toolCallId}"
-                is MessageContentUi.Image -> "image:$index:${block.image.reference.id}"
-            }
-            key(itemKey) {
-                when (block) {
-                    is MessageContentUi.Text -> {
-                        if (block.text.isNotBlank()) textBody(block, Modifier.testTag("message-content-text:$index"))
-                    }
-                    is MessageContentUi.Reasoning -> {
-                        reasoningBody(block.reported,
-                            content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning })
-                        precedingReady = reasoningReady(block.reported)
-                    }
-                    is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
-                    is MessageContentUi.Tool -> {
-                        key(block.step.owner, block.step.toolCallId) {
-                            if (!dedicatedTool(block.step)) WorkStepRow(block.step, showConnector = content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning }, toolContent = toolContent, flowRunning = flowRunning)
+            val visible = precedingReady
+            val imageIndex = if (block is MessageContentUi.Image) ++imageNumber else 0
+            key(block.workflowKey(index)) {
+                if (block is MessageContentUi.Tool) {
+                    key(block.step.owner, block.step.toolCallId) {
+                        // The dedicated interaction keeps one callsite even while the prior thought closes.
+                        val dedicated = dedicatedTool(block.step)
+                        if (visible && !dedicated) entryBody(block.workflowKey(index)) {
+                            WorkStepRow(block.step, showConnector = content.getOrNull(index + 1).let {
+                                it is MessageContentUi.Tool || it is MessageContentUi.Reasoning
+                            }, toolContent = toolContent, flowRunning = flowRunning)
                         }
                     }
+                } else if (visible) entryBody(block.workflowKey(index)) {
+                    when (block) {
+                        is MessageContentUi.Text -> if (block.text.isNotBlank())
+                            textBody(block, Modifier.testTag("message-content-text:$index"))
+                        is MessageContentUi.Reasoning -> reasoningBody(block.reported,
+                            content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning })
+                        is MessageContentUi.Image -> MessageImage(block.image, imageIndex, imageLoader)
+                        is MessageContentUi.Tool -> Unit
+                    }
                 }
             }
+            if (visible && block is MessageContentUi.Reasoning) precedingReady = reasoningReady(block.reported)
         }
     }
 }

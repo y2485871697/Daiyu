@@ -40,10 +40,15 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
 
     fun testReasoningDisclosureDoesNotConsumeAnswerOrToolAndKeepsExpandedStateOnUpdate() {
         prepareSummaries("reported summary", "final reported summary")
-        var turn by mutableStateOf(ChatTurnUi.Assistant("assistant", finalText = "answer remains", status = RunStatus.COMPLETED,
-            reportedReasoning = listOf(ReportedReasoning("r", "reported summary")),
-            workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(WorkStepUi("tool", "fixture tool", "tool result", WorkStepState.OK)))), "已完成"),
-            listKey = "stable-history-segment"))
+        fun history(summary: String): ChatTurnUi.Assistant {
+            val reasoning = ReportedReasoning("r", summary)
+            return ChatTurnUi.Assistant("assistant", finalText = "answer remains", status = RunStatus.COMPLETED,
+                reportedReasoning = listOf(reasoning),
+                workProcess = WorkProcessUi(listOf(WorkSegmentUi(reasoning = reasoning, steps = listOf(
+                    WorkStepUi("tool", "fixture tool", "tool result", WorkStepState.OK)))), "已完成"),
+                listKey = "stable-history-segment")
+        }
+        var turn by mutableStateOf(history("reported summary"))
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) }
         } }
@@ -51,6 +56,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.onNodeWithText("answer remains").assertIsDisplayed()
         ui.onNodeWithTag("work-process-header").assertIsDisplayed()
         ui.onNodeWithText("reported summary").assertDoesNotExist()
+        ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
         val summary = ui.onNodeWithText("reported summary").assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
@@ -58,14 +64,13 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         assertEquals(16.sp, layouts.single().layoutInput.style.fontSize)
         assertEquals(26.sp, layouts.single().layoutInput.style.lineHeight)
         ui.onNodeWithText("answer remains").assertIsDisplayed()
-        ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithText("fixture tool").assertIsDisplayed()
         ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
         ui.onNodeWithText("reported summary").assertDoesNotExist()
         ui.onNodeWithText("answer remains").assertIsDisplayed()
         ui.onNodeWithText("fixture tool").assertIsDisplayed()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
-        mainThread { turn = turn.copy(reportedReasoning = listOf(ReportedReasoning("r", "final reported summary"))) }
+        mainThread { turn = history("final reported summary") }
         ui.waitForIdle()
         ui.onNodeWithText("final reported summary").assertIsDisplayed()
         ui.onNodeWithText("answer remains").assertIsDisplayed()

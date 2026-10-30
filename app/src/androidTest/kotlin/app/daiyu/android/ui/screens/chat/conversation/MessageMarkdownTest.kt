@@ -1382,18 +1382,18 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertEquals(listOf(Triple(owner, reference, 1024)), requests.toList())
         awaitNodes(hasText("first"))
         awaitNodes(hasTestTag("message-content-text:0") and hasText("before"))
-        awaitNodes(hasTestTag("message-content-text:3") and hasText("after"))
+        awaitNodes(hasTestTag("message-content-text:0") and hasText("after"))
         val positions = listOf(
             ui.onNodeWithText("first", useUnmergedTree = true),
-            ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true),
+            ui.onNode(hasTestTag("message-content-text:0") and hasText("before"), useUnmergedTree = true),
             ui.onNodeWithTag("message-image:1", useUnmergedTree = true),
             ui.onNodeWithText("tool marker", useUnmergedTree = true),
-            ui.onNodeWithTag("message-content-text:3", useUnmergedTree = true),
+            ui.onNode(hasTestTag("message-content-text:0") and hasText("after"), useUnmergedTree = true),
         ).map { it.fetchSemanticsNode().boundsInRoot.top }
         assertTrue(positions.zipWithNext().all { (a, b) -> a < b })
         mainThread { second = second.copy(content = blocks("**changed**")) }
         awaitNodes(hasTestTag("message-content-text:0") and hasText("changed"))
-        ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true).assertTextEquals("changed")
+        ui.onNode(hasTestTag("message-content-text:0") and hasText("changed"), useUnmergedTree = true).assertTextEquals("changed")
         assertEquals("text updates must not restart the keyed image load", 1, requests.size)
         mainThread { second = second.copy(content = blocks("**changed**", image.copy(
             expectedOwner = MessageImageOwner("other-chat", "shared-message"),

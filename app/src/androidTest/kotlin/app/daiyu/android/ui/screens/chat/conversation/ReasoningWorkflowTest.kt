@@ -2,6 +2,11 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -90,6 +95,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions(), dedicatedTool = { Text("direct question"); true })
         } } }
+        awaitHeader()
+        ui.onNodeWithTag("work-process-header").performClick()
         ui.waitUntil(5_000) { ui.onAllNodesWithText("direct question").fetchSemanticsNodes().size == 1 }
         ui.onNodeWithText("direct question").assertIsDisplayed()
         ui.onNodeWithTag("reported-reasoning:${turn.listKey}").assertDoesNotExist()
@@ -99,14 +106,17 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         assertTrue(r1 < q && q < r2)
     }
 
-    fun testPureAnswerKeepsStandaloneReasoning() {
+    fun testPureAnswerKeepsItsSingleThoughtInsideTheWorkflow() {
         prepare()
         val turn = mapped(message(listOf(MessageBlock.Text("a", "answer")), listOf(ReportedReasoning("r1", "first summary"))))
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) } } }
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("reported-reasoning:${turn.listKey}").fetchSemanticsNodes().size == 1 }
-        ui.onNodeWithTag("work-process-header").assertDoesNotExist()
-        ui.onNodeWithTag("reported-reasoning-header:${turn.listKey}").performClick()
+        awaitHeader()
+        ui.onNodeWithTag("reported-reasoning:${turn.listKey}").assertDoesNotExist()
+        assertDisclosure("work-process-header", expanded = false)
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithTag("reported-reasoning-header:${turn.listKey}:reasoning:r1").performClick()
         ui.onNodeWithText("first summary").assertIsDisplayed()
+        ui.onNodeWithText("answer").assertIsDisplayed()
     }
 
     fun testLiveReasoningOpensItsWorkflowAndCollapsesAtCompletion() {
@@ -401,9 +411,9 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         val owner = mapped(source).listKey
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("reported-reasoning-content:$owner").fetchSemanticsNodes().isNotEmpty() }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("reported-reasoning-content:$owner:reasoning:r1").fetchSemanticsNodes().isNotEmpty() }
         mainThread { requested = true }
-        ui.onNodeWithTag("reported-reasoning-content:$owner").assertDoesNotExist()
+        ui.onNodeWithTag("reported-reasoning-content:$owner:reasoning:r1").assertDoesNotExist()
         mainThread { source = source.copy(status = RunStatus.STOPPED,
             reportedReasoning = source.reportedReasoning.map { it.frozen() }) }
         awaitHeader()
@@ -516,7 +526,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testStandaloneAnswerWaitsForTheLiveReasoningToFinishClosing() {
+    fun testSingleThoughtWorkflowWaitsForTheLiveReasoningToFinishClosing() {
         prepare()
         var reported by mutableStateOf(ReportedReasoning("r1", "first summary", elapsedMillis = 0L, activeSinceNanos = System.nanoTime()))
         var done by mutableStateOf(false)
@@ -656,6 +666,85 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         mainThread { summaries = summaries.map { it.copy(activeSinceNanos = null) }; done = true }
         ui.waitUntil(5_000) { ui.onAllNodesWithText("answer").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("answer").assertIsDisplayed()
+    }
+
+    fun testFirstThoughtIsAlreadyInTheWorkflowAndKeepsItsBodyWhenToolsAndMixedContentArrive() {
+        prepare()
+        var source by mutableStateOf(message(emptyList(), listOf(
+            ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))).copy(status = RunStatus.RUNNING))
+        var dedicated by mutableStateOf(false)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val turn = ChatTurnMapper.map(listOf(source), dedicatedTool = { _, _ -> if (dedicated) "verified" else null })
+                .single() as ChatTurnUi.Assistant
+            AssistantTurn(turn.copy(isStreaming = true), ChatScreenActions())
+        } } }
+        awaitHeader()
+        assertDisclosure("work-process-header", expanded = true)
+        val owner = mapped(source).listKey
+        val body = "reported-reasoning-content:$owner:reasoning:r1"
+        ui.waitUntil(5_000) { ui.onNodeWithText("first summary").isDisplayed() }
+        val original = ui.onNodeWithTag(body).fetchSemanticsNode().id
+        ui.onNodeWithTag("reported-reasoning:$owner").assertDoesNotExist()
+        mainThread { source = source.copy(blocks = listOf(tool("t1"))) }
+        ui.onNodeWithTag("work-process-header").assertExists()
+        assertEquals(original, ui.onNodeWithTag(body).fetchSemanticsNode().id)
+        ui.onNodeWithTag("tool-step:t1").assertDoesNotExist()
+        mainThread { dedicated = true }
+        assertEquals(original, ui.onNodeWithTag(body).fetchSemanticsNode().id)
+        ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
+        ui.onAllNodesWithText("first summary").assertCountEquals(1)
+    }
+
+    fun testAReleasedToolExpandsIntoPlaceInsteadOfMountingAtFullHeight() {
+        prepare()
+        var reported by mutableStateOf(ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val source = message(listOf(tool("t1")), listOf(reported)).copy(status = RunStatus.RUNNING)
+                AssistantTurn(mapped(source).copy(isStreaming = true), ChatScreenActions())
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("first summary").assertIsDisplayed()
+            ui.onNodeWithTag("workflow-entry:tool:t1").assertDoesNotExist()
+            mainThread { reported = reported.frozen() }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("workflow-entry:tool:t1").assertDoesNotExist()
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithTag("workflow-entry:tool:t1").fetchSemanticsNodes().isNotEmpty()
+            }
+            ui.onNodeWithText("first summary").assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(48)
+            val intermediate = ui.onNodeWithTag("workflow-entry:tool:t1").fetchSemanticsNode().boundsInRoot.height
+            ui.mainClock.advanceTimeBy(300)
+            val complete = ui.onNodeWithTag("workflow-entry:tool:t1").fetchSemanticsNode().boundsInRoot.height
+            assertTrue("entry should have a real intermediate height: $intermediate < $complete", intermediate > 0f && intermediate < complete)
+            ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
+            assertDisclosure("work-process-header", expanded = true)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testEntranceRegistrySurvivesContentUnmountAndDoesNotReplayOnReopen() {
+        var mounted by mutableStateOf(true)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val entrances = remember { WorkflowEntrances() }
+                if (mounted) WorkflowEntry("fixture", entrances, animate = true) { Box(Modifier.size(100.dp)) }
+            } } }
+            ui.mainClock.advanceTimeBy(64)
+            val intermediate = ui.onNodeWithTag("workflow-entry:fixture").fetchSemanticsNode().boundsInRoot.height
+            ui.mainClock.advanceTimeBy(300)
+            val complete = ui.onNodeWithTag("workflow-entry:fixture").fetchSemanticsNode().boundsInRoot.height
+            assertTrue(intermediate > 0f && intermediate < complete)
+            mainThread { mounted = false }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("workflow-entry:fixture").assertDoesNotExist()
+            mainThread { mounted = true }
+            ui.mainClock.advanceTimeByFrame()
+            assertEquals(complete, ui.onNodeWithTag("workflow-entry:fixture").fetchSemanticsNode().boundsInRoot.height, 1f)
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
 }

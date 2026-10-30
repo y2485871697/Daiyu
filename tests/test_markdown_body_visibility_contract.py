@@ -45,3 +45,10 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'advances.get() > beforeAdvances', 'beforeWalks, walks.get()',
                       'beforeParses, parses.get()', 'scrollValue() < beforeScroll'):
             self.assertIn(token, source)
+
+    def test_scroll_fixture_does_not_collapse_the_clickable_thought_body_before_dragging(self):
+        cases = Path(__file__).resolve().parents[1] / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/StreamingScrollTest.kt'
+        source = cases.read_text()
+        self.assertNotIn('click(center)', source)
+        self.assertEqual(1, source.count('down(Offset('))
+        self.assertLess(source.index('down(Offset('), source.index('text = appended'))

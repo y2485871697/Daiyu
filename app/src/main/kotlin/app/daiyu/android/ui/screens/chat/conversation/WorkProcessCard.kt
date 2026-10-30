@@ -23,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
@@ -64,7 +65,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val visibility = remember(ownerKey, stopped) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
     val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
-    val disclosureHandoffReady = reasoningReady && fullyClosed
+    var contentMounted by remember(ownerKey) { mutableStateOf(false) }
+    val disclosureHandoffReady = reasoningReady && fullyClosed && !contentMounted
     androidx.compose.runtime.SideEffect { onDisclosureHandoffReady(disclosureHandoffReady); onExpandedChange(expanded) }
     val manuallyClosed = currentOverride == false && fullyClosed
     androidx.compose.runtime.SideEffect {
@@ -108,6 +110,10 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             }
         }
         AnimatedVisibility(visibility) {
+            DisposableEffect(ownerKey) {
+                contentMounted = true
+                onDispose { contentMounted = false }
+            }
             Column {
                 HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 3.dp, bottom = 4.dp)) {

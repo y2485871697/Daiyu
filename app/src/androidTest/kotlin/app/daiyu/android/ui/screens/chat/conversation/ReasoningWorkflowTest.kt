@@ -574,10 +574,12 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                     val base = mapped(message(listOf(tool(id)), emptyList()).copy(status = RunStatus.RUNNING))
                     val step = base.workProcess!!.segments.flatMap { it.steps }.single()
                     val body = if (answer) "answer" else ""
-                    AssistantTurn(base.copy(finalText = body, isStreaming = true,
-                        content = if (mixed) listOf(MessageContentUi.Tool(step)) +
-                            if (answer) listOf(MessageContentUi.Text("a", body)) else emptyList() else emptyList()),
-                        ChatScreenActions())
+                    androidx.compose.runtime.key(id) {
+                        AssistantTurn(base.copy(finalText = body, isStreaming = true,
+                            content = if (mixed) listOf(MessageContentUi.Tool(step)) +
+                                if (answer) listOf(MessageContentUi.Text("a", body)) else emptyList() else emptyList()),
+                            ChatScreenActions())
+                    }
                 } } }
                 ui.mainClock.advanceTimeBy(300)
                 ui.onNodeWithTag("tool-step:$id").assertIsDisplayed()
@@ -596,7 +598,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                         useUnmergedTree = true).fetchSemanticsNodes()
                     val hasTool = nodes.any { it.config.getOrNull(SemanticsProperties.TestTag) == "tool-step:$id" }
                     val hasAnswer = nodes.any { it.config.getOrNull(SemanticsProperties.Text)?.any { text -> text.text == "answer" } == true }
-                    assertFalse("Answer cannot mount before the tool exit", hasTool && hasAnswer)
+                    assertFalse("Answer cannot mount before the tool exit ($id)", hasTool && hasAnswer)
                     !hasTool && hasAnswer
                 }
                 ui.onNodeWithTag("work-process-header").performClick()

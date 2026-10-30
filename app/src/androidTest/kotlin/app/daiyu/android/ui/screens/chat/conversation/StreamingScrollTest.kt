@@ -68,7 +68,7 @@ class StreamingScrollTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         val list = ui.onNodeWithTag("chat-messages")
-        list.performTouchInput { click(center) }
+        list.performTouchInput { down(Offset(width * .5f, height * .35f)) }
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread { text = appended }
@@ -79,7 +79,6 @@ class StreamingScrollTest : WiredActivityTestCase() {
             val beforeAdvances = advances.get()
             fun scrollValue(): Float = list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
             val beforeScroll = scrollValue()
-            list.performTouchInput { down(Offset(width * .5f, height * .35f)) }
             repeat(6) { frame ->
                 list.performTouchInput { moveTo(Offset(width * .5f, height * (.40f + frame * .07f)), delayMillis = 16) }
                 ui.mainClock.advanceTimeByFrame()

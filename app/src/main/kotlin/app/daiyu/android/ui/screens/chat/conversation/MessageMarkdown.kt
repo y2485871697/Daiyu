@@ -29,8 +29,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -113,13 +111,19 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
     visibleCharacters: Int = Int.MAX_VALUE,
     generationComplete: Boolean = true,
 ) {
-    val parser = LocalMarkdownParser.current
-    var published by remember(MarkdownParserIdentity(parser)) { mutableStateOf<MarkdownBodySnapshot?>(null) }
-    // Keep the displayed source and AST together while an appended chunk parses off-thread.
-    val body = markdownBodySnapshot(text, blocks, published)
-    SideEffect { published = body }
+    val body = rememberMarkdownBodySnapshot(text, blocks)
     if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())
     else ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters, generationComplete && body.text == text)
+}
+
+@Composable
+internal fun rememberMarkdownBodySnapshot(text: String, blocks: List<MarkdownBlock>?): MarkdownBodySnapshot? {
+    val parser = LocalMarkdownParser.current
+    val published = remember(MarkdownParserIdentity(parser)) { MarkdownBodyPublication() }
+    // Keep the displayed source and AST together while an appended chunk parses off-thread.
+    val body = markdownBodySnapshot(text, blocks, published.body)
+    SideEffect { published.body = body }
+    return body
 }
 
 @Composable

@@ -5795,6 +5795,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        toolPresentations.clear()
         suspendOrdinaryDialogActions()
         humanBrowsers.values.forEach { it.close() }
         humanBrowsers.clear()
@@ -6780,6 +6781,7 @@ class MainActivity : ComponentActivity() {
     }
     private data class ToolReceiptKey(val conversation: ConversationId?, val data: Long, val generation: Long,
         val sources: List<app.daiyu.android.ui.RetainedToolOutcomes.Source>, val execution: app.daiyu.android.domain.runtime.ExecutionState?)
+    private val toolPresentations = app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache()
     private var toolReceiptKey: ToolReceiptKey? = null
     private var toolReceiptSnapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null
     private var toolReceiptRead: kotlinx.coroutines.Job? = null
@@ -6869,6 +6871,7 @@ class MainActivity : ComponentActivity() {
         val oldBoundaries = chatState.timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped }
             .map { it.anchor.listKey }.toSet() +
             app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
+        toolPresentations.scope(selected?.id?.value)
         val receiptsReady = prepareToolReceipts()
         val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries)
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
@@ -6883,7 +6886,7 @@ class MainActivity : ComponentActivity() {
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }, toolReceipt = toolReceiptSnapshot?.projectionReader(controller::runState, controller::runStopping) ?: { _, _ -> null }),
+            }, presentations = toolPresentations, toolReceipt = toolReceiptSnapshot?.projectionReader(controller::runState, controller::runStopping) ?: { _, _ -> null }),
                 controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
                 stopRequested = controlOwner?.let(controller::runStopping) == true),
             statusText = controller.problem ?: when { controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";

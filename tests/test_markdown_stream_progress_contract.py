@@ -36,7 +36,8 @@ class MarkdownStreamProgressContract(unittest.TestCase):
                       'AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete']:
             self.assertIn(token, chat)
         typing = (BASE / 'MarkdownTyping.kt').read_text()
-        self.assertIn('source.copy(text = parsed.sources[index])', typing)
+        self.assertIn('MarkdownTypingSource(id, parsed.sources[index])', typing)
+        self.assertIn('partIds.take(parsed.sources.size).mapIndexed', typing)
         self.assertIn('parsed.blocks.getValue(displayed.text)', typing)
         self.assertIn('projection?.sources == sources.map { it.text }', typing)
         reasoning = (BASE / 'ReportedReasoningCard.kt').read_text()

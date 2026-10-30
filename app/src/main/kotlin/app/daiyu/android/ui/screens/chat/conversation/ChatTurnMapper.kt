@@ -7,7 +7,7 @@ import app.daiyu.android.domain.MessageImageOwner
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.runtime.ExecutionPhase
 
-/** No clock, Android APIs or mutable state. Timestamp formatting belongs to the caller. */
+/** No clock or Android APIs. Timestamp formatting and optional presentation reuse belong to the caller. */
 object ChatTurnMapper {
     fun map(
         messages: List<Message>,
@@ -18,10 +18,12 @@ object ChatTurnMapper {
         timestamp: (Message) -> String = { "" },
         boundariesAfter: Set<String> = emptySet(),
         assistantIdentity: (Message, String) -> app.daiyu.android.assistants.AssistantReplyIdentity? = { _, _ -> null },
+        presentations: ToolPresentationCache? = null,
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
         val history = if (messages.any { it.historySegments.isNotEmpty() }) MessageHistory.expand(messages) else messages
+        presentations?.retain(history)
         val toolSources = history.flatMap { source -> source.blocks.filterIsInstance<MessageBlock.Tool>().map {
             (TurnOwner(source.conversationId.value, source.runId.value, source.id.value) to it.invocation.id.value) to source
         } }.toMap()
@@ -72,12 +74,12 @@ object ChatTurnMapper {
                     id = message.id.value,
                     text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text },
                     timestamp = timestamp(message),
-                    content = mixedContent(message, errors, states, dedicated, activity),
+                    content = mixedContent(message, errors, states, dedicated, activity, presentations = presentations),
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
                 )
-                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), errors, states, dedicated, activity).copy(
+                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), errors, states, dedicated, activity, presentations).copy(
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
@@ -160,7 +162,8 @@ object ChatTurnMapper {
         toolState: (Message, MessageBlock.Tool) -> WorkStepState?,
         dedicatedTool: (Message, MessageBlock.Tool) -> String?,
         activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
-        integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool }): List<MessageContentUi> {
+        integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool },
+        presentations: ToolPresentationCache? = null): List<MessageContentUi> {
         if (message.blocks.none { it is MessageBlock.Image ||
                 it is MessageBlock.Tool && dedicatedTool(message, it) != null }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
@@ -173,7 +176,7 @@ object ChatTurnMapper {
                     is MessageBlock.Text -> MessageContentUi.Text(block.itemId, block.text)
                     is MessageBlock.Image -> MessageContentUi.Image(MessageImageUi(owner, block.reference))
                     is MessageBlock.Tool -> MessageContentUi.Tool(
-                        workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block)),
+                        workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations),
                     )
                 })
             }
@@ -192,8 +195,8 @@ object ChatTurnMapper {
         .filter { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
         .groupBy { it.blockOffset ?: 0 }
 
-    private fun workStep(message: Message, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?): WorkStepUi {
-        val display = ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
+    private fun workStep(message: Message, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?): WorkStepUi {
+        val display = presentations?.present(block) ?: ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
         return WorkStepUi(
             id = block.invocation.id.value, name = display.title, detail = display.summary,
             state = receipt ?: when (confirmedError) {
@@ -222,7 +225,8 @@ object ChatTurnMapper {
         confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
         toolState: (Message, MessageBlock.Tool) -> WorkStepState?,
         dedicatedTool: (Message, MessageBlock.Tool) -> String?,
-        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?): ChatTurnUi.Assistant {
+        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
+        presentations: ToolPresentationCache?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val hasWorkflow = hasTools || message.status == RunStatus.STOPPED && message.reportedReasoning.isNotEmpty()
         val lastText = workflowFinalTextIndex(message)
@@ -243,7 +247,7 @@ object ChatTurnMapper {
                         segments += WorkSegmentUi(narration = block.text)
                     }
                     is MessageBlock.Tool -> {
-                        val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block))
+                        val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations)
                         // Keep even trailing tools while reserving the last text for the final answer.
                         if (segments.isEmpty()) segments += WorkSegmentUi()
                         val previous = segments.last()
@@ -281,7 +285,7 @@ object ChatTurnMapper {
             status = message.status,
             error = message.error,
             reportedReasoning = message.reportedReasoning,
-            content = mixedContent(message, confirmedToolError, toolState, dedicatedTool, activity, integrateReasoning = hasWorkflow),
+            content = mixedContent(message, confirmedToolError, toolState, dedicatedTool, activity, integrateReasoning = hasWorkflow, presentations = presentations),
         )
     }
 

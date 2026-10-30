@@ -22,6 +22,9 @@ internal class MarkdownProjection(
 
 internal data class MarkdownBodySnapshot(val text: String, val blocks: List<MarkdownBlock>)
 
+/** Last committed fallback; publication is not new renderer input. */
+internal class MarkdownBodyPublication { var body: MarkdownBodySnapshot? = null }
+
 internal fun markdownBodySnapshot(
     text: String,
     blocks: List<MarkdownBlock>?,

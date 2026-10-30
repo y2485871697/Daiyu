@@ -6775,6 +6775,49 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private data class ToolReceiptKey(val conversation: ConversationId?, val data: Long, val generation: Long,
+        val sources: List<app.daiyu.android.ui.RetainedToolOutcomes.Source>, val execution: app.daiyu.android.domain.runtime.ExecutionState?)
+    private var toolReceiptKey: ToolReceiptKey? = null
+    private var toolReceiptSnapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null
+    private var toolReceiptRead: kotlinx.coroutines.Job? = null
+    private var toolReceiptRequested: ToolReceiptKey? = null
+    private var toolReceiptRequest: Any? = null
+    private fun currentToolReceiptKey() = ToolReceiptKey(selected?.id, controller.dataRevision, editorGeneration,
+        app.daiyu.android.ui.RetainedToolOutcomes.sources(shown.map { it.second }),
+        controller.active?.takeIf { it.conversationId == selected?.id }?.let(controller::runState))
+
+    private fun prepareToolReceipts(): Boolean {
+        val key = currentToolReceiptKey()
+        if (toolReceiptKey == key) return true
+        if (key.sources.isEmpty()) {
+            toolReceiptRead?.cancel(); toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
+            toolReceiptKey = key; toolReceiptSnapshot = null
+            return true
+        }
+        if (toolReceiptRead?.isActive == true && toolReceiptRequested == key) return false
+        toolReceiptRead?.cancel()
+        toolReceiptRequested = key
+        val request = Any()
+        toolReceiptRequest = request
+        val rows = shown.map { it.second }
+        toolReceiptRead = lifecycleScope.launch {
+            try {
+                val snapshot = withContext(Dispatchers.IO) {
+                    app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows)
+                }
+                if (!activityUsable() || toolReceiptRequest !== request || toolReceiptRequested != key ||
+                    currentToolReceiptKey() != key) return@launch
+                toolReceiptKey = key; toolReceiptSnapshot = snapshot
+                publishChat()
+            } finally {
+                if (toolReceiptRequest === request) {
+                    toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
+                }
+            }
+        }
+        return false
+    }
+
     private fun publishChat() = publishChat(rowsChanged = true)
 
     private fun publishChat(rowsChanged: Boolean, scrollRequest: ChatScrollRequest? = chatState.scrollRequest) {
@@ -6820,20 +6863,21 @@ class MainActivity : ComponentActivity() {
             app.daiyu.android.timeline.compressionActivitiesByAnchor(visibleCompressions, visibleTimeline).keys.filterNotNull()
         val oldBoundaries = chatState.timeline.map { it.anchor.listKey }.toSet() +
             app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
-        val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries
+        val receiptsReady = prepareToolReceipts()
+        val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries)
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             scrollRequest = scrollRequest,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
             timeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty(),
             compressionActivity = null,
             compressionActivities = visibleCompressions,
-            turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns else ChatTurnMapper.map(shown.map { it.second },
+            turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else ChatTurnMapper.map(shown.map { it.second },
                 boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }, toolReceipt = app.daiyu.android.ui.RetainedToolOutcomes.projectionReader(controller.database, shown.map { it.second }, controller::runState, controller::runStopping)),
+            }, toolReceipt = toolReceiptSnapshot?.projectionReader(controller::runState, controller::runStopping) ?: { _, _ -> null }),
                 controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
                 stopRequested = controlOwner?.let(controller::runStopping) == true),
             statusText = controller.problem ?: when { controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";

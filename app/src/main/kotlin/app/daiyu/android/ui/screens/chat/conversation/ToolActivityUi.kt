@@ -41,7 +41,7 @@ internal fun toolReceiptPresentation(disposition: ToolDisposition, liveOwner: Bo
         runStatus == RunStatus.STOPPED -> ToolActivityUi.STOPPED
         runStatus == RunStatus.INTERRUPTED -> ToolActivityUi.INTERRUPTED
         liveOwner && stopRequested && (state == WorkStepState.PENDING || activeCall) -> ToolActivityUi.STOPPING
-        disposition == ToolDisposition.UNKNOWN && liveOwner && activeCall &&
+        disposition in setOf(ToolDisposition.UNKNOWN, ToolDisposition.READY) && liveOwner && activeCall &&
             phase in setOf(ExecutionPhase.TOOL_EXECUTING, ExecutionPhase.WAITING_USER) ->
             if (pauseRequested) ToolActivityUi.PAUSING
             else if (phase == ExecutionPhase.WAITING_USER) ToolActivityUi.WAITING else ToolActivityUi.RUNNING

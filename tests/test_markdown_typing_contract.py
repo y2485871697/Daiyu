@@ -20,7 +20,7 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_exact_runtime_phase_updates_even_when_rows_are_reused(self):
         host = (APP / "MainActivity.kt").read_text().split("private fun publishChat(rowsChanged: Boolean", 1)[1].split("private fun requestScroll", 1)[0]
-        self.assertIn("ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns else", host)
+        self.assertIn("ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else", host)
         self.assertIn("val state = controlOwner?.let { controller.runState(it) }", host)
         self.assertIn("controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,", host)
         self.assertIn("stopRequested = controlOwner?.let(controller::runStopping) == true", host)

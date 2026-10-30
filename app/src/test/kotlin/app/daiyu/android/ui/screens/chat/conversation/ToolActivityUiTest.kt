@@ -30,6 +30,13 @@ class ToolActivityUiTest {
         assertEquals(ToolActivityUi.UNKNOWN, toolReceiptPresentation(ToolDisposition.IN_FLIGHT, false, ExecutionPhase.TOOL_EXECUTING, stopRequested = true).activity)
         assertEquals(ToolActivityUi.UNKNOWN, toolReceiptPresentation(ToolDisposition.IN_FLIGHT, true, ExecutionPhase.TERMINAL).activity)
     }
+    @Test fun exactActiveCallDoesNotRemainQueuedWhenTheWorkerSnapshotStillSaysReady() {
+        val running = toolReceiptPresentation(ToolDisposition.READY, true, ExecutionPhase.TOOL_EXECUTING, activeCall = true)
+        assertEquals(WorkStepState.PENDING, running.state)
+        assertEquals(ToolActivityUi.RUNNING, running.activity)
+        assertEquals(ToolActivityUi.QUEUED, toolReceiptPresentation(ToolDisposition.READY, true,
+            ExecutionPhase.TOOL_EXECUTING, activeCall = false).activity)
+    }
     @Test fun activeUnknownReceiptKeepsRunningUntilItsFinalReceiptArrives() {
         assertEquals(ToolActivityUi.RUNNING, toolReceiptPresentation(ToolDisposition.UNKNOWN, true,
             ExecutionPhase.TOOL_EXECUTING, activeCall = true).activity)

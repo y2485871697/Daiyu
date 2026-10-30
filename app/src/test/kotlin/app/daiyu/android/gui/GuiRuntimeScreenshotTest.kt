@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import app.daiyu.android.tasksurface.TaskSurfaceSelfTarget
 import android.os.Looper
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.concurrent.Executor
@@ -17,6 +18,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.RealObject
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.shadows.ShadowAccessibilityNodeInfo
@@ -33,6 +35,10 @@ class GuiRuntimeScreenshotTest {
     // A caller owns the returned window, not the node shadow's backing instance.
     @Implements(AccessibilityNodeInfo::class)
     class CopyingWindowNodeShadow : ShadowAccessibilityNodeInfo() {
+        @RealObject private lateinit var actual: AccessibilityNodeInfo
+        companion object { var refresh: ((AccessibilityNodeInfo) -> Boolean)? = null }
+        @Implementation public override fun refresh(): Boolean =
+            super.refresh() && (refresh?.invoke(actual) ?: true)
         @Implementation
         public override fun getWindow(): AccessibilityWindowInfo? =
             super.getWindow()?.let { AccessibilityWindowInfo.obtain(it) }
@@ -98,6 +104,27 @@ class GuiRuntimeScreenshotTest {
         var permissionEnabled = true
         var screenUnlocked = true
         var rootReads = 0
+        var stableNodes = false
+        var targetRefresh = true
+        var targetBounds = Rect(0, 0, 100, 100)
+        var descendants = 0
+        var wrapper = false
+        var targetChildren = 0
+        var refreshCount = 0
+        var onRefresh: ((Int) -> Unit)? = null
+        var childLabel = "更多"
+        var savedRoot: AccessibilityNodeInfo? = null
+        var savedTarget: AccessibilityNodeInfo? = null
+        var savedLabel: AccessibilityNodeInfo? = null
+        fun refresh(node: AccessibilityNodeInfo): Boolean {
+            val source = savedTarget?.takeIf { node == it } ?: return true
+            if (!targetRefresh) return false
+            refreshCount++; onRefresh?.invoke(refreshCount)
+            ReflectionHelpers.setField(shadowOf(node), "parent", ReflectionHelpers.getField<AccessibilityNodeInfo?>(shadowOf(source), "parent"))
+            node.text = source.text
+            node.setBoundsInScreen(targetBounds)
+            return true
+        }
         val callbacks = mutableListOf<Pair<(GuiCaptureFrame) -> Unit, (Int) -> Unit>>()
         override fun enabled(current: GuiAccessibilityService) = permissionEnabled
         override fun unlocked(current: GuiAccessibilityService) = screenUnlocked
@@ -122,9 +149,24 @@ class GuiRuntimeScreenshotTest {
                 shadowOf(this).setRefreshReturnValue(true)
                 shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; actionAccepted }
             }
-            val root = node(rootLabel).apply { isClickable = rootClickable }
-            shadowOf(root).addChild(node(label))
-            return root
+            val root = if (stableNodes) savedRoot ?: node(rootLabel).also { savedRoot = it } else node(rootLabel)
+            root.text = rootLabel; root.isClickable = rootClickable; root.packageName = pkg
+            ReflectionHelpers.setField(root, "mWindowId", windowId)
+            shadowOf(root).setAccessibilityWindowInfo(window)
+            if (!stableNodes || savedTarget == null) {
+                val target = node(if (wrapper) "" else label)
+                if (stableNodes) savedTarget = target
+                shadowOf(root).addChild(target)
+                if (wrapper) shadowOf(target).addChild(node(childLabel).also { if (stableNodes) savedLabel = it })
+                repeat(targetChildren) { shadowOf(target).addChild(node("target-child-$it")) }
+                repeat(descendants) { shadowOf(root).addChild(node("body-$it")) }
+            }
+            if (stableNodes) {
+                savedTarget!!.text = if (wrapper) "" else label
+                savedTarget!!.setBoundsInScreen(targetBounds)
+                savedLabel?.text = childLabel
+            }
+            return if (stableNodes) AccessibilityNodeInfo.obtain(root) else root
         }
         override fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit) {
             callbacks += success to failure
@@ -136,6 +178,7 @@ class GuiRuntimeScreenshotTest {
     @Before fun setUp() {
         originalAccess = GuiRuntime.access; originalEncoder = GuiRuntime.encoder
         platform = Platform(); worker = QueuedWorker()
+        CopyingWindowNodeShadow.refresh = platform::refresh
         GuiRuntime.access = platform; GuiRuntime.encoder = worker
         service = Robolectric.buildService(GuiAccessibilityService::class.java).create().get()
         GuiRuntime.connected(service)
@@ -149,6 +192,7 @@ class GuiRuntimeScreenshotTest {
         worker.runAll()
         GuiRuntime.disconnected(service)
         GuiRuntime.access = originalAccess; GuiRuntime.encoder = originalEncoder
+        CopyingWindowNodeShadow.refresh = null
     }
 
     private fun observe(): GuiObservation = (session.previewFromUser() as GuiResult.Value).value
@@ -172,6 +216,7 @@ class GuiRuntimeScreenshotTest {
     private fun openSelf(owner: Any = Any(), current: () -> Boolean = { true }): TaskSurfaceSelfTarget {
         val token = TaskSurfaceSelfTarget.foreground(service.packageName, owner, current)
         platform.pkg = service.packageName
+        platform.stableNodes = true
         openTarget(service.packageName, token, owner)
         return token
     }
@@ -459,6 +504,7 @@ class GuiRuntimeScreenshotTest {
         var admitted = true
         val token = TaskSurfaceSelfTarget.foreground(service.packageName, owner) { current }.guardedBy { admitted }
         platform.pkg = service.packageName
+        platform.stableNodes = true
         openTarget(service.packageName, token, owner)
         val observation = observe(); val action = approve(observation)
         admitted = false
@@ -541,6 +587,95 @@ class GuiRuntimeScreenshotTest {
         assertEquals(1, platform.nodeActions)
     }
 
+
+    @Test fun actualSelfContentEventsKeepAnUnchangedTargetOnALongTruncatedChat() {
+        listOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED).forEach { type ->
+            platform.savedRoot = null; platform.savedTarget = null
+            platform.descendants = 2000; platform.rootLabel = "streaming body"
+            openSelf()
+            val observation = observe(); assertTrue(observation.truncated)
+            val action = approve(observation)
+            service.onAccessibilityEvent(AccessibilityEvent.obtain(type).apply { packageName = service.packageName })
+            rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
+            val before = platform.nodeActions
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+            assertEquals(before + 1, platform.nodeActions)
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+            assertEquals(before + 1, platform.nodeActions)
+        }
+    }
+
+    @Test fun anIncompleteTargetSubtreeNeverUsesTheLongChatException() {
+        platform.targetChildren = 40
+        openSelf(); val observation = observe(); val action = approve(observation)
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun aChildSemanticChangeBetweenFirstValidationAndDeliveryStillRejects() {
+        platform.wrapper = true
+        openSelf(); val observation = observe(); val action = approve(observation)
+        platform.onRefresh = { count -> if (count == 2) platform.childLabel = "删除" }
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun reparentingTheOriginalTargetUnderANewAncestorIsNotAllowed() {
+        openSelf(); val observation = observe(); val action = approve(observation)
+        platform.savedTarget!!.let { target ->
+            val middle = AccessibilityNodeInfo.obtain().apply { packageName = service.packageName }
+            shadowOf(middle).addChild(target)
+        }
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun anEmptyWrapperCannotKeepItsGrantWhenItsChildActionChanges() {
+        platform.wrapper = true
+        openSelf(); val observation = observe(); val action = approve(observation)
+        platform.childLabel = "删除"
+        GuiRuntime.changed(service, contentOnly = true)
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        platform.childLabel = "更多"
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        assertNoActions()
+    }
+
+    @Test fun aDetachedOriginalHandleCannotBorrowAnIdenticalNewRoot() {
+        openSelf(); val observation = observe(); val action = approve(observation)
+        platform.savedRoot = null; platform.savedTarget = null
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        assertNoActions()
+    }
+
+    @Test fun aFailedRefreshDoesNotSearchForAReplacementOrRetry() {
+        openSelf(); val observation = observe(); val action = approve(observation)
+        platform.targetRefresh = false
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        platform.targetRefresh = true
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        assertNoActions()
+    }
+
+    @Test fun trueTargetMovementStillRetiresTheObservation() {
+        openSelf(); val observation = observe(); val action = approve(observation)
+        platform.targetBounds = Rect(0, 20, 100, 120)
+        service.onAccessibilityEvent(AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_SCROLLED).apply { packageName = service.packageName })
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
+        assertNoActions()
+    }
+
+    @Test fun hardSelfEventsCannotReviveAnOldGrantWhenThePageReturns() {
+        listOf(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_CLICKED, AccessibilityEvent.TYPE_VIEW_FOCUSED).forEach { type ->
+            openSelf(); val observation = observe(); val action = approve(observation)
+            service.onAccessibilityEvent(AccessibilityEvent.obtain(type).apply { packageName = service.packageName })
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+        }
+        assertNoActions()
+    }
+
     @Test fun selfStreamingContentDoesNotInvalidateAnUnchangedOriginalNode() {
         openSelf()
         val observation = observe(); val action = approve(observation)
@@ -588,7 +723,7 @@ class GuiRuntimeScreenshotTest {
         GuiRuntime.changed(service, contentOnly = true)
         rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
         platform.label = "different target"
-        rejected(GuiRuntime.action(session.lease, action), "TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED")
+        rejected(GuiRuntime.action(session.lease, action), "NODE_STALE")
         platform.label = "before"
         rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()

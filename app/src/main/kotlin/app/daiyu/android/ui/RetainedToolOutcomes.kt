@@ -2,6 +2,9 @@ package app.daiyu.android.ui
 
 import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.MessageBlock
+import app.daiyu.android.domain.RunStatus
+import app.daiyu.android.domain.runtime.ExecutionPhase
+import app.daiyu.android.domain.runtime.ToolDisposition
 import app.daiyu.android.domain.ToolInvocation
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.SQLiteRuntimeStore
@@ -15,39 +18,56 @@ internal object RetainedToolOutcomes {
     private data class Owner(val conversation: String, val run: String, val message: String)
     private data class Result(val invocation: ToolInvocation, val text: String?)
 
-    fun projectionReader(database: ConversationDatabase, messages: List<Message>,
-        liveState: (Message) -> ExecutionState? = { null },
-        stopping: (Message) -> Boolean = { false }): (Message, MessageBlock.Tool) -> ToolReceiptUi? {
-        val receipts = mutableMapOf<Owner, Map<Result, ToolReceiptUi>>()
-        for (physical in messages.filter { it.role == Message.ASSISTANT_ROLE &&
-            (it.blocks.any { block -> block is MessageBlock.Tool } ||
-                it.historySegments.any { segment -> segment.blocks.any { block -> block is MessageBlock.Tool } }) }) {
-            val snapshot = runCatching {
-                SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, physical.id.value)
-            }.getOrNull() ?: continue
-            if (snapshot.message.id != physical.id || snapshot.message.runId != physical.runId ||
-                snapshot.message.conversationId != physical.conversationId) continue
-            val current = liveState(physical)
-            val stopRequested = stopping(physical)
-            val results = snapshot.tools.map { record ->
-                val state = toolReceiptPresentation(record.disposition,
-                    liveOwner = current != null && physical.status == app.daiyu.android.domain.RunStatus.RUNNING,
-                    phase = current?.phase ?: snapshot.phase, pauseRequested = current?.pauseRequested == true,
-                    stopRequested = stopRequested, runStatus = physical.status,
-                    activeCall = record.invocation.id in current?.activeToolCalls.orEmpty())
-                Result(record.invocation, record.result) to state
-            }.toMap()
-            receipts[Owner(physical.conversationId.value, physical.runId.value, physical.id.value)] = results
+    internal data class Source(val conversation: String, val run: String, val message: String,
+        val status: RunStatus, val tools: List<MessageBlock.Tool>)
+    internal fun sources(messages: List<Message>): List<Source> = messages.filter { it.role == Message.ASSISTANT_ROLE }
+        .mapNotNull { message ->
+            val tools = (message.blocks + message.historySegments.flatMap { it.blocks }).filterIsInstance<MessageBlock.Tool>().distinct()
+            if (tools.isEmpty()) null else Source(message.conversationId.value, message.runId.value, message.id.value, message.status, tools)
         }
-        return { message, block ->
-            if (message.role != Message.ASSISTANT_ROLE) null else receipts[Owner(message.conversationId.value, message.runId.value, message.id.value)]
-                ?.get(Result(block.invocation, block.result))
+
+    internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>) {
+        fun projectionReader(liveState: (Message) -> ExecutionState? = { null }, stopping: (Message) -> Boolean = { false }):
+            (Message, MessageBlock.Tool) -> ToolReceiptUi? = { message, block ->
+            if (message.role != Message.ASSISTANT_ROLE) null else {
+                val disposition = records[Owner(message.conversationId.value, message.runId.value, message.id.value)]
+                    ?.get(Result(block.invocation, block.result))
+                disposition?.let {
+                    val current = liveState(message)
+                    toolReceiptPresentation(it, liveOwner = current != null && message.status == RunStatus.RUNNING,
+                        phase = current?.phase ?: ExecutionPhase.IDLE,
+                        pauseRequested = current?.pauseRequested == true, stopRequested = stopping(message), runStatus = message.status,
+                        activeCall = block.invocation.id in current?.activeToolCalls.orEmpty())
+                }
+            }
+        }
+        companion object {
+            fun read(database: ConversationDatabase, messages: List<Message>): Snapshot {
+                val records = buildMap {
+                    for (source in sources(messages)) {
+                        val snapshot = runCatching {
+                            SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, source.message)
+                        }.getOrNull() ?: continue
+                        if (snapshot.message.id.value != source.message || snapshot.message.runId.value != source.run ||
+                            snapshot.message.conversationId.value != source.conversation) continue
+                        put(Owner(source.conversation, source.run, source.message), snapshot.tools.associate {
+                            Result(it.invocation, it.result) to it.disposition
+                        })
+                    }
+                }
+                return Snapshot(records)
+            }
         }
     }
 
+    fun projectionReader(database: ConversationDatabase, messages: List<Message>,
+        liveState: (Message) -> ExecutionState? = { null },
+        stopping: (Message) -> Boolean = { false }): (Message, MessageBlock.Tool) -> ToolReceiptUi? =
+        Snapshot.read(database, messages).projectionReader(liveState, stopping)
+
     fun stateReader(database: ConversationDatabase, messages: List<Message>): (Message, MessageBlock.Tool) -> WorkStepState? {
         val projection = projectionReader(database, messages, liveState = { message ->
-            if (message.status == app.daiyu.android.domain.RunStatus.RUNNING) ExecutionState() else null
+            if (message.status == RunStatus.RUNNING) ExecutionState() else null
         })
         return { message, block -> projection(message, block)?.state }
     }

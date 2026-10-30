@@ -261,13 +261,25 @@ internal class SQLiteRuntimeStore private constructor(
             read(db, messageId)?.let { it.value to it.recoverySourceOwner }
 
         private fun read(db: SQLiteDatabase, messageId: String): Stored? {
-            val metadata = db.rawQuery("SELECT conversation_id,run_id,owner,revision,phase,process_owner,length(payload) FROM runtime_checkpoints WHERE message_id=?",
-                arrayOf(messageId)).use { c -> if (!c.moveToFirst()) null else {
-                require(c.getType(3) == android.database.Cursor.FIELD_TYPE_INTEGER)
-                val size = c.getLong(6); require(size in 1..(64L * 1024 * 1024))
-                listOf(c.getString(0), c.getString(1), c.getString(2), c.getLong(3).toString(), c.getString(4), c.getString(5), size.toString())
-            } } ?: return null
-            val payload = requireNotNull(SQLiteText.read(db, "runtime_checkpoints", "payload", "message_id", messageId))
+            val ownTransaction = !db.inTransaction()
+            if (ownTransaction) {
+                // Keep every payload chunk in one snapshot without taking a writer lock on API35+.
+                if (android.os.Build.VERSION.SDK_INT >= 35) db.beginTransactionReadOnly()
+                else db.beginTransactionNonExclusive()
+            }
+            val raw = try {
+                val metadata = db.rawQuery("SELECT conversation_id,run_id,owner,revision,phase,process_owner,length(payload) FROM runtime_checkpoints WHERE message_id=?",
+                    arrayOf(messageId)).use { c -> if (!c.moveToFirst()) null else {
+                    require(c.getType(3) == android.database.Cursor.FIELD_TYPE_INTEGER)
+                    val size = c.getLong(6); require(size in 1..(64L * 1024 * 1024))
+                    listOf(c.getString(0), c.getString(1), c.getString(2), c.getLong(3).toString(), c.getString(4), c.getString(5), size.toString())
+                } } ?: return null
+                val payload = requireNotNull(SQLiteText.read(db, "runtime_checkpoints", "payload", "message_id", messageId))
+                metadata to payload
+            } finally {
+                if (ownTransaction) db.endTransaction()
+            }
+            val (metadata, payload) = raw
             val value = RunCheckpointCodec.decode(payload)
             val json = org.json.JSONObject(payload)
             val recoveryOwner = if (json.has("recovery_source_owner")) json.getString("recovery_source_owner") else null

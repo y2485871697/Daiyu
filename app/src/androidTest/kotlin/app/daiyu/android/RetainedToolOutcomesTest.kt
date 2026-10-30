@@ -97,4 +97,41 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         assertNull(RetainedToolOutcomes.reader(database, listOf(stored))(stored, tool))
     }
 
+
+    fun testSixSettledReceiptsRemainStableWhileOnlyTheReplyAndRevisionGrow() {
+        val conversation = database.create("default")
+        val user = Message(MessageId("six-user"), conversation.id, RunId("six-run"), Message.USER_ROLE,
+            listOf(MessageBlock.Text("question", "read")), RunStatus.COMPLETED)
+        val tools = (0 until 6).map { index ->
+            val call = ToolInvocation(ToolCallId("six-$index"), "screen", "{\"operation\":\"observe\",\"index\":$index}")
+            ToolRecord(call, if (index < 2) ToolDisposition.SUCCEEDED else ToolDisposition.NOT_EXECUTED, "receipt-$index")
+        }
+        val assistant = user.copy(id = MessageId("six-assistant"), role = Message.ASSISTANT_ROLE,
+            status = RunStatus.RUNNING, blocks = tools.map { MessageBlock.Tool(it.invocation, it.result) })
+        val expected = listOf(WorkStepState.OK, WorkStepState.OK) + List(4) { WorkStepState.NOT_EXECUTED }
+        SQLiteRuntimeStore.acquire(database).use { runtime ->
+            runtime.recoverPending(); database.send(user, assistant)
+            var physical = assistant
+            repeat(12) { index ->
+                val next = assistant.copy(blocks = assistant.blocks + MessageBlock.Text("reply", "数🙂".repeat(index * 1000)))
+                val checkpoint = RunCheckpoint(next, listOf(user), ExecutionPhase.STREAMING, tools,
+                    owner = "six-owner", revision = index + 1L)
+                assertEquals(checkpoint, RunCheckpointCodec.decode(RunCheckpointCodec.encode(checkpoint)))
+                runtime.commitCheckpoint(checkpoint)
+                // UI rows may still show the neighboring revision; exact completed tool evidence is unchanged.
+                for (shown in listOf(physical, next)) {
+                    val receipt = RetainedToolOutcomes.projectionReader(database, listOf(shown),
+                        liveState = { ExecutionState(ExecutionPhase.TOOL_EXECUTING, activeToolCalls = setOf(ToolCallId("other"))) })
+                    val turn = ChatTurnMapper.map(listOf(shown), toolReceipt = receipt).single() as ChatTurnUi.Assistant
+                    assertEquals(expected, turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
+                    assertNull(receipt(shown.copy(runId = RunId("other-run")), shown.blocks.filterIsInstance<MessageBlock.Tool>().first()))
+                }
+                physical = next
+            }
+        }
+        database.close(); database = ConversationDatabase(scoped)
+        assertEquals(expected, project(database.messages(conversation.id).last().second)
+            .workProcess!!.segments.flatMap { it.steps }.map { it.state })
+    }
+
 }

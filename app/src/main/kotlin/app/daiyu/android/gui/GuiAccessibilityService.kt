@@ -75,7 +75,9 @@ class GuiAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
                 AccessibilityEvent.TYPE_VIEW_SCROLLED or AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or
                 AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) != 0) GuiRuntime.changed(this,
-                    contentOnly = event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+                    contentOnly = event.eventType in setOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                        AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+                        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) &&
                         event.packageName?.toString() == packageName)
         // Do not retain event text or continuously collect a UI tree.
     }
@@ -221,6 +223,9 @@ internal object GuiRuntime {
     }
     private val retained = linkedMapOf<Int, AccessibilityNodeInfo>()
     private val identities = linkedMapOf<Int, List<String>?>()
+    private data class LocalNode(val node: GuiNode, val context: NodeContext)
+    private data class LocalTarget(val subtree: List<LocalNode>, val ancestors: List<Int>)
+    private val selfTargets = mutableMapOf<Int, LocalTarget>()
     private fun identity(node: AccessibilityNodeInfo): List<String>? {
         val fields = listOf(node.text, node.contentDescription, node.className, node.viewIdResourceName)
         if (fields.any { (it?.length ?: 0) > 512 }) return null
@@ -268,8 +273,85 @@ internal object GuiRuntime {
     @Suppress("DEPRECATION") private fun clearNodes() {
         screenshotBinding = null
         contentChanged = false
-        retained.values.forEach { it.recycle() }; retained.clear(); identities.clear()
+        retained.values.forEach { it.recycle() }; retained.clear(); identities.clear(); selfTargets.clear()
     }
+    /** Capture only complete target subtrees from the original observation, never from a later tree. */
+    private fun retainSelfTargets(tree: TreeSample) {
+        val children = tree.nodes.groupBy { it.parent }
+        for (target in tree.nodes.filter { it.clickable || it.longClickable || it.scrollable || it.editable }) {
+            val subtree = mutableListOf<LocalNode>()
+            var chars = 0
+            fun collect(node: GuiNode, parent: Int?, depth: Int): Boolean {
+                if (depth > 4 || subtree.size >= 32 || node.password) return false
+                val context = tree.contexts[node.id]
+                val fields = identities[node.id] ?: return false
+                if (fields != listOf(node.text, node.description, node.className, node.viewId)) return false
+                chars += fields.sumOf { it.length }
+                if (chars > 4096 || context.packageName != tree.packageName || context.windowId != tree.windowId) return false
+                val descendants = children[node.id].orEmpty()
+                if (descendants.size != context.children) return false
+                val id = subtree.size
+                subtree += LocalNode(node.copy(id = id, parent = parent), context)
+                return descendants.all { collect(it, id, depth + 1) }
+            }
+            if (!collect(target, null, 0)) continue
+            val ancestors = mutableListOf<Int>()
+            var parent = target.parent
+            while (parent != null && ancestors.size < 16) {
+                ancestors += parent
+                parent = tree.nodes[parent].parent
+            }
+            val chain = listOf(target.id) + ancestors
+            if (parent != null || chain.last() != 0 || chain.indices.any { i ->
+                chain.take(i).any { retained[it] == retained[chain[i]] }
+            }) continue
+            selfTargets[target.id] = LocalTarget(subtree, ancestors)
+        }
+    }
+
+    /** An exact framework handle anchored to the original ancestors replaces whole-chat scanning for self only. */
+    @Suppress("DEPRECATION")
+    private fun validateSelfTarget(lease: GuiLeaseGate.Lease, id: Int, root: AccessibilityNodeInfo): GuiResult<Unit> {
+        fun reject() = rejectChangedTarget(lease, "NODE_STALE")
+        val expected = selfTargets[id] ?: return reject()
+        val target = retained[id] ?: return reject()
+        try {
+            if (!target.refresh()) return reject()
+            val actual = mutableListOf<LocalNode>()
+            var chars = 0
+            fun collect(node: AccessibilityNodeInfo, parent: Int?, depth: Int): Boolean {
+                if (depth > 4 || actual.size >= 32 || node.isPassword) return false
+                val fields = identity(node) ?: return false
+                chars += fields.sumOf { it.length }
+                if (chars > 4096 || node.childCount > 32) return false
+                val pkg = node.packageName?.toString().orEmpty()
+                if (pkg.length > 256) return false
+                val bounds = Rect(); node.getBoundsInScreen(bounds)
+                val index = actual.size
+                actual += LocalNode(GuiNode(index, parent, GuiBounds(bounds.left, bounds.top, bounds.right, bounds.bottom),
+                    fields[0], fields[1], fields[2], fields[3], node.isClickable, node.isLongClickable, node.isScrollable,
+                    node.isEditable, node.isEnabled, node.isPassword), NodeContext(pkg, node.windowId, node.childCount, node.isVisibleToUser))
+                for (childId in 0 until node.childCount) {
+                    val child = node.getChild(childId) ?: return false
+                    try { if (!collect(child, index, depth + 1)) return false } finally { child.recycle() }
+                }
+                return true
+            }
+            if (!collect(target, null, 0) || actual != expected.subtree || !target.isEnabled || !target.isVisibleToUser) return reject()
+            var link = target
+            try {
+                for (ancestor in expected.ancestors) {
+                    val parent = link.parent ?: return reject()
+                    if (link !== target) link.recycle()
+                    link = parent
+                    if (link != retained[ancestor] || link.windowId != root.windowId || link.packageName != root.packageName) return reject()
+                }
+                if (link != root) return reject()
+            } finally { if (link !== target) link.recycle() }
+            return GuiResult.Value(Unit)
+        } catch (_: Exception) { return reject() }
+    }
+
     private fun screenRejection(): GuiResult.Rejected? {
         val current = service ?: return GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
         val enabled = try { access.enabled(current) } catch (_: Exception) { false }
@@ -430,12 +512,12 @@ internal object GuiRuntime {
         }
         val original = action.nodeId?.let { id -> observed.nodes.singleOrNull { it.id == id } }
         if (action.nodeId != null && original == null) { root.recycle(); return GuiResult.Rejected("NODE_NOT_IN_OBSERVATION") }
+        if (isSelfLease(lease) && action.nodeId != null) {
+            return try { validateSelfTarget(lease, action.nodeId, root) } finally { root.recycle() }
+        }
         var count = 0
         var matches = 0
-        // A self-chat observation may omit off-target output. The CURRENT bounded tree
-        // must still be complete and contain exactly one unchanged target; delivery also
-        // refreshes only the originally retained Android node, never the search match.
-        var complete = !observed.truncated || isSelfLease(lease) && original != null
+        var complete = !observed.truncated
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
             try {
                 if (++count > 128 || depth > 16) { complete = false; return }
@@ -526,6 +608,7 @@ internal object GuiRuntime {
         val sampled = sampleTree(lease, retain = true)
         if (sampled !is GuiResult.Value) { clearNodes(); return sampled as GuiResult.Rejected }
         val tree = sampled.value
+        if (isSelfLease(lease)) retainSelfTargets(tree)
         val observation = GuiObservation(UUID.randomUUID().toString(), tree.packageName, tree.windowId, startGeneration,
             SystemClock.elapsedRealtime(), tree.nodes, tree.truncated)
         val published = gate.publish(lease, observation)
@@ -586,6 +669,10 @@ internal object GuiRuntime {
             if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
             val active = fetched.value
             val sameWindow = try {
+                if (isSelfLease(lease) && action.nodeId != null) {
+                    val checked = validateSelfTarget(lease, action.nodeId, active)
+                    if (checked is GuiResult.Rejected) return checked
+                }
                 active.windowId == observed.windowId && active.packageName?.toString().orEmpty() == observed.packageName
             } finally { active.recycle() }
             if (!sameWindow) return rejectChangedTarget(lease, "OBSERVATION_STALE")

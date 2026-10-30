@@ -25,7 +25,7 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('testReorderedMixedTextKeepsEachPublishedBodyWithItsItemIdentity', test)
     def test_reasoning_sessions_rebaseline_only_at_visibility_boundaries(self):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        self.assertIn('val revealEnabled = !manuallyCollapsed && hasReportedReasoningText(text)', source)
+        self.assertIn('val revealEnabled = !manuallyCollapsed && (!stopped || currentOverride == true) && hasReportedReasoningText(text)', source)
         self.assertIn('val reveal = key(revealEnabled)', source)
         self.assertIn('streaming = isThinking && revealEnabled', source)
         self.assertIn('enabled = revealEnabled', source)
@@ -58,14 +58,14 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('ComposerReferences(raw).text.isEmpty()', shortcut)
         self.assertIn('assertEquals("", projection.text)', shortcut)
         self.assertIn('assertEquals(0, fixture.opens.get())', shortcut)
-    def test_legacy_answer_waits_for_workflow_exit_and_stays_released(self):
+    def test_legacy_answer_accepts_ready_running_workflow_and_stays_released(self):
         source = (CHAT / 'ChatMessageList.kt').read_text().split('private fun AssistantTextContent', 1)[1]
         self.assertIn('onDisclosureHandoffReady = { ready ->', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
-        self.assertIn('sequence.ready(reasoning) && (expandedOverride == true || fullyClosed)', work)
+        self.assertIn('reasoningReady && (work.running || currentOverride == true || fullyClosed)', work)
         self.assertIn('val canReleaseWithoutWorkflow = reasoningReady && (work == null || workReasoning.isEmpty())', source)
         self.assertIn('answerReleased || canReleaseWithoutWorkflow', source)
         self.assertIn('if (ready && reasoningReady && turn.finalText.isNotBlank()) answerReleased = true', source)
-        self.assertIn('testExplicitlyOpenLegacyWorkflowDoesNotBlockItsNewAnswer', (DEVICE / 'ReasoningWorkflowTest.kt').read_text())
+        self.assertIn('testTerminalAutoCollapseAndManualReopenDoNotBlockTheAnswer', (DEVICE / 'ReasoningWorkflowTest.kt').read_text())
 if __name__ == '__main__':
     unittest.main()

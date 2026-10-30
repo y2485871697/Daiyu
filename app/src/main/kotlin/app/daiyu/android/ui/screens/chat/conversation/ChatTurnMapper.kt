@@ -118,17 +118,22 @@ object ChatTurnMapper {
             phase == ExecutionPhase.WAITING_USER -> ToolActivityUi.WAITING
             else -> null
         }
-        val streaming = if (phase == null || phase == ExecutionPhase.STREAMING) last else -1
+        val streaming = if (!stopRequested && (phase == null || phase == ExecutionPhase.STREAMING)) last else -1
+        fun stopping(turn: ChatTurnUi.Assistant): Boolean =
+            stopRequested && live != null && turn.ownerMessageId == live.id.value &&
+                turn.listKey == TurnOwner(live.conversationId.value, live.runId.value, turn.id).listKey(turn.segmentIndex) ||
+                turn.stopRequested && turn.status == RunStatus.RUNNING && live == null
         if (turns.withIndex().none { (index, turn) ->
-                turn is ChatTurnUi.Assistant && (turn.isStreaming != (index == streaming) ||
+                turn is ChatTurnUi.Assistant && (turn.isStreaming != (index == streaming) || turn.stopRequested != stopping(turn) ||
                     turn.workProcess?.controlActivity != controlActivity.takeIf { index == last && turn.workProcess != null })
             }) return turns
         return turns.mapIndexed { index, turn ->
             if (turn is ChatTurnUi.Assistant) {
                 val activity = controlActivity.takeIf { index == last }
                 val work = turn.workProcess?.let { if (it.controlActivity == activity) it else it.copy(controlActivity = activity) }
-                if (turn.isStreaming == (index == streaming) && work === turn.workProcess) turn
-                else turn.copy(isStreaming = index == streaming, workProcess = work)
+                val stopped = stopping(turn)
+                if (turn.isStreaming == (index == streaming) && work === turn.workProcess && turn.stopRequested == stopped) turn
+                else turn.copy(isStreaming = index == streaming, workProcess = work, stopRequested = stopped)
             } else turn
         }
     }
@@ -219,7 +224,7 @@ object ChatTurnMapper {
         dedicatedTool: (Message, MessageBlock.Tool) -> String?,
         activity: (Message, MessageBlock.Tool) -> ToolActivityUi?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
-        val hasWorkflow = hasTools
+        val hasWorkflow = hasTools || message.status == RunStatus.STOPPED && message.reportedReasoning.isNotEmpty()
         val lastText = workflowFinalTextIndex(message)
         val finalText = if (hasWorkflow) {
             (message.blocks.getOrNull(lastText) as? MessageBlock.Text)?.text.orEmpty()

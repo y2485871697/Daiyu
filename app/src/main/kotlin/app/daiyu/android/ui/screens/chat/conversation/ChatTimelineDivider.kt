@@ -82,16 +82,18 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
             else "${entry.agentLabel} · 已压缩 ${entry.messages} 条消息"
         is ChatTimelineEntry.Reconnect -> reconnectLabel(entry.status, elapsed)
         is ChatTimelineEntry.ContextLimit -> "上下文超限"
+        is ChatTimelineEntry.Stopped -> "已停止"
     }
+    val hasDetails = entry !is ChatTimelineEntry.ContextLimit && entry !is ChatTimelineEntry.Stopped
     val title = if (entry is ChatTimelineEntry.Compression && entry.failure == null) "压缩摘要" else "错误详情"
     val line = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .5f)
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     Row(Modifier.fillMaxWidth().alpha(alpha).testTag("timeline:${entry.id}").padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f).height(.5.dp).background(line).testTag("timeline-line-left:${entry.id}"))
-        Row(Modifier.clip(RoundedCornerShape(8.dp)).clickable(
-            interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = entry !is ChatTimelineEntry.ContextLimit, onClick = { showDetails = true })
-            .semantics { contentDescription = if (entry is ChatTimelineEntry.ContextLimit) label else "$label. $title" }.padding(horizontal = 8.dp, vertical = 2.dp),
+        Row(Modifier.clip(RoundedCornerShape(8.dp)).then(if (entry is ChatTimelineEntry.Stopped) Modifier else Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = hasDetails, onClick = { showDetails = true }))
+            .semantics { contentDescription = if (hasDetails) "$label. $title" else label }.padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (entry is ChatTimelineEntry.Compression) {
                 Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(12.dp), tint = color)
@@ -102,10 +104,10 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
         }
         Box(Modifier.weight(1f).height(.5.dp).background(line).testTag("timeline-line-right:${entry.id}"))
     }
-    if (showDetails && entry !is ChatTimelineEntry.ContextLimit) {
+    if (showDetails && hasDetails) {
         val summary = when (entry) {
             is ChatTimelineEntry.Compression -> entry.failure ?: entry.summary
-            is ChatTimelineEntry.ContextLimit -> ""
+            is ChatTimelineEntry.ContextLimit, is ChatTimelineEntry.Stopped -> ""
             is ChatTimelineEntry.Reconnect -> {
                 val legacy = app.daiyu.android.domain.ModelFailure.entries.firstOrNull { it.name == entry.reason }
                 legacy?.let { app.daiyu.android.model.reconnect.reconnectErrorDetails(it) } ?: entry.reason

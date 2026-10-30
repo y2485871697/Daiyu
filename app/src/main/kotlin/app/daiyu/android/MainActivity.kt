@@ -6857,18 +6857,21 @@ class MainActivity : ComponentActivity() {
             !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
         val allowed = composerAvailable && !controller.dataBusy
         val messageEditBlocked = inlineMessageEditor?.let { !messageEditTargetCurrent(it) } == true
-        val visibleTimeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty()
+        val visibleTimeline = app.daiyu.android.timeline.withStoppedRuns(
+            shown.map { it.second }, timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty())
         val visibleCompressions = controller.compressionActivities.filter { it.conversationId == selected?.id?.value }
-        val workflowBoundaries = visibleTimeline.map { it.anchor.listKey }.toSet() +
+        val workflowBoundaries = visibleTimeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped }
+            .map { it.anchor.listKey }.toSet() +
             app.daiyu.android.timeline.compressionActivitiesByAnchor(visibleCompressions, visibleTimeline).keys.filterNotNull()
-        val oldBoundaries = chatState.timeline.map { it.anchor.listKey }.toSet() +
+        val oldBoundaries = chatState.timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped }
+            .map { it.anchor.listKey }.toSet() +
             app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
         val receiptsReady = prepareToolReceipts()
         val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries)
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             scrollRequest = scrollRequest,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
-            timeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty(),
+            timeline = visibleTimeline,
             compressionActivity = null,
             compressionActivities = visibleCompressions,
             turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else ChatTurnMapper.map(shown.map { it.second },

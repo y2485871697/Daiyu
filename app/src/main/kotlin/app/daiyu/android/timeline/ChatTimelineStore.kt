@@ -48,6 +48,9 @@ sealed interface ChatTimelineEntry {
     data class ContextLimit(override val id: String, override val anchor: TimelineAnchor,
         override val created: Long, val estimatedTokens: Long, val windowTokens: Long,
         val budgetTokens: Long, val agentLabel: String = "主代理") : ChatTimelineEntry
+    /** Derived from the durable message status; never stored as a timeline wire event. */
+    data class Stopped(override val id: String, override val anchor: TimelineAnchor,
+        override val created: Long) : ChatTimelineEntry
     data class Reconnect(override val id: String, override val anchor: TimelineAnchor,
         override val created: Long, val status: String, val elapsedMs: Long, val reason: String,
         val round: Int, val model: String) : ChatTimelineEntry
@@ -64,6 +67,7 @@ internal object ChatTimelineStore {
         is ChatTimelineEntry.Compression -> "compression"
         is ChatTimelineEntry.Reconnect -> "reconnect"
         is ChatTimelineEntry.ContextLimit -> "context_limit"
+        is ChatTimelineEntry.Stopped -> error("display_only_timeline_entry")
     }
     fun contextLimit(checkpoint: app.daiyu.android.domain.runtime.RunCheckpoint,
         agentLabel: String = "主代理", anchor: TimelineAnchor? = null): ChatTimelineEntry.ContextLimit? =
@@ -103,6 +107,7 @@ internal object ChatTimelineStore {
     fun encode(entry: ChatTimelineEntry): JSONObject = JSONObject().put("conversation", entry.anchor.conversationId)
         .put("run", entry.anchor.runId).put("message", entry.anchor.messageId).put("segment", entry.anchor.segment)
         .apply { when (entry) {
+            is ChatTimelineEntry.Stopped -> error("display_only_timeline_entry")
             is ChatTimelineEntry.Compression -> {
                 put("kind", "compression"); put("summary", entry.summary); put("messages", entry.messages)
                 put("agentLabel", entry.agentLabel); put("failure", entry.failure ?: JSONObject.NULL)

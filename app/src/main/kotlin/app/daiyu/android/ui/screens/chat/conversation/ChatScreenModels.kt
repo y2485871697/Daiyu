@@ -77,12 +77,14 @@ sealed interface ChatTurnUi {
         val reportedReasoning: List<app.daiyu.android.domain.ReportedReasoning> = emptyList(),
         val assistantIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null,
         val isStreaming: Boolean = false,
+        val stopRequested: Boolean = false,
         /** Exact presentation aliases; persisted/action segment identities are unchanged. */
         val sourceListKeys: List<String> = emptyList(),
         val sourceSegmentIndices: List<Int> = emptyList(),
     ) : ChatTurnUi {
         /** Reply actions address the final source, never the stable group identity. */
         val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey
+        val reasoningStopped: Boolean get() = stopRequested || status == RunStatus.STOPPED
     }
 }
 

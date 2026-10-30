@@ -29,6 +29,20 @@ import kotlin.math.abs
 
 class ChatTimelineDividerTest : WiredActivityTestCase() {
     private val anchor = TimelineAnchor("conversation", "run", "message", 0)
+    fun testStoppedRunIsAPlainNonClickableDividerWithoutErrorDetails() {
+        val entry = ChatTimelineEntry.Stopped("manual-stop", anchor, 1L)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ChatTimelineDivider(entry)
+        } } }
+        awaitUniqueTag("timeline:manual-stop")
+        awaitVisualIdle()
+        ui.onNodeWithText("已停止").assertIsDisplayed().assertHasNoClickAction()
+        ui.onNodeWithContentDescription("已停止").assertHasNoClickAction()
+        ui.onNodeWithText("已停止").performTouchInput { click() }
+        ui.onNodeWithText("错误详情").assertDoesNotExist()
+        ui.onNodeWithTag("timeline-details").assertDoesNotExist()
+    }
+
     fun testBothTimelineLinesUseReadableThemeColorWithoutChangingTheirGeometry() {
         val entry = ChatTimelineEntry.Compression("contrast", anchor, 1L, "summary", null, 49, null, null)
         for (dark in listOf(false, true)) for (custom in listOf(false, true)) {

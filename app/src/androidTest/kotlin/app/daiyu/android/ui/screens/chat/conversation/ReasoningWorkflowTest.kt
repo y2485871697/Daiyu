@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -129,9 +130,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
             mainThread { reported = reported.copy(elapsedMillis = 5_400L, activeSinceNanos = null) }
             ui.mainClock.advanceTimeBy(300)
-            assertDisclosure("work-process-header", expanded = false)
-            ui.onNodeWithTag("work-process-header").performClick()
-            ui.mainClock.advanceTimeBy(300)
+            assertDisclosure("work-process-header", expanded = true)
             ui.onNodeWithTag("reasoning-step-state:r1", useUnmergedTree = true).assert(SemanticsMatcher.expectValue(
                 androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已思考"))
             ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
@@ -183,10 +182,10 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                     reportedReasoning = tail.reportedReasoning.map { it.frozen() }))) }
             awaitFrame {
                 ui.onNodeWithText("answer", useUnmergedTree = true).isDisplayed() &&
-                    ui.onAllNodesWithText("first summary", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+                    ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
             }
             ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
-            ui.onNodeWithText("first summary", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
             ui.onNodeWithText("second summary", useUnmergedTree = true).assertDoesNotExist()
             ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             mainThread { source = source.copy(status = RunStatus.COMPLETED,
@@ -208,20 +207,22 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testToolOnlyRunningFlowStartsCollapsedAndManualStatePersists() {
+    fun testRunningFlowStartsExpandedAndTerminalResetsOnlyTheOuterDisclosure() {
         var source by mutableStateOf(message(listOf(tool("t1")), emptyList()).copy(status = RunStatus.RUNNING))
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(mapped(source), ChatScreenActions(), toolContent = { Text("unique tool detail") })
         } } }
         awaitHeader()
-        ui.onNodeWithTag("tool-step:t1").assertDoesNotExist()
-        ui.onNodeWithTag("work-process-header").performClick()
+        assertDisclosure("work-process-header", expanded = true)
+        ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
         ui.onNodeWithText("unique tool detail").assertDoesNotExist()
         ui.onNodeWithTag("tool-step-header:t1").performClick()
         ui.onNodeWithText("unique tool detail").assertIsDisplayed()
         ui.onNodeWithTag("tool-step-header:t1").performClick()
         ui.onNodeWithTag("tool-step-header:t1").performClick()
         ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithTag("work-process-header").performClick()
+        assertDisclosure("work-process-header", expanded = true)
         mainThread { source = source.copy(status = RunStatus.COMPLETED) }
         ui.waitUntil(5_000) { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
             androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
@@ -230,6 +231,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
         })
         ui.waitUntil(5_000) { ui.onAllNodesWithText("unique tool detail").fetchSemanticsNodes().isEmpty() }
+        mainThread { source = source.copy(error = "updated terminal receipt") }
+        assertDisclosure("work-process-header", expanded = true)
     }
 
     fun testMixedContentKeepsDisclosureAcrossPrefixChangesAndCollapsesOnlyAtTerminal() {
@@ -308,8 +311,6 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         awaitHeader()
         ui.onNodeWithText("工作流程").assertIsDisplayed()
         ui.onNodeWithText("已完成1步 · 执行中").assertIsDisplayed()
-        assertDisclosure("work-process-header", expanded = false)
-        ui.onNodeWithTag("work-process-header").performClick()
         assertDisclosure("work-process-header", expanded = true)
         ui.onNodeWithTag("work-process-header").performClick()
         assertDisclosure("work-process-header", expanded = false)
@@ -375,15 +376,144 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onNodeWithText("已完成3步 · 1步失败 · 1步待确认").assertDoesNotExist()
         assertDisclosure("work-process-header", expanded = false)
     }
-    fun testToolOnlyRunningWorkflowStartsCollapsed() {
+    fun testToolOnlyRunningWorkflowStartsExpanded() {
         val turn = mapped(message(listOf(tool("t1")), emptyList()).copy(status = RunStatus.RUNNING)).copy(isStreaming = true)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
         ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
-            androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
-        ui.onNodeWithTag("tool-step:t1").assertDoesNotExist()
+            androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+        ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
+        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher("leaf remains collapsed") {
+            it.config[SemanticsProperties.StateDescription].endsWith("已折叠")
+        })
+    }
+
+    fun testStoppingBeforeAnyToolKeepsReasoningInsideTheCollapsedWorkflow() {
+        prepare()
+        var source by mutableStateOf(message(emptyList(), listOf(
+            ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))).copy(status = RunStatus.RUNNING))
+        var requested by mutableStateOf(false)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val turn = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(source)), source,
+                stopRequested = requested).single() as ChatTurnUi.Assistant
+            AssistantTurn(turn, ChatScreenActions())
+        } } }
+        val owner = mapped(source).listKey
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("reported-reasoning-content:$owner").fetchSemanticsNodes().isNotEmpty() }
+        mainThread { requested = true }
+        ui.onNodeWithTag("reported-reasoning-content:$owner").assertDoesNotExist()
+        mainThread { source = source.copy(status = RunStatus.STOPPED,
+            reportedReasoning = source.reportedReasoning.map { it.frozen() }) }
+        awaitHeader()
+        assertDisclosure("work-process-header", expanded = false)
+        ui.onNodeWithTag("reported-reasoning:$owner").assertDoesNotExist()
+        ui.onNodeWithText("first summary").assertDoesNotExist()
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithTag("work-reasoning:r1").assertIsDisplayed()
+        ui.onNodeWithTag("reported-reasoning-header:$owner:reasoning:r1").performClick()
+        ui.onNodeWithText("first summary").assertIsDisplayed()
+    }
+
+    fun testStoppedReasoningNeverRestoresAPreStopExpandedOverride() {
+        prepare()
+        var mounted by mutableStateOf(true)
+        var stopped by mutableStateOf(false)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val holder = rememberSaveableStateHolder()
+            if (mounted) holder.SaveableStateProvider("reasoning-state") {
+                ReportedReasoningCard("restored-stop", listOf(ReportedReasoning("r1", "first summary", 0L, 1L)),
+                    allowLiveTiming = true, stopped = stopped)
+            }
+        } } }
+        val header = "reported-reasoning-header:restored-stop"
+        ui.onNodeWithTag(header).performClick()
+        ui.onNodeWithTag(header).performClick()
+        assertDisclosure(header, expanded = true)
+        mainThread { mounted = false }
+        ui.onNodeWithTag(header).assertDoesNotExist()
+        mainThread { stopped = true; mounted = true }
+        assertDisclosure(header, expanded = false)
+        ui.onNodeWithTag(header).performClick()
+        assertDisclosure(header, expanded = true)
+        mainThread { mounted = false }
+        ui.onNodeWithTag(header).assertDoesNotExist()
+        mainThread { mounted = true }
+        assertDisclosure(header, expanded = true)
+    }
+
+    fun testTerminalWorkflowRestoresOnlyAnOverrideFromItsCurrentPhase() {
+        var mounted by mutableStateOf(true)
+        var running by mutableStateOf(true)
+        val step = mapped(message(listOf(tool("t1")), emptyList())).workProcess!!.segments.single().steps.single()
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val holder = rememberSaveableStateHolder()
+            if (mounted) holder.SaveableStateProvider("workflow-state") {
+                WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "已完成", running), "restored-flow")
+            }
+        } } }
+        awaitHeader()
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithTag("work-process-header").performClick()
+        assertDisclosure("work-process-header", expanded = true)
+        mainThread { mounted = false }
+        ui.onNodeWithTag("work-process-header").assertDoesNotExist()
+        mainThread { running = false; mounted = true }
+        assertDisclosure("work-process-header", expanded = false)
+        ui.onNodeWithTag("work-process-header").performClick()
+        mainThread { mounted = false }
+        ui.onNodeWithTag("work-process-header").assertDoesNotExist()
+        mainThread { mounted = true }
+        assertDisclosure("work-process-header", expanded = true)
+    }
+
+    fun testDefaultOpenWorkflowReleasesTheAnswerWhileTheTurnIsStillRunning() {
+        prepare()
+        var source by mutableStateOf(message(listOf(tool("t1")), listOf(
+            ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))).copy(status = RunStatus.RUNNING))
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(mapped(source).copy(isStreaming = true), ChatScreenActions())
+        } } }
+        awaitHeader()
+        mainThread { source = source.copy(blocks = source.blocks + MessageBlock.Text("answer", "answer"),
+            reportedReasoning = source.reportedReasoning.map { it.frozen() }) }
+        ui.waitUntil(5_000) { ui.onNodeWithText("answer").isDisplayed() }
+        assertEquals(RunStatus.RUNNING, source.status)
+        assertDisclosure("work-process-header", expanded = true)
+        ui.onNodeWithText("first summary").assertDoesNotExist()
+    }
+
+    fun testStopImmediatelyRemovesAnUnfinishedReasoningRevealAndAllowsManualReopen() {
+        prepare()
+        var stopped by mutableStateOf(false)
+        var text by mutableStateOf("first summary")
+        var advances = 0
+        var ready = false
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ReportedReasoningCard("stop-reveal", listOf(ReportedReasoning("r1", text, 0L, 1L)),
+                    allowLiveTiming = true, stopped = stopped, onVisibleAdvance = { advances++ },
+                    onHandoffReady = { ready = it })
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            mainThread { text += " still revealing".repeat(200) }
+            ui.mainClock.advanceTimeBy(32)
+            mainThread { stopped = true }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("reported-reasoning-content:stop-reveal").assertDoesNotExist()
+            val stoppedAdvances = advances
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals(stoppedAdvances, advances)
+            assertTrue(ready)
+            ui.onNodeWithTag("reported-reasoning-header:stop-reveal").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("reported-reasoning-content:stop-reveal").fetchSemanticsNodes().size == 1 }
+            mainThread { text += " terminal update" }
+            ui.mainClock.advanceTimeBy(300)
+            assertDisclosure("reported-reasoning-header:stop-reveal", expanded = true)
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testStandaloneAnswerWaitsForTheLiveReasoningToFinishClosing() {
@@ -469,7 +599,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testExplicitlyOpenLegacyWorkflowDoesNotBlockItsNewAnswer() {
+    fun testTerminalAutoCollapseAndManualReopenDoNotBlockTheAnswer() {
         prepare()
         var reported by mutableStateOf(ReportedReasoning("r1", "first summary", 0L,
             System.nanoTime(), blockOffset = 0))
@@ -493,9 +623,13 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeBy(32)
                 ui.onNodeWithText("answer").isDisplayed()
             }
-            assertDisclosure("work-process-header", expanded = true)
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(32)
+                ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已折叠"
+            }
             ui.onNodeWithTag("work-process-header").performClick()
             ui.mainClock.advanceTimeBy(300)
+            assertDisclosure("work-process-header", expanded = true)
             ui.onNodeWithText("answer").assertIsDisplayed()
             ui.onNodeWithTag("work-process-header").performClick()
             ui.mainClock.advanceTimeBy(300)
@@ -513,7 +647,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             AssistantTurn(mapped(source).copy(isStreaming = !done), ChatScreenActions())
         } } }
         awaitHeader()
-        ui.onNodeWithTag("tool-step:t1").assertDoesNotExist()
+        ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
         mainThread { summaries = listOf(ReportedReasoning("later", "first summary", elapsedMillis = 0L, activeSinceNanos = System.nanoTime(), blockOffset = 1)) }
         ui.waitUntil(5_000) { ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("first summary").assertIsDisplayed()

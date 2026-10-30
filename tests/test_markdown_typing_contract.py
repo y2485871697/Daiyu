@@ -25,7 +25,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,", host)
         self.assertIn("stopRequested = controlOwner?.let(controller::runStopping) == true", host)
         mapper = (BASE / "ChatTurnMapper.kt").read_text().split("fun withStreamingOwner", 1)[1].split("/**", 1)[0]
-        for token in ["turns.indexOfLast", "ownerMessageId == live.id.value", "live.conversationId.value, live.runId.value, turn.id", "listKey(turn.segmentIndex)", "val streaming = if (phase == null || phase == ExecutionPhase.STREAMING) last else -1", "turn.copy(isStreaming = index == streaming, workProcess = work)"]:
+        for token in ["turns.indexOfLast", "ownerMessageId == live.id.value", "live.conversationId.value, live.runId.value, turn.id", "listKey(turn.segmentIndex)", "val streaming = if (!stopRequested && (phase == null || phase == ExecutionPhase.STREAMING)) last else -1", "turn.copy(isStreaming = index == streaming, workProcess = work, stopRequested = stopped)"]:
             self.assertIn(token, mapper)
 
     def test_full_sources_still_project_once_not_per_frame(self):

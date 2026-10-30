@@ -53,6 +53,43 @@ class ReasoningWorkflowMapperTest {
         assertEquals("", thoughtAfterAnswer.finalText)
         assertEquals(listOf("t1", "r"), sequence(thoughtAfterAnswer))
     }
+    @Test fun stoppedReasoningWithoutToolsBelongsToTheWorkflowAndKeepsItsText() {
+        val summary = ReportedReasoning("r", "stopped summary", blockOffset = 0)
+        val source = message(emptyList(), listOf(summary)).copy(status = RunStatus.STOPPED)
+        val turn = mapped(source)
+        assertEquals(listOf("r"), sequence(turn))
+        assertFalse(turn.workProcess!!.running)
+        assertEquals("已停止", turn.workProcess.summary)
+        assertEquals(summary, turn.workProcess.segments.single().reasoning)
+        assertTrue(turn.reasoningStopped)
+        assertTrue(turn.content.isEmpty())
+    }
+    @Test fun stoppingCoversEveryDisplayedSegmentOfTheExactOwner() {
+        val source = message(emptyList(), emptyList()).copy(status = RunStatus.RUNNING, historySegments = listOf(
+            MessageHistorySegment(MessageId("a"), "assistant", emptyList(), reportedReasoning = listOf(ReportedReasoning("r1", "first"))),
+            MessageHistorySegment(MessageId("a"), "assistant", emptyList(), reportedReasoning = listOf(ReportedReasoning("r2", "second", 0, 1)))))
+        val first = ChatTurnMapper.map(listOf(source)).single()
+        val turns = ChatTurnMapper.map(listOf(source), boundariesAfter = setOf(first.listKey))
+        assertEquals(2, turns.size)
+        val stopped = ChatTurnMapper.withStreamingOwner(turns, source, stopRequested = true)
+            .filterIsInstance<ChatTurnUi.Assistant>()
+        assertTrue(stopped.all { it.reasoningStopped && !it.isStreaming })
+    }
+
+    @Test fun stoppingClosesOnlyTheExactLiveOwnersReasoningBeforeTheTerminalSnapshot() {
+        val source = message(emptyList(), listOf(ReportedReasoning("r", "live", 0, 1))).copy(status = RunStatus.RUNNING)
+        val other = source.copy(id = MessageId("other"), runId = RunId("other-run"))
+        val turns = ChatTurnMapper.map(listOf(other, source))
+        val stopping = ChatTurnMapper.withStreamingOwner(turns, source, stopRequested = true)
+            .filterIsInstance<ChatTurnUi.Assistant>()
+        assertFalse(stopping.first().reasoningStopped)
+        assertTrue(stopping.last().reasoningStopped)
+        assertFalse(stopping.last().isStreaming)
+        val pending = ChatTurnMapper.withStreamingOwner(stopping, null).filterIsInstance<ChatTurnUi.Assistant>()
+        assertTrue(pending.last().reasoningStopped)
+        assertFalse(mapped(source.copy(status = RunStatus.COMPLETED)).reasoningStopped)
+    }
+
     @Test fun noToolsKeepsStandaloneReasoningAndLegacyOffsetsStayExplicitlyUnknown() {
         val summary = ReportedReasoning("r", "legacy")
         val noTool = mapped(message(listOf(MessageBlock.Text("a", "answer")), listOf(summary)))

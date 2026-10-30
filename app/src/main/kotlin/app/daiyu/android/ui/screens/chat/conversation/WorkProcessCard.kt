@@ -50,19 +50,25 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
-    var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val reasoning = work.segments.mapNotNull { it.reasoning }
     val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
-    val expanded = expandedOverride ?: !sequence.ready(reasoning)
-    val visibility = remember(ownerKey) { MutableTransitionState(expanded) }
+    val reasoningReady = stopped || sequence.ready(reasoning)
+    val finished = !work.running && reasoningReady
+    var expandedOverride by rememberSaveable(ownerKey, finished, stopped) { mutableStateOf<Boolean?>(null) }
+    var overrideFinished by rememberSaveable(ownerKey) { mutableStateOf(finished) }
+    var overrideStopped by rememberSaveable(ownerKey) { mutableStateOf(stopped) }
+    val currentOverride = expandedOverride.takeIf { overrideFinished == finished && overrideStopped == stopped }
+    val expanded = currentOverride ?: (!stopped && !finished)
+    val visibility = remember(ownerKey, stopped) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
     val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
-    val disclosureHandoffReady = sequence.ready(reasoning) && (expandedOverride == true || fullyClosed)
+    val disclosureHandoffReady = reasoningReady && (work.running || currentOverride == true || fullyClosed)
     androidx.compose.runtime.SideEffect { onDisclosureHandoffReady(disclosureHandoffReady) }
-    val manuallyClosed = expandedOverride == false && fullyClosed
+    val manuallyClosed = currentOverride == false && fullyClosed
     androidx.compose.runtime.SideEffect {
-        if (manuallyClosed) reasoning.filter { it.activeSinceNanos == null }.forEach(sequence::complete)
+        if (stopped) reasoning.forEach(sequence::complete)
+        else if (manuallyClosed) reasoning.filter { it.activeSinceNanos == null }.forEach(sequence::complete)
     }
     val reasoningState = rememberSaveableStateHolder()
     val colors = conversationColors()
@@ -78,7 +84,9 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             val summaryWidth = maxWidth * .56f
             val stacked = work.failedStepCount > 0 || work.unconfirmedStepCount > 0 ||
                 maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
-            Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable { expandedOverride = !expanded }
+            Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable {
+                overrideFinished = finished; overrideStopped = stopped; expandedOverride = !expanded
+            }
                 .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
                 .padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -120,14 +128,14 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                                     ReasoningStepRow(ownerKey, reported,
                                         showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
                                             .any { it.steps.isNotEmpty() || it.reasoning != null },
-                                        allowLiveTiming = allowLiveTiming, generationComplete = generationComplete,
+                                        allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped,
                                         revealResetEpoch = revealResetEpoch,
                                         onVisibleAdvance = { if (expanded) onVisibleAdvance() },
                                         onHandoffReady = { if (it) sequence.complete(reported) })
                                 }
                             }
                         }
-                        if (segment.reasoning?.let { !sequence.ready(it) } == true) precedingReady = false
+                        if (!stopped && segment.reasoning?.let { !sequence.ready(it) } == true) precedingReady = false
                         if (precedingReady) segment.steps.forEachIndexed { index, step ->
                             key(ownerKey, step.owner, step.toolCallId) {
                                 val laterStep = index < segment.steps.lastIndex ||

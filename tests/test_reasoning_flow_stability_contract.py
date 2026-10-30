@@ -28,12 +28,13 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_disclosure_follows_the_flow_phase_not_each_thought(self):
         work = self.read('WorkProcessCard.kt')
-        self.assertIn('rememberSaveable(ownerKey)', work)
-        self.assertIn('val expanded = expandedOverride ?: !sequence.ready(reasoning)', work)
+        self.assertIn('rememberSaveable(ownerKey, finished, stopped)', work)
+        self.assertIn('val finished = !work.running && reasoningReady', work)
+        self.assertIn('val expanded = currentOverride ?: (!stopped && !finished)', work)
         self.assertIn('rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }', work)
         self.assertIn('AnimatedVisibility(visibility)', work)
         self.assertIn('val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState', work)
-        self.assertIn('val manuallyClosed = expandedOverride == false && fullyClosed', work)
+        self.assertIn('val manuallyClosed = currentOverride == false && fullyClosed', work)
         card = self.read('ReportedReasoningCard.kt')
         self.assertIn('visibility.isIdle && !visibility.currentState && !visibility.targetState', card)
         self.assertNotIn('rememberSaveable(ownerKey, isThinking)', card)

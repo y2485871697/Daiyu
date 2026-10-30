@@ -101,7 +101,7 @@ class ChatTimelineContractTest(unittest.TestCase):
 
     def test_reconnect_details_use_live_actual_errors_without_lifecycle_text(self):
         divider = source('ui/screens/chat/conversation/ChatTimelineDivider.kt')
-        body = divider.split('if (showDetails && entry !is ChatTimelineEntry.ContextLimit)', 1)[1]
+        body = divider.split('if (showDetails && hasDetails)', 1)[1]
         self.assertIn('?: entry.reason', body)
         self.assertNotIn('reconnectLabel(', body)
         self.assertNotIn('累计耗时', body)

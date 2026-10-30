@@ -400,7 +400,9 @@ internal fun ChatMessageList(
                             turnExtras(turn)
                         }
                     }
-                    timelineAfter[turn.listKey].orEmpty().forEach { entry ->
+                    val timelineKeys = (turn as? ChatTurnUi.Assistant)?.sourceListKeys?.takeIf { it.isNotEmpty() }
+                        ?: listOf(turn.listKey)
+                    timelineKeys.flatMap { timelineAfter[it].orEmpty() }.forEach { entry ->
                         key(entry.id) { ChatTimelineDivider(entry) }
                     }
                     compressionAfter[turn.listKey].orEmpty().forEach { activity ->
@@ -477,10 +479,10 @@ internal fun AssistantTurn(
     }
     val handoff = remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }
     SideEffect {
-        turn.reportedReasoning.filter { it.activeSinceNanos == null && !hasReportedReasoningText(it.text) }
+        turn.reportedReasoning.filter { turn.reasoningStopped || it.activeSinceNanos == null && !hasReportedReasoningText(it.text) }
             .forEach(handoff::complete)
     }
-    val reasoningReady = handoff.ready(turn.reportedReasoning)
+    val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)
     val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)
     val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance, enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready)
     val contentReady = projection?.sources == sources
@@ -521,10 +523,10 @@ internal fun AssistantTurn(
         SideEffect { if (!integratedReasoning) standaloneIds = turn.reportedReasoning.map { it.itemId }.toSet() }
         val leadingReasoning = if (integratedReasoning) turn.reportedReasoning.filter { it.itemId in standaloneIds }
             else turn.reportedReasoning
-        val closingStandalone = integratedReasoning && !handoff.ready(leadingReasoning)
+        val closingStandalone = integratedReasoning && !turn.reasoningStopped && !handoff.ready(leadingReasoning)
         if (!integratedReasoning || closingStandalone) ReportedReasoningCard(turn.listKey, leadingReasoning,
             allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
-            generationComplete = turn.status != RunStatus.RUNNING,
+            generationComplete = turn.status != RunStatus.RUNNING, stopped = turn.reasoningStopped,
             revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
             onHandoffReady = { if (it) leadingReasoning.forEach(handoff::complete) })
         if (closingStandalone) {
@@ -537,7 +539,7 @@ internal fun AssistantTurn(
                 reasoningBody = { reported, connector ->
                     ReasoningStepRow(turn.listKey, reported, connector,
                         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
-                        generationComplete = turn.status != RunStatus.RUNNING,
+                        generationComplete = turn.status != RunStatus.RUNNING, stopped = turn.reasoningStopped,
                         revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
                         onHandoffReady = { if (it) handoff.complete(reported) })
                 }) { text, modifier ->
@@ -568,13 +570,13 @@ internal fun AssistantTurn(
 private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff, toolContent: @Composable (WorkStepUi) -> Unit) {
     val work = turn.workProcess
     val workReasoning = work?.segments.orEmpty().mapNotNull { it.reasoning }
-    val reasoningReady = handoff.ready(turn.reportedReasoning)
+    val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)
     var answerReleased by rememberSaveable(turn.listKey) {
         mutableStateOf(reasoningReady && turn.finalText.isNotBlank())
     }
     work?.let { WorkProcessCard(it, turn.listKey,
         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
-        generationComplete = turn.status != RunStatus.RUNNING,
+        generationComplete = turn.status != RunStatus.RUNNING, stopped = turn.reasoningStopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff,
         onDisclosureHandoffReady = { ready ->
             if (ready && reasoningReady && turn.finalText.isNotBlank()) answerReleased = true

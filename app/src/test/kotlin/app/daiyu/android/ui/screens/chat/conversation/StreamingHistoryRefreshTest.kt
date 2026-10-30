@@ -69,4 +69,18 @@ class StreamingHistoryRefreshTest {
         assertFalse(refresh.needsRead(appended.copy(blocks = listOf(MessageBlock.Text("body", "new text"))), true, 1, 1, false))
         assertTrue(refresh.needsRead(reasoning, true, 1, 1, false))
     }
+    @Test fun inFlightReadAcceptsOnlyTheExactLiveRowChanging() {
+        val historical = owner.copy(id = MessageId("old"), status = RunStatus.COMPLETED)
+        val before = listOf(1L to historical, 2L to owner)
+        val active = owner.copy(blocks = listOf(MessageBlock.Text("body", "latest")))
+        val after = listOf(1L to historical, 2L to active)
+        assertTrue(canOverlayLiveHistory(before, after, active))
+        assertFalse(canOverlayLiveHistory(before, after, null))
+        assertFalse(canOverlayLiveHistory(before, after + (3L to owner), active))
+        assertFalse(canOverlayLiveHistory(before, listOf(1L to historical.copy(error = "changed"), 2L to active), active))
+        assertFalse(canOverlayLiveHistory(before, listOf(1L to historical, 3L to active), active))
+        assertFalse(canOverlayLiveHistory(before, after.reversed(), active))
+        assertFalse(canOverlayLiveHistory(before, listOf(1L to historical, 2L to active.copy(runId = RunId("other"))), active))
+    }
+
 }

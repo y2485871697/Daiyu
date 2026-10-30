@@ -5335,6 +5335,7 @@ class MainActivity : ComponentActivity() {
         val generation = editorGeneration
         val request = ++refreshHistoryRequestSerial
         val acceptedRequest = historyRequestSerial
+        val capturedWindow = shown.toList()
         val content = chatState.contentRevision
         val data = controller.dataRevision
         val owner = loadedHistoryOwner(id)
@@ -5362,14 +5363,15 @@ class MainActivity : ComponentActivity() {
                     controller.problem?.startsWith("会话恢复失败") == true || selected?.id != id ||
                     editorGeneration != generation || request != refreshHistoryRequestSerial ||
                     acceptedRequest != historyRequestSerial) return@launch
-                if (refreshHistoryPending || content != chatState.contentRevision || data != controller.dataRevision ||
+                val active = controller.active?.takeIf { it.conversationId == id }
+                val liveOnlyChange = app.daiyu.android.ui.screens.chat.conversation.canOverlayLiveHistory(capturedWindow, shown, active)
+                if (refreshHistoryPending || (content != chatState.contentRevision && !liveOnlyChange) || data != controller.dataRevision ||
                     owner != loadedHistoryOwner(id)) {
                     refreshHistoryPending = true
                     return@launch
                 }
                 if (rows == null) { streamingHistoryRefresh.invalidate(); toast("历史读取失败；原数据保留"); return@launch }
                 if (reloadTail) refreshHistoryTailConversation = null
-                val active = controller.active?.takeIf { it.conversationId == id }
                 val currentOwner = loadedHistoryOwner(id)
                 val refreshed = rows.map { entry ->
                     if (active != null && Triple(entry.second.conversationId, entry.second.id, entry.second.runId) == currentOwner)

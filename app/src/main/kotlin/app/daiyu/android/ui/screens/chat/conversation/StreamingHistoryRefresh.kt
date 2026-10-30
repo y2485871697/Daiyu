@@ -21,3 +21,19 @@ internal class StreamingHistoryRefresh {
         return read
     }
 }
+
+/** An IO snapshot may lag only the exact live row; navigation and every other row stay fenced. */
+internal fun canOverlayLiveHistory(
+    before: List<Pair<Long, Message>>,
+    after: List<Pair<Long, Message>>,
+    active: Message?,
+): Boolean {
+    if (active == null || before.size != after.size) return false
+    fun isOwner(message: Message) = message.id == active.id && message.runId == active.runId &&
+        message.conversationId == active.conversationId
+    return before.indices.all { index ->
+        val old = before[index]
+        val current = after[index]
+        old.first == current.first && (old.second == current.second || isOwner(old.second) && isOwner(current.second))
+    }
+}

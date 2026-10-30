@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.domain.RunStatus
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 
 /** One ordered host from the first thought onward, including later image/question projections. */
 internal data class AssistantWorkflowContent(
@@ -58,4 +60,16 @@ internal fun visibleWorkflowKeys(content: List<MessageContentUi>, handoff: Reaso
         if (item is MessageContentUi.Reasoning && !handoff.ready(item.reported)) break
     }
     return visible
+}
+
+/** Retain the unchanged workflow independently of an appended final answer. */
+@Composable
+internal fun rememberAssistantWorkflowContent(turn: ChatTurnUi.Assistant): AssistantWorkflowContent {
+    val ordered = remember(turn) { turn.workflowContent() }
+    val work = remember(ordered.work) { ordered.work }
+    val steps = remember(ordered.steps) { ordered.steps }
+    val narration = remember(ordered.plainNarration) { ordered.plainNarration }
+    return remember(work, steps, ordered.body, narration) {
+        AssistantWorkflowContent(work, steps, ordered.body, narration)
+    }
 }

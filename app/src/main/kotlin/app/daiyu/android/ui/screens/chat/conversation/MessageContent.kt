@@ -54,7 +54,8 @@ internal fun MessageContent(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         var imageNumber = imageOffset
         var precedingReady = true
-        content.forEachIndexed { index, block ->
+        content.forEachIndexed { index, source ->
+            val block = key(source.workflowKey(index)) { rememberWorkflowItem(source) }
             val visible = precedingReady
             val imageIndex = if (block is MessageContentUi.Image) ++imageNumber else 0
             key(block.workflowKey(index)) {
@@ -133,3 +134,7 @@ internal fun MessageImage(image: MessageImageUi, number: Int, loader: MessageIma
         }
     }
 }
+
+/** Mapper snapshots may allocate equal historical rows while only the active thought grows. */
+@Composable
+internal fun rememberWorkflowItem(item: MessageContentUi): MessageContentUi = remember(item) { item }

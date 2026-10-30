@@ -20,7 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -66,10 +66,10 @@ internal fun SettingsExpandableContent(
 
 @Composable
 internal fun Modifier.settingsDisclosureRotation(expanded: Boolean, expandedDegrees: Float = 90f): Modifier {
-    val rotation by animateFloatAsState(
+    val rotation = animateFloatAsState(
         targetValue = if (expanded) expandedDegrees else 0f,
         animationSpec = tween(SettingsDisclosureDurationMillis, easing = FastOutSlowInEasing),
         label = "settings-disclosure-chevron",
     )
-    return rotate(rotation)
+    return graphicsLayer { rotationZ = rotation.value }
 }

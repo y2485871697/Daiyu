@@ -30,11 +30,13 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         caller = (CHAT / "ChatMessageList.kt").read_text()
         ordered = caller.split("private fun AssistantTextContent", 1)[1]
         self.assertNotIn("ReportedReasoningCard(", ordered)
-        self.assertIn("MessageContent(ordered.steps, actions, imageLoader, markdown = true", ordered)
-        self.assertIn("ReasoningStepRow(turn.listKey, reported, connector,", ordered)
+        self.assertIn("MessageContent(steps, actions, imageLoader, markdown = true", ordered)
+        self.assertIn("ReasoningStepRow(ownerKey, reported, connector,", ordered)
         row = ordered.split("ReasoningStepRow(", 1)[1].split("}, entryBody", 1)[0]
-        self.assertIn("generationComplete = turn.status != RunStatus.RUNNING", row)
-        self.assertIn("stopped = turn.reasoningStopped", row)
+        self.assertIn("generationComplete = turn.status != RunStatus.RUNNING", ordered)
+        self.assertIn("generationComplete = generationComplete", row)
+        self.assertIn("stopped = turn.reasoningStopped", ordered)
+        self.assertIn("stopped = stopped", row)
         self.assertIn("onHandoffReady = { if (it) handoff.complete(reported) }", row)
         step = source.split("internal fun ReasoningStepRow(", 1)[1]
         self.assertIn('ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),', step)

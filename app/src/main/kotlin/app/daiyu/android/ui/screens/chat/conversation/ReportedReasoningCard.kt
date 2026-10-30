@@ -39,7 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -113,7 +113,7 @@ internal fun ReportedReasoningCard(
     val handoffReady = stopped || !observedLive || !isThinking && settled &&
         (manualExpansion || visibility.isIdle && !visibility.currentState && !visibility.targetState)
     SideEffect { onHandoffReady(handoffReady) }
-    val chevronRotation by animateFloatAsState(
+    val chevronRotation = animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
         label = "reported-reasoning-chevron"
@@ -135,7 +135,7 @@ internal fun ReportedReasoningCard(
             if (hasSummary) {
                 Icon(ChatPreviewIcons.Chevron,
                     if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
-                    Modifier.size(if (embedded) 14.dp else 10.dp).rotate(chevronRotation), tint = colors.muted)
+                    Modifier.size(if (embedded) 14.dp else 10.dp).graphicsLayer { rotationZ = chevronRotation.value }, tint = colors.muted)
             }
         }
         AnimatedVisibility(

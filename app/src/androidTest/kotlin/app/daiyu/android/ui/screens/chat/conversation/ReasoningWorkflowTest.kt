@@ -36,6 +36,46 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             SemanticsProperties.StateDescription, if (expanded) "已展开" else "已折叠"))
     }
 
+    fun testFinalAnswerAppendsLeaveTheOpenedWorkflowIdleButUpdateTextLeaves() {
+        prepare()
+        val owner = WorkStepOwnerUi("c", "r", "a")
+        val step = WorkStepUi("probe", "probe tool", "result", WorkStepState.OK, owner = owner, dedicatedKey = "probe")
+        val thought = ReportedReasoning("r1", "first summary", 100)
+        val work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step), reasoning = thought)), "进行中", true)
+        var turn by mutableStateOf(ChatTurnUi.Assistant("a", finalText = "answer", status = RunStatus.RUNNING,
+            isStreaming = true, reportedReasoning = listOf(thought), workProcess = work,
+            content = listOf(MessageContentUi.Reasoning(thought), MessageContentUi.Tool(step), MessageContentUi.Text("final", "answer"))))
+        val toolCommits = java.util.concurrent.atomic.AtomicInteger()
+        val actions = ChatScreenActions()
+        val dedicated: @androidx.compose.runtime.Composable (WorkStepUi) -> Boolean = {
+            androidx.compose.runtime.SideEffect { toolCommits.incrementAndGet() }
+            Text("stable dedicated probe")
+            true
+        }
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(turn, actions, dedicatedTool = dedicated)
+        } } }
+        awaitHeader()
+        ui.waitForIdle()
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithText("stable dedicated probe").assertIsDisplayed()
+        ui.waitForIdle()
+        val before = toolCommits.get()
+        repeat(8) { index ->
+            val answer = "answer update $index"
+            runBlocking { projectMarkdown(listOf(answer), parser = streamingMarkdownParser) }
+            mainThread { turn = turn.copy(finalText = answer, content = turn.content.dropLast(1) + MessageContentUi.Text("final", answer)) }
+            ui.waitForIdle()
+            ui.onNodeWithText(answer).assertIsDisplayed()
+            assertEquals("Final answer updates must not recompose the unchanged dedicated workflow", before, toolCommits.get())
+        }
+        mainThread { turn = turn.copy(content = turn.content.map {
+            if (it is MessageContentUi.Tool) it.copy(step = step.copy(detail = "changed result")) else it
+        }) }
+        ui.waitForIdle()
+        assertTrue("Changed workflow data must still reach its dedicated content", toolCommits.get() > before)
+    }
+
     fun testWorkflowOrderIndependentDisclosureAndNoDuplicateTopCard() {
         prepare()
         val turn = mapped(message(listOf(tool("t1"), tool("t2"), MessageBlock.Text("a", "answer")),

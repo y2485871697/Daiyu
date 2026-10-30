@@ -28,11 +28,11 @@ class ReasoningTypewriterContract(unittest.TestCase):
             self.assertIn(end, tail)
             return tail.partition(end)[0]
 
-        outer = section(source, 'work?.let { WorkProcessCard', 'content = { expanded ->')
+        outer = section(source, 'WorkProcessCard(work, ownerKey,', 'content = { expanded ->')
         self.assertIn('revealResetEpoch = revealResetEpoch', outer)
         self.assertIn('onVisibleAdvance = onVisibleAdvance', outer)
         reasoning = section(source, 'reasoningBody = { reported, connector ->', 'entryBody = { key, body ->')
-        self.assertIn('ReasoningStepRow(turn.listKey, reported, connector,', reasoning)
+        self.assertIn('ReasoningStepRow(ownerKey, reported, connector,', reasoning)
         self.assertIn('revealResetEpoch = revealResetEpoch', reasoning)
         self.assertIn('onVisibleAdvance = { if (expanded) onVisibleAdvance() }', reasoning)
         self.assertIn('onHandoffReady = { if (it) handoff.complete(reported) }', reasoning)
@@ -58,7 +58,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('key(block.workflowKey(index))', content)
         self.assertIn('key(block.step.owner, block.step.toolCallId)', content)
         self.assertIn('reasoningState.SaveableStateProvider("ordered-content")', work)
-        self.assertIn('MessageContent(ordered.steps,', (CHAT / 'ChatMessageList.kt').read_text())
+        self.assertIn('MessageContent(steps,', (CHAT / 'ChatMessageList.kt').read_text())
 
     def test_live_empty_item_observes_first_output_before_visibility(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()

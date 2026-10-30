@@ -129,7 +129,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         work = ' '.join((CHAT / 'WorkProcessCard.kt').read_text().split())
         self.assertIn('val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState', work)
         self.assertIn('val disclosureHandoffReady = reasoningReady && '
-                      '(work.running || currentOverride == true || fullyClosed)', work)
+                      'fullyClosed', work)
         self.assertIn('val manuallyClosed = currentOverride == false && fullyClosed', work)
         host = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertIn('reasoningReady = { turn.reasoningStopped || handoff.ready(it) }', host)

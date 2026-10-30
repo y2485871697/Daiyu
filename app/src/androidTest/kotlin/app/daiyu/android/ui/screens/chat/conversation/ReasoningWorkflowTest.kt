@@ -188,23 +188,25 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
             mainThread { source = source.copy(historySegments = listOf(first,
-                tail.copy(blocks = listOf(MessageBlock.Text("answer", "answer")),
-                    reportedReasoning = tail.reportedReasoning.map { it.frozen() }))) }
+                tail.copy(reportedReasoning = tail.reportedReasoning.map { it.frozen() }))) }
             awaitFrame {
-                ui.onNodeWithText("answer", useUnmergedTree = true).isDisplayed() &&
-                    ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+                ui.onAllNodesWithText("second summary", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
             }
+            ui.onNodeWithText("answer", useUnmergedTree = true).assertDoesNotExist()
             ui.onAllNodesWithTag("work-process-header").assertCountEquals(1)
             ui.onNodeWithText("first summary", useUnmergedTree = true).assertIsDisplayed()
             ui.onNodeWithText("second summary", useUnmergedTree = true).assertDoesNotExist()
             ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             mainThread { source = source.copy(status = RunStatus.COMPLETED,
-                historySegments = source.historySegments.map { part ->
-                    part.copy(reportedReasoning = part.reportedReasoning.map { it.frozen() })
+                historySegments = source.historySegments.mapIndexed { index, part ->
+                    part.copy(blocks = if (index == source.historySegments.lastIndex)
+                        listOf(MessageBlock.Text("answer", "answer")) else part.blocks,
+                        reportedReasoning = part.reportedReasoning.map { it.frozen() })
                 }) }
             awaitFrame { ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
                 androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠" }
             ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("answer", useUnmergedTree = true).assertIsDisplayed()
             ui.onNodeWithTag("work-process-header").performClick()
             ui.mainClock.advanceTimeBy(300)
             val key = mapped(source).listKey
@@ -478,20 +480,87 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         assertDisclosure("work-process-header", expanded = true)
     }
 
-    fun testDefaultOpenWorkflowReleasesTheAnswerWhileTheTurnIsStillRunning() {
+    fun testLiveAnswerWaitsForOuterWorkflowExitWithoutWaitingForTurnEnd() {
         prepare()
         var source by mutableStateOf(message(listOf(tool("t1")), listOf(
             ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))).copy(status = RunStatus.RUNNING))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-            AssistantTurn(mapped(source).copy(isStreaming = true), ChatScreenActions())
-        } } }
-        awaitHeader()
-        mainThread { source = source.copy(blocks = source.blocks + MessageBlock.Text("answer", "answer"),
-            reportedReasoning = source.reportedReasoning.map { it.frozen() }) }
-        ui.waitUntil(5_000) { ui.onNodeWithText("answer").isDisplayed() }
-        assertEquals(RunStatus.RUNNING, source.status)
-        assertDisclosure("work-process-header", expanded = true)
-        ui.onNodeWithText("first summary").assertDoesNotExist()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                AssistantTurn(mapped(source).copy(isStreaming = true), ChatScreenActions())
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("first summary").assertIsDisplayed()
+            assertDisclosure("work-process-header", expanded = true)
+            mainThread { source = source.copy(blocks = source.blocks + MessageBlock.Text("answer", "answer"),
+                reportedReasoning = source.reportedReasoning.map { it.frozen() }) }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("answer").assertDoesNotExist()
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onNodeWithText("answer").assertDoesNotExist()
+                ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[
+                    SemanticsProperties.StateDescription] == "已折叠"
+            }
+            ui.mainClock.advanceTimeBy(48)
+            ui.onNodeWithTag("tool-step:t1").assertExists()
+            ui.onNodeWithText("answer").assertDoesNotExist()
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                if (ui.onAllNodesWithTag("tool-step:t1").fetchSemanticsNodes().isNotEmpty()) {
+                    ui.onNodeWithText("answer").assertDoesNotExist()
+                    false
+                } else ui.onNodeWithText("answer").isDisplayed()
+            }
+            assertEquals(RunStatus.RUNNING, source.status)
+            ui.onNodeWithText("first summary").assertDoesNotExist()
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            assertDisclosure("work-process-header", expanded = true)
+            ui.onNodeWithText("answer").assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testToolOnlyAnswerWaitsForOuterExitInBothContentPaths() {
+        prepare()
+        ui.mainClock.autoAdvance = false
+        try {
+            for (mixed in listOf(false, true)) {
+                var answer by mutableStateOf(false)
+                val id = if (mixed) "mixed" else "legacy"
+                mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val base = mapped(message(listOf(tool(id)), emptyList()).copy(status = RunStatus.RUNNING))
+                    val step = base.workProcess!!.segments.flatMap { it.steps }.single()
+                    val body = if (answer) "answer" else ""
+                    AssistantTurn(base.copy(finalText = body, isStreaming = true,
+                        content = if (mixed) listOf(MessageContentUi.Tool(step)) +
+                            if (answer) listOf(MessageContentUi.Text("a", body)) else emptyList() else emptyList()),
+                        ChatScreenActions())
+                } } }
+                ui.mainClock.advanceTimeBy(300)
+                ui.onNodeWithTag("tool-step:$id").assertIsDisplayed()
+                assertDisclosure("work-process-header", expanded = true)
+                mainThread { answer = true }
+                ui.mainClock.advanceTimeByFrame()
+                assertDisclosure("work-process-header", expanded = false)
+                ui.onNodeWithTag("tool-step:$id").assertExists()
+                ui.onNodeWithText("answer").assertDoesNotExist()
+                ui.mainClock.advanceTimeBy(48)
+                ui.onNodeWithTag("tool-step:$id").assertExists()
+                ui.onNodeWithText("answer").assertDoesNotExist()
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    if (ui.onAllNodesWithTag("tool-step:$id").fetchSemanticsNodes().isNotEmpty()) {
+                        ui.onNodeWithText("answer").assertDoesNotExist()
+                        false
+                    } else ui.onNodeWithText("answer").isDisplayed()
+                }
+                ui.onNodeWithTag("work-process-header").performClick()
+                ui.mainClock.advanceTimeBy(300)
+                ui.onNodeWithTag("tool-step:$id").assertIsDisplayed()
+                ui.onNodeWithText("answer").assertIsDisplayed()
+            }
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testStopImmediatelyRemovesAnUnfinishedReasoningRevealAndAllowsManualReopen() {

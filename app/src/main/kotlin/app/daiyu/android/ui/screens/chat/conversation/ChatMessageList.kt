@@ -548,7 +548,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
     }
     val observedLive = remember(turn.listKey) { turn.status == RunStatus.RUNNING }
     var answerReleased by rememberSaveable(turn.listKey) {
-        mutableStateOf(reasoningReady && ordered.body.isNotEmpty())
+        mutableStateOf(work == null && reasoningReady && ordered.body.isNotEmpty())
     }
     val textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier ->
         if (text.itemId in ordered.plainNarration) Text(text.text, modifier.fillMaxWidth().padding(start = 18.dp),
@@ -561,6 +561,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
         generationComplete = turn.status != RunStatus.RUNNING, stopped = turn.reasoningStopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff,
+        answerPending = ordered.body.isNotEmpty(),
         onDisclosureHandoffReady = { ready ->
             if (ready && reasoningReady && ordered.body.isNotEmpty()) answerReleased = true
         }, onExpandedChange = { expanded ->
@@ -580,7 +581,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
                         stopped = turn.reasoningStopped, content = body)
                 }, textBody = textBody)
         }, toolContent = toolContent) }
-    val canReleaseWithoutWorkflow = reasoningReady && (work == null || workReasoning.isEmpty())
+    val canReleaseWithoutWorkflow = work == null && reasoningReady
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     if (ordered.body.isNotEmpty() && (answerReleased || canReleaseWithoutWorkflow)) {
         MessageContent(ordered.body, actions, imageLoader, markdown = true,

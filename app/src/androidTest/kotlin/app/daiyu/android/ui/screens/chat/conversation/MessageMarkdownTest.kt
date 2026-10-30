@@ -1378,6 +1378,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         var second by mutableStateOf(ChatTurnUi.Assistant("shared-message", content = blocks("**before**"),
             status = RunStatus.RUNNING, listKey = "shared-message:second"))
         show { ChatMessageList(listOf(first, second), ChatScreenActions(), imageLoader = loader) }
+        awaitNodes(hasText("after"))
+        ui.onNodeWithTag("work-process-header").performClick()
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithContentDescription("消息图片 1").fetchSemanticsNodes().size == 1 }
         assertEquals(listOf(Triple(owner, reference, 1024)), requests.toList())
         awaitNodes(hasText("first"))

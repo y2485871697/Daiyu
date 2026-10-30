@@ -65,16 +65,21 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('ComposerReferences(raw).text.isEmpty()', shortcut)
         self.assertIn('assertEquals("", projection.text)', shortcut)
         self.assertIn('assertEquals(0, fixture.opens.get())', shortcut)
-    def test_legacy_answer_accepts_ready_running_workflow_and_stays_released(self):
+    def test_answer_waits_for_outer_closure_and_stays_released(self):
         source = (CHAT / 'ChatMessageList.kt').read_text().split('private fun AssistantTextContent', 1)[1]
         self.assertIn('val ordered = remember(turn) { turn.workflowContent() }', source)
         self.assertIn('val workReasoning = ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }', source)
         self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(workReasoning)', source)
         self.assertIn('var answerReleased by rememberSaveable(turn.listKey)', source)
+        self.assertIn('mutableStateOf(work == null && reasoningReady && ordered.body.isNotEmpty())', source)
+        self.assertIn('answerPending = ordered.body.isNotEmpty(),', source)
+        self.assertNotIn('workReasoning.isEmpty()', source)
         self.assertIn('onDisclosureHandoffReady = { ready ->', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
-        self.assertIn('reasoningReady && (work.running || currentOverride == true || fullyClosed)', work)
-        self.assertIn('val canReleaseWithoutWorkflow = reasoningReady && (work == null || workReasoning.isEmpty())', source)
+        self.assertIn('reasoningReady && fullyClosed', work)
+        self.assertIn('val finished = (!work.running || answerPending) && reasoningReady', work)
+        self.assertNotIn('work.running || currentOverride == true || fullyClosed', work)
+        self.assertIn('val canReleaseWithoutWorkflow = work == null && reasoningReady', source)
         self.assertIn('if (ready && reasoningReady && ordered.body.isNotEmpty()) answerReleased = true', source)
         self.assertIn('if (ordered.body.isNotEmpty() && (answerReleased || canReleaseWithoutWorkflow))', source)
         self.assertIn('MessageContent(ordered.body, actions, imageLoader, markdown = true,', source)
@@ -82,6 +87,19 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         ordered = (CHAT / 'AssistantWorkflowContent.kt').read_text()
         self.assertIn('val body = if (finalText.isBlank()) emptyList() else listOf(MessageContentUi.Text("final", finalText))', ordered)
         self.assertIn('return AssistantWorkflowContent(work, steps, content.drop(lastStep + 1))', ordered)
-        self.assertIn('testTerminalAutoCollapseAndManualReopenDoNotBlockTheAnswer', (DEVICE / 'ReasoningWorkflowTest.kt').read_text())
+        android = (DEVICE / 'ReasoningWorkflowTest.kt').read_text()
+        for name in ('testTerminalAutoCollapseAndManualReopenDoNotBlockTheAnswer',
+                     'testLiveAnswerWaitsForOuterWorkflowExitWithoutWaitingForTurnEnd',
+                     'testToolOnlyAnswerWaitsForOuterExitInBothContentPaths'):
+            self.assertIn('fun ' + name, android)
+        self.assertNotIn('testDefaultOpenWorkflowReleasesTheAnswerWhileTheTurnIsStillRunning', android)
+        cases = android.split('fun testLiveAnswerWaitsForOuterWorkflowExitWithoutWaitingForTurnEnd', 1)[1].split(
+            'fun testStopImmediatelyRemoves', 1)[0]
+        self.assertIn('ui.mainClock.autoAdvance = false', cases)
+        self.assertIn('ui.mainClock.advanceTimeBy(48)', cases)
+        self.assertIn('assertEquals(RunStatus.RUNNING, source.status)', cases)
+        self.assertIn('for (mixed in listOf(false, true))', cases)
+        self.assertGreaterEqual(cases.count('ui.onNodeWithText("answer").assertDoesNotExist()'), 6)
+        self.assertIn('if (ui.onAllNodesWithTag("tool-step:$id").fetchSemanticsNodes().isNotEmpty())', cases)
 if __name__ == '__main__':
     unittest.main()

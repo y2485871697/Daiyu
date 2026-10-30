@@ -40,9 +40,9 @@ class StopDisclosureContractTest(unittest.TestCase):
 
     def test_workflow_lifetime_is_independent_of_each_thought_and_leaf_details(self):
         work = (CHAT / 'WorkProcessCard.kt').read_text()
-        for marker in ('val finished = !work.running && reasoningReady', 'rememberSaveable(ownerKey, finished, stopped)',
+        for marker in ('val finished = (!work.running || answerPending) && reasoningReady', 'rememberSaveable(ownerKey, finished, stopped)',
                        'val expanded = currentOverride ?: (!stopped && !finished)',
-                       'reasoningReady && (work.running || currentOverride == true || fullyClosed)',
+                       'reasoningReady && fullyClosed',
                        'rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }'):
             self.assertIn(marker, work)
 

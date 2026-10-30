@@ -16,7 +16,7 @@ class SettingsDisclosureMotionContractTest(unittest.TestCase):
         self.assertNotIn('animateContentSize', source)
         self.assertNotIn('if (expanded) AnimatedVisibility', source)
         self.assertIn('animateFloatAsState(', source)
-        self.assertIn('return rotate(rotation)', source)
+        self.assertIn('return graphicsLayer { rotationZ = rotation.value }', source)
 
     def test_all_manual_settings_disclosures_use_the_shared_motion(self):
         calls = {

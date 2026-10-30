@@ -250,6 +250,9 @@ class SourceTests(unittest.TestCase):
                    workflow_id=397560064, status='completed', conclusion='success')
         jobs = [dict(name='增量Release编译（不运行全量）', conclusion='success')]
         source.verify(env, record, run, jobs, [])
+        source.verify(dict(env, GITHUB_SHA='b' * 40), record, run, jobs, ['tests/test_stream_refresh_cost_contract.py'])
+        with self.assertRaises(ValueError):
+            source.verify(dict(env, GITHUB_SHA='b' * 40), record, run, jobs, ['app/src/main/kotlin/Changed.kt'])
         for wrong in (dict(env, GITHUB_SHA='b' * 40), dict(env, SMOKE_TEST_CLASSES=''),
                       dict(env, SOURCE_VARIANT='release')):
             with self.assertRaises(ValueError):

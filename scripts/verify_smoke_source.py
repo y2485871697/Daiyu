@@ -39,8 +39,8 @@ def verify(env, record, source_run, jobs, changed):
     if variant == 'compile' and (record.get('validation_scope') != 'compile-only'
             or record.get('full_regression_passed') is not False
             or record.get('unit_tests_run') is not False or record.get('instrumentation_run') is not False
-            or env.get('GITHUB_SHA') != sha or not env.get('SMOKE_TEST_CLASSES')):
-        raise ValueError('增量编译包补检必须绑定相同源码和明确测试范围')
+            or (env.get('GITHUB_SHA') != sha and not changed) or not env.get('SMOKE_TEST_CLASSES')):
+        raise ValueError('增量编译包补检必须绑定未变化的应用源码和明确测试范围')
     if variant == 'daily' and (record.get('validation_profile') != 'daily'
             or record.get('full_regression_passed') is not False):
         raise ValueError('日常Release验证范围不符')
@@ -54,6 +54,8 @@ def verify(env, record, source_run, jobs, changed):
         'scripts/adb_bounded.sh', 'scripts/install_bounded_adb.sh',
         'scripts/verify_boundaries.py', 'scripts/daily_release.py',
     }
+    if variant == 'compile':
+        validation_files.update({'docs/重构清单.md', '更新说明.md'})
     validation_dirs = ('scripts/acceptance/', 'tests/', 'docs/acceptance/')
     if any(not isinstance(path, str) or '\\' in path
            or any(part in ('', '.', '..') for part in path.split('/'))

@@ -37,15 +37,20 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         assistant = chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
         for token in [
-            'val ordered = remember(turn) { turn.workflowContent() }',
-            'val textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit',
-            'else RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId, modifier,',
-            'generationComplete = generationComplete)',
-            'work?.let { WorkProcessCard(it, turn.listKey,',
-            'MessageContent(ordered.steps, actions, imageLoader, markdown = true',
+            'val ordered = rememberAssistantWorkflowContent(turn)',
+            'val textBody = rememberAssistantTextBody(ordered.plainNarration, projection, reveal, generationComplete)',
+            'work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey,',
             'MessageContent(ordered.body, actions, imageLoader, markdown = true',
         ]:
             self.assertIn(token, assistant)
+        leaf = chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
+        for token in ['rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
+                      'rememberUpdatedState(generationComplete)', 'currentProjection.value?.blocks?.get(text.text)',
+                      'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value)']:
+            self.assertIn(token, leaf)
+        workflow = chat.split('private fun AssistantWorkflow(', 1)[1]
+        self.assertIn('WorkProcessCard(work, ownerKey,', workflow)
+        self.assertIn('MessageContent(steps, actions, imageLoader, markdown = true', workflow)
         self.assertEqual(2, assistant.count('textBody = textBody'))
         self.assertNotIn('MessageContent(turn.content', assistant)
         self.assertNotIn('ReportedReasoningCard(', assistant)

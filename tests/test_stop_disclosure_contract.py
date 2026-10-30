@@ -28,7 +28,8 @@ class StopDisclosureContractTest(unittest.TestCase):
         self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)', assistant)
         ordered = chat.split('private fun AssistantTextContent', 1)[1]
         self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(workReasoning)', ordered)
-        self.assertIn('reasoningReady = { turn.reasoningStopped || handoff.ready(it) }', ordered)
+        self.assertIn('stopped = turn.reasoningStopped', ordered)
+        self.assertIn('reasoningReady = { stopped || handoff.ready(it) }', ordered)
         self.assertIn('onHandoffReady = { if (it) handoff.complete(reported) }', ordered)
         content = (CHAT / 'MessageContent.kt').read_text()
         self.assertIn('if (visible && block is MessageContentUi.Reasoning) precedingReady = reasoningReady(block.reported)', content)
@@ -36,7 +37,9 @@ class StopDisclosureContractTest(unittest.TestCase):
         self.assertIn('entrances.enter(key, animate && !stopped)', entry)
         self.assertIn('val visibility = remember(key, stopped)', entry)
         self.assertIn('MutableTransitionState(!enter || stopped).apply { targetState = true }', entry)
-        self.assertGreaterEqual(chat.count('stopped = turn.reasoningStopped'), 3)
+        self.assertEqual(2, chat.count('stopped = turn.reasoningStopped'))
+        self.assertIn('generationComplete = generationComplete, stopped = stopped', ordered)
+        self.assertIn('stopped = stopped, content = body', ordered)
 
     def test_workflow_lifetime_is_independent_of_each_thought_and_leaf_details(self):
         work = (CHAT / 'WorkProcessCard.kt').read_text()

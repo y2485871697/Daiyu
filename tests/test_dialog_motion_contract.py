@@ -131,7 +131,7 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertIn("val contentMotion = if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier", dialog)
         self.assertIn("motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismissRequest()", dialog)
         alert = motion.split("internal fun DaiyuAlertDialog(", 1)[1]
-        self.assertIn("confirmButton = { PlatformDialogFade(); confirmButton() }", alert)
+        self.assertIn("confirmButton = { app.daiyu.android.diagnostics.ObserveDialogFrames(\"alert\"); PlatformDialogFade(); confirmButton() }", alert)
         self.assertIn("modifier = modifier", alert)
         self.assertNotIn("dialogEnterMotion()", alert)
         self.assertNotIn("delay(", motion)

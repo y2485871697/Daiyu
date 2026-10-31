@@ -97,21 +97,44 @@ class AssistantWorkflowContentTest {
         assertFalse(entrances.enter("reasoning:r1", true))
         assertTrue(entrances.enter("tool:later", true))
     }
-    @Test fun growingTailStaysInsideAnExistingWorkflowBeforeAnyLaterToolArrives() {
+    @Test fun unclassifiedTailWaitsForItsRealOwnerAndKeepsTheSameItemId() {
         for (dedicated in listOf(false, true)) {
-            var previousKey: String? = null
             for (value in listOf("c", "checking", "checking now")) {
-                val turn = map(source(listOf(tool("t1"), MessageBlock.Text("n", value))), dedicated)
-                val ordered = turn.workflowContent()
+                val ordered = map(source(listOf(tool("t1"), MessageBlock.Text("n", value))), dedicated).workflowContent()
                 assertTrue(ordered.body.isEmpty())
-                assertEquals(value, ordered.steps.filterIsInstance<MessageContentUi.Text>().single().text)
-                val key = keys(ordered.steps).last()
-                previousKey?.let { assertEquals(it, key) }
-                previousKey = key
+                assertTrue(ordered.steps.none { it is MessageContentUi.Text })
+                assertEquals(listOf("text:n"), keys(ordered.pending))
+                assertEquals(value, (ordered.pending.single() as MessageContentUi.Text).text)
             }
-            val after = map(source(listOf(tool("t1"), MessageBlock.Text("n", "checking now"), tool("t2"))), dedicated)
-            assertEquals(previousKey, keys(after.workflowContent().steps)[1])
-            assertTrue(after.workflowContent().body.isEmpty())
+            val after = map(source(listOf(tool("t1"), MessageBlock.Text("n", "checking now"), tool("t2"))), dedicated).workflowContent()
+            assertEquals(listOf("tool:t1", "text:n", "tool:t2"), keys(after.steps))
+            assertTrue(after.body.isEmpty())
+            assertTrue(after.pending.isEmpty())
+        }
+    }
+
+    @Test fun terminalAnswerNeverAppearsAmongStepsEvenAsSeveralTextItems() {
+        for (dedicated in listOf(false, true)) {
+            val message = source(listOf(tool("t1"), MessageBlock.Text("a1", "final first"), MessageBlock.Text("a2", "final second")))
+            val running = map(message, dedicated).workflowContent()
+            assertEquals(listOf("tool:t1"), keys(running.steps))
+            assertEquals(listOf("text:a1", "text:a2"), keys(running.pending))
+            val terminal = map(message.copy(status = RunStatus.COMPLETED), dedicated).workflowContent()
+            assertEquals(listOf("tool:t1"), keys(terminal.steps))
+            assertEquals(listOf("text:a1", "text:a2"), keys(terminal.body))
+            assertTrue(terminal.pending.isEmpty())
+        }
+    }
+
+    @Test fun pausedTailAndOldReasoningFinalDoNotBecomeNarration() {
+        for (dedicated in listOf(false, true)) {
+            val message = source(listOf(tool("t1"), MessageBlock.Text("a", "answer")), listOf(thought))
+            val initial = map(message, dedicated)
+            val paused = initial.copy(isStreaming = false, workProcess = initial.workProcess!!.copy(controlActivity = ToolActivityUi.PAUSED))
+            assertEquals(listOf("text:a"), keys(paused.workflowContent().pending))
+            val finalizedThought = map(message.copy(reportedReasoning = listOf(thought.copy(text = "closed old summary"))), dedicated)
+            assertEquals(listOf("text:a"), keys(finalizedThought.workflowContent().pending))
+            assertTrue(finalizedThought.workflowContent().steps.none { it is MessageContentUi.Text })
         }
     }
 
@@ -128,12 +151,12 @@ class AssistantWorkflowContentTest {
         }
     }
 
-    @Test fun ownerRunningStateKeepsMixedReconnectSlicesInTheWorkflow() {
+    @Test fun ownerRunningStateKeepsMixedReconnectTailUnclassified() {
         val turn = map(source(listOf(tool("t1"), MessageBlock.Text("n", "checking"))), dedicated = true)
         val displayedSlice = turn.copy(status = RunStatus.COMPLETED, isStreaming = false)
         assertTrue(displayedSlice.workProcess!!.running)
         assertTrue(displayedSlice.workflowContent().body.isEmpty())
-        assertEquals("checking", displayedSlice.workflowContent().steps.filterIsInstance<MessageContentUi.Text>().single().text)
+        assertEquals("checking", displayedSlice.workflowContent().pending.filterIsInstance<MessageContentUi.Text>().single().text)
     }
 
 }

@@ -56,7 +56,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         source = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertNotIn('ReportedReasoningCard(', source)
         self.assertEqual(1, source.count('WorkProcessCard('))
-        self.assertIn('val ordered = rememberAssistantWorkflowContent(displayedTurn)', source)
+        self.assertIn('val ordered = rememberAssistantWorkflowContent(turn)', source)
         self.assertIn('val ordered = remember(turn) { turn.workflowContent() }', (CHAT / 'AssistantWorkflowContent.kt').read_text())
         self.assertIn('MessageContent(steps,', source)
         self.assertIn('ReasoningStepRow(ownerKey, reported, connector,', source)
@@ -141,7 +141,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
     def test_single_thought_host_and_entrances_keep_order_and_do_not_replay(self):
         ordered = (CHAT / 'AssistantWorkflowContent.kt').read_text()
         for token in ['content.indexOfLast { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }',
-                      'val split = if (workProcess?.running ?: (status == RunStatus.RUNNING)) content.size else lastStep + 1',
+                      'val split = lastStep + 1',
                       'val steps = content.take(split)', 'content.drop(split)',
                       'val work = workProcess ?: reportedReasoning.filter',
                       'WorkProcessUi(reasoning.map { WorkSegmentUi(reasoning = it) }',
@@ -160,7 +160,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         host = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertIn('val entrances = remember(turn.listKey) { WorkflowEntrances(visibleWorkflowKeys(ordered.steps, handoff)) }', host)
         self.assertLess(host.index('val entrances = remember(turn.listKey)'), host.index('work?.let { AssistantWorkflow'))
-        self.assertIn('if (!expanded) entrances.suppress(steps.mapIndexed { index, item -> item.workflowKey(index) })', host)
+        self.assertIn('entrances.suppress(steps.mapIndexed { index, item -> item.workflowKey(index) })', host)
         self.assertIn('WorkflowEntry(key, entrances, animate = expanded && work.running,', host)
         self.assertIn('entryBody = { key, body -> WorkflowEntry(key, bodyEntrances, observedLive,', host)
 

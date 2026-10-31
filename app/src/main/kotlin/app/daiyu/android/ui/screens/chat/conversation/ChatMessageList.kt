@@ -476,10 +476,11 @@ internal fun AssistantTurn(
     onContentDisplayed: (Boolean) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
 ) = key(turn.listKey) {
-    val sources = remember(turn.content, turn.finalText) {
-        if (turn.content.isEmpty()) listOf(turn.finalText)
-        else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
+    val ordered = rememberAssistantWorkflowContent(turn)
+    val bodySources = remember(ordered.body) {
+        ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
     }
+    val sources = remember(bodySources) { bodySources.map { it.text } }
     val handoff = remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }
     SideEffect {
         turn.reportedReasoning.filter { turn.reasoningStopped || it.activeSinceNanos == null && !hasReportedReasoningText(it.text) }
@@ -489,17 +490,6 @@ internal fun AssistantTurn(
     val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)
     val contentReady = projection?.sources == sources
     val generationComplete = turn.status != RunStatus.RUNNING && contentReady
-    val displayedTurn = remember(turn, projection) {
-        if (projection == null || projection.sources.none { it.isNotBlank() }) turn
-        else if (turn.content.isEmpty()) turn.copy(finalText = projection.sources.single())
-        else {
-            var textIndex = 0
-            turn.copy(content = turn.content.map { content ->
-                if (content is MessageContentUi.Text) content.copy(text = projection.sources.getOrNull(textIndex++) ?: "") else content
-            })
-        }
-    }
-    val ordered = rememberAssistantWorkflowContent(displayedTurn)
     var answerReleased by rememberSaveable(turn.listKey) {
         mutableStateOf(ordered.work == null && reasoningReady && ordered.body.isNotEmpty())
     }
@@ -508,9 +498,9 @@ internal fun AssistantTurn(
     val blockedSources = remember(ordered.body, bodyVisible) {
         if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
     }
-    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance,
-        enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready,
-        blockedSources = blockedSources)
+    val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,
+        terminal = generationComplete, resetEpoch = revealResetEpoch,
+        onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources)
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { mutableStateOf(false) }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
@@ -532,7 +522,7 @@ internal fun AssistantTurn(
             Text(identity?.name ?: "助手", color = conversationColors().text,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
-        AssistantTextContent(displayedTurn, ordered, bodyVisible, { answerReleased = true }, actions, projection, reveal, generationComplete,
+        AssistantTextContent(turn, ordered, bodyVisible, { answerReleased = true }, actions, projection, reveal, generationComplete,
             revealResetEpoch, onVisibleAdvance, handoff, imageLoader, dedicatedTool, toolContent)
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
@@ -561,7 +551,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
         WorkflowEntrances(if (reasoningReady) ordered.body.mapIndexed { index, item -> item.workflowKey(index) } else emptyList())
     }
     val observedLive = remember(turn.listKey) { turn.status == RunStatus.RUNNING }
-    val textBody = rememberAssistantTextBody(ordered.plainNarration, projection, reveal, generationComplete)
+    val textBody = rememberAssistantTextBody(emptySet(), projection, reveal, generationComplete)
     val answerPending = ordered.body.isNotEmpty()
     val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)
     val notifyVisibleAdvance = remember { { currentVisibleAdvance.value() } }
@@ -571,7 +561,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = notifyVisibleAdvance, handoff = handoff,
         entrances = entrances, answerPending = answerPending,
         onAnswerReleased = { if (reasoningReady && answerPending) onAnswerReleased() },
-        dedicatedTool = dedicatedTool, toolContent = toolContent, textBody = textBody) }
+        dedicatedTool = dedicatedTool, toolContent = toolContent, plainNarration = ordered.plainNarration, plainText = turn.content.isEmpty()) }
     if (ordered.body.isNotEmpty() && bodyVisible) {
         MessageContent(ordered.body, actions, imageLoader, markdown = true,
             imageOffset = ordered.steps.count { it is MessageContentUi.Image },
@@ -596,10 +586,13 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, projection: 
     val currentReveal = rememberUpdatedState(reveal)
     val currentComplete = rememberUpdatedState(generationComplete)
     return remember(plainNarration) { { text, modifier ->
-        if (text.itemId in plainNarration) Text(text.text, modifier.fillMaxWidth(),
-            color = conversationColors().muted,
-            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
-        else RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),
+        if (text.itemId in plainNarration) {
+            val visibility = currentReveal.value.visibility(text.itemId)
+            val boundaries = remember(text.text) { MarkdownTextBoundaries(text.text) }
+            val end by remember(visibility, boundaries) { androidx.compose.runtime.derivedStateOf { boundaries.end(visibility.value) } }
+            Text(text.text.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
+        } else RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),
             currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)
     } }
 }
@@ -610,15 +603,29 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
     stopped: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff,
     entrances: WorkflowEntrances, answerPending: Boolean, onAnswerReleased: () -> Unit,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit,
-    textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit) {
+    plainNarration: Set<String>, plainText: Boolean) {
+    val textSources = remember(steps) { steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) } }
+    val textPhase = textSources to work.running
+    var settledPhase by remember(ownerKey) { mutableStateOf(textPhase) }
+    var disclosureExpanded by remember(ownerKey) { mutableStateOf(work.running && !stopped) }
     WorkProcessCard(work, ownerKey,
         allowLiveTiming = live, generationComplete = generationComplete, stopped = stopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff,
-        answerPending = answerPending,
+        answerPending = answerPending, workflowTextSettled = !disclosureExpanded || textSources.isEmpty() || settledPhase == textPhase,
         onDisclosureHandoffReady = { if (it) onAnswerReleased() },
         onExpandedChange = { expanded ->
-            if (!expanded) entrances.suppress(steps.mapIndexed { index, item -> item.workflowKey(index) })
+            disclosureExpanded = expanded
+            if (!expanded) {
+                entrances.suppress(steps.mapIndexed { index, item -> item.workflowKey(index) })
+                settledPhase = textPhase
+            }
         }, content = { expanded ->
+            val narration = rememberWorkflowNarration(steps, plainText, textSources,
+                running = work.running, paused = work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING,
+                expanded = expanded, stopped = stopped, revealResetEpoch = revealResetEpoch,
+                reasoningReady = { stopped || handoff.ready(it) }, onVisibleAdvance = onVisibleAdvance)
+            SideEffect { if (narration.reveal.settled) settledPhase = textPhase }
+            val textBody = rememberAssistantTextBody(plainNarration, narration.projection, narration.reveal, generationComplete)
             MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
                 workflowTimeline = true,
                 toolContent = toolContent, flowRunning = work.running,

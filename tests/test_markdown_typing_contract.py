@@ -30,8 +30,8 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)", self.chat)
-        self.assertIn("val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance,", self.chat)
-        self.assertIn("enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready,", self.chat)
+        self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)
+        self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources)", self.chat)
         self.assertIn("blockedSources = blockedSources)", self.chat)
         self.assertIn("withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }", self.typing)
         for source in [self.typing, self.reveal]:
@@ -46,20 +46,20 @@ class MarkdownTypingContract(unittest.TestCase):
         workflow = (BASE / "AssistantWorkflowContent.kt").read_text()
         fallback = workflow.split('    val narration = mutableSetOf<String>()', 1)[1].split(
             '\ninternal fun MessageContentUi.workflowKey', 1)[0]
-        self.assertIn(
-            'val body = if (finalText.isBlank()) emptyList() else listOf(MessageContentUi.Text("final", finalText))',
-            fallback)
-        self.assertIn('return AssistantWorkflowContent(work, steps, body, narration)', fallback)
+        self.assertIn('val body = finalContent.ifEmpty {', fallback)
+        self.assertIn('segment.narrationId ?: "workflow-narration:$index"', fallback)
+        self.assertIn('pending = body', fallback)
         self.assertIn('is MessageContentUi.Text -> "text:$itemId"', workflow)
         assistant = self.chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
-        self.assertIn('val textBody = rememberAssistantTextBody(ordered.plainNarration, projection, reveal, generationComplete)', assistant)
+        self.assertIn('val textBody = rememberAssistantTextBody(emptySet(), projection, reveal, generationComplete)', assistant)
         text_body = self.chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
                       'RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),',
                       'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)'):
             self.assertIn(token, text_body)
-        self.assertEqual(2, assistant.count('textBody = textBody'))
+        self.assertEqual(1, assistant.count('textBody = textBody'))
+        self.assertIn('rememberWorkflowNarration(steps, plainText, textSources,', self.chat)
         self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", self.ui)
         content = (BASE / "MessageContent.kt").read_text()
         self.assertIn('key(block.workflowKey(index))', content)

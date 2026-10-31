@@ -51,12 +51,12 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, onExpandedChange: (Boolean) -> Unit = {}, answerPending: Boolean = false, content: (@Composable (Boolean) -> Unit)? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, onExpandedChange: (Boolean) -> Unit = {}, answerPending: Boolean = false, workflowTextSettled: Boolean = true, content: (@Composable (Boolean) -> Unit)? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val reasoning = work.segments.mapNotNull { it.reasoning }
     val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
     val reasoningReady = stopped || sequence.ready(reasoning)
     val finishing = !work.running || answerPending
-    val finished = finishing && reasoningReady
+    val finished = finishing && reasoningReady && workflowTextSettled
     var expandedOverride by rememberSaveable(ownerKey, finishing, stopped) { mutableStateOf<Boolean?>(null) }
     var overrideFinished by rememberSaveable(ownerKey) { mutableStateOf(finishing) }
     var overrideStopped by rememberSaveable(ownerKey) { mutableStateOf(stopped) }

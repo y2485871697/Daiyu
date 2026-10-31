@@ -83,6 +83,7 @@ sealed interface ChatTurnUi {
         /** Exact presentation aliases; persisted/action segment identities are unchanged. */
         val sourceListKeys: List<String> = emptyList(),
         val sourceSegmentIndices: List<Int> = emptyList(),
+        val finalContent: List<MessageContentUi.Text> = emptyList(),
     ) : ChatTurnUi {
         /** Reply actions address the final source, never the stable group identity. */
         val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey
@@ -124,6 +125,7 @@ data class WorkSegmentUi(
     val narration: String? = null,
     val steps: List<WorkStepUi> = emptyList(),
     val reasoning: app.daiyu.android.domain.ReportedReasoning? = null,
+    val narrationId: String? = null,
 )
 
 data class WorkStepOwnerUi(val conversationId: String, val runId: String, val messageId: String)

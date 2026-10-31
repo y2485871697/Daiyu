@@ -193,11 +193,12 @@ object ChatTurnMapper {
     }
 
     private fun workflowFinalTextIndex(message: Message): Int {
-        val index = message.blocks.indexOfLast { it is MessageBlock.Text }
-        // A text followed by another workflow event is narration. It must not switch
-        // the whole reply between a process card and unframed mixed-content rows.
-        return if (message.blocks.drop(index + 1).any { it is MessageBlock.Tool } ||
-            message.reportedReasoning.any { (hasReportedReasoningText(it.text) || it.activeSinceNanos != null) && (it.blockOffset ?: 0) > index }) -1 else index
+        val lastTool = message.blocks.indexOfLast { it is MessageBlock.Tool }
+        val lastReasoning = message.reportedReasoning.filter {
+            hasReportedReasoningText(it.text) || it.activeSinceNanos != null
+        }.maxOfOrNull { it.blockOffset ?: 0 } ?: 0
+        val start = maxOf(lastTool + 1, lastReasoning)
+        return (start until message.blocks.size).firstOrNull { message.blocks[it] is MessageBlock.Text } ?: -1
     }
 
     private fun reasoningAtBoundaries(message: Message) = message.reportedReasoning
@@ -238,14 +239,14 @@ object ChatTurnMapper {
         presentations: ToolPresentationCache?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val hasWorkflow = hasTools || message.reportedReasoning.any { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
-        // A running tail can still be followed by a tool. Keep it in the workflow
-        // until the owning reply reaches a terminal snapshot.
-        val lastText = if (hasWorkflow && message.status == RunStatus.RUNNING) -1 else workflowFinalTextIndex(message)
-        val finalText = if (hasWorkflow) {
-            (message.blocks.getOrNull(lastText) as? MessageBlock.Text)?.text.orEmpty()
-        } else {
-            message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text }
+        // Keep the unclassified tail out of process narration. The UI admits it only
+        // after a real successor step or a terminal reply resolves its ownership.
+        val lastText = workflowFinalTextIndex(message)
+        val finalContent = message.blocks.mapIndexedNotNull { index, block ->
+            (block as? MessageBlock.Text)?.takeIf { !hasWorkflow || lastText >= 0 && index >= lastText }
+                ?.let { MessageContentUi.Text(it.itemId, it.text) }
         }
+        val finalText = finalContent.joinToString("\n\n") { it.text }
         val segments = mutableListOf<WorkSegmentUi>()
         if (hasWorkflow) {
             val reasoning = reasoningAtBoundaries(message)
@@ -254,8 +255,8 @@ object ChatTurnMapper {
                 val block = message.blocks.getOrNull(index) ?: continue
                 when (block) {
                     is MessageBlock.Image -> Unit // Kept, in order, by mixedContent; never converted to narration.
-                    is MessageBlock.Text -> if (index != lastText) {
-                        segments += WorkSegmentUi(narration = block.text)
+                    is MessageBlock.Text -> if (lastText < 0 || index < lastText) {
+                        segments += WorkSegmentUi(narration = block.text, narrationId = block.itemId)
                     }
                     is MessageBlock.Tool -> {
                         val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations)
@@ -293,6 +294,7 @@ object ChatTurnMapper {
             timestamp = timestamp,
             workProcess = if (hasWorkflow) WorkProcessUi(segments, summary, running) else null,
             finalText = finalText,
+            finalContent = finalContent,
             status = message.status,
             error = message.error,
             reportedReasoning = message.reportedReasoning,

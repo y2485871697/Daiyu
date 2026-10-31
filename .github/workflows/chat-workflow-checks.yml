@@ -64,7 +64,8 @@ jobs:
           patterns = ('test_tool_card_html_contract.py',) if os.environ['WORKFLOW_CHECK_SCOPE'] == 'environment-dots' else (
               'test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',
               'test_workflow_render_isolation_contract.py', 'test_reasoning_stream_cost_contract.py',
-              'test_tool_card_html_contract.py')
+              'test_tool_card_html_contract.py', 'test_markdown_typing_contract.py',
+              'test_markdown_body_visibility_contract.py', 'test_workflow_narration_contract.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'composer-send':
               patterns = ('test_composer_surface_color_contract.py', 'test_chat_submission_preview_contract.py',
                           'test_compression_send_gate_contract.py', 'test_delegation_batch_and_send_contract.py')
@@ -86,7 +87,8 @@ jobs:
           classes=(AssistantWorkflowContentTest ToolHeaderTextTest)
           if [[ "$WORKFLOW_CHECK_SCOPE" != environment-dots ]]; then
             classes+=(ChatTurnMapperTest ReasoningWorkflowMapperTest AssistantWorkflowCompositionTest
-                      WorkflowConnectorsTest ReasoningHandoffTest MarkdownAdmissionCompositionTest)
+                      WorkflowConnectorsTest ReasoningHandoffTest MarkdownAdmissionCompositionTest
+                      WorkflowNarrationCompositionTest MarkdownRevealTest MarkdownRevealHapticsTest)
           fi
           filters=()
           if [[ "$WORKFLOW_CHECK_SCOPE" == composer-send ]]; then
@@ -111,7 +113,8 @@ jobs:
           expected = {'AssistantWorkflowContentTest', 'ToolHeaderTextTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] != 'environment-dots':
               expected |= {'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest', 'AssistantWorkflowCompositionTest',
-                           'WorkflowConnectorsTest', 'ReasoningHandoffTest', 'MarkdownAdmissionCompositionTest'}
+                           'WorkflowConnectorsTest', 'ReasoningHandoffTest', 'MarkdownAdmissionCompositionTest',
+                           'WorkflowNarrationCompositionTest', 'MarkdownRevealTest', 'MarkdownRevealHapticsTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'composer-send':
               expected = {'ComposerPhaseProjectionTest', 'ForegroundComposerStateTest', 'ChatSubmissionPreviewTest',
                           'ChatProjectionTest', 'ComposerTextActionTest'}

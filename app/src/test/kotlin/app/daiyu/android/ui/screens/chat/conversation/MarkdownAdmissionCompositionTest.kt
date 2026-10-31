@@ -32,7 +32,9 @@ class MarkdownAdmissionCompositionTest {
     @Test fun terminalBodyDoesNotTypeOrEmitFeedbackBeforeAdmission() = verifyAdmission(terminal = true)
     @Test fun streamingBodyDoesNotTypeBehindAClosingWorkflow() = verifyAdmission(terminal = false)
 
-    private fun verifyAdmission(terminal: Boolean) = runBlocking {
+    @Test fun newlyClassifiedTerminalBodyKeepsItsEmptyLiveBaseline() = verifyAdmission(terminal = true, initiallyNoBody = true)
+
+    private fun verifyAdmission(terminal: Boolean, initiallyNoBody: Boolean = false) = runBlocking {
         projectMarkdown(listOf(""))
         projectMarkdown(listOf(""), parser = streamingMarkdownParser)
         val clock = BroadcastFrameClock()
@@ -40,10 +42,10 @@ class MarkdownAdmissionCompositionTest {
         val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
         val composition = Composition(NoNodes(), recomposer)
         val text = "字".repeat(500)
-        val sources = mutableStateOf(listOf(MarkdownTypingSource("answer", "")))
+        val sources = mutableStateOf(if (initiallyNoBody) emptyList() else listOf(MarkdownTypingSource("answer", "")))
         val parser = defaultMarkdownParser
         fun projection(text: String) = MarkdownProjection(listOf(text), mapOf(text to MarkdownParser.parse(text)), parser)
-        val parsed = mutableStateOf(projection(""))
+        val parsed = mutableStateOf(if (initiallyNoBody) MarkdownProjection(emptyList(), emptyMap(), parser) else projection(""))
         val complete = mutableStateOf(false)
         val admitted = mutableStateOf(false)
         var reveal: MarkdownReveal? = null

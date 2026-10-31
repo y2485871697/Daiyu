@@ -11,6 +11,7 @@ import app.daiyu.android.media.MessageImageAssetStore
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.model.images.FrozenMessageImagePlan
+import app.daiyu.android.storage.IndependentModelSettings
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.storage.ModelSettingsStore
@@ -417,6 +418,48 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         val replay = submit(f, conversation, owner, 7, parts,
             expectedDraft = "before between after") as ImageSendResult.Accepted
         assertEquals(receipt.userId, replay.userId); assertEquals(2, f.probe.opens.get())
+    }
+
+    fun testNativeImagesIgnoreAuxiliaryCapabilityAndConfigurationChanges() {
+        for (auxiliaryCapability in listOf(true, false, null)) {
+            val f = fixture(); val conversation = f.db.create("default")
+            val owner = ImageAttachmentOwner(conversation.id.value, "native-editor")
+            val image = image(f, owner)
+            f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
+                ModelSettings("https://aux.invalid", "vision", "fixture-key", false), null, true,
+                auxiliaryCapability)
+            val mainProvider = runProvider(f)
+            assertEquals(true, mainProvider.imageInputSupported)
+            val route = f.controller.captureImageRoute(mainProvider)
+            assertEquals(mainProvider, route.actual)
+            assertNull(route.auxiliaryGeneration)
+            f.probe.beforeFactory = { f.controller.independentModels.disable(IndependentModelSettings.Slot.VISION) }
+            val result = submit(f, conversation, owner, 1, listOf(ImageSendPart.Image(image)), mainProvider)
+            assertTrue(result is ImageSendResult.Accepted)
+            await(f) { f.controller.active == null }
+            assertNull(f.controller.problem)
+            assertEquals(1, f.probe.opens.get())
+            assertTrue(f.probe.histories.single().any { row -> row.blocks.any { it is MessageBlock.Image } })
+        }
+    }
+
+    fun testMainVisionOffWithUnknownAuxiliaryRejectsWithoutNativeFallbackOrDraftLoss() {
+        val f = fixture(); val conversation = f.db.create("default")
+        val owner = ImageAttachmentOwner(conversation.id.value, "aux-editor")
+        val image = image(f, owner); f.db.draft(conversation.id, "keep")
+        f.settings.modelCatalogSnapshot()
+        f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
+            val record = checkNotNull(current)
+            record.copy(settings = record.settings.copy(visionOverride = false))
+        }
+        f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
+            ModelSettings("https://aux.invalid", "vision", "fixture-key", false), null, true, null)
+        val result = submit(f, conversation, owner, 1, listOf(ImageSendPart.Image(image)))
+        assertTrue(result is ImageSendResult.Rejected)
+        assertEquals(0, f.probe.opens.get())
+        assertTrue(f.db.messages(conversation.id).isEmpty())
+        assertEquals("keep", f.db.conversations().single().draft)
+        assertEquals(listOf(image), f.controller.imageAttachments.store.list(owner))
     }
 
     fun testExplicitUnsupportedCapabilityRejectsBeforeFactoryAndKeepsDraft() {

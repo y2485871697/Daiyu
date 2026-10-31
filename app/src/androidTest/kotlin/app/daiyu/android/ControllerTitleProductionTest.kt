@@ -40,12 +40,20 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
         main { f.controller.observe(listener); listener() }
         try { await(done) } finally { main { f.controller.unobserve(listener) } }
     }
-    private fun fresh(parentStatus: RunStatus = RunStatus.COMPLETED, customTitle: Boolean = true): Fixture {
+    private fun fresh(parentStatus: RunStatus = RunStatus.COMPLETED, customTitle: Boolean = true,
+        mainVision: Boolean? = null): Fixture {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(instrumentation.targetContext, "controller-title-$id-"))
         val db = ConversationDatabase(app)
         val settings = ModelSettingsStore(app, "synthetic-title-main-$id")
         settings.save(ModelSettings("https://main.invalid", "synthetic-main", "synthetic-key", false))
+        if (mainVision != null) {
+            settings.modelCatalogSnapshot()
+            settings.modelCatalog.updateRegisteredModel(settings.load().model) { current ->
+                val record = checkNotNull(current)
+                record.copy(settings = record.settings.copy(visionOverride = mainVision))
+            }
+        }
         var stored: ModelSettings? = null
         val titleStore = TitleModelSettingsStore(app.getSharedPreferences("title-fixture", 0),
             { checkNotNull(stored) }, { p, _, _ -> stored = p }, "title-fixture-$id")
@@ -99,6 +107,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
         f.release.countDown(); state(f) { f.controller.titleRevision == 1L }
         assertEquals("生产标题", f.db.conversations().single().title)
         assertEquals(1, f.calls.get())
+        assertNull(f.controller.consumeTitleNotice())
     }
 
     fun testNewFirstTurnRunsExactlyOnceAfterPersistAndSurvivesNormalCleanup() {
@@ -111,6 +120,39 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
         f.release.countDown(); state(f) { f.controller.titleRevision == 1L }
         assertEquals("生产标题", f.db.conversations().single().title)
         assertEquals(1L, ContextService(f.app, f.db).usage(saved.id.value).requests)
+        assertNull(f.controller.consumeTitleNotice())
+    }
+
+    fun testBrokenTitleConfigurationStillAcceptsChatAndRetainsFailureNotice() {
+        val f = fresh()
+        check(f.app.getSharedPreferences("title-fixture", 0).edit()
+            .putString(TitleModelSettingsStore.KEY, "{}").commit())
+        val saved = send(f)
+        state(f) { f.controller.active == null }
+        assertEquals(RunStatus.COMPLETED, f.db.messages(saved.id).last().second.status)
+        assertEquals("新会话", f.db.conversations().single().title)
+        assertEquals(0, f.calls.get())
+        assertEquals(0L, f.controller.titleRevision)
+        assertTrue(checkNotNull(f.controller.consumeTitleNotice()).contains("标题"))
+        send(f, f.db.conversations().single())
+        state(f) { f.controller.active == null }
+        assertEquals(4, f.db.messages(saved.id).size)
+        assertEquals(0, f.calls.get())
+    }
+
+    fun testTextWithoutImagesIgnoresInvalidAuxiliaryVisionForEitherMainCapability() {
+        for (native in listOf(true, false)) {
+            val f = fresh(customTitle = false, mainVision = native)
+            f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
+                ModelSettings("https://aux.invalid", "vision", "synthetic-key", false), null, true, null)
+            val saved = send(f)
+            await(f.entered); f.release.countDown()
+            state(f) { f.controller.active == null && f.controller.titleRevision == 1L }
+            assertEquals(RunStatus.COMPLETED, f.db.messages(saved.id).last().second.status)
+            assertEquals("生产标题", f.db.conversations().single().title)
+            assertNull(f.controller.problem)
+            assertNull(f.controller.consumeTitleNotice())
+        }
     }
 
     fun testSameValueRenameWhileTitleHeldWinsButActualUsageIsRecorded() {

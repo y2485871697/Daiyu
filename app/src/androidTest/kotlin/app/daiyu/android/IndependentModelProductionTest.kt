@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.test.InstrumentationTestCase
 import app.daiyu.android.assistants.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.domain.pet.PetModelSelection
 import app.daiyu.android.storage.*
 import app.daiyu.android.ui.FeatureRoute
@@ -110,6 +111,26 @@ class IndependentModelProductionTest : InstrumentationTestCase() {
         assertEquals("main-api", main.load().model)
         assistants.delete("pet-assistant")
         assertNull(store.resolvePet(selection, assistants))
+    }
+
+    fun testSelectedCatalogVisionCapabilityPersistsAndRepairsAnOldUnknownBinding() {
+        val store = IndependentModelSettings(context)
+        val slot = IndependentModelSettings.Slot.VISION
+        val settings = ModelSettings("https://vision.invalid", "vision-api", "synthetic-key", false)
+        store.save(slot, settings, null, true, null)
+        assertNull(store.freeze(slot).provider.imageInputSupported)
+        for (declared in listOf(true, false, null)) {
+            val selected = CatalogModelParameters(visionOverride = declared)
+            store.save(slot, selected.applyTo(settings, settings.model), null, true, selected.visionSupported)
+            val reopened = IndependentModelSettings(context)
+            assertEquals(selected.visionSupported, reopened.record(slot).imageInput)
+            val frozen = reopened.freeze(slot)
+            assertEquals(selected.visionSupported, frozen.provider.imageInputSupported)
+            if (selected.visionSupported) {
+                val binding = reopened.visionSelection().resolve(listOf(reopened.visionCandidate(frozen)))
+                assertEquals(settings.model, binding.snapshot.model)
+            } else reject { reopened.visionSelection().resolve(listOf(reopened.visionCandidate(frozen))) }
+        }
     }
 
     fun testInvalidSaveStillRevokesEpochAndFailsClosedForBothSlots() {

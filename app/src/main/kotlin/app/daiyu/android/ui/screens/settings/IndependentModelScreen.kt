@@ -68,7 +68,8 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
         busy = true
         saving = true
         problem = null
-        val images = if (choice.key == selectedKey) record?.imageInput else null
+        val images = if (slot == IndependentModelSettings.Slot.VISION) choice.selection.record.settings.visionSupported
+            else if (choice.key == selectedKey) record?.imageInput else null
         scope.launch {
             try {
                 // Once committed, finish the short host synchronization even if the page closes.
@@ -79,10 +80,10 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
                     }
                     if (slot == IndependentModelSettings.Slot.PET) applyPetModel(PetModelSelection(
                         checkNotNull(saved.assistantId), saved.providerId, saved.localModelId))
-                    withContext(Dispatchers.IO) { source.remember(feature, choice) }
                     record = saved
                     label = choice.label
                     selectedKey = choice.key
+                    withContext(Dispatchers.IO) { source.remember(feature, choice) }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {

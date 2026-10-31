@@ -216,7 +216,7 @@ class ChatController internal constructor(private val application:Application,
                 titleReaders--
                 if (result == app.daiyu.android.title.TitleOutcome.SAVED) titleRevision++
                 titleNotice = when (result) {
-                    app.daiyu.android.title.TitleOutcome.SAVED -> "会话标题已保存"
+                    app.daiyu.android.title.TitleOutcome.SAVED -> null
                     null -> "标题或用量保存未确认；聊天结果不受影响，未自动重试"
                     else -> "标题未保存（${result.name}）；聊天结果不受影响"
                 }
@@ -338,9 +338,9 @@ class ChatController internal constructor(private val application:Application,
     }
     internal val petTransitions = CommittedPetTransitions()
     internal data class ImageRoute(val actual: ProviderSnapshot, val auxiliaryGeneration: Long?)
-    /** Worker-only: explicit auxiliary enablement is not main-provider image capability. */
+    /** Worker-only: native vision takes precedence over the optional auxiliary route. */
     internal fun captureImageRoute(main: ProviderSnapshot): ImageRoute {
-        if (!independentModels.visionSelection().enabled) return ImageRoute(main, null)
+        if (main.imageInputSupported != false || !independentModels.visionSelection().enabled) return ImageRoute(main, null)
         val generation = independentModels.generation()
         val frozen = independentModels.freeze(IndependentModelSettings.Slot.VISION)
         independentModels.visionSelection().resolve(listOf(independentModels.visionCandidate(frozen)))
@@ -3860,21 +3860,6 @@ class ChatController internal constructor(private val application:Application,
             token.video?.revoke()
             problem="原视频目录证据、运行批准或原件校验失败；草稿保留，未启动模型请求";notifyChanged();return null
         } else null
-        val auxiliaryEpoch = independentModels.generation()
-        val auxiliaryCurrent = { video != null || independentModels.isCurrent(auxiliaryEpoch) }
-        val auxiliarySelection = if (video != null) app.daiyu.android.model.auxiliary.AuxiliaryModelSelection(false, "", "")
-            else independentModels.visionSelection()
-        val auxiliaryFrozen = try {
-            if (video != null || !auxiliarySelection.enabled) null else independentModels.freeze(IndependentModelSettings.Slot.VISION).also {
-                auxiliarySelection.resolve(listOf(independentModels.visionCandidate(it)))
-            }
-        } catch (_: Exception) {
-            problem="独立辅助视觉配置不可用或图片能力未知；草稿保留，不回退主模型";notifyChanged();return null
-        }
-        if (imageAttempt != null && (imageAttempt.auxiliaryGeneration != auxiliaryEpoch.takeIf { auxiliaryFrozen != null } ||
-                !auxiliaryCurrent())) {
-            problem="图片路由已变化；草稿保留，请重新发送";notifyChanged();return null
-        }
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
@@ -3918,6 +3903,30 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged(); return null
         }
         if(preparationCancelled(token)) return null
+        val imageHistory = try {
+            if (video != null) emptyList() else
+                ((actionRevision?.prefix ?: contextService.displayHistory(conversationId)) + preparedContext.messages)
+                    .distinctBy { it.id }
+        } catch (_: Exception) {
+            problem="图片历史读取失败；草稿保留，未启动模型请求";notifyChanged();return null
+        }
+        val auxiliaryNeeded = video == null && app.daiyu.android.model.auxiliary.requiresAuxiliaryVision(
+            provider, imageHistory + user)
+        val auxiliaryEpoch = independentModels.generation()
+        val auxiliarySelection = if (auxiliaryNeeded) independentModels.visionSelection()
+            else app.daiyu.android.model.auxiliary.AuxiliaryModelSelection(false, "", "")
+        val auxiliaryFrozen = try {
+            if (!auxiliarySelection.enabled) null else independentModels.freeze(IndependentModelSettings.Slot.VISION).also {
+                auxiliarySelection.resolve(listOf(independentModels.visionCandidate(it)))
+            }
+        } catch (_: Exception) {
+            problem="独立辅助视觉配置不可用或图片能力未知；草稿保留，不回退主模型";notifyChanged();return null
+        }
+        val auxiliaryCurrent = { auxiliaryFrozen == null || independentModels.isCurrent(auxiliaryEpoch) }
+        if (imageAttempt != null && (imageAttempt.auxiliaryGeneration != auxiliaryEpoch.takeIf { auxiliaryFrozen != null } ||
+                !auxiliaryCurrent())) {
+            problem="图片路由已变化；草稿保留，请重新发送";notifyChanged();return null
+        }
         var auxiliaryPort: ControllerAuxiliaryVision? = null
         val acceptedTitle = java.util.concurrent.atomic.AtomicReference<String?>()
         val pendingTitle = java.util.concurrent.atomic.AtomicReference<app.daiyu.android.title.TitleJob?>()
@@ -3927,8 +3936,6 @@ class ChatController internal constructor(private val application:Application,
                 checkNotNull(video.first.post), onFrozenPlan = video.first::onFrozenPlan,
                 backgroundResume = frozenReconnect.responsesBackground) else {
             // Capability preflight is against the actual image route, not the text/main provider.
-            val imageHistory=((actionRevision?.prefix ?: contextService.displayHistory(conversationId)) + preparedContext.messages)
-                .distinctBy { it.id }
             val summaries = preparedContext.messages.filter { row ->
                 preparedContext.archiveId != null && row.id.value == "summary-${preparedContext.archiveId}" &&
                     row.runId.value == "summary-${preparedContext.archiveId}"

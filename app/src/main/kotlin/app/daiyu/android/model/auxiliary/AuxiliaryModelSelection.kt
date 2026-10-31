@@ -1,6 +1,15 @@
 package app.daiyu.android.model.auxiliary
 
 import app.daiyu.android.model.ProviderSnapshot
+import app.daiyu.android.domain.Message
+import app.daiyu.android.domain.MessageBlock
+import app.daiyu.android.domain.MessageHistory
+
+/** An auxiliary model is relevant only to actual pictures with native vision explicitly off. */
+internal fun requiresAuxiliaryVision(main: ProviderSnapshot, history: List<Message>): Boolean =
+    main.imageInputSupported == false && MessageHistory.expand(history).any { row ->
+        row.blocks.any { it is MessageBlock.Image }
+    }
 
 /** Host registry identities, not display names or the main model's defaults. */
 internal data class AuxiliaryModelSelection(

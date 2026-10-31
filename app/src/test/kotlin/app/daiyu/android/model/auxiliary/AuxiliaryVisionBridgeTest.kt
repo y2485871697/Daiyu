@@ -49,6 +49,32 @@ class AuxiliaryVisionBridgeTest {
         AuxiliaryVisionBridge(binding, resolver, describe, encoder)
     private fun reject(work: () -> Unit) { assertNotNull(runCatching(work).exceptionOrNull()) }
 
+    @Test fun auxiliaryRoutingRequiresExplicitNativeOffAndActualPictures() {
+        val picture = row()
+        val text = picture.copy(blocks = listOf(MessageBlock.Text("text", "question")))
+        for (native in listOf(true, false, null)) {
+            val main = ProviderSnapshot.capture(ModelSettings(
+                "https://main.invalid", "main", "fixture-key", false), ProviderProtocol.RESPONSES, native)
+            assertEquals(native == false, requiresAuxiliaryVision(main, listOf(picture)))
+            assertFalse(requiresAuxiliaryVision(main, listOf(text)))
+            assertFalse(requiresAuxiliaryVision(main, emptyList()))
+        }
+    }
+
+    @Test fun auxiliaryRoutingIncludesPicturesInHistoricalSegmentsNotOnlyNewAttachments() {
+        val picture = row("original")
+        val continued = row("continued").copy(blocks = listOf(MessageBlock.Text("next", "follow up")))
+        val segmented = picture.copy(id = MessageId("assistant"), role = Message.ASSISTANT_ROLE,
+            blocks = listOf(MessageBlock.Text("answer", "answer")), historySegments = listOf(
+                MessageHistorySegment(picture.id, picture.role, picture.blocks)))
+        val main = ProviderSnapshot.capture(ModelSettings(
+            "https://main.invalid", "main", "fixture-key", false), ProviderProtocol.RESPONSES, false)
+        assertTrue(requiresAuxiliaryVision(main, listOf(segmented, continued)))
+        assertFalse(requiresAuxiliaryVision(main, listOf(continued)))
+        assertTrue(picture.blocks[1] is MessageBlock.Image)
+        assertEquals(1, segmented.historySegments.size)
+    }
+
     @Test fun exactAuthorizationCachePreservesImagePositionAndLeavesOriginalUntouched() {
         val resolver = Resolver()
         val requests = mutableListOf<AuxiliaryVisionRequest>()

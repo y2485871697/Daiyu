@@ -354,7 +354,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         } finally { release.countDown(); lease.cancel() }
     }
 
-    fun testEnabledVisionRouteIsIndependentAndDoesNotUpgradeMainImageCapability() {
+    fun testAuxiliaryImageRouteRemainsSeparateWhilePlainTextUsesMain() {
         val mainOpens = AtomicInteger()
         val f = fresh(factory = { provider, _ ->
             assertEquals("fixture", provider.model)
@@ -364,7 +364,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
                 assertTrue(history.all { it.blocks.none { block -> block is MessageBlock.Image } })
                 object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                        sink(ModelEvent.TextFinal("done", "ordinary text through auxiliary branch"))
+                        sink(ModelEvent.TextFinal("done", "ordinary text stays on the main branch"))
                     }
                     override fun cancel() {}
                 }
@@ -383,18 +383,21 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         assertEquals("separate-vision-api", route.actual.model)
         assertEquals(true, route.actual.imageInputSupported)
         assertNotNull(route.auxiliaryGeneration)
-        assertNotNull(f.controller.send(null, "text needs authorization too"))
+        assertNotNull(f.controller.send(null, "text needs no image authorization"))
         await(f) { f.controller.active == null }
         assertEquals(1, mainOpens.get())
     }
 
-    fun testAuxiliaryConfigurationEditCancelsBlockedOpenButRetainsRunUntilWorkerDrains() {
+    fun testAuxiliaryConfigurationEditDoesNotCancelAnUnrelatedTextRun() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         val lateCancels = AtomicInteger(); val nextCalls = AtomicInteger()
         val f = fresh(factory = { _, _ -> CatalogFixturePort {
             entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
             object : ModelSession {
-                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { nextCalls.incrementAndGet() }
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    nextCalls.incrementAndGet()
+                    sink(ModelEvent.TextFinal("answer", "done"))
+                }
                 override fun cancel() { lateCancels.incrementAndGet() }
             }
         } })
@@ -405,30 +408,29 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
             assertTrue(entered.await(10, TimeUnit.SECONDS))
             f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
                 configuration.copy(model = "vision-b"), null, true, true)
-            assertNotNull(f.controller.active) // cancel is not worker/drain completion.
+            assertNotNull(f.controller.active)
+            assertEquals(0, lateCancels.get())
             release.countDown()
             await(f) { f.controller.active == null }
-            assertEquals(0, nextCalls.get())
-            assertTrue(lateCancels.get() >= 1)
+            assertEquals(1, nextCalls.get())
+            assertEquals(RunStatus.COMPLETED, f.database.messages(f.database.conversations().single().id).last().second.status)
         } finally { release.countDown() }
     }
 
-    fun testExplicitAuxiliaryUnknownFailsWithoutCallingMainOrFallingBack() {
+    fun testUnknownAuxiliaryCapabilityDoesNotBlockOrReplacePlainText() {
         val factories = AtomicInteger()
         val f = fresh(factory = { _, _ -> factories.incrementAndGet(); port() })
         f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
             ModelSettings("https://auxiliary.invalid", "vision-api", "independent-key", false), null, true, null)
-        f.database.draft("retain unknown capability")
-        assertNull(f.controller.send(null, "retain unknown capability"))
-        assertEquals(0, factories.get())
-        assertEquals("retain unknown capability", f.database.draft())
-        assertTrue(f.controller.problem!!.contains("辅助视觉"))
-        // Explicitly disabled is a separate ordinary text path, not catch-and-fallback.
-        f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
-            ModelSettings("https://auxiliary.invalid", "vision-api", "independent-key", false), null, false, null)
-        assertNotNull(f.controller.send(null, "retain unknown capability"))
+        val conversation = checkNotNull(f.controller.send(null, "no pictures"))
         await(f) { f.controller.active == null }
         assertEquals(1, factories.get())
+        assertNull(f.controller.problem)
+        assertEquals(RunStatus.COMPLETED, f.database.messages(conversation.id).last().second.status)
+        f.controller.independentModels.disable(IndependentModelSettings.Slot.VISION)
+        assertNotNull(f.controller.send(conversation, "still ordinary text"))
+        await(f) { f.controller.active == null }
+        assertEquals(2, factories.get())
     }
 
     fun testExistingInjectedFactoryStillOwnsPortConstruction() {

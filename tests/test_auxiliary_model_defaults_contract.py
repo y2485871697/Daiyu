@@ -39,5 +39,41 @@ class AuxiliaryModelDefaultsContract(unittest.TestCase):
         self.assertIn('settings.whileCurrent(job.binding, job.provider, job.configurationRevision)', coordinator)
         self.assertIn('if (closed || job.revoked)', coordinator)
 
+    def test_auxiliary_vision_only_freezes_for_pictures_when_native_is_explicitly_off(self):
+        controller = (MAIN / 'ChatController.kt').read_text()
+        capture = controller.split('internal fun captureImageRoute(', 1)[1].split('internal fun independentConfigurationChanging', 1)[0]
+        self.assertIn('main.imageInputSupported != false || !independentModels.visionSelection().enabled', capture)
+        self.assertLess(capture.index('main.imageInputSupported != false'), capture.index('independentModels.freeze('))
+        send = controller.split('val imageHistory =', 1)[1].split('var auxiliaryPort:', 1)[0]
+        self.assertIn('actionRevision?.prefix ?: contextService.displayHistory(conversationId)', send)
+        self.assertIn('provider, imageHistory + user)', send)
+        self.assertIn('+ preparedContext.messages)', send)
+        self.assertLess(controller.index('val preparedContext ='), controller.index('val imageHistory ='))
+        self.assertIn('if (auxiliaryNeeded) independentModels.visionSelection()', send)
+        self.assertIn('auxiliaryFrozen == null || independentModels.isCurrent(auxiliaryEpoch)', send)
+        helper = (MAIN / 'model/auxiliary/AuxiliaryModelSelection.kt').read_text()
+        self.assertIn('main.imageInputSupported == false && MessageHistory.expand(history)', helper)
+        self.assertIn('row.blocks.any { it is MessageBlock.Image }', helper)
+        self.assertIn('require(candidate.snapshot.imageInputSupported == true)', helper)
+
+    def test_independent_picker_uses_selected_catalog_capability_and_updates_confirmed_label_first(self):
+        source = (MAIN / 'ui/screens/settings/IndependentModelScreen.kt').read_text()
+        self.assertIn('if (slot == IndependentModelSettings.Slot.VISION) choice.selection.record.settings.visionSupported', source)
+        self.assertIn('else if (choice.key == selectedKey) record?.imageInput else null', source)
+        self.assertIn('store.save(slot, settings, assistantId, true, images)', source)
+        self.assertLess(source.index('record = saved'), source.index('source.remember(feature, choice)'))
+        self.assertLess(source.index('label = choice.label'), source.index('source.remember(feature, choice)'))
+        self.assertLess(source.index('selectedKey = choice.key'), source.index('source.remember(feature, choice)'))
+
+    def test_saved_title_is_silent_but_refresh_and_failure_notices_remain(self):
+        controller = (MAIN / 'ChatController.kt').read_text()
+        self.assertNotIn('会话标题已保存', controller)
+        self.assertIn('TitleOutcome.SAVED -> null', controller)
+        self.assertIn('TitleOutcome.SAVED) titleRevision++', controller)
+        self.assertIn('标题或用量保存未确认', controller)
+        self.assertIn('独立标题配置不可用；聊天已保存', controller)
+        activity = (MAIN / 'MainActivity.kt').read_text()
+        self.assertIn('controller.consumeTitleNotice()?.let { toast(it) }', activity)
+
 if __name__ == '__main__':
     unittest.main()

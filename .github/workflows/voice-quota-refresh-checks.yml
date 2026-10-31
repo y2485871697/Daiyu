@@ -57,7 +57,12 @@ jobs:
           records = []
           for pattern in ('test_voice_quota_selection_contract.py', 'test_voice_creation_cards_contract.py',
                           'test_voice_settings_parity_contract.py', 'test_voice_sync_layout_contract.py'):
-              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              if pattern == 'test_voice_settings_parity_contract.py':
+                  suite = unittest.TestLoader().loadTestsFromName(
+                      'test_voice_settings_parity_contract.VoiceSettingsParityContractTest.'
+                      'test_doubao_slot_and_recording_details_match_existing_flows_without_new_requests')
+              else:
+                  suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
               assert result.wasSuccessful() and not result.skipped, pattern

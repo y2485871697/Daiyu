@@ -356,7 +356,8 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
                 self.assertNotIn(stale, source)
         self.assertIn('val saved = ModelFactory.snapshot(resolveSavedModel(profile.providerId, profile.modelId))', binding)
         self.assertIn('require(saved.model == model.modelId)', binding)
-        self.assertIn('profile.role == "review"', binding)
+        self.assertIn('require(profile.role in setOf("implementation", "review"))', binding)
+        self.assertIn('role = if (binding.profile.role == "implementation") ChildModelRole.IMPLEMENTATION else ChildModelRole.REVIEW', binding)
 
     def test_both_new_request_paths_freeze_and_check_without_mutating_old_definitions(self):
         controller = (SRC / 'ChatController.kt').read_text()

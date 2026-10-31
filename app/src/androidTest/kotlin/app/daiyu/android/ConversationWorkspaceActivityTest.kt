@@ -390,6 +390,69 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(full, choices.single().path); assertEquals(0, saves) }
     }
 
+    private fun assertNoDirectoryReadIndicator() {
+        ui.onAllNodes(SemanticsMatcher.keyIsDefined(
+            androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo),
+            useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    fun testDirectoryReadKeepsMountedRowsAndPathUntilResultAndDisablesStaleActions() {
+        showSheet()
+        node("workspace-edit:0").performClick()
+        node("workspace-folder:项目 空格").performClick()
+        val shownPath = "$original/项目 空格"
+        val target = "$shownPath/second"
+        val listId = node("workspace-directories").fetchSemanticsNode().id
+        val rowId = node("workspace-folder:second").fetchSemanticsNode().id
+        val footer = node("workspace-save").fetchSemanticsNode().boundsInRoot
+        ui.runOnIdle { path = target; listing = true }
+        repeat(3) {
+            ui.mainClock.advanceTimeByFrame()
+            assertEquals(listId, node("workspace-directories").fetchSemanticsNode().id)
+            assertEquals(rowId, node("workspace-folder:second").fetchSemanticsNode().id)
+            assertEquals(footer, node("workspace-save").fetchSemanticsNode().boundsInRoot)
+            node("workspace-current-path").assertTextEquals("/workspace/项目 空格")
+            node("workspace-folder:second").assertIsNotEnabled()
+            assertNoDirectoryReadIndicator()
+        }
+        node("workspace-parent").assertIsNotEnabled()
+        node("workspace-copy-path").assertIsNotEnabled()
+        node("workspace-create-folder").assertIsNotEnabled()
+        node("workspace-save").assertIsNotEnabled()
+        node("workspace-cancel").assertIsEnabled()
+        node("workspace-folder:second").performTouchInput { click() }
+        ui.runOnIdle {
+            assertEquals(shownPath, directory?.path)
+            assertEquals(target, path)
+            assertEquals(0, saves)
+            assertTrue(copiedPaths.isEmpty())
+        }
+        ui.runOnIdle { setDirectory(target); listing = false }
+        node("workspace-current-path").assertTextEquals("/workspace/项目 空格/second")
+        assertEquals(listId, node("workspace-directories").fetchSemanticsNode().id)
+        node("workspace-folder:second").assertIsEnabled()
+        node("workspace-save").assertIsEnabled()
+        assertEquals(footer, node("workspace-save").fetchSemanticsNode().boundsInRoot)
+        assertNoDirectoryReadIndicator()
+        ui.runOnIdle { assertEquals(0, saves); assertEquals(0, switches) }
+    }
+
+    fun testFirstDirectoryReadHasNoSpinnerOrPrematureEmptyState() {
+        ui.runOnIdle { choosing = true; listing = true; directory = null }
+        showSheet()
+        node("workspace-directories").assertExists()
+        node("workspace-folder:second").assertDoesNotExist()
+        node("workspace-save").assertIsNotEnabled()
+        node("workspace-create-folder").assertIsNotEnabled()
+        node("workspace-cancel").assertIsEnabled()
+        ui.onNodeWithText("此目录为空").assertDoesNotExist()
+        assertNoDirectoryReadIndicator()
+        ui.runOnIdle { setDirectory(original); listing = false }
+        node("workspace-folder:second").assertExists()
+        node("workspace-save").assertIsEnabled()
+        assertNoDirectoryReadIndicator()
+    }
+
     fun testCopyIsDisabledWhileLoadingOrSavingAndDoesNotDispatchWhenHidden() {
         showSheet()
         node("workspace-copy-path").assertDoesNotExist()

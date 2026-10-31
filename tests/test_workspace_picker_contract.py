@@ -57,6 +57,27 @@ class WorkspacePickerContract(unittest.TestCase):
         self.assertIn('else \"会话工作区\"', sheet)
         self.assertIn('Column(Modifier.fillMaxSize()', sheet)
 
+    def test_directory_read_keeps_list_mounted_without_loading_animation(self):
+        sheet = self.text('ui/components/ConversationWorkspaceSheet.kt')
+        body = sheet.split('testTag("workspace-directory-body")', 1)[1].split('if (directory?.truncated', 1)[0]
+        self.assertIn('LazyColumn(Modifier.fillMaxSize().testTag("workspace-directories"))', body)
+        self.assertNotIn('if (listing)', body)
+        self.assertNotIn('ProgressIndicator', body)
+        self.assertIn('!busy && !listing', body)
+        self.assertIn('items(directory.entries, key = { it.name })', body)
+        self.assertIn('val fullPath = directory?.path ?: path', sheet)
+
+    def test_navigation_retains_snapshot_until_guarded_read_finishes(self):
+        main = self.text('MainActivity.kt')
+        browse = main.split('private fun browseConversationWorkspace', 1)[1].split('private fun manageConversationWorkspaceEntry', 1)[0]
+        loading = browse.split('val loading =', 1)[1].split('lifecycleScope.launch', 1)[0]
+        self.assertIn('visit.copy(', loading)
+        self.assertIn('listing = true', loading)
+        self.assertNotIn('directory =', loading)
+        self.assertIn('workspacePresented(loading) && workspaceVisit === loading', browse)
+        self.assertIn('path = directory.path, directory = directory, listing = false', browse)
+        self.assertIn('directory = loading.directory?.copy(selectable = false)', browse)
+
     def test_only_use_saves_cancel_discards_draft(self):
         main = self.text('MainActivity.kt')
         cancel = main.split('private fun cancelWorkspaceSelection', 1)[1].split('private fun saveConversationWorkspace', 1)[0]

@@ -190,16 +190,12 @@ fun ConversationWorkspaceSheet(
                         }
                         HorizontalDivider(color = colors.line)
                         Box(Modifier.fillMaxWidth().weight(1f).testTag("workspace-directory-body")) {
-                            if (listing) {
-                                CircularProgressIndicator(Modifier.size(28.dp).align(Alignment.Center), color = colors.accent)
-                            } else {
-                                LazyColumn(Modifier.fillMaxSize().testTag("workspace-directories")) {
-                                    if (directory != null) {
-                                        items(directory.entries, key = { it.name }) { entry ->
-                                            WorkspaceFolderRow(entry.name, "workspace-${if (entry.directory) "folder" else "file"}:${entry.name}", !busy,
-                                                directory = entry.directory, onLongClick = { onLongPressFile(entry.name) },
-                                                onClick = { if (entry.directory) onNavigate(directory.path.trimEnd('/') + "/" + entry.name) })
-                                        }
+                            LazyColumn(Modifier.fillMaxSize().testTag("workspace-directories")) {
+                                if (directory != null) {
+                                    items(directory.entries, key = { it.name }) { entry ->
+                                        WorkspaceFolderRow(entry.name, "workspace-${if (entry.directory) "folder" else "file"}:${entry.name}", !busy && !listing,
+                                            directory = entry.directory, onLongClick = { onLongPressFile(entry.name) },
+                                            onClick = { if (entry.directory) onNavigate(directory.path.trimEnd('/') + "/" + entry.name) })
                                     }
                                 }
                             }

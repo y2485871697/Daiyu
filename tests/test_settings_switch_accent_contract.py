@@ -56,14 +56,13 @@ class SettingsSwitchAccentContractTest(unittest.TestCase):
                          'disabledUncheckedTrackColor = colors.surface'):
             self.assertIn(retained, skill)
 
-    def test_subagent_and_balance_direct_switches_share_track_and_keep_authority(self):
+    def test_balance_direct_switch_keeps_track_and_authority_and_profiles_have_no_switch(self):
         subagent = (SRC / 'ui/SubAgentSettingsScreen.kt').read_text()
         balance = (SRC / 'balance/ui/BalanceSettingsScreen.kt').read_text()
-        for text in (subagent, balance):
-            self.assertEqual(1, text.count(f'checkedTrackColor = {TOKEN}'))
-            self.assertEqual(1, text.count(f'checkedBorderColor = {TOKEN}'))
-        self.assertIn('if (editor.enabled) { editor.updateProfile(profile.id) { it.copy(enabled = active) } }', subagent)
-        self.assertIn('modifier = Modifier.scale(0.7f)', subagent)
+        self.assertEqual(1, balance.count(f'checkedTrackColor = {TOKEN}'))
+        self.assertEqual(1, balance.count(f'checkedBorderColor = {TOKEN}'))
+        self.assertNotIn('Switch(profile.enabled', subagent)
+        self.assertNotIn('copy(enabled = active)', subagent)
         self.assertIn('onChange(option.copy(enabled = it))', balance)
         self.assertIn('if (it) expanded = true', balance)
 

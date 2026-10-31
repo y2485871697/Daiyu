@@ -89,14 +89,9 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("草稿职责").assertExists()
         ui.onNodeWithContentDescription("草稿任务分工").assertExists()
         ui.onNodeWithContentDescription("草稿思考深度").assertExists()
-        val enable = ui.onNode(hasText("启用") and hasAnyAncestor(hasTestTag("subagent-config-body")),
-            useUnmergedTree = true).scrollToVisible().fetchSemanticsNode().boundsInRoot
-        val modelLabel = ui.onNode(hasText("模型") and hasAnyAncestor(hasContentDescription("草稿模型")),
-            useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val switch = formSwitch().assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
-            .fetchSemanticsNode().boundsInRoot
-        assertEquals("Enable label shares the model text column", modelLabel.left, enable.left, 1f)
-        assertEquals("Enable label centers on the switch", switch.center.y, enable.center.y, 1f)
+        ui.onAllNodes(hasText("启用") and hasAnyAncestor(hasTestTag("subagent-config-body")),
+            useUnmergedTree = true).assertCountEquals(0)
+        formSwitch().assertDoesNotExist()
     }
 
     private fun nameField(value: String) = ui.onNode(hasSetTextAction() and hasText(value))
@@ -165,7 +160,7 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
             }
     }
 
-    fun testSettingsEditUsesSharedSheetAndNewSwitchButOutsideDiscardsAllChanges() {
+    fun testSettingsEditUsesSharedSheetWithoutEnableSwitchAndOutsideDiscardsAllChanges() {
         val (repository, owner) = openGroup()
         val before = repository.snapshot(owner)
         openExisting()
@@ -173,7 +168,7 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.onAllNodes(hasText("取消") and hasClickAction() and hasAnyAncestor(hasTestTag("subagent-config-actions"))).assertCountEquals(0)
         awaitNodeWindowFocus(nameField("Existing worker"))
         nameField("Existing worker").performTextReplacement("Discarded edit")
-        formSwitch().scrollToVisible().assertIsOn().performClick().assertIsOff()
+        formSwitch().assertDoesNotExist()
         ui.onNodeWithContentDescription("草稿任务分工").scrollToVisible().performClick()
         ui.onNode(hasText("未设置分工") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
             .assertIsDisplayed().performClick()
@@ -191,7 +186,7 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         assertEquals(before, repository.snapshot(owner))
         openExisting()
         nameField("Existing worker").assertExists()
-        formSwitch().scrollToVisible().assertIsOn()
+        formSwitch().assertDoesNotExist()
         dismissForm()
         assertEquals(0, fixture.opens.get())
     }
@@ -267,15 +262,15 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         openExisting()
         awaitNodeWindowFocus(nameField("Existing worker"))
         nameField("Existing worker").performTextReplacement("Saved edit")
-        formSwitch().scrollToVisible().assertIsOn().performClick().assertIsOff()
+        formSwitch().assertDoesNotExist()
         ui.onNodeWithTag("subagent-field:并行上限（0 为不限）").scrollToVisible().performTextReplacement("3")
         ui.onAllNodesWithText("本配置内相同提供商/API 模型共用此上限").assertCountEquals(0)
         assertEquals(added, repository.snapshot(owner).profiles.single { it.id == added.id })
         confirm().assertIsEnabled().performClick()
         ui.waitUntil(5_000) { repository.snapshot(owner).profiles.any { it.name == "Saved edit" } }
         val edited = repository.snapshot(owner).profiles.single { it.id == "existing" }
-        assertFalse(edited.enabled)
-        assertEquals(before.profiles.single().copy(name = "Saved edit", enabled = false, parallelLimit = 3), edited)
+        assertTrue(edited.toJson().getBoolean("enabled"))
+        assertEquals(before.profiles.single().copy(name = "Saved edit", parallelLimit = 3), edited)
         assertEquals(added, repository.snapshot(owner).profiles.single { it.id == added.id })
         assertEquals(listOf(owner.value), repository.presets().map { it.id })
         assertEquals(0, fixture.opens.get())

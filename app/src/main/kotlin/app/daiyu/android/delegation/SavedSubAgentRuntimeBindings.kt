@@ -31,7 +31,7 @@ internal class SavedSubAgentRuntimeBindings(
         profileCurrent: (String) -> Boolean = { true },
         modelDeleted: (SubAgentProfile) -> Boolean = { false }): FrozenSubAgentModels {
         val frozen = config.detached(); frozen.validate()
-        val enabled = if (frozen.enabled) frozen.profiles.filter { it.enabled } else emptyList()
+        val enabled = if (frozen.enabled) frozen.profiles else emptyList()
         val selected = enabled.map { profile ->
             val provider = requireNotNull(providers.singleOrNull { it.id == profile.providerId && it.isEnabled }) {
                 "Saved child provider is unavailable"

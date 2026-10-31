@@ -9,20 +9,20 @@ internal object SubAgentModelDefaults {
     const val KEY = "agent_subagent_model_defaults_v1"
     private const val VERSION = 1
     data class Entry(
-        val providerId: String, val modelId: String, val enabled: Boolean, val role: String,
+        val providerId: String, val modelId: String, val role: String,
         val tier: SubAgentTaskTier?, val reasoning: ReasoningEffort?, val imageResolution: String?,
         val gptSpeed: GptSpeedMode, val apiModel: String? = null, val parallelLimit: Int? = null,
         val gptSpeedInherited: Boolean = false,
     ) {
         val key: String get() = SubAgentProfile.modelReasoningKey(providerId, modelId)
         fun restore(profile: SubAgentProfile): SubAgentProfile = profile.copy(
-            providerId = providerId, modelId = modelId, enabled = enabled, role = role, tier = tier,
+            providerId = providerId, modelId = modelId, role = role, tier = tier,
             reasoning = reasoning, imageResolution = imageResolution,
             reasoningByModel = reasoning?.let { mapOf(key to it) }.orEmpty(), gptSpeedByModel = if (gptSpeedInherited) emptyMap() else mapOf(key to gptSpeed),
         )
     }
     fun confirmed(profile: SubAgentProfile, previous: Entry?, binding: SubAgentParallelModel?, limit: Int?): Entry = Entry(
-        profile.providerId, profile.modelId, profile.enabled, profile.role, profile.tier, profile.reasoning,
+        profile.providerId, profile.modelId, profile.role, profile.tier, profile.reasoning,
         profile.imageResolution, profile.gptSpeedForModel(), binding?.apiModel ?: previous?.apiModel,
         limit ?: previous?.parallelLimit,
         gptSpeedInherited = SubAgentProfile.modelReasoningKey(profile.providerId, profile.modelId) !in profile.gptSpeedByModel,
@@ -61,7 +61,7 @@ internal object SubAgentModelDefaults {
                 item.getInt("parallel_limit").also { require(it >= 0 && api != null) }
             }
             require(item.has("api_model") && item.has("parallel_limit"))
-            val entry = Entry(provider, model, item.getBoolean("enabled"), role, tier, reasoning, resolution, speed, api, limit, inherited)
+            val entry = Entry(provider, model, role, tier, reasoning, resolution, speed, api, limit, inherited)
             require(result.put(entry.key, entry) == null) { "Duplicate model defaults identity" }
         }
         return result.toMap()
@@ -69,7 +69,7 @@ internal object SubAgentModelDefaults {
     fun encode(entries: Map<String, Entry>): String {
         require(entries.all { (key, entry) -> key == entry.key })
         val raw = JSONObject().put("version", VERSION).put("models", JSONArray(entries.values.map { entry ->
-            JSONObject().put("provider", entry.providerId).put("model", entry.modelId).put("enabled", entry.enabled)
+            JSONObject().put("provider", entry.providerId).put("model", entry.modelId).put("enabled", true)
                 .put("role", entry.role).put("tier", entry.tier?.wireValue.orEmpty())
                 .put("reasoning", entry.reasoning?.wireValue.orEmpty()).put("image_resolution", entry.imageResolution.orEmpty())
                 .put("gpt_speed", entry.gptSpeed.name).put("api_model", entry.apiModel ?: JSONObject.NULL)

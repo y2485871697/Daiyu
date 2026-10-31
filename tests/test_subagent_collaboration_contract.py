@@ -246,7 +246,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertNotIn('.background(', field)
         self.assertNotIn('Color.White', field)
         shared = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
-        self.assertIn('ConversationAgentSwitch(draft.enabled, usable)', shared)
+        self.assertNotIn('draft.enabled', shared)
         for label in ('模型', 'GPT 速度', '职责', '任务分工', '思考深度', '默认分辨率'):
             self.assertIn(f'SubAgentSettingRow("{label}"', shared)
         self.assertIn('choices = "role"', shared)
@@ -254,16 +254,14 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('if (canEditSpeed)', shared)
         self.assertIn('if (draft.supportsTaskTier)', shared)
 
-    def test_config_body_has_no_extra_dividers_and_enabled_uses_the_label_column(self):
+    def test_config_body_has_no_extra_dividers_or_enable_control(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
         body = form.split('SubAgentConfigurationWindow(title =', 1)[1].split('SubAgentDraftDialogActions(ready', 1)[0]
         self.assertNotIn('divider =', body)
         self.assertNotIn('HorizontalDivider(', body)
-        self.assertIn('.padding(start = 30.dp, top = 8.dp, bottom = 8.dp)', body)
-        self.assertIn('Text("启用", Modifier.weight(1f)', body)
-        self.assertIn('fontSize = 14.sp, lineHeight = 22.sp, color = conversationAgentColors().text', body)
-        self.assertIn('ConversationAgentSwitch(draft.enabled, usable)', body)
-        self.assertIn('active -> interact { session.edit { it.copy(enabled = active) } }', body)
+        self.assertNotIn('Text("启用"', body)
+        self.assertNotIn('ConversationAgentSwitch(', body)
+        self.assertNotIn('copy(enabled =', body)
         footer = form.split('private fun SubAgentDraftDialogActions', 1)[1]
         self.assertEqual(1, footer.count('HorizontalDivider('))
 

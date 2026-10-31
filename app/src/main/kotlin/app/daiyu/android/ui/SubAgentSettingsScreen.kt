@@ -3,8 +3,6 @@ package app.daiyu.android.ui
 import app.daiyu.android.ui.app.destructiveColors
 
 import app.daiyu.android.ui.navigation.PageBackStack
-import app.daiyu.android.ui.app.DaiyuPalette
-import app.daiyu.android.ui.app.daiyuSwitchColors
 
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.background
@@ -20,7 +18,6 @@ import androidx.compose.material3.*
 import app.daiyu.android.ui.haptics.material.TextButton
 import app.daiyu.android.ui.haptics.material.FilledTonalButton
 import app.daiyu.android.ui.haptics.material.IconButton
-import app.daiyu.android.ui.haptics.material.Switch
 import app.daiyu.android.ui.haptics.material.DropdownMenuItem
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,13 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.*
@@ -213,15 +206,6 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                                         }, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
                                         Text(profile.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                                             maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                        Box(Modifier.requiredSize(36.dp, 22.dp).wrapContentSize(unbounded = true)
-                                            .semantics { contentDescription = "启用${profile.name}" }, contentAlignment = Alignment.Center) {
-                                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                                                Switch(profile.enabled, enabled = editable, onCheckedChange = { active ->
-                                                    if (editor.enabled) { editor.updateProfile(profile.id) { it.copy(enabled = active) } }
-                                                }, colors = daiyuSwitchColors(SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                                    checkedBorderColor = DaiyuPalette.switchTrack)), modifier = Modifier.scale(0.7f))
-                                            }
-                                        }
                                         var expanded by remember(editor, profile.id) { mutableStateOf(false) }
                                         LaunchedEffect(editable) { if (!editable) expanded = false }
                                         Box {

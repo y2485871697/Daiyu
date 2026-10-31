@@ -1870,9 +1870,9 @@ class ChatController internal constructor(private val application:Application,
         val registryRevision = providers.snapshot().revision
         val availableConfig = config.copy(profiles = config.profiles.filterNot { (it.providerId to it.modelId) in deletedCatalogModels })
         val selection = if (profileId == null) availableConfig else availableConfig.copy(enabled = true,
-            profiles = availableConfig.profiles.filter { it.id == profileId }.map { it.copy(enabled = true) })
+            profiles = availableConfig.profiles.filter { it.id == profileId })
         check(profileId == null || selection.profiles.size == 1) { "child_profile_removed_or_role_changed" }
-        val catalogRevisions = selection.profiles.filter { selection.enabled && it.enabled }.map { it.providerId }.distinct().associateWith { slot ->
+        val catalogRevisions = selection.profiles.filter { selection.enabled }.map { it.providerId }.distinct().associateWith { slot ->
             providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it } }
         }
         val bindingsCurrent = {

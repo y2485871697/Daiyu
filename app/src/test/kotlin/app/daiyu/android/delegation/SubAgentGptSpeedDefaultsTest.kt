@@ -13,6 +13,22 @@ class SubAgentGptSpeedDefaultsTest {
     private fun roundTrip(entry: SubAgentModelDefaults.Entry): SubAgentModelDefaults.Entry =
         SubAgentModelDefaults.decode(SubAgentModelDefaults.encode(mapOf(entry.key to entry))).getValue(entry.key)
 
+    @Test fun legacyDisabledDefaultsRestoreOtherFieldsAndAlwaysEncodeTrue() {
+        val expected = profile.copy(reasoning = ReasoningEffort.HIGH, parallelLimit = 2)
+        val json = JSONObject(SubAgentModelDefaults.encode(mapOf(key to confirmed(expected))))
+        json.getJSONArray("models").getJSONObject(0).put("enabled", false)
+        val entry = SubAgentModelDefaults.decode(json.toString()).getValue(key)
+        val restored = entry.restore(profile)
+        assertEquals(ReasoningEffort.HIGH, restored.reasoning)
+        assertTrue(restored.toJson().getBoolean("enabled"))
+        val encoded = JSONObject(SubAgentModelDefaults.encode(mapOf(key to entry)))
+        assertTrue(encoded.getJSONArray("models").getJSONObject(0).getBoolean("enabled"))
+        for (invalid in listOf<Any>("false", 0, JSONObject.NULL)) {
+            json.getJSONArray("models").getJSONObject(0).put("enabled", invalid)
+            assertThrows(IllegalArgumentException::class.java) { SubAgentModelDefaults.decode(json.toString()) }
+        }
+    }
+
     @Test fun inheritedSpeedStaysInheritedAcrossConfirmationEncodingAndRestore() {
         val entry = roundTrip(confirmed(profile))
         assertTrue(entry.gptSpeedInherited)

@@ -13,7 +13,7 @@ class ConversationSubAgentHotConfigurationTest {
         val notifications = mutableListOf<ConversationSubAgentConfig?>()
         val observer = repository.observeChanges { changed, config -> if (changed == owner) notifications += config }
         val lifetime = repository.profileLifetime(owner, profile.id)
-        repository.update(owner) { it.copy(enabled = false, profiles = listOf(profile.copy(name = "renamed", enabled = false))) }
+        repository.update(owner) { it.copy(enabled = false, profiles = listOf(profile.copy(name = "renamed"))) }
         assertEquals(lifetime, repository.profileLifetime(owner, profile.id))
         repository.update(owner) { it.copy(profiles = emptyList()) }
         repository.update(owner) { it.copy(profiles = listOf(profile)) }

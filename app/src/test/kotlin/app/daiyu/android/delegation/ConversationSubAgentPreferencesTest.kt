@@ -7,6 +7,66 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ConversationSubAgentPreferencesTest {
+    @Test fun oldDisabledProfileHasNoDisableStateAndWritesEnabledCompatibilityFlag() {
+        val profile = SubAgentProfile("legacy", "Legacy", "review", providerId = "provider", modelId = "model")
+        val old = profile.toJson().put("enabled", false)
+        val restored = SubAgentProfile.fromJson(old)
+        assertEquals(profile, restored)
+        assertTrue(restored.toJson().getBoolean("enabled"))
+        assertEquals(profile, SubAgentProfile.fromJson(profile.toJson().also { it.remove("enabled") }))
+    }
+
+    @Test fun oldFalseProfilesImportReopenCopyAndDeleteWithoutChangingGroupSwitch() {
+        val disk = MemoryPreferences(); val repository = ConversationSubAgentPreferences(disk)
+        val source = SubAgentConfigKey.Conversation("source")
+        val profile = SubAgentProfile("legacy", "Legacy", "review", providerId = "provider", modelId = "model", parallelLimit = 2)
+        repository.update(source) { it.copy(profiles = listOf(profile)) }
+        for (groupEnabled in listOf(false, true)) {
+            val owner = SubAgentConfigKey.Conversation("import-$groupEnabled")
+            val old = org.json.JSONObject(repository.export(source)).put("enabled", groupEnabled)
+            old.getJSONArray("agents").getJSONObject(0).put("enabled", false)
+            assertTrue(repository.importOwner(owner, old.toString()))
+            val reopened = ConversationSubAgentPreferences(disk.reopen())
+            assertEquals(groupEnabled, reopened.snapshot(owner).enabled)
+            assertEquals(listOf(profile), reopened.snapshot(owner).profiles)
+            val exported = org.json.JSONObject(reopened.export(owner))
+            assertTrue(exported.getJSONArray("agents").getJSONObject(0).getBoolean("enabled"))
+            val copy = SubAgentConfigKey.Conversation("copy-$groupEnabled")
+            assertTrue(reopened.importOwner(copy, exported.toString()))
+            assertEquals(reopened.snapshot(owner), reopened.snapshot(copy))
+            val lifetime = reopened.profileLifetime(owner, profile.id)
+            assertTrue(reopened.removeProfile(owner, profile, null) is ConversationSubAgentPreferences.WriteResult.Saved)
+            assertTrue(reopened.snapshot(owner).profiles.isEmpty())
+            assertEquals(lifetime + 1, reopened.profileLifetime(owner, profile.id))
+            assertEquals(listOf(profile), reopened.snapshot(copy).profiles)
+        }
+    }
+
+    @Test fun legacyDisabledPresetLoadsAndAppliesButMalformedEnabledStillRejectsImport() {
+        val disk = MemoryPreferences(); val repository = ConversationSubAgentPreferences(disk)
+        val preset = repository.addPreset("Legacy group")
+        val owner = SubAgentConfigKey.Preset(preset.id)
+        val profile = SubAgentProfile("legacy", "Legacy")
+        repository.update(owner) { it.copy(profiles = listOf(profile)) }
+        for ((key, value) in disk.all) {
+            if (!key.startsWith(ConversationSubAgentPreferences.OWNER_PREFIX)) continue
+            val json = org.json.JSONObject(value as String)
+            val agents = json.getJSONArray("agents")
+            for (index in 0 until agents.length()) agents.getJSONObject(index).put("enabled", false)
+            disk.edit().putString(key, json.toString()).commit()
+        }
+        val reopened = ConversationSubAgentPreferences(disk.reopen())
+        assertEquals(listOf(profile), reopened.snapshot(owner).profiles)
+        val target = SubAgentConfigKey.Conversation("target")
+        assertTrue(reopened.applyPreset(target, preset.id) is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(listOf(profile), reopened.snapshot(target).profiles)
+        for (invalid in listOf<Any>("false", 0, org.json.JSONObject.NULL)) {
+            val malformed = org.json.JSONObject(reopened.export(target))
+            malformed.getJSONArray("agents").getJSONObject(0).put("enabled", invalid)
+            assertThrows(IllegalArgumentException::class.java) { reopened.importOwner(SubAgentConfigKey.Conversation("invalid"), malformed.toString()) }
+        }
+    }
+
     @Test fun profileParallelLimitJsonRoundTripsLegacyUnlimitedAndRejectsMalformedValues() {
         val profile = SubAgentProfile("p", "Worker")
         for (limit in listOf(null, 0, 1, Int.MAX_VALUE)) {
@@ -253,7 +313,7 @@ class ConversationSubAgentPreferencesTest {
         val pool = SubAgentParallelModel("provider", "api-model")
         val key = SubAgentProfile.modelReasoningKey("provider", "local-model")
         val profile = SubAgentProfile("worker", "Worker", providerId = "provider", modelId = "local-model",
-            enabled = false, tier = SubAgentTaskTier.COMPLEX, reasoning = ReasoningEffort.HIGH,
+            tier = SubAgentTaskTier.COMPLEX, reasoning = ReasoningEffort.HIGH,
             reasoningByModel = mapOf(key to ReasoningEffort.HIGH),
             gptSpeedByModel = mapOf(key to app.daiyu.android.model.GptSpeedMode.FAST), parallelLimit = 0)
         val image = SubAgentProfile("image", "Image", role = "image_generation", providerId = "media", modelId = "image-model", imageResolution = "high", parallelLimit = 2)

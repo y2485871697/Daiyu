@@ -225,6 +225,10 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         openDraft(newProfile = adding)
         val initialTitle = if (adding) "添加子代理" else "子代理配置"
         ui.onNodeWithText(initialTitle).assertIsDisplayed()
+        ui.onAllNodes(hasText("启用") and hasAnyAncestor(hasTestTag("subagent-config-body")),
+            useUnmergedTree = true).assertCountEquals(0)
+        ui.onAllNodes(isToggleable() and hasAnyAncestor(hasTestTag("subagent-config-body")),
+            useUnmergedTree = true).assertCountEquals(0)
         ui.onNodeWithText(if (adding) "取消" else "删除").assertIsDisplayed()
         ui.onNodeWithText("确认").assertIsDisplayed()
         if (chatStyle) noHeaderNavigation()
@@ -254,6 +258,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         awaitControl("confirmed child reasoning") { repository.snapshot(owner).profiles.singleOrNull()?.reasoning == ReasoningEffort.HIGH }
         ui.waitForIdle()
         ui.runOnIdle { assertNull(active) }
+        assertTrue(repository.snapshot(owner).profiles.single().toJson().getBoolean("enabled"))
         val savedHigh = preferences.all.toMap()
 
         openDraft(newProfile = false)

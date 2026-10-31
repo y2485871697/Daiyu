@@ -7,7 +7,6 @@ internal data class SubAgentProfile(
     val id: String,
     val name: String,
     val role: String = "implementation",
-    val enabled: Boolean = true,
     val providerId: String = "",
     val modelId: String = "",
     val tier: SubAgentTaskTier? = null,
@@ -43,7 +42,7 @@ internal data class SubAgentProfile(
         "video_generation" -> "视频生成"
         else -> "审查／总结"
     }
-    fun toJson() = JSONObject().put("id", id).put("name", name).put("role", role).put("enabled", enabled)
+    fun toJson() = JSONObject().put("id", id).put("name", name).put("role", role).put("enabled", true)
         .put("provider", providerId).put("model", modelId).put("tier", tier?.takeIf { supportsTaskTier }?.wireValue.orEmpty())
         .put("reasoning", reasoning?.wireValue.orEmpty())
         .put("image_resolution", imageResolution.orEmpty())
@@ -64,7 +63,7 @@ internal data class SubAgentProfile(
         })
     companion object {
         fun fromJson(j: JSONObject) = SubAgentProfile(j.getString("id"), j.getString("name"),
-            j.getString("role"), j.optBoolean("enabled", true), j.optString("provider"), j.optString("model"),
+            j.getString("role"), j.optString("provider"), j.optString("model"),
             SubAgentTaskTier.fromWireValue(j.optString("tier")), ReasoningEffort.fromWireValue(j.optString("reasoning")),
             j.optString("image_resolution").takeIf { it in ImageResolutionTier.values },
             reasoningMemory(j), gptSpeedMemory(j), parallelLimit(j)).normalizedTaskTier()

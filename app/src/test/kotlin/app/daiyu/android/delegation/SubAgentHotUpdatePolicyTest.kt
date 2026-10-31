@@ -11,7 +11,7 @@ class SubAgentHotUpdatePolicyTest {
         val pool = SubAgentParallelModel("provider", "old")
         listOf(original.copy(profiles = listOf(profile.copy(parallelLimit = 2))), original.copy(enabled = false), original.copy(appliedPresetId = "preset", appliedPresetName = "name", presetApplicationToken = "token"),
             original.copy(parallelLimits = mapOf(pool to 2)), original.copy(legacyParallelLimits = mapOf(pool.legacyKey() to 2)),
-            original.copy(profiles = listOf(profile.copy(name = "Renamed", enabled = false, modelId = "new", imageResolution = "high"))))
+            original.copy(profiles = listOf(profile.copy(name = "Renamed", modelId = "new", imageResolution = "high"))))
             .forEach { assertTrue(it.toString(), original.acceptsModelHotUpdate(it)) }
         val implementation = original.copy(profiles = listOf(profile.copy(role = "implementation")))
         assertTrue(implementation.acceptsModelHotUpdate(implementation.copy(profiles = listOf(

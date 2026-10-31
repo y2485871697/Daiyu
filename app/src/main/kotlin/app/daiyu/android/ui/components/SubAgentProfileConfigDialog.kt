@@ -11,7 +11,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -160,11 +159,6 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll(rememberScrollState())) {
                     if (LocalConversationAgentStyle.current) ConversationAgentField("名称", session.name, { if (usable) session.name = it.take(80) }, usable)
                     else DaiyuFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 30.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("启用", Modifier.weight(1f), fontSize = 14.sp, lineHeight = 22.sp, color = conversationAgentColors().text)
-                        if (LocalConversationAgentStyle.current) ConversationAgentSwitch(draft.enabled, usable) { active -> interact { session.edit { it.copy(enabled = active) } } }
-                        else Switch(draft.enabled, enabled = usable, onCheckedChange = { active -> interact { session.edit { it.copy(enabled = active) } } })
-                    }
                     SubAgentSettingRow("模型", boundConfig?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (draft.modelId.isBlank()) "选择模型" else "模型不可用",
                         Icons.Rounded.ViewInAr, "草稿模型", usable, badge = boundConfig?.providerName,
                         onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { thinkingPicker = true } })

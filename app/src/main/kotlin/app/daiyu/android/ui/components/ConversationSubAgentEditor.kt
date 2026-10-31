@@ -97,7 +97,7 @@ internal class ConversationSubAgentEditor(
     fun changeProfileModel(profile: SubAgentProfile, selection: ModelFeatureSelection): SubAgentProfile {
         require(selection.providerId.isNotBlank() && selection.modelId.isNotBlank()) { "A model selection is required" }
         val blank = profile.copy(providerId = selection.providerId, modelId = selection.modelId,
-            enabled = true, tier = null, reasoning = null, imageResolution = null, reasoningByModel = emptyMap(), gptSpeedByModel = emptyMap())
+            tier = null, reasoning = null, imageResolution = null, reasoningByModel = emptyMap(), gptSpeedByModel = emptyMap())
         return repository.modelDefaults(blank)?.restore(blank) ?: blank
     }
     fun rememberedParallelLimit(profile: SubAgentProfile): Int? = profile.parallelLimit

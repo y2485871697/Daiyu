@@ -198,10 +198,22 @@ class SavedSubAgentRuntimeBindingsTest {
         assertTrue(captured.isEmpty())
     }
 
+    @Test fun legacyDisabledProfileAdmitsAndCreatesUntilItIsDeleted() {
+        val restored = SubAgentProfile.fromJson(profile.toJson().put("enabled", false))
+        val selection = config.copy(profiles = listOf(restored))
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val frozen = bindings.freeze(owner, selection, listOf(provider), { _, _ -> saved })
+        assertEquals(setOf(profile.id), frozen.keys)
+        frozen.getValue(profile.id).create()
+        assertEquals(saved.model, captured.single().model)
+        assertTrue(bindings.freeze(owner, selection.copy(profiles = emptyList()), listOf(provider),
+            { _, _ -> error("deleted profile must not resolve credentials") }).isEmpty())
+    }
+
     @Test fun disabledAdmissionReturnsEmptyWithoutReadingCredentials() {
         val bindings = SavedSubAgentRuntimeBindings()
-        listOf(config.copy(enabled = false), config.copy(profiles = emptyList()),
-            config.copy(profiles = listOf(profile.copy(enabled = false)))).forEach { selection ->
+        listOf(config.copy(enabled = false), config.copy(profiles = emptyList())).forEach { selection ->
             assertTrue(bindings.freeze(owner, selection, listOf(provider), { _, _ -> error("credentials must not be read") }).isEmpty())
         }
     }

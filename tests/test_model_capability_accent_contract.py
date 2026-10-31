@@ -19,7 +19,7 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
             self.assertNotIn(old_or_fixed_color, self.tags)
 
     def test_all_labels_keep_their_conditions_and_compact_noninteractive_layout(self):
-        for fragment in ('"上下文未知"', '"支持视觉".takeIf { form?.vision == true }',
+        for fragment in ('modelContextWindowLabel(context)', '"支持视觉".takeIf { form?.vision == true }',
                          '"原生搜索".takeIf { form?.nativeSearch == true }',
                          'if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型", tint = DaiyuPalette.selectionAccent)',
                          "horizontalArrangement = Arrangement.spacedBy(6.dp)",
@@ -32,6 +32,15 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
         labels = self.source.split("val labels = listOfNotNull(", 1)[1].split("labels.forEach", 1)[0]
         for removed in ('"推理"', '"当前"', '"视觉"', '"搜索"', 'form?.reasoning', 'selected'):
             self.assertNotIn(removed, labels)
+
+    def test_context_badge_uses_the_formatter_without_changing_the_stored_window(self):
+        self.assertIn('val context = form?.contextWindow?.toIntOrNull()', self.source)
+        labels = self.source.split("val labels = listOfNotNull(", 1)[1].split("labels.forEach", 1)[0]
+        self.assertIn("modelContextWindowLabel(context)", labels)
+        self.assertNotIn("context / 1000", labels)
+        helper = (SETTINGS / "ModelContextWindowLabel.kt").read_text()
+        self.assertIn('tokens == null -> "上下文未知"', helper)
+        self.assertIn("tokens >= 1_000_000", helper)
 
     def test_tag_tokens_match_connection_button_and_local_provider_accent(self):
         helper = (SETTINGS / "ProviderSettingsComponents.kt").read_text().split(

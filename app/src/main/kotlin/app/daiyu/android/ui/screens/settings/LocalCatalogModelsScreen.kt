@@ -357,7 +357,7 @@ internal fun <T> LocalCatalogModelsScreen(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     val context = form?.contextWindow?.toIntOrNull()
                                     val labels = listOfNotNull(
-                                        if (context == null) "上下文未知" else if (context % 1000 == 0) "${context / 1000}K 上下文" else "$context 上下文",
+                                        modelContextWindowLabel(context),
                                         "支持视觉".takeIf { form?.vision == true },
                                         "原生搜索".takeIf { form?.nativeSearch == true })
                                     labels.forEach { label ->

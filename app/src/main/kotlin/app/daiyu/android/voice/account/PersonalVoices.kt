@@ -155,6 +155,13 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             val local = find(slot.id, config)
             val voice = local ?: Voice(slot.id, slot.name, account.fingerprint)
             voice.copy(name = if (voice.name == voice.id && !voice.nameSyncPending) slot.name else voice.name,
+                status = when (slot.state) {
+                    "Unknown" -> -1
+                    "Training" -> 1
+                    "Success" -> 2
+                    "Active" -> 4
+                    else -> voice.status
+                },
                 catalogState = slot.state,
                 remaining = slot.remaining.takeIf { it >= 0 } ?: voice.remaining)
         }

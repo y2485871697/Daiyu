@@ -115,6 +115,27 @@ class PersonalVoiceTrainingDiscoveryTest {
         assertEquals(before, index.readText())
     }
 
+    @Test fun currentCloudSuccessReplacesStaleTrainingButNeverClearsUnknownSubmission() = runBlocking {
+        val index = File(folder.root, "training.json")
+        index.writeText(JSONArray().put(local("S_training", "以前制作的声音").put("status", 1)
+            .put("catalogState", "Training"))
+            .put(local("S_uncertain", "提交未确认", uncertain = true).put("status", 1)).toString())
+        val before = index.readText()
+        val store = PersonalVoices(index, AccountHttpTransport { request, _ ->
+            val state = body(request).getString("State")
+            response(state, if (state == "Success") listOf("S_training", "S_uncertain") else emptyList())
+        })
+        store.load()
+        val found = store.listTrainingSlots(config, "ak", "sk", "project").associateBy { it.id }
+        assertEquals(2, found.getValue("S_training").status)
+        assertTrue(found.getValue("S_training").canTrain)
+        assertFalse(found.getValue("S_training").tts)
+        assertTrue(found.getValue("S_uncertain").uncertain)
+        assertFalse(found.getValue("S_uncertain").canTrain)
+        assertEquals(before, index.readText())
+        assertEquals(1, store.state.value.first { it.id == "S_training" }.status)
+    }
+
     @Test fun errorsAndCancellationNeverBecomeEmptySuccessOrWriteRecords() = runBlocking {
         val index = File(folder.root, "failed.json")
         var cancel = false

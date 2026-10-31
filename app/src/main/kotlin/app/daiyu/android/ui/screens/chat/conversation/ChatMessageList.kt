@@ -93,7 +93,16 @@ internal fun ChatMessageList(
     speechMessageId: String? = null,
     compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
 ) {
-    val timelineAfter = remember(timeline) { timeline.groupBy { it.anchor.listKey } }
+    val reconnectPartsByKey = remember(turns, timeline) {
+        val reconnects = timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
+        reconnectPartsForTurns(turns, reconnects)
+    }
+    val placedReconnectIds = remember(reconnectPartsByKey) {
+        reconnectPartsByKey.values.flatMapTo(hashSetOf()) { it.placedIds }
+    }
+    val fallbackAfter = remember(turns, timeline, placedReconnectIds) {
+        turns.associate { it.listKey to reconnectFallbackEntries(it, timeline, placedReconnectIds, turns) }
+    }
     val compressionAfter = app.daiyu.android.timeline.compressionActivitiesByAnchor(
         compressionActivities + listOfNotNull(compressionActivity), timeline)
     val tailCompressions = compressionAfter[null].orEmpty()
@@ -379,7 +388,8 @@ internal fun ChatMessageList(
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
-                            AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent,
+                            ReconnectedAssistantTurn(turn, reconnectPartsByKey.getValue(turn.listKey), actions, imageLoader,
+                                dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id,
                                 revealResetEpoch = revealResetEpoch,
                                 onVisibleAdvance = {
@@ -402,9 +412,7 @@ internal fun ChatMessageList(
                             turnExtras(turn)
                         }
                     }
-                    val timelineKeys = (turn as? ChatTurnUi.Assistant)?.sourceListKeys?.takeIf { it.isNotEmpty() }
-                        ?: listOf(turn.listKey)
-                    timelineKeys.flatMap { timelineAfter[it].orEmpty() }.forEach { entry ->
+                    fallbackAfter[turn.listKey].orEmpty().forEach { entry ->
                         key(entry.id) { ChatTimelineDivider(entry) }
                     }
                     compressionAfter[turn.listKey].orEmpty().forEach { activity ->
@@ -474,9 +482,13 @@ internal fun AssistantTurn(
     onVisibleAdvance: () -> Unit = {},
     onRevealSettled: (Boolean) -> Unit = {},
     onContentDisplayed: (Boolean) -> Unit = {},
+    showIdentity: Boolean = true,
+    showActions: Boolean = true,
+    actionTurn: ChatTurnUi.Assistant = turn,
     onContentReady: (Boolean) -> Unit = {},
 ) = key(turn.listKey) {
-    val ordered = rememberAssistantWorkflowContent(turn)
+    val baseOrdered = rememberAssistantWorkflowContent(turn)
+    val ordered = if (actionTurn !== turn) reconnectWorkflowContent(turn, baseOrdered, frozen = !showActions) else baseOrdered
     val bodySources = remember(ordered.body) {
         ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
     }
@@ -511,12 +523,12 @@ internal fun AssistantTurn(
     val revealSettled = reveal.settled && reasoningReady && (bodyVisible || ordered.body.isEmpty())
     SideEffect { onRevealSettled(revealSettled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
-    if (turn.hasVisibleResponse()) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    if (turn.hasVisibleResponse() || showActions && actionTurn !== turn) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val identity = turn.assistantIdentity
         val avatar by produceState<android.graphics.Bitmap?>(null, identity?.avatarPng) {
             value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() }.getOrNull() }
         }
-        Row(Modifier.testTag("reply-identity:${turn.listKey}").padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
+        if (showIdentity) Row(Modifier.testTag("reply-identity:${turn.listKey}").padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             AssistantAvatar(bitmap = avatar, size = 26.dp)
             Text(identity?.name ?: "助手", color = conversationColors().text,
@@ -529,13 +541,13 @@ internal fun AssistantTurn(
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp),
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        if (turn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady) {
+        if (showActions && actionTurn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady) {
             // Preserve legacy text/tool actions. Mixed content is authoritative, so images
             // (or their metadata) alone must not offer body-text copy or speech actions.
-            val hasTextActions = turn.content.isEmpty() || turn.content.any {
+            val hasTextActions = actionTurn.content.isEmpty() || actionTurn.content.any {
                 it is MessageContentUi.Text && it.text.isNotBlank()
             }
-            MessageActionBar(turn.actionKey, actions, timestamp = turn.timestamp,
+            MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,
                 allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking)
         }
     }

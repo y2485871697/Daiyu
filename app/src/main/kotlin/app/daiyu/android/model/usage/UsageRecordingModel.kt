@@ -95,11 +95,14 @@ internal class UsageRecordingModel(
     private inner class Retrying(private val transport: RequestRetryModelSession, owner: String?) :
         Resumable(transport, owner), RequestRetryModelSession {
         override val retriesCurrentRequest: Boolean get() = transport.retriesCurrentRequest
+        override fun prepareContinuation(continuation: RequestContinuation) = transport.prepareContinuation(continuation)
         override fun disconnectTransport() = transport.disconnectTransport()
     }
     private inner class Checkpointed(private val transport: CheckpointedResumableModelSession, owner: String?) :
         Resumable(transport, owner), CheckpointedResumableModelSession, RequestRetryModelSession {
         override val retriesCurrentRequest: Boolean get() = (transport as? RequestRetryModelSession)?.retriesCurrentRequest == true
+        override fun prepareContinuation(continuation: RequestContinuation) =
+            (transport as RequestRetryModelSession).prepareContinuation(continuation)
         override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
             val current = start()
             try { transport.nextAcknowledged(outputs) { current.deliver(it, sink) } } finally { current.persist() }

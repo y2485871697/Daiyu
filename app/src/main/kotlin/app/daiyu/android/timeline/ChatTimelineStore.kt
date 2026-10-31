@@ -53,7 +53,7 @@ sealed interface ChatTimelineEntry {
         override val created: Long) : ChatTimelineEntry
     data class Reconnect(override val id: String, override val anchor: TimelineAnchor,
         override val created: Long, val status: String, val elapsedMs: Long, val reason: String,
-        val round: Int, val model: String) : ChatTimelineEntry
+        val round: Int, val model: String, val position: ReconnectPosition? = null) : ChatTimelineEntry
 }
 
 /** Only the original live budget may resume a stopped display row; terminal owners are fenced. */
@@ -85,17 +85,21 @@ internal object ChatTimelineStore {
     fun write(db: SQLiteDatabase, entry: ChatTimelineEntry) {
         val kind = kind(entry)
         if (entry !is ChatTimelineEntry.Reconnect && db.rawQuery("SELECT 1 FROM chat_timeline_events WHERE id=?", arrayOf(entry.id)).use { it.moveToFirst() }) return
-        val values = ContentValues().apply {
-            put("id", entry.id); put("conversation_id", entry.anchor.conversationId)
-            put("message_id", entry.anchor.messageId); put("kind", kind)
-            put("payload", encode(entry).toString()); put("created", entry.created)
-        }
+        var saved = entry
         if (entry is ChatTimelineEntry.Reconnect) {
             // Pause and resume update the same row; successful/failed rows remain final.
-            val prior = db.rawQuery("SELECT payload FROM chat_timeline_events WHERE id=?", arrayOf(entry.id)).use {
-                if (it.moveToFirst()) decode(entry.id, entry.created, JSONObject(it.getString(0))) as ChatTimelineEntry.Reconnect else null
+            val prior = db.rawQuery("SELECT created,payload FROM chat_timeline_events WHERE id=?", arrayOf(entry.id)).use {
+                if (it.moveToFirst()) decode(entry.id, it.getLong(0), JSONObject(it.getString(1))) as ChatTimelineEntry.Reconnect else null
             }
-            if (prior != null && !reconnectTransitionAllowed(prior.status, entry.status)) return
+            if (prior != null) {
+                if (!reconnectTransitionAllowed(prior.status, entry.status)) return
+                saved = entry.keepPositionOf(prior)
+            }
+        }
+        val values = ContentValues().apply {
+            put("id", saved.id); put("conversation_id", saved.anchor.conversationId)
+            put("message_id", saved.anchor.messageId); put("kind", kind)
+            put("payload", encode(saved).toString()); put("created", saved.created)
         }
         db.insertWithOnConflict("chat_timeline_events", null, values, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
         revision.incrementAndGet()
@@ -121,6 +125,7 @@ internal object ChatTimelineStore {
             is ChatTimelineEntry.Reconnect -> {
                 put("kind", "reconnect"); put("status", entry.status); put("elapsed", entry.elapsedMs)
                 put("reason", entry.reason); put("round", entry.round); put("model", entry.model)
+                entry.position?.let { put("offset", it.offset) }
             }
         } }
     fun decode(id: String, created: Long, row: JSONObject): ChatTimelineEntry {
@@ -136,7 +141,8 @@ internal object ChatTimelineStore {
             else -> error("unknown_timeline_kind")
         }
         val keys = row.keys().asSequence().toSet()
-        require(keys == common + detail || (kind == "compression" && keys == common + detail + setOf("agentLabel", "failure")))
+        require(keys == common + detail || (kind == "compression" && keys == common + detail + setOf("agentLabel", "failure")) ||
+            (kind == "reconnect" && keys == common + detail + "offset"))
         val anchor = TimelineAnchor(text("conversation"), text("run"), text("message"), number("segment").also { require(it <= Int.MAX_VALUE) }.toInt())
         return when (kind) {
             "compression" -> {
@@ -160,7 +166,8 @@ internal object ChatTimelineStore {
             }
             "reconnect" -> ChatTimelineEntry.Reconnect(id, anchor, created,
                 text("status").also { require(it in setOf("running", "succeeded", "failed", "stopped")) },
-                number("elapsed"), text("reason"), number("round").also { require(it <= Int.MAX_VALUE) }.toInt(), text("model"))
+                number("elapsed"), text("reason"), number("round").also { require(it <= Int.MAX_VALUE) }.toInt(), text("model"),
+                if (row.has("offset")) ReconnectPosition(number("offset")) else null)
             else -> error("unknown_timeline_kind")
         }
     }

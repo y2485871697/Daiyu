@@ -167,7 +167,8 @@ internal class ModelErrorReconnect(
 
     fun finish(status: String) = synchronized(lock) {
         if (terminal) return@synchronized
-        val finalStatus = if (pausedAtMs != null) "stopped" else status
+        // A committed accepted output closes this error even if pause raced its ACK.
+        val finalStatus = if (pausedAtMs != null && status != "succeeded") "stopped" else status
         if (finalStatus == "succeeded" && (expired || (windowMs != null && elapsedLocked() >= windowMs))) {
             expired = true
             throw ReconnectDeadlineException(lastReason, lateSuccess = true)

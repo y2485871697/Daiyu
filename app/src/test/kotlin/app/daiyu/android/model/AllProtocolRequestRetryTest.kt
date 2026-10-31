@@ -66,7 +66,7 @@ class AllProtocolRequestRetryTest {
             BatteryTool { error("no local tools") }, RunnerOptions(reconnect = frozen.runnerPolicy())) {}.run(
             Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant", emptyList(), RunStatus.RUNNING), emptyList())
     }
-    @Test fun everyProtocolRetriesCurrentPostWithBackgroundOffAndReplacesPartialText() {
+    @Test fun everyProtocolContinuesWithBackgroundOffAndRetainsAcceptedPrefix() {
         for (protocol in ProviderProtocol.entries.filter { it != ProviderProtocol.UNKNOWN }) {
             val config = ModelSettings("https://fixture.invalid/v1", "fixture", "synthetic", false, protocol = protocol)
             val connections = mutableListOf<Connection>()
@@ -79,10 +79,21 @@ class AllProtocolRequestRetryTest {
             }
             val result = run(config, raw, ReconnectDurationPreset.WINDOW_30S)
             assertEquals(protocol.name, RunStatus.COMPLETED, result.status)
-            assertEquals(protocol.name, listOf("fresh"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+            assertEquals(protocol.name, "discardfresh", result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text })
             assertEquals(2, connections.size)
             assertEquals(connections[0].url, connections[1].url)
-            assertEquals(connections[0].sent.toString("UTF-8"), connections[1].sent.toString("UTF-8"))
+            assertNotEquals(connections[0].sent.toString("UTF-8"), connections[1].sent.toString("UTF-8"))
+            val continued = JSONObject(connections[1].sent.toString("UTF-8"))
+            val rows = continued.getJSONArray(when (protocol) {
+                ProviderProtocol.RESPONSES -> "input"
+                ProviderProtocol.GEMINI -> "contents"
+                else -> "messages"
+            })
+            assertEquals(2, rows.length())
+            assertEquals(if (protocol == ProviderProtocol.GEMINI) "model" else "assistant", rows.getJSONObject(0).getString("role"))
+            assertTrue(rows.getJSONObject(0).toString().contains("discard"))
+            assertEquals("user", rows.getJSONObject(1).getString("role"))
+            assertTrue(rows.getJSONObject(1).toString().contains("Do not repeat"))
             assertEquals(listOf("POST", "POST"), connections.map { it.requestMethod })
         }
     }
@@ -103,6 +114,7 @@ class AllProtocolRequestRetryTest {
                 val retained = session as RequestRetryModelSession
                 return object : RequestRetryModelSession {
                     override val canResume: Boolean get() = retained.canResume
+                    override fun prepareContinuation(continuation: RequestContinuation) = retained.prepareContinuation(continuation)
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = retained.next(outputs) { event ->
                         if (!paused && (event is ModelEvent.TextDelta || event is ModelEvent.TextFinal)) {
                             paused = true
@@ -131,6 +143,51 @@ class AllProtocolRequestRetryTest {
             assertEquals(protocol.name, 2, connections.size)
         }
     }
+    @Test fun emptyPublicOutputRetriesIdenticalBodyForEveryProtocol() {
+        for (protocol in ProviderProtocol.entries.filter { it != ProviderProtocol.UNKNOWN }) {
+            val config = ModelSettings("https://fixture.invalid/v1", "fixture", "synthetic", false, protocol = protocol)
+            val connections = mutableListOf<Connection>()
+            val connect: (URL) -> HttpsURLConnection = { url -> Connection(url,
+                stream(protocol, if (connections.isEmpty()) "" else "answer", connections.isEmpty())).also(connections::add) }
+            val raw = when (protocol) {
+                ProviderProtocol.RESPONSES -> ResponsesModel(config, connect)
+                ProviderProtocol.MESSAGES -> MessagesModel(config, connect)
+                else -> NativeCompletionModel(config, connect)
+            }
+            assertEquals(protocol.name, RunStatus.COMPLETED, run(config, raw, ReconnectDurationPreset.WINDOW_30S).status)
+            assertEquals(2, connections.size)
+            assertEquals(protocol.name, connections[0].sent.toString("UTF-8"), connections[1].sent.toString("UTF-8"))
+        }
+    }
+
+    @Test fun twoDisconnectsRebuildOneCumulativePrefixAndReopenedHistoryDoesNotDuplicateIt() {
+        for (protocol in ProviderProtocol.entries.filter { it != ProviderProtocol.UNKNOWN }) {
+            val config = ModelSettings("https://fixture.invalid/v1", "fixture", "synthetic", false, protocol = protocol)
+            val connections = mutableListOf<Connection>()
+            val connect: (URL) -> HttpsURLConnection = { url ->
+                val index = connections.size
+                Connection(url, stream(protocol, when (index) { 0 -> "alpha "; 1 -> "beta "; else -> "gamma" }, index < 2)).also(connections::add)
+            }
+            val raw = when (protocol) {
+                ProviderProtocol.RESPONSES -> ResponsesModel(config, connect)
+                ProviderProtocol.MESSAGES -> MessagesModel(config, connect)
+                else -> NativeCompletionModel(config, connect)
+            }
+            val result = run(config, raw, ReconnectDurationPreset.WINDOW_30S)
+            assertEquals(protocol.name, RunStatus.COMPLETED, result.status)
+            assertEquals("alpha beta gamma", result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text })
+            val third = connections[2].sent.toString("UTF-8")
+            assertEquals(1, Regex("alpha").findAll(third).count())
+            assertEquals(1, Regex("beta").findAll(third).count())
+            assertTrue(third.contains("alpha beta "))
+            raw.open(listOf(result)).next(emptyList()) {}
+            val reopened = connections[3].sent.toString("UTF-8")
+            assertEquals(protocol.name, 1, Regex("alpha").findAll(reopened).count())
+            assertEquals(protocol.name, 1, Regex("beta").findAll(reopened).count())
+            assertEquals(protocol.name, 1, Regex("gamma").findAll(reopened).count())
+        }
+    }
+
     @Test fun noneNeverRetriesEvenThoughProductionSessionSupportsIt() {
         for (protocol in ProviderProtocol.entries.filter { it != ProviderProtocol.UNKNOWN }) {
             val config = ModelSettings("https://fixture.invalid/v1", "fixture", "synthetic", false, protocol = protocol)

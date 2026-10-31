@@ -20,6 +20,7 @@ object ChatTurnMapper {
         assistantIdentity: (Message, String) -> app.daiyu.android.assistants.AssistantReplyIdentity? = { _, _ -> null },
         presentations: ToolPresentationCache? = null,
         messageVideos: (Message) -> List<MessageVideoUi> = { emptyList() },
+        reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect> = emptyList(),
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
@@ -41,11 +42,14 @@ object ChatTurnMapper {
             TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
         } }.toMap()
         val nextSegment = mutableMapOf<TurnOwner, Int>()
+        val nextOffset = mutableMapOf<TurnOwner, Long>()
         val display = mutableListOf<DisplayMessage>()
         history.forEach { message ->
             val owner = TurnOwner(message.conversationId.value, message.runId.value, message.id.value)
             val segment = nextSegment[owner] ?: 0
             nextSegment[owner] = segment + 1
+            val start = nextOffset[owner] ?: 0L
+            nextOffset[owner] = start + app.daiyu.android.timeline.ReconnectPosition.size(message)
             val previous = display.lastOrNull()
             // Protocol snapshots and their raw-free live tail are one visual workflow, not
             // separate model replies. Keep durable history/action targets unchanged.
@@ -62,7 +66,7 @@ object ChatTurnMapper {
                             it.copy(blockOffset = (it.blockOffset ?: 0) + offset)
                         }),
                     segments = prior.segments + segment, keys = prior.keys + owner.listKey(segment))
-            } else display += DisplayMessage(message, owner, listOf(segment), listOf(owner.listKey(segment)))
+            } else display += DisplayMessage(message, owner, listOf(segment), listOf(owner.listKey(segment)), start)
         }
         return display.mapNotNull { source ->
             val message = source.message
@@ -91,6 +95,12 @@ object ChatTurnMapper {
                     segmentIndex = segment,
                     assistantIdentity = assistantIdentity(message, databaseOwners[owner] ?: message.id.value),
                     sourceListKeys = source.keys, sourceSegmentIndices = source.segments,
+                    reconnectSource = if (reconnects.any { it.position != null &&
+                        it.anchor.conversationId == owner.conversationId && it.anchor.runId == owner.runId &&
+                        it.anchor.messageId == owner.messageId }) ReconnectSourceUi(
+                        app.daiyu.android.timeline.TimelineAnchor(owner.conversationId, owner.runId, owner.messageId, segment),
+                        source.start, mixedContent(message, errors, states, dedicated, activity,
+                            integrateReasoning = true, presentations = presentations, forceOrdered = true)) else null,
                 )
                 else -> null
             }
@@ -147,7 +157,7 @@ object ChatTurnMapper {
     }
 
     private data class DisplayMessage(val message: Message, val owner: TurnOwner,
-        val segments: List<Int>, val keys: List<String>)
+        val segments: List<Int>, val keys: List<String>, val start: Long)
 
     /**
      * Count segments within their conversation/run/message identity, never within the loaded
@@ -170,11 +180,13 @@ object ChatTurnMapper {
         activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
         integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool },
         presentations: ToolPresentationCache? = null,
-        videos: List<MessageVideoUi> = emptyList()): List<MessageContentUi> {
-        if (videos.isEmpty() && message.blocks.none { it is MessageBlock.Image ||
+        videos: List<MessageVideoUi> = emptyList(),
+        forceOrdered: Boolean = false): List<MessageContentUi> {
+        if (!forceOrdered && videos.isEmpty() && message.blocks.none { it is MessageBlock.Image ||
                 it is MessageBlock.Tool && dedicatedTool(message, it) != null }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
-        val reasoning = if (integrateReasoning) reasoningAtBoundaries(message) else emptyMap()
+        val reasoning = if (forceOrdered) message.reportedReasoning.groupBy { it.blockOffset ?: 0 }
+            else if (integrateReasoning) reasoningAtBoundaries(message) else emptyMap()
         return buildList {
             for (index in 0..message.blocks.size) {
                 reasoning[index].orEmpty().forEach { add(MessageContentUi.Reasoning(it)) }

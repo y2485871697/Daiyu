@@ -39,6 +39,20 @@ internal class RunnerHistorySegments(private val initial: Message, private val n
         it.reasoning.putAll(reasoning)
     }
 
+    /** Keep public reasoning segments while dropping only unconfirmed call blocks.
+     * Do not seal body history here: the next cumulative protocol snapshot owns that prefix. */
+    fun continueRequest(message: Message, discarded: Set<ToolCallId>, retainedProtocol: List<String>, retainedBlockEnd: Int): Message {
+        finishReasoning()
+        fun keep(block: MessageBlock) = block !is MessageBlock.Tool || block.invocation.id !in discarded
+        fun offset(old: Int) = message.blocks.take(old).count(::keep)
+        reasoning.replaceAll { _, value -> value.copy(blockOffset = value.blockOffset?.let(::offset)) }
+        blockStart = offset(blockStart)
+        protocolBlockEnd = offset(retainedBlockEnd)
+        protocol = retainedProtocol.toList()
+        protocolReasoning = reasoning.filterValues { (it.blockOffset ?: blockStart) < protocolBlockEnd }.keys.toSet()
+        return project(message.copy(blocks = message.blocks.filter(::keep), protocolItems = retainedProtocol))
+    }
+
     fun replaceSessionProtocol(message: Message, items: List<String>) {
         protocol = items.toList()
         protocolBlockEnd = message.blocks.size

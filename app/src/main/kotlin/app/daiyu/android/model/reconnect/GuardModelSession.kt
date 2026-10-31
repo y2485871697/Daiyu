@@ -7,6 +7,9 @@ import app.daiyu.android.domain.*
 fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSession {
     if (session is CheckpointedResumableModelSession) return object : CheckpointedResumableModelSession, RequestRetryModelSession {
         override val retriesCurrentRequest: Boolean get() = (session as? RequestRetryModelSession)?.retriesCurrentRequest == true
+        override fun prepareContinuation(continuation: RequestContinuation) {
+            checkRuntime(); (session as RequestRetryModelSession).prepareContinuation(continuation)
+        }
         override val canResume: Boolean get() = session.canResume
         override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
             checkRuntime(); session.updateToolDefinitions(definitions)
@@ -33,6 +36,9 @@ fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSes
     if (session is RequestRetryModelSession) return object : RequestRetryModelSession {
         override val canResume: Boolean get() = session.canResume
         override val retriesCurrentRequest: Boolean get() = session.retriesCurrentRequest
+        override fun prepareContinuation(continuation: RequestContinuation) {
+            checkRuntime(); session.prepareContinuation(continuation)
+        }
         override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
             checkRuntime(); session.updateToolDefinitions(definitions)
         }

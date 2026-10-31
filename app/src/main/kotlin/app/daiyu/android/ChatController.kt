@@ -4312,10 +4312,13 @@ class ChatController internal constructor(private val application:Application,
                         val previous = reconnectTimeline[id]
                         if (previous != null && !app.daiyu.android.timeline.reconnectTransitionAllowed(previous.status, event.status)) return@runnerPolicyWithDiagnostics
                         val logical = MessageHistory.expand(listOf(current))
+                        val anchor = previous?.anchor ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex)
+                        val position = if (previous != null) previous.position else
+                            app.daiyu.android.timeline.ReconnectPosition.atEnd(logical, anchor)
                         val entry = app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(id,
-                            previous?.anchor ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex),
+                            anchor,
                             previous?.created ?: System.currentTimeMillis(), event.status,
-                            maxOf(previous?.elapsedMs ?: 0, event.elapsedMs), app.daiyu.android.model.reconnect.reconnectErrorDetails(event.reason, event.diagnostic), event.round, provider.model)
+                            maxOf(previous?.elapsedMs ?: 0, event.elapsedMs), app.daiyu.android.model.reconnect.reconnectErrorDetails(event.reason, event.diagnostic), event.round, provider.model, position)
                         reconnectTimeline[id] = entry
                         if (event.status == "running") reconnectObservedAt[id] = android.os.SystemClock.elapsedRealtime()
                         else reconnectObservedAt.remove(id)

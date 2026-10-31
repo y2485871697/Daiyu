@@ -103,6 +103,37 @@ class ChatRunnerBatchTransactionTest {
         } finally { runner.stop(); owner.join(5000); assertFalse(owner.isAlive) }
     }
 
+    @Test fun firstEffectiveAcknowledgedBatchClosesErrorOnlyAfterAtomicCommit() {
+        val statuses = mutableListOf<String>()
+        var firstEffectiveCommit = true
+        val runtime = object : Runtime() {
+            override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                if (checkpoint.transport?.sequence == 2L && firstEffectiveCommit) {
+                    assertTrue(statuses.isEmpty()); firstEffectiveCommit = false
+                }
+                super.commitCheckpoint(checkpoint)
+            }
+        }
+        val budget = object : Budget() { override fun finish(status: String) { statuses.add(status) } }
+        val session = object : Session() {
+            override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(0, ModelEvent.TextDelta("t", "prefix"))))
+                throw ModelRequestException(ModelFailure.NETWORK)
+            }
+            override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(1, ModelEvent.Usage(4, 1), ModelEvent.TextFinal("t", "prefix"))))
+                assertTrue(statuses.isEmpty())
+                assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(2, ModelEvent.TextDelta("t", "suffix"))))
+                assertEquals(listOf("succeeded"), statuses)
+                assertEquals(2L, runtime.writes.last().transport?.sequence)
+            }
+        }
+        val result = runner(ModelPort { session }, runtime, budget).run(initial(), emptyList())
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals("prefixsuffix", result.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        assertEquals(listOf("succeeded"), statuses)
+    }
+
     @Test fun failedBatchCommitCannotLeakDirtyStateIntoLaterCheckpoint() = failedCommit(false)
     @Test fun lostCommitReceiptSealsRunWithoutRetryOrRollbackWrite() = failedCommit(true)
     @Test fun failedBatchCommitRacingStopCannotWriteTerminalCheckpoint() = failedCommit(false, true)

@@ -2,15 +2,22 @@ package app.daiyu.android.model.reconnect
 
 import app.daiyu.android.domain.*
 
-/** A frozen CURRENT model request, not a new model session or a local tool replay. */
+/** Retains one submitted boundary across retries; continuation is rebuilt, never array-appended. */
 internal class ModelRequestRetry {
     private var restore: (() -> Unit)? = null
     private var outputs = emptyList<ToolOutput>()
+    var continuation: RequestContinuation = RequestContinuation("")
+        private set
+    private var prepared: RequestContinuation? = null
+    fun prepare(value: RequestContinuation) { prepared = value }
     var available = false
         private set
     fun capture(outputs: List<ToolOutput>, restore: () -> Unit) {
-        this.outputs = outputs.toList()
-        this.restore = restore
+        if (!replaying) {
+            this.outputs = outputs.toList()
+            this.restore = restore
+            continuation = RequestContinuation("")
+        }
         available = false
     }
     fun failed(failure: Exception, authenticationRetry: Boolean = false) {
@@ -26,6 +33,8 @@ internal class ModelRequestRetry {
         available = false
         val retained = outputs
         checkNotNull(restore).invoke()
+        continuation = prepared ?: RequestContinuation("")
+        prepared = null
         replaying = true
         try { send(retained) } finally { replaying = false }
     }

@@ -341,6 +341,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 .filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>().single()
             val initial = line()
             assertEquals("running", initial.status)
+            assertNotNull(initial.position)
             assertTrue(initial.reason.startsWith("SERVER · HTTP 503"))
             repeat(2) { index ->
                 controlMain { assertTrue(f.controller.pause(owner)) }
@@ -348,12 +349,16 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 assertEquals("stopped", paused.status)
                 assertEquals(initial.id, paused.id); assertEquals(initial.reason, paused.reason)
                 assertEquals(initial.anchor, paused.anchor); assertEquals(initial.created, paused.created)
+                assertEquals(initial.position, paused.position)
+                Thread.sleep(60)
+                assertEquals("Paused wall time must not count", paused.elapsedMs, line().elapsedMs)
                 controlMain { assertTrue(f.controller.resume(owner)) }
                 await(entered[index + 1])
                 val resumed = line()
                 assertEquals("running", resumed.status)
                 assertEquals(initial.id, resumed.id); assertEquals(initial.reason, resumed.reason)
                 assertEquals(initial.anchor, resumed.anchor); assertEquals(initial.created, resumed.created)
+                assertEquals(initial.position, resumed.position)
             }
             succeed.set(true); released.last().countDown()
             awaitControl("resumed run completed") { f.controller.active == null }
@@ -367,6 +372,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 .filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>().single()
             assertEquals(live, saved)
             assertEquals(initial.id, saved.id); assertEquals(initial.reason, saved.reason)
+            assertEquals(initial.position, saved.position)
             assertNull(f.controller.problem)
             assertEquals(1, opens.get())
         } finally { released.forEach { it.countDown() } }

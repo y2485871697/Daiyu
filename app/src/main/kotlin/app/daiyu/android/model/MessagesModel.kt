@@ -68,6 +68,7 @@ class MessagesModel internal constructor(
 
         private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
         override val canResume: Boolean get() = !cancelled.get() && retry.available
+        override fun prepareContinuation(continuation: RequestContinuation) = retry.prepare(continuation)
         @Synchronized
         override fun resume(sink: (ModelEvent) -> Unit) = retry.replay { next(it, sink) }
         override fun disconnectTransport() { try { connection?.disconnect() } catch (_: Exception) {} }
@@ -97,6 +98,16 @@ class MessagesModel internal constructor(
                 outputs.forEach { content.put(MessagesRequest.result(it.callId.value, it.output)) }
                 val item = MessagesRequest.message("user", content)
                 messages.put(item); ownItems.add(item.toString())
+            }
+            val continuation = retry.continuation
+            if (continuation.hasAcceptedOutput) {
+                val additions = listOfNotNull(
+                    ("assistant" to continuation.textPrefix).takeIf { continuation.textPrefix.isNotEmpty() },
+                    "user" to continuation.instruction)
+                additions.forEach { (role, text) ->
+                    val row = MessagesRequest.message(role, JSONArray().put(JSONObject().put("type", "text").put("text", text)))
+                    messages.put(row); ownItems.add(row.toString())
+                }
             }
             var request = MessagesRequest.withAssistantInstructions(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),

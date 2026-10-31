@@ -6954,10 +6954,12 @@ class MainActivity : ComponentActivity() {
         val visibleTimeline = app.daiyu.android.timeline.withStoppedRuns(
             shown.map { it.second }, timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty())
         val visibleCompressions = controller.compressionActivities.filter { it.conversationId == selected?.id?.value }
-        val workflowBoundaries = visibleTimeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped }
+        val workflowBoundaries = visibleTimeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped ||
+            it is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && it.position != null }
             .map { it.anchor.listKey }.toSet() +
             app.daiyu.android.timeline.compressionActivitiesByAnchor(visibleCompressions, visibleTimeline).keys.filterNotNull()
-        val oldBoundaries = chatState.timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped }
+        val oldBoundaries = chatState.timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped ||
+            it is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && it.position != null }
             .map { it.anchor.listKey }.toSet() +
             app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
         val sendPreview = pendingTextSend?.takeIf {
@@ -6991,7 +6993,10 @@ class MainActivity : ComponentActivity() {
         }
         else questionCards = if (toolReceiptKey?.conversation != selected?.id) emptyMap()
             else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
-        val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries)
+        val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
+        val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
+        val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries ||
+            reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position })
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             scrollRequest = scrollRequest,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
@@ -7000,7 +7005,7 @@ class MainActivity : ComponentActivity() {
             compressionActivities = visibleCompressions,
             turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else ChatTurnMapper.map(shown.map { it.second },
                 messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },
-                boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
+                reconnects = reconnects, boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->

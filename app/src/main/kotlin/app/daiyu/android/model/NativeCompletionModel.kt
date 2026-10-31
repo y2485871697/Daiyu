@@ -55,6 +55,7 @@ class NativeCompletionModel internal constructor(
 
         private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
         override val canResume: Boolean get() = !cancelled.get() && retry.available
+        override fun prepareContinuation(continuation: RequestContinuation) = retry.prepare(continuation)
         @Synchronized
         override fun resume(sink: (ModelEvent) -> Unit) = retry.replay { next(it, sink) }
         override fun disconnectTransport() { try { connection?.disconnect() } catch (_: Exception) {} }
@@ -84,6 +85,19 @@ class NativeCompletionModel internal constructor(
                 val raw = row.toString()
                 require(raw.length <= 1_000_000) { "工具结果超过原生历史存储上限" }
                 rows.put(row); ownItems.add(raw)
+            }
+            val continuation = retry.continuation
+            if (continuation.hasAcceptedOutput) {
+                val additions = listOfNotNull(
+                    ("assistant" to continuation.textPrefix).takeIf { continuation.textPrefix.isNotEmpty() },
+                    "user" to continuation.instruction)
+                additions.forEach { (role, text) ->
+                    val row = if (settings.protocol == ProviderProtocol.GEMINI)
+                        org.json.JSONObject().put("role", if (role == "assistant") "model" else role)
+                            .put("parts", org.json.JSONArray().put(org.json.JSONObject().put("text", text)))
+                    else org.json.JSONObject().put("role", role).put("content", text)
+                    rows.put(row); ownItems.add(row.toString())
+                }
             }
             val request = settings.requestOptions.apply(NativeCompletionRequest.body(settings, rows, tools, instructions), settings.protocol)
             if (settings.protocol == ProviderProtocol.CHAT_COMPLETIONS) require(request.opt("model") == settings.model) { "自定义请求体不能替换所选模型" }

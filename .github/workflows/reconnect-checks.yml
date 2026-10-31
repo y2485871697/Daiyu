@@ -1,0 +1,157 @@
+name: 代鱼重连续写检查
+run-name: 代鱼重连续写检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 检查目标完整提交SHA
+        type: string
+        required: true
+      check_id:
+        description: 本次定向检查标识
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-reconnect-checks-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  reconnect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      CHECK_ID: ${{ inputs.check_id }}
+      SKIP_JDK_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: 核对准确源码
+        run: |
+          test -n "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            27
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 重连展示与请求边界契约
+        shell: bash
+        run: |
+          mkdir -p reconnect-checks
+          set -o pipefail
+          python3 -B - 2>&1 <<'PY' | tee reconnect-checks/contracts.log
+          import json, unittest
+          from pathlib import Path
+          records = []
+          for pattern in ('test_chat_timeline_contract.py', 'test_reasoning_flow_stability_contract.py', 'test_rikkahub_protocol_port_contract.py'):
+              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              assert suite.countTestCases() > 0, pattern
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              assert result.wasSuccessful() and not result.skipped, pattern
+              records.append(dict(pattern=pattern, tests=result.testsRun))
+          Path('reconnect-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
+          PY
+          python3 scripts/verify_boundaries.py
+      - name: 领域重连、事务与恢复定向测试
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --parallel --build-cache --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=reconnect-checks/domain-task-graph.json \
+            :core-domain:test \
+            --tests 'app.daiyu.android.domain.ChatRunnerRequestRetryTest' \
+            --tests 'app.daiyu.android.domain.ContinuationTextTest' \
+            --tests 'app.daiyu.android.domain.ChatRunnerBatchTransactionTest' \
+            --tests 'app.daiyu.android.domain.ChatRunnerAttemptGateTest' \
+            --tests 'app.daiyu.android.domain.ChatRunnerTransportResumeTest' \
+            --tests 'app.daiyu.android.domain.ChatRunnerResumeCheckpointTest' \
+            --tests 'app.daiyu.android.domain.ChatRunnerUsageCheckpointTest' \
+            --tests 'app.daiyu.android.domain.RunnerHistorySegmentsTest' \
+            --tests 'app.daiyu.android.domain.RunnerHistorySegmentsTimeTest' \
+            --tests 'app.daiyu.android.domain.ProviderEventDeliveryGateTest' \
+            --tests 'app.daiyu.android.domain.MessageHistoryTest' \
+            2>&1 | tee reconnect-checks/domain-gradle.log
+      - name: 准备既有离线依赖（不打包）
+        run: |
+          ./gradlew --no-daemon --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=reconnect-checks/prepare-task-graph.json \
+            :app:prepareOfflineSpeechRuntime
+      - name: 四协议、预算、时间线与Compose定向验证（不打包）
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --parallel --build-cache --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=reconnect-checks/app-task-graph.json \
+            :app:compileDebugKotlin :app:testDebugUnitTest \
+            --tests 'app.daiyu.android.model.AllProtocolRequestRetryTest' \
+            --tests 'app.daiyu.android.model.ResponsesBackgroundResumeTest' \
+            --tests 'app.daiyu.android.model.reconnect.*' \
+            --tests 'app.daiyu.android.model.usage.UsageRecordingModelTest' \
+            --tests 'app.daiyu.android.ControllerAuxiliaryVisionTest' \
+            --tests 'app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest' \
+            --tests 'app.daiyu.android.timeline.*' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.Reconnect*' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatProjectionTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowContentTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowCompositionTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowMapperTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.WorkflowNarrationCompositionTest' \
+            :app:compileDebugAndroidTestKotlin \
+            2>&1 | tee reconnect-checks/app-gradle.log
+      - name: 核对测试证据与零安装包
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          roots = {'domain': Path('core-domain/build/test-results/test'), 'app': Path('app/build/test-results/testDebugUnitTest')}
+          required = {'domain': {'ContinuationTextTest', 'ChatRunnerRequestRetryTest', 'ChatRunnerBatchTransactionTest', 'ChatRunnerAttemptGateTest', 'ChatRunnerTransportResumeTest', 'ChatRunnerResumeCheckpointTest', 'ChatRunnerUsageCheckpointTest', 'RunnerHistorySegmentsTest', 'RunnerHistorySegmentsTimeTest', 'ProviderEventDeliveryGateTest', 'MessageHistoryTest'},
+                      'app': {'AllProtocolRequestRetryTest', 'ResponsesBackgroundResumeTest', 'ReconnectRunnerTimelineTest', 'ModelErrorReconnectTest', 'UsageRecordingModelTest', 'ControllerAuxiliaryVisionTest', 'AuxiliaryVisionModelAdapterTest', 'ChatTimelineCodecTest', 'ReconnectPositionCodecTest', 'ReconnectPartsTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest'}}
+          reports = {}
+          for scope, root in roots.items():
+              suites = [ET.parse(p).getroot() for p in root.glob('TEST-*.xml')]
+              names = {s.attrib['name'].rsplit('.', 1)[-1] for s in suites}
+              assert required[scope] <= names, (scope, required[scope] - names)
+              assert all(int(s.attrib['tests']) > 0 for s in suites)
+              assert all(int(s.attrib.get(k, 0)) == 0 for s in suites for k in ('failures', 'errors', 'skipped'))
+              reports[scope] = dict(classes=sorted(names), tests=sum(int(s.attrib['tests']) for s in suites))
+          graph = json.loads(Path('reconnect-checks/app-task-graph.json').read_text())
+          log = Path('reconnect-checks/app-gradle.log').read_text()
+          for task in (':app:compileDebugKotlin', ':app:compileDebugAndroidTestKotlin'):
+              assert task in graph, task
+              match = re.search(r'^> Task ' + re.escape(task) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
+              assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
+          assert not [str(p) for p in Path('.').rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
+          record = dict(check_id=os.environ['CHECK_ID'], source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'], attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), reports=reports, contracts=json.loads(Path('reconnect-checks/contracts.json').read_text()), apk_built=False, instrumentation_run=False)
+          Path('reconnect-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(record, ensure_ascii=False))
+          PY
+      - name: 上传准确检查证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 重连续写定向检查
+          path: |
+            reconnect-checks/
+            core-domain/build/test-results/test/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/host-pty/
+          if-no-files-found: error

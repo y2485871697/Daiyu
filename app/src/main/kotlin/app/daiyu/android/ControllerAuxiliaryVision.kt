@@ -122,6 +122,9 @@ internal class ControllerAuxiliaryVision private constructor(
         GuardedSession(retained), RequestRetryModelSession {
         override val canResume: Boolean get() = !isCancelled() && retained.canResume
         override val retriesCurrentRequest: Boolean get() = retained.retriesCurrentRequest
+        override fun prepareContinuation(continuation: app.daiyu.android.domain.RequestContinuation) {
+            checkUsable(); retained.prepareContinuation(continuation)
+        }
         override fun resume(sink: (ModelEvent) -> Unit) = operation {
             retained.resume { event -> checkUsable(); sink(event) }
         }

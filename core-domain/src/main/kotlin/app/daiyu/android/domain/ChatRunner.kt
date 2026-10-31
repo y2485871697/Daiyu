@@ -383,10 +383,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
             }
         }
-        fun apply(candidate: Message) {
+        fun apply(candidate: Message, committed: () -> Unit = {}) {
             if (candidate.status != RunStatus.RUNNING) segmentHistory.finishReasoning()
             val next = segmentHistory.project(candidate)
-            if (stagingTransportBatch) { current = next; return }
+            if (stagingTransportBatch) { current = next; committed(); return }
             val runtime = options.runtimeStore
             try {
                 if (runtime is AtomicRuntimeStore) {
@@ -401,6 +401,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 terminal = true; setPhase(ExecutionPhase.TERMINAL)
                 if (runtime !is AtomicRuntimeStore) try { checkpoint() } catch (_: Exception) { }
             } else if (runtime !is AtomicRuntimeStore) checkpoint()
+            committed()
             try { publish(next) } catch (_: Exception) { /* UI notification is not a domain failure. */ }
         }
         val calls = linkedMapOf<ToolCallId, ToolInvocation>()
@@ -756,6 +757,36 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     }
                 }
                 var textFloor = current.blocks.size
+                var continuationText = ContinuationText("")
+                var reasoningScope = ""
+                var effectiveOutput = false
+                var requestDeliveredOutput = false
+                fun recovered() {
+                    if (!stagingTransportBatch && effectiveOutput) {
+                        val recoveredBudget = reconnectBudget
+                        recoveredBudget?.finish("succeeded")
+                        if (reconnectBudget === recoveredBudget) reconnectBudget = null
+                    }
+                }
+                fun flushContinuation(nextItem: String? = null) {
+                    val (itemId, raw) = continuationText.pendingBefore(nextItem) ?: return
+                    val text = continuationText.suffix(itemId, raw, final = true)
+                    val blocks = current.blocks.toMutableList()
+                    val at = blocks.indices.firstOrNull { it >= textFloor && blocks[it] is MessageBlock.Text &&
+                        (blocks[it] as MessageBlock.Text).itemId == itemId } ?: -1
+                    val previous = if (at < 0) "" else (blocks[at] as MessageBlock.Text).text
+                    if (text != previous) {
+                        val changed = text.substring(text.commonPrefixWith(previous).length).isNotBlank()
+                        bodyProgress(changed)
+                        if (at < 0) { if (text.isNotEmpty()) blocks.add(MessageBlock.Text(itemId, text)) }
+                        else blocks[at] = MessageBlock.Text(itemId, text)
+                        apply(current.copy(blocks = blocks)) {
+                            effectiveOutput = effectiveOutput || changed
+                            requestDeliveredOutput = requestDeliveredOutput || changed
+                            recovered()
+                        }
+                    }
+                }
                 var sinkFailure: Exception? = null
                 var accepting = true
                 var attemptFence = 0L
@@ -824,16 +855,22 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             try { if (!stagingTransportBatch) options.onUsage(event) } catch (_: Exception) { /* Observer failure cannot invalidate committed usage. */ }
                         }
                         is ModelEvent.ReasoningDelta -> {
-                            checkText(event.itemId, event.text, final = event.cumulative, reasoning = true)
-                            segmentHistory.acceptReasoning(event.itemId, event.text, final = false,
+                            val changed = checkText(event.itemId, event.text, final = event.cumulative, reasoning = true)
+                            segmentHistory.acceptReasoning(reasoningScope + event.itemId, event.text, final = false,
                                 blockOffset = current.blocks.size, replace = event.cumulative)
-                            apply(current)
+                            apply(current) {
+                                effectiveOutput = effectiveOutput || changed
+                                recovered()
+                            }
                             try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ReasoningFinal -> {
-                            checkText(event.itemId, event.text, final = true, reasoning = true)
-                            segmentHistory.acceptReasoning(event.itemId, event.text, final = true, blockOffset = current.blocks.size)
-                            apply(current)
+                            val changed = checkText(event.itemId, event.text, final = true, reasoning = true)
+                            segmentHistory.acceptReasoning(reasoningScope + event.itemId, event.text, final = true, blockOffset = current.blocks.size)
+                            apply(current) {
+                                effectiveOutput = effectiveOutput || changed
+                                recovered()
+                            }
                             try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ProtocolOutput -> {
@@ -841,25 +878,38 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             apply(current.copy(protocolItems = event.items))
                         }
                         is ModelEvent.TextDelta -> {
+                            flushContinuation(event.itemId)
                             segmentHistory.finishReasoning()
-                            bodyProgress(checkText(event.itemId, event.text, final = false))
+                            checkText(event.itemId, event.text, final = false)
+                            val text = continuationText.suffix(event.itemId, responseText.getValue(event.itemId))
                             val blocks = current.blocks.toMutableList()
                             val at = blocks.indices.firstOrNull { it >= textFloor && blocks[it] is MessageBlock.Text && (blocks[it] as MessageBlock.Text).itemId == event.itemId } ?: -1
-                            if (at < 0) blocks.add(MessageBlock.Text(event.itemId, event.text))
-                            else {
-                                val text = blocks[at] as MessageBlock.Text
-                                blocks[at] = text.copy(text = text.text + event.text)
+                            val previous = if (at < 0) "" else (blocks[at] as MessageBlock.Text).text
+                            val changed = text.substring(text.commonPrefixWith(previous).length).isNotBlank()
+                            bodyProgress(changed)
+                            if (at < 0) { if (text.isNotEmpty()) blocks.add(MessageBlock.Text(event.itemId, text)) }
+                            else blocks[at] = MessageBlock.Text(event.itemId, text)
+                            apply(current.copy(blocks = blocks)) {
+                                effectiveOutput = effectiveOutput || changed
+                                recovered()
                             }
-                            apply(current.copy(blocks = blocks))
                         }
                         is ModelEvent.TextFinal -> {
+                            flushContinuation(event.itemId)
                             segmentHistory.finishReasoning()
-                            bodyProgress(checkText(event.itemId, event.text, final = true))
+                            checkText(event.itemId, event.text, final = true)
+                            val suffix = continuationText.suffix(event.itemId, responseText.getValue(event.itemId))
                             val blocks = current.blocks.toMutableList()
                             val at = blocks.indices.firstOrNull { it >= textFloor && blocks[it] is MessageBlock.Text && (blocks[it] as MessageBlock.Text).itemId == event.itemId } ?: -1
-                            val text = MessageBlock.Text(event.itemId, event.text)
-                            if (at < 0) blocks.add(text) else blocks[at] = text
-                            apply(current.copy(blocks = blocks))
+                            val previous = if (at < 0) "" else (blocks[at] as MessageBlock.Text).text
+                            val changed = suffix.substring(suffix.commonPrefixWith(previous).length).isNotBlank()
+                            bodyProgress(changed)
+                            val text = MessageBlock.Text(event.itemId, suffix)
+                            if (at < 0) { if (suffix.isNotEmpty()) blocks.add(text) } else blocks[at] = text
+                            apply(current.copy(blocks = blocks)) {
+                                effectiveOutput = effectiveOutput || changed
+                                recovered()
+                            }
                         }
                         is ModelEvent.ToolReady -> {
                             segmentHistory.finishReasoning()
@@ -871,11 +921,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 calls[call.id] = call
                                 pending.add(call)
                                 records[call.id] = ToolRecord(call, ToolDisposition.READY)
-                                apply(current.copy(blocks = current.blocks + MessageBlock.Tool(call)))
+                                apply(current.copy(blocks = current.blocks + MessageBlock.Tool(call))) {
+                                    effectiveOutput = true
+                                    recovered()
+                                }
                                 textFloor = current.blocks.size
                             }
                         }
                     }
+                    if (effectiveOutput) requestDeliveredOutput = true
+                    recovered()
                     } catch (failure: Exception) { if (failure !is TransportReconnectDeadlineException) sinkFailure = failure; throw failure }
                     }
                 }
@@ -899,6 +954,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val beforeSurface = repetitiveSurface
                             val beforeFloor = textFloor
                             val beforeGuardSize = guardEdits.size
+                            val beforeEffectiveOutput = effectiveOutput
+                            val beforeDeliveredOutput = requestDeliveredOutput
+                            val beforeContinuationText = continuationText.fork()
                             var committed = false
                             try {
                                 check(options.runtimeStore is AtomicRuntimeStore && options.runtimeStore.durable) {
@@ -913,6 +971,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 transportCheckpoint = batch.checkpoint
                                 checkpoint()
                                 committed = true
+                                recovered()
                                 // The successful atomic write is the ACK linearization point.
                                 // Pause/stop/deadline may fence later deliveries, not undo this ACK.
                                 try { publish(current) } catch (_: Exception) {}
@@ -938,6 +997,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     reasoningBaseline = beforeBaseline
                                     repetitiveSurface = beforeSurface
                                     textFloor = beforeFloor
+                                    effectiveOutput = beforeEffectiveOutput
+                                    requestDeliveredOutput = beforeDeliveredOutput
+                                    continuationText = beforeContinuationText
                                     restoreGuards(beforeGuardSize)
                                 }
                                 // An uncertain write or sink failure seals this run. Never retry
@@ -948,13 +1010,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         }
                     }
                 }
-                // A repost replaces only this model turn. Prior tool receipts/outputs stay intact.
+                // The public prefix is scoped to this frozen request, not earlier tool rounds.
                 val requestBaseCurrent = current
-                val requestBaseHistory = segmentHistory.fork()
-                val requestBaseContext = contextState
-                val requestBaseOverhead = contextInputOverhead
-                val requestBaseRecords = records.toMap()
-                val requestBaseCalls = calls.toMap()
                 val requestBaseFloor = textFloor
                 var replayRequest = false
                 var transportFailure: Exception? = null
@@ -1005,19 +1062,29 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 }
                                 if (replayRequest) {
                                     synchronized(eventLock) {
-                                        segmentHistory = requestBaseHistory.fork()
-                                        current = requestBaseCurrent
-                                        contextState = requestBaseContext
-                                        contextInputOverhead = requestBaseOverhead
+                                        flushContinuation()
+                                        val prefix = current.blocks.drop(requestBaseFloor)
+                                            .filterIsInstance<MessageBlock.Text>().joinToString("") { it.text }
+                                        (active as RequestRetryModelSession).prepareContinuation(RequestContinuation(prefix, requestDeliveredOutput))
+                                        val discarded = pending.map { it.id }.toSet()
+                                        // Only this unconfirmed response's READY calls are revoked.
+                                        discarded.forEach { id ->
+                                            if (records[id]?.disposition == ToolDisposition.READY) {
+                                                records.remove(id); calls.remove(id)
+                                            }
+                                        }
+                                        current = segmentHistory.continueRequest(current, discarded,
+                                            requestBaseCurrent.protocolItems, requestBaseCurrent.blocks.size)
                                         transportCheckpoint = null
-                                        records.clear(); records.putAll(requestBaseRecords)
-                                        calls.clear(); calls.putAll(requestBaseCalls)
                                         pending.clear()
                                         responseText.clear(); reasoningText.clear()
                                         reasoningBaseline = emptyMap()
                                         repetitiveSurface = null
                                         restoreGuards(0)
-                                        textFloor = requestBaseFloor
+                                        textFloor = current.blocks.size
+                                        continuationText = ContinuationText(prefix)
+                                        reasoningScope = checkNotNull(request).attemptId + ":"
+                                        contextState = contextState?.copy(input = null)
                                         apply(current)
                                     }
                                     replayRequest = false
@@ -1027,6 +1094,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     if (stopped.get() || terminalReserved || terminal || token != generation) throw InterruptedException()
                                     if (pauseRequested || attemptFence != pauseEpoch || delivery.isClosed) throw ModelDeliveryRejectedException()
                                 }
+                                effectiveOutput = false
                                 invoked = true
                                 if (attempt == 0 && tool is CatalogTool) {
                                     active.updateToolDefinitions(requestDefinitions)
@@ -1053,7 +1121,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 // Drain even when releasing an external budget binding fails.
                                 try { binding?.close() } finally { delivery.close() }
                             }
-                            reconnectBudget?.finish("succeeded")
+                            synchronized(eventLock) { flushContinuation() }
+                            reconnectBudget?.finish(if (effectiveOutput) "succeeded" else "failed")
+                            reconnectBudget = null
                             break
                         } catch (failure: Exception) {
                             if (stopped.get() || breakStream || sinkFailure != null) throw failure
@@ -1068,6 +1138,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 checkpoint()
                                 continue
                             }
+                            reconnectBudget?.check()
+                            synchronized(eventLock) { flushContinuation() }
                             val resumable = active as? ResumableModelSession
                             val classified = (failure as? ModelRequestException)?.failure
                                 ?: if (failure is ModelDeliveryRejectedException && (active is CheckpointedResumableModelSession || active is RequestRetryModelSession))
@@ -1135,6 +1207,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             usageRequests = if (replayRequest) usageRequests + checkNotNull(request)
                                 else usageRequests.map { if (it.requestId == request?.requestId) checkNotNull(request) else it }
                             contextState = contextState?.let { state ->
+                                if (replayRequest) return@let state.copy(input = null)
                                 val resumed = checkNotNull(request)
                                 fun anchor(value: RequestInputCheckpoint?): RequestInputCheckpoint? = value?.let {
                                     if (it.request.owner == resumed.owner && it.request.requestId == resumed.requestId)

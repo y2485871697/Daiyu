@@ -22,6 +22,8 @@ class ChatRunnerRequestRetryTest {
         override fun finish(status: String) {}
     }
     private abstract class Session : RequestRetryModelSession {
+        val continuations = mutableListOf<RequestContinuation>()
+        override fun prepareContinuation(continuation: RequestContinuation) { continuations.add(continuation) }
         override val canResume = true
         override fun cancel() {}
         override fun disconnectTransport() {}
@@ -52,7 +54,7 @@ class ChatRunnerRequestRetryTest {
         }
         val result = runner(session, runtime, budget = { budgets++; Budget() }).run(initial(), emptyList())
         assertEquals(RunStatus.COMPLETED, result.status)
-        assertEquals(listOf("fresh"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+        assertEquals(listOf("discard", "fresh"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
         assertEquals(26, retries); assertEquals(1, budgets)
         assertEquals(27, runtime.writes.last().usageRequests.map { it.requestId }.distinct().size)
     }
@@ -81,7 +83,8 @@ class ChatRunnerRequestRetryTest {
         val result = runner(session, runtime, BatteryTool { tools++; "saved-result" }).run(initial(), emptyList())
         assertEquals(RunStatus.COMPLETED, result.status)
         assertEquals(1, tools); assertEquals(2, nexts); assertEquals(1, retries)
-        assertEquals(listOf("new answer"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+        assertEquals(listOf("old partial", "new answer"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+        assertEquals("old partial", session.continuations.single().textPrefix)
         assertTrue(result.blocks.none { it is MessageBlock.Tool && it.invocation.id.value == "unconfirmed" })
         assertEquals(3, runtime.writes.last().usageRequests.size)
     }
@@ -137,7 +140,7 @@ class ChatRunnerRequestRetryTest {
         assertEquals(1, resumes)
         assertEquals(0, budgets)
         assertTrue(runtime.writes.none { it.phase == ExecutionPhase.RECONNECTING })
-        assertEquals(listOf("fresh"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+        assertEquals(listOf("discard", "fresh"), result.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
     }
 
     @Test(timeout = 15000) fun ordinaryPauseCancellationWaitsWithoutStartingReconnectOrBackoff() {
@@ -170,7 +173,7 @@ class ChatRunnerRequestRetryTest {
                 assertEquals(kind, RunStatus.COMPLETED, result.get().status)
                 assertEquals(kind, 1, resumes); assertEquals(kind, 0, budgets)
                 assertTrue(kind, runtime.writes.none { it.phase == ExecutionPhase.RECONNECTING })
-                assertEquals(kind, listOf("fresh"), result.get().blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+                assertEquals(kind, listOf("partial", "fresh"), result.get().blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
                 assertEquals(kind, 2, runtime.writes.last().usageRequests.size)
             } finally { runner.stop(); worker.join(3000) }
         }
@@ -199,7 +202,7 @@ class ChatRunnerRequestRetryTest {
         assertEquals(writes, runtime.writes.size)
         assertEquals(RunStatus.STOPPED, runtime.writes.last().message.status)
     }
-    @Test fun replayRollbackCommitIsFinalControlAdmissionBoundary() {
+    @Test fun continuationCommitIsFinalControlAdmissionBoundary() {
         for (control in listOf("stop", "pause", "deadline")) {
             val runtime = Runtime()
             lateinit var runner: ChatRunner
@@ -214,7 +217,7 @@ class ChatRunnerRequestRetryTest {
                 override fun resume(sink: (ModelEvent) -> Unit) { resumes++; sink(ModelEvent.TextFinal("m", "fresh")) }
             }
             runtime.onCommit = { checkpoint ->
-                if (!triggered && checkpoint.phase == ExecutionPhase.STREAMING && checkpoint.usageRequests.size == 2 && checkpoint.message.blocks.isEmpty()) {
+                if (!triggered && checkpoint.phase == ExecutionPhase.STREAMING && checkpoint.usageRequests.size == 2 && checkpoint.message.blocks.filterIsInstance<MessageBlock.Text>().any { it.text == "partial" }) {
                     triggered = true
                     when (control) {
                         "stop" -> runner.stop()
@@ -228,6 +231,7 @@ class ChatRunnerRequestRetryTest {
             } })
             val result = runner.run(initial(), emptyList())
             assertTrue(control, triggered)
+            assertTrue(control, result.blocks.filterIsInstance<MessageBlock.Text>().any { it.text == "partial" })
             assertEquals(control, if (control == "pause") 1 else 0, resumes)
             assertEquals(control, when (control) {
                 "stop" -> RunStatus.STOPPED
@@ -235,6 +239,74 @@ class ChatRunnerRequestRetryTest {
                 else -> RunStatus.FAILED
             }, result.status)
         }
+    }
+
+    @Test fun twoDisconnectsKeepBodyReasoningAndCumulativeFinalOnlyReplacesSuffix() {
+        val runtime = Runtime()
+        val finishes = mutableListOf<Pair<Int, String>>()
+        var budgets = 0
+        val session = object : Session() {
+            var resumed = 0
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                sink(ModelEvent.TextDelta("m", "first "))
+                sink(ModelEvent.ReasoningFinal("r", "earlier thinking"))
+                throw ModelRequestException(ModelFailure.NETWORK)
+            }
+            override fun resume(sink: (ModelEvent) -> Unit) {
+                resumed++
+                sink(ModelEvent.Usage(10, 1))
+                sink(ModelEvent.InputEstimate(9))
+                assertTrue(finishes.none { it.first == resumed })
+                if (resumed == 1) {
+                    assertEquals("first ", continuations.last().textPrefix)
+                    sink(ModelEvent.TextDelta("m", "second"))
+                    assertEquals(resumed to "succeeded", finishes.last())
+                    sink(ModelEvent.TextFinal("m", "second "))
+                    sink(ModelEvent.ReasoningFinal("r", "later thinking"))
+                    throw ModelRequestException(ModelFailure.NETWORK)
+                }
+                assertEquals("first second ", continuations.last().textPrefix)
+                sink(ModelEvent.TextDelta("m", "third"))
+                sink(ModelEvent.TextFinal("m", "third!"))
+                sink(ModelEvent.TextFinal("m", "third!"))
+            }
+        }
+        val result = runner(session, runtime, budget = {
+            val id = ++budgets
+            object : Budget() { override fun finish(status: String) { finishes.add(id to status) } }
+        }).run(initial(), emptyList())
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals("first second third!", result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text })
+        assertEquals(listOf("earlier thinking", "later thinking"), result.historySegments.flatMap { it.reportedReasoning }.map { it.text })
+        assertEquals(2, budgets)
+        assertEquals(listOf(1 to "succeeded", 2 to "succeeded"), finishes)
+        assertEquals(3, runtime.writes.last().usageRequests.map { it.requestId }.distinct().size)
+        assertEquals(2, runtime.writes.last().usage.size)
+    }
+
+    @Test fun usageOnlyAndUnchangedFinalDoNotRecoverTheError() {
+        val runtime = Runtime()
+        val statuses = mutableListOf<String>()
+        val session = object : Session() {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                sink(ModelEvent.TextDelta("m", "prefix"))
+                throw ModelRequestException(ModelFailure.NETWORK)
+            }
+            override fun resume(sink: (ModelEvent) -> Unit) {
+                sink(ModelEvent.Usage(3, 0)); sink(ModelEvent.InputEstimate(3))
+                sink(ModelEvent.TextFinal("m", "prefix"))
+                sink(ModelEvent.ReasoningFinal("r", "  "))
+                sink(ModelEvent.ProtocolOutput(emptyList()))
+                assertTrue(statuses.isEmpty())
+                sink(ModelEvent.TextDelta("next", "new"))
+                assertEquals(listOf("succeeded"), statuses)
+            }
+        }
+        val result = runner(session, runtime, budget = {
+            object : Budget() { override fun finish(status: String) { statuses.add(status) } }
+        }).run(initial(), emptyList())
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals("prefixnew", result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text })
     }
 
 }

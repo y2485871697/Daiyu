@@ -40,6 +40,7 @@ class ResponsesModel internal constructor(
         override fun cancel() = session.cancel()
         override val canResume: Boolean get() = session.canResume
         override fun resume(sink: (ModelEvent) -> Unit) = session.resume(sink)
+        override fun prepareContinuation(continuation: RequestContinuation) = session.prepareContinuation(continuation)
         override fun disconnectTransport() = session.disconnectTransport()
     }
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, connect, null)
@@ -104,6 +105,7 @@ class ResponsesModel internal constructor(
         private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
         private val cursorAvailable: Boolean get() = backgroundResume != null && resumeAllowed && decoder.canResume
         override val retriesCurrentRequest: Boolean get() = !cursorAvailable
+        override fun prepareContinuation(continuation: RequestContinuation) = retry.prepare(continuation)
         override val canResume: Boolean get() = !cancelled.get() && (cursorAvailable || retry.available)
         @Synchronized
         override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
@@ -296,6 +298,16 @@ class ResponsesModel internal constructor(
             outputs.forEach {
                 val item = JSONObject().put("type", "function_call_output").put("call_id", it.callId.value).put("output", it.output)
                 input.put(item); ownItems.add(item.toString())
+            }
+            val continuation = retry.continuation
+            if (continuation.hasAcceptedOutput) {
+                val additions = listOfNotNull(
+                    ("assistant" to continuation.textPrefix).takeIf { continuation.textPrefix.isNotEmpty() },
+                    "user" to continuation.instruction)
+                additions.forEach { (role, text) ->
+                    val row = JSONObject().put("role", role).put("content", text)
+                    input.put(row); ownItems.add(row.toString())
+                }
             }
             val request = ResponsesRequest.withAssistantInstructions(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled), ProviderProtocol.RESPONSES),

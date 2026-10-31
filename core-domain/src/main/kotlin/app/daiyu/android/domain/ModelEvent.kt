@@ -46,10 +46,22 @@ interface ResumableModelSession : ModelSession {
     val canResume: Boolean
     fun resume(sink: (ModelEvent) -> Unit)
 }
-/** Explicit current-request replay, distinct from cursor-only transport resume. Implementations
- * retain the already-submitted tool outputs; replay never authorizes executing local tools. */
+/** Accepted public body since the frozen request boundary. Never includes opaque output,
+ * reasoning, incomplete calls, or local tool side effects. Whitespace is significant. */
+data class RequestContinuation(val textPrefix: String, val hasAcceptedOutput: Boolean = textPrefix.isNotEmpty()) {
+    val instruction: String get() = "Continue the interrupted answer from exactly where the supplied assistant text ends. " +
+        "Do not repeat that text. Do not repeat or re-execute completed tool calls; use their supplied results. " +
+        "Discard any incomplete tool call from the interrupted response."
+}
+
+/** A new POST from the retained request boundary, distinct from cursor transport resume.
+ * Submitted tool results are retained, never re-executed locally. */
 interface RequestRetryModelSession : ResumableModelSession {
     val retriesCurrentRequest: Boolean get() = true
+    /** Called only for a new request, never for an acknowledged cursor resume. */
+    fun prepareContinuation(continuation: RequestContinuation) {
+        require(!continuation.hasAcceptedOutput && continuation.textPrefix.isEmpty()) { "Session does not support partial-answer continuation" }
+    }
     fun disconnectTransport()
 }
 /** Explicit acknowledgement: a stale gate returning Unit is NOT an acknowledgement. */

@@ -123,6 +123,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var selectedSlots by remember { mutableStateOf<Set<String>?>(null) }
     var detail by remember { mutableStateOf<ProviderDetail?>(null) }
     var openingSlot by remember { mutableStateOf<String?>(null) }
+    var savedReadbackUi by remember { mutableStateOf<ProviderPageUiState?>(null) }
     var pausedDraft by remember { mutableStateOf<PausedProviderDraft?>(null) }
     var pendingOpen by remember { mutableStateOf(true) }
     var serial by remember { mutableStateOf(0L) }
@@ -155,7 +156,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
     fun clearTransientPrompts() { confirmation = null; selectedSlots = null }
     fun clearPrompts() { creating?.revoke(); creating = null; clearTransientPrompts() }
-    fun closeDetail() { serial++; loading = false; openingSlot = null; detail?.revoke(); detail = null; clearPrompts() }
+    fun closeDetail() { serial++; loading = false; openingSlot = null; savedReadbackUi = null; detail?.revoke(); detail = null; clearPrompts() }
     fun refresh() {
         val p = permit
         if (!current(p)) return
@@ -202,12 +203,21 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             })
         }
     }
-    fun open(slot: String, restore: PausedProviderDraft? = null, newProtocol: ProviderProtocol? = null) {
+    fun open(slot: String, restore: PausedProviderDraft? = null, newProtocol: ProviderProtocol? = null,
+        savedPageUi: ProviderPageUiState? = null,
+    ) {
         val p = permit
         if (!current(p) || busy != null) return
         val retained = detail?.takeIf { restore != null && it.editor == restore.editor }
         if (restore == null) pausedDraft = null
-        if (retained == null) closeDetail()
+        if (savedPageUi != null) {
+            // Revoke execution, not presentation. Keep the disabled form mounted until the
+            // authoritative readback atomically installs the new editor and its saved baseline.
+            detail?.revoke()
+            creating?.balanceTestJob?.cancel()
+            savedReadbackUi = savedPageUi
+            pendingOpen = false
+        } else if (retained == null) closeDetail()
         openingSlot = slot; checkingRegistry = false; loading = true; notice = null
         val request = ++serial
         scope.launch {
@@ -235,7 +245,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 repo.withEditor(editor) { }
                 ProviderDetail(editor, registration.name, registration.enabled, editing, configurationRevision,
                     repo.catalogPersistence(editor), identity, balance, snapshot).also { loaded ->
-                    if (clearedDeletedModel || sameSavedProvider) loaded.pageUi = checkNotNull(restore).pageUi
+                    if (savedPageUi != null) loaded.pageUi = savedPageUi
+                    else if (clearedDeletedModel || sameSavedProvider) loaded.pageUi = checkNotNull(restore).pageUi
                 }
             } }
             if (!current(p) || serial != request) return@launch
@@ -252,9 +263,15 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 authentication = false
                 pausedDraft = null
                 registry = ready.registry
+                if (savedPageUi != null) {
+                    detail?.revoke()
+                    creating?.revoke(); creating = null
+                }
                 detail = ready
-                openingSlot = null
+                openingSlot = null; savedReadbackUi = null
             }, onFailure = { openingSlot = null;
+                // A successful write is not permission to keep editing an unverified baseline.
+                if (savedPageUi != null) closeDetail()
                 pausedDraft = null; notice = "详情读取失败或已变化，请刷新后重新打开。"
                 retained?.error = notice
             })
@@ -332,15 +349,16 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     LaunchedEffect(resumed, permit, busy, initialSlot, pendingOpen, oauthAttempt, oauthReturned) {
         if (current(permit) && busy == null && oauthAttempt == null && !oauthReturned) {
             val registered = creating?.registration?.registeredSlot
-            if (registered != null) {
-                creating?.revoke(); creating = null; authentication = false; pendingOpen = false
-                open(registered)
+            if (registered != null && (pendingOpen || !loading)) {
+                open(registered, savedPageUi = checkNotNull(creating).pageUi)
                 return@LaunchedEffect
             }
             if (!pendingOpen) return@LaunchedEffect
             val restore = pausedDraft
+            val readbackUi = savedReadbackUi
             pendingOpen = false
-            if (restore != null) open(restore.editor.slotId, restore)
+            if (readbackUi != null && openingSlot != null) open(checkNotNull(openingSlot), savedPageUi = readbackUi)
+            else if (restore != null) open(restore.editor.slotId, restore)
             else if (openingSlot != null) open(checkNotNull(openingSlot))
             else if (initialSlot == null) refresh() else open(initialSlot)
         }
@@ -349,7 +367,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         if (selectedSlots != null) { clearTransientPrompts(); return }
         oauthAttempt = null; oauthRegistryRevision = null; oauthReturned = false; oauthDraft = null
         discardOAuth(oauthResult); oauthResult = null
-        if (creating != null) { serial++; clearPrompts(); refresh(); return }
+        if (creating != null) { closeDetail(); refresh(); return }
         if (authentication && !loading) { serial++; authentication = false; clearPrompts(); refresh(); return }
         detail?.revoke()
         pausedDraft = null; pendingOpen = false
@@ -386,6 +404,13 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val modelScrollBehavior = key(modelScrollOwner) { MiuixScrollBehavior() }
         val d = detail
         val newProvider = creating
+        // A save replaces authority and catalog bindings, not this visual form. The same movable
+        // composition spans creation -> catalog detail and subsequent authoritative reloads.
+        // A genuine provider switch has a different pageUi and therefore a fresh form.
+        val configurationOwner = newProvider?.pageUi ?: d?.pageUi
+        val configurationContent = key(configurationOwner) {
+            remember { movableContentOf<ProviderConfigurationForm> { it.Content() } }
+        }
         if (newProvider != null) key(newProvider) {
             val draft = newProvider.draft
             val creationTitle = if (newProvider.oauthOnly) "新建提供商" else "添加提供商"
@@ -399,7 +424,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             if (modelTab) ProviderEmptyModelsPage(creationTitle, { back() }, tabs,
                 "请先在配置页保存提供商配置，再添加或拉取模型。",
                 listState = newProvider.pageUi.modelListState, queryState = newProvider.pageUi.modelQuery)
-            else ModelSettingsScreen(draft, { if (current(p) && enabled && creating === newProvider && newProvider.draft === draft) {
+            else configurationContent(ProviderConfigurationForm(draft, { if (current(p) && enabled && creating === newProvider && newProvider.draft === draft) {
                 newProvider.balanceTestJob?.cancel(); newProvider.balanceTestJob = null; newProvider.error = null; newProvider.draft = it
             } },
                 onSave = { submitted ->
@@ -417,7 +442,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         if (value.isFailure) newProvider.error = "未保存，请检查名称、连接配置及密钥。"
                         else mutate(expected, p, completed = { result ->
                             val added = result.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
-                            open(added.slotId)
+                            open(added.slotId, savedPageUi = newProvider.pageUi)
                         }, reportFailure = { message ->
                             if (creating === newProvider) newProvider.error = message
                         }) { repo, revision, admit ->
@@ -440,6 +465,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     }
                 }, onFetchCatalog = {}, onBack = { back() }, pageTitle = creationTitle, providerName = "",
                 headerContent = tabs, showCatalog = false, enabled = enabled && oauthAttempt == null, errorText = newProvider.error,
+                engineeringUi = engineeringUi,
                 onOAuthLogin = if (!newProvider.oauthOnly) null else ({
                     if (current(p) && enabled && creating === newProvider && newProvider.draft === draft && oauthAttempt == null) {
                         oauthRegistryRevision = registry?.revision
@@ -477,7 +503,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             if (current(p) && creating === newProvider && newProvider.draft === value && !cancelled()) deliver(it)
                         }
                     } ?: false
-                })
+                }))
         } else if (d != null) key(d) {
             val live = { current(p) && detail === d && d.live.get() }
             val cancelled = { !p.live.get() || !d.live.get() }
@@ -519,7 +545,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                                 if (live()) {
                                     if (success && initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY) {
                                         d.revoke(); p.revoke(); onDetailBack()
-                                    } else if (success) open(d.editor.slotId)
+                                    } else if (success) open(d.editor.slotId, savedPageUi = d.pageUi)
                                     else { closeDetail(); notice = "保存未完整确认，请重新打开详情核对名称与配置。"; refresh() }
                                 }
                             }
@@ -621,14 +647,14 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     ProviderEmptyModelsPage(detailTitle, { back() }, tabs,
                         "请先在配置页保存 Base URL 和 API Key，再添加或拉取模型。",
                         listState = d.pageUi.modelListState, queryState = d.pageUi.modelQuery)
-                } else ModelSettingsScreen(draft, change, save, {}, { back() },
+                } else configurationContent(ProviderConfigurationForm(draft, change, save, {}, { back() },
                     modifier = connectionModifier, headerContent = tabs, showCatalog = false,
                     pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
                     credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                     headersUnavailable = d.editing.headersUnavailable,
                     catalogEnabled = false, errorText = d.error?.takeIf { d.live.get() }, testBalance = balanceTest, onDelete = delete,
                     listState = d.pageUi.configurationListState,
-                    speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(d.editing.settings.endpoint))
+                    speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(d.editing.settings.endpoint)))
             } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
                 createModel = { CatalogModelParameters.newModel(it) },
                 isRemoteModel = { it.settings.source == app.daiyu.android.model.catalog.CatalogModelSource.REMOTE },
@@ -649,6 +675,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 headersUnavailable = d.editing.headersUnavailable,
                 testConnection = connection, localModelActions = actions, testBalance = balanceTest,
                 onDelete = delete, pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior,
+                configurationContent = configurationContent,
                 speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(d.editing.settings.endpoint))
         } else if (loading) {
             SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }

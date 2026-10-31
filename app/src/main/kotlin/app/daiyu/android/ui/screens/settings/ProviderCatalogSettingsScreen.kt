@@ -73,6 +73,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     modelDeletionEnabled: Boolean = enabled,
     isRemoteModel: (SavedCatalogModel<T>) -> Boolean = { false },
     catalogConnectionSaved: Boolean = true,
+    configurationContent: @Composable (ProviderConfigurationForm) -> Unit = { it.Content() },
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -145,7 +146,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
                         state.status?.let { SettingsNote(it) }
                     }
                 }) }
-        } else ModelSettingsScreen(
+        } else configurationContent(ProviderConfigurationForm(
             pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
             listState = configurationListState, speechOnly = speechOnly,
             onManageLocalModels = localModelActions?.let { { session.invalidate(); selectedModelIds.value = null; managingLocal = true } },
@@ -171,7 +172,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
             catalogEnabled = enabled && !state.saving,
             enabled = enabled && !state.saving,
             // Deliberately no legacy clickable remote result list: that list changes the active draft.
-        )
+        ))
         state.selection?.let { selection ->
             ProviderModelSelectionDialog(
                 selection = selection,

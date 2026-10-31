@@ -163,8 +163,8 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('LaunchedEffect(sampleUri, lifecycleState, frozenConfiguration.revision)', leaf)
         self.assertIn('if (current() && sampleUri == uri) sampleName = label', leaf)
         self.assertIn('summary = if (sampleUri == null) null else sampleName', leaf)
-        self.assertIn('首次正式合成可能产生音色费用', leaf)
-        self.assertIn('未正式使用的音色可能七天后删除', leaf)
+        self.assertIn('SettingsSwitchRow("我有权使用此录音并同意本次上传制作", agreed', leaf)
+        self.assertIn('SettingsRow("确认上传并制作"', leaf)
         project = leaf.split('if (projectPicker) ChatSelectionSheet(', 1)[1].split('voiceMenu?.let', 1)[0]
         self.assertIn('showCloseButton = false', project)
         self.assertIn('item.name.takeIf { it != item.displayName }', project)

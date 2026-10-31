@@ -44,7 +44,8 @@ class AssistantWorkflowContentTest {
         val turn = map(source(listOf(tool("t1"), MessageBlock.Image(reference), tool("t2"), MessageBlock.Text("answer", "answer")),
             listOf(thought), status = RunStatus.COMPLETED), dedicated = true)
         val ordered = turn.workflowContent()
-        assertEquals(listOf("reasoning:r1", "tool:t1", "image:2:${reference.id}", "tool:t2"), keys(ordered.steps))
+        val expectedImageKey = "image:1:c1:a1:c1:a36:${reference.id}64:${reference.sha256}"
+        assertEquals(listOf("reasoning:r1", "tool:t1", expectedImageKey, "tool:t2"), keys(ordered.steps))
         assertEquals(listOf("text:answer"), keys(ordered.body))
         assertSame(reference, (ordered.steps[2] as MessageContentUi.Image).image.reference)
         assertEquals(owner, (ordered.steps[2] as MessageContentUi.Image).image.expectedOwner)

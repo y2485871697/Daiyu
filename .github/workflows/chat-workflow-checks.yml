@@ -11,6 +11,11 @@ on:
         description: 本次定向检查标识
         type: string
         required: true
+      check_scope:
+        description: 工作流程或环境圆点的定向检查范围
+        type: choice
+        options: [workflow, environment-dots]
+        default: workflow
 permissions:
   contents: read
 concurrency:
@@ -24,6 +29,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       SKIP_JDK_VERSION_CHECK: 'true'
+      WORKFLOW_CHECK_SCOPE: ${{ inputs.check_scope }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -52,12 +58,14 @@ jobs:
           mkdir -p workflow-checks
           set -o pipefail
           python3 -B - 2>&1 <<'PY' | tee workflow-checks/contracts.log
-          import json, unittest
+          import json, os, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',
-                          'test_workflow_render_isolation_contract.py', 'test_reasoning_stream_cost_contract.py',
-                          'test_tool_card_html_contract.py'):
+          patterns = ('test_tool_card_html_contract.py',) if os.environ['WORKFLOW_CHECK_SCOPE'] == 'environment-dots' else (
+              'test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',
+              'test_workflow_render_isolation_contract.py', 'test_reasoning_stream_cost_contract.py',
+              'test_tool_card_html_contract.py')
+          for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -72,18 +80,19 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          classes=(AssistantWorkflowContentTest ToolHeaderTextTest)
+          if [[ "$WORKFLOW_CHECK_SCOPE" != environment-dots ]]; then
+            classes+=(ChatTurnMapperTest ReasoningWorkflowMapperTest AssistantWorkflowCompositionTest
+                      WorkflowConnectorsTest ReasoningHandoffTest MarkdownAdmissionCompositionTest)
+          fi
+          filters=()
+          for class in "${classes[@]}"; do
+            filters+=(--tests "app.daiyu.android.ui.screens.chat.conversation.$class")
+          done
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=workflow-checks/task-graph.json \
-            :app:compileDebugKotlin :app:testDebugUnitTest \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowMapperTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowContentTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowCompositionTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.WorkflowConnectorsTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.ReasoningHandoffTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.MarkdownAdmissionCompositionTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.ToolHeaderTextTest' \
+            :app:compileDebugKotlin :app:testDebugUnitTest "${filters[@]}" \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee workflow-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -92,9 +101,10 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest', 'AssistantWorkflowContentTest',
-                      'AssistantWorkflowCompositionTest', 'WorkflowConnectorsTest', 'ReasoningHandoffTest',
-                      'MarkdownAdmissionCompositionTest', 'ToolHeaderTextTest'}
+          expected = {'AssistantWorkflowContentTest', 'ToolHeaderTextTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] != 'environment-dots':
+              expected |= {'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest', 'AssistantWorkflowCompositionTest',
+                           'WorkflowConnectorsTest', 'ReasoningHandoffTest', 'MarkdownAdmissionCompositionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)
@@ -110,7 +120,7 @@ jobs:
           assert not packages, packages
           record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
-                        classes=sorted(names), contracts=json.loads(Path('workflow-checks/contracts.json').read_text()),
+                        check_scope=os.environ['WORKFLOW_CHECK_SCOPE'], classes=sorted(names), contracts=json.loads(Path('workflow-checks/contracts.json').read_text()),
                         apk_built=False, instrumentation_run=False)
           Path('workflow-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
           print(json.dumps(record, ensure_ascii=False))

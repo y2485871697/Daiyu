@@ -3,7 +3,6 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -51,9 +50,6 @@ internal class MarkdownRevealBudgets(
 
 private val hiddenMarkdownVisibility: State<Int> = derivedStateOf { 0 }
 
-/** The mount's accepted baseline must survive pending or differently-laned projections. */
-internal class MarkdownBaselineBudget { var length: Int? = null }
-
 internal data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
 
 @Composable
@@ -97,15 +93,11 @@ internal fun rememberMarkdownReveal(
     val parser = LocalMarkdownParser.current
     val identity = MarkdownParserIdentity(parser)
     val baseline = remember(identity, resetEpoch) { sources.toList() }
-    val baselineBudget = remember(identity, resetEpoch, allowBaselinePrefix) { MarkdownBaselineBudget() }
-    val baselineProjection = if (sources == baseline) projection
-        else if (baselineBudget.length == null) rememberMarkdownProjection(baseline.map { it.text }, streaming = !terminal)
-        else null
-    val preparedBaselineLength = remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix) {
+    val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
+        streaming = !terminal)
+    val baselineLength = remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix) {
         markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix)
     }
-    val baselineLength = baselineBudget.length ?: preparedBaselineLength
-    SideEffect { if (baselineBudget.length == null) baselineBudget.length = baselineLength }
     val partIds = sources.map { it.id }
     val compatible = projection?.let { allowBaselinePrefix || isMarkdownAppend(baseline.map { it.text }, it.sources) ||
         !markdownTypingAppends(baseline, sources) } == true

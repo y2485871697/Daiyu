@@ -93,6 +93,25 @@ class MarkdownRevealInvalidationTest {
         } finally { observer.stop(); observer.clear() }
     }
 
+    @Test fun pendingBaselinePreparationKeepsTheAcceptedTargetAndVisibleBudget() {
+        val source = MarkdownTypingSource("body", "Accepted baseline")
+        val motion = MarkdownTypingState(listOf(source))
+        val target = motion.update(listOf(MarkdownTypingPart(source, source.text.length)),
+            source.text.length, streaming = true, terminal = false)!!
+        val current = mutableStateOf<MarkdownTypingTarget?>(target)
+        val frame = mutableStateOf(MarkdownTypingFrame(target, target.start))
+        val budgets = MarkdownRevealBudgets(current, frame)
+        val visibility = budgets.visibility("body")
+        val pending = listOf(MarkdownTypingPart(source.copy(text = source.text + " appended"), source.text.length + 9))
+        repeat(8) {
+            current.value = motion.update(pending, baselineLength = null, streaming = true, terminal = false)
+            Snapshot.sendApplyNotifications()
+            assertSame(target, motion.target)
+            assertSame(visibility, budgets.visibility("body"))
+            assertEquals(source.text.length, visibility.value)
+        }
+    }
+
     @Test fun visibilityStateDoesNotSubscribeTheBodyHost() {
         val target = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("body", "x".repeat(300)), 300)),
             start = 0, streaming = true, terminal = false)

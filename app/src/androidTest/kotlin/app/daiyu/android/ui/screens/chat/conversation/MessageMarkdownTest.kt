@@ -1500,6 +1500,19 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
             return results.single()
         }
+        // EmojiCompat's cold-start download legitimately invalidates every paragraph once.
+        // Capture the layout baseline only after that independent font transition has finished.
+        if (androidx.emoji2.text.EmojiCompat.isConfigured()) {
+            ui.waitUntil(30_000) {
+                androidx.emoji2.text.EmojiCompat.get().loadState.let {
+                    it == androidx.emoji2.text.EmojiCompat.LOAD_STATE_SUCCEEDED ||
+                        it == androidx.emoji2.text.EmojiCompat.LOAD_STATE_FAILED
+                }
+            }
+            awaitVisualIdle()
+        }
+        val paragraphId = paragraph.fetchSemanticsNode().id
+        val cellId = cell.fetchSemanticsNode().id
         val budget = currentBudget
         val shapedParagraph = layout(paragraph).multiParagraph
         val shapedCell = layout(cell).multiParagraph
@@ -1511,7 +1524,12 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             assertEquals("Accepted appends cannot clear the visible mount baseline", prefix.let {
                 markdownBlocksDisplayText(MarkdownParser.parse(it + "Tail")).length
             }, currentBudget?.value)
-            assertSame("Completed paragraph shaping survives network append $index", shapedParagraph, layout(paragraph).multiParagraph)
+            assertEquals("Network append $index must not remount the paragraph", paragraphId, paragraph.fetchSemanticsNode().id)
+            assertEquals("Network append $index must not remount the cell", cellId, cell.fetchSemanticsNode().id)
+            val paragraphLayout = layout(paragraph)
+            assertFalse("Font baseline is settled before comparison", paragraphLayout.multiParagraph.intrinsics.hasStaleResolvedFonts)
+            assertSame("Completed paragraph shaping survives network append $index: ${paragraphLayout.layoutInput}",
+                shapedParagraph, paragraphLayout.multiParagraph)
             assertSame("Completed cell shaping survives network appends", shapedCell, layout(cell).multiParagraph)
         }
         assertTrue(opened.isEmpty())

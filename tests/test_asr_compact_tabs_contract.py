@@ -30,14 +30,14 @@ class AsrCompactTabsContract(unittest.TestCase):
         self.assertNotIn('voice-asr-account-card', scoped)
 
     def test_width_cap_is_local_flexible_and_keeps_vertical_spacing(self):
-        self.assertIn('Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp)', self.asr)
-        self.assertEqual(1, self.panel.count('widthIn(max = 240.dp)'))
-        self.assertNotIn('.width(240.dp)', self.asr)
+        self.assertIn('Modifier.widthIn(max = 300.dp).padding(vertical = 8.dp)', self.asr)
+        self.assertEqual(1, self.panel.count('widthIn(max = 300.dp)'))
+        self.assertNotIn('.width(300.dp)', self.asr)
         self.assertIn('testTag("voice-asr-method-card")', self.asr)
         shared = (SRC / 'ui/screens/settings/SettingsSegmentedTabs.kt').read_text()
         workspace = (SRC / 'ui/screens/settings/LinuxSettingsNavigation.kt').read_text()
         for text in [shared, workspace]:
-            self.assertNotIn('widthIn(max = 240.dp)', text)
+            self.assertNotIn('widthIn(max = 300.dp)', text)
         self.assertIn('Row(modifier.fillMaxWidth()', shared)
         self.assertIn('.heightIn(min = 48.dp)', shared)
         self.assertIn('fontSize = 14.sp', shared)
@@ -59,7 +59,7 @@ class AsrCompactTabsContract(unittest.TestCase):
                       'node("voice-asr-method-card").getUnclippedBoundsInRoot()',
                       'val pageWidth = (page.right - page.left).value',
                       'val groupWidth = (group.right - group.left).value',
-                      'minOf(240f, pageWidth - 32f)',
+                      'minOf(300f, pageWidth - 32f)',
                       'page.left.value + page.right.value',
                       'group.left.value + group.right.value', '.assertHeightIsAtLeast(48.dp)',
                       'assertEquals(local.width, cloud.width, 1f)']:

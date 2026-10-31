@@ -318,7 +318,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         val group = node("voice-asr-method-card").getUnclippedBoundsInRoot()
         val pageWidth = (page.right - page.left).value
         val groupWidth = (group.right - group.left).value
-        assertEquals(minOf(240f, pageWidth - 32f), groupWidth, 1f)
+        assertEquals(minOf(300f, pageWidth - 32f), groupWidth, 1f)
         assertEquals(page.left.value + page.right.value, group.left.value + group.right.value, 1f)
         val local = node("voice-asr-method:system").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
         val cloud = node("voice-asr-method:doubao").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot

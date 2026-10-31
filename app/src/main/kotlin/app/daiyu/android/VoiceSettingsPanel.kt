@@ -320,7 +320,7 @@ internal fun VoiceSettingsPanel(
                             labels = listOf("本机识别", "豆包识别"),
                             selectedIndex = if (draft.dictation == "DOUBAO") 1 else 0,
                             enabled = !busy,
-                            modifier = Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp).testTag("voice-asr-method-card"),
+                            modifier = Modifier.widthIn(max = 300.dp).padding(vertical = 8.dp).testTag("voice-asr-method-card"),
                             tabTag = { if (it == 0) "voice-asr-method:system" else "voice-asr-method:doubao" },
                             onSelect = { index ->
                                 if (current() && !busy) {

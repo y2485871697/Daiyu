@@ -38,6 +38,7 @@ internal fun SpeechMorphButton(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    description: String? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -58,7 +59,7 @@ internal fun SpeechMorphButton(
     Box(
         modifier = modifier.testTag("chat-voice").size(32.dp).clip(CircleShape)
             .semantics {
-                contentDescription = if (listening) "停止语音输入" else "语音输入"
+                contentDescription = description ?: if (listening) "停止语音输入" else "语音输入"
                 if (listening) stateDescription = "正在聆听"
                 else if (generating) stateDescription = "正在生成"
             }

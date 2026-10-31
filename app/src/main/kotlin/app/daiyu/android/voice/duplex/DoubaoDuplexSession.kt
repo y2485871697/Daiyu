@@ -37,6 +37,20 @@ class DoubaoDuplexSession(
     private var started = false
     @Volatile private var ended = false
     private var closeSent = false
+    @Volatile private var microphoneMuted = false
+    @Volatile private var microphoneEpoch = 0L
+    val muted: Boolean get() = synchronized(lock) { microphoneMuted }
+    val speaker: Boolean get() = audio.speaker
+    fun setMuted(muted: Boolean): Boolean = synchronized(lock) {
+        if (!current()) false else {
+            if (microphoneMuted != muted) { microphoneEpoch++; microphoneMuted = muted }
+            true
+        }
+    }
+    fun setSpeaker(speaker: Boolean): Boolean = synchronized(lock) {
+        current() && audio.setSpeaker(speaker)
+    }
+    @Volatile private var revokeFailure: Throwable? = null
     private var deadline: java.util.Timer? = null
     private val drained = java.util.concurrent.CountDownLatch(1)
     private var teardownStarted = false
@@ -123,12 +137,18 @@ class DoubaoDuplexSession(
                 when (e.optString("type")) {
                     "session.created" -> if (opened && !created) {
                         created = true; deadline?.cancel(); deadline = null; update(DuplexPhase.LISTENING)
-                        audio.startCapture { pcm -> event {
-                            if (created && pcm.isNotEmpty()) {
-                                check(pcm.size <= 64_000 && pcm.size % 2 == 0)
-                                send(DoubaoDuplexProtocol.inputAudio(pcm))
+                        audio.startCapture capture@ { pcm ->
+                            val frameEpoch = microphoneEpoch
+                            if (microphoneMuted) return@capture
+                            event {
+                                // A frame waiting for the event lock across a mute/unmute
+                                // boundary is stale too; muted audio is never buffered/replayed.
+                                if (created && !microphoneMuted && frameEpoch == microphoneEpoch && pcm.isNotEmpty()) {
+                                    check(pcm.size <= 64_000 && pcm.size % 2 == 0)
+                                    send(DoubaoDuplexProtocol.inputAudio(pcm))
+                                }
                             }
-                        } }
+                        }
                     }
                     "conversation.item.input_audio_transcription.started",
                     "conversation.item.input_audio_transcription.failed" -> interruption.started()
@@ -211,15 +231,34 @@ class DoubaoDuplexSession(
         drainFailure?.let { throw it }
     }
 
-    private fun finish(phase: DuplexPhase, reason: String? = null) {
+    /** Hangup fences callbacks and silences hardware/aborts I/O before returning; never joins. */
+    fun stop() = finish(DuplexPhase.CANCELLED, "stopped", asynchronous = true)
+
+    private fun finish(phase: DuplexPhase, reason: String? = null, asynchronous: Boolean = false) {
         val token: AudioOwnerGate.Lease?
+        val sendClose: Boolean
         synchronized(lock) {
             if (ended) return
             ended = true; epoch++; token = lease
             update(phase, reason)
+            deadline?.cancel(); deadline = null
+            sendClose = opened && !closeSent && phase != DuplexPhase.UNKNOWN && !asynchronous
+            closeSent = true
         }
-        // releaseAfter poisons the shared gate if a strict teardown cannot be confirmed.
-        if (token == null || !gate.releaseAfter(token) { teardown() }) teardown()
+        // Do not carry the state lock across any platform operation or worker join.
+        try { audio.stopImmediately() } catch (t: Throwable) { revokeFailure = t }
+        // Best effort protocol close only on the existing waiting close path; never retry it.
+        if (sendClose) try { transport.send(DoubaoDuplexProtocol.sessionClose()) } catch (_: Exception) { }
+        try { transport.abort() } catch (t: Throwable) { if (revokeFailure == null) revokeFailure = t }
+        val release = {
+            // The lease stays held until actual drain. A competing acquire invokes close()
+            // and waits for the same drain, so it cannot commit in the scheduling gap.
+            if (token == null || !gate.releaseAfter(token) { teardown() }) teardown()
+        }
+        if (asynchronous) Thread({
+            try { release() } catch (_: Throwable) { /* drainFailure + poisoned gate retain failure */ }
+        }, "doubao-duplex-drain").apply { isDaemon = true; start() }
+        else release()
     }
 
     private fun teardown() {
@@ -227,15 +266,9 @@ class DoubaoDuplexSession(
             if (teardownStarted) false else { teardownStarted = true; teardownThread = Thread.currentThread(); true }
         }
         if (!first) { awaitDrain(); return }
-        var failure: Throwable? = null
+        var failure: Throwable? = revokeFailure
         try {
-            val sendClose = synchronized(lock) {
-                deadline?.cancel(); deadline = null
-                (opened && !closeSent && state.value.phase != DuplexPhase.UNKNOWN).also { closeSent = true }
-            }
-            try { audio.closeAndDrain() } catch (t: Throwable) { failure = t }
-            // Best effort only: session.close itself is never retried, even on UNKNOWN.
-            if (sendClose) try { transport.send(DoubaoDuplexProtocol.sessionClose()) } catch (_: Exception) { }
+            try { audio.closeAndDrain() } catch (t: Throwable) { if (failure == null) failure = t }
             try { transport.closeAndDrain() } catch (t: Throwable) { if (failure == null) failure = t }
         } finally {
             drainFailure = failure

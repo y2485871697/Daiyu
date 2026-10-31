@@ -3,6 +3,9 @@ package app.daiyu.android
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.flow.StateFlow
 import app.daiyu.android.voice.*
 import app.daiyu.android.voice.duplex.*
 import app.daiyu.android.voice.network.VoiceNetworkAdapters
@@ -13,6 +16,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import java.util.UUID
+
+data class DuplexCallSnapshot(
+    val sessionKey: Long,
+    val conversationId: String?,
+    val state: DuplexState,
+    val startedAtMillis: Long,
+    val endedAtMillis: Long? = null,
+    val muted: Boolean = false,
+    val speaker: Boolean = true,
+) {
+    internal fun advance(next: DuplexState, now: Long): DuplexCallSnapshot {
+        if (endedAtMillis != null || next.owner != state.owner) return this
+        return copy(state = next, endedAtMillis = if (next.phase.isCallTerminal()) now else null)
+    }
+    internal fun controls(key: Long): Boolean = sessionKey == key && endedAtMillis == null && !state.phase.isCallTerminal()
+}
+
+private fun DuplexPhase.isCallTerminal() = this in setOf(DuplexPhase.COMPLETE,
+    DuplexPhase.CANCELLED, DuplexPhase.FAILED, DuplexPhase.UNKNOWN)
 
 /** Activity-bound product entry. Never starts on load/resume, never retries UNKNOWN. */
 internal class ActivityRemoteVoiceHost(
@@ -35,6 +57,8 @@ internal class ActivityRemoteVoiceHost(
     private var attempt: Attempt? = null
     internal val dictationTarget: DictationDraftTarget? get() = attempt?.target
     private var duplex: DoubaoDuplexSession? = null
+    private val mutableDuplexSnapshot = MutableStateFlow<DuplexCallSnapshot?>(null)
+    val duplexSnapshot: StateFlow<DuplexCallSnapshot?> = mutableDuplexSnapshot.asStateFlow()
     private var observation: Job? = null
     private var epoch = 0L
     internal val operationToken: Long get() = epoch
@@ -72,8 +96,8 @@ internal class ActivityRemoteVoiceHost(
             mutable.value = "豆包听写未启动：检查独立语音设置或音频占用"
         }
     }
-    val duplexActive: Boolean get() = duplex != null
-    fun startDuplex(admission: () -> Boolean) {
+    val duplexActive: Boolean get() = duplex?.state?.value?.phase?.isCallTerminal() == false
+    fun startDuplex(conversationId: String? = null, admission: () -> Boolean = { true }) {
         try {
             val config = runtime.snapshot()
             check(VoiceSettingsPreferences(context).enabled("realtime"))
@@ -81,24 +105,61 @@ internal class ActivityRemoteVoiceHost(
             if (!permission()) return
             invalidate()
             val token = ++epoch
-            val next = DoubaoDuplexSession(VoiceOwner("voice-call", UUID.randomUUID().toString()),
+            val key = callKeys.incrementAndGet()
+            val next = DoubaoDuplexSession(VoiceOwner(conversationId ?: "unsaved-call-$key", UUID.randomUUID().toString()),
                 runtime.prepareDuplex(config),
-                VoiceNetworkAdapters.duplex(), AndroidDuplexAudio(), gate)
+                VoiceNetworkAdapters.duplex(), AndroidDuplexAudio(context), gate)
             duplex = next
+            mutableDuplexSnapshot.value = DuplexCallSnapshot(key, conversationId, next.state.value,
+                SystemClock.elapsedRealtime())
             observation = scope.launch {
                 next.state.collect { value ->
-                    if (epoch == token && duplex === next) mutable.value = when (value.phase) {
-                        DuplexPhase.UNKNOWN -> "双工结果未确认"
-                        DuplexPhase.FAILED -> "双工失败，已停止；检查独立配置后手动重试"
-                        else -> "双工 ${value.phase}\n${value.transcript}\n${value.reply}"
+                    if (epoch == token && duplex === next && mutableDuplexSnapshot.value?.sessionKey == key) {
+                        publishDuplex(next, value)
+                        mutable.value = when (value.phase) {
+                            DuplexPhase.UNKNOWN -> "双工结果未确认"
+                            DuplexPhase.FAILED -> "双工失败，已停止；检查独立配置后手动重试"
+                            else -> "双工 ${value.phase}\n${value.transcript}\n${value.reply}"
+                        }
                     }
                 }
             }
             next.start { admission() && runtime.current(config) && epoch == token }
         } catch (_: Exception) {
-            try { invalidate() } catch (_: Exception) { /* strict release failure keeps gate closed */ }
+            val failed = duplex
+            if (failed != null) {
+                try { failed.stop() } finally { publishDuplex(failed, failed.state.value) }
+            }
             mutable.value = "双工未启动：检查独立密钥、麦克风权限或音频占用"
         }
+    }
+    private fun publishDuplex(call: DoubaoDuplexSession, state: DuplexState) {
+        if (duplex !== call) return
+        val prior = mutableDuplexSnapshot.value ?: return
+        mutableDuplexSnapshot.value = prior.advance(state, SystemClock.elapsedRealtime())
+    }
+    fun stopDuplex(sessionKey: Long) {
+        val call = duplex ?: return
+        publishDuplex(call, call.state.value)
+        if (mutableDuplexSnapshot.value?.controls(sessionKey) != true) return
+        call.stop() // Hardware stop/flush + network abort happen now, not after a UI animation.
+        publishDuplex(call, call.state.value)
+    }
+    fun setDuplexMuted(sessionKey: Long, muted: Boolean): Boolean {
+        val call = duplex ?: return false
+        publishDuplex(call, call.state.value)
+        val prior = mutableDuplexSnapshot.value ?: return false
+        if (!prior.controls(sessionKey) || !call.setMuted(muted)) return false
+        mutableDuplexSnapshot.value = prior.copy(muted = call.muted)
+        return true
+    }
+    fun setDuplexSpeaker(sessionKey: Long, speaker: Boolean): Boolean {
+        val call = duplex ?: return false
+        publishDuplex(call, call.state.value)
+        val prior = mutableDuplexSnapshot.value ?: return false
+        if (!prior.controls(sessionKey) || !call.setSpeaker(speaker)) return false
+        mutableDuplexSnapshot.value = prior.copy(speaker = call.speaker)
+        return true
     }
     fun invalidate() {
         mutablePreview.value = null
@@ -108,6 +169,7 @@ internal class ActivityRemoteVoiceHost(
         observation?.cancel(); observation = null
         val prior = attempt; attempt = null
         val call = duplex; duplex = null
+        mutableDuplexSnapshot.value = null
         // Both close paths fence callbacks before synchronously draining Android audio.
         try { prior?.cancel() } finally { call?.close() }
     }
@@ -223,6 +285,7 @@ internal class ActivityRemoteVoiceHost(
     }
 
     internal companion object {
+        private val callKeys = AtomicLong()
         /** Unit callback contract: the editor must throw if it cannot confirm the draft commit. */
         fun finalDraftStatus(text: String, isCurrent: () -> Boolean, commit: () -> Unit): String {
             if (text.isBlank()) return "未识别到有效内容"

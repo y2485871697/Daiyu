@@ -14,6 +14,8 @@ class DoubaoDuplexFixtureTest {
         val sent = mutableListOf<String>()
         var result = DuplexSendResult.ACCEPTED
         var drains = 0
+        var aborts = 0
+        override fun abort() { aborts++ }
         override fun connect(request: DuplexRequest, listener: DuplexTransport.Listener) {
             this.request = request; this.listener = listener
         }
@@ -33,6 +35,15 @@ class DoubaoDuplexFixtureTest {
         var drains = 0
         var epoch = 0L
         var failDrain = false
+        var stops = 0
+        var routeAvailable = true
+        private var routeSpeaker = true
+        override val speaker get() = routeSpeaker
+        override fun setSpeaker(speaker: Boolean): Boolean {
+            if (!routeAvailable) return false
+            routeSpeaker = speaker; return true
+        }
+        override fun stopImmediately() { stops++; pending.clear() }
         var onDrain: (() -> Unit)? = null
         val pending = mutableListOf<Pair<Long, ByteArray>>()
         val flushed = mutableListOf<Long>()
@@ -293,6 +304,84 @@ class DoubaoDuplexFixtureTest {
             c.wire.receive("response.output_audio.delta", "audio", "AAABAA==", "B")
             assertEquals(2, c.audio.pending.size)
         }
+    }
+
+    @Test fun muteDropsPcmImmediatelyAndUnmuteDoesNotReplay() {
+        Call().use { c ->
+            c.ready()
+            assertTrue(c.session.setMuted(true))
+            assertTrue(c.session.muted)
+            val before = c.wire.sent.size
+            repeat(4) { c.audio.capture!!(byteArrayOf(it.toByte(), 0)) }
+            assertEquals(before, c.wire.sent.size)
+            assertTrue(c.session.setMuted(false))
+            assertFalse(c.session.muted)
+            assertEquals(before, c.wire.sent.size)
+            c.audio.capture!!(byteArrayOf(9, 0))
+            assertEquals(before + 1, c.wire.sent.size)
+            assertEquals("CQA=", JSONObject(c.wire.sent.last()).getString("audio"))
+            c.session.close()
+            assertFalse(c.session.setMuted(true))
+        }
+    }
+
+    @Test fun speakerFailureIsNotReportedAsSuccessAndTerminalCannotRoute() {
+        Call().use { c ->
+            c.ready(); c.audio.routeAvailable = false
+            assertFalse(c.session.setSpeaker(false))
+            assertTrue(c.session.speaker)
+            c.audio.routeAvailable = true
+            assertTrue(c.session.setSpeaker(false))
+            assertFalse(c.session.speaker)
+            c.session.close()
+            assertFalse(c.session.setSpeaker(true))
+            assertFalse(c.session.speaker)
+        }
+    }
+
+    @Test fun hangupStopsAndAbortsBeforeBlockedDrainAndRejectsRepeatedStop() {
+        val c = Call(); c.ready()
+        val draining = java.util.concurrent.CountDownLatch(1)
+        val allowDrain = java.util.concurrent.CountDownLatch(1)
+        c.audio.onDrain = {
+            assertEquals(1, c.audio.stops)
+            assertEquals(1, c.wire.aborts)
+            draining.countDown()
+            check(allowDrain.await(3, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        try {
+            c.session.stop() // Must return even though the drain worker is blocked.
+            assertEquals(1, c.audio.stops)
+            assertEquals(1, c.wire.aborts)
+            assertTrue(draining.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            val terminal = c.session.state.value
+            val sent = c.wire.sent.size
+            c.session.stop(); c.wire.listener.failed()
+            c.audio.capture!!(byteArrayOf(0, 0))
+            assertEquals(terminal, c.session.state.value)
+            assertEquals(sent, c.wire.sent.size)
+            assertEquals(1, c.audio.stops)
+            try {
+                c.gate.acquire(VoiceOwner("new", "new")) { }
+                fail("draining lease must not admit a new owner")
+            } catch (expected: IllegalStateException) {
+                assertEquals("audio_release_pending", expected.message)
+            }
+        } finally { allowDrain.countDown(); c.session.close() }
+        assertEquals(1, c.audio.drains)
+        assertEquals(1, c.wire.drains)
+    }
+
+    @Test fun asynchronousDrainFailureStillPoisonsSharedGateAndWaitingCloseThrows() {
+        val c = Call(); c.ready(); c.audio.failDrain = true
+        c.session.stop()
+        try { c.session.close(); fail("close must retain drain failure") }
+        catch (_: IllegalStateException) { }
+        try {
+            c.gate.acquire(VoiceOwner("new", "new")) { }
+            fail("failed release must remain poisoned")
+        } catch (expected: IllegalStateException) { assertEquals("audio_release_pending", expected.message) }
+        assertEquals(1, c.wire.drains)
     }
 
     @Test fun wireErrorIsSanitizedAndPrematureSocketCloseIsUnknown() {

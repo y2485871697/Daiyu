@@ -69,6 +69,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
 import app.daiyu.android.ui.icons.modelNameOpticalAlignment
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.LineHeightStyle
@@ -94,6 +97,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     onInputFocusChanged: (Boolean) -> Unit = {},
     isInputDismissInProgress: () -> Boolean = { false },
     onOpenWorkspace: () -> Unit = actions.onOpenWorkspace,
+    onVoiceAnchorBounds: (Rect) -> Unit = {},
+    callUi: DoubaoCallUi? = null,
     attachmentContent: @Composable () -> Unit = {}) {
     var lifecycleDismissInProgress by remember { mutableStateOf(false) }
     app.daiyu.android.ui.components.DismissImeOnStop { dismiss ->
@@ -339,7 +344,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         SpeechMorphButton(
                             generating = state.showGenerationLoading(),
                             listening = state.listening,
-                            enabled = voiceMenuEnabled,
+                            enabled = voiceMenuEnabled && callUi?.presentation != DoubaoCallPresentation.CLOSING,
+                            description = if (state.voiceMode == ChatMenuAction.VOICE_DOUBAO) {
+                                if (callUi != null) "展开豆包实时通话" else "开始豆包实时通话"
+                            } else null,
+                            modifier = Modifier.onGloballyPositioned { onVoiceAnchorBounds(it.boundsInRoot()) },
                             onClick = { if (state.voiceMode in state.voiceModes) actions.onVoice() },
                             onLongClick = if (voiceMenuEnabled) ({ actions.onVoiceLongPress(); voiceModes = true }) else null,
                         )

@@ -19,7 +19,9 @@ interface DuplexTransport {
     }
     fun connect(request: DuplexRequest, listener: Listener)
     fun send(json: String): DuplexSendResult
-    /** Abort pending I/O, discard queued sends and detach callbacks before returning. Idempotent. */
+    /** Immediate I/O cancellation, discarding queued sends without waiting for a listener. */
+    fun abort() = closeAndDrain()
+    /** Abort I/O and fence executing callbacks. Idempotent; may wait. */
     fun closeAndDrain()
 }
 
@@ -34,6 +36,11 @@ interface DuplexAudio {
     fun startCapture(onPcm: (ByteArray) -> Unit)
     fun enqueue(pcm: ByteArray, epoch: Long)
     fun flush(epoch: Long)
+    /** Fence capture/playback and stop/pause/flush hardware now; never join workers. */
+    fun stopImmediately() { flush(Long.MAX_VALUE) }
+    /** False means unavailable/failed; callers must not optimistically update UI. */
+    fun setSpeaker(speaker: Boolean): Boolean = false
+    val speaker: Boolean get() = true
     /** Must stop capture, purge playback, release effects/recorder/player, and join workers. */
     fun closeAndDrain()
 }

@@ -481,10 +481,15 @@ class MainActivity : ComponentActivity() {
         selectionStart = ComposerReferences(next).toSource(captured.cursor); selectionEnd = selectionStart
         publishChat()
     }
+    private val doubaoCallPresentation = DoubaoCallPresentationOwner()
     private val remoteVoice by lazy {
         ActivityRemoteVoiceHost(applicationContext, lifecycleScope, voiceRuntime, ::voiceEditorCurrent,
             applyDraft = ::applyRecognizedDraft, applyPartialDraft = ::applyRecognizedPartial,
-            requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) })
+            requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) }).also { host ->
+                lifecycleScope.launch {
+                    host.duplexSnapshot.collect { snapshot -> doubaoCallPresentation.update(snapshot) }
+                }
+            }
     }
     private val cascadeVoice by lazy {
         ActivityCascadeVoiceHost(applicationContext, voiceRuntime) {
@@ -502,6 +507,7 @@ class MainActivity : ComponentActivity() {
         voiceConsent?.dismiss(); voiceConsent = null; preparedSpeech = null
     }
     private fun invalidateConfiguredVoice() {
+        doubaoCallPresentation.clear()
         accountPreviewRevoke?.invoke()
         if (!universalOwnMutation) revokeUniversalVoice()
         invalidatePreparedSpeech()
@@ -1334,7 +1340,9 @@ class MainActivity : ComponentActivity() {
         set(value) {
             if (field != value) {
                 revokeChatReferencePick(); revokePlatformActionVisit(); cancelGenerationEditor(); messageActionHost.invalidate()
-                if (!applyingDictationDraft) { invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+                if (!applyingDictationDraft && !doubaoCallPresentation.onDraftChanged(selected?.id?.value, remoteVoice.duplexActive)) {
+                    invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                }
             }
             field = value
             if (applyingDictationDraft) dictationDraftRevision = value
@@ -2666,7 +2674,9 @@ class MainActivity : ComponentActivity() {
                                         if (turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
                                         }
-                                    }, speechMessageId = speechMessageId, dedicatedTool = { step -> DedicatedQuestion(step) },
+                                    }, speechMessageId = speechMessageId,
+                                        callUi = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value },
+                                        callActions = doubaoCallActions(), dedicatedTool = { step -> DedicatedQuestion(step) },
                                         toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
                                         assistant = projectedAssistants.firstOrNull { it.id == (if (selected == null) activeAssistant else selected?.assistantId) },
                                         composerAttachments = { if (!sidebarVisible) key(editorGeneration) {
@@ -3191,11 +3201,16 @@ class MainActivity : ComponentActivity() {
             when (voiceEntryMode) {
                 ChatMenuAction.VOICE_INPUT -> requestDictation()
                 ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) {
-                    if (remoteVoice.duplexActive) remoteVoice.invalidate()
-                    else { stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
-                        speechHost.stop(speechHost.owner); remoteVoice.startDuplex {
+                    val shownCall = doubaoCallPresentation.state
+                    if (shownCall?.presentation == DoubaoCallPresentation.CLOSING) return@voice
+                    if (shownCall != null && shownCall.conversationKey == selected?.id?.value) {
+                        doubaoCallPresentation.expand(shownCall.sessionKey)
+                    } else {
+                        stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                        speechHost.stop(speechHost.owner)
+                        remoteVoice.startDuplex(conversationId = selected?.id?.value) {
                             activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-                                editorGeneration == renderedEditorGeneration && draftRevision == renderedDraftRevision
+                                selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
                         }
                     }
                 }
@@ -3419,6 +3434,34 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun doubaoCallActions(): DoubaoCallActions {
+        val shown = doubaoCallPresentation.state ?: return DoubaoCallActions()
+        val key = shown.sessionKey
+        fun current() = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+            selected?.id?.value == shown.conversationKey && doubaoCallPresentation.state?.let {
+                it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
+            } == true
+        return DoubaoCallActions(
+            onExpand = { if (current()) doubaoCallPresentation.expand(key) },
+            onMinimize = { if (current()) doubaoCallPresentation.minimize(key) },
+            onHangUp = {
+                if (current() && doubaoCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
+                    try { remoteVoice.stopDuplex(key) } catch (_: Exception) { voiceConfigurationToast("语音资源释放未确认") }
+                }
+            },
+            onToggleMute = {
+                if (current() && !remoteVoice.setDuplexMuted(key, !remoteVoice.duplexSnapshot.value.let { it?.muted ?: shown.muted }))
+                    voiceConfigurationToast("麦克风状态未改变")
+            },
+            onToggleSpeaker = {
+                if (current() && !remoteVoice.setDuplexSpeaker(key, !remoteVoice.duplexSnapshot.value.let { it?.speaker ?: shown.speaker }))
+                    voiceConfigurationToast("当前音频输出不可切换")
+            },
+            onToggleCaptions = { if (current()) doubaoCallPresentation.toggleCaptions(key) },
+            onCloseAnimationFinished = { completedKey -> doubaoCallPresentation.finishClose(completedKey) },
+        )
+    }
+
     @Composable private fun projectedVoiceComposer(): ComposerUi {
         val system by dictationHost.state.collectAsStateWithLifecycle()
         val offline by offlineHost.state.collectAsStateWithLifecycle()
@@ -3567,7 +3610,7 @@ class MainActivity : ComponentActivity() {
         val remoteStatus by remoteVoice.status.collectAsStateWithLifecycle()
         if (!engineeringUi && !remoteVoice.duplexActive) app.daiyu.android.ui.components.DictationStatusNotice(
             app.daiyu.android.voice.ComposerDictationState(target = remoteVoice.dictationTarget, status = remoteStatus), false)
-        if (remoteStatus.isNotEmpty() && (engineeringUi || remoteVoice.duplexActive)) {
+        if (remoteStatus.isNotEmpty() && engineeringUi) {
             top.yukonga.miuix.kmp.basic.Text(remoteStatus,
                 modifier = Modifier.testTag("remote-voice-status").semantics { liveRegion = LiveRegionMode.Polite })
             app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止云端语音", modifier = Modifier.testTag("remote-voice-stop"), onClick = {

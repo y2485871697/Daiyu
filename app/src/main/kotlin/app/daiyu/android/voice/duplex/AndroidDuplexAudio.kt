@@ -1,6 +1,10 @@
 package app.daiyu.android.voice.duplex
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -14,9 +18,17 @@ import java.util.concurrent.TimeUnit
 /**
  * Android PCM adapter for the migrated session. Hardware AEC is best effort, not a
  * guarantee of echo-free audio. Speculative ASR still cannot truncate playback.
- * No AudioManager mode/global volume changes; the host owns permission/lifecycle.
+ * A context opts duplex calls into owned communication routing; dictation keeps its old route.
+ * Never changes global volume. The host owns permission/lifecycle.
  */
-class AndroidDuplexAudio : DuplexAudio {
+class AndroidDuplexAudio(context: Context? = null) : DuplexAudio {
+    private val route = context?.let {
+        DuplexRouteLease(AndroidCommunicationRoute(it.applicationContext.getSystemService(AudioManager::class.java)))
+    }
+    override val speaker: Boolean get() = route?.speaker ?: true
+    override fun setSpeaker(speaker: Boolean): Boolean = synchronized(lock) {
+        !closing && opened && route?.setSpeaker(speaker) == true
+    }
     private data class Packet(val bytes: ByteArray, val epoch: Long)
     private val lock = Any()
     private val drained = CountDownLatch(1)
@@ -39,6 +51,7 @@ class AndroidDuplexAudio : DuplexAudio {
         synchronized(lock) {
             check(!opened && !closing) { "audio_single_use" }
             opened = true; failure = onFailure
+            check(route?.setSpeaker(true) != false) { "communication_route_unavailable" }
             val inputMin = AudioRecord.getMinBufferSize(16_000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val outputMin = AudioTrack.getMinBufferSize(24_000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             check(inputMin > 0 && outputMin > 0) { "audio_unavailable" }
@@ -55,7 +68,8 @@ class AndroidDuplexAudio : DuplexAudio {
             }.getOrNull()
             runCatching { noise?.enabled = true }
             player = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(
+                    if (route != null) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                 .setAudioFormat(AudioFormat.Builder().setSampleRate(24_000)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
@@ -137,11 +151,31 @@ class AndroidDuplexAudio : DuplexAudio {
         }
     }
 
-    override fun closeAndDrain() {
-        val first = synchronized(lock) {
-            if (closing) false else {
-                closing = true; epoch++; queue.clear(); queuedBytes = 0; failure = null; true
+    private var drainStarted = false
+    private var stopFailure: Throwable? = null
+    override fun stopImmediately() {
+        synchronized(lock) {
+            if (closing) return
+            closing = true; epoch++; queue.clear(); queuedBytes = 0; failure = null
+            fun attempt(action: () -> Unit) {
+                try { action() } catch (t: Throwable) { if (stopFailure == null) stopFailure = t }
             }
+            // Fence writes with the playback lock and silence hardware BEFORE any joins.
+            recorder?.let { record ->
+                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) attempt { record.stop() }
+            }
+            player?.let { track ->
+                if (track.state == AudioTrack.STATE_INITIALIZED) {
+                    attempt { track.pause() }; attempt { track.flush() }
+                }
+            }
+        }
+    }
+
+    override fun closeAndDrain() {
+        stopImmediately()
+        val first = synchronized(lock) {
+            if (drainStarted) false else { drainStarted = true; true }
         }
         if (!first) {
             // A worker may already be inside a callback while a different closer joins it.
@@ -150,12 +184,9 @@ class AndroidDuplexAudio : DuplexAudio {
             closeFailure?.let { throw it }
             return
         }
-        var problem: Throwable? = null
+        var problem: Throwable? = stopFailure
         fun attempt(action: () -> Unit) { try { action() } catch (t: Throwable) { if (problem == null) problem = t } }
         try {
-            recorder?.let { record ->
-                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) attempt { record.stop() }
-            }
             for (worker in listOfNotNull(capture, playback)) {
                 if (worker !== Thread.currentThread()) attempt {
                     worker.join(2_000)
@@ -171,10 +202,141 @@ class AndroidDuplexAudio : DuplexAudio {
                 }
                 attempt { aec?.release() }; attempt { noise?.release() }; attempt { recorder?.release() }
                 player = null; recorder = null; aec = null; noise = null
+                attempt { route?.close() }
             }
         } finally { closeFailure = problem; drained.countDown() }
         problem?.let { throw it }
     }
 
     companion object { private const val MAX_QUEUE_BYTES = 2 * 1024 * 1024 }
+}
+
+/** Small testable ownership boundary: never restore over a route/mode changed by another user. */
+internal interface DuplexRoutePort {
+    var mode: Int
+    val communicationMode: Int
+    val current: Int?
+    fun target(speaker: Boolean): Int?
+    fun isSpeaker(route: Int?): Boolean
+    fun select(route: Int): Boolean
+    fun isAvailable(route: Int): Boolean
+    /** Release our explicit preference; return the system route observed after release.
+     * Failure must throw, not be reported as a successful release with a null route.
+     */
+    fun clearSelection(): Int?
+}
+
+internal class DuplexRouteLease(private val port: DuplexRoutePort) : AutoCloseable {
+    private var acquired = false
+    private var closed = false
+    private var previousMode = 0
+    private var previousRoute: Int? = null
+    private var ownedRoute: Int? = null
+    val speaker: Boolean get() = port.isSpeaker(port.current)
+    @Synchronized fun setSpeaker(speaker: Boolean): Boolean {
+        if (closed) return false
+        return try {
+            val target = port.target(speaker) ?: return false
+            if (acquired && (port.mode != port.communicationMode || port.current != ownedRoute)) return false
+            if (!acquired) {
+                previousMode = port.mode; previousRoute = port.current
+                port.mode = port.communicationMode
+                ownedRoute = previousRoute; acquired = true
+            }
+            val selected = port.select(target)
+            if (selected && port.current == target && port.mode == port.communicationMode) {
+                ownedRoute = target
+                this.speaker == speaker
+            } else {
+                // Remember only a route we actually installed. A changed external route is not ours.
+                if (port.current == target) ownedRoute = target
+                false
+            }
+        } catch (_: Exception) { false }
+    }
+    @Synchronized override fun close() {
+        if (closed) return
+        closed = true
+        if (!acquired || !stillOwnsRoute()) return
+        val restoreRoute = previousRoute?.takeIf { port.isAvailable(it) }
+        // Enumeration can race a route/mode change. Never clear someone else's preference.
+        if (!stillOwnsRoute()) return
+        val restoredRoute = if (restoreRoute == null) {
+            // A disconnected previous device is not a platform release failure. Relinquish
+            // our explicit selection instead; Android may now report a non-null default.
+            port.clearSelection()
+        } else {
+            val restored = port.select(restoreRoute)
+            if (!restored) {
+                // The device may have disappeared between enumeration and selection. Only
+                // fall back for disappearance, never mask a rejected available-device restore.
+                check(!port.isAvailable(restoreRoute)) { "communication_route_restore_failed" }
+                if (!stillOwnsRoute()) return
+                port.clearSelection()
+            } else restoreRoute
+        }
+        // Restore mode only while the route observed at release is still current.
+        if (port.mode == port.communicationMode && port.current == restoredRoute) port.mode = previousMode
+    }
+
+    private fun stillOwnsRoute(): Boolean =
+        port.mode == port.communicationMode && port.current == ownedRoute
+}
+
+/** Legacy speakerphone control cannot start or confirm SCO (or BLE) routing. */
+internal fun legacyPrivateRouteTarget(deviceTypes: List<Int>): Int? {
+    // Even a co-enumerated earpiece does not prove where speakerphone=false will
+    // route while Bluetooth is present. Be conservative rather than claim SCO works.
+    if (deviceTypes.any { it == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it == AudioDeviceInfo.TYPE_BLE_HEADSET }) return null
+    return if (deviceTypes.any {
+        it == AudioDeviceInfo.TYPE_WIRED_HEADSET || it == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+            it == AudioDeviceInfo.TYPE_USB_HEADSET || it == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+    }) 0 else null
+}
+
+@Suppress("DEPRECATION")
+private class AndroidCommunicationRoute(private val manager: AudioManager) : DuplexRoutePort {
+    override var mode: Int
+        get() = manager.mode
+        set(value) { manager.mode = value }
+    override val communicationMode: Int get() = AudioManager.MODE_IN_COMMUNICATION
+    override val current: Int? get() = if (Build.VERSION.SDK_INT >= 31)
+        manager.communicationDevice?.id else if (manager.isSpeakerphoneOn) 1 else 0
+    override fun target(speaker: Boolean): Int? {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val devices = manager.availableCommunicationDevices
+            return if (speaker) devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.id
+            else devices.firstOrNull { it.type in PRIVATE_ROUTES }?.id
+        }
+        if (speaker) return 1
+        return legacyPrivateRouteTarget(manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type })
+    }
+    override fun isSpeaker(route: Int?): Boolean = if (Build.VERSION.SDK_INT >= 31)
+        manager.communicationDevice?.let { it.id == route && it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } == true
+        else route == 1
+    override fun select(route: Int): Boolean {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val device = manager.availableCommunicationDevices.firstOrNull { it.id == route } ?: return false
+            return manager.setCommunicationDevice(device) && current == route
+        }
+        manager.isSpeakerphoneOn = route == 1
+        return current == route
+    }
+    override fun isAvailable(route: Int): Boolean = if (Build.VERSION.SDK_INT >= 31)
+        manager.availableCommunicationDevices.any { it.id == route } else route == 0 || route == 1
+
+    override fun clearSelection(): Int? {
+        // clearCommunicationDevice is a void platform API: a normal return releases
+        // the explicit preference, not necessarily the active default device itself.
+        // Do not catch platform failures or equate a non-null default with failure.
+        if (Build.VERSION.SDK_INT >= 31) manager.clearCommunicationDevice()
+        else manager.isSpeakerphoneOn = false
+        return current
+    }
+    companion object {
+        private val PRIVATE_ROUTES = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
+            AudioDeviceInfo.TYPE_BLE_HEADSET)
+    }
 }

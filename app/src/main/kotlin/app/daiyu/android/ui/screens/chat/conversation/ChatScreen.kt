@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.components.chatInputDismissTapModifier
 import app.daiyu.android.ui.components.hideChatInputIme
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.Modifier
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -84,7 +90,12 @@ internal fun DaiyuChatScreen(
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     composerAttachments: @Composable () -> Unit = {},
     speechMessageId: String? = null,
+    callUi: DoubaoCallUi? = null,
+    callActions: DoubaoCallActions = DoubaoCallActions(),
 ) {
+    var voiceAnchor by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
+    var composerBounds by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
+    var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
     val displayedTurns = submissionTurns(state.turns, state.submissionPreview)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -102,6 +113,7 @@ internal fun DaiyuChatScreen(
         }
     }
     ChatMenuLayer(modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().onGloballyPositioned { overlayOrigin = it.positionInRoot() }) {
     Column(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .statusBarsPadding(),
@@ -127,9 +139,20 @@ internal fun DaiyuChatScreen(
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
-                onInputFocusChanged = { draftFocused = it }, isInputDismissInProgress = { inputDismissInProgress },
+                modifier = Modifier.onGloballyPositioned { composerBounds = it.boundsInRoot() },
+                onVoiceAnchorBounds = { voiceAnchor = it }, callUi = callUi,
+                onInputFocusChanged = { focused ->
+                    draftFocused = focused
+                    if (focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()
+                }, isInputDismissInProgress = { inputDismissInProgress },
                 attachmentContent = composerAttachments)
         })
+    }
+    if (callUi != null && voiceAnchor.width > 0f) {
+        DoubaoCallOverlay(callUi, callActions,
+            anchorBounds = voiceAnchor.translate(-overlayOrigin),
+            composerTop = composerBounds.takeIf { it.height > 0f }?.top?.minus(overlayOrigin.y))
+    }
     }
 }
 }

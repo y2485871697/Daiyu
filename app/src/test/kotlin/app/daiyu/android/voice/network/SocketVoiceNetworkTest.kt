@@ -222,6 +222,33 @@ class SocketVoiceNetworkTest {
         assertTrue(factory.peer.aborted)
     }
 
+    @Test fun duplexAbortDoesNotWaitForAnExecutingCallback() {
+        val factory = FakeSockets()
+        val transport = DuplexNetworkTransport(factory)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val aborted = CountDownLatch(1)
+        val messages = AtomicInteger()
+        transport.connect(duplexRequest, object : Listener() {
+            override fun opened() { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+            override fun message(json: String) { messages.incrementAndGet() }
+        })
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        factory.events.text("{}")
+        val stopper = Thread {
+            try { transport.abort() } finally { aborted.countDown() }
+        }.apply { isDaemon = true; start() }
+        try {
+            assertTrue("Abort must precede callback drain", aborted.await(1, TimeUnit.SECONDS))
+            assertTrue(factory.peer.aborted)
+            assertEquals(DuplexSendResult.REJECTED, transport.send("{}"))
+        } finally {
+            release.countDown(); stopper.join(2000); transport.closeAndDrain()
+        }
+        factory.events.text("{}")
+        assertEquals(0, messages.get())
+    }
+
     private open class Listener : DuplexTransport.Listener {
         override fun opened() { }
         override fun message(json: String) { }

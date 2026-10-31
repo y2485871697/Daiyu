@@ -118,7 +118,7 @@ internal class DuplexNetworkTransport(
         try { socket?.abort() } catch (_: Exception) { }
     }
 
-    override fun closeAndDrain() {
+    override fun abort() {
         // Detach FIRST so a worker cannot start queued callbacks while close waits for the active one.
         val socket = synchronized(lock) {
             drained = true
@@ -128,9 +128,13 @@ internal class DuplexNetworkTransport(
             executor.shutdown()
             peer // Retain the reference so concurrent close callers also fence/abort actual I/O.
         }
-        // Fence an executing callback; reentrant close from that callback remains safe.
-        synchronized(callbacks) {
-            try { socket?.abort() } catch (_: Exception) { }
-        }
+        // Hangup must abort I/O even while an earlier callback is still unwinding.
+        try { socket?.abort() } catch (_: Exception) { }
+    }
+
+    override fun closeAndDrain() {
+        abort()
+        // The drain phase separately fences an executing callback; reentrant close is safe.
+        synchronized(callbacks) { }
     }
 }

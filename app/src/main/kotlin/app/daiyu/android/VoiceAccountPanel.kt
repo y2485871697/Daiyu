@@ -246,6 +246,14 @@ internal fun VoiceAccountPanel(
         projects = fetched; project = selected.name
         return selected.name
     }
+    suspend fun syncName(voice: PersonalVoices.Voice) {
+        val saved = withContext(Dispatchers.IO) { resources.preferences.load(voice.account) }
+        resources.voices.syncName(voice, speech!!, saved?.keyId.orEmpty(), saved?.secret.orEmpty(), saved?.project.orEmpty())
+    }
+    suspend fun trySyncName(voice: PersonalVoices.Voice): Boolean = try {
+        syncName(voice); true
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { false }
     fun beginFlow(target: String) {
         if (!current() || busy) return
         name = ""; existingId = ""; slotId = ""; manualSlotId = ""; postpaid = false; sampleUri = null
@@ -294,7 +302,7 @@ internal fun VoiceAccountPanel(
                     val voice = visibleVoices[index]
                     VoiceSettingsCard {
                         val playing = previewState.matches(voice.account, voice.id)
-                        SettingsRow(voice.name, summary = voiceStatus(voice), showChevron = false,
+                        SettingsRow(voice.name, summary = voiceStatus(voice) + if (voice.nameSyncPending) " · 名称待同步" else "", showChevron = false,
                             onClick = if (!enabled || !voice.tts || !voice.accepted) null else ({
                                 if (current() && !busy) {
                                     val selectedVoice = runCatching { resources.voices.selected(voice.id, speech!!) }.getOrNull()
@@ -541,11 +549,17 @@ internal fun VoiceAccountPanel(
                             try {
                                 currentCoroutineContext().ensureActive()
                                 if (!current() || feedback.visit != origin) throw CancellationException("account_page_changed")
-                                resources.voices.create(speech!!, sample, n, slot, confirmed = true)
+                                val id = resources.voices.create(speech!!, sample, n, slot, confirmed = true)
+                                val created = resources.voices.find(id, speech!!)
+                                val nameSynced = created?.takeIf { it.nameSyncPending && !it.uncertain }?.let { trySyncName(it) }
                                 currentCoroutineContext().ensureActive()
                                 check(current() && feedback.visit == origin)
                                 clearPageFeedback(); page = "LIST"; step = 0
-                                feedback = feedback.report(feedback.visit, "已提交制作，请在原音色菜单查询状态，不要重复提交。")
+                                feedback = feedback.report(feedback.visit, when (nameSynced) {
+                                    true -> "声音已提交，名称已同步到云端；请在原音色菜单查询制作状态。"
+                                    false -> "声音已提交，名称同步失败；可在原音色菜单重试名称同步，不要重新制作。"
+                                    null -> "已提交制作，请在原音色菜单查询状态，不要重复提交。"
+                                })
                             } finally { sample.clear(); sampleUri = null; agreed = false }
                         }
                     }))
@@ -612,12 +626,20 @@ internal fun VoiceAccountPanel(
         voiceMenu?.let { pending ->
             voices.firstOrNull { it.account == pending.account && it.id == pending.id }
         }?.let { voice ->
-            VoiceChoiceDialog(voice.name, listOf("QUERY" to "查看状态", "REMOVE" to "移除本机记录"), "",
+            VoiceChoiceDialog(voice.name, listOf("QUERY" to if (voice.nameSyncPending && !voice.uncertain && voice.tts) "重试名称同步" else "查看状态", "REMOVE" to "移除本机记录"), "",
                 onSelect = { action ->
                     voiceMenu = null
                     val latestVoice = resources.voices.state.value.firstOrNull { it.account == voice.account && it.id == voice.id }
                     if (enabled && current() && latestVoice != null) when (action) {
-                        "QUERY" -> ask("查询原音色 ${latestVoice.id}，不重复制作") { resources.voices.refresh(latestVoice, speech!!) }
+                        "QUERY" -> ask(if (latestVoice.nameSyncPending && !latestVoice.uncertain && latestVoice.tts)
+                            "仅同步原音色 ${latestVoice.id} 的名称，不上传、不重新制作"
+                            else "查询原音色 ${latestVoice.id}，有待同步名称时一并同步；不重复制作") { report ->
+                            if (!latestVoice.nameSyncPending || latestVoice.uncertain || !latestVoice.tts) resources.voices.refresh(latestVoice, speech!!)
+                            resources.voices.find(latestVoice.id, speech!!)?.takeIf { it.nameSyncPending && !it.uncertain }?.let {
+                                report(if (trySyncName(it)) "名称已同步到云端；没有重新制作。"
+                                    else "名称同步失败；请检查已保存的 AK／SK 与项目后重试，不要重新制作。")
+                            }
+                        }
                         "REMOVE" -> if (!latestVoice.uncertain) ask("仅移除本机记录，不删除云端音色或任务，不退款、不释放名额") {
                             preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(latestVoice) }
                         }

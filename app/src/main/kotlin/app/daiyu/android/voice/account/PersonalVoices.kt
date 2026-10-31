@@ -30,7 +30,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
     data class Voice(val id: String, val name: String, val account: String, val status: Int = -1,
         val models: Set<Int> = emptySet(), val demo: String = "", val error: String = "",
         val accepted: Boolean = false, val catalogState: String = "", val remaining: Int = -1,
-        val uncertain: Boolean = false) {
+        val uncertain: Boolean = false, val nameSyncPending: Boolean = false) {
         val canTrain get() = !uncertain && status != 1 && status != 4 &&
             catalogState !in setOf("Training", "Active", "Expired", "Reclaimed") && remaining != 0
         val unused get() = catalogState == "Unknown" && status !in 1..4 && !uncertain
@@ -166,6 +166,23 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         }
         return slots.size
     }
+    suspend fun syncName(voice: Voice, config: SpeechProviderConfig, ak: String, sk: String, project: String) {
+        val account = VoiceAccountIdentity.from(config)
+        require(account.fingerprint == voice.account) { "请选择此音色所属账户" }
+        begin(voice.account, voice.id)
+        try {
+            val current = find(voice.id, config) ?: error("本机记录已移除")
+            if (!current.nameSyncPending) return
+            require(!current.uncertain) { "请先查询原音色，确认制作提交状态" }
+            DoubaoVoiceAliases(transport).rename(ak, sk, project, current.id, current.name)
+            currentCoroutineContext().ensureActive()
+            synchronized(this) {
+                find(current.id, config)?.takeIf { it.name == current.name }?.let {
+                    save(it.copy(nameSyncPending = false))
+                }
+            }
+        } finally { finish(voice.account, voice.id) }
+    }
     suspend fun refresh(voice: Voice, config: SpeechProviderConfig) {
         val account = VoiceAccountIdentity.from(config)
         require(account.fingerprint == voice.account) { "请选择此音色所属账户" }
@@ -197,7 +214,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
                 require(previous?.canTrain != false) { "此音色训练中、结果未知、已锁定或额度耗尽，请先查询" }
                 // Identity and uncertainty commit before ANY bytes can reach the network.
                 val pending = (previous ?: Voice(id, name.trim(), account.fingerprint))
-                    .copy(name = name.trim(), status = -1, accepted = false, uncertain = true, models = emptySet(), demo = "", error = "提交结果未确认；仅可查询，不能重复训练")
+                    .copy(name = name.trim(), status = -1, accepted = false, uncertain = true, nameSyncPending = id.startsWith("S_"), models = emptySet(), demo = "", error = "提交结果未确认；仅可查询，不能重复训练")
                 save(pending, false)
                 pending
             }
@@ -276,14 +293,14 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         private fun encode(v: Voice) = JSONObject().put("id", v.id).put("name", v.name).put("account", v.account)
             .put("status", v.status).put("models", JSONArray(v.models.toList())).put("demo", v.demo)
             .put("error", v.error).put("accepted", v.accepted).put("catalogState", v.catalogState)
-            .put("remaining", v.remaining).put("uncertain", v.uncertain)
+            .put("remaining", v.remaining).put("uncertain", v.uncertain).put("nameSyncPending", v.nameSyncPending)
         private fun decode(j: JSONObject): Voice {
             val id = existingIdentity(j.getString("id")); val account = j.getString("account")
             require(account.matches(Regex("[a-f0-9]{64}")))
             val models = j.optJSONArray("models") ?: JSONArray()
             return Voice(id, j.getString("name"), account, j.optInt("status", -1),
                 (0 until models.length()).map { models.getInt(it) }.toSet(), j.optString("demo"), j.optString("error"),
-                j.optBoolean("accepted"), j.optString("catalogState"), j.optInt("remaining", -1), j.optBoolean("uncertain"))
+                j.optBoolean("accepted"), j.optString("catalogState"), j.optInt("remaining", -1), j.optBoolean("uncertain"), j.optBoolean("nameSyncPending"))
         }
     }
 }

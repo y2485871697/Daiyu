@@ -100,7 +100,7 @@ class VoicePersonalMenuContractTest(unittest.TestCase):
         panel = (SRC / "VoiceAccountPanel.kt").read_text()
         self.assertIn('voiceMenu?.let { pending ->', panel)
         menu = panel.split('voiceMenu?.let { pending ->', 1)[1].split('confirmation?.let', 1)[0]
-        self.assertIn('listOf("QUERY" to "查看状态", "REMOVE" to "移除本机记录")', menu)
+        self.assertIn('listOf("QUERY" to if (voice.nameSyncPending && !voice.uncertain && voice.tts) "重试名称同步" else "查看状态", "REMOVE" to "移除本机记录")', menu)
         self.assertIn('resources.voices.refresh(latestVoice, speech!!)', menu)
         self.assertIn('resources.voices.removeLocal(latestVoice)', menu)
         self.assertIn('action != "REMOVE" || !voice.uncertain', menu)

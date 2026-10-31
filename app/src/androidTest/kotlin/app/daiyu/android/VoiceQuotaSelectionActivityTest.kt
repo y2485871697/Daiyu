@@ -37,7 +37,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
 
     private fun mount(available: Boolean, unavailable: Boolean = false, secondAvailable: Boolean = false,
         flow: String = "CREATE", ready: Boolean = false, uncertain: Boolean = false, queryStatus: Int? = null,
-        active: Boolean = false, cloned: Boolean = false, verifySlot: Boolean = false) {
+        active: Boolean = false, cloned: Boolean = false, verifySlot: Boolean = false, namePending: Boolean = false) {
         frozen = VoiceConfiguration(engine = "DOUBAO", provider = "quota-fixture",
             endpoint = "https://openspeech.bytedance.com", key = "synthetic-${UUID.randomUUID()}",
             model = "seed-tts-2.0", voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)
@@ -46,10 +46,11 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         roots += root
         index = File(root, "voices.json")
         fun slot(id: String, owner: String, remaining: Int) = JSONObject().put("id", id).put("name", id)
-            .put("account", owner).put("catalogState", if (active) "Active" else if (ready || flow == "IMPORT") "Success" else "Unknown")
-            .put("status", if (active) 4 else if (ready || flow == "IMPORT") 2 else -1).put("remaining", remaining)
+            .put("account", owner).put("catalogState", if (active) "Active" else if (ready || flow == "IMPORT") "Success" else if (namePending) "Training" else "Unknown")
+            .put("status", if (active) 4 else if (ready || flow == "IMPORT") 2 else if (namePending) 1 else -1).put("remaining", remaining)
             .put("models", if (ready) JSONArray().put(4) else JSONArray())
             .put("demo", if (ready) "https://preview.invalid/demo.mp3" else "").put("uncertain", uncertain)
+            .put("nameSyncPending", namePending)
         index.writeText(JSONArray().apply {
             if (available) put(slot("S_available", account, 3))
             if (unavailable) put(slot("S_exhausted", account, 0))
@@ -462,6 +463,46 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         ui.onNode(error).assertIsDisplayed()
         node("voice-import-slot:S_available").assertDoesNotExist()
         assertNoSideEffects(expectedRequests = 6)
+    }
+
+    fun testPendingNameShowsRetryWithoutImplicitRequestsOrRecreation() {
+        mount(available = true, flow = "LIST", ready = true, namePending = true)
+        ui.onNode(hasText("名称待同步", substring = true) and
+            hasAnyAncestor(hasTestTag("settings-row:S_available")), useUnmergedTree = true).assertIsDisplayed()
+        assertNoSideEffects()
+        node("voice-menu:S_available").performClick()
+        awaitUniqueTag("voice-choice-dialog")
+        awaitNodeWindowFocus(node("voice-choice-dialog"))
+        node("settings-radio:重试名称同步").assertIsEnabled()
+        node("settings-radio:移除本机记录").assertIsEnabled()
+        node("settings-radio:查看状态").assertDoesNotExist()
+        ui.onAllNodes(hasAnyAncestor(hasTestTag("voice-choice-dialog")) and hasClickAction()).assertCountEquals(2)
+        assertNoSideEffects()
+        node("settings-radio:重试名称同步").performClick()
+        ui.onNodeWithText("仅同步原音色 S_available 的名称，不上传、不重新制作").assertIsDisplayed()
+        assertNoSideEffects()
+        ui.onNodeWithText("确认").assertIsEnabled().performClick()
+        val failure = "名称同步失败；请检查已保存的 AK／SK 与项目后重试，不要重新制作。"
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText(failure).assertIsDisplayed()
+        val voice = resources.voices.state.value.single { it.id == "S_available" }
+        assertTrue(voice.nameSyncPending); assertFalse(voice.uncertain)
+        assertNoSideEffects()
+    }
+
+    fun testPendingNameDoesNotBlockTrainingStatusQueryWhenCredentialsAreMissing() {
+        mount(available = true, flow = "LIST", ready = false, namePending = true, queryStatus = 2)
+        node("voice-menu:S_available").performClick()
+        awaitUniqueTag("voice-choice-dialog")
+        awaitNodeWindowFocus(node("voice-choice-dialog"))
+        node("settings-radio:查看状态").assertIsEnabled().performClick()
+        ui.onNodeWithText("确认").performClick()
+        val failure = "名称同步失败；请检查已保存的 AK／SK 与项目后重试，不要重新制作。"
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
+        assertEquals(1, requests.get())
+        val voice = resources.voices.state.value.single { it.id == "S_available" }
+        assertEquals(2, voice.status); assertTrue(voice.nameSyncPending); assertFalse(voice.uncertain)
+        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
     }
 
     fun testRecordHasIconActionsTwoMenuChoicesAndQueryUpdatesSummary() {

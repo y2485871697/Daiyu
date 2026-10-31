@@ -78,13 +78,13 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
         const val CONTENT_TYPE = "application/json; charset=utf-8"
         const val AccountHttpTransportLimit = 2 * 1024 * 1024
         private const val HOST = "open.volcengineapi.com"
-        internal fun signedRequest(ak: String, sk: String, body: String, now: Instant): Request {
+        internal fun signedRequest(ak: String, sk: String, body: String, now: Instant, query: String = QUERY): Request {
             val date = Signing.date(now); val day = date.take(8); val digest = Signing.hash(body)
             val headers = "content-type;host;x-content-sha256;x-date"
             val scope = "$day/cn-beijing/speech_saas_prod/request"
-            val canonical = "POST\n/\n$QUERY\ncontent-type:$CONTENT_TYPE\nhost:$HOST\nx-content-sha256:$digest\nx-date:$date\n\n$headers\n$digest"
+            val canonical = "POST\n/\n$query\ncontent-type:$CONTENT_TYPE\nhost:$HOST\nx-content-sha256:$digest\nx-date:$date\n\n$headers\n$digest"
             val signature = Signing.signature(sk, day, "speech_saas_prod", "HMAC-SHA256\n$date\n$scope\n${Signing.hash(canonical)}")
-            return Request.Builder().url("https://$HOST/?$QUERY").header("Host", HOST)
+            return Request.Builder().url("https://$HOST/?$query").header("Host", HOST)
                 .header("Content-Type", CONTENT_TYPE).header("X-Date", date).header("X-Content-Sha256", digest)
                 .header("Authorization", "HMAC-SHA256 Credential=$ak/$scope, SignedHeaders=$headers, Signature=$signature")
                 .post(body.toByteArray(Charsets.UTF_8).toRequestBody(CONTENT_TYPE.toMediaType())).build()

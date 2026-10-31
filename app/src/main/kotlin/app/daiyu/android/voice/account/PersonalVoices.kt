@@ -122,8 +122,10 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         begin(account.fingerprint, valid, true)
         try {
             val previous = find(valid, config)
-            val voice = previous?.copy(name = name.trim().ifBlank { previous.name })
-                ?: Voice(valid, name.trim().ifBlank { valid }, account.fingerprint)
+            val displayName = name.trim()
+            val voice = (previous?.copy(name = displayName.ifBlank { previous.name })
+                ?: Voice(valid, displayName.ifBlank { valid }, account.fingerprint))
+                .copy(nameSyncPending = (DoubaoVoiceIdentity.isSlot(valid) && displayName.isNotBlank()) || previous?.nameSyncPending == true)
             val result = updated(voice, request("get_voice", account.key, identity(voice)))
             currentCoroutineContext().ensureActive()
             require(result.canImport) { "此音色尚未复刻成功或不可用，未导入；请在云端确认后重试。" }
@@ -201,7 +203,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             throw IllegalStateException("查询未确认；不会重新训练，请手动查询")
         } finally { finish(voice.account, voice.id) }
     }
-    /** Only call after a visible one-request upload/charge confirmation. No auto polling. */
+    /** Requires explicit recording consent and a user submit action. No auto polling. */
     suspend fun create(config: SpeechProviderConfig, sample: Sample, name: String, slotId: String?, confirmed: Boolean): String {
         require(confirmed) { "上传和训练需要明确确认" }
         val account = VoiceAccountIdentity.from(config)

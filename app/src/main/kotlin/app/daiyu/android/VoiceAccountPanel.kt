@@ -434,17 +434,25 @@ internal fun VoiceAccountPanel(
                     }
                     SettingsRow("导入声音", showChevron = true, onClick = if (!enabled || !DoubaoVoiceIdentity.isPersonal(existingId.trim())) null else ({
                         val id = existingId; val n = name
-                        ask("用当前语音账户查询已有音色 $id；不上传、不制作") {
+                        execute {
                             val origin = feedback.visit
-                            resources.voices.importExisting(speech!!, id, n)
+                            val imported = resources.voices.importExisting(speech!!, id, n)
+                            currentCoroutineContext().ensureActive()
+                            check(current() && feedback.visit == origin)
+                            val nameSynced = imported.takeIf { it.nameSyncPending && !it.uncertain }?.let { trySyncName(it) }
                             currentCoroutineContext().ensureActive()
                             check(current() && feedback.visit == origin)
                             clearPageFeedback(); page = "LIST"
-                            feedback = feedback.report(feedback.visit, "声音已导入；没有重新制作。")
+                            feedback = feedback.report(feedback.visit, when (nameSynced) {
+                                true -> "声音已导入，名称已同步到云端。"
+                                false -> "声音已导入，名称同步失败；可在原音色菜单重试名称同步。"
+                                null -> if (n.isNotBlank() && !DoubaoVoiceIdentity.isSlot(imported.id))
+                                    "声音已导入；此自定义音色暂不支持云端改名，备注已保存在本机。"
+                                else "声音已导入；没有重新制作。"
+                            })
                         }
                     }))
                 }
-                SettingsNote("仅查询已有声音，不上传录音、不重新制作。备注名称最多 80 字。")
             }
             if (page == "CREATE" && step == 0) {
                 item { SettingsSectionTitle("1. 选择名额") }
@@ -541,13 +549,13 @@ internal fun VoiceAccountPanel(
                 item { SettingsCard(Modifier.testTag("voice-create-submit-card")) {
                     SettingsRow("确认上传并制作", tag = "voice-training-submit", showChevron = true, onClick = if (!enabled || !agreed || sampleUri == null) null else ({
                         val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else creationSlotId
-                        ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。${if (slot != null && voices.any { it.id == slot && !it.unused }) "将消耗此名额的剩余复刻次数并覆盖已有声音，不占用新名额。" else ""}结果未知时只查询原音色，不重复提交。${if (slot == null) "\n\n须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。" else ""}", "制作结果未确认，请在原音色菜单查询状态，不要重复提交。") { report ->
+                        execute("制作结果未确认，请在原音色菜单查询状态，不要重复提交。") { report ->
                             val origin = feedback.visit
                             val sample = try { PersonalVoices.readSample(context, uri) }
                             catch (cancelled: CancellationException) { throw cancelled }
                             catch (_: Exception) {
                                 report("录音读取失败，请检查文件格式、大小与访问权限；本次未提交制作。")
-                                return@ask
+                                return@execute
                             }
                             try {
                                 currentCoroutineContext().ensureActive()
@@ -634,9 +642,7 @@ internal fun VoiceAccountPanel(
                     voiceMenu = null
                     val latestVoice = resources.voices.state.value.firstOrNull { it.account == voice.account && it.id == voice.id }
                     if (enabled && current() && latestVoice != null) when (action) {
-                        "QUERY" -> ask(if (latestVoice.nameSyncPending && !latestVoice.uncertain && latestVoice.tts)
-                            "仅同步原音色 ${latestVoice.id} 的名称，不上传、不重新制作"
-                            else "查询原音色 ${latestVoice.id}，有待同步名称时一并同步；不重复制作") { report ->
+                        "QUERY" -> execute { report ->
                             if (!latestVoice.nameSyncPending || latestVoice.uncertain || !latestVoice.tts) resources.voices.refresh(latestVoice, speech!!)
                             resources.voices.find(latestVoice.id, speech!!)?.takeIf { it.nameSyncPending && !it.uncertain }?.let {
                                 report(if (trySyncName(it)) "名称已同步到云端；没有重新制作。"

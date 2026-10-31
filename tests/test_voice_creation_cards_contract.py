@@ -102,21 +102,19 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
         self.assertNotIn('readSample(', sample)
         self.assertNotIn('resources.voices.create(', sample)
 
-    def test_submission_keeps_consent_confirmation_and_one_original_request(self):
+    def test_submission_executes_directly_with_consent_and_one_original_request(self):
         final = self.steps[2]
         for required in ('SettingsSwitchRow("我有权使用此录音并同意本次上传制作", agreed, enabled = enabled)',
                          'tag = "voice-training-submit"', 'if (!enabled || !agreed || sampleUri == null) null',
-                         'ask("上传所选录音', 'PersonalVoices.readSample(context, uri)',
+                         'execute("制作结果未确认，请在原音色菜单查询状态，不要重复提交。")', 'PersonalVoices.readSample(context, uri)',
                          'if (!current() || feedback.visit != origin) throw CancellationException("account_page_changed")',
                          'resources.voices.create(speech!!, sample, n, slot, confirmed = true)',
                          'finally { sample.clear(); sampleUri = null; agreed = false }'):
             self.assertIn(required, final)
-        self.assertIn('if (slot == null) "\\n\\n须在同一项目另行开通后付费音色服务。', final)
-        self.assertIn('首次正式合成可能产生音色费用', final)
-        self.assertIn('未正式使用的音色可能七天后删除', final)
+        self.assertNotIn('ask(', final)
         self.assertEqual(1, final.count('resources.voices.create('))
         self.assertIn('本次未提交制作', final)
-        self.assertLess(final.index('return@ask'), final.index('resources.voices.create('))
+        self.assertLess(final.index('return@execute'), final.index('resources.voices.create('))
         self.assertIn('confirmation === pending && enabled', self.panel)
         self.assertIn('confirmation = null; operation?.cancel(); preview.stop()', self.panel)
 

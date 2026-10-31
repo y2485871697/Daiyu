@@ -26,6 +26,8 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private val importAccountCleanup = mutableListOf<() -> Unit>()
     private var importQueryFails = false
     private var importVoiceQueryFails = false
+    private var importAliasFails = false
+    private var remoteImportAlias = "remote name"
     private var creationQueryFails = false
     private var creationRemoteIds = listOf("S_available")
     private var creationRemaining = 3
@@ -68,22 +70,37 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                 check(!body.has("audio")) { "Import must not upload" }
                 if (request.url.host == "open.volcengineapi.com") {
                     check(!importQueryFails) { "Synthetic import query failure" }
-                    val state = body.getString("State")
-                    val ids = when (state) {
-                        "Unknown" -> listOf("S_unused")
-                        "Training" -> listOf("S_training")
-                        "Success" -> buildList {
-                            if (available) add("S_available")
-                            if (unavailable) add("S_exhausted")
-                            if (secondAvailable) add("S_second")
+                    when (request.url.queryParameter("Action")) {
+                        "ResourcePacksStatus" -> JSONObject().put("Result", JSONObject().put("TotalCount", 1)
+                            .put("Packs", JSONArray().put(JSONObject().put("TrainID", "S_available")
+                                .put("InstanceNumber", "import-resource").put("Alias", remoteImportAlias))))
+                        "AliasResourcePack" -> {
+                            check(!importAliasFails) { "Synthetic alias failure" }
+                            check(body.getString("TrainID") == "S_available")
+                            check(body.getString("InstanceNumber") == "import-resource")
+                            remoteImportAlias = body.getString("Alias")
+                            JSONObject().put("Result", JSONObject().put("TrainID", "S_available")
+                                .put("InstanceNumber", "import-resource").put("Alias", remoteImportAlias))
                         }
-                        else -> emptyList()
+                        else -> {
+                            val state = body.getString("State")
+                            val ids = when (state) {
+                                "Unknown" -> listOf("S_unused")
+                                "Training" -> listOf("S_training")
+                                "Success" -> buildList {
+                                    if (available) add("S_available")
+                                    if (unavailable) add("S_exhausted")
+                                    if (secondAvailable) add("S_second")
+                                }
+                                else -> emptyList()
+                            }
+                            JSONObject().put("Result", JSONObject().put("TotalCount", ids.size)
+                                .put("Statuses", JSONArray().apply { ids.forEach {
+                                    put(JSONObject().put("SpeakerID", it).put("State", state).put("Alias", it)
+                                        .put("AvailableTrainingTimes", if (it == "S_exhausted") 0 else 3))
+                                } }))
+                        }
                     }
-                    JSONObject().put("Result", JSONObject().put("TotalCount", ids.size)
-                        .put("Statuses", JSONArray().apply { ids.forEach {
-                            put(JSONObject().put("SpeakerID", it).put("State", state).put("Alias", it)
-                                .put("AvailableTrainingTimes", if (it == "S_exhausted") 0 else 3))
-                        } }))
                 } else {
                     check(request.url.encodedPath.endsWith("/get_voice")) { "Import must not train" }
                     if (importVoiceQueryFails) throw PersonalVoiceQueryFailure(
@@ -505,6 +522,55 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         assertNoSideEffects(expectedRequests = 10)
     }
 
+    private fun importDirectly(remark: String) {
+        reveal("settings-field:备注名称（可空）", "导入声音").performTextReplacement(remark)
+        reveal("settings-row:备用方式：从控制台复制 ID", "导入声音").performClick()
+        reveal("settings-field:已有音色 ID", "导入声音").performTextReplacement("S_available")
+        reveal("settings-row:导入声音", "导入声音").performClick()
+        ui.onNodeWithText("确认本次操作").assertDoesNotExist()
+    }
+
+    fun testImportWithoutRemarkExecutesDirectlyWithoutAliasOrClone() {
+        mount(available = true, flow = "IMPORT")
+        importDirectly("")
+        val success = "声音已导入；没有重新制作。"
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
+        assertEquals(1, requests.get())
+        assertFalse(resources.voices.state.value.single { it.id == "S_available" }.nameSyncPending)
+        assertEquals("remote name", remoteImportAlias)
+        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testImportWithRemarkNamesRemoteResourceWithoutConfirmationOrClone() {
+        mount(available = true, flow = "IMPORT")
+        importDirectly("我的备注")
+        val success = "声音已导入，名称已同步到云端。"
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
+        assertEquals(3, requests.get()); assertEquals("我的备注", remoteImportAlias)
+        val voice = resources.voices.state.value.single { it.id == "S_available" }
+        assertEquals("我的备注", voice.name); assertFalse(voice.nameSyncPending)
+        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testImportAliasFailureKeepsVoiceAndDirectMenuRetryOnlyRenames() {
+        mount(available = true, flow = "IMPORT")
+        importAliasFails = true
+        importDirectly("重试备注")
+        val failure = "声音已导入，名称同步失败；可在原音色菜单重试名称同步。"
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
+        assertEquals(3, requests.get())
+        assertTrue(resources.voices.state.value.single { it.id == "S_available" }.nameSyncPending)
+        importAliasFails = false
+        node("voice-menu:S_available").performClick()
+        awaitUniqueTag("voice-choice-dialog")
+        awaitNodeWindowFocus(node("voice-choice-dialog"))
+        node("settings-radio:重试名称同步").performClick()
+        ui.onNodeWithText("确认本次操作").assertDoesNotExist()
+        ui.waitUntil(5_000) { resources.voices.state.value.none { it.id == "S_available" && it.nameSyncPending } }
+        assertEquals(5, requests.get()); assertEquals("重试备注", remoteImportAlias)
+        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
+    }
+
     fun testPendingNameShowsRetryWithoutImplicitRequestsOrRecreation() {
         mount(available = true, flow = "LIST", ready = true, namePending = true)
         ui.onNode(hasText("名称待同步", substring = true) and
@@ -519,9 +585,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         ui.onAllNodes(hasAnyAncestor(hasTestTag("voice-choice-dialog")) and hasClickAction()).assertCountEquals(2)
         assertNoSideEffects()
         node("settings-radio:重试名称同步").performClick()
-        ui.onNodeWithText("仅同步原音色 S_available 的名称，不上传、不重新制作").assertIsDisplayed()
-        assertNoSideEffects()
-        ui.onNodeWithText("确认").assertIsEnabled().performClick()
+        ui.onNodeWithText("确认本次操作").assertDoesNotExist()
         val failure = "名称同步失败；请检查已保存的 AK／SK 与项目后重试，不要重新制作。"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
         ui.onNodeWithText(failure).assertIsDisplayed()
@@ -536,7 +600,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("voice-choice-dialog")
         awaitNodeWindowFocus(node("voice-choice-dialog"))
         node("settings-radio:查看状态").assertIsEnabled().performClick()
-        ui.onNodeWithText("确认").performClick()
+        ui.onNodeWithText("确认本次操作").assertDoesNotExist()
         val failure = "名称同步失败；请检查已保存的 AK／SK 与项目后重试，不要重新制作。"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
         assertEquals(1, requests.get())
@@ -568,7 +632,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("settings-radio:用于朗读").assertDoesNotExist()
         node("settings-radio:错误详情").assertDoesNotExist()
         node("settings-radio:查看状态").performClick()
-        ui.onNodeWithText("确认").assertIsEnabled().performClick()
+        ui.onNodeWithText("确认本次操作").assertDoesNotExist()
         ui.waitUntil(5_000) { requests.get() == 1 && resources.voices.state.value.any { it.id == "S_available" && it.status == 1 } }
         ui.onNode(
             hasText("训练中", substring = true) and hasAnyAncestor(hasTestTag("settings-row:S_available")),

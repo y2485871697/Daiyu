@@ -162,4 +162,81 @@ class PersonalVoiceNameSyncTest {
         catch (_: IllegalStateException) { }
         assertEquals(1, calls); assertTrue(store.state.value.isEmpty())
     }
+    @Test fun importedRemarkIsDurableBeforeAliasAndNamesTheOriginalRemoteResource() = runBlocking {
+        val file = File(folder.root, "import-name.json")
+        val actions = mutableListOf<String>()
+        val store = PersonalVoices(file, AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action") ?: request.url.pathSegments.last()
+            actions += action
+            val json = body(request)
+            when (action) {
+                "get_voice" -> { assertEquals("S_owned", json.getString("speaker_id")); accepted() }
+                "ResourcePacksStatus" -> {
+                    val pending = JSONArray(file.readText()).getJSONObject(0)
+                    assertTrue(pending.getBoolean("nameSyncPending"))
+                    assertEquals("我的声音", pending.getString("name")); listed()
+                }
+                "AliasResourcePack" -> {
+                    assertEquals("S_owned", json.getString("TrainID"))
+                    assertEquals("我的声音", json.getString("Alias")); assertFalse(json.has("audio"))
+                    response(JSONObject().put("Result", resource("我的声音")))
+                }
+                else -> error("Import must not train: $action")
+            }
+        })
+        store.load()
+        val imported = store.importExisting(config, " S_owned ", "  我的声音  ")
+        assertEquals("S_owned", imported.id); assertTrue(imported.nameSyncPending)
+        sync(store)
+        assertEquals(listOf("get_voice", "ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertFalse(store.state.value.single().nameSyncPending)
+        assertEquals("我的声音", store.state.value.single().name)
+    }
+
+    @Test fun importAliasFailureKeepsRemarkAcrossRestartAndRetryReadsBackWithoutReimportOrClone() = runBlocking {
+        val file = File(folder.root, "import-retry.json")
+        val actions = mutableListOf<String>()
+        val store = PersonalVoices(file, AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action") ?: request.url.pathSegments.last()
+            actions += action
+            when (action) {
+                "get_voice" -> accepted()
+                "ResourcePacksStatus" -> listed()
+                "AliasResourcePack" -> throw IOException("alias receipt lost")
+                else -> error("Import must not train")
+            }
+        })
+        store.load(); store.importExisting(config, "S_owned", "我的声音")
+        try { sync(store); fail("Expected alias failure") } catch (_: IOException) { }
+        assertTrue(store.state.value.single().tts); assertTrue(store.state.value.single().nameSyncPending)
+        val restarted = PersonalVoices(file, AccountHttpTransport { request, _ ->
+            assertEquals("ResourcePacksStatus", request.url.queryParameter("Action")); listed("我的声音")
+        })
+        restarted.load(); assertEquals("我的声音", restarted.state.value.single().name)
+        sync(restarted); assertFalse(restarted.state.value.single().nameSyncPending)
+        assertEquals(listOf("get_voice", "ResourcePacksStatus", "AliasResourcePack"), actions)
+    }
+
+    @Test fun blankImportRemarkDoesNotStartRenameOrClearAnExistingPendingName() = runBlocking {
+        val store = PersonalVoices(File(folder.root, "import-blank.json"), AccountHttpTransport { request, _ ->
+            assertTrue(request.url.encodedPath.endsWith("/get_voice")); accepted()
+        })
+        store.load()
+        assertFalse(store.importExisting(config, "S_owned", "  ").nameSyncPending)
+        val named = store.importExisting(config, "S_owned", "我的声音")
+        assertTrue(named.nameSyncPending)
+        val importedAgain = store.importExisting(config, "S_owned", "\t ")
+        assertEquals("我的声音", importedAgain.name); assertTrue(importedAgain.nameSyncPending)
+    }
+
+    @Test fun importedCustomRemarkDoesNotQueueUnsupportedPrepaidAliasApi() = runBlocking {
+        val store = PersonalVoices(File(folder.root, "import-custom.json"), AccountHttpTransport { request, _ ->
+            assertTrue(request.url.encodedPath.endsWith("/get_voice")); accepted()
+        })
+        store.load()
+        val imported = store.importExisting(config, "Daiyu" + "a".repeat(32), "本机备注")
+        assertEquals("本机备注", imported.name); assertFalse(imported.nameSyncPending)
+        sync(store)
+    }
+
 }

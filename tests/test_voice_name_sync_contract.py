@@ -38,7 +38,8 @@ class VoiceNameSyncContractTest(unittest.TestCase):
 
     def test_existing_query_action_retries_metadata_without_reupload(self):
         panel = (SRC / "VoiceAccountPanel.kt").read_text()
-        query = panel[panel.index('"QUERY" -> ask('):panel.index('"REMOVE" -> if')]
+        query = panel[panel.index('"QUERY" -> execute'):panel.index('"REMOVE" -> if')]
+        self.assertNotIn('ask(', query)
         self.assertIn('重试名称同步', panel)
         self.assertIn('if (!latestVoice.nameSyncPending || latestVoice.uncertain || !latestVoice.tts)', query)
         self.assertIn('resources.voices.refresh(latestVoice, speech!!)', query)

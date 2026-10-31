@@ -1,0 +1,137 @@
+name: 代鱼声音账户检查
+run-name: 代鱼声音账户检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 检查目标完整提交SHA
+        type: string
+        required: true
+      check_id:
+        description: 本次定向检查标识
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-voice-account-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  workflow:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      SKIP_JDK_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 核对检查源码
+        run: |
+          test -n "$EXPECTED_SHA"
+          python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            27
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 声音账户定向契约
+        shell: bash
+        run: |
+          mkdir -p voice-account-checks
+          set -o pipefail
+          python3 -B - 2>&1 <<'PY' | tee voice-account-checks/contracts.log
+          import json, unittest
+          from pathlib import Path
+          records = []
+          for pattern in ('test_voice_creation_cards_contract.py', 'test_voice_name_sync_contract.py', 'test_voice_quota_selection_contract.py', 'test_voice_personal_menu_contract.py', 'test_voice_account_notice_contract.py', 'test_voice_direct_operations_contract.py', 'test_cloud_voice_account_workflow.py'):
+              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              assert suite.countTestCases() > 0, pattern
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              assert result.wasSuccessful() and not result.skipped, pattern
+              records.append(dict(pattern=pattern, tests=result.testsRun, skipped=0))
+          Path('voice-account-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
+          PY
+      - name: 准备既有离线语音依赖（不打包）
+        run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
+      - name: 声音账户定向单测及Compose源码编译（不打包）
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 - <<'PYRESET'
+          import shutil
+          from pathlib import Path
+          shutil.rmtree('app/build/test-results/testDebugUnitTest', ignore_errors=True)
+          for name in ('task-graph.json', 'record.json'):
+              Path('voice-account-checks', name).unlink(missing_ok=True)
+          PYRESET
+          ./gradlew --no-daemon --parallel --build-cache --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=voice-account-checks/task-graph.json \
+            :app:compileDebugKotlin :app:testDebugUnitTest \
+            --tests 'app.daiyu.android.AccountPageFeedbackTest' \
+            --tests 'app.daiyu.android.VoiceAccountPanelLeafTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoiceImportTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoicesTest' \
+            --tests 'app.daiyu.android.voice.account.DoubaoVoiceAliasesTest' \
+            :app:compileDebugAndroidTestKotlin 2>&1 | tee voice-account-checks/gradle.log
+      - name: 核对定向报告及零安装包
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root = Path.cwd()
+          expected = {'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.VoiceAccountPanelLeafTest', 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest', 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest', 'app.daiyu.android.voice.account.DoubaoVoiceAliasesTest', 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest', 'app.daiyu.android.voice.account.PersonalVoiceImportTest', 'app.daiyu.android.voice.account.PersonalVoicesTest'}
+          suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
+          names = [suite.attrib['name'] for suite in suites]
+          assert set(names) == expected and len(names) == len(expected), (names, expected)
+          cases = set()
+          for suite in suites:
+              assert suite.tag == 'testsuite' and int(suite.attrib['tests']) > 0
+              assert all(int(suite.attrib.get(k, 0)) == 0 for k in ('failures', 'errors', 'skipped'))
+              assert not any(suite.findall('.//' + k) for k in ('failure', 'error', 'skipped'))
+              assert len(suite.findall('testcase')) == int(suite.attrib['tests'])
+              for case in suite.findall('testcase'):
+                  key = (case.attrib['classname'], case.attrib['name'])
+                  assert key[0] == suite.attrib['name'] and key not in cases, key
+                  cases.add(key)
+          graph = json.loads(Path('voice-account-checks/task-graph.json').read_text())
+          log = Path('voice-account-checks/gradle.log').read_text()
+          for task in (':app:compileDebugKotlin', ':app:compileDebugAndroidTestKotlin'):
+              assert task in graph, task
+              match = re.search(r'^> Task ' + re.escape(task) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
+              assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
+          packages = [str(p) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
+          assert not packages, packages
+          record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+                        attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
+                        scope='voice-account-targeted', classes=sorted(names), contracts=json.loads(Path('voice-account-checks/contracts.json').read_text()),
+                        apk_built=False, instrumentation_run=False)
+          Path('voice-account-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(record, ensure_ascii=False))
+          PY
+      - name: 上传检查证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 声音账户定向检查
+          path: |
+            voice-account-checks/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: error

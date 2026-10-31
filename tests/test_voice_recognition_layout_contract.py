@@ -81,12 +81,15 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         self.assertIn('if (canAct()) OfflineSpeechPack.download(context)', card)
         self.assertIn('onDismiss = { confirm = false }', card)
 
-    def test_home_keeps_download_owner_and_ready_gated_offline_dictation(self):
+    def test_home_keeps_download_owner_without_redundant_offline_dictation_switch(self):
         home = self.panel.split('"RECOGNITION" -> {', 1)[1].split('"READ_ALOUD", "CONVERSATION" ->', 1)[0]
         self.assertEqual(1, home.count('OfflineSpeechPackCard(context, ::current)'))
-        self.assertIn('if (pack.ready && draft.dictation != "DOUBAO")', home)
-        self.assertIn('SettingsSwitchRow("离线听写", pack.enabled,', home)
-        self.assertIn('if (current()) OfflineSpeechPack.setEnabled(context, it)', home)
+        self.assertNotIn('SettingsSwitchRow("离线听写"', home)
+        self.assertNotIn('offline-speech-enable', home)
+        self.assertNotIn('OfflineSpeechPack.setEnabled', home)
+        self.assertNotIn('OfflineSpeechPack.state', self.panel)
+        self.assertIn('switchFeature("input", it) { inputEnabled = it }', home)
+        self.assertIn('child = "ASR"', home)
 
     def test_asr_has_its_own_title_without_home_selector(self):
         self.assertIn('"ASR" -> "识别方式"', self.panel)

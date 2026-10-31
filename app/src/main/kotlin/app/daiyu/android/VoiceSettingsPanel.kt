@@ -23,7 +23,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
@@ -35,7 +34,6 @@ import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.voice.ActivityVoiceAudio
 import app.daiyu.android.voice.duplex.DoubaoDuplexProtocol
-import app.daiyu.android.voice.offline.OfflineSpeechPack
 import app.daiyu.android.voice.providers.DoubaoAsrProtocol
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -63,7 +61,6 @@ internal fun VoiceSettingsPanel(
     val saved = key(profile) { runtime.profileConfiguration(profile).collectAsState().value }
     val voices by runtime.personal.state.collectAsState()
     val personalAccounts by runtime.accountConfigurations.collectAsState()
-    val pack by OfflineSpeechPack.state.collectAsStateWithLifecycle()
     val accountVoices by accounts.voices.state.collectAsState()
     val scope = rememberCoroutineScope()
     val drafts = remember { mutableMapOf<VoiceProfile, VoiceConfiguration>() }
@@ -399,8 +396,6 @@ internal fun VoiceSettingsPanel(
                             item { SettingsCard(Modifier.testTag("voice-recognition-method-card")) { SettingsRow("识别方式", tag = "voice-recognition-method",
                                 summary = if (saved?.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
                                 showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
-                            if (pack.ready && draft.dictation != "DOUBAO") item { VoiceSettingsCard { SettingsSwitchRow("离线听写", pack.enabled,
-                                tag = "offline-speech-enable") { if (current()) OfflineSpeechPack.setEnabled(context, it) } } }
                         }
                         "READ_ALOUD", "CONVERSATION" -> {
                             if (section == "CONVERSATION") item { VoiceSettingsCard {

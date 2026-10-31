@@ -147,6 +147,8 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     }
     fun testRecognitionHomeOmitsExtraOfflineEntryAndKeepsAlignedCards() {
         systemProfiles(); enter()
+        node("offline-speech-enable").assertDoesNotExist()
+        ui.onAllNodesWithText("离线听写", substring = false).assertCountEquals(0)
         node("voice-input-enable").assert(hasAnyAncestor(hasTestTag("voice-recognition-input-card")))
         node("voice-offline-settings").assertDoesNotExist()
         ui.onAllNodesWithText("离线语音", substring = false).assertCountEquals(0)

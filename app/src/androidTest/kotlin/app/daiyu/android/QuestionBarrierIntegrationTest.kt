@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.question.*
@@ -332,7 +333,21 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
                 PrivateQuestionStore(f.app).use {store->check(store.create(QuestionRecord(id.storageKey,AskUserContract.parse(ARGS))));if(answer!=null) check(store.answer(id.storageKey,answer))}
             } finally {f.db.close();runtime.close()}
         }
+        val recoveredMessage = f.db.messages(old.message.conversationId).last().second
+        val recoveredEvidence = RetainedToolOutcomes.Snapshot.read(f.db, listOf(recoveredMessage)).questionEvidence(recoveredMessage)
+        main {
+            val call = recoveredMessage.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation
+            val projection = f.c.questionProjection(recoveredMessage, call, recoveredEvidence)
+            assertNotNull(projection); assertFalse(projection!!.canAnswer); assertNull(projection.binding)
+            assertEquals(old.owner, projection.identity.ownerId)
+        }
         launch(f,f.db.conversations().single())
+        ui.waitUntil(timeoutMillis=8_000) {
+            ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size==1
+        }
+        node("work-process-header").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
+        node("question-card").assertDoesNotExist()
+        node("work-process-header").performClick()
         waitForCard(readOnly=true)
         if (answer == null) {
             node("question-toggle").assertTextContains("提问已中断 · Route choice")
@@ -348,8 +363,6 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         val saved=checkpoint(f,old.message);assertEquals(RunStatus.INTERRUPTED,saved.message.status);assertEquals(ExecutionPhase.TERMINAL,saved.phase);assertNull(saved.pending)
         assertTrue(saved.owner!=old.owner);assertEquals(ToolDisposition.UNKNOWN,saved.tools.single().disposition)
         assertEquals(answer,row(f,id).answer);if(answer==null) assertTrue(row(f,id).interrupted)
-        val recoveredMessage = f.db.messages(old.message.conversationId).last().second
-        val recoveredEvidence = RetainedToolOutcomes.Snapshot.read(f.db, listOf(recoveredMessage)).questionEvidence(recoveredMessage)
         main {
             val shown = recoveredMessage
             val projection = f.c.questionProjection(shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation, recoveredEvidence)

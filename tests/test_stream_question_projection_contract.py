@@ -19,6 +19,14 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         self.assertIn('controller.questionWaiting(message)', host)
         self.assertIn('toolReceiptSnapshot?.questionEvidence(message)', host)
         self.assertIn('question.copy(binding = null, canAnswer = false)', host)
+    def test_recovered_question_is_validated_before_explicit_terminal_workflow_disclosure(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/QuestionBarrierIntegrationTest.kt').read_text()
+        recovery = text.split('private fun recovery(answer:QuestionAnswer?)', 1)[1]
+        self.assertLess(recovery.index('assertNotNull(projection)'), recovery.index('launch(f,'))
+        self.assertIn('SemanticsProperties.StateDescription, "已折叠"', recovery)
+        self.assertLess(recovery.index('node("work-process-header").performClick()'), recovery.index('waitForCard(readOnly=true)'))
+        self.assertIn('assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())', recovery)
+        self.assertIn('recreate();waitForCard(readOnly=true)', recovery)
     def test_default_bitmap_is_shared_sampled_and_decoded_only_on_io(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/components/AssistantAvatar.kt').read_text()
         composition, worker = text.split('internal object DefaultAssistantAvatar', 1)

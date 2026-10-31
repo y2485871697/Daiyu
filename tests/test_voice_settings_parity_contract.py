@@ -62,15 +62,24 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
 
     def test_selection_only_voice_dialogs_share_sheet_without_close_buttons(self):
         text = source('VoiceSettingsDialogs.kt')
-        for name in ('VoiceChoiceDialog', 'VoiceProviderDialog', 'VoiceToneDialog'):
+        for name in ('VoiceChoiceDialog', 'VoiceProviderDialog'):
             dialog = text.split(f'internal fun {name}(', 1)[1].split('\n@Composable', 1)[0]
             self.assertIn('ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false', dialog)
             self.assertNotIn('WindowDialog(', dialog)
             self.assertNotIn('TextButton(', dialog)
         tone = text.split('internal fun VoiceToneDialog(', 1)[1]
-        self.assertIn('choices.distinctBy { it.first }', tone)
-        self.assertIn('listOf("女声", "男声", "", "个人声音")', tone)
-        self.assertIn('selected = id == initial', tone)
+        self.assertIn('VoiceTonePicker(title, initial, choices.map { (id, label) -> VoiceToneOption(id, label) }', tone)
+        self.assertIn('onSelect, onDismiss, Modifier.testTag("voice-tone-dialog")', tone)
+        picker = source('VoiceTonePicker.kt')
+        self.assertIn('ChatSelectionSheet(title = title,', picker)
+        self.assertIn('onDismiss = onDismiss,', picker)
+        self.assertIn('showCloseButton = false', picker)
+        self.assertIn('options.distinctBy { it.id }', picker)
+        self.assertIn('listOf("女声", "男声", "其他音色", "个人音色")', picker)
+        self.assertIn('val selected = voice.id == selectedId', picker)
+        self.assertIn('onClick = { onSelect(voice.id) }', picker)
+        self.assertNotIn('WindowDialog(', picker)
+        self.assertNotIn('TextButton(', picker)
         panel = source('VoiceSettingsPanel.kt')
         self.assertIn('"VOICE" -> VoiceToneDialog(', panel)
         self.assertIn('"DUPLEX_VOICE" -> VoiceToneDialog(', panel)
@@ -269,7 +278,9 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         composer = source('ui/screens/chat/conversation/ChatComposer.kt')
         self.assertIn('val toolbarEnabled = state.enabled && !editing', composer)
         self.assertIn('val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()', composer)
-        self.assertIn('onClick = { if (state.voiceMode in state.voiceModes) actions.onVoice() }', composer)
+        self.assertIn('onClick = { if (callUi != null || state.voiceMode in state.voiceModes) actions.onVoice() }', composer)
+        self.assertIn('enabled = callUi != null || voiceMenuEnabled', composer)
+        self.assertIn('voiceModes && voiceMenuEnabled && callUi == null', composer)
         self.assertNotIn('state.voiceModes.single()', composer)
         main = source('MainActivity.kt')
         self.assertIn('if (!VoiceSettingsPreferences(applicationContext).enabled(feature)) return@voice', main)

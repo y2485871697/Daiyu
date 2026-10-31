@@ -128,7 +128,7 @@ class PersonalVoiceImportTest {
         assertEquals("S_existing", imported.id)
         assertEquals("my remark", imported.name)
         assertEquals(0, imported.remaining)
-        assertFalse(imported.accepted); assertFalse(imported.uncertain)
+        assertTrue(imported.accepted); assertFalse(imported.uncertain)
         val before = index.readText()
         for (next in listOf(-1, 0, 1, 3)) {
             status = next
@@ -141,6 +141,56 @@ class PersonalVoiceImportTest {
         catch (_: IllegalArgumentException) { }
         assertEquals(before, index.readText())
         assertEquals(6, calls)
+    }
+
+    @Test fun successfulImportsAreImmediatelySelectableAndStayAcceptedAfterReload() = runBlocking {
+        for ((number, entry) in listOf("S_ready" to 2, "S_active" to 4, ("Daiyu" + "a".repeat(32)) to 2).withIndex()) {
+            val (id, status) = entry
+            val index = File(folder.root, "accepted-$number.json")
+            var calls = 0
+            val store = PersonalVoices(index, AccountHttpTransport { request, _ ->
+                calls++
+                assertTrue(request.url.encodedPath.endsWith("/get_voice"))
+                assertFalse(body(request).has("audio"))
+                response(voice(status, remaining = 3))
+            })
+            store.load()
+            val imported = store.importExisting(config(), id, "ready")
+            assertTrue(imported.accepted)
+            assertTrue(store.selected(id, config())!!.availableFor(config().apiKey))
+            assertEquals(1, calls)
+            val restarted = PersonalVoices(index, AccountHttpTransport { _, _ ->
+                error("Loading and selecting an imported voice must not query or train")
+            })
+            restarted.load()
+            assertTrue(restarted.find(id, config())!!.accepted)
+            assertTrue(restarted.selected(id, config())!!.availableFor(config().apiKey))
+        }
+    }
+
+    @Test fun reimportingAnUnconfirmedVoiceMakesItUsableWithoutAnotherConfirmation() = runBlocking {
+        val index = File(folder.root, "reimport-accepted.json")
+        val account = VoiceAccountIdentity.from(config()).fingerprint
+        index.writeText(JSONArray().put(JSONObject().put("id", "S_existing").put("name", "old")
+            .put("account", account).put("status", 2).put("models", JSONArray().put(5))
+            .put("catalogState", "Success").put("accepted", false)).toString())
+        var calls = 0
+        val store = PersonalVoices(index, AccountHttpTransport { request, _ ->
+            calls++
+            assertTrue(request.url.encodedPath.endsWith("/get_voice"))
+            assertEquals("S_existing", body(request).getString("speaker_id"))
+            assertFalse(body(request).has("audio"))
+            response(voice(2, remaining = 3))
+        })
+        store.load()
+        assertFalse(store.find("S_existing", config())!!.accepted)
+        try { store.selected("S_existing", config()); fail("The old record must still require acceptance") }
+        catch (_: IllegalArgumentException) { }
+        val imported = store.importExisting(config(), "S_existing", "new")
+        assertTrue(imported.accepted)
+        assertTrue(store.find("S_existing", config())!!.accepted)
+        assertNotNull(store.selected("S_existing", config()))
+        assertEquals(1, calls)
     }
 
     @Test fun documentedCodeLessQueryLoadsCloudClonesWithoutSavingOrTraining() = runBlocking {
@@ -184,8 +234,10 @@ class PersonalVoiceImportTest {
         store.load()
         val imported = store.importExisting(config(), "S_existing", "remark")
         assertEquals("S_existing", imported.id); assertTrue(imported.canImport)
-        assertEquals("remark", imported.name); assertFalse(imported.accepted)
+        assertEquals("remark", imported.name); assertTrue(imported.accepted)
         store.refresh(imported, config())
+        assertTrue(store.find("S_existing", config())!!.accepted)
+        assertNotNull(store.selected("S_existing", config()))
         assertEquals(2, calls)
         assertEquals(listOf("S_existing"), store.state.value.map { it.id })
     }

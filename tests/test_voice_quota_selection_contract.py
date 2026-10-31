@@ -133,7 +133,7 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
             self.assertNotIn(effect, query)
         final = block(store, 'suspend fun importExisting(')
         self.assertLess(final.index('request("get_voice"'), final.index('require(result.canImport)'))
-        self.assertLess(final.index('require(result.canImport)'), final.index('save(result)'))
+        self.assertLess(final.index('require(result.canImport)'), final.index('save(imported)'))
         self.assertNotIn('voice_clone', final)
         self.assertNotIn('切换为“全部”或“未复刻”', self.imported)
 

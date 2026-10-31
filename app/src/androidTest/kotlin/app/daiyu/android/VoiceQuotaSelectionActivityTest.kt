@@ -572,11 +572,20 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("确认本次操作").assertDoesNotExist()
     }
 
+    private fun assertImportedVoiceReadyForUse() {
+        val voice = resources.voices.state.value.single { it.id == "S_available" }
+        reveal("settings-row:${voice.name}", "我的声音").assertIsEnabled().assertHasClickAction()
+        ui.onNodeWithText("确认音色，允许正式合成").assertDoesNotExist()
+        assertTrue(voice.accepted)
+        assertNotNull(resources.voices.selected(voice.id, frozen.speech()))
+    }
+
     fun testImportWithoutRemarkExecutesDirectlyWithoutAliasOrClone() {
         mount(available = true, flow = "IMPORT")
         importDirectly("")
         val success = "声音已导入；没有重新制作。"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
+        assertImportedVoiceReadyForUse()
         assertEquals(1, requests.get())
         assertFalse(resources.voices.state.value.single { it.id == "S_available" }.nameSyncPending)
         assertEquals("remote name", remoteImportAlias)
@@ -588,6 +597,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         importDirectly("我的备注")
         val success = "声音已导入，名称已同步到云端。"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
+        assertImportedVoiceReadyForUse()
         assertEquals(3, requests.get()); assertEquals("我的备注", remoteImportAlias)
         val voice = resources.voices.state.value.single { it.id == "S_available" }
         assertEquals("我的备注", voice.name); assertFalse(voice.nameSyncPending)
@@ -600,6 +610,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         importDirectly("重试备注")
         val failure = "声音已导入，名称同步失败；可在原音色菜单重试名称同步。"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
+        assertImportedVoiceReadyForUse()
         assertEquals(3, requests.get())
         assertTrue(resources.voices.state.value.single { it.id == "S_available" }.nameSyncPending)
         importAliasFails = false

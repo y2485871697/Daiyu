@@ -41,9 +41,19 @@ class VoiceDirectOperationsContractTest(unittest.TestCase):
         self.assertIn('val displayName = name.trim()', imported)
         self.assertIn('DoubaoVoiceIdentity.isSlot(valid) && displayName.isNotBlank()', imported)
         self.assertIn('previous?.nameSyncPending == true', imported)
-        self.assertLess(imported.index('require(result.canImport)'), imported.index('save(result)'))
+        self.assertLess(imported.index('require(result.canImport)'), imported.index('save(imported)'))
         self.assertNotIn('voice_clone', imported)
         self.assertIn('此自定义音色暂不支持云端改名', self.panel)
+
+    def test_verified_import_is_accepted_and_saved_without_changing_creation_consent(self):
+        imported = block(self.store, 'suspend fun importExisting(')
+        self.assertLess(imported.index('require(result.canImport)'), imported.index('result.copy(accepted = true)'))
+        self.assertLess(imported.index('result.copy(accepted = true)'), imported.index('save(imported)'))
+        self.assertIn('return imported', imported)
+        self.assertNotIn('accepted = true', block(self.store, 'suspend fun listImportable('))
+        self.assertIn('voice != null && voice.tts && voice.accepted', self.store)
+        self.assertIn('if (voice.tts && !voice.accepted)', self.panel)
+        self.assertIn('require(confirmed)', block(self.store, 'suspend fun create('))
 
     def test_android_regressions_assert_direct_query_and_import_with_retry(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceQuotaSelectionActivityTest.kt').read_text()

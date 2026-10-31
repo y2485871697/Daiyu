@@ -129,7 +129,8 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             val result = updated(voice, request("get_voice", account.key, identity(voice)))
             currentCoroutineContext().ensureActive()
             require(result.canImport) { "此音色尚未复刻成功或不可用，未导入；请在云端确认后重试。" }
-            save(result); return result
+            val imported = result.copy(accepted = true)
+            save(imported); return imported
         } finally { finish(account.fingerprint, valid) }
     }
     suspend fun listImportable(config: SpeechProviderConfig, ak: String, sk: String, project: String): List<Voice> {

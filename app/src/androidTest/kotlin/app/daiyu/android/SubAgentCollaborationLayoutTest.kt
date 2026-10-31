@@ -195,6 +195,7 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         ui.onNodeWithText("gpt-6.1-sol").assertIsDisplayed()
         node("chat-model-option:$local").performClick()
         ui.runOnIdle { assertEquals("provider" to local, selected) }
+        node("chat-model-picker").assertIsDisplayed()
     }
 
     fun testActualCardKeepsRolePassiveAndRemovesSpeedAndDividerWhenModelChanges() {
@@ -258,6 +259,12 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         ui.onAllNodes(hasText("无") and hasClickAction() and hasAnyAncestor(hasTestTag("chat-model-picker"))).assertCountEquals(0)
         node("chat-model-option:other-local").performClick()
         awaitControl("non-GPT binding saved") { data.repository.snapshot(data.editor.owner).profiles.single().modelId == "other-local" }
+        node("chat-model-picker").assertIsDisplayed()
+        node("chat-model-option:other-local").assertIsSelected()
+        awaitNodeWindowFocus(node("chat-model-picker"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        awaitNodeWindowFocus(ui.onNodeWithContentDescription("Worker模型"))
         node("subagent-gpt-divider-worker").assertDoesNotExist()
         ui.onAllNodes(hasContentDescription("GPT 速度", substring = true)).assertCountEquals(0)
         ui.onNodeWithContentDescription("Worker模型").performTouchInput { longClick() }

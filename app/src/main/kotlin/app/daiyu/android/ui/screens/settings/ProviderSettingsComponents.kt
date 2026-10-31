@@ -78,11 +78,11 @@ internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolea
 @Composable
 internal fun ProviderChoiceRow(title: String, value: String, tag: String, enabled: Boolean,
     choices: List<String>, optionTags: List<String>, selectedIndex: Int, summary: String? = null, onSelect: (Int) -> Unit) {
-    var expanded by remember(value) { mutableStateOf(false) }
+    var expanded by remember(tag) { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val colors = MiuixTheme.colorScheme
     val currentEnabled by rememberUpdatedState(enabled)
-    DisposableEffect(lifecycle, value, enabled) {
+    DisposableEffect(lifecycle, tag, enabled) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) expanded = false
         }
@@ -110,7 +110,6 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
                 OptionSelectionItem(choice, selected = index == selectedIndex,
                     modifier = Modifier.testTag(optionTags[index])) {
                     if (expanded && currentEnabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                        expanded = false
                         onSelect(index)
                     }
                 }

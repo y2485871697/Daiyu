@@ -21,7 +21,7 @@ class SheetSelectionExitActivityTest : WiredActivityTestCase() {
         finally { preferenceNames.forEach { instrumentation.targetContext.deleteSharedPreferences(it) } }
     }
 
-    fun testDraftModelRoleAndTierRetainTheParentUntilTheChildFinishesExiting() {
+    fun testDraftModelRoleAndTierSelectImmediatelyAndKeepBothWindows() {
         for (dark in listOf(false, true)) for (field in listOf("model", "role", "tier")) {
             val preferencesName = "sheet-selection-${UUID.randomUUID()}"
             preferenceNames += preferencesName
@@ -48,7 +48,6 @@ class SheetSelectionExitActivityTest : WiredActivityTestCase() {
             awaitDialogEnter(parent)
             val parentView = (parent.fetchSemanticsNode().root as ViewRootForTest).view
             val ticket = session.openToken
-            val before = session.draft
             val savedBefore = preferences.all.toMap()
             val description = when (field) { "model" -> "草稿模型"; "role" -> "草稿职责"; else -> "草稿任务分工" }
             ui.onNodeWithContentDescription(description).scrollToVisible().performClick()
@@ -59,31 +58,23 @@ class SheetSelectionExitActivityTest : WiredActivityTestCase() {
             }
             awaitNodeWindowFocus(option)
             awaitDialogEnter(option)
-            val previousAutoAdvance = ui.mainClock.autoAdvance
-            try {
-                ui.mainClock.autoAdvance = false
-                option.performClick()
-                ui.mainClock.advanceTimeBy(80)
-                val progress = ui.onNode(SemanticsMatcher.expectValue(DialogDismissing, true), useUnmergedTree = true)
-                    .fetchSemanticsNode().config[DialogMotionProgress]
-                assertTrue("$field has an intermediate exit frame", progress > 0f && progress < 1f)
-                assertEquals(before, session.draft)
-                assertEquals(savedBefore, preferences.all.toMap())
-                assertSame(ticket, session.openToken)
-                ui.mainClock.advanceTimeBy(3_000)
-                ui.waitForIdle()
-                assertSame(parentView, (parent.fetchSemanticsNode().root as ViewRootForTest).view)
-                assertSame(ticket, session.openToken)
-                assertEquals("Retained name", session.name)
-                when (field) {
-                    "model" -> { assertEquals(provider.id, session.draft.providerId); assertEquals("second", session.draft.modelId) }
-                    "role" -> assertEquals("review", session.draft.role)
-                    else -> assertEquals(SubAgentTaskTier.entries.last(), session.draft.tier)
-                }
-                assertEquals(savedBefore, preferences.all.toMap())
-                assertTrue(repository.snapshot(owner).profiles.isEmpty())
-                assertEquals(0, fixture.opens.get())
-            } finally { ui.mainClock.autoAdvance = previousAutoAdvance }
+            option.performClick()
+            ui.waitForIdle()
+            when (field) {
+                "model" -> { assertEquals(provider.id, session.draft.providerId); assertEquals("second", session.draft.modelId) }
+                "role" -> assertEquals("review", session.draft.role)
+                else -> assertEquals(SubAgentTaskTier.entries.last(), session.draft.tier)
+            }
+            option.assertIsSelected()
+            ui.mainClock.advanceTimeBy(3_000)
+            option.assertIsDisplayed().assertIsSelected()
+            ui.onAllNodes(SemanticsMatcher.expectValue(DialogDismissing, true), useUnmergedTree = true).assertCountEquals(0)
+            assertSame(parentView, (parent.fetchSemanticsNode().root as ViewRootForTest).view)
+            assertSame(ticket, session.openToken)
+            assertEquals("Retained name", session.name)
+            assertEquals(savedBefore, preferences.all.toMap())
+            assertTrue(repository.snapshot(owner).profiles.isEmpty())
+            assertEquals(0, fixture.opens.get())
         }
     }
 

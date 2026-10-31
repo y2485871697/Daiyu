@@ -126,7 +126,6 @@ internal fun CompressionSettingsScreen(
         protocols = setOf(app.daiyu.android.model.ProviderProtocol.RESPONSES, app.daiyu.android.model.ProviderProtocol.MESSAGES, app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS),
         onSelect = { choice ->
             if (!busy && page.active && currentOwner()) {
-                choosingModel = false
                 val selectedBinding = app.daiyu.android.context.CatalogSummaryBindings.encode(
                     app.daiyu.android.storage.ProviderCatalogRunTarget(choice.provider,
                         choice.selection.providerIdentity, choice.selection.expectedRevision,

@@ -31,12 +31,15 @@ class AssistantPickerClickCompletionContractTest(unittest.TestCase):
         body = SOURCE.read_text(encoding='utf-8').split(
             'fun testSearchStillFiltersRealProfilesAndSelectionUsesOriginalId()', 1)[1]
         click = 'ui.onNodeWithTag("assistant-item-visual-b").performClick()'
-        completion = 'ui.waitUntil(5_000) { ui.runOnIdle { selected != null && dismissed } }'
+        completion = 'ui.waitUntil(5_000) { ui.runOnIdle { selected != null } }'
         self.assertEqual(1, body.count(click))
         self.assertEqual(1, body.count(completion))
-        self.assertEqual(1, body.count('ui.waitUntil'))
+        self.assertEqual(3, body.count('ui.waitUntil'))
         self.assertIn(click + '\n        ' + completion +
-                      '\n        assertEquals("visual-b", selected)\n        assertTrue(dismissed)', body)
+                      '\n        assertEquals("visual-b", selected)\n        assertFalse(dismissed)', body)
+        self.assertIn('hasTestTag("assistant-item-visual-b")', body)
+        self.assertIn('hasTestTag("assistant-item-visual-a")', body)
+        self.assertIn('ui.onNodeWithTag("assistant-done").performClick()', body)
         for forbidden in ['Thread.sleep', 'SystemClock.sleep']:
             self.assertNotIn(forbidden, body)
 

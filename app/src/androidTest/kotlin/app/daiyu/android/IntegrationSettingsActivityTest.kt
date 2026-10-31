@@ -164,7 +164,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertChatBinding("second", other.slotId)
         assertEquals(bindings + ("" to expectedChatBinding("second", other.slotId)), modelBindings())
         assertEquals(database, fixture.database.exportBackup())
-        node("chat-model-picker").assertDoesNotExist()
+        awaitChatPickerReady()
+        node("chat-model-picker").assertIsDisplayed()
+        node("chat-model-option:second").assertIsSelected()
+        closeChatPicker()
         node("chat-model").performClick(); awaitChatPickerReady()
         node("chat-model-option:second").assertIsSelected()
         assertChatPickerOffline(calls)
@@ -271,7 +274,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model-list").scrollToDescendant(hasTestTag(option))
         node(option).assertIsDisplayed().assertIsEnabled().performClick()
         awaitControl("unbound chat model selected") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        awaitChatPickerReady()
+        node("chat-model-picker").assertIsDisplayed()
+        node("chat-model-option:second").assertIsSelected()
+        closeChatPicker()
         assertChatBinding("second")
         assertEquals(before, fixture.settings.load())
         assertEquals(database, fixture.database.exportBackup())
@@ -306,7 +312,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model-option:first").assertDoesNotExist()
         node("chat-model-option:second").assertIsDisplayed().assertIsEnabled().performClick()
         awaitControl("chat model selected") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        awaitChatPickerLoaded()
+        node("chat-model-picker").assertIsDisplayed()
+        node("chat-model-option:second").assertIsSelected()
+        closeChatPicker()
         node("chat-model-picker").assertDoesNotExist()
         assertEquals(before, fixture.settings.load())
         assertChatBinding("second")
@@ -343,7 +352,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model-picker").assertExists()
         node("chat-model-option:second").performClick()
         awaitControl("new picker selection") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        awaitChatPickerLoaded()
+        node("chat-model-picker").assertIsDisplayed()
+        node("chat-model-option:second").assertIsSelected()
+        closeChatPicker()
         assertEquals(before, fixture.settings.load())
         assertChatBinding("second")
         assertEquals(bindings + ("" to expectedChatBinding("second")), modelBindings())
@@ -396,7 +408,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model-picker").assertExists()
         node("chat-model-option:second").assertIsEnabled().performClick()
         awaitControl("resumed picker selection") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        awaitChatPickerLoaded()
+        node("chat-model-picker").assertIsDisplayed()
+        node("chat-model-option:second").assertIsSelected()
+        closeChatPicker()
         assertEquals(before, fixture.settings.load())
         assertChatBinding("second")
         assertEquals(bindings + ("" to expectedChatBinding("second")), modelBindings())

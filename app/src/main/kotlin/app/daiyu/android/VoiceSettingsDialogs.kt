@@ -24,13 +24,15 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable
 internal fun VoiceChoiceDialog(title: String, options: List<Pair<String, String>>, selected: String,
-    onSelect: (String) -> Unit, onDismiss: () -> Unit, isEnabled: (String) -> Boolean = { true }) {
+    onSelect: (String) -> Unit, onDismiss: () -> Unit, isEnabled: (String) -> Boolean = { true },
+    retainOnSelect: Boolean = false) {
     ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false, titleFontSize = 20.sp) {
         val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
         Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
             .testTag("voice-choice-dialog")) {
             options.forEach { (id, label) -> SettingsRadioRow(label, selected == id, enabled = isEnabled(id)) {
-                finishSelection { if (isEnabled(id)) onSelect(id) }
+                if (retainOnSelect) { if (isEnabled(id)) onSelect(id) }
+                else finishSelection { if (isEnabled(id)) onSelect(id) }
             } }
         }
     }
@@ -172,13 +174,12 @@ internal fun VoiceToneDialog(title: String, initial: String, choices: List<Pair<
         else -> ""
     }
     ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false, titleFontSize = 20.sp) {
-        val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
         Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState())
             .testTag("voice-tone-dialog")) {
             listOf("女声", "男声", "", "个人声音").forEach { section ->
                 val rows = catalog.filter { group(it.first) == section }
                 if (section.isNotEmpty() && rows.isNotEmpty()) SettingsSectionTitle(section)
-                rows.forEach { (id, label) -> SettingsRadioRow(label, selected = id == initial) { finishSelection { onSelect(id) } } }
+                rows.forEach { (id, label) -> SettingsRadioRow(label, selected = id == initial) { onSelect(id) } }
             }
         }
     }

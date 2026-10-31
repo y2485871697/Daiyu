@@ -2,6 +2,9 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -26,8 +29,8 @@ import java.util.concurrent.atomic.AtomicReference
 
 class AssistantPickerVisualTest : WiredActivityTestCase() {
     private val density = AtomicReference<Density>()
-    private var selected: String? = null
-    private var dismissed = false
+    private var selected by mutableStateOf<String?>(null)
+    private var dismissed by mutableStateOf(false)
     private var edited: String? = null
 
     private fun show(scale: Float = 1f, dark: Boolean = false) {
@@ -49,7 +52,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
                         applyInterfaceScale = true) {
                         density.set(LocalDensity.current)
                         key(fixtureKey) {
-                            AssistantPickerDialog(true, profiles, "visual-a", { selected = it }, { edited = it }, { dismissed = true },
+                            AssistantPickerDialog(!dismissed, profiles, selected ?: "visual-a", { selected = it }, { edited = it }, { dismissed = true },
                                 onCopy = {}, onDelete = {}, onCreate = {}, assets = assets)
                         }
                     }
@@ -243,8 +246,20 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
         ui.onNodeWithTag("assistant-item-visual-a").assertDoesNotExist()
         ui.onNodeWithText(text(R.string.assistant_count, 1)).assertIsDisplayed()
         ui.onNodeWithTag("assistant-item-visual-b").performClick()
-        ui.waitUntil(5_000) { ui.runOnIdle { selected != null && dismissed } }
+        ui.waitUntil(5_000) { ui.runOnIdle { selected != null } }
         assertEquals("visual-b", selected)
-        assertTrue(dismissed)
+        assertFalse(dismissed)
+        ui.mainClock.advanceTimeBy(3_000)
+        ui.onNodeWithTag("assistant-item-visual-b").assertIsDisplayed()
+        ui.onNode(hasText(text(R.string.assistant_current)) and hasAnyAncestor(hasTestTag("assistant-item-visual-b")),
+            useUnmergedTree = true).assertIsDisplayed()
+        input.performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("")) }
+        ui.onNodeWithTag("assistant-item-visual-a").performClick()
+        ui.waitUntil(5_000) { ui.runOnIdle { selected == "visual-a" } }
+        assertFalse(dismissed)
+        ui.onNode(hasText(text(R.string.assistant_current)) and hasAnyAncestor(hasTestTag("assistant-item-visual-a")),
+            useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithTag("assistant-done").performClick()
+        ui.waitUntil(5_000) { ui.runOnIdle { dismissed } }
     }
 }

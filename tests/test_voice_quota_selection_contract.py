@@ -47,7 +47,7 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         for required in ('selected = !postpaid && slotId == voice.id', 'enabled = enabled && voice.canTrain',
                          'if (enabled && !busy && current() && page == "CREATE" && step == 0 &&',
                          'resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }',
-                         'slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null; slotPicker = false'):
+                         'slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null'):
             self.assertIn(required, self.sheet)
         self.assertIn('var slotPicker by remember(frozenConfiguration.revision)', self.panel)
         self.assertIn('slotPicker = false', block(self.panel, 'fun navigate(target: String)'))
@@ -102,7 +102,8 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertIn('enabled = enabled, cardStyle = true', self.import_sheet)
         self.assertIn('page == "IMPORT"', self.import_sheet)
         self.assertIn('importCandidates.any { it.account == account?.fingerprint && it.id == voice.id && it.canImport }', self.import_sheet)
-        self.assertIn('existingId = voice.id; confirmation = null; importSlotPicker = false', self.import_sheet)
+        self.assertIn('existingId = voice.id; confirmation = null', self.import_sheet)
+        self.assertNotIn('importSlotPicker = false', self.import_sheet)
         self.assertNotIn('canTrain', self.import_sheet)
         self.assertNotIn('name =', self.import_sheet)
         self.assertNotIn('voiceSlotSummary(', self.import_sheet)

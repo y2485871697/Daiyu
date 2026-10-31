@@ -64,7 +64,6 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
     }
     fun select(choice: SettingsModelChoice, assistantId: String?) {
         if (busy) return
-        picker = false
         pendingAssistant = null
         busy = true
         saving = true

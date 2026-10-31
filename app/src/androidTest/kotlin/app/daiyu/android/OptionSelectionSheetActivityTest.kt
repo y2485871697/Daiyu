@@ -37,11 +37,12 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     key(visit) {
                         var open by remember { mutableStateOf(true) }
+                        var current by remember { mutableStateOf(selected) }
                         if (open) OptionSelectionSheet("选择接口", onDismiss = { open = false; dismissed.incrementAndGet() }) {
                             repeat(options) { index ->
-                                OptionSelectionItem("接口 $index", selected = index == selected,
+                                OptionSelectionItem("接口 $index", selected = index == current,
                                     enabled = index != disabled, modifier = Modifier.testTag("choice:$index")) {
-                                    selections.incrementAndGet(); onSelect(index); open = false
+                                    current = index; selections.incrementAndGet(); onSelect(index)
                                 }
                             }
                         }
@@ -83,9 +84,19 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
                 assertTrue("last option must stay inside the surface", sheet.bottom - bounds.last().bottom >= -1f)
                 assertTrue("short content must not leave a minimum-height tail", sheet.bottom - bounds.last().bottom <= 17f * menuDensity + 1f)
                 node("choice:1").performClick()
-                awaitClosed()
+                ui.mainClock.advanceTimeBy(3_000)
+                node("chat-selection-sheet").assertIsDisplayed()
+                node("choice:1").assertIsSelected()
+                node("choice:0").assertIsNotSelected()
                 assertEquals(1, selections.get())
                 assertEquals(1, selected)
+                node("choice:0").performClick()
+                node("choice:0").assertIsSelected()
+                node("choice:1").assertIsNotSelected()
+                assertEquals(2, selections.get())
+                assertEquals(0, selected)
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                awaitClosed()
             }
         }
         assertEquals(before, fixture.database.exportBackup())
@@ -119,6 +130,10 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
         node("choice:39").scrollToVisible().assertIsDisplayed().assertIsNotSelected()
         assertEquals(0, selections.get())
         node("choice:39").performClick()
+        ui.mainClock.advanceTimeBy(3_000)
+        node("choice:39").assertIsSelected()
+        node("chat-selection-sheet").assertIsDisplayed()
+        node("preview-dialog-viewport").performTouchInput { click(Offset(2f, 2f)) }
         awaitClosed()
         assertEquals(1, selections.get())
         assertEquals(39, selected)

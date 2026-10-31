@@ -17,27 +17,29 @@ class SheetSelectionExitContractTest(unittest.TestCase):
         self.assertIn('Lifecycle.Event.ON_PAUSE) motion.cancelDismiss()', provider)
         self.assertNotIn('delay(', provider)
 
-    def test_only_one_shot_option_scope_opts_in(self):
+    def test_value_options_invoke_immediately_without_requesting_exit(self):
         text = (UI / 'components/OptionSelectionSheet.kt').read_text()
-        self.assertIn('staticCompositionLocalOf { false }', text)
-        self.assertIn('LocalOptionSelectionClosesSheet provides true', text)
-        self.assertIn('if (closesSheet) finishSelection(onClick) else onClick()', text)
+        self.assertNotIn('LocalOptionSelectionClosesSheet', text)
+        self.assertNotIn('rememberBottomSheetAction', text)
+        self.assertIn('onClick = onClick', text)
         folder = (UI / 'components/ConversationFolderPicker.kt').read_text()
         self.assertIn('onClick = { selectedFolderId = folder.id }', folder)
         self.assertNotIn('OptionSelectionSheet(', folder)
 
-    def test_subagent_and_settings_models_opt_in_without_changing_chat_default(self):
+    def test_all_model_options_select_without_implicit_exit(self):
         text = (UI / 'screens/chat/conversation/ChatModelPicker.kt').read_text()
-        self.assertIn('closeOnSelect: Boolean = false', text)
-        self.assertIn('if (closeOnSelect) finishSelection(select) else select()', text)
+        self.assertNotIn('closeOnSelect', text)
+        self.assertNotIn('rememberBottomSheetAction', text)
+        self.assertIn('if (provider.id == state.providerId) onSelect(model.id)', text)
         for path in ('components/subagent/SubAgentModelPicker.kt', 'screens/settings/SettingsModelPicker.kt'):
-            self.assertIn('closeOnSelect = true', (UI / path).read_text())
+            self.assertNotIn('closeOnSelect', (UI / path).read_text())
         local = (UI / 'screens/chat/conversation/LocalCatalogChatModelPicker.kt').read_text()
         self.assertNotIn('closeOnSelect = true', local)
 
-    def test_linux_accessibility_selection_also_requests_exit(self):
+    def test_linux_accessibility_and_pointer_selection_both_stay_open(self):
         text = (UI / 'screens/settings/LinuxSettingsScreen.kt').read_text()
-        self.assertIn('hapticClick(enabled) { finishSelection(selectChoice) }', text)
+        self.assertIn('hapticClick(enabled) { selectChoice() }', text)
+        self.assertNotIn('expanded = false; onSelect(index)', text)
         self.assertIn('onClick { semanticSelectChoice(); true }', text)
 
     def test_attachment_and_workspace_replacement_wait_before_next_action(self):

@@ -103,6 +103,12 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
     private fun formSwitch() = ui.onNode(isToggleable() and hasAnyAncestor(hasTestTag("subagent-config-window")))
     private fun confirm() = ui.onNode(hasText("确认") and hasClickAction())
     private fun delete() = ui.onNode(hasText("删除") and hasClickAction() and hasAnyAncestor(hasTestTag("subagent-config-actions")))
+    private fun dismissNestedChoice() {
+        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty() }
+        awaitNodeWindowFocus(node("subagent-config-window"))
+    }
     private fun dismissForm() {
         ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("subagent-config-window"))).performTouchInput {
             click(androidx.compose.ui.geometry.Offset(2f, 2f))
@@ -171,6 +177,10 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("草稿任务分工").scrollToVisible().performClick()
         ui.onNode(hasText("未设置分工") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
             .assertIsDisplayed().performClick()
+        ui.onNode(hasText("未设置分工") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+            .assertIsDisplayed().assertIsSelected()
+        dismissNestedChoice()
+        assertEquals(before, repository.snapshot(owner))
         val capacity = ui.onNode(hasSetTextAction() and hasText("1"))
         capacity.scrollToVisible().performTextReplacement("-1")
         ui.onNodeWithText("请输入 0 或正整数").assertExists()
@@ -235,6 +245,10 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.onNode(hasTestTag("chat-model-option:${model.id}") and hasText(model.displayName) and inPicker
             and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
             .assertIsEnabled().performClick()
+        node("chat-model-picker").assertIsDisplayed()
+        node("chat-model-option:${model.id}").assertIsSelected()
+        assertEquals(before, repository.snapshot(owner))
+        dismissNestedChoice()
         assertSheet()
         ui.waitUntil(5_000) {
             confirm().fetchSemanticsNode().config.getOrNull(SemanticsProperties.Disabled) == null

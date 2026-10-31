@@ -42,7 +42,9 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
         self.assertIn('Modifier.testTag(optionTags[index])', text)
         self.assertIn('Lifecycle.Event.ON_PAUSE) expanded = false', text)
         self.assertIn('expanded && currentEnabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)', text)
-        self.assertIn('expanded = false\n                        onSelect(index)', text)
+        self.assertNotIn('expanded = false\n                        onSelect(index)', text)
+        self.assertIn('remember(tag) { mutableStateOf(false) }', text)
+        self.assertIn('DisposableEffect(lifecycle, tag, enabled)', text)
         self.assertNotIn('DropdownMenu(', text)
 
     def test_all_four_provider_choice_callers_keep_their_business(self):
@@ -92,7 +94,7 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
         self.assertNotIn('WindowDialog', window)
         form = source('ui/components/SubAgentProfileConfigDialog.kt').split('if (usable) choices?.let', 1)[1].split('private fun SubAgentDraftDialogActions', 1)[0]
         self.assertIn('session.edit { profile -> when (field)', form)
-        self.assertIn('}; choices = null', form)
+        self.assertNotIn('}; choices = null', form)
         self.assertNotIn('commitProfileDraft', form)
         self.assertNotIn('.verticalScroll(', form)
 

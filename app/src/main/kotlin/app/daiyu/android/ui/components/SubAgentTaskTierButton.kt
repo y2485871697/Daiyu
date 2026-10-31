@@ -87,7 +87,7 @@ internal fun SubAgentTaskTierButton(label: String, tier: SubAgentTaskTier?, enab
             onClick = { if (latestEnabled) { expanded = !expanded } })
         if (enabled && expanded) OptionSelectionSheet("任务分工", { expanded = false }) {
             SubAgentTaskTier.entries.forEach { option ->
-                SubAgentSelectionItem(option.label, option == tier) { if (latestEnabled) { latestSelection(option); expanded = false } }
+                SubAgentSelectionItem(option.label, option == tier) { if (latestEnabled) { latestSelection(option) } }
             }
         }
     }

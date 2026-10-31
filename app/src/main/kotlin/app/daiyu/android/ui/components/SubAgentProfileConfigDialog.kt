@@ -226,7 +226,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                 val all = SubAgentModelPickerProjector.project(providers, draft.providerId, draft.modelId)
                 val models = all.copy(providerGroups = all.providerGroups.map { group -> group.copy(models = group.models.filter { draft.acceptsModel(it.supportsImageGeneration, it.supportsVideoGeneration) }) }.filter { it.models.isNotEmpty() })
                 SubAgentModelPickerDialog(models, true, { modelPicker = false }, { provider, model ->
-                    if (session.canCommit(latestEditor, latestEnabled)) session.selectModel(ModelFeatureSelection(true, provider, model)); modelPicker = false
+                    if (session.canCommit(latestEditor, latestEnabled)) session.selectModel(ModelFeatureSelection(true, provider, model))
                 }, "选择${draft.name}模型")
             }
             if (usable && thinkingPicker && canThink && effective != null) {
@@ -250,7 +250,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                                     "role" -> profile.withRole(requireNotNull(value))
                                     "tier" -> if (profile.supportsTaskTier) profile.copy(tier = SubAgentTaskTier.fromWireValue(value.orEmpty())) else profile
                                     else -> if (profile.role == "image_generation") profile.copy(imageResolution = value) else profile
-                                } }; choices = null
+                                } }
                             } }
                             ConversationAgentChoice(label, when (field) {
                                 "role" -> draft.role == value

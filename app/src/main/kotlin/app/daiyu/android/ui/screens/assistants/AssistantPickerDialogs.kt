@@ -112,7 +112,7 @@ fun AssistantPickerDialog(
             verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
             items(filtered, key = { it.id }) { profile ->
                 AssistantProfileCard(profile, profile.id == selectedId,
-                    onClick = { finishSelection { if (canSelect()) { onSelect(profile.id); onDismiss() } } },
+                    onClick = { if (canSelect()) onSelect(profile.id) },
                     onLongClick = { finishSelection { if (canInteract()) actionProfileId = profile.id } }, assets = assets,
                     modifier = Modifier.testTag("assistant-item-${profile.id}"))
             }

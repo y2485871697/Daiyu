@@ -41,7 +41,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
     LaunchedEffect(usable, editor) {
         if (!usable) { modelPicker = false; thinkingPicker = false; rolePicker = false; tierPicker = false; resolutionPicker = false }
     }
-    LaunchedEffect(profile.role) { rolePicker = false; tierPicker = false; thinkingPicker = false; modelPicker = false; resolutionPicker = false }
+    LaunchedEffect(profile.role) { tierPicker = false; thinkingPicker = false; modelPicker = false; resolutionPicker = false }
     val config = remember(profile.providerId, profile.modelId, profile.role, presentationProviders) {
         val provider = presentationProviders.firstOrNull { it.id == profile.providerId && it.isEnabled }
         val model = provider?.models?.firstOrNull { it.id == profile.modelId && it.isEnabled }
@@ -81,7 +81,6 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                         listOf("implementation" to "执行", "review" to "审查／总结", "image_generation" to "图片生成", "video_generation" to "视频生成").forEach { (role, label) ->
                             SubAgentSelectionItem(label, profile.role == role) {
                                 if (currentUsable) editor?.updateProfile(profile.id) { it.withRole(role) }
-                                rolePicker = false
                             }
                         }
                     }
@@ -97,7 +96,6 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                             (listOf<SubAgentTaskTier?>(null) + SubAgentTaskTier.entries).forEach { tier ->
                                 SubAgentSelectionItem(tier?.label ?: "未设置分工", profile.tier == tier) {
                                     if (currentUsable) editor?.updateProfile(profile.id) { latest -> if (latest.supportsTaskTier) latest.copy(tier = tier) else latest }
-                                    tierPicker = false
                                 }
                             }
                         }
@@ -196,7 +194,6 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                     if (currentUsable) editor?.updateProfile(profile.id) { latest ->
                         if (latest.providerId == profile.providerId && latest.modelId == profile.modelId && latest.role == "image_generation") latest.copy(imageResolution = tier) else latest
                     }
-                    resolutionPicker = false
                 })
             }
         }
@@ -208,7 +205,6 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
         }.filter { it.models.isNotEmpty() })
         SubAgentModelPickerDialog(models, true, { modelPicker = false }, { provider, model ->
             if (currentUsable) editor?.saveModel(profile.id, ModelFeatureSelection(true, provider, model), expected = profile)
-            modelPicker = false
         }, "选择${profile.name}模型")
     }
     if (usable && thinkingPicker && config != null && canThink) {

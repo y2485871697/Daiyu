@@ -2829,6 +2829,7 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { if (dialogActionsCurrent(lease) && composerShortcutPick === pick) composerShortcutPick = null })
                 }
                 assistantSelectionOwner?.let { owner -> key(owner) {
+                var confirmedAssistantId by remember(owner) { mutableStateOf(owner.expectedAssistantId) }
                 val editAssistant = { id: String ->
                     if (assistantOwnerMatches(owner) && retainedPage != "assistant-edit") {
                         assistantEditReturnPage = retainedPage
@@ -2837,7 +2838,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
-                        selectedId = owner.expectedAssistantId, useGlobalSelection = false,
+                        selectedId = confirmedAssistantId, useGlobalSelection = false,
                         editing = retainedPage == "assistant-edit",
                         canMutate = { assistantOwnerMatches(owner) && !controller.dataBusy },
                         canInteract = { assistantOwnerMatches(owner) && allowTaskConfigurationChange() },
@@ -2852,9 +2853,10 @@ class MainActivity : ComponentActivity() {
                             if(owner.global) assistantStore.select(id)
                             else {
                                 val conversationId=ConversationId(checkNotNull(owner.conversationId))
-                                check(controller.bindConversationAssistant(conversationId,owner.expectedAssistantId,id)) { "当前正在准备或运行，或绑定已变化；未改变绑定" }
+                                check(controller.bindConversationAssistant(conversationId,confirmedAssistantId,id)) { "当前正在准备或运行，或绑定已变化；未改变绑定" }
                                 selected=selected?.copy(assistantId=id)
                             }
+                            confirmedAssistantId = id
                             refresh()
                         } },
                         onEdit = { id -> if (allowTaskConfigurationChange()) editAssistant(id) },
@@ -7125,7 +7127,7 @@ class MainActivity : ComponentActivity() {
                         refreshConfirmedModelLabel()
                     }
                     if (dialogActionsCurrent(lease) && chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
-                        if (success) { dismissChatModels(); refresh() }
+                        if (success) { reloadChatModels(owner, retainPresentation = true); refresh() }
                         else {
                             chatModelSelectionFailed = true
                             chatModelPicker = chatModelPicker?.copy(enabled = false, switching = false,

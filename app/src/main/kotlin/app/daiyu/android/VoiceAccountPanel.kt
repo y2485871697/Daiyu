@@ -585,7 +585,7 @@ internal fun VoiceAccountPanel(
                     modifier = Modifier.testTag("voice-create-slot:${voice.id}")) {
                     if (enabled && !busy && current() && page == "CREATE" && step == 0 &&
                         resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
-                        slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null; slotPicker = false
+                        slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null
                     }
                 }
             }
@@ -607,24 +607,21 @@ internal fun VoiceAccountPanel(
                     modifier = Modifier.testTag("voice-import-slot:${voice.id}")) {
                     if (enabled && !busy && current() && page == "IMPORT" &&
                         importCandidates.any { it.account == account?.fingerprint && it.id == voice.id && it.canImport }) {
-                        existingId = voice.id; confirmation = null; importSlotPicker = false
+                        existingId = voice.id; confirmation = null
                     }
                 }
             }
         }
         if (projectPicker) ChatSelectionSheet("选择项目", onDismiss = { projectPicker = false },
             showCloseButton = false, titleFontSize = 20.sp) {
-            val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 projects.forEach { item -> SettingsRadioRow(item.displayName, project == item.name,
                     enabled = item.allowed && !busy, summary = listOfNotNull(
                         item.name.takeIf { it != item.displayName },
                         "无此项目访问权限".takeIf { !item.allowed },
                     ).joinToString(" · ").ifBlank { null }) {
-                    finishSelection {
-                        if (current() && !busy && page == "SYNC" && projects.any { it.name == item.name && it.allowed }) {
-                            project = item.name; projectPicker = false; confirmation = null; feedback = feedback.clear()
-                        }
+                    if (current() && !busy && page == "SYNC" && projects.any { it.name == item.name && it.allowed }) {
+                        project = item.name; confirmation = null; feedback = feedback.clear()
                     }
                 } }
             }

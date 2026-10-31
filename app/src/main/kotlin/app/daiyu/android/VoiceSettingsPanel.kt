@@ -486,14 +486,14 @@ internal fun VoiceSettingsPanel(
                 }
             }
         }
-        key(profile, saved?.revision, dialog) { when (dialog) {
-            "MODEL" -> VoiceModelDialog(draft, modelSource, ::current, onSave = { value ->
-                if (current()) {
+        key(profile, dialog) { when (dialog) {
+            "MODEL" -> VoiceModelDialog(draft, modelSource, { current() && !busy }, onSave = { value ->
+                if (current() && !busy) {
                     preferences.rememberCloud(profile, draft)
                     val catalog = SpeechVoices.catalog(SpeechEngine.valueOf(value.engine), value.model)
                     val history = preferences.cloudVoice(profile, value.referenceOwner(), value.historyModel)
                     val selected = value.copy(voice = value.voice.ifBlank { history.ifBlank { catalog.firstOrNull()?.id.orEmpty() } })
-                    cloud = true; changeDraft(selected); dialog = null
+                    cloud = true; changeDraft(selected)
                     if (selected.voice.isNotBlank()) save(selected, speechOnly = true)
                 }
             }, onDismiss = { dialog = null })
@@ -501,17 +501,17 @@ internal fun VoiceSettingsPanel(
                 val kind = if (dialog == "MIMO_MODEL") "MIMO" else "DOUBAO"
                 VoiceProviderDialog(if (dialog == "DUPLEX_PROVIDER") "提供商" else if (kind == "MIMO") "MiMo 提供商" else "声音复刻账户",
                     kind, modelSource, if (dialog == "DUPLEX_PROVIDER") draft.duplexProvider else personalAccounts[kind]?.provider.orEmpty(),
-                    ::current, onSelect = { choice, settings ->
+                    { current() && !busy }, onSelect = { choice, settings ->
                         if (current() && !busy && stopAudio()) {
                             if (dialog == "DUPLEX_PROVIDER") {
-                                dialog = null
                                 save(realtimeConfiguration().copy(duplexKey = settings.apiKey, duplexProvider = choice.provider.slotId))
                             } else {
                                 val value = VoiceConfiguration(engine = kind, provider = choice.provider.slotId,
                                     endpoint = settings.endpoint, key = settings.apiKey, customHeaders = settings.customHeaders,
                                     model = if (kind == "MIMO") "mimo-v2.5-tts" else "seed-tts-2.0",
                                     voice = if (kind == "MIMO") "mimo_default" else DoubaoVoices.DEFAULT_ID)
-                                dialog = null; busy = true
+                                if (kind == "DOUBAO") dialog = null
+                                busy = true
                                 scope.launch {
                                     try {
                                         runtime.saveAccount(value)
@@ -539,7 +539,7 @@ internal fun VoiceSettingsPanel(
                     val identity = runCatching { app.daiyu.android.voice.account.VoiceAccountIdentity.from(draft.speech()).fingerprint }.getOrNull()
                     accountVoices.filter { it.account == identity && it.tts && it.accepted }.forEach { add(it.id to it.name) }
                 }
-            }, onSelect = { if (current()) { dialog = null; save(draft.copy(voice = it), speechOnly = true) } }, onDismiss = { dialog = null })
+            }, onSelect = { if (current() && !busy) save(draft.copy(voice = it), speechOnly = true) }, onDismiss = { dialog = null })
             "ASR_ADVANCED" -> ChatSelectionSheet("识别服务", onDismiss = { dialog = null },
                 subtitle = "仅在控制台开通了不同服务时更改。", showCloseButton = false, titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("voice-asr-service-sheet")) {
@@ -547,7 +547,7 @@ internal fun VoiceSettingsPanel(
                         SettingsRadioRow(listOf("识别 2.0 · 按时长", "识别 2.0 · 按并发", "识别 1.0 · 按时长", "识别 1.0 · 按并发")[index],
                             draft.asrResource == resource, !busy) {
                             if (current() && !busy) {
-                                changeDraft(draft.copy(asrResource = resource)); dialog = null
+                                changeDraft(draft.copy(asrResource = resource))
                                 save((saved ?: VoiceConfiguration()).copy(asrResource = resource))
                             }
                         }
@@ -555,13 +555,14 @@ internal fun VoiceSettingsPanel(
                 }
             }
             "ASR_RESOURCE" -> VoiceChoiceDialog("识别资源", DoubaoAsrProtocol.resources.map { it to it }, draft.asrResource,
-                onSelect = { if (current()) { changeDraft(draft.copy(asrResource = it)); dialog = null; save((saved ?: VoiceConfiguration()).copy(asrResource = it)) } }, onDismiss = { dialog = null })
+                onSelect = { if (current() && !busy) { changeDraft(draft.copy(asrResource = it)); save((saved ?: VoiceConfiguration()).copy(asrResource = it)) } },
+                onDismiss = { dialog = null }, isEnabled = { !busy }, retainOnSelect = true)
             "DUPLEX_VOICE" -> VoiceToneDialog("选择音色", draft.duplexVoice,
                 realtimeCatalog.map { it.id to it.name } + accountVoices.filter {
                     it.tts && it.accepted && runCatching { it.account == app.daiyu.android.voice.account.VoiceAccountIdentity
                         .from(SpeechProviderConfig(SpeechEngine.DOUBAO, "https://openspeech.bytedance.com", draft.duplexKey, "seed-tts-2.0", draft.duplexProvider)).fingerprint }.getOrDefault(false)
                 }.map { it.id to it.name },
-                onSelect = { if (current()) { dialog = null; save(realtimeConfiguration().copy(duplexVoice = it)) } }, onDismiss = { dialog = null })
+                onSelect = { if (current() && !busy) save(realtimeConfiguration().copy(duplexVoice = it)) }, onDismiss = { dialog = null })
         }
         }
         removing?.let { id ->

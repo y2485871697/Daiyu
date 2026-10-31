@@ -33,7 +33,8 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
         self.assertLess(pending, method.index("controller.selectActiveProviderCatalogModel("))
         self.assertIn("!controller.taskConfigurationBusy(conversation) && !controller.dataBusy", method)
         self.assertIn("chatModelOwner === owner && chatModelSession === session", method)
-        self.assertIn("if (success) { dismissChatModels(); refresh() }", method)
+        self.assertIn("if (success) { reloadChatModels(owner, retainPresentation = true); refresh() }", method)
+        self.assertNotIn("dismissChatModels()", method)
 
     def test_failure_releases_switching_without_hiding_error_or_reenabling_stale_session(self):
         text = (SRC / "MainActivity.kt").read_text().split("private fun selectChatModel(", 1)[1].split("private fun gatewayCurrent", 1)[0]

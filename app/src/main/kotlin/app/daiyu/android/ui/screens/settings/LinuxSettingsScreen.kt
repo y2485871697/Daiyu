@@ -185,13 +185,13 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                         LinuxChoiceRow("Linux 发行版", distributionName(distribution), "linux-distribution-choice", choiceEnabled,
                             choices = listOf("Alpine", "Debian"),
                             selectedIndex = if (distribution.equals("debian", true)) 1 else 0,
-                            popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
+                            popupScope = remember(page, runningMode, renderedTabScope) { Any() }, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(if (it == 0) "alpine" else "debian", mode) })
                         LinuxChoiceRow("运行方式", modeName(mode), "linux-execution-choice", choiceEnabled,
                             choices = listOf("普通模式 · PRoot") +
                                 if (rootMode) listOf("Root 模式 · chroot") else emptyList(),
                             selectedIndex = if (mode == LinuxExecutionMode.CHROOT) 1 else 0,
-                            popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
+                            popupScope = remember(page, runningMode, renderedTabScope) { Any() }, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(distribution, if (it == 0) LinuxExecutionMode.PROOT else LinuxExecutionMode.CHROOT) })
                         if (needsSwitch) {
                             val switchEnabled = choiceEnabled && !controller.installationBlocksManual
@@ -315,12 +315,11 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
         key(popupScope) {
             if (expanded && enabled) OptionSelectionSheet(title,
                 onDismiss = { if (ownerCurrent()) expanded = false }) {
-                val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
                 currentChoices.value.forEachIndexed { index, choice ->
                     val selectChoice: () -> Unit = {
-                        if (enabled && expanded && ownerCurrent()) { expanded = false; onSelect(index) }
+                        if (enabled && expanded && ownerCurrent()) onSelect(index)
                     }
-                    val semanticSelectChoice = hapticClick(enabled) { finishSelection(selectChoice) }
+                    val semanticSelectChoice = hapticClick(enabled) { selectChoice() }
                     OptionSelectionItem(choice, selected = index == selectedIndex, enabled = enabled,
                         modifier = Modifier.testTag("linux-choice:$tag:$index").semantics { onClick { semanticSelectChoice(); true } },
                         onClick = selectChoice)

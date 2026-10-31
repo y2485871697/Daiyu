@@ -41,6 +41,6 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
             models = providers.singleOrNull { it.id == providerId }?.models.orEmpty(), providers = providers,
             message = if (providers.isEmpty()) "没有可用模型" else null),
         onSelect = { select(providerId, it) }, onDismiss = onDismiss,
-        onSelectOtherProvider = { provider, model -> select(provider, model) }, title = title, closeOnSelect = true,
+        onSelectOtherProvider = { provider, model -> select(provider, model) }, title = title,
     )
 }

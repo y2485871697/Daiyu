@@ -23,7 +23,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
-import app.daiyu.android.ui.components.DaiyuChoiceSheet
+import app.daiyu.android.ui.components.OptionSelectionSheet
+import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.icons.ModelBrandIcon
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -306,7 +307,10 @@ internal fun ResponsesPathRow(title: String, path: String, enabled: Boolean, onS
     val options = listOf("/v1/responses", "/responses")
     SettingsRow(title, summary = path.ifBlank { options.first() },
         tag = "responses-path-select:$title", showChevron = true, onClick = if (enabled) ({ choosing = true }) else null)
-    if (choosing) DaiyuChoiceSheet(title = title, options = options,
-        onSelect = { index -> if (enabled) onSelect(options[index]); choosing = false },
-        onDismiss = { choosing = false })
+    if (choosing && enabled) OptionSelectionSheet(title, onDismiss = { choosing = false }) {
+        options.forEach { option ->
+            OptionSelectionItem(option, selected = option == path.ifBlank { options.first() }, enabled = enabled,
+                onClick = { if (enabled) onSelect(option) })
+        }
+    }
 }

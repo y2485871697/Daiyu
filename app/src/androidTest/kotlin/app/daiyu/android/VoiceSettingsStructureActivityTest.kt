@@ -331,7 +331,9 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         ui.waitUntil(timeoutMillis = 5000) {
             fixture.controller.voiceRuntime.configuration.value?.asrResource == resource
         }
-        awaitHostWindowFocus(activity)
+        assertSelectionSheet("voice-asr-service-sheet")
+        node("settings-radio:${serviceNames[1]}").assertIsSelected()
+        backFromSelectionSheet()
         node("voice-asr-service-sheet").assertDoesNotExist()
         assertEquals("", fixture.controller.voiceRuntime.configuration.value?.asrKey)
         node("settings-field:ASR API Key").assertTextContains("synthetic-asr-key")
@@ -420,7 +422,9 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         ui.waitUntil(timeoutMillis = 5000) {
             fixture.controller.voiceRuntime.configuration.value?.modelIdentity == record.settings.localIdentity
         }
-        awaitHostWindowFocus(activity)
+        assertSelectionSheet("voice-model-dialog")
+        node("chat-model-option:local:${record.settings.localIdentity}").assertIsSelected()
+        backFromSelectionSheet()
         node("voice-model-dialog").assertDoesNotExist()
         val saved = checkNotNull(fixture.controller.voiceRuntime.configuration.value)
         assertEquals("tts-1", saved.model)
@@ -497,7 +501,9 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             fixture.controller.voiceRuntime.configuration.value?.duplexVoice ==
                 app.daiyu.android.voice.providers.realtimeSpeechVoices[2].id
         }
-        awaitHostWindowFocus(activity)
+        assertSelectionSheet("voice-tone-dialog")
+        node("settings-radio:云舟").assertIsSelected()
+        backFromSelectionSheet()
         node("voice-tone-dialog").assertDoesNotExist()
         assertEquals(readingBefore?.copy(duplexVoice = app.daiyu.android.voice.providers.realtimeSpeechVoices[2].id),
             fixture.controller.voiceRuntime.configuration.value?.copy(revision = readingBefore?.revision.orEmpty()))

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import android.view.KeyEvent
+import androidx.compose.ui.platform.ViewRootForTest
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
@@ -73,6 +75,37 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         ui.onNode(hasTestTag("page:工作区") or hasTestTag("page:$pageTitle")).scrollToDescendant(hasTestTag(tag))
         return node(tag)
     }
+    private fun dismissChoice() {
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty()
+        }
+    }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    fun testChoicesKeepWindowAndInvalidateOldValueCallbacks() {
+        show()
+        node("linux-distribution-choice").performClick()
+        val first = node("linux-choice:linux-distribution-choice:0")
+        val second = node("linux-choice:linux-distribution-choice:1")
+        awaitNodeWindowFocus(second)
+        awaitDialogEnter(second)
+        val view = (second.fetchSemanticsNode().root as ViewRootForTest).view
+        val oldDebian = checkNotNull(second.fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        second.performClick().assertIsSelected()
+        first.assertIsNotSelected()
+        ui.mainClock.advanceTimeBy(3_000)
+        assertSame(view, (second.fetchSemanticsNode().root as ViewRootForTest).view)
+        first.performClick().assertIsSelected()
+        second.assertIsNotSelected()
+        mainThread { oldDebian() }
+        first.assertIsSelected()
+        assertSame(view, (first.fetchSemanticsNode().root as ViewRootForTest).view)
+        ui.onAllNodes(SemanticsMatcher.expectValue(app.daiyu.android.ui.components.DialogDismissing, true),
+            useUnmergedTree = true).assertCountEquals(0)
+        dismissChoice()
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
     fun testOriginalGroupsHaveNoTechnicalPreviewAndUnavailableToolsAreNotMarkedInstalled() {
         show()
         node("linux-distribution-choice").assertIsDisplayed()
@@ -92,6 +125,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         val reads = loads.get()
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:1").performClick()
+        dismissChoice()
         node("linux-tab:files").performClick().assertIsSelected()
         node("linux-files:workspace").assertIsSelected()
         ui.waitUntil(5_000) {
@@ -289,10 +323,12 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         show()
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:1").performClick()
+        dismissChoice()
         node("linux-distribution-choice").assertTextContains("Debian")
         setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
         node("linux-choice:linux-execution-choice:1").performClick()
+        dismissChoice()
         revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
@@ -302,8 +338,10 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         show()
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:1").performClick()
+        dismissChoice()
         revealLinux("linux-execution-choice").performClick()
         node("linux-choice:linux-execution-choice:1").performClick()
+        dismissChoice()
         val previousOwner = checkNotNull(owner)
         show()
         assertTrue(previousOwner.state.value.revoked)
@@ -333,6 +371,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         node("linux-switch-environment").assertDoesNotExist()
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:1").performClick()
+        dismissChoice()
         assertEquals(0, selects.get())
         assertEquals(alpine, currentSelection)
         revealLinux("linux-switch-environment").assertIsEnabled().assertTextContains("切换环境").performClick()
@@ -370,12 +409,14 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         val oldSwitch = retainedClickCallback(revealLinux("linux-switch-environment").assertIsEnabled())
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:0").performClick()
+        dismissChoice()
         awaitVisualIdle()
         node("linux-distribution-choice").assertTextContains("Alpine")
         mainThread { oldSwitch() }
         assertEquals(0, selects.get())
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:1").performClick()
+        dismissChoice()
         awaitVisualIdle()
         node("linux-distribution-choice").assertTextContains("Debian")
         mainThread { oldSwitch() }
@@ -405,6 +446,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         show(preferenceOverride = failing)
         node("linux-distribution-choice").performClick()
         node("linux-choice:linux-distribution-choice:1").performClick()
+        dismissChoice()
         node("linux-distribution-choice").assertTextContains("Alpine")
         ui.onNodeWithText("选项未保存，请重试。").assertExists()
         assertEquals(original, LinuxInstallChoicePreferences(choicePreferences).read())
@@ -436,6 +478,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
             revealLinux("linux-execution-choice").performClick()
             node("linux-choice:linux-execution-choice:1").assertDoesNotExist()
             node("linux-choice:linux-execution-choice:0").performClick()
+        dismissChoice()
         }
         setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
@@ -445,6 +488,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         setRunningMode(RunningMode.NORMAL)
         node("linux-choice:linux-execution-choice:1").assertDoesNotExist()
         node("linux-choice:linux-execution-choice:0").performClick()
+        dismissChoice()
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
         mainThread { oldChroot() }
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
@@ -470,6 +514,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         node("linux-choice:linux-execution-choice:1").assertIsDisplayed()
         mainThread { oldChroot() }
         node("linux-choice:linux-execution-choice:0").performClick()
+        dismissChoice()
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
         assertFalse(checkNotNull(owner).state.value.revoked)
         assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())

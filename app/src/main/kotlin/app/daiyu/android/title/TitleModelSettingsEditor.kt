@@ -26,8 +26,8 @@ class TitleModelSettingsEditor(private val store: () -> TitleModelSettingsStore)
             requestOptionsReplacementAuthorized = draft.requestOptionsReplacementAuthorized)
         it.snapshot()
     }
-    internal fun prepareSelectProfile(profile: () -> TitleModelProfile, saved: () -> Unit): Work? = prepare {
-        it.save(profile(), protocolChangeAuthorized = true, requestOptionsReplacementAuthorized = true)
+    internal fun prepareSelectProfile(profile: () -> TitleModelProfile, saved: () -> Unit, enabled: Boolean = true): Work? = prepare {
+        it.save(profile(), enabled = enabled, protocolChangeAuthorized = true, requestOptionsReplacementAuthorized = true)
         saved()
         it.snapshot()
     }

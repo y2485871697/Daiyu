@@ -42,6 +42,7 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
     var label by remember(store, slot) { mutableStateOf(source.label(feature)) }
     var selectedKey by remember(store, slot) { mutableStateOf(source.key(feature)) }
     var picker by remember(store, slot) { mutableStateOf(false) }
+    var selectionEnabled by remember(store, slot) { mutableStateOf(false) }
     var pendingAssistant by remember(store, slot) { mutableStateOf<SettingsModelChoice?>(null) }
     LaunchedEffect(store, slot) {
         try { record = withContext(Dispatchers.IO) { store.record(slot) } }
@@ -70,12 +71,13 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
         problem = null
         val images = if (slot == IndependentModelSettings.Slot.VISION) choice.selection.record.settings.visionSupported
             else if (choice.key == selectedKey) record?.imageInput else null
+        val enabled = slot == IndependentModelSettings.Slot.PET || selectionEnabled
         scope.launch {
             try {
                 // Once committed, finish the short host synchronization even if the page closes.
                 withContext(NonCancellable) {
                     val saved = withContext(Dispatchers.IO) {
-                        source.withModel(choice) { settings -> store.save(slot, settings, assistantId, true, images) }
+                        source.withModel(choice) { settings -> store.save(slot, settings, assistantId, enabled, images) }
                         store.record(slot)
                     }
                     if (slot == IndependentModelSettings.Slot.PET) applyPetModel(PetModelSelection(
@@ -113,8 +115,10 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
         }
     }
     content(IndependentModelControls(record?.enabled == true, busy, label, problem,
-        onEnabledChange = { if (!busy) { if (it) picker = true else disable() } },
-        onChoose = { if (!busy) picker = true }, saving = saving))
+        onEnabledChange = { if (!busy) {
+            if (it) { selectionEnabled = true; picker = true } else disable()
+        } },
+        onChoose = { if (!busy) { selectionEnabled = record?.enabled == true; picker = true } }, saving = saving))
     val title = if (slot == IndependentModelSettings.Slot.PET) "说话模型" else "辅助视觉模型"
     if (picker) SettingsModelPicker(title, source, selectedKey, onSelect = { choice ->
         if (!busy) {

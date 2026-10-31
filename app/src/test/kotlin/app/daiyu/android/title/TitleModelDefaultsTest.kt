@@ -33,6 +33,43 @@ class TitleModelDefaultsTest {
             { model, _, _ -> custom = model }, UUID.randomUUID().toString())
     }
 
+    @Test fun profileSelectionPersistsTheRequestedSwitchStateWithoutChangingTheChatModel() {
+        for (enabled in listOf(false, true)) {
+            val store = store()
+            val owner = TitleModelSettingsEditor { store }
+            var remembered = 0
+            val result = owner.prepareSelectProfile(
+                profile = { TitleModelProfile(binding, current.copy(model = "selected-title")) },
+                saved = { remembered++ }, enabled = enabled)!!.runWorker()
+            assertFalse(result.failed)
+            assertTrue(owner.isCurrent(result))
+            assertEquals(enabled, result.settings!!.enabled)
+            assertEquals(binding, result.settings!!.binding)
+            assertEquals(result.settings, store.snapshot())
+            assertEquals(1, remembered)
+            if (enabled) assertEquals("selected-title", store.resolve(binding).model)
+            else {
+                assertThrows(TitleModelUnavailableException::class.java) { store.resolve(binding) }
+                assertEquals("current-chat", store.whileCurrent(null, current.requestSnapshot(),
+                    result.settings!!.revision) { current.model })
+            }
+            assertEquals("current-chat", current.model)
+        }
+    }
+
+    @Test fun revokedProfileSelectionCannotSaveOrRememberAnEnableRequest() {
+        val store = store()
+        val owner = TitleModelSettingsEditor { store }
+        var remembered = 0
+        val work = owner.prepareSelectProfile(
+            profile = { fail("revoked selection opened its profile"); error("unreachable") },
+            saved = { remembered++ }, enabled = true)!!
+        owner.revoke()
+        assertTrue(work.runWorker().revoked)
+        assertFalse(store.snapshot().enabled)
+        assertEquals(0, remembered)
+    }
+
     @Test fun untouchedSettingsAdmitEachFrozenCurrentModelWithoutLoadingACustomKey() {
         val store = store()
         assertFalse(store.snapshot().enabled)

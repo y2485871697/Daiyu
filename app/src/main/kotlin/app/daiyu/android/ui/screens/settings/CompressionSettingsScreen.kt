@@ -29,12 +29,13 @@ internal fun CompressionSettingsScreen(
     var notice by remember(editor) { mutableStateOf<String?>(null) }
     var error by remember(editor) { mutableStateOf(false) }
     var choosingModel by remember(editor) { mutableStateOf(false) }
+    var enableSummarySelection by remember(editor) { mutableStateOf(false) }
     var modelLabel by remember(editor) { mutableStateOf(source.label("compression")) }
     var selectedKey by remember(editor) { mutableStateOf(source.key("compression")) }
     val page = remember(editor) { CompressionPage() }
     val currentOwner by rememberUpdatedState(ownerCurrent)
 
-    fun submit(work: CompressionSettingsEditor.Work, save: Boolean) {
+    fun submit(work: CompressionSettingsEditor.Work, save: Boolean, selectedBinding: SummaryModelBinding? = null) {
         busy = true
         saving = save
         try {
@@ -54,7 +55,7 @@ internal fun CompressionSettingsScreen(
                                 notice = if (error) "已选压缩模型暂不可用。" else null
                             }
                             is CompressionSettingsEditor.Outcome.Saved -> {
-                                outcome.snapshot.settings.summaryModel?.let { retainedSummaryBinding = it }
+                                (outcome.snapshot.settings.summaryModel ?: selectedBinding)?.let { retainedSummaryBinding = it }
                                 draft = outcome.snapshot.toDraft(retainedSummaryBinding ?: binding).let {
                                     it.copy(provider = it.provider.copy(protocol = source.protocol("compression") ?: it.provider.protocol))
                                 }
@@ -120,7 +121,15 @@ internal fun CompressionSettingsScreen(
         }, onBack = leave, enabled = !busy || saving, saving = busy && saving,
         notice = notice, error = error, modifier = modifier,
         modelLabel = modelLabel, hasSummarySelection = retainedSummaryBinding != null, onChooseModel = {
-            if (!busy && page.active && currentOwner()) choosingModel = true
+            if (!busy && page.active && currentOwner()) {
+                enableSummarySelection = false
+                choosingModel = true
+            }
+        }, onEnableSummary = {
+            if (!busy && page.active && currentOwner()) {
+                enableSummarySelection = true
+                choosingModel = true
+            }
         })
     if (choosingModel) SettingsModelPicker("压缩模型", source, selectedKey,
         protocols = setOf(app.daiyu.android.model.ProviderProtocol.RESPONSES, app.daiyu.android.model.ProviderProtocol.MESSAGES, app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS),
@@ -130,11 +139,11 @@ internal fun CompressionSettingsScreen(
                     app.daiyu.android.storage.ProviderCatalogRunTarget(choice.provider,
                         choice.selection.providerIdentity, choice.selection.expectedRevision,
                         choice.selection.record.settings.localIdentity, choice.selection.record.id, choice.protocol))
-                val settings = draft.copy(binding = selectedBinding, configureSummary = true).compression()
+                val settings = draft.copy(binding = selectedBinding, configureSummary = draft.configureSummary || enableSummarySelection).compression()
                 editor.prepareSelection(settings) {
                     source.withModel(choice) { /* Validate the explicitly selected provider on the admitted worker. */ }
                     source.remember("compression", choice)
-                }?.let { submit(it, save = true) }
+                }?.let { submit(it, save = true, selectedBinding = selectedBinding) }
             }
         }, onDismiss = { choosingModel = false })
 }

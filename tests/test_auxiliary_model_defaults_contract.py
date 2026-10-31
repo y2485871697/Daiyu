@@ -60,7 +60,7 @@ class AuxiliaryModelDefaultsContract(unittest.TestCase):
         source = (MAIN / 'ui/screens/settings/IndependentModelScreen.kt').read_text()
         self.assertIn('if (slot == IndependentModelSettings.Slot.VISION) choice.selection.record.settings.visionSupported', source)
         self.assertIn('else if (choice.key == selectedKey) record?.imageInput else null', source)
-        self.assertIn('store.save(slot, settings, assistantId, true, images)', source)
+        self.assertIn('store.save(slot, settings, assistantId, enabled, images)', source)
         self.assertLess(source.index('record = saved'), source.index('source.remember(feature, choice)'))
         self.assertLess(source.index('label = choice.label'), source.index('source.remember(feature, choice)'))
         self.assertLess(source.index('selectedKey = choice.key'), source.index('source.remember(feature, choice)'))

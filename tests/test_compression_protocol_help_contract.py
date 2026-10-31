@@ -49,7 +49,7 @@ class CompressionProtocolHelpContract(unittest.TestCase):
     def test_protocol_placeholder_and_model_selection_are_unchanged(self):
         self.assertIn('selectedIndex = -1, onSelect = {}', self.form)
         self.assertIn('"compression-endpoint:chat-completions", "compression-endpoint:responses"', self.form)
-        self.assertIn('if (it && !hasSummarySelection) onChooseModel()', self.form)
+        self.assertIn('if (it && !hasSummarySelection) onEnableSummary()', self.form)
         self.assertIn('"当前使用的模型"', self.form)
 
 

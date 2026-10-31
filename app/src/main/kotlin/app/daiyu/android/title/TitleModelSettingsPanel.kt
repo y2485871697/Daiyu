@@ -39,13 +39,14 @@ fun TitleModelSettingsPanel(
     modelLabel: String? = null,
     onChooseModel: () -> Unit = {},
     saving: Boolean = false,
+    onEnableModel: () -> Unit = onChooseModel,
 ) {
     SettingsScaffoldPage(title = "标题模型", onBack = onBack, modifier = modifier) {
         notice?.let { item("title-model-status") { SettingsNote(it) } }
         item("title-model-summary") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("使用自定义模型", settings.enabled, !busy || saving,
-                    busy = busy && saving, tag = "title-model-enabled") { requested -> if (requested) onChooseModel() else onDisable() }
+                    busy = busy && saving, tag = "title-model-enabled") { requested -> if (requested) onEnableModel() else onDisable() }
                 SettingsRow("选择模型", summary = if (settings.enabled) modelLabel ?: "选择模型" else "当前使用的模型", tag = "title-model-configure",
                     showChevron = true, onClick = if (busy) null else onChooseModel)
             }

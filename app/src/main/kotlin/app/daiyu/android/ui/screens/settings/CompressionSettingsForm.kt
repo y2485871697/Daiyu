@@ -75,6 +75,7 @@ internal fun CompressionSettingsForm(
     hasSummarySelection: Boolean = false,
     onChooseModel: () -> Unit = {},
     saving: Boolean = false,
+    onEnableSummary: () -> Unit = onChooseModel,
 ) {
     var showHelp by remember { mutableStateOf(false) }
     SettingsScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
@@ -102,7 +103,7 @@ internal fun CompressionSettingsForm(
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("自定义压缩模型", draft.configureSummary, enabled,
                     busy = saving, tag = "settings-switch:使用独立摘要配置", summary = "关闭时沿用对话模型。") {
-                    if (it && !hasSummarySelection) onChooseModel() else onSave(draft.copy(configureSummary = it))
+                    if (it && !hasSummarySelection) onEnableSummary() else onSave(draft.copy(configureSummary = it))
                 }
                 SettingsRow("压缩模型", summary = if (draft.configureSummary) modelLabel ?: "选择模型" else "当前使用的模型", tag = "compression-summary-config",
                     showChevron = true, onClick = if (enabled && !saving) onChooseModel else null)

@@ -41,6 +41,21 @@ class CompressionSettingsDraftTest {
         assertEquals(binding, readBack.copy(configureSummary = true).compression().summaryModel)
     }
 
+    @Test fun changingTheSelectedBindingPreservesBothSwitchStates() {
+        val replacement = SummaryModelBinding("replacement-provider", "replacement-model")
+        for (automatic in listOf(false, true)) for (custom in listOf(false, true)) {
+            val selected = CompressionSettingsDraftUi(binding, automatic = automatic, configureSummary = custom)
+                .copy(binding = replacement)
+            val persisted = selected.compression()
+            assertEquals(automatic, persisted.automatic)
+            assertEquals(if (custom) replacement else null, persisted.summaryModel)
+            val restored = app.daiyu.android.context.CompressionSettingsEditor.Snapshot(persisted, null)
+                .toDraft(replacement)
+            assertEquals(custom, restored.configureSummary)
+            assertEquals(replacement, restored.copy(configureSummary = true).compression().summaryModel)
+        }
+    }
+
     @Test fun invalidNumbersNeverTurnIntoDefaults() {
         assertTrue(runCatching { CompressionSettingsDraftUi(binding, window = "unknown").compression() }.isFailure)
         assertTrue(runCatching { CompressionSettingsDraftUi(binding, reserve = "-1").compression() }.isFailure)

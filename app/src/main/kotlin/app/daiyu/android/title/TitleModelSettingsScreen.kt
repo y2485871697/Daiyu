@@ -19,6 +19,7 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
     var notice by remember(owner) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     var picker by remember(owner) { mutableStateOf(false) }
+    var selectionEnabled by remember(owner) { mutableStateOf(false) }
     var modelLabel by remember(owner) { mutableStateOf(source.label("title")) }
     var selectedKey by remember(owner) { mutableStateOf(source.key("title")) }
     fun consume(result: TitleModelSettingsEditor.Result, saved: Boolean) {
@@ -51,7 +52,11 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
         onSave = { if (ownerCurrent()) enqueue(owner.prepareSave(it), true) },
         onDisable = { if (ownerCurrent()) enqueue(owner.prepareDisable(), true) },
         busy = busy, saving = saving, notice = notice, onBack = { if (ownerCurrent()) onBack() },
-        modelLabel = modelLabel, onChooseModel = { if (ownerCurrent() && !busy) picker = true })
+        modelLabel = modelLabel, onChooseModel = {
+            if (ownerCurrent() && !busy) { selectionEnabled = settings.enabled; picker = true }
+        }, onEnableModel = {
+            if (ownerCurrent() && !busy) { selectionEnabled = true; picker = true }
+        })
     if (picker) SettingsModelPicker("标题模型", source, selectedKey,
         onSelect = { choice ->
             if (ownerCurrent() && !busy) {
@@ -59,7 +64,7 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
                 val binding = TitleModelBinding(UUID.randomUUID().toString(), UUID.randomUUID().toString())
                 enqueue(owner.prepareSelectProfile(
                     profile = { source.withModel(choice) { TitleModelProfile(binding, it.copy(batteryEnabled = false, deviceStatusEnabled = false, requestOptions = app.daiyu.android.model.ProviderRequestOptions())) } },
-                    saved = { source.remember("title", choice) }), true)
+                    saved = { source.remember("title", choice) }, enabled = selectionEnabled), true)
             }
         }, onDismiss = { picker = false })
 }

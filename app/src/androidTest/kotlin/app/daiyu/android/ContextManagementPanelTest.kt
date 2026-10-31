@@ -104,7 +104,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
             ui.onNode(hasTestTag("chat-model-option:$id") or hasTestTag("chat-model-option:$provider:$id")).performClick()
             assertTrue(presentation.choosingModel)
             assertEquals(choice.key, presentation.draft?.modelKey)
-            assertEquals(id, CatalogSummaryBindings.decode(checkNotNull(presentation.binding)).apiModel)
+            assertEquals(id, checkNotNull(CatalogSummaryBindings.decode(checkNotNull(presentation.binding))).apiModel)
             assertSame(sheet, node("chat-selection-sheet").fetchSemanticsNode().root)
             node("chat-model-option:$id").assertIsSelected()
             ui.onNodeWithText("正在读取模型目录…").assertDoesNotExist()

@@ -29,7 +29,7 @@ internal fun toolHeaderText(text: String, emphasizeSeparators: Boolean): Annotat
 internal fun toolHeaderInlineContent(color: Color): Map<String, InlineTextContent> = mapOf(
     ToolHeaderSeparatorId to InlineTextContent(ToolHeaderSeparatorPlaceholder) {
         Canvas(Modifier.fillMaxSize().testTag(ToolHeaderSeparatorId)) {
-            drawCircle(color, radius = size.minDimension * .28f, center = center)
+            drawCircle(color, radius = size.minDimension * .224f, center = center)
         }
     },
 )

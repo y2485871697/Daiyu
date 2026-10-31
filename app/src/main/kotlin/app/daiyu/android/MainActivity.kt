@@ -2735,13 +2735,6 @@ class MainActivity : ComponentActivity() {
                                         } })
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
-                                        pendingTextSend?.let { pending ->
-                                            app.daiyu.android.ui.haptics.miuix.TextButton(
-                                                text = "取消发送准备",
-                                                modifier = Modifier.testTag("text-send-cancel"),
-                                                onClick = { cancelPendingTextSend(pending) }
-                                            )
-                                        }
                                         DictationComposerEntry()
                                         ShizukuComposerEntry()
                                     }
@@ -3055,6 +3048,7 @@ class MainActivity : ComponentActivity() {
     private fun chatActions(onVisibleCompleted: (Set<String>) -> Unit): ChatScreenActions {
         val dictationProjection = currentDictationProjection()
         val renderedOwner = controlOwner
+        val renderedTextSend = pendingTextSend
         val renderedConversation = chatState.conversationKey
         val renderedRevealOwner = controller.active?.takeIf { it.conversationId.value == renderedConversation }
         val renderedRevealTurns = chatState.turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
@@ -3363,6 +3357,7 @@ class MainActivity : ComponentActivity() {
             offlineHost.invalidate()
             gestureOwner()?.let { submitSupplement(it, text) }
         } },
+        onCancelSend = { renderedTextSend?.let(::cancelPendingTextSend) },
         onPrimaryTap = { guard {
             gestureOwner()?.let { owner -> controller.runState(owner)?.let { state ->
                 val accepted = if (state.pauseRequested) controller.resume(owner) else controller.pause(owner)
@@ -6944,13 +6939,16 @@ class MainActivity : ComponentActivity() {
                 controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
                 messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
                     else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
-                pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
+                imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = inlineMessageEditor?.text ?: draft,
                 selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart,
                 selectionEnd = inlineMessageEditor?.selectionEnd ?: selectionEnd,
                 editingMessageCanSubmit = inlineMessageEditor?.let { it.canSubmit && !editReferencePending(it) } == true,
                 editingMessageBlocked = messageEditBlocked,
                 mainContextCompressing = controller.isMainContextCompressing(selected?.id),
+                preparingSendKey = pendingTextSend?.takeIf { pending ->
+                    controller.textSendState()?.let { it.ticket === pending.ticket && it.result == null } == true
+                }?.ticket?.previewKey,
                 editorGeneration = editorGeneration,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value,
                 imageSendAvailable = inlineMessageEditor == null && imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&

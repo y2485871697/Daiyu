@@ -43,6 +43,7 @@ data class ChatScreenActions(
     val onControlPress: () -> Unit = {},
     val onControlRelease: () -> Unit = {},
     val onPrimaryTap: () -> Unit = {},
+    val onCancelSend: () -> Unit = {},
     val onPrimaryLongPress: () -> Unit = {},
     val onAttach: () -> Unit = {},
     val onVoice: () -> Unit = {},

@@ -47,10 +47,15 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertTrue("send must reach the worker preparation gate", preparing.await(5, TimeUnit.SECONDS))
         assertFalse("model preparation must not run on main", preparationOnMain.get())
         node("chat-draft").assertIsNotEnabled()
-        node("chat-send").assertIsNotEnabled()
+        node("chat-send").assertDoesNotExist()
+        node("text-send-cancel").assertIsEnabled()
         assertEquals(0, fixture.opens.get())
         assertEquals(1, preparationCalls.get())
         node("chat-send-preview").assertIsDisplayed()
+        ui.onNodeWithText("正在准备发送…").assertDoesNotExist()
+        ui.onNodeWithText("正在准备上下文并核实发送结果").assertDoesNotExist()
+        ui.onNodeWithText("取消发送准备").assertDoesNotExist()
+        node("text-send-cancel").assertContentDescriptionEquals("取消发送")
         mainThread {
             val getter = MainActivity::class.java.declaredMethods.single { it.name == "getChatState" && it.parameterCount == 0 }
                 .apply { isAccessible = true }
@@ -148,15 +153,17 @@ class TextSendActivityTest : WiredActivityTestCase() {
         lateinit var submission: ChatController.TextSendState
         lateinit var pending: Any
         lateinit var staleCancel: () -> Unit
+        lateinit var staleComposerCancel: () -> Unit
         mainThread {
             submission = checkNotNull(fixture.controller.textSendState())
             pending = checkNotNull(pendingSend(activity))
             val ticket = pending.javaClass.getDeclaredField("ticket").apply { isAccessible = true }.get(pending)
             assertSame("retain the ticket created by the real UI", submission.ticket, ticket)
             staleCancel = retainedCancel(activity, pending)
+            staleComposerCancel = retainedControls(activity).onCancelSend
         }
         // Invoke the attached button, not controller.stop() or a synthetic UI callback.
-        node("text-send-cancel").performClick()
+        node("text-send-cancel").performTouchInput { click(center) }
         mainThread {
             assertSame("button must not clear the UI pending send", pending, pendingSend(activity))
             val retained = checkNotNull(fixture.controller.textSendState())
@@ -168,7 +175,8 @@ class TextSendActivityTest : WiredActivityTestCase() {
             assertFalse(fixture.controller.sendText(null, 90, 91, "duplicate") { fail("not admitted") })
         }
         node("chat-draft").assertIsNotEnabled()
-        node("chat-send").assertIsNotEnabled()
+        node("chat-send").assertDoesNotExist()
+        node("text-send-cancel").assertIsEnabled()
         node("text-send-cancel").assertExists()
         assertDraft(text); assertSelection(2, 6)
         assertEquals(text, fixture.database.draft())
@@ -202,11 +210,13 @@ class TextSendActivityTest : WiredActivityTestCase() {
             assertNotSame(submission.ticket, nextSubmission.ticket)
             val nextPending = checkNotNull(pendingSend(activity))
             staleCancel()
+            staleComposerCancel()
             assertSame(nextPending, pendingSend(activity))
             assertSame(nextSubmission, fixture.controller.textSendState())
         }
         node("chat-draft").assertIsNotEnabled()
-        node("chat-send").assertIsNotEnabled()
+        node("chat-send").assertDoesNotExist()
+        node("text-send-cancel").assertIsEnabled()
         assertDraft(nextText)
         assertEquals(0, fixture.opens.get())
         nextGate.countDown()
@@ -275,7 +285,8 @@ class TextSendActivityTest : WiredActivityTestCase() {
         activity = recreateActivity(oldActivity)
         // f63a5f9: replacement adopts the same retained ticket, not a fresh editable draft.
         node("chat-draft").assertIsNotEnabled()
-        node("chat-send").assertIsNotEnabled()
+        node("chat-send").assertDoesNotExist()
+        node("text-send-cancel").assertIsEnabled()
         mainThread {
             oldEditor.onTextChange("destroyed editor"); oldEditor.onSend(text)
             try {
@@ -494,7 +505,8 @@ class TextSendActivityTest : WiredActivityTestCase() {
         if (beforeCompletion) {
             activity = startMain()
             node("chat-draft").assertIsNotEnabled()
-            node("chat-send").assertIsNotEnabled()
+            node("chat-send").assertDoesNotExist()
+            node("text-send-cancel").assertIsEnabled()
             assertDraft(text)
             assertEquals(text, fixture.database.conversations().single().draft)
             mainThread { assertSame(ticket, checkNotNull(fixture.controller.textSendState()).ticket) }

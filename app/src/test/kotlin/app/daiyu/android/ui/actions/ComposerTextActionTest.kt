@@ -39,6 +39,13 @@ class ComposerTextActionTest {
         assertFalse(edit.copy(phase = ComposerPhase.RUNNING, supplementAvailable = true).textActionEnabled())
         assertFalse(edit.copy(phase = ComposerPhase.PAUSED, supplementAvailable = true).textActionEnabled())
     }
+    @Test fun preparingTicketNeverEnablesAnotherSendOrSupplement() {
+        for (phase in ComposerPhase.entries) {
+            val preparing = composer.copy(phase = phase, preparingSendKey = "ticket-a", supplementAvailable = true)
+            assertFalse(preparing.textActionEnabled())
+            assertTrue(preparing.copy(preparingSendKey = null).textActionEnabled())
+        }
+    }
     @Test fun idleTextCanSendWithoutSupplementCapability() {
         assertTrue(composer.textActionEnabled())
     }

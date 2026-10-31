@@ -133,12 +133,14 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes) { mutableStateOf(false) }
     val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
-    val textAction = hasText
-    val compressionBlocked = state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)
-    val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
-    val primaryVisualEnabled = if (textAction) state.copy(enabled = visualEnabled).textActionEnabled()
+    val preparingSend = state.preparingSendKey != null
+    val textAction = hasText && !preparingSend
+    val compressionBlocked = !preparingSend && state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)
+    val primaryEnabled = preparingSend || if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
+    val primaryVisualEnabled = preparingSend || if (textAction) state.copy(enabled = visualEnabled).textActionEnabled()
         else visualEnabled && state.phase != ComposerPhase.IDLE
     val primaryIcon = when {
+        preparingSend -> app.daiyu.android.ui.icons.DaiyuIcons.Stop
         state.phase == ComposerPhase.PAUSED && !hasText -> ChatPreviewIcons.Play
         textAction && state.phase != ComposerPhase.IDLE -> ChatPreviewIcons.Append
         textAction -> ChatPreviewIcons.Send
@@ -146,6 +148,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         else -> ChatPreviewIcons.Send
     }
     val primaryLabel = when {
+        preparingSend -> "取消发送"
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
         textAction && state.supplementPending -> "正在追加"
         textAction && state.phase != ComposerPhase.IDLE -> "追加消息"
@@ -299,14 +302,15 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 AssistantAvatar(assistant, 19.dp, Modifier.testTag("chat-assistant-avatar"))
                             }
                         }
-                        key(state.controlOwnerKey) {
+                        key(state.preparingSendKey ?: state.controlOwnerKey) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-composer-provider-balance")
                                     .widthIn(max = 72.dp), animateChanges = true, iconSize = 16.dp,
                                 textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
-                                if (compressionBlocked) actions.onCompressionSendBlocked()
+                                if (preparingSend) actions.onCancelSend()
+                                else if (compressionBlocked) actions.onCompressionSendBlocked()
                                 else if (!textAction) actions.onPrimaryTap()
                                 else {
                                     lifecycleDismissInProgress = true
@@ -315,16 +319,19 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
                                     else actions.onSupplement(state.text)
                                 }
-                            }, Modifier.size(32.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
-                                .controlGesture(actions, primaryEnabled),
+                            }, Modifier.size(32.dp).testTag(when {
+                                preparingSend -> "text-send-cancel"
+                                textAction || state.phase == ComposerPhase.IDLE -> "chat-send"
+                                else -> "chat-control"
+                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, primaryEnabled)),
                                 containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
                                     else (if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                         .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
                                 enabled = primaryEnabled || compressionBlocked, containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
                                 tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface
                                     else if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
-                                iconSize = if (!textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
-                                onLongClick = if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
+                                iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
+                                onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }
                     }

@@ -430,7 +430,8 @@ internal fun ChatMessageList(
 @Composable
 internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
     var showMenu by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+    Column(Modifier.fillMaxWidth().then(if (turn.pending) Modifier.testTag("chat-send-preview") else Modifier),
+        horizontalAlignment = Alignment.End) {
         BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
             val bubbleWidth = maxWidth * 0.9f
             Box {
@@ -450,8 +451,6 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
             UserTurnMenu(showMenu, { showMenu = false }, turn.listKey, actions)
             }
         }
-        if (turn.pending) Text("正在准备发送…", Modifier.testTag("chat-send-preview"),
-            color = conversationColors().muted, style = MiuixTheme.textStyles.footnote1)
         if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(
             id = turn.listKey,
             actions = actions,

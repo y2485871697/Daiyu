@@ -33,6 +33,22 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertIn('if (!turn.pending) showMenu = true', source)
         self.assertIn('if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(', source)
         self.assertIn('Modifier.testTag("chat-send-preview")', source)
+        self.assertNotIn('正在准备发送', source)
+
+    def test_normal_preparation_uses_existing_composer_control_not_extra_status_or_footer(self):
+        main = (APP / 'MainActivity.kt').read_text()
+        self.assertNotIn('正在准备上下文并核实发送结果', main)
+        self.assertNotIn('text = "取消发送准备"', main)
+        self.assertIn('val renderedTextSend = pendingTextSend', main)
+        self.assertIn('onCancelSend = { renderedTextSend?.let(::cancelPendingTextSend) }', main)
+        self.assertIn('it.ticket === pending.ticket && it.result == null', main)
+        self.assertIn('statusText = controller.problem ?: when {', main)
+        composer = (CHAT / 'ChatComposer.kt').read_text()
+        self.assertIn('if (preparingSend) actions.onCancelSend()', composer)
+        self.assertIn('key(state.preparingSendKey ?: state.controlOwnerKey)', composer)
+        self.assertIn('if (preparingSend) Modifier else Modifier.controlGesture', composer)
+        self.assertIn('preparingSend -> "取消发送"', composer)
+        self.assertIn('!preparingSend && state.mainContextCompressing', composer)
 
     def test_regeneration_preview_is_admission_scoped_and_rolls_back(self):
         controller = (APP / 'ChatController.kt').read_text()

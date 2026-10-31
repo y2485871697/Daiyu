@@ -611,14 +611,17 @@ internal fun VoiceAccountPanel(
         }
         if (projectPicker) ChatSelectionSheet("选择项目", onDismiss = { projectPicker = false },
             showCloseButton = false, titleFontSize = 20.sp) {
+            val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 projects.forEach { item -> SettingsRadioRow(item.displayName, project == item.name,
                     enabled = item.allowed && !busy, summary = listOfNotNull(
                         item.name.takeIf { it != item.displayName },
                         "无此项目访问权限".takeIf { !item.allowed },
                     ).joinToString(" · ").ifBlank { null }) {
-                    if (current() && !busy && page == "SYNC" && projects.any { it.name == item.name && it.allowed }) {
-                        project = item.name; projectPicker = false; confirmation = null; feedback = feedback.clear()
+                    finishSelection {
+                        if (current() && !busy && page == "SYNC" && projects.any { it.name == item.name && it.allowed }) {
+                            project = item.name; projectPicker = false; confirmation = null; feedback = feedback.clear()
+                        }
                     }
                 } }
             }

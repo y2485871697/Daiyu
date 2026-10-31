@@ -53,19 +53,43 @@ internal val DialogEnterSettled = SemanticsPropertyKey<Boolean>("DialogEnterSett
 internal val DialogMotionProgress = SemanticsPropertyKey<Float>("DialogMotionProgress")
 internal val DialogDismissing = SemanticsPropertyKey<Boolean>("DialogDismissing")
 
-internal enum class BottomSheetDismissSource { System, Outside }
+internal enum class BottomSheetDismissSource { System, Outside, Action }
 
 internal class BottomSheetMotion {
     val progress = Animatable(0f, visibilityThreshold = 0.0001f)
     val scrimProgress = Animatable(0f)
     var dismissSource by mutableStateOf<BottomSheetDismissSource?>(null)
 
+    private var dismissAction: (() -> Unit)? = null
+
     fun requestDismiss(source: BottomSheetDismissSource) {
         if (dismissSource == null) dismissSource = source
+    }
+
+    fun requestAction(action: () -> Unit) {
+        if (dismissSource != null) return
+        dismissAction = action
+        dismissSource = BottomSheetDismissSource.Action
+    }
+
+    fun takeAction(): (() -> Unit)? = dismissAction.also { dismissAction = null }
+
+    fun cancelDismiss() {
+        dismissAction = null
+        dismissSource = null
     }
 }
 
 private val LocalBottomSheetMotion = staticCompositionLocalOf<BottomSheetMotion?> { null }
+
+/** Bind inside the owning sheet so only its window exits before a closing action runs. */
+@Composable
+internal fun rememberBottomSheetAction(): (() -> Unit) -> Unit {
+    val motion = LocalBottomSheetMotion.current
+    return remember(motion) { { action ->
+        if (motion == null) action() else motion.requestAction(action)
+    } }
+}
 
 @Composable
 internal fun DialogMotionProvider(
@@ -84,7 +108,7 @@ internal fun DialogMotionProvider(
         DisposableEffect(lifecycle, motion) {
             val observer = LifecycleEventObserver { _, event ->
                 // A dismiss animation must not acquire a replacement foreground callback.
-                if (event == Lifecycle.Event.ON_PAUSE) motion.dismissSource = null
+                if (event == Lifecycle.Event.ON_PAUSE) motion.cancelDismiss()
             }
             lifecycle.addObserver(observer)
             onDispose { lifecycle.removeObserver(observer) }
@@ -100,10 +124,11 @@ internal fun DialogMotionProvider(
                 when (source) {
                     BottomSheetDismissSource.System -> latestDismiss()
                     BottomSheetDismissSource.Outside -> latestOutsideDismiss()
+                    BottomSheetDismissSource.Action -> motion.takeAction()?.invoke()
                 }
                 // A vetoing owner keeps the window: restore it instead of leaving an invisible modal.
                 withFrameNanos { }
-                motion.dismissSource = null
+                motion.cancelDismiss()
             }
         }
     }

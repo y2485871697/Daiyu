@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import app.daiyu.android.balance.BalanceState
 import app.daiyu.android.balance.ui.ProviderBalanceIndicator
 import app.daiyu.android.ui.components.usagePalette
+import app.daiyu.android.ui.components.rememberBottomSheetAction
 import app.daiyu.android.ui.icons.ModelBrandIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.settings.ModelCatalogEntryUi
@@ -76,6 +77,7 @@ internal fun ChatModelPicker(
     modifier: Modifier = Modifier,
     showStatusMessages: Boolean = true,
     onClearSelection: (() -> Unit)? = null,
+    closeOnSelect: Boolean = false,
 ) {
     var query by remember { mutableStateOf("") }
     var searchFocused by remember { mutableStateOf(false) }
@@ -105,6 +107,7 @@ internal fun ChatModelPicker(
         else -> null
     }
     ChatSelectionSheet(height = 500.dp, title = title, showCloseButton = false, onDismiss = onDismiss) {
+        val finishSelection = rememberBottomSheetAction()
         Box(modifier.fillMaxSize()) {
             Column(Modifier.testTag("chat-model-picker").semantics {
                 stateDescription = if (state.loading) "正在读取模型目录" else "模型目录读取完成"
@@ -183,8 +186,11 @@ internal fun ChatModelPicker(
                                     .selectable(selected = selected, enabled = canSelect, role = Role.RadioButton,
                                         interactionSource = remember { MutableInteractionSource() }, indication = null,
                                         onClick = {
-                                            if (provider.id == state.providerId) onSelect(model.id)
-                                            else onSelectOtherProvider(provider.id, model.id)
+                                            val select = {
+                                                if (provider.id == state.providerId) onSelect(model.id)
+                                                else onSelectOtherProvider(provider.id, model.id)
+                                            }
+                                            if (closeOnSelect) finishSelection(select) else select()
                                         })
                                     .heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

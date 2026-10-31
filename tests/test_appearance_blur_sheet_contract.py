@@ -28,7 +28,7 @@ class AppearanceBlurSheetContractTest(unittest.TestCase):
 
     def test_cancel_is_a_shared_footer_action_and_dismiss_does_not_save(self):
         self.assertIn("footer = {", BLUR)
-        self.assertIn('AssistantPreviewButton("取消", { choosingBlur = false }', BLUR)
+        self.assertIn('AssistantPreviewButton("取消", { finishDismiss { choosingBlur = false } }', BLUR)
         self.assertIn('testTag("choice-sheet-cancel")', BLUR)
         self.assertIn("onDismiss = { choosingBlur = false }", BLUR)
         self.assertIn('listOf("高斯模糊", "渐进模糊")', SCREEN)

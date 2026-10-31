@@ -40,6 +40,7 @@ internal fun WorkspaceEntryDialogs(name: String, directory: Boolean, enabled: ()
             "删除", true, onConfirm = { if (enabled()) { stage = "submitted"; onDelete() } },
             onDismiss = { if (enabled()) onDismiss() }, preview = true, deletionAppearance = true)
         "actions" -> ChatSelectionSheet(name, onDismiss = onDismiss, showCloseButton = false, titleFontSize = 20.sp) {
+            val finishSelection = rememberBottomSheetAction()
             Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
                 .testTag("workspace-entry-action-sheet")) {
                 val actions = buildList {
@@ -53,9 +54,11 @@ internal fun WorkspaceEntryDialogs(name: String, directory: Boolean, enabled: ()
                         .clip(RoundedCornerShape(12.dp)).alpha(if (active) 1f else .38f)
                         .clickable(enabled = active, interactionSource = remember { MutableInteractionSource() },
                             indication = null, role = Role.Button) {
-                            if (enabled()) when (id) {
-                                "export" -> { stage = "submitted"; onExport?.invoke() }
-                                else -> stage = id
+                            finishSelection {
+                                if (enabled()) when (id) {
+                                    "export" -> { stage = "submitted"; onExport?.invoke() }
+                                    else -> stage = id
+                                }
                             }
                         }.padding(horizontal = 12.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

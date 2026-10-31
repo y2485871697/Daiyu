@@ -49,6 +49,7 @@ private fun VoiceActionSheet(title: String, items: List<VoiceActionItem>,
     onSelect: (String) -> Unit, onDismiss: () -> Unit, isEnabled: (String) -> Boolean) {
     val colors = usagePalette()
     ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false, titleFontSize = 20.sp) {
+        val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
         Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
             .testTag("voice-action-sheet")) {
             items.forEach { item ->
@@ -62,7 +63,7 @@ private fun VoiceActionSheet(title: String, items: List<VoiceActionItem>,
                     .heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
                     .alpha(if (enabled) 1f else .38f)
                     .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() },
-                        indication = null, role = Role.Button) { if (isEnabled(item.id)) onSelect(item.id) }
+                        indication = null, role = Role.Button) { finishSelection { if (isEnabled(item.id)) onSelect(item.id) } }
                     .padding(horizontal = 12.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(item.icon, null, Modifier.size(24.dp).testTag("voice-personal-icon:${item.id}"), tint = tint)

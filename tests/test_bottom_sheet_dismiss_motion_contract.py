@@ -23,7 +23,7 @@ class BottomSheetDismissMotionContractTest(unittest.TestCase):
         self.assertIn('BottomSheetDismissSource.System -> latestDismiss()', text)
         self.assertIn('BottomSheetDismissSource.Outside -> latestOutsideDismiss()', text)
         self.assertIn('withFrameNanos { }', text)
-        self.assertIn('motion.dismissSource = null', text)
+        self.assertIn('motion.cancelDismiss()', text)
         self.assertIn('rememberUpdatedState(onDismiss)', text)
         self.assertNotIn('finally { onDismiss', text)
 

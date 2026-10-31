@@ -165,6 +165,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
     val colors = usagePalette()
     ChatSelectionSheet("附件", onDismiss, subtitle = "选择你要添加的内容", showCloseButton = false,
         titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
+        val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             entries.forEach { entry ->
                 val tint = when (entry.action) {
@@ -175,7 +176,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                 Row(Modifier.fillMaxWidth().testTag("chat-attachment:${entry.action.name}")
                     .heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                        role = Role.Button) { onDismiss(); onAction(entry.action) }
+                        role = Role.Button) { finishSelection { onDismiss(); onAction(entry.action) } }
                     .padding(horizontal = 12.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(entry.icon, null, Modifier.size(24.dp).testTag("chat-attachment-icon:${entry.action.name}"), tint = tint)

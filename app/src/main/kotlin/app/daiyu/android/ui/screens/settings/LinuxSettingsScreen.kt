@@ -315,11 +315,12 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
         key(popupScope) {
             if (expanded && enabled) OptionSelectionSheet(title,
                 onDismiss = { if (ownerCurrent()) expanded = false }) {
+                val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
                 currentChoices.value.forEachIndexed { index, choice ->
                     val selectChoice: () -> Unit = {
                         if (enabled && expanded && ownerCurrent()) { expanded = false; onSelect(index) }
                     }
-                    val semanticSelectChoice = hapticClick(enabled, selectChoice)
+                    val semanticSelectChoice = hapticClick(enabled) { finishSelection(selectChoice) }
                     OptionSelectionItem(choice, selected = index == selectedIndex, enabled = enabled,
                         modifier = Modifier.testTag("linux-choice:$tag:$index").semantics { onClick { semanticSelectChoice(); true } },
                         onClick = selectChoice)

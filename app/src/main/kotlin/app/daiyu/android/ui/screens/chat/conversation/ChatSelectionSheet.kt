@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
 import app.daiyu.android.ui.components.usagePalette
+import app.daiyu.android.ui.components.rememberBottomSheetAction
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
 
@@ -45,6 +46,7 @@ internal fun ChatSelectionSheet(
 ) {
     val colors = usagePalette()
     PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled) {
+        val finishDismiss = rememberBottomSheetAction()
         val available = (maxHeight - if (height == null) 70.dp else 88.dp).coerceAtLeast(0.dp)
         val shape = RoundedCornerShape(25.dp)
         Column(Modifier.align(Alignment.BottomCenter).padding(10.dp).fillMaxWidth()
@@ -64,7 +66,7 @@ internal fun ChatSelectionSheet(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) }
                 }
                 if (showCloseButton) Box(Modifier.size(40.dp).clip(RoundedCornerShape(9.dp))
-                    .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                    .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { finishDismiss(onDismiss) }),
                     contentAlignment = Alignment.Center) {
                     Icon(DaiyuIcons.Close, "关闭", Modifier.size(20.dp), tint = colors.muted)
                 }

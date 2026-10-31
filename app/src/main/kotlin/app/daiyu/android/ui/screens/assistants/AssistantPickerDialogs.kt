@@ -88,11 +88,13 @@ fun AssistantPickerDialog(
         showCloseButton = false,
         onOutsideDismiss = onOutsideDismiss,
         footer = {
-            AssistantPreviewButton(stringResource(R.string.assistant_new), onCreate,
+            val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
+            AssistantPreviewButton(stringResource(R.string.assistant_new), { finishSelection(onCreate) },
                 Modifier.weight(1f).testTag("assistant-new"), secondary = true, icon = AssistantPreviewIcons.Add)
-            AssistantPreviewButton(stringResource(R.string.assistant_done), onDismiss,
+            AssistantPreviewButton(stringResource(R.string.assistant_done), { finishSelection(onDismiss) },
                 Modifier.weight(1f).testTag("assistant-done"), primary = true)
         }) {
+        val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
         AssistantSearchField(searchQuery, { searchQuery = it }, stringResource(R.string.assistant_search),
             focused = searchFocused, onFocusChanged = { searchFocused = it },
             modifier = Modifier.testTag("assistant-search"),
@@ -110,8 +112,8 @@ fun AssistantPickerDialog(
             verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
             items(filtered, key = { it.id }) { profile ->
                 AssistantProfileCard(profile, profile.id == selectedId,
-                    onClick = { if (canSelect()) { onSelect(profile.id); onDismiss() } },
-                    onLongClick = { if (canInteract()) actionProfileId = profile.id }, assets = assets,
+                    onClick = { finishSelection { if (canSelect()) { onSelect(profile.id); onDismiss() } } },
+                    onLongClick = { finishSelection { if (canInteract()) actionProfileId = profile.id } }, assets = assets,
                     modifier = Modifier.testTag("assistant-item-${profile.id}"))
             }
             if (filtered.isEmpty()) item {

@@ -34,12 +34,13 @@ internal fun ConversationFolderPicker(
         onDismiss = onDismiss,
         showCloseButton = false,
         footer = {
+            val finishSelection = rememberBottomSheetAction()
             AssistantPreviewButton(
-                text = "取消", onClick = onDismiss,
+                text = "取消", onClick = { finishSelection(onDismiss) },
                 modifier = Modifier.weight(1f).testTag("dialog-cancel"),
             )
             AssistantPreviewButton(
-                text = "保存", onClick = { onConfirm(selectedFolderId) }, primary = true,
+                text = "保存", onClick = { finishSelection { onConfirm(selectedFolderId) } }, primary = true,
                 modifier = Modifier.weight(1f).testTag("dialog-confirm"),
             )
         },

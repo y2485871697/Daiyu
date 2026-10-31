@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +33,8 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import top.yukonga.miuix.kmp.basic.Text
 
+private val LocalOptionSelectionClosesSheet = staticCompositionLocalOf { false }
+
 @Composable
 internal fun OptionSelectionSheet(
     title: String,
@@ -43,7 +47,9 @@ internal fun OptionSelectionSheet(
     ChatSelectionSheet(title = title, onDismiss = onDismiss, subtitle = subtitle, showCloseButton = false) {
         Column(modifier.fillMaxWidth().semantics { paneTitle = title }
             .verticalScroll(rememberScrollState()).selectableGroup(),
-            verticalArrangement = Arrangement.spacedBy(itemSpacing), content = content)
+            verticalArrangement = Arrangement.spacedBy(itemSpacing)) {
+            CompositionLocalProvider(LocalOptionSelectionClosesSheet provides true) { content() }
+        }
     }
 }
 
@@ -56,6 +62,8 @@ internal fun OptionSelectionItem(
     cardStyle: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val finishSelection = rememberBottomSheetAction()
+    val closesSheet = LocalOptionSelectionClosesSheet.current
     val colors = usagePalette()
     val selectedBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
     val background = when {
@@ -70,7 +78,7 @@ internal fun OptionSelectionItem(
         .background(background)
         .then(if (cardStyle) Modifier.border(1.dp, if (selected) colors.selectionContent else colors.edge, shape) else Modifier)
         .selectable(selected = selected, enabled = enabled, role = Role.RadioButton,
-            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { if (closesSheet) finishSelection(onClick) else onClick() })
         .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text, Modifier.weight(1f), color = if (selected) selectedContent else colors.text,

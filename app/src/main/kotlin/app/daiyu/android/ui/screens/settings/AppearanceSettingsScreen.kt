@@ -104,16 +104,20 @@ internal fun AppearanceSettingsScreen(
         title = "顶栏模糊样式", onDismiss = { choosingBlur = false },
         showCloseButton = false, titleFontSize = 20.sp,
         footer = {
-            AssistantPreviewButton("取消", { choosingBlur = false },
+            val finishDismiss = app.daiyu.android.ui.components.rememberBottomSheetAction()
+            AssistantPreviewButton("取消", { finishDismiss { choosingBlur = false } },
                 Modifier.fillMaxWidth().testTag("choice-sheet-cancel"))
         },
     ) {
+        val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
         Column(Modifier.fillMaxWidth().heightIn(max = 440.dp)
             .verticalScroll(rememberScrollState()).selectableGroup()) {
             blurStyles.forEachIndexed { index, title ->
                 SettingsRadioRow(title, selected = state.topBarBlurStyle.ordinal == index) {
-                    onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))
-                    choosingBlur = false
+                    finishSelection {
+                        onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))
+                        choosingBlur = false
+                    }
                 }
             }
         }

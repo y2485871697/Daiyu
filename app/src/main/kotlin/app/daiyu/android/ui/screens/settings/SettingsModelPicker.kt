@@ -55,5 +55,5 @@ internal fun SettingsModelPicker(title: String, source: SettingsModelSource, sel
     }
     ChatModelPicker(state, { select(providerId, it) }, onDismiss,
         onSelectOtherProvider = { slot, id -> select(slot, id) }, title = title,
-        modifier = Modifier.testTag("settings-model-picker"), showStatusMessages = showStatusMessages)
+        modifier = Modifier.testTag("settings-model-picker"), showStatusMessages = showStatusMessages, closeOnSelect = true)
 }

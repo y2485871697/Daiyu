@@ -136,11 +136,13 @@ internal fun DaiyuChoiceSheet(
 ) {
     if (preview) {
         ChatSelectionSheet(title, onDismiss, footer = {
-            AssistantPreviewButton("取消", onDismiss, Modifier.fillMaxWidth())
+            val finishDismiss = rememberBottomSheetAction()
+            AssistantPreviewButton("取消", { finishDismiss(onDismiss) }, Modifier.fillMaxWidth())
         }) {
+            val finishSelection = rememberBottomSheetAction()
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
                 itemsIndexed(options) { index, option ->
-                    val select = { onSelect(index) }
+                    val select = { finishSelection { onSelect(index) } }
                     val retained = if (engineeringUi) Modifier.semantics { this[RetainedChoiceSelect] = select } else Modifier
                     AssistantPreviewButton(option, select,
                         Modifier.fillMaxWidth().testTag("prompt-choice:$index").then(retained), actionRow = true)
@@ -156,13 +158,14 @@ internal fun DaiyuChoiceSheet(
         animateContent = false,
         bottomSheet = true,
     ) {
+        val finishSelection = rememberBottomSheetAction()
         Box(
             Modifier.fillMaxSize().testTag("choice-sheet-viewport").dialogDimBackground(Color.Black.copy(alpha = 0.32f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     clickFeedback = false,
-                    onClick = onDismiss,
+                    onClick = { finishSelection(onDismiss) },
                 ).windowInsetsPadding(WindowInsets.safeDrawing)
                 .imePadding(),
         ) {
@@ -183,7 +186,7 @@ internal fun DaiyuChoiceSheet(
                     modifier = Modifier.padding(bottom = 12.dp))
                 LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
                     itemsIndexed(options) { index, option ->
-                        val select = { onSelect(index) }
+                        val select = { finishSelection { onSelect(index) } }
                         val retained = if (engineeringUi) Modifier.semantics { this[RetainedChoiceSelect] = select } else Modifier
                         Box(
                             Modifier.testTag("prompt-choice:$index").fillMaxWidth().heightIn(min = 56.dp)
@@ -195,7 +198,7 @@ internal fun DaiyuChoiceSheet(
                         }
                     }
                 }
-                TextButton(text = "取消", onClick = onDismiss,
+                TextButton(text = "取消", onClick = { finishSelection(onDismiss) },
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("choice-sheet-cancel"))
             }
         }

@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class LargeDelegationBatchTest {
     private val parent = Message(MessageId("parent"), ConversationId("conversation"), RunId("parent-run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-    private val owner = RunExecutionOwner.issue(parent)
+    private val owner = runnerOwner(parent)
     private val session = SessionCapabilities("session", setOf(RunChildModels.CAPABILITY, RunChildTasks.CAPABILITY))
     private val authorization = TaskAuthorization(session.sessionId, parent.runId.value)
     private class Journal : ChildTaskStore {

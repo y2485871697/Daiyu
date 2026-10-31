@@ -40,19 +40,29 @@ class ConversationSubAgentHotConfigurationTest {
         val legacyProfile = profile.copy(providerId = model.providerId, modelId = "selection")
         val config = ConversationSubAgentConfig(listOf(legacyProfile), parallelLimits = mapOf(model to 2))
         val key = config.poolKey(owner, profile.id)
-        val pool = app.daiyu.android.domain.delegation.ChildModelPool(4)
+        val pool = app.daiyu.android.domain.delegation.ChildModelPool(4, maximum = 4)
         val neighbor = app.daiyu.android.domain.delegation.ChildModelPool(3)
         for (limit in listOf(2, 0, 1)) {
             val current = config.copy(parallelLimits = mapOf(model to limit))
             val resolved = current.parallelLimitForPool(owner, key) { model.apiModel }
             assertEquals(limit, resolved)
             pool.resize(requireNotNull(resolved))
-            assertEquals(if (limit == 0) Int.MAX_VALUE else limit, pool.semaphore.availablePermits())
-            assertEquals(3, neighbor.semaphore.availablePermits())
+            assertPoolCapacity(pool, if (limit == 0) 4 else limit)
+            assertPoolCapacity(neighbor, 3)
         }
         assertEquals(1, config.copy(parallelLimits = emptyMap()).parallelLimitForPool(owner, key))
         assertEquals(4, config.copy(profiles = listOf(legacyProfile.copy(parallelLimit = 4)))
             .parallelLimitForPool(owner, key) { error("explicit values must not read the catalog") })
+    }
+
+    private fun assertPoolCapacity(pool: app.daiyu.android.domain.delegation.ChildModelPool, expected: Int) {
+        val leases = List(expected + 1) { pool.lease() }
+        try {
+            leases.take(expected).forEach { assertTrue(it.tryAcquire()) }
+            assertFalse(leases.last().tryAcquire())
+        } finally {
+            leases.forEach { it.close() }
+        }
     }
 
     @Test fun poolLimitDecodingIsExactAndConversationScoped() {

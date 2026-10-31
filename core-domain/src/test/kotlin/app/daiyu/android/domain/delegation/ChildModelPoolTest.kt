@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChildModelPoolTest {
+    @Test fun zeroLimitRestoresDefaultMaximumAfterResize() {
+        val pool = ChildModelPool(4)
+        for (limit in listOf(2, 0, 1)) {
+            pool.resize(limit)
+            assertEquals(if (limit == 0) Int.MAX_VALUE else limit, pool.semaphore.availablePermits())
+        }
+    }
+
     @Test fun shrinkParksOnlyLaterLeasesAtSafeBoundaryAndKeepsSameSemaphore() {
         val pool = ChildModelPool(4); val original = pool.semaphore
         val leases = List(4) { pool.lease() }

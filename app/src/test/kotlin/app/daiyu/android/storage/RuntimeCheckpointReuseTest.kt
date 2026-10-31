@@ -86,7 +86,7 @@ class RuntimeCheckpointReuseTest {
         val requests = base.usageRequests.toMutableList(); val usage = base.usage.toMutableList()
         val summaries = base.context!!.summaries.toMutableList()
         val mutable = base.copy(usageRequests = requests, usage = usage,
-            context = base.context.copy(summaries = summaries))
+            context = base.context!!.copy(summaries = summaries))
         val facts = CheckpointPreservation.capture(mutable)
         requests.clear(); usage.clear(); summaries.clear()
         val rejected = runCatching { facts.preserve(mutable) }.exceptionOrNull()
@@ -94,7 +94,7 @@ class RuntimeCheckpointReuseTest {
         assertEquals("summary_usage_changed_after_handoff",
             runCatching { facts.preserve(base.copy(usage = usage)) }.exceptionOrNull()!!.message)
         assertEquals("runtime_summary_admission_dropped",
-            runCatching { facts.preserve(base.copy(context = base.context.copy(summaries = summaries))) }
+            runCatching { facts.preserve(base.copy(context = base.context!!.copy(summaries = summaries))) }
                 .exceptionOrNull()!!.message)
         facts.preserve(base)
     }
@@ -105,7 +105,7 @@ class RuntimeCheckpointReuseTest {
         val usage = base.usage.toMutableList()
         val summaries = base.context!!.summaries.toMutableList()
         val input = base.copy(usageRequests = requests, usage = usage,
-            context = base.context.copy(summaries = summaries))
+            context = base.context!!.copy(summaries = summaries))
         val frozen = CheckpointPreservation.freeze(input)
         requests.clear(); usage.clear(); summaries.clear()
         assertEquals(base, frozen)
@@ -116,13 +116,13 @@ class RuntimeCheckpointReuseTest {
         assertEquals("summary_usage_changed_after_handoff",
             runCatching { facts.preserve(base.copy(usage = emptyList())) }.exceptionOrNull()!!.message)
         assertEquals("runtime_summary_admission_dropped",
-            runCatching { facts.preserve(base.copy(context = base.context.copy(summaries = emptyList()))) }
+            runCatching { facts.preserve(base.copy(context = base.context!!.copy(summaries = emptyList()))) }
                 .exceptionOrNull()!!.message)
     }
 
     @Test fun currentOwnerSummaryUsageMayGrowOnlyAfterAdmission() {
         val base = checkpoint(); val own = RequestCheckpoint("own-summary", "s", "owner", RequestOperation.NEXT)
-        val next = base.copy(context = base.context!!.copy(summaries = base.context.summaries + own),
+        val next = base.copy(context = base.context!!.copy(summaries = base.context!!.summaries + own),
             usage = base.usage + RequestUsageCheckpoint(own, ModelEvent.Usage(8, 4, 0), UsageRequestSource.SUMMARY))
         CheckpointPreservation.capture(base).preserve(next)
         CheckpointPreservation.capture(next).preserve(next.copy(usage = base.usage))

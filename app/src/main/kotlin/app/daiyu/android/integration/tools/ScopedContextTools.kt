@@ -19,20 +19,30 @@ internal object ScopedContextTools {
             val hint = when (name) {
                 "context_archive_page" -> {
                     if (preparedArchiveId == null || !scope.allowsArchive(conversationId)) return@mapNotNull null
-                    "；本轮可信准备的档案locator：" + JSONObject().put("archive_id", preparedArchiveId)
+                    "；省略archive_id时读取宿主本轮准备的档案；显式ID仍按原授权校验"
                 }
-                "context_usage" -> "；本轮宿主会话/任务：" + JSONObject()
-                    .put("branch_id", conversationId.value).put("run_id", runId.value) +
-                    "；零条回执不代表零消耗，不用估算补齐"
+                "context_usage" -> "；省略branch_id时使用当前会话；两个ID均省略时读取本轮任务；" +
+                    "仅提供branch_id时读取该会话总量；显式run_id仍按原授权校验；零条回执不代表零消耗，不用估算补齐"
                 else -> error("unsupported_context_tool")
             }
             check(source.getString("sideEffect") == "none")
             val definition = ToolDefinition(name, 1, source.getString("description") + hint,
-                "context.read.$name", ToolEffect.READ_ONLY, schema(source.getJSONObject("parameters")))
+                "context.read.$name", ToolEffect.READ_ONLY,
+                schema(source.getJSONObject("parameters"), if (name == "context_usage") "branch_id" else "archive_id"))
             object : RegisteredTool {
                 override val definition = definition
                 override fun prepare(arguments: ToolArguments): PreparedTool {
-                    val canonical = arguments.canonicalJson()
+                    val resolved = JSONObject(arguments.canonicalJson())
+                    when (name) {
+                        "context_usage" -> if (!resolved.has("branch_id")) {
+                            resolved.put("branch_id", conversationId.value)
+                            if (!resolved.has("run_id")) resolved.put("run_id", runId.value)
+                        }
+                        "context_archive_page" -> if (!resolved.has("archive_id")) {
+                            resolved.put("archive_id", checkNotNull(preparedArchiveId))
+                        }
+                    }
+                    val canonical = resolved.toString()
                     return PreparedTool {
                         val result = adapter.execute(name, JSONObject(canonical))
                         if (result.opt("ok") !is Boolean) ExecutionReceipt.Unknown("invalid_backend_receipt")
@@ -43,7 +53,7 @@ internal object ScopedContextTools {
         }
     }
 
-    private fun schema(source: JSONObject): ToolSchema {
+    private fun schema(source: JSONObject, defaultedField: String): ToolSchema {
         fun keys(value: JSONObject) = value.keys().asSequence().toSet()
         require(keys(source) == setOf("type", "properties", "required", "additionalProperties"))
         require(source.getString("type") == "object" && source.get("additionalProperties") == false)
@@ -66,7 +76,7 @@ internal object ScopedContextTools {
                 }
                 else -> error("unsupported_context_schema")
             }
-            ArgumentField(name, type, required = name in required)
+            ArgumentField(name, type, required = name in required && name != defaultedField)
         })
     }
 }

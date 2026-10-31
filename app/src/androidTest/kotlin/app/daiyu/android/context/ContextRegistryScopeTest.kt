@@ -264,8 +264,7 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
         val archive=full.single {it.definition.name=="context_archive_page"}.definition
         val parameters=JSONObject(archive.schema.jsonSchema())
         assertFalse(parameters.getBoolean("additionalProperties"))
-        assertEquals(1,parameters.getJSONArray("required").length())
-        assertEquals("archive_id",parameters.getJSONArray("required").getString(0))
+        assertEquals(0,parameters.getJSONArray("required").length())
         val properties=parameters.getJSONObject("properties")
         assertEquals(1,properties.getJSONObject("archive_id").getInt("minLength"))
         assertEquals(200,properties.getJSONObject("archive_id").getInt("maxLength"))

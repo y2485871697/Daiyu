@@ -22,7 +22,7 @@ CLOUD_SCOPES['context'] = (
     ':core-domain:test --tests app.daiyu.android.domain.context.* '
     ':app:testDebugUnitTest --tests app.daiyu.android.context.* '
     '--tests app.daiyu.android.storage.ProviderRepositoryDeletionTest '
-    '--tests app.daiyu.android.storage.ProviderRegistryTest')
+    '--tests app.daiyu.android.storage.ProviderRegistryTest :app:compileDebugAndroidTestKotlin')
 UNIT_SCOPES = {'unit', 'delegation', 'context'}
 CONTEXT_PACKAGES = (
     ('core-domain', 'app.daiyu.android.domain.context.'),
@@ -33,6 +33,7 @@ CONTEXT_STORAGE_CLASSES = {
     'app.daiyu.android.storage.ProviderRegistryTest',
 }
 CONTEXT_RESOLUTION_CLASS = 'app.daiyu.android.context.SavedCatalogSummaryResolutionTest'
+CONTEXT_TOOL_CLASS = 'app.daiyu.android.context.ContextToolDefinitionStabilityTest'
 DELEGATION_PACKAGES = (
     ('core-domain', 'app.daiyu.android.domain.delegation.'),
     ('core-domain', 'app.daiyu.android.domain.tools.'),
@@ -147,7 +148,7 @@ def verify_xml(archive, scope, platform=None):
                             if group is not None:
                                 covered.add(group)
                 if (covered != set(CONTEXT_PACKAGES)
-                        or not (CONTEXT_STORAGE_CLASSES | {CONTEXT_RESOLUTION_CLASS}) <= classes):
+                        or not (CONTEXT_STORAGE_CLASSES | {CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS}) <= classes):
                     raise ValueError('context_package_coverage_missing')
             if scope == 'delegation':
                 covered = set()
@@ -162,6 +163,7 @@ def verify_xml(archive, scope, platform=None):
                             covered.add(group)
                 if covered != set(DELEGATION_PACKAGES):
                     raise ValueError('delegation_package_coverage_missing')
+            if scope in ('delegation', 'context'):
                 summary = json.loads(z.read('androidtest-compile.json'))
                 if (summary.get('task') != ':app:compileDebugAndroidTestKotlin'
                         or summary.get('outcome') not in ('EXECUTED', 'UP-TO-DATE', 'FROM-CACHE')

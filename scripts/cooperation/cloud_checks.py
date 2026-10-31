@@ -46,7 +46,7 @@ def run(scope):
         command = [str(root / ('gradlew.bat' if os.name == 'nt' else 'gradlew')),
                    '--no-daemon', '--parallel', '--build-cache', '--warning-mode=fail',
                    '--console=plain', '-I', 'scripts/cooperation/checks_only.init.gradle', *CLOUD_SCOPES[item].split()]
-        if item == 'delegation':
+        if item in ('delegation', 'context'):
             command[command.index('-I'):command.index('-I')] = ['-PdaiyuCheckGraph=' + str(folder / 'task-graph.json')]
         if item in UNIT_SCOPES:
             for reports in UNIT_REPORTS:
@@ -55,7 +55,7 @@ def run(scope):
             (folder / name).unlink(missing_ok=True)
         with (folder / 'check.log').open('wb') as log:
             code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
-        if item == 'delegation' and code == 0:
+        if item in ('delegation', 'context') and code == 0:
             target = ':app:compileDebugAndroidTestKotlin'
             graph = json.loads((folder / 'task-graph.json').read_text(encoding='utf-8'))
             text = (folder / 'check.log').read_text(encoding='utf-8', errors='replace')
@@ -71,7 +71,7 @@ def run(scope):
                 for p in reports.rglob('*.xml'):
                     base = root if item in UNIT_SCOPES else reports
                     z.write(p, p.relative_to(base).as_posix())
-            if item == 'delegation' and (folder / 'androidtest-compile.json').exists():
+            if item in ('delegation', 'context') and (folder / 'androidtest-compile.json').exists():
                 z.write(folder / 'androidtest-compile.json', 'androidtest-compile.json')
         report_summary = {}
         if code == 0:

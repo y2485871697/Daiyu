@@ -51,7 +51,8 @@ internal fun MessageContentUi.workflowKey(index: Int): String = when (this) {
     is MessageContentUi.Reasoning -> "reasoning:${reported.itemId}"
     is MessageContentUi.Tool -> "tool:${step.toolCallId}"
     is MessageContentUi.Text -> "text:$itemId"
-    is MessageContentUi.Image -> "image:$index:${image.reference.id}"
+    is MessageContentUi.Image -> messageImagePreviewKey(image)
+    is MessageContentUi.Video -> messageVideoPreviewKey(video)
 }
 
 internal fun visibleWorkflowKeys(content: List<MessageContentUi>, handoff: ReasoningHandoff): List<String> {

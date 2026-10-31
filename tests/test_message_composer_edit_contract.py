@@ -30,14 +30,21 @@ class MessageComposerEditContract(unittest.TestCase):
         self.assertLess(main.index('return@send'), main.index('text == draft'))
         self.assertIn('text == editor.text && editor.canSubmit', main)
         store = (SRC / 'storage/MessageActionStore.kt').read_text()
-        self.assertIn('addAll(selected.blocks.filterNot { it is MessageBlock.Text })', store)
+        self.assertIn('addAll(selectedBlocks.filterNot { it is MessageBlock.Text })', store)
         self.assertIn('重新提交原视频需要新的上传批准', store)
 
     def test_message_owned_attachments_are_borrowed_not_imported(self):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('editor.images, editor.videos, imageHost.historyLoader', main)
         media = (UI / 'ComposerMessageEdit.kt').read_text()
-        self.assertIn('MessageImage(item.image, index + 1, loader, compact = true)', media)
+        self.assertIn('ComposerImageAttachmentChip(number,', media)
+        self.assertIn('loadMessageImage(image, loader, 256)', media)
+        self.assertIn('contentScale = ContentScale.Crop', media)
+        self.assertIn('onRemoveImage(item)', media)
+        self.assertNotIn('MessageImage(item.image', media)
+        self.assertNotIn('width(72.dp)', media)
+        self.assertNotIn('ImageAttachmentItem.Ready', media)
+        self.assertNotIn('ImageAttachmentOwner(', media)
         self.assertIn('videos.forEachIndexed', media)
         for forbidden in ('discard', 'import(', 'remove(', 'VideoChatHost', 'ImageAttachmentStore'):
             self.assertNotIn(forbidden, media)
@@ -101,7 +108,7 @@ class MessageComposerEditContract(unittest.TestCase):
         main = (SRC / 'MainActivity.kt').read_text()
         host = (SRC / 'MessageEditImageDraft.kt').read_text()
         self.assertIn('MessageEditImageDraft(target.conversationId.value', main)
-        self.assertIn('messageCallbacks.onSaveEditImages(editor.key, text, editor.additions.ready)', main)
+        self.assertIn('messageCallbacks.onSaveEditImages(editor.key, text, editor.additions.ready, editor.retainedImages)', main)
         self.assertIn('message-edit-${UUID.randomUUID()}', host)
         self.assertIn('source.import(owner, uri, signal)', host)
         self.assertIn('source.store.clear(owner)', host)
@@ -125,6 +132,58 @@ class MessageComposerEditContract(unittest.TestCase):
         controller = (SRC / 'ChatController.kt').read_text()
         self.assertIn('if (action == MessageAction.SAVE_EDIT) editImages else emptyList()', controller)
         self.assertIn('actionRevision = revision', controller)
+
+    def test_shared_chip_is_presentation_only_and_matches_normal_compact_draft(self):
+        attachments = (SRC / 'ui/screens/chat/attachments/ImageAttachments.kt').read_text()
+        chip = attachments.split('internal fun ComposerImageAttachmentChip(', 1)[1].split('private fun AttachmentTile(', 1)[0]
+        for expected in ('width(188.dp).height(44.dp)', 'size(36.dp)', 'DaiyuIcons.Close',
+                         'removable: Boolean', 'thumbnail: @Composable () -> Unit'):
+            self.assertIn(expected, chip)
+        for forbidden in ('ImageAttachmentItem', 'ImageAttachmentOwner', 'MessageImageReference',
+                          'import(', 'remove(', 'clear(', '.reference.copy('):
+            self.assertNotIn(forbidden, chip)
+        self.assertIn('ComposerImageAttachmentChip(', attachments.split('private fun AttachmentTile(', 1)[1])
+        self.assertIn('numberOffset + index + 1', attachments)
+
+    def test_retained_selection_is_validated_against_authorized_original_blocks(self):
+        store = (SRC / 'storage/MessageActionStore.kt').read_text()
+        prepare = store.split('fun prepareRegeneration(', 1)[1].split('private fun appendEditImages(', 1)[0]
+        self.assertIn('retainedImages: List<MessageImageReference>? = null', prepare)
+        self.assertLess(prepare.index('authorize(db, target)'), prepare.index('retainedImages?.let'))
+        for expected in ('selected.blocks.filterIsInstance<MessageBlock.Image>()',
+                         'requested.map { it.owner to it.id }.distinct().size == requested.size',
+                         'originals.indexOfFirst { it.reference == reference }', 'require(position > previous)',
+                         'originals[position]', 'retained == null || it in retained',
+                         'selectedBlocks.any { it is MessageBlock.Image }'):
+            self.assertIn(expected, prepare)
+        self.assertNotIn('MessageBlock.Image(reference)', prepare)
+        host = (SRC / 'ControllerMessageActions.kt').read_text()
+        self.assertIn('retained?.toList()', host)
+        self.assertIn('retainedImages = retainedImages', host)
+        controller = (SRC / 'ChatController.kt').read_text()
+        self.assertIn('retainedImages: List<app.daiyu.android.domain.MessageImageReference>? = null', controller)
+        self.assertIn('val retainedImageSelection = retainedImages?.toList()', controller)
+        self.assertIn('if (action == MessageAction.SAVE_EDIT) retainedImageSelection else null', controller)
+
+    def test_removal_is_fenced_and_only_changes_edit_selection_and_capacity(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('val retainedImages get() = images.map { it.image.reference }', main)
+        self.assertIn('numberOffset = editor.images.size', main)
+        self.assertIn('editor.additions.setRetainedImageCount(retained.size)', main)
+        self.assertIn('inlineMessageEditor = editor.copy(images = retained)', main)
+        removal = main.split('fun editImageRemovalCurrent()', 1)[1].split('ComposerEditAttachments(', 1)[0]
+        for expected in ('inlineMessageEditor === editor', '!editor.uncertain',
+                         'editorGeneration == removalGeneration', 'draftRevision == removalRevision',
+                         'controller.dataRevision == removalDataRevision', 'messageActionVisit === removalVisit',
+                         'messageEditTargetCurrent(editor)', '!controller.dataBusy'):
+            self.assertIn(expected, removal)
+        self.assertIn('if (editImageRemovalCurrent()) additionActions.onRemove(key)', main)
+        host = (SRC / 'MessageEditImageDraft.kt').read_text()
+        self.assertIn('retainedImageCount + attachments.state.value.items.size >= 8', host)
+        self.assertIn('8 - retainedImageCount - attachments.state.value.items.size', host)
+        count_update = host.split('fun setRetainedImageCount(', 1)[1].split('private val signals', 1)[0]
+        for forbidden in ('source.import', 'source.store', '.remove(', '.clear('):
+            self.assertNotIn(forbidden, count_update)
 
     def test_unknown_save_keeps_temporary_attachments_and_blocks_resubmit(self):
         main = (SRC / 'MainActivity.kt').read_text()

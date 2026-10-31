@@ -70,6 +70,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantSelectionOwner
@@ -749,6 +750,7 @@ class MainActivity : ComponentActivity() {
         }
         videoSending = sending.receipt == null
         val receipt = sending.receipt ?: return
+        if (receipt.outcome == VideoDraftOutcome.ACCEPTED) messageMediaCommitRevision++
         videoHost.settle(receipt)
         val original = videoReceiptEditor
         val accepted = original != null && (
@@ -1253,6 +1255,7 @@ class MainActivity : ComponentActivity() {
         val uncertain: Boolean = false,
         val selectionStart: Int = text.length, val selectionEnd: Int = text.length,
         val visit: Any = Any()) {
+        val retainedImages get() = images.map { it.image.reference }
         val canSubmit: Boolean get() = !uncertain && !additions.blocked &&
             (text.isNotBlank() || images.isNotEmpty() || videos.isNotEmpty() || additions.ready.isNotEmpty())
     }
@@ -2641,6 +2644,11 @@ class MainActivity : ComponentActivity() {
                             BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {
+                                    val mediaLease = imageHost.mediaPreviews
+                                    val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot) {
+                                        chatMediaPreviewGallery(chatState.turns, mediaLease, messageMediaSnapshot)
+                                    }
+                                    app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
                                         automaticCompression = automaticCompression, automaticCompressionPending = automaticCompressionPending,
                                         composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
@@ -2667,16 +2675,48 @@ class MainActivity : ComponentActivity() {
                                                 ImageComposerPanel()
                                                 VideoComposerPanel()
                                             } else {
+                                                val removalGeneration = editorGeneration
+                                                val removalRevision = draftRevision
+                                                val removalDataRevision = controller.dataRevision
+                                                val removalVisit = messageActionVisit
+                                                fun editImageRemovalCurrent(): Boolean =
+                                                    inlineMessageEditor === editor && !editor.uncertain &&
+                                                        activityUsable() && voiceForeground && selectionReady &&
+                                                        retainedPage == "chat" && !sidebarVisible &&
+                                                        selected?.id == editor.target.conversationId &&
+                                                        editorGeneration == removalGeneration &&
+                                                        draftRevision == removalRevision &&
+                                                        controller.dataRevision == removalDataRevision &&
+                                                        messageActionVisit === removalVisit &&
+                                                        messageEditTargetCurrent(editor) &&
+                                                        pendingTextSend == null && controller.textSendState() == null &&
+                                                        !controller.dataBusy && controller.active == null &&
+                                                        terminalEditor == null && virtualDisplayEditor == null &&
+                                                        !videoSending && !imageHost.sending && !shizukuWritesBlocked &&
+                                                        chatState.composer.enabled
                                                 app.daiyu.android.ui.screens.chat.conversation.ComposerEditAttachments(
-                                                    editor.images, editor.videos, imageHost.historyLoader)
+                                                    editor.images, editor.videos, imageHost.historyLoader,
+                                                    enabled = editImageRemovalCurrent(),
+                                                    onRemoveImage = { item ->
+                                                        if (editImageRemovalCurrent() && item in editor.images) {
+                                                            val retained = editor.images.filterNot { it == item }
+                                                            editor.additions.setRetainedImageCount(retained.size)
+                                                            inlineMessageEditor = editor.copy(images = retained)
+                                                            publishChat(rowsChanged = false)
+                                                        }
+                                                    })
                                                 val additions by editor.additions.attachments.state.collectAsStateWithLifecycle()
-                                                ImageAttachments(additions, editor.additions.actions, editor.additions.loader,
-                                                    enabled = chatState.composer.enabled && !controller.dataBusy && !editor.uncertain, compact = true)
+                                                val additionActions = editor.additions.actions
+                                                ImageAttachments(additions, additionActions.copy(onRemove = { key ->
+                                                    if (editImageRemovalCurrent()) additionActions.onRemove(key)
+                                                }), editor.additions.loader, enabled = editImageRemovalCurrent(), compact = true,
+                                                    numberOffset = editor.images.size)
                                                 if (editor.uncertain) top.yukonga.miuix.kmp.basic.Text(
                                                     "保存结果待核实；保留编辑附件，不会自动重发",
                                                     modifier = Modifier.testTag("message-edit-unknown"))
                                             }
                                         } })
+                                    }
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
                                         DictationComposerEntry()
@@ -3272,7 +3312,7 @@ class MainActivity : ComponentActivity() {
             if (editor != null) {
                 if (currentChat() && editorMatches() && !controller.dataBusy && text == editor.text && editor.canSubmit && !editReferencePending(editor) &&
                     editor.target == (actionSnapshot?.renderedTargets?.get(editor.key) ?: actionSnapshot?.targets?.get(editor.key)))
-                    messageCallbacks.onSaveEditImages(editor.key, text, editor.additions.ready)
+                    messageCallbacks.onSaveEditImages(editor.key, text, editor.additions.ready, editor.retainedImages)
                 return@send
             }
             if (editorMatches() && terminalEditor == null && !mcpPreparing && mcpApproval == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
@@ -6736,6 +6776,43 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private var messageMediaCommitRevision = 0L
+    private data class MessageMediaKey(val conversation: ConversationId?, val data: Long, val generation: Long,
+        val mediaCommit: Long)
+    private var messageMediaKey: MessageMediaKey? = null
+    private var messageMediaSnapshot by mutableStateOf<ControllerMessageMediaSnapshot?>(null)
+    private var messageMediaRead: kotlinx.coroutines.Job? = null
+    private var messageMediaRequested: MessageMediaKey? = null
+    private fun currentMessageMediaKey() = MessageMediaKey(selected?.id, controller.dataRevision, editorGeneration, messageMediaCommitRevision)
+
+    /** SQLite/asset reads occur in this host IO projection, never during composition. */
+    private fun prepareMessageMedia() {
+        if (!controller.ready) return
+        val key = currentMessageMediaKey()
+        if (messageMediaKey == key || messageMediaRead?.isActive == true && messageMediaRequested == key) return
+        messageMediaRead?.cancel()
+        messageMediaRequested = key
+        // Do not leave a previous visit's grants visible while another owner is being read.
+        messageMediaSnapshot = null
+        val id = key.conversation
+        if (id == null) { messageMediaKey = key; return }
+        messageMediaRead = lifecycleScope.launch {
+            val context = kotlinx.coroutines.currentCoroutineContext()
+            try {
+                val snapshot = try {
+                    withContext(Dispatchers.IO) { controller.messageMediaProjection(id) { !context.isActive } }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                  catch (_: Exception) { null } // Damaged/missing witnesses never become grants.
+                if (!activityUsable() || currentMessageMediaKey() != key || messageMediaRequested != key) return@launch
+                messageMediaKey = key
+                messageMediaSnapshot = snapshot
+                publishChat()
+            } finally {
+                if (messageMediaRequested == key) { messageMediaRead = null; messageMediaRequested = null }
+            }
+        }
+    }
+
     private data class ToolReceiptKey(val conversation: ConversationId?, val data: Long, val generation: Long,
         val sources: List<app.daiyu.android.ui.RetainedToolOutcomes.Source>, val execution: app.daiyu.android.domain.runtime.ExecutionState?)
     private val toolPresentations = app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache()
@@ -6836,6 +6913,7 @@ class MainActivity : ComponentActivity() {
         } ?: sendPreview
         toolPresentations.scope(selected?.id?.value)
         val receiptsReady = prepareToolReceipts()
+        prepareMessageMedia()
         if (receiptsReady) questionCards = buildMap {
             MessageHistory.expand(shown.map { it.second }).forEach { message ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
@@ -6856,6 +6934,7 @@ class MainActivity : ComponentActivity() {
             compressionActivity = null,
             compressionActivities = visibleCompressions,
             turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else ChatTurnMapper.map(shown.map { it.second },
+                messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },
                 boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey

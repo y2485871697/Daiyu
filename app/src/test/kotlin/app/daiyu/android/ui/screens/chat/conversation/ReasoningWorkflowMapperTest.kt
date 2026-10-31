@@ -34,6 +34,7 @@ class ReasoningWorkflowMapperTest {
                 is MessageContentUi.Tool -> it.step.toolCallId
                 is MessageContentUi.Text -> it.text
                 is MessageContentUi.Image -> "image"
+                is MessageContentUi.Video -> "video"
             }
         })
         assertEquals(owner, turn.content.filterIsInstance<MessageContentUi.Image>().single().image.expectedOwner)

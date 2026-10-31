@@ -19,6 +19,7 @@ object ChatTurnMapper {
         boundariesAfter: Set<String> = emptySet(),
         assistantIdentity: (Message, String) -> app.daiyu.android.assistants.AssistantReplyIdentity? = { _, _ -> null },
         presentations: ToolPresentationCache? = null,
+        messageVideos: (Message) -> List<MessageVideoUi> = { emptyList() },
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
@@ -74,7 +75,12 @@ object ChatTurnMapper {
                     id = message.id.value,
                     text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text },
                     timestamp = timestamp(message),
-                    content = mixedContent(message, errors, states, dedicated, activity, presentations = presentations),
+                    content = mixedContent(message, errors, states, dedicated, activity, presentations = presentations,
+                        videos = messageVideos(message).filter { video ->
+                            video.expectedOwner.conversationId == message.conversationId.value &&
+                                video.expectedOwner.messageId == message.id.value &&
+                                video.reference.owner == video.expectedOwner
+                        }),
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
@@ -163,8 +169,9 @@ object ChatTurnMapper {
         dedicatedTool: (Message, MessageBlock.Tool) -> String?,
         activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
         integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool },
-        presentations: ToolPresentationCache? = null): List<MessageContentUi> {
-        if (message.blocks.none { it is MessageBlock.Image ||
+        presentations: ToolPresentationCache? = null,
+        videos: List<MessageVideoUi> = emptyList()): List<MessageContentUi> {
+        if (videos.isEmpty() && message.blocks.none { it is MessageBlock.Image ||
                 it is MessageBlock.Tool && dedicatedTool(message, it) != null }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
         val reasoning = if (integrateReasoning) reasoningAtBoundaries(message) else emptyMap()
@@ -180,6 +187,8 @@ object ChatTurnMapper {
                     )
                 })
             }
+            // Sidecar order is defined after the source row's text/image blocks.
+            videos.forEach { add(MessageContentUi.Video(it)) }
         }
     }
 

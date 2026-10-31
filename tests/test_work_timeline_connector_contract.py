@@ -12,7 +12,7 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertNotIn('Arrangement.spacedBy(10.dp)', main)
         entry = source[source.index('private fun SpacedMessageEntry('):source.index('internal fun MessageImage(')]
         self.assertIn('entryBody(current.workflowKey(index)) {', entry)
-        self.assertIn('spacingAfter = if (index < content.lastIndex) 10.dp else 0.dp', entry)
+        self.assertIn('spacingAfter = if (lastIndex < content.lastIndex) 10.dp else 0.dp', entry)
         self.assertIn('leadingConnector = connector.before', entry)
         self.assertIn('trailingConnector = connector.after', entry)
         self.assertIn('throughConnector = connector.through', entry)

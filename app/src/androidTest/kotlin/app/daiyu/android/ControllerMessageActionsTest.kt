@@ -1150,6 +1150,51 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs")); assertEquals(0, f.opens.get())
     }
 
+    fun testFourArgumentSaveCopiesSelectionAndKeepsAdmittedReceiptAcrossRebind() {
+        val f = fresh(); val owner = seed(f)
+        val snapshot = snapshot(f, owner.id)
+        val target = snapshot.targets.values.single { it.role == Message.USER_ROLE }
+        val host = ControllerMessageActionHost(f.controller)
+        val done = CountDownLatch(1)
+        val receipt = AtomicReference<MessageActionResult>()
+        val retained = mutableListOf<MessageImageReference>()
+        main {
+            val callbacks = host.bind(snapshot, { true }) { receipt.set(it); done.countDown() }
+            callbacks.onSaveEditImages(target.messageId.value, "edited via attachment callback", emptyList(), retained)
+            retained += MessageImageReference(MessageImageOwner("foreign", "foreign"),
+                "00000000-0000-0000-0000-000000000001", "image/png", 1, "a".repeat(64), 1, 1)
+            host.bind(snapshot, { true }) { fail("replacement must not steal admitted save receipt") }
+        }
+        await(done)
+        assertTrue(receipt.get() is MessageActionResult.Regenerated)
+        assertEquals("edited via attachment callback", history(f, owner.id).first().blocks
+            .filterIsInstance<MessageBlock.Text>().single().text)
+        assertEquals(1, f.opens.get())
+    }
+
+    fun testStaleFourArgumentSaveHasNoAdmissionAndInvalidatedReceiptIsNotDelivered() {
+        val f = fresh(); val owner = seed(f)
+        val snapshot = snapshot(f, owner.id)
+        val target = snapshot.targets.values.single { it.role == Message.USER_ROLE }
+        val host = ControllerMessageActionHost(f.controller)
+        val results = AtomicInteger()
+        val done = CountDownLatch(1)
+        val observer: () -> Unit = { if (!f.controller.dataBusy) done.countDown() }
+        main {
+            val old = host.bind(snapshot, { true }) { results.incrementAndGet() }
+            val current = host.bind(snapshot, { true }) { results.incrementAndGet() }
+            old.onSaveEditImages(target.messageId.value, "stale", emptyList(), emptyList())
+            assertFalse(f.controller.dataBusy)
+            current.onSaveEditImages(target.messageId.value, "current", emptyList(), emptyList())
+            host.invalidate()
+            f.controller.observe(observer)
+        }
+        await(done); main { f.controller.unobserve(observer) }
+        assertEquals(0, results.get())
+        assertEquals(1, f.opens.get())
+        assertEquals("current", history(f, owner.id).first().blocks.filterIsInstance<MessageBlock.Text>().single().text)
+    }
+
     override fun tearDown() {
         try { fixtures.forEach { f ->
             f.controller.stop(); f.controller.close(); f.app.balances.close(); f.db.close()

@@ -33,5 +33,38 @@ class PreviewDialogStatusBarContractTest(unittest.TestCase):
         self.assertIn("PreviewDialog(onDismiss, bottomSheet = true,", selection)
 
 
+
+MEDIA = SRC / "ui/media"
+
+class PreviewDialogContract(unittest.TestCase):
+    def test_status_bar_effect_only_uses_preview_dialog_window(self):
+        source = (MEDIA / 'ChatMediaPreviewSystemBars.kt').read_text()
+        self.assertIn('view.parent as? DialogWindowProvider', source)
+        self.assertIn('BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE', source)
+        self.assertIn('onDispose { lease?.close() }', source)
+        self.assertNotIn('Activity', source.split('internal class', 1)[1])
+        self.assertIn('ChatMediaPreviewHideStatusBars()', (MEDIA / 'ChatMediaPreviewHost.kt').read_text())
+
+    def test_download_uses_original_stream_and_video_awaits_release(self):
+        storage = (MEDIA / 'ChatMediaPreviewStorage.kt').read_text()
+        self.assertIn('item.openOriginal()', storage)
+        self.assertIn('chatMediaPreviewCopy(original.stream', storage)
+        self.assertNotIn('Bitmap.compress', storage)
+        video = (MEDIA / 'ChatMediaPreviewVideo.kt').read_text()
+        self.assertIn('awaitCancellation()', video)
+        self.assertIn('view.stopPlayback()', video)
+        self.assertIn('Lifecycle.State.RESUMED', video)
+
+    def test_committed_video_invalidates_projection_even_when_editor_no_longer_matches(self):
+        source = (SRC / 'MainActivity.kt').read_text()
+        receipt = source.split('private fun settleRetainedVideoReceipt()', 1)[1].split('// A mount', 1)[0]
+        self.assertLess(receipt.index('messageMediaCommitRevision++'), receipt.index('if (accepted && conversation != null)'))
+        self.assertIn('editorGeneration, messageMediaCommitRevision)', source)
+
+    def test_new_media_sources_have_no_old_brand_or_package(self):
+        for path in MEDIA.glob('*.kt'):
+            self.assertNotRegex(path.read_text(), r'(?i)\beta\b|io\.github\.mangi|eta[-_/]')
+
+
 if __name__ == "__main__":
     unittest.main()

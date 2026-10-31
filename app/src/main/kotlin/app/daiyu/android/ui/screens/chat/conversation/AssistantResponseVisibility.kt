@@ -10,7 +10,7 @@ internal fun ChatTurnUi.Assistant.hasVisibleResponse(): Boolean {
             when (it) {
                 is MessageContentUi.Text -> it.text.isNotBlank()
                 is MessageContentUi.Reasoning -> hasReportedReasoningText(it.reported.text)
-                is MessageContentUi.Image, is MessageContentUi.Tool -> true
+                is MessageContentUi.Image, is MessageContentUi.Video, is MessageContentUi.Tool -> true
             }
         }
     } else {

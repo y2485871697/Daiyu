@@ -86,6 +86,7 @@ fun ImageAttachments(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     compact: Boolean = false,
+    numberOffset: Int = 0,
 ) {
     val colors = MiuixTheme.colorScheme
     if (!compact || state.items.isNotEmpty() || state.selection != null || state.submission != null) Column(
@@ -112,7 +113,7 @@ fun ImageAttachments(
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.items.forEachIndexed { index, item ->
                     key(item.key) {
-                        AttachmentTile(item, index + 1, enabled && state.canRemove(item.key), actions, loadPreview, compact)
+                        AttachmentTile(item, numberOffset + index + 1, enabled && state.canRemove(item.key), actions, loadPreview, compact)
                     }
                 }
             }
@@ -120,6 +121,34 @@ fun ImageAttachments(
     }
     state.ready.firstOrNull { it.key == state.preview }?.let { item ->
         key(item.key) { ImageAttachmentPreview(item, actions, loadPreview) }
+    }
+}
+
+/** Pure presentation shared by draft assets and borrowed historical references.
+ * The thumbnail slot owns loading; this chip never imports, copies or deletes any asset. */
+@Composable
+internal fun ComposerImageAttachmentChip(
+    number: Int,
+    label: String,
+    removable: Boolean,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+    thumbnailModifier: Modifier = Modifier,
+    labelModifier: Modifier = Modifier,
+    removeModifier: Modifier = Modifier,
+    thumbnail: @Composable () -> Unit,
+) {
+    val chrome = chatChromeColors()
+    Row(modifier.width(188.dp).height(44.dp).clip(RoundedCornerShape(12.dp))
+        .background(chrome.accent.copy(alpha = .08f)).padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).then(thumbnailModifier),
+            contentAlignment = Alignment.Center) { thumbnail() }
+        Text(label, Modifier.weight(1f).then(labelModifier), fontSize = 10.sp, lineHeight = 14.sp,
+            color = chrome.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        ChatIconButton(DaiyuIcons.Close, stringResource(R.string.image_attachments_remove_number, number),
+            onRemove, Modifier.size(24.dp).then(removeModifier),
+            enabled = removable, iconSize = 12.dp, tint = chrome.muted)
     }
 }
 
@@ -135,32 +164,29 @@ private fun AttachmentTile(
     val colors = MiuixTheme.colorScheme
     val previewLabel = stringResource(R.string.image_attachments_preview_number, number)
     if (compact) {
-        val chrome = chatChromeColors()
-        Row(Modifier.width(188.dp).clip(RoundedCornerShape(12.dp))
-            .background(chrome.accent.copy(alpha = .08f))
-            .testTag("image_attachments_item:${item.key.id}").padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val previewModifier = if (item is ImageAttachmentItem.Ready) Modifier.clickable(
-                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                role = Role.Button, onClickLabel = previewLabel, onClick = { actions.onPreview(item.key) },
-            ) else Modifier
-            Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).then(previewModifier)
-                .testTag("image_attachments_thumbnail:${item.key.id}"), contentAlignment = Alignment.Center) {
-                if (item is ImageAttachmentItem.Ready) AttachmentImage(item, loadPreview, 256, previewLabel, ContentScale.Crop, compact = true)
-                else androidx.compose.material3.Icon(DaiyuIcons.Image, null, Modifier.size(18.dp), tint = chrome.accent)
-            }
-            Text(when (item) {
+        val previewModifier = if (item is ImageAttachmentItem.Ready) Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null,
+            role = Role.Button, onClickLabel = previewLabel, onClick = { actions.onPreview(item.key) },
+        ) else Modifier
+        ComposerImageAttachmentChip(
+            number = number,
+            label = when (item) {
                 is ImageAttachmentItem.Ready -> "图片 $number · ${item.attachment.width} × ${item.attachment.height}"
                 is ImageAttachmentItem.Importing -> stringResource(R.string.image_attachments_importing)
                 is ImageAttachmentItem.Failed -> failureText(item.failure)
-            }, Modifier.weight(1f).then(when (item) {
+            },
+            removable = removable, onRemove = { actions.onRemove(item.key) },
+            modifier = Modifier.testTag("image_attachments_item:${item.key.id}"),
+            thumbnailModifier = previewModifier.testTag("image_attachments_thumbnail:${item.key.id}"),
+            labelModifier = when (item) {
                 is ImageAttachmentItem.Importing -> Modifier.testTag("image_attachments_importing:${item.key.id}")
                 is ImageAttachmentItem.Failed -> Modifier.testTag("image_attachments_failed:${item.key.id}")
                 else -> Modifier
-            }), fontSize = 10.sp, lineHeight = 14.sp, color = chrome.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            ChatIconButton(DaiyuIcons.Close, stringResource(R.string.image_attachments_remove_number, number),
-                { actions.onRemove(item.key) }, Modifier.size(24.dp).testTag("image_attachments_remove:${item.key.id}"),
-                enabled = removable, iconSize = 12.dp, tint = chrome.muted)
+            },
+            removeModifier = Modifier.testTag("image_attachments_remove:${item.key.id}"),
+        ) {
+            if (item is ImageAttachmentItem.Ready) AttachmentImage(item, loadPreview, 256, previewLabel, ContentScale.Crop, compact = true)
+            else androidx.compose.material3.Icon(DaiyuIcons.Image, null, Modifier.size(18.dp), tint = chatChromeColors().accent)
         }
         return
     }

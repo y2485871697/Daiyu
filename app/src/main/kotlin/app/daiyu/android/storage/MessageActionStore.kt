@@ -124,8 +124,9 @@ internal class MessageActionStore(private val database: ConversationDatabase,
     }
 
     fun prepareRegeneration(target: MessageActionTarget, replacementText: String? = null,
-        addedImages: List<app.daiyu.android.media.ImageAttachment> = emptyList()): MessageRevision = transactions.run { db ->
-        require(replacementText != null || addedImages.isEmpty()) { "只能为编辑消息添加附件" }
+        addedImages: List<app.daiyu.android.media.ImageAttachment> = emptyList(),
+        retainedImages: List<MessageImageReference>? = null): MessageRevision = transactions.run { db ->
+        require(replacementText != null || addedImages.isEmpty() && retainedImages == null) { "只能为编辑消息选择附件" }
         val history = authorize(db, target)
         val logical = MessageHistory.expand(history)
         val index = MessageHistoryCut.index(history, target)
@@ -138,10 +139,25 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         }
         val selected = logical[userIndex]
         val text = replacementText ?: selected.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
-        require(text.isNotBlank() || selected.blocks.any { it is MessageBlock.Image } || addedImages.isNotEmpty()) { "消息内容不能为空" }
-        val blocks = if (replacementText == null) selected.blocks else buildList {
+        // A selection is not an asset capability. Validate against THIS authorized displayed
+        // segment, including every metadata field, then retain the original blocks themselves.
+        // null is the legacy keep-all contract; emptyList explicitly removes every original.
+        val originals = selected.blocks.filterIsInstance<MessageBlock.Image>()
+        val retained = retainedImages?.let { requested ->
+            require(requested.map { it.owner to it.id }.distinct().size == requested.size) { "原图片选择重复" }
+            var previous = -1
+            requested.map { reference ->
+                val position = originals.indexOfFirst { it.reference == reference }
+                require(position > previous) { "原图片身份、元数据或顺序已变化" }
+                previous = position
+                originals[position]
+            }.toSet()
+        }
+        val selectedBlocks = selected.blocks.filter { it !is MessageBlock.Image || retained == null || it in retained }
+        require(text.isNotBlank() || selectedBlocks.any { it is MessageBlock.Image } || addedImages.isNotEmpty()) { "消息内容不能为空" }
+        val blocks = if (replacementText == null) selectedBlocks else buildList {
             if (text.isNotBlank()) add(MessageBlock.Text("edited-user", text))
-            addAll(selected.blocks.filterNot { it is MessageBlock.Text })
+            addAll(selectedBlocks.filterNot { it is MessageBlock.Text })
         }
         val prefix = MessageHistoryCut.prefix(history, userIndex)
         // Historical tool results stay data. No prior tool session, approval or attempt is resumed.

@@ -84,6 +84,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     private var picker: Pair<Session, ImageAttachmentSelection>? = null
     private var lease = PreviewLease(controller, null)
     var historyLoader by mutableStateOf<MessageImageLoader?>(null); private set
+    var mediaPreviews by mutableStateOf<PreviewLease?>(null); private set
     var draftLoader by mutableStateOf<ImageAttachmentPreviewLoader>(lease.draftLoader); private set
 
     val hasAttachments: Boolean get() = session.attachments.state.value.items.isNotEmpty()
@@ -118,7 +119,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
             visit++
             cancelTransient(session)
             session.attempt?.cancel()
-            lease.close(); historyLoader = null
+            lease.close(); historyLoader = null; mediaPreviews = null
         } else renewPreviews(conversation)
     }
 
@@ -128,6 +129,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         if (!visible || closed) lease.close()
         draftLoader = lease.draftLoader
         historyLoader = if (visible && !closed && conversation != null) lease.historyLoader else null
+        mediaPreviews = if (visible && !closed && conversation != null) lease else null
     }
 
     fun syncConversation(conversation: String?) {
@@ -380,7 +382,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     fun close() {
         if (closed) return
         closed = true; visible = false; visit++
-        abandon(session); lease.close(); historyLoader = null
+        abandon(session); lease.close(); historyLoader = null; mediaPreviews = null
         controller.revokeImageProvider()
         changed = {}; notice = {}; settled = { _, _ -> }
     }
@@ -410,9 +412,77 @@ internal fun imageReceiptMatches(submission: ImageAttachmentSubmission, result: 
 /** No cache survives the route. Returned bitmaps are owned by Compose until it releases them;
  * never recycle a bitmap which might still be displayed. Late decodes are recycled before return.
  */
-private class PreviewLease(private val controller: ChatController, val conversation: String?) {
+internal class PreviewLease(private val controller: ChatController, val conversation: String?) {
     private val open = AtomicBoolean(true)
-    fun close() { open.set(false) }
+    private val originals = MessageMediaOriginals()
+    fun isOpen(): Boolean = open.get()
+    fun close() { open.set(false); originals.close() }
+
+    private fun imageAuthority(image: app.daiyu.android.ui.screens.chat.conversation.MessageImageUi):
+        Pair<app.daiyu.android.media.MessageImageOwner, app.daiyu.android.media.MessageImageReference> {
+        check(open.get() && conversation != null && image.expectedOwner.conversationId == conversation &&
+            image.reference.owner == image.expectedOwner) { "media_image_owner_mismatch" }
+        val owner = app.daiyu.android.media.MessageImageOwner(image.expectedOwner.conversationId, image.expectedOwner.messageId)
+        val ref = image.reference
+        return owner to app.daiyu.android.media.MessageImageReference(owner, ref.id, ref.mime,
+            ref.bytes, ref.sha256, ref.width, ref.height)
+    }
+
+    suspend fun loadDisplay(image: app.daiyu.android.ui.screens.chat.conversation.MessageImageUi,
+        edge: Int): androidx.compose.ui.graphics.ImageBitmap {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val (owner, reference) = imageAuthority(image)
+        // Retain the result before dispatcher delivery so prompt cancellation cannot orphan it.
+        var decoded: android.graphics.Bitmap? = null
+        val bitmap = try {
+            withContext(Dispatchers.IO) {
+                decodeMessageMediaDisplay(controller.messageImageResolver(ConversationId(checkNotNull(conversation))),
+                    owner, reference, edge).also { decoded = it }
+            }
+        } catch (failure: Throwable) {
+            decoded?.recycle()
+            throw failure
+        }
+        if (!open.get() || !context.isActive) {
+            bitmap.recycle(); throw CancellationException("Media page left")
+        }
+        return bitmap.asImageBitmap()
+    }
+
+    private suspend fun original(mime: String, name: String,
+        read: (kotlin.coroutines.CoroutineContext) -> java.io.InputStream): app.daiyu.android.ui.media.ChatMediaPreviewOriginal {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        check(open.get()) { "Media page left" }
+        var opened: java.io.InputStream? = null
+        try {
+            val stream = withContext(Dispatchers.IO) { read(context).also { opened = it } }
+            context.ensureActive()
+            check(open.get()) { "Media page left" }
+            return app.daiyu.android.ui.media.ChatMediaPreviewOriginal(originals.retain(stream), mime, name)
+        } catch (failure: Throwable) {
+            opened?.close()
+            throw failure
+        }
+    }
+
+    suspend fun openImageOriginal(image: app.daiyu.android.ui.screens.chat.conversation.MessageImageUi):
+        app.daiyu.android.ui.media.ChatMediaPreviewOriginal {
+        val (owner, reference) = imageAuthority(image)
+        return original(reference.mime, messageMediaDisplayName("image", reference.mime)) {
+            controller.messageImageResolver(ConversationId(checkNotNull(conversation))).read(owner, reference).inputStream()
+        }
+    }
+
+    suspend fun openVideoOriginal(binding: MessageMediaVideoBinding): app.daiyu.android.ui.media.ChatMediaPreviewOriginal {
+        val video = binding.video
+        return original(video.reference.mime, messageMediaDisplayName("video", video.reference.mime)) { context ->
+            controller.openMessageVideoOriginal(ConversationId(checkNotNull(conversation)), binding) {
+                !open.get() || !context.isActive
+            }
+        }
+    }
     private suspend fun decode(work: () -> android.graphics.Bitmap): androidx.compose.ui.graphics.ImageBitmap {
         currentCoroutineContext().ensureActive()
         if (!open.get()) throw CancellationException("Image page left")

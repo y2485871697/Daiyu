@@ -9,12 +9,19 @@ import kotlinx.coroutines.*
 import java.util.UUID
 
 /** A temporary attachment owner for one edit visit, distinct from the normal composer draft. */
-internal class MessageEditImageDraft(conversation: String, private val originalCount: Int,
+internal class MessageEditImageDraft(conversation: String, originalCount: Int,
     private val source: AndroidImageAttachments, private val scope: CoroutineScope,
     private val changed: () -> Unit, private val report: (String) -> Unit) {
     val owner = ImageAttachmentOwner(conversation, "message-edit-${UUID.randomUUID()}")
     val attachments = ImageAttachmentsState(ImageAttachmentDraft(owner, 0))
     private var live = true
+    private var retainedImageCount = originalCount.also { require(it in 0..8) }
+    // The host supplies only a count, never message-owned assets. Removing an original
+    // releases capacity immediately; picker returns are checked against the current count.
+    fun setRetainedImageCount(count: Int) {
+        require(count in 0..8)
+        if (live) retainedImageCount = count
+    }
     private val signals = mutableSetOf<CancellationSignal>()
     val ready get() = attachments.state.value.ready.map { it.attachment }
     val blocked get() = attachments.state.value.let { it.selection != null || it.isImporting ||
@@ -23,13 +30,13 @@ internal class MessageEditImageDraft(conversation: String, private val originalC
         withContext(Dispatchers.IO) { source.decodePreview(owner, image, edge).asImageBitmap() }
     }
     fun select(): ImageAttachmentSelection? {
-        if (!live || originalCount + attachments.state.value.items.size >= 8) {
+        if (!live || retainedImageCount + attachments.state.value.items.size >= 8) {
             report("每条消息最多8张图片"); return null
         }
         return attachments.requestSelection().also { changed() }
     }
     fun picked(selection: ImageAttachmentSelection, uris: List<Uri>) {
-        if (!live || uris.size > 8 - originalCount - attachments.state.value.items.size) {
+        if (!live || uris.size > 8 - retainedImageCount - attachments.state.value.items.size) {
             attachments.cancelSelection(selection)
             if (live) { report("每条消息最多8张图片"); changed() }
             return

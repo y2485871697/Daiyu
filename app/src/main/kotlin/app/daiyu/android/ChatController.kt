@@ -1565,6 +1565,16 @@ class ChatController internal constructor(private val application:Application,
                 imageRead {scoped.freeze(owner,references,imageInputSupported,isCancelled)}
         }
     }
+    internal fun messageMediaProjection(conversation: ConversationId,
+        cancelled: () -> Boolean): ControllerMessageMediaSnapshot = imageRead {
+        ControllerMessageMedia(database, videoAttachments.store, messageImageResolver(conversation)).capture(conversation, cancelled)
+    }
+
+    internal fun openMessageVideoOriginal(conversation: ConversationId,
+        binding: MessageMediaVideoBinding, cancelled: () -> Boolean): java.io.FileInputStream = imageRead {
+        ControllerMessageMedia(database, videoAttachments.store).openOriginal(conversation, binding, cancelled)
+    }
+
     private fun <T> imageRead(work:()->T):T {
         check(Looper.myLooper()!=Looper.getMainLooper()) {"image_read_requires_worker"}
         synchronized(this) {check(!closed && ready && !recoveryFailed);imageReaders++}
@@ -4807,7 +4817,9 @@ class ChatController internal constructor(private val application:Application,
      * Read fences are closed on the worker; unrelated runs retain their publication rights. */
     internal fun messageAction(action: MessageAction, target: MessageActionTarget,
         replacementText: String? = null, editImages: List<app.daiyu.android.media.ImageAttachment> = emptyList(),
+        retainedImages: List<app.daiyu.android.domain.MessageImageReference>? = null,
         complete: (MessageActionResult) -> Unit): Boolean {
+        val retainedImageSelection = retainedImages?.toList()
         synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false
             if ((action == MessageAction.RETRY_STEP) != (target.toolCallId != null)) return false
@@ -4867,7 +4879,8 @@ class ChatController internal constructor(private val application:Application,
                     MessageAction.REGENERATE, MessageAction.SAVE_EDIT -> {
                         val revision = messageActionStore.prepareRegeneration(target,
                             if (action == MessageAction.SAVE_EDIT) requireNotNull(replacementText) else null,
-                            if (action == MessageAction.SAVE_EDIT) editImages else emptyList())
+                            if (action == MessageAction.SAVE_EDIT) editImages else emptyList(),
+                            if (action == MessageAction.SAVE_EDIT) retainedImageSelection else null)
                         val owner = database.conversations().single { it.id == target.conversationId }
                         val text = revision.user.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
                         val token = synchronized(this) { if (closed) null else reservePreparation(owner.id) }

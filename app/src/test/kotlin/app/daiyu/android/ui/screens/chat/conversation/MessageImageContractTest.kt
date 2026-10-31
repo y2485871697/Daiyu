@@ -30,6 +30,7 @@ class MessageImageContractTest {
             when (it) {
                 is MessageContentUi.Text -> it.text
                 is MessageContentUi.Image -> "image"
+                is MessageContentUi.Video -> "video"
                 is MessageContentUi.Reasoning -> "reasoning"
                 is MessageContentUi.Tool -> "tool"
             }

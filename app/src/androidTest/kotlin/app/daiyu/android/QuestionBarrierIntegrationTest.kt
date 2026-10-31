@@ -314,6 +314,15 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertTrue(row(f,id).interrupted);assertNull(row(f,id).answer)
         assertEquals(1,f.probe.nexts.get());assertEquals(1,f.probe.opens.get())
     }
+    private fun openRecoveredWorkflow() {
+        ui.waitUntil(timeoutMillis=8_000) {
+            ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size==1
+        }
+        node("work-process-header").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
+        node("question-card").assertDoesNotExist()
+        node("work-process-header").performClick()
+        waitForCard(readOnly=true)
+    }
     private fun recovery(answer:QuestionAnswer?) {
         lateinit var old:RunCheckpoint;lateinit var id:QuestionIdentity
         val f=fresh {f ->
@@ -342,13 +351,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             assertEquals(old.owner, projection.identity.ownerId)
         }
         launch(f,f.db.conversations().single())
-        ui.waitUntil(timeoutMillis=8_000) {
-            ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size==1
-        }
-        node("work-process-header").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
-        node("question-card").assertDoesNotExist()
-        node("work-process-header").performClick()
-        waitForCard(readOnly=true)
+        openRecoveredWorkflow()
         if (answer == null) {
             node("question-toggle").assertTextContains("提问已中断 · Route choice")
             ui.onNodeWithText("提问已中断，当前不可作答").assertExists()
@@ -370,7 +373,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             assertEquals(old.owner, projection.identity.ownerId)
             assertExactQuestionOwner(f, shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation, id, recoveredEvidence)
         }
-        recreate();waitForCard(readOnly=true)
+        recreate();openRecoveredWorkflow()
         drainWorker(f);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
     }
     fun testRecoveryOfPendingQuestionOnlyDisplaysAndDoesNotResend()=recovery(null)

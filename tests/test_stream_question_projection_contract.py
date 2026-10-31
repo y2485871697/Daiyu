@@ -23,10 +23,17 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/QuestionBarrierIntegrationTest.kt').read_text()
         recovery = text.split('private fun recovery(answer:QuestionAnswer?)', 1)[1]
         self.assertLess(recovery.index('assertNotNull(projection)'), recovery.index('launch(f,'))
-        self.assertIn('SemanticsProperties.StateDescription, "已折叠"', recovery)
-        self.assertLess(recovery.index('node("work-process-header").performClick()'), recovery.index('waitForCard(readOnly=true)'))
+        disclosure = text.split('private fun openRecoveredWorkflow()', 1)[1].split('private fun recovery(', 1)[0]
+        self.assertIn('SemanticsProperties.StateDescription, "已折叠"', disclosure)
+        self.assertLess(disclosure.index('node("work-process-header").performClick()'), disclosure.index('waitForCard(readOnly=true)'))
         self.assertIn('assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())', recovery)
-        self.assertIn('recreate();waitForCard(readOnly=true)', recovery)
+        self.assertIn('recreate();openRecoveredWorkflow()', recovery)
+    def test_long_output_paths_have_distinct_saved_disclosure_owners(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolOperationCardTest.kt').read_text()
+        fixture = text.split('fun testLongOutputDisclosureAndHostSlotNeverReplayTools()', 1)[1].split('fun testRestrictedReceipts', 1)[0]
+        self.assertIn('source(mixed, "long-output-$mixed")', fixture)
+        self.assertIn('assertCountEquals(1)', fixture)
+        self.assertIn('assertEquals(0, executions)', fixture)
     def test_default_bitmap_is_shared_sampled_and_decoded_only_on_io(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/components/AssistantAvatar.kt').read_text()
         composition, worker = text.split('internal object DefaultAssistantAvatar', 1)

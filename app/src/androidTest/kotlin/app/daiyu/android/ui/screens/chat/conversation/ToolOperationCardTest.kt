@@ -464,7 +464,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         var executions = 0
         val body = "long output " + "x".repeat(600)
         for (mixed in listOf(false, true)) {
-            val message = source(mixed).copy(blocks = source(mixed).blocks.map { block ->
+            val source = source(mixed, "long-output-$mixed")
+            val message = source.copy(blocks = source.blocks.map { block ->
                 if (block is MessageBlock.Tool) block.copy(result = org.json.JSONObject().put("stdout", body).toString()) else block
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant

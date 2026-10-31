@@ -20,6 +20,7 @@ import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.DaiyuPromptCacheRetention
 import app.daiyu.android.model.GptSpeedMode
@@ -28,6 +29,7 @@ import app.daiyu.android.ui.components.OptionSelectionSheet
 import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.icons.ModelBrandIcon
 import app.daiyu.android.ui.haptics.miuix.TextButton
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -178,7 +180,13 @@ internal fun ModelSettingsScreen(
                             enabled = enabled && !connection.running, onClick = connection.start,
                             modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
                     }
-                    connection.status?.let { SettingsNote(it) }
+                    connection.status?.let { message ->
+                        Text(text = message, style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.testTag("model-connection-status").fillMaxWidth()
+                                .padding(horizontal = 28.dp, vertical = 12.dp))
+                    }
                 }
                 if (requestOptionsUnavailable) {
                     SettingsNote("原请求策略不可用；替换需要明确确认", error = true)
@@ -205,6 +213,7 @@ internal fun ModelSettingsScreen(
             SettingsCard { ProviderHeadersEditor(draft, enabled, changeDraft) }
         }
         if (!speechOnly && draft.protocol == ProviderProtocol.MESSAGES) item(key = "provider_cache_retention") {
+            SettingsSectionTitle("提示缓存")
             SettingsCard { DaiyuPromptCacheFields(draft, enabled, changeDraft) }
         }
         if (providerName != null) {

@@ -55,28 +55,15 @@ internal fun rememberSettingsConnectionTest(draft: ModelSettingsDraftUi, enabled
                 }
             } catch (_: Exception) { false }
             if (!accepted && request === original) {
-                original.set(true); request = null; status = "当前任务不可测试连接，请稍后重试"
+                original.set(true); request = null; status = connectionTestMessage(ModelConnectionResult.Failed(RemoteModelFailure.REQUEST),
+                    app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(frozen.draft.endpoint))
             }
         }
     }, cancel = ::cancel)
 }
 
 internal fun connectionTestMessage(result: ModelConnectionResult, speechOnly: Boolean = false): String = when (result) {
-    ModelConnectionResult.SpeechConnected -> "语音合成连接成功；未播放音频或验证语音识别"
-    is ModelConnectionResult.Connected -> "目录连接成功，返回 ${result.modelCount} 个模型；未验证推理、工具或图片能力"
-    is ModelConnectionResult.Failed -> when (result.reason) {
-        RemoteModelFailure.INVALID_ENDPOINT -> "服务地址无效，请检查 HTTPS 地址"
-        RemoteModelFailure.AUTHENTICATION -> "鉴权失败，请检查密钥"
-        RemoteModelFailure.PERMISSION -> "服务拒绝访问，请检查账号权限"
-        RemoteModelFailure.ENDPOINT -> if (speechOnly) "语音接口不存在或不支持" else "模型目录接口不存在或不支持"
-        RemoteModelFailure.RATE_LIMIT -> "服务限流，请稍后重试"
-        RemoteModelFailure.SERVER -> "服务暂时不可用，请稍后重试"
-        RemoteModelFailure.REDIRECT -> "服务要求重定向；未向新地址发送密钥"
-        RemoteModelFailure.TIMEOUT -> "连接超时，请检查网络或服务地址"
-        RemoteModelFailure.NETWORK -> "网络连接失败"
-        RemoteModelFailure.TLS -> "安全连接失败，请检查服务证书"
-        RemoteModelFailure.PROTOCOL -> if (speechOnly) "语音响应格式不受支持" else "模型目录响应格式不受支持"
-        RemoteModelFailure.REQUEST -> if (speechOnly) "语音无法发起请求，请检查连接设置" else "无法发起目录请求，请检查连接设置"
-        RemoteModelFailure.CANCELLED -> "连接测试已取消"
-    }
+    ModelConnectionResult.SpeechConnected -> "语音合成成功"
+    is ModelConnectionResult.Connected -> "连接成功，返回 ${result.modelCount} 个模型"
+    is ModelConnectionResult.Failed -> if (speechOnly) "语音合成失败" else "连接失败"
 }

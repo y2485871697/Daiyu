@@ -64,7 +64,7 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
 
     def test_speech_success_never_claims_catalog_or_playback(self):
         ui = source('ui/screens/settings/SettingsConnectionTest.kt')
-        self.assertIn('ModelConnectionResult.SpeechConnected -> "语音合成连接成功；未播放音频或验证语音识别"', ui)
+        self.assertIn('ModelConnectionResult.SpeechConnected -> "语音合成成功"', ui)
         self.assertNotIn('测试会合成“你好”，可能产生语音服务用量；不会播放或录音。', source('ui/screens/settings/ModelSettingsScreen.kt'))
 
     def test_chat_and_subagent_directories_exclude_speech_but_speech_keeps_catalog(self):

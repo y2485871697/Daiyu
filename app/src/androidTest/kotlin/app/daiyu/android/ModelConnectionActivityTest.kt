@@ -64,18 +64,26 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         val (entered, _, last) = connect()
         editModel("Base URL", "https://unsaved.invalid/v1/responses")
         editModel("API Key", "unsaved-test-key")
-        testConnection(); assertTrue(entered.await(5, TimeUnit.SECONDS)); awaitStatus("目录连接成功，返回 1 个模型")
+        testConnection(); assertTrue(entered.await(5, TimeUnit.SECONDS)); awaitStatus("连接成功，返回 1 个模型")
+        val status = ui.onNodeWithTag("model-connection-status").assertTextEquals("连接成功，返回 1 个模型")
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        status.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertEquals(androidx.compose.ui.text.style.TextAlign.Center, layout.layoutInput.style.textAlign)
+        for (line in 0 until layout.lineCount) {
+            assertTrue(kotlin.math.abs((layout.getLineLeft(line) + layout.getLineRight(line)) / 2f - layout.size.width / 2f) <= 1f)
+        }
         assertEquals("https://unsaved.invalid/v1/models", last.get().url.toString())
         assertEquals("Bearer unsaved-test-key", last.get().getRequestProperty("Authorization"))
         assertEquals(saved, fixture.settings.load()); assertEquals(catalog, fixture.settings.localModelCatalogSnapshot())
         assertEquals(before, fixture.database.exportBackup()); assertEquals(0, fixture.opens.get())
         backToChat(activity); assertDraft("connection test unsent")
     }
-    fun testAuthenticationAndRateLimitAreSeparateNonSensitiveResults() {
-        openModels(); connect(status = 401); testConnection(); awaitStatus("鉴权失败，请检查密钥")
+    fun testAuthenticationAndRateLimitShowOnlyConnectionFailure() {
+        openModels(); connect(status = 401); testConnection(); awaitStatus("连接失败")
         editModel("API Key", "different-unsaved-key")
-        ui.onNodeWithText("鉴权失败，请检查密钥").assertDoesNotExist()
-        connect(status = 429); testConnection(); awaitStatus("服务限流，请稍后重试")
+        ui.onNodeWithText("连接失败").assertDoesNotExist()
+        connect(status = 429); testConnection(); awaitStatus("连接失败")
         assertEquals(0, fixture.opens.get())
     }
     fun testEditingAwayAndBackRejectsTheOldConnectionResult() {
@@ -86,8 +94,8 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
             editModel("Base URL", "https://temporary.invalid"); editModel("Base URL", endpoint)
         } finally { release.countDown() }
         awaitControl("cancelled connection drained") { last.get().closed }
-        ui.waitForIdle(); ui.onAllNodesWithText("目录连接成功", substring = true).assertCountEquals(0)
-        testConnection(); awaitStatus("目录连接成功，返回 1 个模型")
+        ui.waitForIdle(); ui.onAllNodesWithText("连接成功", substring = true).assertCountEquals(0)
+        testConnection(); awaitStatus("连接成功，返回 1 个模型")
         assertEquals(0, fixture.opens.get())
     }
     fun testPauseCancelsThePendingResultAndAllowsAnExplicitNewTest() {
@@ -95,8 +103,8 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         testConnection(); assertTrue(entered.await(5, TimeUnit.SECONDS))
         try { realPauseResume(activity) } finally { release.countDown() }
         awaitControl("paused connection drained") { last.get().closed }
-        ui.waitForIdle(); ui.onAllNodesWithText("目录连接成功", substring = true).assertCountEquals(0)
-        testConnection(); awaitStatus("目录连接成功，返回 1 个模型")
+        ui.waitForIdle(); ui.onAllNodesWithText("连接成功", substring = true).assertCountEquals(0)
+        testConnection(); awaitStatus("连接成功，返回 1 个模型")
         assertEquals(0, fixture.opens.get())
     }
     fun testOldModelVisitCannotBorrowTheNewEqualDraftOwner() {
@@ -114,7 +122,7 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         var accepted = true
         mainThread { accepted = oldRequest(newDraft, { false }, callback) }
         assertFalse(accepted); assertEquals(0, requests.get())
-        testConnection(); awaitStatus("目录连接成功，返回 1 个模型"); assertEquals(1, requests.get())
+        testConnection(); awaitStatus("连接成功，返回 1 个模型"); assertEquals(1, requests.get())
     }
     fun testOldDraftCannotStartConnectionAfterCredentialEditWithinSameVisit() {
         val original = fixture.settings.load()
@@ -128,7 +136,7 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         var accepted = true
         mainThread { accepted = retained.second(retained.first, { false }) { error("stale draft result") } }
         assertFalse(accepted); assertEquals(0, requests.get())
-        testConnection(); awaitStatus("目录连接成功，返回 1 个模型")
+        testConnection(); awaitStatus("连接成功，返回 1 个模型")
         assertEquals(1, requests.get()); assertEquals(0, fixture.opens.get())
     }
 

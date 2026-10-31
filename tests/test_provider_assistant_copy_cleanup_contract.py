@@ -29,7 +29,10 @@ class SettingsCopyCleanupContractTest(unittest.TestCase):
         page = source("ui/screens/settings/ModelSettingsScreen.kt")
         self.assertNotIn('测试会合成“你好”，可能产生语音服务用量；不会播放或录音。', page)
         self.assertIn('enabled = enabled && !connection.running, onClick = connection.start', page)
-        self.assertIn('connection.status?.let { SettingsNote(it) }', page)
+        result = page.split('connection.status?.let { message ->', 1)[1].split('if (requestOptionsUnavailable)', 1)[0]
+        for kept in ('Text(text = message', 'textAlign = TextAlign.Center',
+                     'Modifier.testTag("model-connection-status").fillMaxWidth()'):
+            self.assertIn(kept, result)
 
     def test_request_body_caption_keeps_json_guidance(self):
         page = source("ui/screens/settings/ProviderInlineEditors.kt")

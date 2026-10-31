@@ -1,7 +1,6 @@
 package app.daiyu.android.integration.tools
 
 import android.os.Looper
-import android.util.Base64
 import app.daiyu.android.RunScreenLocation
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
@@ -29,10 +28,7 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                 require(screenshot || !arguments.contains("observation_id")) { "observation_id_not_allowed_for_observe" }
                 val observationId = if (arguments.contains("observation_id")) arguments.text("observation_id") else null
                 return read { context -> withSession(requestedTarget, context) { session ->
-                    if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled)) { image ->
-                        JSONObject().put("observation_id", image.observationId).put("width", image.width).put("height", image.height)
-                            .put("mime_type", "image/png").put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).toString()
-                    } else encode(session.dynamicObserve(context.cancelled), GuiScreenToolFactory::observationJson)
+                    if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled), GuiScreenToolFactory::screenshotJson) else encode(session.dynamicObserve(context.cancelled), GuiScreenToolFactory::observationJson)
                 } }
             }
             val command = GuiAction(arguments.text("observation_id"), GuiOperation.valueOf(arguments.text("operation").uppercase()),

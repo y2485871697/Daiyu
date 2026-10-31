@@ -42,6 +42,17 @@ class ToolScreenshotReceiptTest : InstrumentationTestCase() {
         val missing = JSONObject(record.result!!).apply { remove("observation_id") }
         assertNull(ToolScreenshotReceipt.decode(record.copy(result = missing.toString())))
     }
+    fun testVisualOnlyCaptureHasNoClickableObservationAndCannotSatisfyAnExplicitRequest() {
+        val original = receipt()
+        val data = JSONObject(original.result!!).apply { remove("observation_id"); put("capture_id", "visual") }
+        val visual = original.copy(result = data.toString(),
+            invocation = original.invocation.copy(arguments = """{"operation":"screenshot"}"""))
+        val image = ToolScreenshotReceipt.decode(visual)
+        assertNotNull(image); image!!.recycle()
+        assertNull(ToolScreenshotReceipt.decode(original.copy(result = data.toString())))
+        data.put("observation_id", "obs")
+        assertNull(ToolScreenshotReceipt.decode(visual.copy(result = data.toString())))
+    }
     fun testMalformedOrMismatchedMediaNeverLoadsPathOrUrl() {
         val record = receipt()
         val changes = listOf<(JSONObject) -> Unit>(

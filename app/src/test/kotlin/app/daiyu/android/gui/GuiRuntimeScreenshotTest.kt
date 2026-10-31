@@ -104,6 +104,7 @@ class GuiRuntimeScreenshotTest {
         var permissionEnabled = true
         var screenUnlocked = true
         var rootReads = 0
+        var onRootRead: (() -> Unit)? = null
         var stableNodes = false
         var targetRefresh = true
         var targetBounds = Rect(0, 0, 100, 100)
@@ -132,6 +133,7 @@ class GuiRuntimeScreenshotTest {
         override fun windows(current: GuiAccessibilityService) = listedWindows?.invoke().orEmpty()
         override fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? {
             rootReads++
+            onRootRead?.invoke()
             if (missing) return null
             val window = AccessibilityWindowInfo.obtain()
             // Android's hidden setters initialize real public-getter state; traversal/admission
@@ -261,7 +263,12 @@ class GuiRuntimeScreenshotTest {
         assertEquals(1, platform.callbacks.size)
         platform.success(); worker.runAll()
         val image = future.get(3, java.util.concurrent.TimeUnit.SECONDS) as GuiResult.Value
-        assertEquals(session.lease.observation!!.observationId, image.value.observationId)
+        assertFalse(image.value.observationBound)
+        assertTrue(image.value.observationId.isNotBlank())
+        assertNull(session.lease.observation)
+        val json = org.json.JSONObject(GuiScreenToolFactory.screenshotJson(image.value))
+        assertEquals(image.value.observationId, json.getString("capture_id"))
+        assertFalse(json.has("observation_id"))
         assertEquals(0, session.lease.reads)
         val reads = platform.rootReads
         val stale = java.util.concurrent.FutureTask { session.dynamicScreenshot("stale") { false } }
@@ -269,8 +276,110 @@ class GuiRuntimeScreenshotTest {
         while (!stale.isDone && System.nanoTime() < deadline) {
             shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5)
         }
-        rejected(stale.get(3, java.util.concurrent.TimeUnit.SECONDS), "OBSERVATION_ID_MISMATCH")
+        rejected(stale.get(3, java.util.concurrent.TimeUnit.SECONDS), "OBSERVATION_REQUIRED")
         assertEquals(reads, platform.rootReads); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun implicitScreenshotSubmitsInTheSameMainTurnBeforeQueuedSelfContent() {
+        openSelf()
+        val owner = app.daiyu.android.integration.tools.runnerOwner(app.daiyu.android.domain.Message(
+            app.daiyu.android.domain.MessageId("m"), app.daiyu.android.domain.ConversationId("c"),
+            app.daiyu.android.domain.RunId("target-run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
+            emptyList(), app.daiyu.android.domain.RunStatus.RUNNING))
+        session.bindDynamic(owner, app.daiyu.android.domain.tools.TaskAuthorization("target-session", "target-run"))
+        var queuedEventRan = false
+        var capturePrecededEvent = false
+        platform.onRootRead = {
+            platform.onRootRead = null
+            GuiRuntime.main.post {
+                capturePrecededEvent = platform.callbacks.size == 1
+                queuedEventRan = true
+                platform.rootLabel = "streamed reply"
+                GuiRuntime.changed(service, contentOnly = true)
+            }
+        }
+        val future = java.util.concurrent.FutureTask { session.dynamicScreenshot(null) { false } }
+        Thread(future).start()
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
+        while (!queuedEventRan && !future.isDone && System.nanoTime() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5)
+        }
+        assertTrue(queuedEventRan); assertTrue(capturePrecededEvent)
+        assertEquals(1, platform.callbacks.size)
+        platform.success(); worker.runAll()
+        val image = future.get(3, java.util.concurrent.TimeUnit.SECONDS) as GuiResult.Value
+        assertFalse(image.value.observationBound); assertNull(session.lease.observation)
+        assertNoActions()
+    }
+
+    @Test fun visualOnlySelfCaptureSurvivesStreamingBeforeCallbackAndEncodingWithoutPublishingNodes() {
+        openSelf()
+        val observation = observe()
+        val action = approve(observation)
+        val future = GuiRuntime.screenshot(session.lease, observation.observationId, visualOnly = true)
+        platform.rootLabel = "new reply"
+        GuiRuntime.changed(service, contentOnly = true)
+        val frame = platform.success()
+        platform.rootLabel = "reply continues"
+        GuiRuntime.changed(service, contentOnly = true)
+        worker.runAll()
+        val image = future.completed() as GuiResult.Value
+        assertFalse(image.value.observationBound); assertEquals(observation.observationId, image.value.observationId)
+        assertNull(session.lease.observation)
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        assertDisposed(frame); assertNoActions()
+    }
+
+    @Test fun visualOnlyCaptureRejectsWindowChangeAndLockAndDoesNotHidePlatformFailure() {
+        openSelf(); val observation = observe()
+        val future = GuiRuntime.screenshot(session.lease, observation.observationId, visualOnly = true)
+        platform.windowId++
+        val frame = platform.success()
+        rejected(future.completed(), "SCREENSHOT_WINDOW_CHANGED"); assertDisposed(frame)
+        openSelf(); val second = observe()
+        val locked = GuiRuntime.screenshot(session.lease, second.observationId, visualOnly = true)
+        platform.screenUnlocked = false
+        val lockedFrame = platform.success()
+        rejected(locked.completed(), "SCREEN_LOCKED_NOT_EXECUTED"); assertDisposed(lockedFrame)
+        platform.screenUnlocked = true
+        openSelf(); val third = observe()
+        val failed = GuiRuntime.screenshot(session.lease, third.observationId, visualOnly = true)
+        platform.callbacks.removeAt(0).second(4)
+        rejected(failed.completed(), "SCREENSHOT_PLATFORM_ERROR_4")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun visualOnlyCaptureDoesNotRetireALaterObservationOrAcceptHardWindowEvents() {
+        openSelf(); val observation = observe()
+        val future = GuiRuntime.screenshot(session.lease, observation.observationId, visualOnly = true)
+        val later = observe()
+        val frame = platform.success()
+        rejected(future.completed(), "OBSERVATION_ID_MISMATCH")
+        assertEquals(later, session.lease.observation); assertDisposed(frame)
+        session.approveReadsFromUser(GuiReadApproval(1, 1))
+        val hard = GuiRuntime.screenshot(session.lease, later.observationId, visualOnly = true)
+        GuiRuntime.changed(service)
+        val hardFrame = platform.success()
+        rejected(hard.completed(), "OBSERVATION_STALE"); assertDisposed(hardFrame)
+        assertNoActions()
+    }
+
+    @Test fun visualOnlyEarlyTreeRejectionRetiresItsPrivateObservationButExplicitFailureDoesNot() {
+        platform.label = "x".repeat(513)
+        val visual = observe()
+        rejected(GuiRuntime.screenshot(session.lease, visual.observationId, visualOnly = true).completed(),
+            "SCREENSHOT_TREE_UNVERIFIABLE")
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty())
+        val explicit = observe()
+        rejected(screenshot(explicit).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        assertSame(explicit, session.lease.observation); assertNoActions()
+    }
+
+    @Test @Config(sdk = [29]) fun visualOnlyUnsupportedApiRetiresItsPrivateObservationWithoutCapture() {
+        val observation = observe()
+        rejected(GuiRuntime.screenshot(session.lease, observation.observationId, visualOnly = true).completed(),
+            "SCREENSHOT_UNSUPPORTED_API")
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
     @Test fun focusedApplicationWindowCanBeObservedWithoutRootInActiveWindow() {

@@ -18,7 +18,7 @@ internal object GuiScreenToolFactory {
 
     internal fun readDefinition(allowImplicitObservation: Boolean = false): ToolDefinition = ToolDefinition("screen", 1,
             "Bounded accessibility observation or an explicitly requested screenshot. observe forbids observation_id. " +
-                (if (allowImplicitObservation) "screenshot accepts a current observation_id; if omitted, creates exactly one bounded observation in the same target session before capture. "
+                (if (allowImplicitObservation) "screenshot accepts a current observation_id for a tree-bound image; omit it for a current visual-only image. Visual-only results have capture_id, not observation_id; run observe before node actions. "
                  else "screenshot requires observation_id from a successful observe in this session. ") +
                 "IDs expire after ${GUI_OBSERVATION_TTL_MILLIS / 1000} seconds, a target window change, or an action. Never retry a stale ID automatically. " +
                 (if (allowImplicitObservation) "For the current screen omit any previous target_package. Self-app observation requires target_package=app.daiyu.android. " else "") +
@@ -36,14 +36,15 @@ internal object GuiScreenToolFactory {
             val id = if (screenshot) arguments.text("observation_id") else null
             return PreparedTool.contextual(admit = { admission(session, it) }) { context ->
                 admission(session, context)?.let { return@contextual it }
-                if (screenshot) result(session.screenshot(id!!, context.cancelled)) { image ->
-                    JSONObject().put("observation_id", image.observationId).put("width", image.width)
-                        .put("height", image.height).put("mime_type", "image/png")
-                        .put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).toString()
-                } else result(session.observe(context.cancelled), ::observationJson)
+                if (screenshot) result(session.screenshot(id!!, context.cancelled), ::screenshotJson) else result(session.observe(context.cancelled), ::observationJson)
             }
         }
     }
+    internal fun screenshotJson(image: GuiScreenshot): String = JSONObject()
+        .put(if (image.observationBound) "observation_id" else "capture_id", image.observationId)
+        .put("width", image.width).put("height", image.height).put("mime_type", "image/png")
+        .put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).toString()
+
     internal fun actionDefinition(): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact user-confirmed accessibility node or global action, bound to the same observation_id. " +
                 "No coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",

@@ -166,22 +166,26 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         }
     }
     internal fun dynamicScreenshot(observationId: String?, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
-        val selected: GuiResult<String> = onWorker(cancelled) {
+        val started = onWorker(cancelled) {
             check(dynamic)
             val approval = GuiRuntime.approveReads(lease, GuiReadApproval(if (observationId == null) 1 else 0, 1))
             if (approval !is GuiResult.Value) approval as GuiResult.Rejected
-            else if (observationId != null) GuiResult.Value(observationId)
-            else when (val observed = GuiRuntime.observe(lease)) {
-                is GuiResult.Value -> GuiResult.Value(observed.value.observationId)
-                is GuiResult.Rejected -> observed
-                is GuiResult.Unknown -> observed
+            else {
+                val selected = if (observationId != null) GuiResult.Value(observationId)
+                    else when (val observed = GuiRuntime.observe(lease)) {
+                        is GuiResult.Value -> GuiResult.Value(observed.value.observationId)
+                        is GuiResult.Rejected -> observed
+                        is GuiResult.Unknown -> observed
+                    }
+                when (selected) {
+                    is GuiResult.Value -> GuiResult.Value(GuiRuntime.screenshot(lease, selected.value,
+                        visualOnly = observationId == null))
+                    is GuiResult.Rejected -> selected
+                    is GuiResult.Unknown -> selected
+                }
             }
         }
-        return when (selected) {
-            is GuiResult.Value -> screenshot(selected.value, cancelled)
-            is GuiResult.Rejected -> selected
-            is GuiResult.Unknown -> selected
-        }
+        return awaitScreenshot(started, cancelled)
     }
     fun observe(cancelled: () -> Boolean): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease) }
     fun action(action: GuiAction, cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
@@ -190,6 +194,10 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
     }.also { if (it is GuiResult.Unknown) ioFence.unknown() }
     fun screenshot(observationId: String, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
         val started = onWorker(cancelled) { GuiResult.Value(GuiRuntime.screenshot(lease, observationId)) }
+        return awaitScreenshot(started, cancelled)
+    }
+    private fun awaitScreenshot(started: GuiResult<CompletableFuture<GuiResult<GuiScreenshot>>>,
+        cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
         if (started !is GuiResult.Value) return when (started) {
             is GuiResult.Rejected -> started
             is GuiResult.Unknown -> started

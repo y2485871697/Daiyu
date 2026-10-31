@@ -256,7 +256,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
                         "checksumFailureCleansOnlyItsOwnStaging",
                         "traversalAndUnknownEntriesNeverBecomePaths",
                         "roundTripVerifiesPayloadsAndKeepsSourceBytes",
-                        "completeArchiveIsDetectedByInputSpoolAndLegacyZipStaysLegacy",
+                        "completeArchiveIsDetectedAndUnrecognizedArchivesAreRejected",
                     ),
                     "context.ProviderSummaryModelTest" to listOf(
                         "oauthSummaryDeadlineStillAbortsTheRealSession",

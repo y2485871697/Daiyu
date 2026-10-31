@@ -29,6 +29,19 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
         self.assertIn('Modifier.testTag("chat-voice-mode-menu").fillMaxWidth().verticalScroll(rememberScrollState())', sheet)
         self.assertNotIn('ChatAnchoredMenu(', sheet)
 
+    def test_doubao_call_uses_its_own_handset_not_the_input_microphone(self):
+        sheet = voice_sheet()
+        self.assertIn('MenuEntry("语音输入", DaiyuIcons.Voice, ChatMenuAction.VOICE_INPUT)', sheet)
+        self.assertIn('MenuEntry("语音对话", DaiyuIcons.Speak, ChatMenuAction.VOICE_CHAT)', sheet)
+        self.assertIn('MenuEntry("豆包实时通话", DaiyuIcons.Call, ChatMenuAction.VOICE_DOUBAO)', sheet)
+        icons = (SRC / 'ui/icons/DaiyuIcons.kt').read_text()
+        call = icons.split('val Call: ImageVector by lazy {', 1)[1].split('    val ', 1)[0]
+        for fragment in ('name = "Daiyu.Call"', 'defaultWidth = 24.dp', 'defaultHeight = 24.dp',
+                         'viewportWidth = 24f, viewportHeight = 24f', 'fill = null',
+                         'strokeLineWidth = 1.75f', 'StrokeCap.Round', 'StrokeJoin.Round', 'curveTo('):
+            self.assertIn(fragment, call)
+        self.assertNotIn('Daiyu.Voice', call)
+
     def test_voice_rows_match_attachment_density_not_small_popup(self):
         sheet = voice_sheet()
         attachment = (CHAT / 'ChatMenus.kt').read_text().split('internal fun ChatAttachmentSheet(', 1)[1].split('internal fun UserTurnMenu(', 1)[0]

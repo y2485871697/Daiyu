@@ -562,6 +562,22 @@ object DaiyuIcons {
         }.build()
     }
 
+    val Call: ImageVector by lazy {
+        ImageVector.Builder(name = "Daiyu.Call", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
+                moveTo(6.2f, 3.5f); lineTo(9.4f, 7.4f)
+                curveTo(9.9f, 8f, 9.8f, 8.8f, 9.3f, 9.3f); lineTo(7.7f, 10.9f)
+                curveTo(8.9f, 13.2f, 10.8f, 15.1f, 13.1f, 16.3f); lineTo(14.7f, 14.7f)
+                curveTo(15.2f, 14.2f, 16f, 14.1f, 16.6f, 14.6f); lineTo(20.5f, 17.8f)
+                curveTo(21.1f, 18.3f, 21.2f, 19.2f, 20.6f, 19.8f); lineTo(19.5f, 20.9f)
+                curveTo(18.9f, 21.5f, 18f, 21.7f, 17.2f, 21.4f)
+                curveTo(10.3f, 19.1f, 4.9f, 13.7f, 2.6f, 6.8f)
+                curveTo(2.3f, 6f, 2.5f, 5.1f, 3.1f, 4.5f); lineTo(4.2f, 3.4f)
+                curveTo(4.8f, 2.8f, 5.7f, 2.9f, 6.2f, 3.5f); close()
+            }
+        }.build()
+    }
+
     val Voice: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Voice", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {

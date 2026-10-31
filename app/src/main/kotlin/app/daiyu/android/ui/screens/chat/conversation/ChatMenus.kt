@@ -218,7 +218,7 @@ internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onActio
     val entries = listOf(
         MenuEntry("语音输入", DaiyuIcons.Voice, ChatMenuAction.VOICE_INPUT),
         MenuEntry("语音对话", DaiyuIcons.Speak, ChatMenuAction.VOICE_CHAT),
-        MenuEntry("豆包实时通话", DaiyuIcons.Voice, ChatMenuAction.VOICE_DOUBAO),
+        MenuEntry("豆包实时通话", DaiyuIcons.Call, ChatMenuAction.VOICE_DOUBAO),
     ).filter { it.action in available }
     if (entries.isEmpty()) return
     val colors = usagePalette()

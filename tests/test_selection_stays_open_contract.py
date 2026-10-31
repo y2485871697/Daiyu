@@ -66,5 +66,6 @@ class SelectionStaysOpenContractTest(unittest.TestCase):
         self.assertIn("Lifecycle.Event.ON_PAUSE) expanded = false", provider)
         appearance = (SRC / "ui/screens/settings/AppearanceSettingsScreen.kt").read_text()
         self.assertNotIn("val finishSelection =", appearance)
-        self.assertIn("finishDismiss { choosingBlur = false }", appearance)
+        self.assertIn("onDismiss = { choosingBlur = false }", appearance)
+        self.assertEqual(1, appearance.count("choosingBlur = false"))
 if __name__ == "__main__": unittest.main()

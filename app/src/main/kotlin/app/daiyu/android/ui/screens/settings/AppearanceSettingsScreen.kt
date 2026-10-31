@@ -29,6 +29,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import app.daiyu.android.ui.components.usagePalette
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -40,7 +43,6 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
-import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -103,17 +105,26 @@ internal fun AppearanceSettingsScreen(
     if (choosingBlur) ChatSelectionSheet(
         title = "顶栏模糊样式", onDismiss = { choosingBlur = false },
         showCloseButton = false, titleFontSize = 20.sp,
-        footer = {
-            val finishDismiss = app.daiyu.android.ui.components.rememberBottomSheetAction()
-            AssistantPreviewButton("取消", { finishDismiss { choosingBlur = false } },
-                Modifier.fillMaxWidth().testTag("choice-sheet-cancel"))
-        },
     ) {
+        val sheetColors = usagePalette()
         Column(Modifier.fillMaxWidth().heightIn(max = 440.dp)
             .verticalScroll(rememberScrollState()).selectableGroup()) {
             blurStyles.forEachIndexed { index, title ->
-                SettingsRadioRow(title, selected = state.topBarBlurStyle.ordinal == index) {
-                    onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))
+                val selected = state.topBarBlurStyle.ordinal == index
+                Row(Modifier.fillMaxWidth().testTag("settings-radio:$title")
+                    .heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (selected) sheetColors.selectionContainer else Color.Transparent)
+                    .selectable(selected = selected, role = Role.RadioButton, onClick = {
+                        onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))
+                    }).padding(horizontal = 12.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f), fontSize = 16.sp, lineHeight = 24.sp,
+                        color = if (selected) sheetColors.selectionContent else sheetColors.text)
+                    Box(Modifier.size(22.dp)
+                        .background(if (selected) sheetColors.accent else Color.Transparent, CircleShape),
+                        contentAlignment = Alignment.Center) {
+                        if (selected) DaiyuIcon(DaiyuIcons.Check, null, tint = sheetColors.onPrimary, size = 14.dp)
+                    }
                 }
             }
         }

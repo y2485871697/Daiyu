@@ -236,9 +236,11 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                 node("chat-selection-sheet").assertIsDisplayed()
                 node("daiyu-choice-sheet").assertDoesNotExist()
                 ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+                node("choice-sheet-cancel").assertDoesNotExist()
+                ui.onNodeWithText("取消").assertDoesNotExist()
                 val sheet = node("chat-selection-sheet").fetchSemanticsNode().boundsInRoot
                 var previousBottom = sheet.top
-                for (tag in listOf("settings-radio:高斯模糊", "settings-radio:渐进模糊", "choice-sheet-cancel")) {
+                for (tag in listOf("settings-radio:高斯模糊", "settings-radio:渐进模糊")) {
                     val bounds = node(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
                     assertTrue(bounds.left >= sheet.left && bounds.right <= sheet.right)
                     assertTrue(bounds.top >= previousBottom && bounds.bottom <= sheet.bottom)
@@ -249,23 +251,25 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             node("settings-radio:高斯模糊").assertIsNotSelected()
             node("settings-radio:渐进模糊").assertIsSelected()
             node("settings-radio:高斯模糊").performTouchInput { click() }
-            node("chat-selection-sheet").assertDoesNotExist()
+            node("chat-selection-sheet").assertIsDisplayed()
             ui.runOnIdle { assertEquals(listOf(initial.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.GAUSSIAN)), requests) }
-            node("settings-row:顶栏模糊样式").assertTextContains("高斯模糊")
-            open()
             node("settings-radio:高斯模糊").assertIsSelected()
             node("settings-radio:渐进模糊").assertIsNotSelected().performTouchInput { click() }
-            node("chat-selection-sheet").assertDoesNotExist()
+            node("chat-selection-sheet").assertIsDisplayed()
+            node("settings-radio:渐进模糊").assertIsSelected()
+            node("settings-radio:高斯模糊").assertIsNotSelected()
             ui.runOnIdle {
                 assertEquals(listOf(initial.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.GAUSSIAN), initial), requests)
                 assertEquals(initial, state)
             }
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty() }
             node("settings-row:顶栏模糊样式").assertTextContains("渐进模糊")
         }
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testTopBarBlurCancelOutsideAndBackDoNotChangeAppearance() {
+    fun testTopBarBlurOutsideAndBackDoNotChangeAppearanceWithoutCancel() {
         if (android.os.Build.VERSION.SDK_INT < 33) return
         val initial = AppearanceSettings(topBarBlurStyle = AppearanceTopBarBlurStyle.PROGRESSIVE)
         var state by mutableStateOf(initial)
@@ -277,15 +281,16 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                 }
             }
         }
-        repeat(3) { action ->
+        repeat(2) { action ->
             reveal("settings-row:顶栏模糊样式", "外观与主题").performTouchInput { click() }
             node("chat-selection-sheet").assertIsDisplayed()
             node("settings-radio:渐进模糊").assertIsSelected()
+            node("choice-sheet-cancel").assertDoesNotExist()
             when (action) {
-                0 -> node("choice-sheet-cancel").performTouchInput { click() }
-                1 -> node("preview-dialog-scrim").performTouchInput { click(Offset(width / 2f, height * .1f)) }
+                0 -> node("preview-dialog-scrim").performTouchInput { click(Offset(width / 2f, height * .1f)) }
                 else -> instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             }
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty() }
             node("chat-selection-sheet").assertDoesNotExist()
             ui.runOnIdle { assertTrue(requests.isEmpty()); assertEquals(initial, state) }
             node("settings-row:顶栏模糊样式").assertTextContains("渐进模糊")

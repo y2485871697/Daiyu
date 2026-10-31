@@ -15,22 +15,29 @@ class AppearanceBlurSheetContractTest(unittest.TestCase):
         self.assertIn("showCloseButton = false", BLUR)
         self.assertNotIn("DaiyuChoiceSheet", SCREEN)
         for primitive in ("WindowDialog", "DialogProperties", "dialogEnterMotion", "RoundedCornerShape"):
-            self.assertNotIn(primitive, BLUR)
+            self.assertNotIn(primitive, BLUR.split("val sheetColors", 1)[0])
 
-    def test_choices_use_selected_radio_rows_and_a_scrollable_group(self):
+    def test_choices_use_voice_style_highlights_and_a_scrollable_group(self):
         self.assertIn(".verticalScroll(rememberScrollState())", BLUR)
         self.assertIn(".selectableGroup()", BLUR)
         self.assertIn("blurStyles.forEachIndexed", BLUR)
-        self.assertIn("SettingsRadioRow", BLUR)
+        for fragment in ('usagePalette()', 'RoundedCornerShape(12.dp)', 'heightIn(min = 56.dp)',
+                         'sheetColors.selectionContainer', 'sheetColors.selectionContent',
+                         'sheetColors.accent', 'sheetColors.onPrimary', 'Modifier.size(22.dp)',
+                         'fontSize = 16.sp, lineHeight = 24.sp', 'Role.RadioButton',
+                         'testTag("settings-radio:$title")'):
+            self.assertIn(fragment, BLUR)
+        self.assertNotIn('SettingsRadioRow', BLUR)
         self.assertIn("selected = state.topBarBlurStyle.ordinal == index", BLUR)
         self.assertIn("onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))", BLUR)
         self.assertEqual(1, BLUR.count("onChange("))
 
-    def test_cancel_is_a_shared_footer_action_and_dismiss_does_not_save(self):
-        self.assertIn("footer = {", BLUR)
-        self.assertIn('AssistantPreviewButton("取消", { finishDismiss { choosingBlur = false } }', BLUR)
-        self.assertIn('testTag("choice-sheet-cancel")', BLUR)
+    def test_no_cancel_or_description_and_outside_back_dismiss_does_not_save(self):
+        for fragment in ('footer =', 'AssistantPreviewButton', 'choice-sheet-cancel',
+                         'subtitle =', 'summary =', '"取消"'):
+            self.assertNotIn(fragment, BLUR)
         self.assertIn("onDismiss = { choosingBlur = false }", BLUR)
+        self.assertEqual(1, BLUR.count("choosingBlur = false"))
         self.assertIn('listOf("高斯模糊", "渐进模糊")', SCREEN)
         self.assertIn("val blurSupported = isRuntimeShaderSupported()", SCREEN)
         self.assertIn("if (blurSupported)", SCREEN)

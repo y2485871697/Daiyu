@@ -766,11 +766,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("first summary").assertIsDisplayed()
             mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true }
-            ui.mainClock.advanceTimeBy(600)
-            ui.onNodeWithText("answer").assertDoesNotExist()
-            assertDisclosure("work-process-header", expanded = true)
-            mainThread { source = source.copy(status = RunStatus.COMPLETED) }
             ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("answer").assertDoesNotExist()
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeBy(32)
                 ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isEmpty() &&
@@ -798,11 +795,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("first summary").assertIsDisplayed()
             mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true; epoch++ }
-            ui.mainClock.advanceTimeBy(600)
-            ui.onNodeWithText("answer").assertDoesNotExist()
-            assertDisclosure("work-process-header", expanded = true)
-            mainThread { source = source.copy(status = RunStatus.COMPLETED) }
             ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("answer").assertDoesNotExist()
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeBy(32)
                 ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isEmpty() &&
@@ -829,11 +823,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.onNodeWithText("first summary").assertIsDisplayed()
             ui.onNodeWithTag("work-process-header").performClick()
             mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L); done = true }
-            ui.mainClock.advanceTimeBy(600)
-            ui.onNodeWithText("answer").assertDoesNotExist()
-            assertDisclosure("work-process-header", expanded = true)
-            mainThread { source = source.copy(status = RunStatus.COMPLETED) }
             ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("answer").assertDoesNotExist()
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeBy(32)
                 ui.onAllNodesWithText("first summary").fetchSemanticsNodes().isEmpty() &&

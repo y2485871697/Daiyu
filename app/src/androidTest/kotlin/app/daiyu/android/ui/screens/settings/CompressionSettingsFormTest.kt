@@ -20,6 +20,9 @@ import app.daiyu.android.ui.app.AgentAppTheme
 /** Exercises actual form controls and captured requests, without a provider or persistence. */
 class CompressionSettingsFormTest : WiredActivityTestCase() {
     private var submitted: CompressionSettingsEditor.SaveRequest? = null
+    private var saves = 0
+    private var saveBusy by mutableStateOf(false)
+    private var confirmSave: (() -> Unit)? = null
     private var pickerOpens = 0
     private var observed: CompressionSettingsDraftUi? = null
 
@@ -30,20 +33,26 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
         reasoningBudget = "1000", overheadBudget = "2000", deadlineMillis = "30000",
     )
 
-    private fun show(initial: CompressionSettingsDraftUi, dark: Boolean = false) {
+    private fun show(initial: CompressionSettingsDraftUi, dark: Boolean = false, deferSave: Boolean = false) {
         submitted = null
+        saves = 0
+        confirmSave = null
         observed = null
         pickerOpens = 0
         mainThread {
+            saveBusy = false
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                     applyInterfaceScale = false) {
                     var value by remember { mutableStateOf(initial) }
                     CompressionSettingsForm(value, onChange = { value = it; observed = it },
                         onSave = {
+                            saves++
+                            if (deferSave) { saveBusy = true; confirmSave = { value = it; saveBusy = false } }
+                            else value = it
                             submitted = CompressionSettingsEditor.SaveRequest(it.compression(), it.summary(),
                                 it.protocolChangeAuthorized, it.requestOptionsReplacementAuthorized)
-                        }, onBack = {}, enabled = true, notice = null, error = false,
+                        }, onBack = {}, enabled = true, saving = saveBusy, notice = null, error = false,
                         onChooseModel = { pickerOpens++ })
                 }
             }
@@ -119,23 +128,51 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
         }
     }
 
-    fun testEndpointPlaceholderDoesNotChangeProviderOrOpenModelPicker() {
-        val initial = draft().copy(provider = draft().provider.copy(protocol = ProviderProtocol.MESSAGES))
-        show(initial)
-        node("compression-protocol").performClick()
-        listOf("compression-endpoint:chat-completions", "compression-endpoint:responses").forEach { option ->
-            node(option).assertIsNotSelected().performClick()
-            node("compression-protocol-menu").assertExists()
-            assertEquals(0, pickerOpens)
-            assertNull(submitted)
+    fun testEndpointPointerSelectionSavesTheActualPreferenceAndKeepsTheMenuOpen() {
+        for (dark in listOf(false, true)) {
+            val initial = draft().copy(provider = draft().provider.copy(protocol = ProviderProtocol.MESSAGES))
+            show(initial, dark)
+            node("compression-protocol").performClick()
+            node("compression-endpoint:chat-completions").assertIsSelected()
+            node("compression-endpoint:responses").performTouchInput { click() }
+            node("compression-protocol-menu").assertIsDisplayed()
+            node("compression-endpoint:responses").assertIsSelected()
+            node("compression-endpoint:chat-completions").assertIsNotSelected()
+            assertEquals(1, saves)
+            assertEquals(ProviderProtocol.RESPONSES, submitted!!.settings.summaryProtocol)
+            assertEquals(initial.binding, submitted!!.settings.summaryModel)
+            assertEquals(initial.provider, submitted!!.profile!!.provider)
+            node("compression-endpoint:chat-completions").performTouchInput { click() }
+            node("compression-endpoint:chat-completions").assertIsSelected()
+            assertEquals(2, saves)
+            assertEquals(ProviderProtocol.CHAT_COMPLETIONS, submitted!!.settings.summaryProtocol)
+            node("compression-endpoint:chat-completions").performClick()
+            assertEquals(2, saves)
             assertNull(observed)
+            assertEquals(0, pickerOpens)
             assertEquals(0, fixture.opens.get())
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitForIdle()
+            node("compression-protocol-menu").assertDoesNotExist()
         }
-        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-        ui.waitForIdle()
-        node("compression-protocol-menu").assertDoesNotExist()
-        reveal("compression-summary-config", "上下文压缩").performClick()
-        assertEquals(1, pickerOpens)
+    }
+
+    fun testSavingRetainsTheMenuButRejectsCompetingClicksAndFailedSaveDoesNotSelect() {
+        show(draft(), deferSave = true)
+        node("compression-protocol").performClick()
+        node("compression-endpoint:responses").performTouchInput { click() }
+        node("compression-protocol-menu").assertIsDisplayed()
+        node("compression-endpoint:responses").assertIsNotEnabled()
+        node("compression-endpoint:chat-completions").assertIsNotEnabled().performTouchInput { click() }
+        assertEquals(1, saves)
+        mainThread { saveBusy = false }
+        node("compression-endpoint:chat-completions").assertIsSelected()
+        node("compression-endpoint:responses").assertIsNotSelected().performClick()
+        assertEquals(2, saves)
+        mainThread { confirmSave!!.invoke() }
+        node("compression-protocol-menu").assertIsDisplayed()
+        node("compression-endpoint:responses").assertIsSelected()
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testDraftProtocolAuthorizationAndRequestPolicyResetRemainExplicit() {

@@ -66,8 +66,9 @@ class ProviderSummaryModelResolver internal constructor(
 
     override fun resolve(binding: SummaryModelBinding): BoundSummaryModel? = resolve(binding, usagePort)
 
-    override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
-        val configuration = lookup(binding) ?: return null
+    override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?,
+        protocol: ProviderProtocol?): BoundSummaryModel? {
+        val configuration = (lookup(binding) ?: return null).withSummaryProtocol(protocol)
         require(configuration.binding == binding) { "摘要模型绑定不匹配；未回退主模型" }
         val adapter = ProviderSummaryModelPort(configuration, connect, deadlines, usage, oauthHeaders)
         return BoundSummaryModel(binding, adapter, configuration.contextWindowTokens, configuration.inputBudgetTokens,

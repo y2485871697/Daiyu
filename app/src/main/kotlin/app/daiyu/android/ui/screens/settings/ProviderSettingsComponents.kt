@@ -72,11 +72,11 @@ internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolea
 
 @Composable
 internal fun ProviderChoiceRow(title: String, value: String, tag: String, enabled: Boolean,
-    choices: List<String>, optionTags: List<String>, selectedIndex: Int, summary: String? = null, onSelect: (Int) -> Unit) {
+    choices: List<String>, optionTags: List<String>, selectedIndex: Int, summary: String? = null, busy: Boolean = false, onSelect: (Int) -> Unit) {
     var expanded by remember(tag) { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val colors = MiuixTheme.colorScheme
-    val currentEnabled by rememberUpdatedState(enabled)
+    val currentEnabled by rememberUpdatedState(enabled && !busy)
     DisposableEffect(lifecycle, tag, enabled) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) expanded = false
@@ -86,7 +86,7 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
     }
     Box(Modifier.fillMaxWidth()) {
         Row(Modifier.testTag(tag).fillMaxWidth().heightIn(min = 64.dp)
-            .clickable(enabled = enabled) { expanded = true }.padding(horizontal = 16.dp, vertical = 14.dp),
+            .clickable(enabled = enabled && !busy) { expanded = true }.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MiuixTheme.textStyles.body1)
@@ -102,7 +102,7 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
         if (expanded && enabled) OptionSelectionSheet(title, onDismiss = { expanded = false },
             modifier = Modifier.testTag("$tag-menu")) {
             choices.forEachIndexed { index, choice ->
-                OptionSelectionItem(choice, selected = index == selectedIndex,
+                OptionSelectionItem(choice, selected = index == selectedIndex, enabled = enabled && !busy,
                     modifier = Modifier.testTag(optionTags[index])) {
                     if (expanded && currentEnabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                         onSelect(index)

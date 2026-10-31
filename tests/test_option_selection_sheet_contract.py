@@ -47,14 +47,16 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
         self.assertIn('DisposableEffect(lifecycle, tag, enabled)', text)
         self.assertNotIn('DropdownMenu(', text)
 
-    def test_all_four_provider_choice_callers_keep_their_business(self):
+    def test_all_five_provider_choice_callers_keep_their_business(self):
         settings = SRC / 'ui/screens/settings'
         calls = {p.name: p.read_text() for p in settings.glob('*.kt') if 'ProviderChoiceRow(' in p.read_text()}
         self.assertEqual(set(calls), {'ProviderSettingsComponents.kt', 'ModelSettingsScreen.kt',
-                                    'ProviderBalanceFields.kt', 'CompressionSettingsForm.kt'})
+                                    'ProviderBalanceFields.kt', 'CompressionSettingsForm.kt', 'DaiyuPromptCacheFields.kt'})
         self.assertIn('draft.selectProtocol(protocols[choice])', calls['ProviderSettingsComponents.kt'])
         self.assertIn('BalanceOption.applyPreset', calls['ProviderBalanceFields.kt'])
-        self.assertIn('selectedIndex = -1', calls['CompressionSettingsForm.kt'])
+        self.assertIn('selectedIndex = selected, busy = saving', calls['CompressionSettingsForm.kt'])
+        self.assertIn('onSave(draft.copy(summaryProtocol = protocols[index]))', calls['CompressionSettingsForm.kt'])
+        self.assertIn('draft.copy(promptCacheRetention = values[index])', calls['DaiyuPromptCacheFields.kt'])
 
     def test_linux_keeps_scope_owner_and_option_identity(self):
         text = source('ui/screens/settings/LinuxSettingsScreen.kt')

@@ -11,17 +11,19 @@ internal object CatalogSummaryExecutionPolicy {
     const val DEADLINE_MILLIS = 120_000L
     private const val EXTRA_FRAMING_RESERVE = 512L
 
-    fun chatConfiguration(snapshot: app.daiyu.android.model.ProviderSnapshot, window: Long): SummaryProviderConfiguration {
+    fun chatConfiguration(snapshot: app.daiyu.android.model.ProviderSnapshot, window: Long,
+        protocol: app.daiyu.android.model.ProviderProtocol? = null): SummaryProviderConfiguration {
         require(window in 1024..10_000_000)
         val settings = summarySettings(snapshot.asModelSettings())
         val binding = SummaryModelBinding("frozen-chat-summary", settings.model)
-        return configuration(binding, settings.copy(contextWindowOverride = window.toInt()))
+        return configuration(binding, settings.copy(contextWindowOverride = window.toInt())).withSummaryProtocol(protocol)
     }
 
     fun childConfiguration(snapshot: app.daiyu.android.model.ProviderSnapshot, window: Long,
-        binding: SummaryModelBinding?, resolve: (SummaryModelBinding) -> SummaryProviderConfiguration?): SummaryProviderConfiguration =
-        if (binding == null) chatConfiguration(snapshot, window)
-        else requireNotNull(resolve(binding)) { "子代理摘要模型不可用" }
+        binding: SummaryModelBinding?, protocol: app.daiyu.android.model.ProviderProtocol? = null,
+        resolve: (SummaryModelBinding) -> SummaryProviderConfiguration?): SummaryProviderConfiguration =
+        (if (binding == null) chatConfiguration(snapshot, window)
+        else requireNotNull(resolve(binding)) { "子代理摘要模型不可用" }).withSummaryProtocol(protocol)
 
     /** Project chat-only reasoning/output/tool options onto the existing tool-free summary policy. */
     fun summarySettings(settings: ModelSettings): ModelSettings {
@@ -75,3 +77,6 @@ internal fun catalogSummaryConfiguration(context: Context, expected: SummaryProf
     }
     return CatalogSummaryExecutionPolicy.configuration(expected.binding, CatalogSummaryExecutionPolicy.summarySettings(frozen.settings))
 }
+
+internal fun SummaryProviderConfiguration.withSummaryProtocol(protocol: app.daiyu.android.model.ProviderProtocol?): SummaryProviderConfiguration =
+    if (protocol == null) this else copy(provider = ManualSummaryTargets.forSummary(provider.asModelSettings(), protocol).requestSnapshot())

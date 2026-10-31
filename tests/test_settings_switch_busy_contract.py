@@ -32,8 +32,9 @@ class SettingsSwitchBusyContractTest(unittest.TestCase):
     def test_compression_form_passes_save_lock_to_both_switches_and_other_actions(self):
         text = (SETTINGS / 'CompressionSettingsForm.kt').read_text()
         self.assertIn('saving: Boolean = false', text)
-        self.assertEqual(text.count('busy = saving'), 2)
-        self.assertIn('"compression-protocol", enabled && !saving', text)
+        self.assertEqual(text.count('busy = saving'), 3)
+        self.assertIn('"compression-protocol", enabled', text)
+        self.assertIn('selectedIndex = selected, busy = saving', text)
         self.assertIn('if (enabled && !saving) onChooseModel else null', text)
 
     def test_compression_confirmation_owner_and_failure_guards_stay(self):

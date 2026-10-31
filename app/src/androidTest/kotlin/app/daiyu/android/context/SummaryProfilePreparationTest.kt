@@ -57,7 +57,8 @@ class SummaryProfilePreparationTest : InstrumentationTestCase() {
         SummaryProfileBudgets(32000, 27000, 2000, 1000, 2000, 30000))
 
     private fun coordinator(wire: Wire = Wire()): ContextPreparationCoordinator {
-        val settings = ProductionCompressionSettings(true, 5000, 1000, summaryModel = binding)
+        val settings = ProductionCompressionSettings(true, 5000, 1000, summaryModel = binding,
+            summaryProtocol = ProviderProtocol.RESPONSES)
         return ContextPreparationCoordinator(service, { settings.coordinatorSettings() },
             ProductionCompressionPolicyResolver,
             ProviderSummaryModelResolver({ store.configuration(it) }, { connections++; wire },

@@ -2,6 +2,7 @@ package app.daiyu.android.context
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.domain.context.CompressionPolicy
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -14,8 +15,10 @@ data class ProductionCompressionSettings(
     val reserveTokens: Long = 4096,
     val triggerPercent: Int = 80,
     val summaryModel: SummaryModelBinding? = null,
+    val summaryProtocol: ProviderProtocol = ProviderProtocol.CHAT_COMPLETIONS,
 ) {
     init {
+        require(summaryProtocol in setOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES))
         require(triggerPercent == 80)
         CompressionPolicy(automatic && contextWindowTokens != null, contextWindowTokens,
             triggerPercent, reserveTokens, tokenTail = true)
@@ -24,7 +27,7 @@ data class ProductionCompressionSettings(
     internal fun coordinatorSettings() = CompressionSettings(
         automatic = automatic, contextWindowTokens = contextWindowTokens,
         reserveTokens = reserveTokens, triggerPercent = triggerPercent,
-        summaryModel = summaryModel, tokenTail = true)
+        summaryModel = summaryModel, tokenTail = true, summaryProtocol = summaryProtocol)
 
     internal fun childSettings(snapshot: app.daiyu.android.model.ProviderSnapshot) = coordinatorSettings().copy(
         automatic = true, contextWindowTokens = snapshot.contextWindowOverride?.toLong())
@@ -46,7 +49,10 @@ class ProductionCompressionSettingsStore(private val preferences: SharedPreferen
         if (fenced[preferences] == true) throw CompressionSettingsWriteUnconfirmed()
         val present = listOf(KEY, V2_KEY, CompressionSettingsStore.KEY).filter(preferences::contains)
         check(present.size <= 1) { "压缩配置版本冲突；请重新保存" }
-        if (present.isEmpty()) return@synchronized ProductionCompressionSettings()
+        val protocol = preferences.getString(PROTOCOL_KEY, ProviderProtocol.CHAT_COMPLETIONS.wireName).let { raw ->
+            listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES).single { it.wireName == raw }
+        }
+        if (present.isEmpty()) return@synchronized ProductionCompressionSettings(summaryProtocol = protocol)
         val key = present.single()
         val raw = requireNotNull(preferences.getString(key, null))
         val json = configurationObject(raw)
@@ -65,7 +71,8 @@ class ProductionCompressionSettingsStore(private val preferences: SharedPreferen
             automatic = json.configurationBoolean("automatic"),
             contextWindowTokens = if (json.isNull("window")) null else json.configurationLong("window"),
             reserveTokens = json.configurationLong("reserve"),
-            summaryModel = if (json.isNull("summaryModel")) null else decodeBinding(json.getJSONObject("summaryModel")))
+            summaryModel = if (json.isNull("summaryModel")) null else decodeBinding(json.getJSONObject("summaryModel")),
+            summaryProtocol = protocol)
         if (legacy) save(settings)
         settings
     }
@@ -84,9 +91,10 @@ class ProductionCompressionSettingsStore(private val preferences: SharedPreferen
             .put("reserve", settings.reserveTokens).put("trigger", 80)
             .put("summaryModel", settings.summaryModel?.let(::encodeBinding) ?: JSONObject.NULL).toString()
         fenced[preferences] = true
-        val confirmed = preferences.edit().putString(KEY, raw).remove(V2_KEY)
+        val confirmed = preferences.edit().putString(KEY, raw).putString(PROTOCOL_KEY, settings.summaryProtocol.wireName).remove(V2_KEY)
             .remove(CompressionSettingsStore.KEY).commit()
-        if (!confirmed || preferences.getString(KEY, null) != raw || preferences.contains(V2_KEY) ||
+        if (!confirmed || preferences.getString(KEY, null) != raw ||
+            preferences.getString(PROTOCOL_KEY, null) != settings.summaryProtocol.wireName || preferences.contains(V2_KEY) ||
             preferences.contains(CompressionSettingsStore.KEY)) throw CompressionSettingsWriteUnconfirmed()
         fenced.remove(preferences)
         Unit
@@ -95,6 +103,7 @@ class ProductionCompressionSettingsStore(private val preferences: SharedPreferen
     companion object {
         internal const val NAMESPACE = "context-compression"
         internal const val KEY = "compression-settings-v3"
+        internal const val PROTOCOL_KEY = "summary-request-protocol"
         internal const val V2_KEY = "compression-settings-v2"
         private val lock = Any()
         private val fenced = WeakHashMap<SharedPreferences, Boolean>()

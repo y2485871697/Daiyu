@@ -46,8 +46,9 @@ class CompressionProtocolHelpContract(unittest.TestCase):
         for action in ['onSave', 'onChange', 'onConfirm', 'onChooseModel', 'ProviderProtocol']:
             self.assertNotIn(action, self.help)
 
-    def test_protocol_placeholder_and_model_selection_are_unchanged(self):
-        self.assertIn('selectedIndex = -1, onSelect = {}', self.form)
+    def test_protocol_is_wired_without_changing_the_model_selection(self):
+        self.assertNotIn('selectedIndex = -1, onSelect = {}', self.form)
+        self.assertIn('onSave(draft.copy(summaryProtocol = protocols[index]))', self.form)
         self.assertIn('"compression-endpoint:chat-completions", "compression-endpoint:responses"', self.form)
         self.assertIn('if (it && !hasSummarySelection) onEnableSummary()', self.form)
         self.assertIn('"当前使用的模型"', self.form)

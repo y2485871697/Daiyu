@@ -74,18 +74,18 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         var custom = 0
         val coordinator = ContextPreparationCoordinator(service, { saved }, policies,
             SummaryModelResolver { custom++; error("custom must not resolve") },
-            chatModel = { provider, window, usage ->
+            chatModel = { provider, window, usage, _ ->
                 assertSame(snapshot, provider); assertEquals(saved.contextWindowTokens, window)
                 assertNull(usage); defaults++; bound()
             })
         val frozen = coordinator.freeze(owner, emptyList(), chatProvider = snapshot)
         assertNotNull(frozen.summarizer); assertEquals(1, defaults); assertEquals(0, custom)
         val disabled = ContextPreparationCoordinator(service, { saved.copy(automatic = false) }, policies,
-            SummaryModelResolver { error("disabled custom") }, chatModel = { _, _, _ -> error("disabled default") })
+            SummaryModelResolver { error("disabled custom") }, chatModel = { _, _, _, _ -> error("disabled default") })
         assertNull(disabled.freeze(owner, emptyList(), chatProvider = snapshot).summarizer)
         val explicit = ContextPreparationCoordinator(service, { saved.copy(summaryModel = binding) }, policies,
             SummaryModelResolver { custom++; throw IllegalArgumentException("bad custom") },
-            chatModel = { _, _, _ -> error("must not fall back") })
+            chatModel = { _, _, _, _ -> error("must not fall back") })
         try { explicit.freeze(owner, emptyList(), chatProvider = snapshot); fail("custom failure must remain") }
         catch (failure: IllegalArgumentException) { assertEquals("bad custom", failure.message) }
         assertEquals(1, custom); assertEquals(1, defaults)
@@ -147,7 +147,7 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         val owner = seed(); val original = service.displayHistory(owner)
         var resolved = 0
         val coordinator = ContextPreparationCoordinator(service, { settings() }, policies,
-            SummaryModelResolver { resolved++; null }, chatModel = { _, _, _ -> error("custom cannot fall back") })
+            SummaryModelResolver { resolved++; null }, chatModel = { _, _, _, _ -> error("custom cannot fall back") })
         try { coordinator.prepare(coordinator.freeze(owner, listOf(pending(owner)))); fail() }
         catch (_: ContextCapacityExceededException) { }
         assertEquals(1, resolved)

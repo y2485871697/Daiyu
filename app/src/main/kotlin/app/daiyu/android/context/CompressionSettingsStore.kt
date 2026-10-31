@@ -2,6 +2,7 @@ package app.daiyu.android.context
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.daiyu.android.model.ProviderProtocol
 import org.json.JSONObject
 import java.util.WeakHashMap
 
@@ -26,8 +27,10 @@ data class CompressionSettings(
     /** Only explicit v2 production configuration supplies turns; never derived from v1 messages. */
     val keepTurns: Int? = null,
     val tokenTail: Boolean = false,
+    val summaryProtocol: ProviderProtocol? = null,
 ) {
     init {
+        require(summaryProtocol == null || summaryProtocol in setOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES))
         require(contextWindowTokens == null || contextWindowTokens > 0)
         require(reserveTokens >= 0 && triggerPercent in 10..95)
         require(keepRecentMessages in 0..100)

@@ -35,6 +35,7 @@ internal data class CompressionSettingsDraftUi(
     val deadlineMillis: String = "",
     val protocolChangeAuthorized: Boolean = false,
     val requestOptionsReplacementAuthorized: Boolean = false,
+    val summaryProtocol: ProviderProtocol = ProviderProtocol.CHAT_COMPLETIONS,
 ) {
     val needsProtocolAuthorization: Boolean get() = savedProtocol == null || provider.protocol != savedProtocol
 
@@ -45,7 +46,7 @@ internal data class CompressionSettingsDraftUi(
 
     fun compression() = ProductionCompressionSettings(automatic,
         window.trim().takeIf { it.isNotEmpty() }?.toLong(), reserve.trim().toLong(),
-        trigger.trim().toInt(), binding.takeIf { configureSummary })
+        trigger.trim().toInt(), binding.takeIf { configureSummary }, summaryProtocol)
 
     fun summary(): SummaryProfileSettings? = if (!configureSummary) null else SummaryProfileSettings(
         binding, provider, SummaryProfileBudgets(summaryWindow.trim().toLong(), inputBudget.trim().toLong(),
@@ -90,11 +91,14 @@ internal fun CompressionSettingsForm(
         }
         item("compression-protocol") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
-                // Endpoint preference is not wired yet; never reuse the provider/model selection action.
-                ProviderChoiceRow("请求接口", "Chat Completions API", "compression-protocol", enabled && !saving,
-                    listOf("Chat Completions API", "Responses API"),
-                    listOf("compression-endpoint:chat-completions", "compression-endpoint:responses"),
-                    selectedIndex = -1, onSelect = {})
+                val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES)
+                val labels = listOf("Chat Completions API", "Responses API")
+                val selected = protocols.indexOf(draft.summaryProtocol)
+                ProviderChoiceRow("请求接口", labels[selected], "compression-protocol", enabled,
+                    labels, listOf("compression-endpoint:chat-completions", "compression-endpoint:responses"),
+                    selectedIndex = selected, busy = saving, onSelect = { index ->
+                        if (protocols[index] != draft.summaryProtocol) onSave(draft.copy(summaryProtocol = protocols[index]))
+                    })
                 CompressionProtocolHelp(expanded = showHelp, onToggle = { showHelp = !showHelp },
                     tag = "compression-protocol-help", modifier = Modifier.padding(horizontal = 16.dp))
             }

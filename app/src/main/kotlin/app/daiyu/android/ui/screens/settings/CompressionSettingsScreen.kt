@@ -152,7 +152,8 @@ private class CompressionPage { var active = true }
 
 internal fun CompressionSettingsEditor.Snapshot.toDraft(fallbackBinding: SummaryModelBinding): CompressionSettingsDraftUi {
     val value = CompressionSettingsDraftUi(settings.summaryModel ?: fallbackBinding,
-        automatic = settings.automatic, window = settings.contextWindowTokens?.toString().orEmpty(),
+        automatic = settings.automatic, summaryProtocol = settings.summaryProtocol,
+        window = settings.contextWindowTokens?.toString().orEmpty(),
         reserve = settings.reserveTokens.toString(), trigger = settings.triggerPercent.toString(),
         configureSummary = settings.summaryModel != null)
     val saved = profile ?: return value

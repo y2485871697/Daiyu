@@ -59,7 +59,8 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
                         snapshot.triggerPercent,snapshot.reserveTokens,2)
                 }, object : SummaryModelResolver {
                     override fun resolve(binding: SummaryModelBinding) = summary.resolve(binding)
-                    override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
+                    override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?,
+                        protocol: app.daiyu.android.model.ProviderProtocol?): BoundSummaryModel? {
                         val bound = summary.resolve(binding) ?: return null
                         return bound.copy(transport = SummaryModelTransport { history, deadline ->
                             usage?.claim()

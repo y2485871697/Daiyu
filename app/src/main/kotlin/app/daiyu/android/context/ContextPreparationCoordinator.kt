@@ -19,7 +19,9 @@ fun interface CompressionPolicyResolver {
 fun interface SummaryModelResolver {
     fun resolve(binding: SummaryModelBinding): BoundSummaryModel?
     /** Production must implement this overload; legacy fake resolvers may ignore an unused port. */
-    fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
+    fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?,
+        protocol: app.daiyu.android.model.ProviderProtocol? = null): BoundSummaryModel? {
+        check(protocol == null) { "summary_resolver_has_no_protocol_preference" }
         check(usage == null) { "summary_resolver_has_no_durable_usage_binding" }
         return resolve(binding)
     }
@@ -96,7 +98,7 @@ class ContextPreparationCoordinator(
     private val settingsSnapshot: () -> CompressionSettings,
     private val policies: CompressionPolicyResolver,
     private val models: SummaryModelResolver,
-    private val chatModel: ((ProviderSnapshot, Long, BoundSummaryUsagePort?) -> BoundSummaryModel)? = null,
+    private val chatModel: ((ProviderSnapshot, Long, BoundSummaryUsagePort?, app.daiyu.android.model.ProviderProtocol?) -> BoundSummaryModel)? = null,
 ) {
     constructor(service: ContextService, settings: CompressionSettingsStore,
         policies: CompressionPolicyResolver, models: SummaryModelResolver) :
@@ -122,10 +124,10 @@ class ContextPreparationCoordinator(
         val binding = settings.summaryModel
         val bound = when {
             !policy.enabled -> null
-            binding != null -> models.resolve(binding, summaryUsage)
+            binding != null -> models.resolve(binding, summaryUsage, settings.summaryProtocol)
             else -> checkNotNull(chatModel) { "当前聊天摘要解析器不可用" }.invoke(
                 checkNotNull(chatProvider) { "需要本次冻结的聊天模型" },
-                checkNotNull(settings.contextWindowTokens), summaryUsage)
+                checkNotNull(settings.contextWindowTokens), summaryUsage, settings.summaryProtocol)
         }
         require(binding == null || bound == null || bound.binding == binding) { "摘要模型绑定已变化；未回退主模型" }
         cancellation.check()

@@ -56,7 +56,8 @@ internal fun ContextManagementRoute(
     val dismiss = { if (isCurrent()) { adapter?.close(); onClose() } }
     val initial = remember(adapter, state?.snapshot?.savedConfiguration) {
         val binding = state?.snapshot?.savedConfiguration?.summaryModel
-        val protocol = runCatching { binding?.let(CatalogSummaryBindings::decode)?.protocol }.getOrNull()
+        val protocol = state?.snapshot?.savedConfiguration?.summaryProtocol
+            ?: runCatching { binding?.let(CatalogSummaryBindings::decode)?.protocol }.getOrNull()
             ?: source.protocol("compression") ?: ProviderProtocol.CHAT_COMPLETIONS
         CompressionDialogDraft(customModel = binding != null,
             modelLabel = source.label("compression"), modelKey = source.key("compression"),

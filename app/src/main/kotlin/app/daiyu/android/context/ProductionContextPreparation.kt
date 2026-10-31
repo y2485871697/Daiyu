@@ -16,10 +16,10 @@ internal object ProductionContextPreparation {
                 ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
             },
             policies = ProductionCompressionPolicyResolver,
-            chatModel = { snapshot, window, usage ->
+            chatModel = { snapshot, window, usage, protocol ->
                 requireWorker()
                 check(usage != null) { "production_summary_requires_runtime_preparation" }
-                val configuration = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, window)
+                val configuration = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, window, protocol)
                 requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage))
             },
             models = object : SummaryModelResolver {
@@ -29,8 +29,9 @@ internal object ProductionContextPreparation {
                     else catalogSummaryConfiguration(app, binding)
                 }
                 override fun resolve(binding: SummaryModelBinding): BoundSummaryModel? = resolve(binding, null)
-                override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
-                    val bound = provider.resolve(binding, usage) ?: return null
+                override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?,
+                    protocol: app.daiyu.android.model.ProviderProtocol?): BoundSummaryModel? {
+                    val bound = provider.resolve(binding, usage, protocol) ?: return null
                     check(usage != null) { "production_summary_requires_runtime_preparation" }
                     return bound
                 }
@@ -47,7 +48,7 @@ internal object ProductionContextPreparation {
         val policy = ProductionCompressionPolicyResolver.resolve(settings)
         if (policy.contextTokens == null) return null
         val configuration = CatalogSummaryExecutionPolicy.childConfiguration(snapshot,
-            checkNotNull(policy.contextTokens), settings.summaryModel) { binding ->
+            checkNotNull(policy.contextTokens), settings.summaryModel, settings.summaryProtocol) { binding ->
             if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).configuration(binding)
             else catalogSummaryConfiguration(app, binding)
         }

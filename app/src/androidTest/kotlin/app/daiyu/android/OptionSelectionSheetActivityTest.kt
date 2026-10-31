@@ -103,6 +103,28 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
         assertEquals(opens, fixture.opens.get())
     }
 
+    fun testEnabledChoicesAcceptRealPointerClicksAcrossTheirWholeRows() {
+        for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
+            val selections = AtomicInteger()
+            val dismissed = AtomicInteger()
+            mount(mode = mode, selections = selections, dismissed = dismissed)
+            node("choice:1").performTouchInput { click(Offset(20f, center.y)) }
+            node("choice:1").assertIsSelected()
+            node("choice:0").performTouchInput { click(center) }
+            node("choice:0").assertIsSelected()
+            node("choice:1").performTouchInput { click(Offset(width - 20f, center.y)) }
+            node("choice:1").assertIsSelected()
+            node("chat-selection-sheet").assertIsDisplayed()
+            assertEquals(3, selections.get())
+            assertEquals(0, dismissed.get())
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            awaitClosed()
+            assertEquals(1, dismissed.get())
+            assertEquals(3, selections.get())
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testDisabledChoiceAndBackOrOutsideNeverSelectAnOption() {
         val selections = AtomicInteger()
         val dismissed = AtomicInteger()

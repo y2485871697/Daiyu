@@ -23,10 +23,12 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /** Real SQLite selection authorization with a decodable PNG fixture; no network or controller. */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditingImageSelectionStoreTest {
     private lateinit var root: File
     private lateinit var db: ConversationDatabase

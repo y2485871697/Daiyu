@@ -16,7 +16,8 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     if (content.isNotEmpty()) {
         val lastStep = content.indexOfLast { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }
         if (lastStep < 0) return AssistantWorkflowContent(null, emptyList(), content)
-        val steps = content.take(lastStep + 1)
+        val split = if (workProcess?.running ?: (status == RunStatus.RUNNING)) content.size else lastStep + 1
+        val steps = content.take(split)
         val work = workProcess ?: WorkProcessUi(steps.mapNotNull {
             when (it) {
                 is MessageContentUi.Reasoning -> WorkSegmentUi(reasoning = it.reported)
@@ -24,7 +25,7 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
                 else -> null
             }
         }, summary = if (status == RunStatus.RUNNING) "进行中" else "已完成", running = status == RunStatus.RUNNING)
-        return AssistantWorkflowContent(work, steps, content.drop(lastStep + 1))
+        return AssistantWorkflowContent(work, steps, content.drop(split))
     }
     val work = workProcess ?: reportedReasoning.filter {
         hasReportedReasoningText(it.text) || it.activeSinceNanos != null

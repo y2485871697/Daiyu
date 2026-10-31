@@ -42,7 +42,7 @@ class AssistantWorkflowContentTest {
         val owner = MessageImageOwner("c", "a")
         val reference = MessageImageReference(owner, "00000000-0000-0000-0000-000000000001", "image/png", 1, "0".repeat(64), 1, 1)
         val turn = map(source(listOf(tool("t1"), MessageBlock.Image(reference), tool("t2"), MessageBlock.Text("answer", "answer")),
-            listOf(thought)), dedicated = true)
+            listOf(thought), status = RunStatus.COMPLETED), dedicated = true)
         val ordered = turn.workflowContent()
         assertEquals(listOf("reasoning:r1", "tool:t1", "image:2:${reference.id}", "tool:t2"), keys(ordered.steps))
         assertEquals(listOf("text:answer"), keys(ordered.body))
@@ -51,7 +51,7 @@ class AssistantWorkflowContentTest {
         assertEquals(2, ordered.steps.filterIsInstance<MessageContentUi.Tool>().size)
     }
     @Test fun narrationBeforeLaterStepsIsPreservedAndOnlyTheTrailingAnswerIsOutside() {
-        val turn = map(source(listOf(MessageBlock.Text("n", "narration"), tool("t1"), MessageBlock.Text("a", "answer")), listOf(thought)))
+        val turn = map(source(listOf(MessageBlock.Text("n", "narration"), tool("t1"), MessageBlock.Text("a", "answer")), listOf(thought), status = RunStatus.COMPLETED))
         val ordered = turn.workflowContent()
         assertEquals(listOf("first summary", "narration", "t1"), ordered.steps.map {
             when (it) { is MessageContentUi.Reasoning -> it.reported.text; is MessageContentUi.Text -> it.text
@@ -70,7 +70,7 @@ class AssistantWorkflowContentTest {
     }
     @Test fun placeholderTailDoesNotMoveTheFinalAnswerIntoTheWorkflow() {
         val turn = map(source(listOf(tool("t1"), MessageBlock.Text("a", "answer")),
-            listOf(ReportedReasoning("empty", "...", blockOffset = 2))))
+            listOf(ReportedReasoning("empty", "...", blockOffset = 2)), status = RunStatus.COMPLETED))
         assertEquals("answer", turn.finalText)
         assertEquals(listOf("tool:t1"), keys(turn.workflowContent().steps))
     }
@@ -96,4 +96,43 @@ class AssistantWorkflowContentTest {
         assertFalse(entrances.enter("reasoning:r1", true))
         assertTrue(entrances.enter("tool:later", true))
     }
+    @Test fun growingTailStaysInsideAnExistingWorkflowBeforeAnyLaterToolArrives() {
+        for (dedicated in listOf(false, true)) {
+            var previousKey: String? = null
+            for (value in listOf("c", "checking", "checking now")) {
+                val turn = map(source(listOf(tool("t1"), MessageBlock.Text("n", value))), dedicated)
+                val ordered = turn.workflowContent()
+                assertTrue(ordered.body.isEmpty())
+                assertEquals(value, ordered.steps.filterIsInstance<MessageContentUi.Text>().single().text)
+                val key = keys(ordered.steps).last()
+                previousKey?.let { assertEquals(it, key) }
+                previousKey = key
+            }
+            val after = map(source(listOf(tool("t1"), MessageBlock.Text("n", "checking now"), tool("t2"))), dedicated)
+            assertEquals(previousKey, keys(after.workflowContent().steps)[1])
+            assertTrue(after.workflowContent().body.isEmpty())
+        }
+    }
+
+    @Test fun terminalSnapshotsReleaseOnlyTheFinalTailWithoutLosingProcessNarration() {
+        for (dedicated in listOf(false, true)) {
+            val running = source(listOf(tool("t1"), MessageBlock.Text("n", "checking"), tool("t2"),
+                MessageBlock.Text("a", "complete answer")))
+            assertTrue(map(running, dedicated).workflowContent().body.isEmpty())
+            for (status in listOf(RunStatus.COMPLETED, RunStatus.STOPPED, RunStatus.FAILED, RunStatus.INTERRUPTED)) {
+                val result = map(running.copy(status = status), dedicated).workflowContent()
+                assertEquals(listOf("checking"), result.steps.filterIsInstance<MessageContentUi.Text>().map { it.text })
+                assertEquals(listOf("complete answer"), result.body.filterIsInstance<MessageContentUi.Text>().map { it.text })
+            }
+        }
+    }
+
+    @Test fun ownerRunningStateKeepsMixedReconnectSlicesInTheWorkflow() {
+        val turn = map(source(listOf(tool("t1"), MessageBlock.Text("n", "checking"))), dedicated = true)
+        val displayedSlice = turn.copy(status = RunStatus.COMPLETED, isStreaming = false)
+        assertTrue(displayedSlice.workProcess!!.running)
+        assertTrue(displayedSlice.workflowContent().body.isEmpty())
+        assertEquals("checking", displayedSlice.workflowContent().steps.filterIsInstance<MessageContentUi.Text>().single().text)
+    }
+
 }

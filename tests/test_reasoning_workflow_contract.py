@@ -141,7 +141,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
     def test_single_thought_host_and_entrances_keep_order_and_do_not_replay(self):
         ordered = (CHAT / 'AssistantWorkflowContent.kt').read_text()
         for token in ['content.indexOfLast { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }',
-                      'val steps = content.take(lastStep + 1)', 'content.drop(lastStep + 1)',
+                      'val split = if (workProcess?.running ?: (status == RunStatus.RUNNING)) content.size else lastStep + 1',
+                      'val steps = content.take(split)', 'content.drop(split)',
                       'val work = workProcess ?: reportedReasoning.filter',
                       'WorkProcessUi(reasoning.map { WorkSegmentUi(reasoning = it) }',
                       'if (item is MessageContentUi.Reasoning && !handoff.ready(item.reported)) break',

@@ -45,8 +45,8 @@ class AssistantWorkflowCompositionTest {
         val composition = Composition(NoNodes(), recomposer)
         val thought = ReportedReasoning("r", "reported summary", 0L)
         val step = WorkStepUi("t", "lookup", "old result", WorkStepState.OK)
-        val initial = ChatTurnUi.Assistant("turn", finalText = "answer", status = RunStatus.RUNNING,
-            workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step), reasoning = thought)), "进行中", true))
+        val initial = ChatTurnUi.Assistant("turn", finalText = "answer", status = RunStatus.COMPLETED,
+            workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step), reasoning = thought)), "已完成", false))
         val initialTurn = if (!mixed) initial else initial.copy(content = listOf(
             MessageContentUi.Reasoning(thought), MessageContentUi.Tool(step), MessageContentUi.Text("final", "answer")))
         fun withBody(text: String) = if (!mixed) initialTurn.copy(finalText = text)

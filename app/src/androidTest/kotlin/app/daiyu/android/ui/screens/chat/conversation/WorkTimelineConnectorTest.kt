@@ -30,14 +30,25 @@ class WorkTimelineConnectorTest : WiredActivityTestCase() {
     fun testOrderedMixedStepsStayJoinedWhenThoughtAndToolExpandInBothThemes() = verify(legacy = false)
     fun testLegacySegmentsStayJoinedWhenThoughtAndToolExpandInBothThemes() = verify(legacy = true)
 
-    private fun verify(legacy: Boolean) {
+    fun testOrderedNarrationKeepsEveryPixelBetweenStepsConnected() = verify(legacy = false, narration = "process text\nsecond line")
+    fun testOrderedEmptyTextDoesNotDisconnectVisuallyAdjacentSteps() = verify(legacy = false, narration = "")
+    fun testOrderedWhitespaceTextDoesNotDisconnectVisuallyAdjacentSteps() = verify(legacy = false, narration = " \n ")
+
+    private fun verify(legacy: Boolean, narration: String? = null) {
         val thought = ReportedReasoning("connector-thought", "connector thought")
         val lastThought = ReportedReasoning("connector-last", "last thought")
         val owner = WorkStepOwnerUi("connector-c", "connector-r", "connector-a")
         val first = WorkStepUi("connector-first", "first tool", "", WorkStepState.OK, owner = owner)
         val second = first.copy(id = "connector-second", name = "second tool")
-        val content = listOf(MessageContentUi.Reasoning(thought), MessageContentUi.Tool(first),
-            MessageContentUi.Tool(second), MessageContentUi.Reasoning(lastThought))
+        val content = buildList {
+            add(MessageContentUi.Reasoning(thought))
+            narration?.let { add(MessageContentUi.Text("n1", it)) }
+            add(MessageContentUi.Tool(first))
+            narration?.let { add(MessageContentUi.Text("n2", it)); add(MessageContentUi.Text("n3", it)) }
+            add(MessageContentUi.Tool(second))
+            narration?.let { add(MessageContentUi.Text("n4", it)) }
+            add(MessageContentUi.Reasoning(lastThought))
+        }
         runBlocking { projectMarkdown(listOf("connector thought", "last thought")) }
         for (dark in listOf(false, true)) {
             lateinit var density: Density
@@ -56,7 +67,7 @@ class WorkTimelineConnectorTest : WiredActivityTestCase() {
                                 WorkSegmentUi(reasoning = thought, steps = listOf(first, second)),
                                 WorkSegmentUi(reasoning = lastThought)), "运行中", running = true), "connector",
                                 toolContent = { Box(Modifier.height(64.dp)) })
-                            else MessageContent(content, ChatScreenActions(), null, markdown = false,
+                            else MessageContent(content, ChatScreenActions(), null, markdown = false, workflowTimeline = true,
                                 toolContent = { Box(Modifier.height(64.dp)) },
                                 reasoningBody = { reported, connector -> ReasoningStepRow("connector", reported, connector) })
                         }

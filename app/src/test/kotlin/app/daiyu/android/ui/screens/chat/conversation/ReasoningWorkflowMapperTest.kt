@@ -128,7 +128,8 @@ class ReasoningWorkflowMapperTest {
         val body = tail.copy(blocks = listOf(MessageBlock.Text("answer", "answer")))
         val next = mapped(owner(body))
         assertEquals(initial.listKey, next.listKey)
-        assertEquals("answer", next.finalText)
+        assertEquals("", next.finalText)
+        assertEquals("answer", next.workProcess!!.segments.last().narration)
         assertEquals(sequence(initial), sequence(next))
         for (status in listOf(RunStatus.COMPLETED, RunStatus.STOPPED, RunStatus.FAILED)) {
             val complete = mapped(owner(body).copy(status = status, error = if (status == RunStatus.FAILED) "offline" else null,
@@ -254,7 +255,11 @@ class ReasoningWorkflowMapperTest {
                 assertTrue(expanded.all { it.status == sample.status })
                 val turn = mapped(sample)
                 assertEquals(listOf("r1", "t", "r2"), sequence(turn))
-                assertEquals("answer", turn.finalText)
+                assertEquals(if (sample.status == RunStatus.RUNNING) "" else "answer", turn.finalText)
+                if (sample.status == RunStatus.RUNNING) {
+                    assertEquals("answer", turn.workProcess!!.segments.last().narration)
+                    assertTrue(turn.workflowContent().body.isEmpty())
+                }
                 assertEquals(liveTurn.listKey, turn.listKey)
                 assertEquals(liveTurn.sourceListKeys, turn.sourceListKeys)
                 assertEquals(listOf(0, 1), turn.sourceSegmentIndices)

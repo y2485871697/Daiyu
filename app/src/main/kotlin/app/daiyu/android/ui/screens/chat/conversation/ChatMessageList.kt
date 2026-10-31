@@ -596,7 +596,7 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, projection: 
     val currentReveal = rememberUpdatedState(reveal)
     val currentComplete = rememberUpdatedState(generationComplete)
     return remember(plainNarration) { { text, modifier ->
-        if (text.itemId in plainNarration) Text(text.text, modifier.fillMaxWidth().padding(start = 18.dp),
+        if (text.itemId in plainNarration) Text(text.text, modifier.fillMaxWidth(),
             color = conversationColors().muted,
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
         else RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),
@@ -620,6 +620,7 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
             if (!expanded) entrances.suppress(steps.mapIndexed { index, item -> item.workflowKey(index) })
         }, content = { expanded ->
             MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
+                workflowTimeline = true,
                 toolContent = toolContent, flowRunning = work.running,
                 reasoningReady = { stopped || handoff.ready(it) },
                 reasoningBody = { reported, connector ->

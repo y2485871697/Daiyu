@@ -229,7 +229,9 @@ object ChatTurnMapper {
         presentations: ToolPresentationCache?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val hasWorkflow = hasTools || message.reportedReasoning.any { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
-        val lastText = workflowFinalTextIndex(message)
+        // A running tail can still be followed by a tool. Keep it in the workflow
+        // until the owning reply reaches a terminal snapshot.
+        val lastText = if (hasWorkflow && message.status == RunStatus.RUNNING) -1 else workflowFinalTextIndex(message)
         val finalText = if (hasWorkflow) {
             (message.blocks.getOrNull(lastText) as? MessageBlock.Text)?.text.orEmpty()
         } else {

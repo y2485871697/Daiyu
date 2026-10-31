@@ -13,13 +13,15 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         entry = source[source.index('private fun SpacedMessageEntry('):source.index('internal fun MessageImage(')]
         self.assertIn('entryBody(current.workflowKey(index)) {', entry)
         self.assertIn('spacingAfter = if (index < content.lastIndex) 10.dp else 0.dp', entry)
-        self.assertIn('leadingConnector = step && (previous is MessageContentUi.Tool || previous is MessageContentUi.Reasoning)', entry)
-        self.assertIn('trailingConnector = step && (next is MessageContentUi.Tool || next is MessageContentUi.Reasoning)', entry)
+        self.assertIn('leadingConnector = connector.before', entry)
+        self.assertIn('trailingConnector = connector.after', entry)
+        self.assertIn('throughConnector = connector.through', entry)
         self.assertLess(entry.index('entryBody('), entry.index('WorkTimelineEntry('))
 
     def test_top_and_bottom_bridges_draw_inside_their_own_layout_bounds(self):
         source = (CHAT / 'WorkTimelineEntry.kt').read_text()
         self.assertIn('if (leadingConnector)', source)
+        self.assertIn('if (throughConnector) drawLine(line, Offset(x, 0f), Offset(x, size.height)', source)
         self.assertIn('Offset(x, 0f), Offset(x, 17.dp.toPx())', source)
         self.assertIn('Offset(x, size.height - spacingAfter.toPx()), Offset(x, size.height)', source)
         self.assertIn('.padding(bottom = spacingAfter)', source)
@@ -30,6 +32,18 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
             self.assertNotIn('size.height + 3.dp.toPx()', row)
         legacy = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertEqual(2, legacy.count('WorkTimelineEntry(leadingConnector ='))
+
+    def test_workflow_only_connects_across_narration_with_one_text_gutter(self):
+        source = (CHAT / 'MessageContent.kt').read_text()
+        helper = (CHAT / 'WorkflowConnectors.kt').read_text()
+        self.assertIn('workflowTimeline: Boolean = false', source)
+        self.assertIn('workflowConnectors(content, workflowTimeline)', source)
+        self.assertIn('showConnector = connectors[index].after', source)
+        self.assertIn('through = continuous && !node && index > first && index < last', helper)
+        host = (CHAT / 'ChatMessageList.kt').read_text()
+        self.assertIn('workflowTimeline = true', host)
+        renderer = host[host.index('internal fun rememberAssistantTextBody'):host.index('private fun AssistantWorkflow(')]
+        self.assertNotIn('padding(start = 18.dp)', renderer)
 
     def test_android_regression_samples_every_join_and_rejects_stray_end_segments(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkTimelineConnectorTest.kt').read_text()

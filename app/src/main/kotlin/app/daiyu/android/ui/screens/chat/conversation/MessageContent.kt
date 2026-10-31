@@ -45,12 +45,14 @@ internal fun MessageContent(
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     flowRunning: Boolean = false,
+    workflowTimeline: Boolean = false,
     reasoningReady: (app.daiyu.android.domain.ReportedReasoning) -> Boolean = { true },
     reasoningBody: @Composable (app.daiyu.android.domain.ReportedReasoning, Boolean) -> Unit = { _, _ -> },
     imageOffset: Int = 0,
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit = { _, body -> body() },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
+    val connectors = remember(content, workflowTimeline) { workflowConnectors(content, workflowTimeline) }
     Column {
         var imageNumber = imageOffset
         var precedingReady = true
@@ -63,19 +65,20 @@ internal fun MessageContent(
                     key(block.step.owner, block.step.toolCallId) {
                         // The dedicated interaction keeps one callsite even while the prior thought closes.
                         val dedicated = dedicatedTool(block.step)
-                        if (visible && !dedicated) SpacedMessageEntry(index, content, entryBody) {
-                            WorkStepRow(block.step, showConnector = content.getOrNull(index + 1).let {
-                                it is MessageContentUi.Tool || it is MessageContentUi.Reasoning
-                            }, toolContent = toolContent, flowRunning = flowRunning)
+                        if (visible && !dedicated) SpacedMessageEntry(index, content, connectors[index], entryBody) {
+                            WorkStepRow(block.step, showConnector = connectors[index].after, toolContent = toolContent, flowRunning = flowRunning)
                         }
                     }
-                } else if (visible && (block !is MessageContentUi.Text || block.text.isNotBlank())) SpacedMessageEntry(index, content, entryBody) {
+                } else if (visible && (block !is MessageContentUi.Text || block.text.isNotBlank())) SpacedMessageEntry(index, content, connectors[index], entryBody) {
                     when (block) {
                         is MessageContentUi.Text -> if (block.text.isNotBlank())
-                            textBody(block, Modifier.testTag("message-content-text:$index"))
+                            textBody(block, Modifier.testTag("message-content-text:$index")
+                                .then(if (workflowTimeline) Modifier.padding(start = 18.dp) else Modifier))
                         is MessageContentUi.Reasoning -> reasoningBody(block.reported,
-                            content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning })
-                        is MessageContentUi.Image -> MessageImage(block.image, imageIndex, imageLoader)
+                            connectors[index].after)
+                        is MessageContentUi.Image -> Box(if (workflowTimeline) Modifier.padding(start = 18.dp) else Modifier) {
+                            MessageImage(block.image, imageIndex, imageLoader)
+                        }
                         is MessageContentUi.Tool -> Unit
                     }
                 }
@@ -87,15 +90,14 @@ internal fun MessageContent(
 
 @Composable
 private fun SpacedMessageEntry(index: Int, content: List<MessageContentUi>,
+    connector: WorkflowConnector,
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit, body: @Composable () -> Unit) {
     val current = content[index]
-    val step = current is MessageContentUi.Tool || current is MessageContentUi.Reasoning
-    val previous = content.getOrNull(index - 1)
-    val next = content.getOrNull(index + 1)
     entryBody(current.workflowKey(index)) {
         WorkTimelineEntry(
-            leadingConnector = step && (previous is MessageContentUi.Tool || previous is MessageContentUi.Reasoning),
-            trailingConnector = step && (next is MessageContentUi.Tool || next is MessageContentUi.Reasoning),
+            leadingConnector = connector.before,
+            trailingConnector = connector.after,
+            throughConnector = connector.through,
             spacingAfter = if (index < content.lastIndex) 10.dp else 0.dp,
             content = body,
         )

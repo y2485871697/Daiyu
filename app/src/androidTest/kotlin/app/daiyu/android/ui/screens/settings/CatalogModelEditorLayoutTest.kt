@@ -98,7 +98,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
     fun testModelFieldTitlesArePlaceholdersAndDoNotFloatAfterTyping() {
         show(isNew = true, canDelete = false, initial = CatalogModelEdit("", "", ""))
         open()
-        for ((label, value) in listOf("展示名称" to "新模型", "Model ID" to "placeholder-model", "上下文窗口（tokens）" to "8192")) {
+        for ((label, value) in listOf("展示名称" to "新模型", "Model ID" to "placeholder-model", "上下文窗口" to "8.192")) {
             val field = revealEditor("settings-field:$label").assertContentDescriptionEquals(label)
             ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
             field.performClick()
@@ -113,6 +113,59 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
             ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
         }
         assertEquals(0, saves)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testContextUnitToggleRescalesAndSavesExactTokensAcrossReopen() {
+        for (dark in listOf(false, true)) {
+            show(dark = dark, initial = CatalogModelEdit("layout-model", "布局模型", "131072"))
+            open()
+            revealEditor("settings-field:上下文窗口").assertEditableText("131.072")
+            val unit = revealEditor("catalog-model-context-unit")
+            unit.assertTextEquals("K").performClick().assertTextEquals("M")
+            revealEditor("settings-field:上下文窗口").assertEditableText("0.131072")
+            unit.performClick().assertTextEquals("K")
+            node("dialog-confirm").performClick()
+            assertEquals("131072", checkNotNull(saved).contextWindow)
+            node("dialog-cancel").performClick()
+            show(dark = dark, initial = checkNotNull(saved))
+            open()
+            revealEditor("settings-field:上下文窗口").assertEditableText("131.072")
+            revealEditor("catalog-model-context-unit").performClick()
+            revealEditor("settings-field:上下文窗口").performTextReplacement("1.5")
+            node("dialog-confirm").performClick()
+            assertEquals("1500000", checkNotNull(saved).contextWindow)
+            node("dialog-cancel").performClick()
+            show(dark = dark, initial = checkNotNull(saved))
+            open()
+            revealEditor("settings-field:上下文窗口").assertEditableText("1.5")
+            revealEditor("catalog-model-context-unit").assertTextEquals("M")
+            node("dialog-cancel").performClick()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testContextUnitRetainsAutomaticAndRejectsOverflowOrFractionalTokens() {
+        show(isNew = true, initial = CatalogModelEdit("new-model", "新模型"))
+        open()
+        val field = revealEditor("settings-field:上下文窗口")
+        revealEditor("catalog-model-context-unit").performClick().assertTextEquals("M")
+        field.assertEditableText("")
+        node("dialog-confirm").assertIsEnabled()
+        for (invalid in listOf("2147.483648", "0.0000001", "-1")) {
+            field.performTextReplacement(invalid)
+            node("dialog-confirm").assertIsNotEnabled()
+        }
+        field.performTextReplacement("2147.483647")
+        node("dialog-confirm").performClick()
+        assertEquals(Int.MAX_VALUE.toString(), checkNotNull(saved).contextWindow)
+        field.performTextReplacement("")
+        node("dialog-confirm").performClick()
+        assertEquals("", checkNotNull(saved).contextWindow)
+        mainThread { enabled = false }
+        revealEditor("catalog-model-context-unit").assertIsNotEnabled().performTouchInput { click(center) }
+        revealEditor("catalog-model-context-unit").assertTextEquals("M")
+        assertEquals(2, saves)
         assertEquals(0, fixture.opens.get())
     }
 
@@ -131,7 +184,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
             assertEquals(cancel.bottom, save.bottom, 1f)
             assertTrue(save.left > cancel.right)
             for (tag in listOf("settings-field:展示名称", "settings-field:Model ID",
-                "settings-field:上下文窗口（tokens）", "catalog-model-capabilities",
+                "settings-field:上下文窗口", "catalog-model-capabilities",
                 "local-model-delete:layout-model")) {
                 val bounds = revealEditor(tag).fetchSemanticsNode().boundsInRoot
                 assertEquals("$tag left", footer.left, bounds.left, 1f)
@@ -203,17 +256,17 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         show(canDelete = false)
         open()
         node("settings-field:Model ID").assertIsNotEnabled()
-        revealEditor("settings-field:上下文窗口（tokens）").performTextReplacement("invalid")
+        revealEditor("settings-field:上下文窗口").performTextReplacement("invalid")
         node("dialog-confirm").assertIsNotEnabled()
         node("catalog-model-auto").assertDoesNotExist()
-        revealEditor("settings-field:上下文窗口（tokens）").performTextReplacement("")
-        revealEditor("settings-field:上下文窗口（tokens）").assertEditableText("")
+        revealEditor("settings-field:上下文窗口").performTextReplacement("")
+        revealEditor("settings-field:上下文窗口").assertEditableText("")
         assertNull(saved)
         node("dialog-confirm").performClick()
         assertEquals(1, saves)
         assertEquals(CatalogModelEdit("layout-model", "布局模型"), saved)
         revealEditor("local-model-delete:layout-model").assertIsNotEnabled()
-        revealEditor("settings-field:上下文窗口（tokens）").performTextReplacement("16384")
+        revealEditor("settings-field:上下文窗口").performTextReplacement("16.384")
         mainThread { enabled = false }
         for (tag in listOf("local-model-delete:layout-model", "settings-switch:支持视觉", "settings-switch:原生搜索"))
             revealEditor(tag).assertIsNotEnabled().performTouchInput { click(center) }
@@ -224,7 +277,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         assertEquals(1, saves)
         assertEquals(0, deletions)
         assertEquals(0, dismissals)
-        revealEditor("settings-field:上下文窗口（tokens）").assertEditableText("16384")
+        revealEditor("settings-field:上下文窗口").assertEditableText("16.384")
         mainThread { enabled = true }
         node("dialog-cancel").performClick()
         show(canDelete = true)

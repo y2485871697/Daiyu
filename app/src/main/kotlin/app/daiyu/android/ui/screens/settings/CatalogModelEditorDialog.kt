@@ -16,6 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -32,6 +34,7 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.basic.Text
+import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -41,6 +44,9 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
     canSave: Boolean = true, canDelete: Boolean = false, onDelete: () -> Unit = {}, errorText: String? = null,
 ) {
     var value by remember(initial) { mutableStateOf(initial) }
+    var contextInput by remember(initial) { mutableStateOf(ModelContextWindowInput.fromTokens(initial.contextWindow)) }
+    val editedValue = contextInput.tokenText()?.let { value.copy(contextWindow = it) }
+    val formValid = editedValue != null && runCatching { editedValue.validate() }.isSuccess
     val accent = assistantPreviewPalette()
     val colors = MiuixTheme.colorScheme.copy(primary = accent.primary, onPrimary = accent.onPrimary)
     MiuixTheme(colors = colors) {
@@ -61,9 +67,20 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                         CatalogModelField("Model ID", value.id, enabled && isNew, keyboardType = KeyboardType.Ascii,
                             onValueChange = { value = value.copy(id = it) })
                         Spacer(Modifier.height(12.dp))
-                        CatalogModelField("上下文窗口（tokens）", value.contextWindow, enabled,
-                            keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
-                            onValueChange = { value = value.copy(contextWindow = it) })
+                        CatalogModelField("上下文窗口", contextInput.text, enabled,
+                            keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done,
+                            trailingIcon = {
+                                Text(contextInput.unit.name, fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.sizeIn(minWidth = 44.dp, minHeight = 44.dp)
+                                        .clip(RoundedCornerShape(12.dp)).testTag("catalog-model-context-unit")
+                                        .semantics {
+                                            contentDescription = "切换上下文窗口单位"
+                                            stateDescription = contextInput.unit.name
+                                        }.clickable(enabled = enabled, role = Role.Button) {
+                                            contextInput = contextInput.switchUnit()
+                                        }.wrapContentSize(Alignment.Center))
+                            },
+                            onValueChange = { contextInput = contextInput.copy(text = it) })
                         Text("该值用于会话裁剪和上下文预算。留空时使用远端或官方目录值。",
                             style = MiuixTheme.textStyles.footnote2, color = colors.onSurfaceVariantSummary,
                             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
@@ -79,13 +96,15 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                                 colors = deletionButtonColors(),
                                 onClick = onDelete)
                         }
-                        if (value.contextWindow.isNotBlank() && value.contextWindow.toIntOrNull()?.let { it > 0 } != true)
-                            CatalogModelNote("上下文窗口须为正整数，或留空使用自动值。")
+                        if (editedValue == null)
+                            CatalogModelNote("上下文窗口换算后须为有效的正整数 tokens，或留空使用自动值。")
                         errorText?.let { CatalogModelNote(it) }
                     }
-                    MiuixDialogActions("保存", onCancel = onDismiss, onConfirm = { if (enabled) onSave(value) },
+                    MiuixDialogActions("保存", onCancel = onDismiss, onConfirm = {
+                        if (enabled && canSave && formValid) onSave(editedValue)
+                    },
                         modifier = Modifier.padding(top = 16.dp).testTag("catalog-model-actions"),
-                        confirmEnabled = enabled && canSave && runCatching { value.validate() }.isSuccess, cancelEnabled = enabled)
+                        confirmEnabled = enabled && canSave && formValid, cancelEnabled = enabled)
                 }
             }
         }
@@ -95,10 +114,11 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
 @Composable
 private fun CatalogModelField(label: String, value: String, enabled: Boolean,
     keyboardType: KeyboardType = KeyboardType.Text, imeAction: ImeAction = ImeAction.Next,
+    trailingIcon: @Composable (() -> Unit)? = null,
     onValueChange: (String) -> Unit,
 ) {
     TextField( value = value, onValueChange = onValueChange, label = label, singleLine = true,
-        enabled = enabled, useLabelAsPlaceholder = true,
+        enabled = enabled, useLabelAsPlaceholder = true, trailingIcon = trailingIcon,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
         colors = TextFieldDefaults.textFieldColors(backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.managedInput().fillMaxWidth().testTag("settings-field:$label").semantics { contentDescription = label },

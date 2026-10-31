@@ -113,7 +113,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("catalog-model-editor")
         awaitDialogEnter(node("catalog-model-editor"))
         awaitNodeWindowFocus(node("catalog-model-editor"))
-        node("settings-field:上下文窗口（tokens）").performTextReplacement("8000")
+        node("settings-field:上下文窗口").performTextReplacement("8")
         dismissIme()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:支持视觉"))
         awaitEditorSwitch("settings-switch:支持视觉", true)
@@ -144,6 +144,32 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testContextUnitsPersistExactMillionTokensAndReopenInM() {
+        openLocalModels()
+        val settings = fixture.settings.load()
+        reveal("local-model-rename:extra-local").performClick()
+        awaitUniqueTag("catalog-model-editor")
+        node("catalog-model-context-unit").assertTextEquals("K").performClick().assertTextEquals("M")
+        node("settings-field:上下文窗口").performTextReplacement("1.5")
+        node("dialog-confirm").performClick()
+        awaitControl("million-token window saved") {
+            fixture.settings.localModelCatalogSnapshot()!!.models.single { it.id == "extra-local" }
+                .settings.contextWindowOverride == 1500000
+        }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("catalog-model-editor").fetchSemanticsNodes().isEmpty() }
+        reveal("local-model-rename:extra-local").performClick()
+        awaitUniqueTag("catalog-model-editor")
+        node("settings-field:上下文窗口").assertEditableText("1.5")
+        node("catalog-model-context-unit").assertTextEquals("M").performClick().assertTextEquals("K")
+        node("settings-field:上下文窗口").assertEditableText("1500")
+        node("dialog-confirm").performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("catalog-model-editor").fetchSemanticsNodes().isEmpty() }
+        assertEquals(1500000, fixture.settings.localModelCatalogSnapshot()!!.models.single { it.id == "extra-local" }
+            .settings.contextWindowOverride)
+        assertEquals(settings, fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCustomModelDialogMatchesFieldsAndSavesOnlyAnExplicitValidModel() {
         openLocalModels()
         val saved = fixture.settings.load()
@@ -153,7 +179,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         node("settings-field:展示名称").assertEditableText("自定义模型")
         node("dialog-confirm").assertIsNotEnabled()
         node("settings-field:Model ID").performTextReplacement("custom-model")
-        node("settings-field:上下文窗口（tokens）").performTextReplacement("8192")
+        node("settings-field:上下文窗口").performTextReplacement("8.192")
         node("settings-switch:支持推理").assertDoesNotExist()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:支持视觉"))
         node("settings-switch:支持视觉").assertIsOn()
@@ -270,14 +296,14 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         reveal("local-model-add").performClick()
         node("settings-field:展示名称").performTextReplacement("retained custom model")
         node("settings-field:Model ID").performTextReplacement("retained-model-id")
-        node("settings-field:上下文窗口（tokens）").performTextReplacement("32768")
+        node("settings-field:上下文窗口").performTextReplacement("32.768")
         repeat(2) {
             realPauseResume(activity)
             awaitUniqueTag("catalog-model-editor")
             node("dialog-confirm").assertIsEnabled()
             node("settings-field:展示名称").assertEditableText("retained custom model")
             node("settings-field:Model ID").assertEditableText("retained-model-id")
-            node("settings-field:上下文窗口（tokens）").assertEditableText("32768")
+            node("settings-field:上下文窗口").assertEditableText("32.768")
             assertEquals(before, fixture.settings.localModelCatalogSnapshot())
         }
         node("dialog-cancel").performClick()

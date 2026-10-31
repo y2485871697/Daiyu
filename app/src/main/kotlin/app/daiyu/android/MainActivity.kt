@@ -328,9 +328,7 @@ class MainActivity : ComponentActivity() {
         if (voiceConversationDialogOwner == before) voiceConversationDialogOwner = after
     }
     private fun microphoneGranted() = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    private fun universalQuestionWaiting(message: Message): Boolean = message.blocks.filterIsInstance<MessageBlock.Tool>()
-        .mapNotNull { controller.questionProjection(message, it.invocation) }
-        .any { it.record.answer == null && !it.record.interrupted }
+    private fun universalQuestionWaiting(message: Message): Boolean = controller.questionWaiting(message)
     private fun revokeUniversalVoice() {
         universalAdmissionSnapshot = VoiceAdmission.REVOKED // Fence BEFORE drain/old callbacks.
         if (universalVoiceDelegate.isInitialized()) universalVoice.state.value.permitId?.let { universalVoice.revoke(it) }
@@ -6870,16 +6868,6 @@ class MainActivity : ComponentActivity() {
             val retryCleanup = controller.canRetryQuestionCleanup(message)
             if (!retryCleanup) null else message.id.value to QuestionRowUi(message, retryCleanup)
         }.toMap()
-        if (rowsChanged) questionCards = buildMap {
-            MessageHistory.expand(shown.map { it.second }).forEach { message ->
-                val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
-                message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
-                    controller.questionProjection(message, block.invocation)?.let { question ->
-                        put(owner to block.invocation.id.value, question)
-                    }
-                }
-            }
-        }
         val state = controlOwner?.let { controller.runState(it) }
         val phase = composerPhaseForRun(state?.pauseRequested)
         val composerAvailable = !sidebarVisible && controller.ready && controller.problem?.startsWith("会话恢复失败") != true &&
@@ -6898,6 +6886,18 @@ class MainActivity : ComponentActivity() {
             app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
         toolPresentations.scope(selected?.id?.value)
         val receiptsReady = prepareToolReceipts()
+        if (receiptsReady) questionCards = buildMap {
+            MessageHistory.expand(shown.map { it.second }).forEach { message ->
+                val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
+                message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
+                    controller.questionProjection(message, block.invocation, toolReceiptSnapshot?.questionEvidence(message))?.let { question ->
+                        put(owner to block.invocation.id.value, question)
+                    }
+                }
+            }
+        }
+        else questionCards = if (toolReceiptKey?.conversation != selected?.id) emptyMap()
+            else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
         val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries)
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             scrollRequest = scrollRequest,

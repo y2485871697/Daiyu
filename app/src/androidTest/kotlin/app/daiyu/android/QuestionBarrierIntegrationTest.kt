@@ -11,6 +11,8 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.LedgerState
 import app.daiyu.android.integration.tools.SQLiteToolLedgerStore
 import app.daiyu.android.question.PrivateQuestionStore
+import app.daiyu.android.question.QuestionCheckpointEvidence
+import app.daiyu.android.ui.RetainedToolOutcomes
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -149,7 +151,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             val shown=MainActivity::class.java.getDeclaredField("shown").apply {isAccessible=true}.get(checkNotNull(activity)) as List<Pair<Long,Message>>
             val message=shown.singleOrNull {it.second.id==owner.id}?.second
             val tools=message?.blocks?.filterIsInstance<MessageBlock.Tool>().orEmpty()
-            val projection=tools.singleOrNull()?.let {f.c.questionProjection(checkNotNull(message),it.invocation)}
+            val projection=tools.singleOrNull()?.let {f.c.questionProjection(checkNotNull(message),it.invocation, saved?.let { checkpoint -> QuestionCheckpointEvidence.from(checkpoint, null) })}
             details="checkpointPresent=${saved!=null} phase=${saved?.phase} pendingCallMatches=${saved?.pending?.callId==ToolCallId(CALL)} " +
                 "checkpointTools=${saved?.tools?.size} recordPresent=${record!=null} answered=${record?.answer!=null} interrupted=${record?.interrupted} " +
                 "activePresent=${f.c.active!=null} activeMatchesOwner=${f.c.active?.id==owner.id} controllerReady=${f.c.ready} problemPresent=${f.c.problem!=null} " +
@@ -189,16 +191,17 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         } finally {instrumentation.removeMonitor(monitor)}
     }
     @Suppress("UNCHECKED_CAST")
-    private fun assertExactQuestionOwner(f: Fixture, shown: Message, call: ToolInvocation, expected: QuestionIdentity) {
+    private fun assertExactQuestionOwner(f: Fixture, shown: Message, call: ToolInvocation, expected: QuestionIdentity,
+        evidence: QuestionCheckpointEvidence?) {
         val records = ChatController::class.java.getDeclaredField("questionHistory").apply { isAccessible = true }
             .get(f.c) as MutableMap<String, Pair<QuestionIdentity, QuestionRecord>>
         val original = checkNotNull(records[expected.storageKey])
         val unrelated = QuestionIdentity(expected.conversationId, expected.runId, "unrelated-owner", expected.callId)
         records[unrelated.storageKey] = unrelated to original.second.copy(callId = unrelated.storageKey)
         try {
-            assertEquals(expected, f.c.questionProjection(shown, call)!!.identity)
+            assertEquals(expected, f.c.questionProjection(shown, call, evidence)!!.identity)
             records.remove(expected.storageKey)
-            assertNull(f.c.questionProjection(shown, call))
+            assertNull(f.c.questionProjection(shown, call, evidence))
         } finally {
             records[expected.storageKey] = original
             records.remove(unrelated.storageKey)
@@ -207,14 +210,24 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
 
     fun testPublicQuestionReleasesWorkerAndDurableAnswerContinuesExactlyOnce() {
         val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
+        val evidence = RetainedToolOutcomes.Snapshot.read(f.db, listOf(checkpoint(f, owner).message))
+            .questionEvidence(owner)
         main {
             val shown = f.db.messages(owner.conversationId).last().second
             val call = shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation
-            assertNotNull(f.c.questionProjection(shown, call))
-            assertExactQuestionOwner(f, shown, call, id)
-            assertNull(f.c.questionProjection(shown.copy(id = MessageId("different-owner")), call))
-            assertNull(f.c.questionProjection(shown, call.copy(arguments = ARGS.replace("Route choice", "Changed question"))))
-            assertNull(f.c.questionProjection(shown.copy(runId = RunId("different-run")), call))
+            assertNotNull(f.c.questionProjection(shown, call, evidence))
+            assertTrue(f.c.questionWaiting(shown))
+            assertFalse(f.c.questionWaiting(shown.copy(id = MessageId("other"))))
+            repeat(100) { index ->
+                val appended = shown.copy(blocks = shown.blocks + MessageBlock.Text("body", "append $index"))
+                assertSame(evidence, evidence?.takeIf { it.matches(appended, call) })
+                assertTrue(checkNotNull(f.c.questionProjection(appended, call, evidence)).canAnswer)
+            }
+            assertNull(f.c.questionProjection(shown, call, null))
+            assertExactQuestionOwner(f, shown, call, id, evidence)
+            assertNull(f.c.questionProjection(shown.copy(id = MessageId("different-owner")), call, evidence))
+            assertNull(f.c.questionProjection(shown, call.copy(arguments = ARGS.replace("Route choice", "Changed question")), evidence))
+            assertNull(f.c.questionProjection(shown.copy(runId = RunId("different-run")), call, evidence))
         }
         node("question-option:0").performClick().assertIsSelected()
         val originalCardId=node("question-card").fetchSemanticsNode().id
@@ -335,12 +348,14 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         val saved=checkpoint(f,old.message);assertEquals(RunStatus.INTERRUPTED,saved.message.status);assertEquals(ExecutionPhase.TERMINAL,saved.phase);assertNull(saved.pending)
         assertTrue(saved.owner!=old.owner);assertEquals(ToolDisposition.UNKNOWN,saved.tools.single().disposition)
         assertEquals(answer,row(f,id).answer);if(answer==null) assertTrue(row(f,id).interrupted)
+        val recoveredMessage = f.db.messages(old.message.conversationId).last().second
+        val recoveredEvidence = RetainedToolOutcomes.Snapshot.read(f.db, listOf(recoveredMessage)).questionEvidence(recoveredMessage)
         main {
-            val shown = f.db.messages(old.message.conversationId).last().second
-            val projection = f.c.questionProjection(shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation)
+            val shown = recoveredMessage
+            val projection = f.c.questionProjection(shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation, recoveredEvidence)
             assertNotNull(projection); assertFalse(projection!!.canAnswer); assertNull(projection.binding)
             assertEquals(old.owner, projection.identity.ownerId)
-            assertExactQuestionOwner(f, shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation, id)
+            assertExactQuestionOwner(f, shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation, id, recoveredEvidence)
         }
         recreate();waitForCard(readOnly=true)
         drainWorker(f);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())

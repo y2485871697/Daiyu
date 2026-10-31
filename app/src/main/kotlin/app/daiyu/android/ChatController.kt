@@ -1700,14 +1700,11 @@ class ChatController internal constructor(private val application:Application,
     private fun rememberQuestions(records:List<QuestionRecord>) {
         records.forEach { record -> questionIdentity(record.callId)?.let {questionHistory[record.callId]=it to record} }
     }
-    @Synchronized internal fun questionProjection(message:Message,call:ToolInvocation):QuestionProjection? {
-        if(call.name!=ASK_USER_TOOL_NAME || message.role!=Message.ASSISTANT_ROLE) return null
-        val (snapshot, recoveryOwner) = runCatching {
-            SQLiteRuntimeStore.readQuestionCheckpoint(database.readableDatabase, message.id.value)
-        }.getOrNull() ?: return null
-        if (snapshot.message.id != message.id || snapshot.message.conversationId != message.conversationId ||
-            snapshot.message.runId != message.runId || snapshot.tools.none { it.invocation == call }) return null
-        val expectedOwner = recoveryOwner ?: snapshot.owner
+    @Synchronized internal fun questionProjection(message:Message,call:ToolInvocation,
+        evidence:QuestionCheckpointEvidence?):QuestionProjection? {
+        if (evidence?.matches(message, call) != true) return null
+        val recoveryOwner = evidence.recoveryOwner
+        val expectedOwner = recoveryOwner ?: evidence.owner
         val (identity, record) = questionHistory.values.singleOrNull {
             it.first.conversationId == message.conversationId.value && it.first.runId == message.runId.value &&
                 it.first.callId == call.id.value && it.first.ownerId == expectedOwner
@@ -1720,6 +1717,17 @@ class ChatController internal constructor(private val application:Application,
             current.offer?.context?.owner?.ownerId==identity.ownerId &&
             current.offer?.pending?.callId==call.id && record.answer==null && !record.interrupted
         return QuestionProjection(identity,record,if (recoveryOwner == null) session?.binding else null,writable)
+    }
+    @Synchronized internal fun questionWaiting(message:Message):Boolean {
+        val current = resources?.takeIf { it.initial.id == message.id && it.initial.runId == message.runId &&
+            it.initial.conversationId == message.conversationId && message.role == Message.ASSISTANT_ROLE &&
+            !closed && !it.fenced && it.waiting } ?: return false
+        val offer = current.offer?.takeIf { it.waitingCommitted && it.context.invocation.name == ASK_USER_TOOL_NAME }
+            ?: return false
+        val identity = QuestionIdentity(message.conversationId.value, message.runId.value,
+            offer.context.owner.ownerId, offer.pending.callId.value)
+        val record = questionHistory[identity.storageKey]?.takeIf { it.first == identity }?.second ?: return false
+        return record.answer == null && !record.interrupted
     }
     private val toolLedger = ToolLedger(SQLiteToolLedgerStore(database))
     private val childPreferences by lazy { ConversationSubAgentPreferences(application.getSharedPreferences("subagent_configuration", 0)) }

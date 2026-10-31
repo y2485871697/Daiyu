@@ -8,6 +8,7 @@ import app.daiyu.android.domain.runtime.ToolDisposition
 import app.daiyu.android.domain.ToolInvocation
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.SQLiteRuntimeStore
+import app.daiyu.android.question.QuestionCheckpointEvidence
 import app.daiyu.android.ui.screens.chat.conversation.WorkStepState
 import app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi
 import app.daiyu.android.ui.screens.chat.conversation.toolReceiptPresentation
@@ -26,7 +27,11 @@ internal object RetainedToolOutcomes {
             if (tools.isEmpty()) null else Source(message.conversationId.value, message.runId.value, message.id.value, message.status, tools)
         }
 
-    internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>) {
+    internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>,
+        private val questions: Map<Owner, QuestionCheckpointEvidence>) {
+        fun questionEvidence(message: Message): QuestionCheckpointEvidence? =
+            questions[Owner(message.conversationId.value, message.runId.value, message.id.value)]
+
         fun projectionReader(liveState: (Message) -> ExecutionState? = { null }, stopping: (Message) -> Boolean = { false }):
             (Message, MessageBlock.Tool) -> ToolReceiptUi? = { message, block ->
             if (message.role != Message.ASSISTANT_ROLE) null else {
@@ -43,19 +48,24 @@ internal object RetainedToolOutcomes {
         }
         companion object {
             fun read(database: ConversationDatabase, messages: List<Message>): Snapshot {
+                val questions = mutableMapOf<Owner, QuestionCheckpointEvidence>()
                 val records = buildMap {
                     for (source in sources(messages)) {
-                        val snapshot = runCatching {
-                            SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, source.message)
+                        val (snapshot, recoveryOwner) = runCatching {
+                            SQLiteRuntimeStore.readQuestionCheckpoint(database.readableDatabase, source.message)
                         }.getOrNull() ?: continue
                         if (snapshot.message.id.value != source.message || snapshot.message.runId.value != source.run ||
                             snapshot.message.conversationId.value != source.conversation) continue
-                        put(Owner(source.conversation, source.run, source.message), snapshot.tools.associate {
+                        val owner = Owner(source.conversation, source.run, source.message)
+                        if (snapshot.tools.any { it.invocation.name == app.daiyu.android.domain.question.ASK_USER_TOOL_NAME }) {
+                            questions[owner] = QuestionCheckpointEvidence.from(snapshot, recoveryOwner)
+                        }
+                        put(owner, snapshot.tools.associate {
                             Result(it.invocation, it.result) to it.disposition
                         })
                     }
                 }
-                return Snapshot(records)
+                return Snapshot(records, questions.toMap())
             }
         }
     }

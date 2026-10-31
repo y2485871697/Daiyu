@@ -2,7 +2,7 @@ package app.daiyu.android.ui.components
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,10 +24,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
-import androidx.core.content.ContextCompat
 import app.daiyu.android.R
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -47,12 +49,10 @@ internal fun AssistantAvatar(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val imageBitmap = remember(bitmap, context) {
-        bitmap
-            ?.takeUnless { it.isRecycled }
-            ?.let { runCatching { it.asImageBitmap() }.getOrNull() }
-            ?: rasterizeDefaultAvatar(context)
-    }
+    val custom = remember(bitmap) { bitmap?.takeUnless { it.isRecycled }?.asImageBitmap() }
+    val fallback by DefaultAssistantAvatar.image.collectAsState()
+    if (custom == null) LaunchedEffect(context) { DefaultAssistantAvatar.load(context.applicationContext) }
+    val imageBitmap = custom ?: fallback
     Box(
         modifier = modifier
             .size(size)
@@ -77,16 +77,23 @@ internal fun AssistantAvatar(
     }
 }
 
-private fun rasterizeDefaultAvatar(context: Context): ImageBitmap? {
-    val drawable = ContextCompat.getDrawable(context, R.drawable.ic_assistant_default)
-        ?: ContextCompat.getDrawable(context, R.drawable.ic_assistant_default)
-        ?: return null
-    val size = maxOf(drawable.intrinsicWidth, drawable.intrinsicHeight, 128)
-    return runCatching {
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, size, size)
-        drawable.draw(canvas)
-        bitmap.asImageBitmap()
-    }.getOrNull()
+internal object DefaultAssistantAvatar {
+    private val prepared = MutableStateFlow<ImageBitmap?>(null)
+    val image = prepared.asStateFlow()
+    private val mutex = Mutex()
+
+    suspend fun load(context: Context): ImageBitmap? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            prepared.value?.let { return@withLock it }
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeResource(context.resources, R.drawable.ic_assistant_default, options)
+            options.inJustDecodeBounds = false
+            while (options.outWidth / (options.inSampleSize.coerceAtLeast(1) * 2) >= 256 &&
+                options.outHeight / (options.inSampleSize.coerceAtLeast(1) * 2) >= 256) {
+                options.inSampleSize = options.inSampleSize.coerceAtLeast(1) * 2
+            }
+            BitmapFactory.decodeResource(context.resources, R.drawable.ic_assistant_default, options)
+                ?.asImageBitmap()?.also { prepared.value = it }
+        }
+    }
 }

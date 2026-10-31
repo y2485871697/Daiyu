@@ -309,7 +309,7 @@ class ChatController internal constructor(private val application:Application,
     }
     private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
 
-    internal class TextSendTicket
+    internal class TextSendTicket { val previewKey = "pending-send:${UUID.randomUUID()}" }
     internal data class TextSendOwner(val conversationId: ConversationId?, val editorGeneration: Long,
         val draftRevision: Long)
     internal data class TextSendState(val ticket: TextSendTicket, val owner: TextSendOwner,
@@ -322,7 +322,7 @@ class ChatController internal constructor(private val application:Application,
     internal sealed interface TextSendResult {
         val owner: TextSendOwner
         data class Accepted(override val owner: TextSendOwner, val conversation: Conversation,
-            val assistant: Message? = null): TextSendResult
+            val assistant: Message? = null, val userId: String? = null): TextSendResult
         data class Rejected(override val owner: TextSendOwner): TextSendResult
         /** Persistence did not return a confirmed receipt; retain the draft and do not auto-retry. */
         data class Unknown(override val owner: TextSendOwner): TextSendResult
@@ -398,6 +398,7 @@ class ChatController internal constructor(private val application:Application,
         var summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null
         var summaryTransferred = false
         var admittedVoiceOwner: Message? = null
+        var admittedUserId: String? = null
         val cancellation = ContextPreparationCancellation()
         var revoked = false
         var committing = false
@@ -2362,7 +2363,7 @@ class ChatController internal constructor(private val application:Application,
             }
                 catch (_: Exception) { null }
             val result = when {
-                saved != null -> TextSendResult.Accepted(owner,saved,token.admittedVoiceOwner)
+                saved != null -> TextSendResult.Accepted(owner,saved,token.admittedVoiceOwner,token.admittedUserId)
                 token.persistenceUnconfirmed -> TextSendResult.Unknown(owner)
                 else -> TextSendResult.Rejected(owner)
             }
@@ -4379,6 +4380,7 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged();return null
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
+        token.admittedUserId = user.id.value
         acceptedTitle.set(saved.title)
         // Explicit New chat already has a durable row. Admit only its first accepted turn,
         // never restoration, regeneration, or a subsequent send as title catch-up.
@@ -4707,6 +4709,13 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
 
+    internal data class RegenerationPreview(val target: MessageActionTarget, val assistantId: String? = null)
+    private var regenerationPreview: RegenerationPreview? = null
+    @Synchronized internal fun regenerationPreview(): RegenerationPreview? = regenerationPreview
+    @Synchronized internal fun acknowledgeRegenerationPreview(preview: RegenerationPreview) {
+        if (regenerationPreview === preview && preview.assistantId != null) regenerationPreview = null
+    }
+
     /** Explicit gestures only. No old tool or model attempt is ever resumed by this API.
      * Deletion seals the exact generation RUN before waiting on its publication barrier.
      * Read fences are closed on the worker; unrelated runs retain their publication rights. */
@@ -4716,11 +4725,13 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false
             if ((action == MessageAction.RETRY_STEP) != (target.toolCallId != null)) return false
+            if (action == MessageAction.REGENERATE) regenerationPreview = RegenerationPreview(target)
             dataBusy = true
         }
         notifyChanged()
         try { executor.execute {
             var changed = false
+            var acceptedAssistantId: String? = null
             var branchReasoning: app.daiyu.android.delegation.ReasoningEffort? = null
             var branchChildren: String? = null
             fun retainBranchConfiguration(id: ConversationId): Boolean {
@@ -4784,6 +4795,7 @@ class ChatController internal constructor(private val application:Application,
                                 else -> RegenerationSendOutcome.NOT_SENT
                             }
                         } finally { finishPreparation(token) }
+                        acceptedAssistantId = token?.admittedVoiceOwner?.id?.value
                         changed = outcome != RegenerationSendOutcome.NOT_SENT
                         MessageActionResult.Regenerated(saved ?: owner, outcome)
                     }
@@ -4804,6 +4816,9 @@ class ChatController internal constructor(private val application:Application,
             }
             handler.post {
                 val deliver = synchronized(this) {
+                    if (regenerationPreview?.target === target) regenerationPreview =
+                        if (result is MessageActionResult.Regenerated && result.outcome == RegenerationSendOutcome.ACCEPTED && acceptedAssistantId != null)
+                            regenerationPreview?.copy(assistantId = acceptedAssistantId) else null
                     dataBusy = false
                     if (changed) dataRevision++
                     if (closed) { closeStorageWhenIdle(); false } else true
@@ -4811,7 +4826,10 @@ class ChatController internal constructor(private val application:Application,
                 if (deliver) { complete(result); dispatchChanged() }
             }
         } } catch (_: java.util.concurrent.RejectedExecutionException) {
-            synchronized(this) { dataBusy = false }; return false
+            synchronized(this) {
+                if (regenerationPreview?.target === target) regenerationPreview = null
+                dataBusy = false
+            }; return false
         }
         return true
     }

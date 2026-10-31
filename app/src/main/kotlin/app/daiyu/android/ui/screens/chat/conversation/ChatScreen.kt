@@ -84,6 +84,7 @@ internal fun DaiyuChatScreen(
     composerAttachments: @Composable () -> Unit = {},
     speechMessageId: String? = null,
 ) {
+    val displayedTurns = submissionTurns(state.turns, state.submissionPreview)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
@@ -119,7 +120,7 @@ internal fun DaiyuChatScreen(
         ChatConversationLayers(Modifier.weight(1f)
             .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)), messages = { bottomInset ->
             androidx.compose.runtime.key(state.conversationKey) {
-                ChatMessageList(state.turns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
+                ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
                     speechMessageId = speechMessageId, compressionActivities = state.compressionActivities)
             }

@@ -50,6 +50,16 @@ class TextSendActivityTest : WiredActivityTestCase() {
         node("chat-send").assertIsNotEnabled()
         assertEquals(0, fixture.opens.get())
         assertEquals(1, preparationCalls.get())
+        node("chat-send-preview").assertIsDisplayed()
+        mainThread {
+            val getter = MainActivity::class.java.declaredMethods.single { it.name == "getChatState" && it.parameterCount == 0 }
+                .apply { isAccessible = true }
+            val state = getter.invoke(activity) as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+            val preview = checkNotNull(state.submissionPreview)
+            assertEquals(checkNotNull(fixture.controller.textSendState()).text, preview.text)
+            assertNull("preparation is not a durable receipt", preview.settledAssistantId)
+            assertFalse("the preview never enters authoritative history", state.turns.any { it.id == preview.key })
+        }
     }
 
     private fun assertUserText(conversation: app.daiyu.android.domain.ConversationId, text: String) {
@@ -86,6 +96,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
         node("chat-draft").assertIsEnabled()
         val owner = checkNotNull(fixture.controller.active)
         assertUserText(owner.conversationId, text)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-send-preview").fetchSemanticsNodes().isEmpty() }
         assertEquals("", fixture.database.draft())
         assertEquals("", fixture.database.conversations().single().draft)
         assertEquals(owner.conversationId.value, fixture.controller.preferences.getString("selected", null))
@@ -117,6 +128,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
 
         node("chat-draft").assertIsEnabled()
         node("chat-send").assertIsEnabled()
+        node("chat-send-preview").assertDoesNotExist()
         assertDraft(text); assertSelection(2, 6)
         assertEquals(text, fixture.database.draft())
         assertTrue(fixture.database.conversations().isEmpty())

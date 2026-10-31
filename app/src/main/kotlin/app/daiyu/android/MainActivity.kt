@@ -1382,6 +1382,7 @@ class MainActivity : ComponentActivity() {
         val ticket: ChatController.TextSendTicket = ChatController.TextSendTicket(),
         val editorOwner: ChatController.TextSendOwner = owner)
     private var pendingTextSend by mutableStateOf<PendingTextSend?>(null)
+    private var acceptedTextPreview: Pair<ConversationId, app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview>? = null
     private class TerminalEditor(val conversation: Conversation?, val draft: TerminalDraftSnapshot) {
         var command by mutableStateOf("")
         var linux by mutableStateOf<app.daiyu.android.terminal.LinuxGenerationRef?>(null)
@@ -6362,6 +6363,7 @@ class MainActivity : ComponentActivity() {
 
     private fun select(conversation: Conversation?, prepared: PaneConversationSnapshot?) {
         requireActivityUsable()
+        acceptedTextPreview = null
         gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null
         revokeCommandApproval()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
@@ -6443,6 +6445,7 @@ class MainActivity : ComponentActivity() {
             universalTickets[pending.ticket] = universal
         }
         cascadeVoice.reserve(pending.ticket)
+        acceptedTextPreview = null
         pendingTextSend = pending
         var unknown = false
         val queued = try {
@@ -6468,6 +6471,7 @@ class MainActivity : ComponentActivity() {
             toast("本次发送未受理；草稿保留")
         }
         publishChat()
+        if (queued) jumpToBottom()
     }
     private fun cancelPendingTextSend(pending: PendingTextSend) {
         if (activityUsable() && pendingTextSend === pending) {
@@ -6512,6 +6516,10 @@ class MainActivity : ComponentActivity() {
         when (result) {
             is ChatController.TextSendResult.Accepted -> {
                 val saved = result.conversation
+                acceptedTextPreview = result.assistant?.let { assistant ->
+                    saved.id to app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(
+                        pending.ticket.previewKey, pending.text, settledAssistantId = assistant.id.value, settledUserId = result.userId)
+                }
                 editorGeneration++; draftRevision++
                 if (selected?.id != saved.id) shown = mutableListOf()
                 selected = saved; selectionReady = true
@@ -6884,6 +6892,22 @@ class MainActivity : ComponentActivity() {
         val oldBoundaries = chatState.timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped }
             .map { it.anchor.listKey }.toSet() +
             app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
+        val sendPreview = pendingTextSend?.takeIf {
+            it.editorOwner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        }?.let { pending ->
+            val receipt = controller.textSendState()?.takeIf { it.ticket === pending.ticket }?.result
+                as? ChatController.TextSendResult.Accepted
+            app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(pending.ticket.previewKey,
+                pending.text, settledAssistantId = receipt?.assistant?.id?.value, settledUserId = receipt?.userId)
+        } ?: acceptedTextPreview?.takeIf { it.first == selected?.id }?.second
+        val regeneration = controller.regenerationPreview()?.takeIf { it.target.conversationId == selected?.id }
+        val submissionPreview = regeneration?.let { preview ->
+            val target = preview.target
+            val key = app.daiyu.android.timeline.TimelineAnchor(target.conversationId.value, target.runId.value,
+                target.messageId.value, target.segmentIndex).listKey
+            app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview("pending-regeneration:$key",
+                replaceFromKey = key, settledAssistantId = preview.assistantId)
+        } ?: sendPreview
         toolPresentations.scope(selected?.id?.value)
         val receiptsReady = prepareToolReceipts()
         if (receiptsReady) questionCards = buildMap {
@@ -6914,7 +6938,10 @@ class MainActivity : ComponentActivity() {
             }, presentations = toolPresentations, toolReceipt = toolReceiptSnapshot?.projectionReader(controller::runState, controller::runStopping) ?: { _, _ -> null }),
                 controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
                 stopRequested = controlOwner?.let(controller::runStopping) == true),
-            statusText = controller.problem ?: when { controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
+            submissionPreview = submissionPreview,
+            statusText = controller.problem ?: when {
+                regeneration != null && regeneration.assistantId == null -> "正在准备重新生成…"
+                controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
                 messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
                     else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
@@ -6944,6 +6971,12 @@ class MainActivity : ComponentActivity() {
                     supplementDraft.pending != null,
                 executionPhase = state?.phase,
             ))
+        regeneration?.takeIf { preview -> preview.assistantId?.let { id -> chatState.turns.any { it.id == id } } == true }
+            ?.let(controller::acknowledgeRegenerationPreview)
+        acceptedTextPreview?.takeIf { preview ->
+            preview.first == selected?.id && (preview.second.settledUserId ?: preview.second.settledAssistantId)
+                ?.let { id -> chatState.turns.any { it.id == id } } == true
+        }?.let { acceptedTextPreview = null }
     }
     private fun requestScroll(id: String? = null, follow: Boolean = true, segmentIndex: Int? = null) {
         chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow, segmentIndex))

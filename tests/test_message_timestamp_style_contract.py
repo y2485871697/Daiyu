@@ -44,7 +44,7 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         for setting in ('showEditAction = true', 'allowSpeech = false',
                         'showRegenerateAction = false', 'endAligned = true'):
             self.assertIn(setting, user)
-        self.assertIn('if (actions.editingMessageKey != turn.listKey) MessageActionBar(', user)
+        self.assertIn('if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(', user)
         self.assertIn('MessageActionBar(turn.actionKey, actions, timestamp = turn.timestamp,', assistant)
         models = (CHAT / 'ChatScreenModels.kt').read_text(encoding='utf-8')
         self.assertIn('val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey', models)

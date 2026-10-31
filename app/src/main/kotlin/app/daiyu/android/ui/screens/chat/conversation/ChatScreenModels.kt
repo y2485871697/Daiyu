@@ -19,6 +19,7 @@ data class ChatScreenState(
     val timeline: List<app.daiyu.android.timeline.ChatTimelineEntry> = emptyList(),
     val compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null,
     val compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
+    val submissionPreview: ChatSubmissionPreview? = null,
 )
 
 /** A new serial consumes a host navigation request, never a model execution state. */
@@ -61,6 +62,7 @@ sealed interface ChatTurnUi {
         override val listKey: String = id,
         override val ownerMessageId: String = id,
         override val segmentIndex: Int = 0,
+        val pending: Boolean = false,
     ) : ChatTurnUi
 
     data class Assistant(

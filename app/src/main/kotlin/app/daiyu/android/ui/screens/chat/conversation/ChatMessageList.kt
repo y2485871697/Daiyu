@@ -438,7 +438,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 5.dp, bottomStart = 16.dp))
                 .background(conversationColors().bubble)
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    clickFeedback = false, onClick = {}, onLongClick = { showMenu = true })
+                    clickFeedback = false, onClick = {}, onLongClick = { if (!turn.pending) showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
                 if (turn.content.isNotEmpty()) {
                     MessageContent(turn.content, actions, imageLoader, markdown = false,
@@ -450,7 +450,9 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
             UserTurnMenu(showMenu, { showMenu = false }, turn.listKey, actions)
             }
         }
-        if (actions.editingMessageKey != turn.listKey) MessageActionBar(
+        if (turn.pending) Text("正在准备发送…", Modifier.testTag("chat-send-preview"),
+            color = conversationColors().muted, style = MiuixTheme.textStyles.footnote1)
+        if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(
             id = turn.listKey,
             actions = actions,
             showEditAction = true,

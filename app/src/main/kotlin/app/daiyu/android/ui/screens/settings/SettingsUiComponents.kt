@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
 
 import app.daiyu.android.ui.components.LocalBottomSheetContent
+import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.components.daiyuInputContainerColor
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
@@ -166,6 +167,11 @@ internal fun SettingsSwitchRow(title: String, checked: Boolean, enabled: Boolean
 
 @Composable
 internal fun SettingsRadioRow(title: String, selected: Boolean, enabled: Boolean = true, summary: String? = null, onClick: () -> Unit) {
+    if (LocalBottomSheetContent.current) {
+        OptionSelectionItem(title, selected, enabled = enabled, summary = summary,
+            modifier = Modifier.testTag("settings-radio:$title"), onClick = onClick)
+        return
+    }
     Box(Modifier.testTag("settings-radio:$title").fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, enabled = enabled, onClick = onClick)) {
         SettingsRow(title = title, summary = summary, trailing = {
             if (selected) {

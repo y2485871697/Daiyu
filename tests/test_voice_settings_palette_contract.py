@@ -39,10 +39,12 @@ class VoiceSettingsPaletteContractTest(unittest.TestCase):
     def test_quota_cards_share_settings_fill_and_edge_without_recoloring_text(self):
         options = (SRC / 'ui/components/OptionSelectionSheet.kt').read_text()
         self.assertIn('cardStyle -> Brush.linearGradient(colors.sheet)', options)
-        self.assertIn('cardStyle && selected -> SolidColor(colors.selectionContainer)', options)
+        self.assertIn('selected -> SolidColor(colors.selectionContainer)', options)
+        self.assertLess(options.index('selected -> SolidColor(colors.selectionContainer)'),
+                        options.index('cardStyle -> Brush.linearGradient(colors.sheet)'))
         self.assertIn('if (selected) colors.selectionContent else colors.edge, shape)', options)
         self.assertIn('color = if (selected) selectedContent else colors.text', options)
-        self.assertIn('selected -> SolidColor(selectedBackground)', options)
+        self.assertIn('val selectedContent = colors.selectionContent', options)
         self.assertNotIn('cardStyle -> colors.bubble', options)
 
     def test_recognition_save_reuses_selected_tab_fill_without_changing_foregrounds(self):

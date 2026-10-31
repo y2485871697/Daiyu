@@ -70,8 +70,8 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
                 val selections = AtomicInteger()
                 var selected = -1
                 mount(mode = mode, fontScale = fontScale, selections = selections, onSelect = { selected = it })
-                node("choice:0").assertIsSelected().assertHeightIsAtLeast(48.dp)
-                node("choice:1").assertIsNotSelected().assertHeightIsAtLeast(48.dp)
+                node("choice:0").assertIsSelected().assertHeightIsAtLeast(56.dp)
+                node("choice:1").assertIsNotSelected().assertHeightIsAtLeast(56.dp)
                 ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
                 val sheet = node("chat-selection-sheet").fetchSemanticsNode().boundsInRoot
                 val viewport = node("preview-dialog-viewport").fetchSemanticsNode().boundsInRoot

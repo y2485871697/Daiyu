@@ -37,10 +37,10 @@ internal fun OptionSelectionSheet(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
-    itemSpacing: Dp = 3.dp,
+    itemSpacing: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    ChatSelectionSheet(title = title, onDismiss = onDismiss, subtitle = subtitle, showCloseButton = false) {
+    ChatSelectionSheet(title = title, onDismiss = onDismiss, subtitle = subtitle, showCloseButton = false, titleFontSize = 20.sp) {
         Column(modifier.fillMaxWidth().semantics { paneTitle = title }
             .verticalScroll(rememberScrollState()).selectableGroup(),
             verticalArrangement = Arrangement.spacedBy(itemSpacing)) {
@@ -56,31 +56,36 @@ internal fun OptionSelectionItem(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     cardStyle: Boolean = false,
+    summary: String? = null,
     onClick: () -> Unit,
 ) {
     val colors = usagePalette()
-    val selectedBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
     val background = when {
-        cardStyle && selected -> SolidColor(colors.selectionContainer)
+        selected -> SolidColor(colors.selectionContainer)
         cardStyle -> Brush.linearGradient(colors.sheet)
-        selected -> SolidColor(selectedBackground)
         else -> SolidColor(Color.Transparent)
     }
     val shape = if (cardStyle) RoundedCornerShape(16.dp) else RoundedCornerShape(12.dp)
-    val selectedContent = if (cardStyle) colors.selectionContent else colors.accent
+    val selectedContent = colors.selectionContent
+    val indicatorColor = if (cardStyle) selectedContent else colors.accent
     Row(modifier.fillMaxWidth().alpha(if (enabled) 1f else .45f).clip(shape)
         .background(background)
         .then(if (cardStyle) Modifier.border(1.dp, if (selected) colors.selectionContent else colors.edge, shape) else Modifier)
         .selectable(selected = selected, enabled = enabled, role = Role.RadioButton,
             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-        .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, Modifier.weight(1f), color = if (selected) selectedContent else colors.text,
-            fontSize = 14.sp, lineHeight = 20.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal)
+        .heightIn(min = if (cardStyle) 48.dp else 56.dp)
+        .padding(horizontal = 12.dp, vertical = if (cardStyle) 12.dp else 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (cardStyle) 12.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(text, color = if (selected) selectedContent else colors.text,
+                fontSize = if (cardStyle) 14.sp else 16.sp,
+                lineHeight = if (cardStyle) 20.sp else 24.sp,
+                fontWeight = if (cardStyle && selected) FontWeight.Medium else FontWeight.Normal)
+            summary?.let { Text(it, color = colors.muted, fontSize = 14.sp, lineHeight = 20.sp) }
+        }
         Box(Modifier.size(22.dp).clip(CircleShape)
-            .background(if (selected) selectedContent else Color.Transparent), contentAlignment = Alignment.Center) {
-            if (selected) Icon(DaiyuIcons.Check, "已选择", Modifier.size(14.dp), tint = if (cardStyle) colors.selectionContainer else if (colors.dark) Color(0xFF211735) else Color.White)
+            .background(if (selected) indicatorColor else Color.Transparent), contentAlignment = Alignment.Center) {
+            if (selected) Icon(DaiyuIcons.Check, "已选择", Modifier.size(14.dp), tint = if (cardStyle) colors.selectionContainer else colors.onPrimary)
         }
     }
 }

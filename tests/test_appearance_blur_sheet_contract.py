@@ -15,19 +15,23 @@ class AppearanceBlurSheetContractTest(unittest.TestCase):
         self.assertIn("showCloseButton = false", BLUR)
         self.assertNotIn("DaiyuChoiceSheet", SCREEN)
         for primitive in ("WindowDialog", "DialogProperties", "dialogEnterMotion", "RoundedCornerShape"):
-            self.assertNotIn(primitive, BLUR.split("val sheetColors", 1)[0])
+            self.assertNotIn(primitive, BLUR.split("Column(", 1)[0])
 
     def test_choices_use_voice_style_highlights_and_a_scrollable_group(self):
         self.assertIn(".verticalScroll(rememberScrollState())", BLUR)
         self.assertIn(".selectableGroup()", BLUR)
         self.assertIn("blurStyles.forEachIndexed", BLUR)
-        for fragment in ('usagePalette()', 'RoundedCornerShape(12.dp)', 'heightIn(min = 56.dp)',
-                         'sheetColors.selectionContainer', 'sheetColors.selectionContent',
-                         'sheetColors.accent', 'sheetColors.onPrimary', 'Modifier.size(22.dp)',
-                         'fontSize = 16.sp, lineHeight = 24.sp', 'Role.RadioButton',
-                         'testTag("settings-radio:$title")'):
-            self.assertIn(fragment, BLUR)
-        self.assertNotIn('SettingsRadioRow', BLUR)
+        self.assertIn('SettingsRadioRow(title, selected = state.topBarBlurStyle.ordinal == index)', BLUR)
+        shared = (ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/SettingsUiComponents.kt").read_text()
+        self.assertIn("if (LocalBottomSheetContent.current)", shared)
+        self.assertIn("OptionSelectionItem(title, selected, enabled = enabled, summary = summary", shared)
+        row = (ROOT / "app/src/main/kotlin/app/daiyu/android/ui/components/OptionSelectionSheet.kt").read_text()
+        for fragment in ('usagePalette()', 'RoundedCornerShape(12.dp)', '48.dp else 56.dp',
+                         'colors.selectionContainer', 'colors.selectionContent',
+                         'colors.accent', 'colors.onPrimary', 'Modifier.size(22.dp)',
+                         '14.sp else 16.sp', '20.sp else 24.sp', 'Role.RadioButton'):
+            self.assertIn(fragment, row)
+        self.assertIn('testTag("settings-radio:$title")', shared)
         self.assertIn("selected = state.topBarBlurStyle.ordinal == index", BLUR)
         self.assertIn("onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))", BLUR)
         self.assertEqual(1, BLUR.count("onChange("))

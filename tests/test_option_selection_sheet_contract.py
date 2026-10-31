@@ -13,7 +13,7 @@ def source(path):
 class OptionSelectionSheetContractTest(unittest.TestCase):
     def test_small_choices_reuse_the_reference_sheet_without_fixed_height(self):
         text = source('ui/components/OptionSelectionSheet.kt')
-        self.assertIn('ChatSelectionSheet(title = title, onDismiss = onDismiss, subtitle = subtitle, showCloseButton = false)', text)
+        self.assertIn('ChatSelectionSheet(title = title, onDismiss = onDismiss, subtitle = subtitle, showCloseButton = false, titleFontSize = 20.sp)', text)
         self.assertIn('.verticalScroll(rememberScrollState()).selectableGroup()', text)
         self.assertNotIn('height =', text)
         self.assertNotIn('fillMaxHeight', text)
@@ -25,9 +25,13 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
 
     def test_rows_match_model_highlight_checkmark_and_accessible_selection(self):
         text = source('ui/components/OptionSelectionSheet.kt')
-        for fragment in ('Color(0xFFEFEDFB)', 'colors.bubble', 'RoundedCornerShape(12.dp)',
+        for fragment in ('colors.selectionContainer', 'colors.selectionContent', 'RoundedCornerShape(12.dp)',
                          'Role.RadioButton', 'selected = selected, enabled = enabled',
-                         'heightIn(min = 48.dp)', 'Modifier.size(22.dp).clip(CircleShape)',
+                         'heightIn(min = if (cardStyle) 48.dp else 56.dp)', 'Modifier.size(22.dp).clip(CircleShape)',
+                         'fontSize = if (cardStyle) 14.sp else 16.sp',
+                         'lineHeight = if (cardStyle) 20.sp else 24.sp',
+                         'val indicatorColor = if (cardStyle) selectedContent else colors.accent',
+                         'else colors.onPrimary', 'summary?.let',
                          'Icon(DaiyuIcons.Check, "已选择", Modifier.size(14.dp)',
                          'import app.daiyu.android.ui.haptics.selectable'):
             self.assertIn(fragment, text)

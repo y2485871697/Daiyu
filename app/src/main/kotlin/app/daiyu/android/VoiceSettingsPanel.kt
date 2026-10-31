@@ -14,6 +14,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.voice.providers.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
@@ -547,8 +548,8 @@ internal fun VoiceSettingsPanel(
                 }
             }, onSelect = { if (current() && !busy) save(draft.copy(voice = it), speechOnly = true) }, onDismiss = { dialog = null })
             "ASR_ADVANCED" -> ChatSelectionSheet("识别服务", onDismiss = { dialog = null },
-                subtitle = "仅在控制台开通了不同服务时更改。", showCloseButton = false, titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("voice-asr-service-sheet")) {
+                showCloseButton = false, titleFontSize = 20.sp) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup().testTag("voice-asr-service-sheet")) {
                     DoubaoAsrProtocol.resources.forEachIndexed { index, resource ->
                         SettingsRadioRow(listOf("识别 2.0 · 按时长", "识别 2.0 · 按并发", "识别 1.0 · 按时长", "识别 1.0 · 按并发")[index],
                             draft.asrResource == resource, !busy) {

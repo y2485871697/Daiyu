@@ -433,9 +433,11 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         awaitImeFrame(node("settings-field:ASR API Key"), visible = false)
         reveal("voice-asr-advanced", "语音设置").performClick()
         awaitNodeWindowFocus(node("voice-asr-service-sheet").assert(hasAnyAncestor(hasTestTag("chat-selection-sheet"))))
+        ui.onNodeWithText("仅在控制台开通了不同服务时更改。", useUnmergedTree = true).assertDoesNotExist()
         val serviceNames = listOf("识别 2.0 · 按时长", "识别 2.0 · 按并发", "识别 1.0 · 按时长", "识别 1.0 · 按并发")
         serviceNames.forEach { title ->
             node("settings-radio:$title").assert(hasAnyAncestor(hasTestTag("voice-asr-service-sheet")))
+                .assertHeightIsAtLeast(56.dp)
         }
         node("settings-radio:${serviceNames.first()}").assertIsSelected()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()

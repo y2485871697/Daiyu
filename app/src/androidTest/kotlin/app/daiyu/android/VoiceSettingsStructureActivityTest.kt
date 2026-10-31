@@ -273,6 +273,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         method.performClick()
         node("voice-section-select").assertDoesNotExist()
         node("voice-asr-method:system").assertIsSelected()
+        assertRecognitionSegmentsAreCompact()
         assertRecognitionSelectedColors("voice-asr-method:system")
         node("voice-asr-method:doubao").performClick()
         ui.waitUntil { fixture.controller.voiceRuntime.conversationConfiguration.value?.dictation == "DOUBAO" }
@@ -312,6 +313,18 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    private fun assertRecognitionSegmentsAreCompact() {
+        val page = node("page:语音设置").getUnclippedBoundsInRoot()
+        val group = node("voice-asr-method-card").getUnclippedBoundsInRoot()
+        val pageWidth = (page.right - page.left).value
+        val groupWidth = (group.right - group.left).value
+        assertEquals(minOf(240f, pageWidth - 32f), groupWidth, 1f)
+        assertEquals(page.left.value + page.right.value, group.left.value + group.right.value, 1f)
+        val local = node("voice-asr-method:system").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+        val cloud = node("voice-asr-method:doubao").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+        assertEquals(local.width, cloud.width, 1f)
+    }
+
     private fun assertRecognitionSelectedColors(tag: String) {
         val pixels = node(tag).captureToImage().toPixelMap()
         fun Color.matches(expected: Color) = abs(red - expected.red) < .035f &&
@@ -333,6 +346,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
         enter(); reveal("voice-recognition-method", "语音设置").performClick()
         node("voice-asr-method:system").assertIsSelected()
+        assertRecognitionSegmentsAreCompact()
         assertRecognitionSelectedColors("voice-asr-method:system")
         ui.onNodeWithText("无需账户。上一页下载语音包后，即可离线识别。").assertDoesNotExist()
         node("voice-asr-method:doubao").assertIsNotSelected()

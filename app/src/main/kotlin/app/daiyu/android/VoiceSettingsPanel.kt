@@ -315,11 +315,12 @@ internal fun VoiceSettingsPanel(
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("page:语音设置"),
                     contentPadding = PaddingValues(bottom = 24.dp)) {
                     if (child == "ASR") {
-                        item { LinuxSettingsTheme { SettingsSegmentedTabs(
+                        item { Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center) { LinuxSettingsTheme { SettingsSegmentedTabs(
                             labels = listOf("本机识别", "豆包识别"),
                             selectedIndex = if (draft.dictation == "DOUBAO") 1 else 0,
                             enabled = !busy,
-                            modifier = Modifier.padding(vertical = 8.dp).testTag("voice-asr-method-card"),
+                            modifier = Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp).testTag("voice-asr-method-card"),
                             tabTag = { if (it == 0) "voice-asr-method:system" else "voice-asr-method:doubao" },
                             onSelect = { index ->
                                 if (current() && !busy) {
@@ -328,7 +329,7 @@ internal fun VoiceSettingsPanel(
                                     save((saved ?: VoiceConfiguration()).copy(dictation = method))
                                 }
                             },
-                        ) } }
+                        ) } } }
                         if (draft.dictation == "DOUBAO") {
                             item { SettingsCard(Modifier.testTag("voice-asr-account-card")) {
                                 SettingsSectionTitle("连接豆包账户")

@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -72,31 +73,69 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
         }
     }
     Column(Modifier.fillMaxWidth().testTag("tool-children:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text("子任务生命周期", style = MiuixTheme.textStyles.footnote1)
         when {
-            loading -> Text("正在读取已登记子任务…", style = MiuixTheme.textStyles.footnote1)
-            failed -> Text("子任务记录读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
-            rows.isEmpty() -> Text("暂无子任务记录", style = MiuixTheme.textStyles.footnote1)
-            else -> rows.forEach { row -> key(row.owner) {
-                ChildTaskDisclosure(row, details = {
-                    Text(ToolRichDetails.scrub(row.model, limit = 160) + " · " + row.owner.childRunId.take(8),
-                        style = MiuixTheme.textStyles.footnote1)
-                    records.firstOrNull { it.owner == row.owner }?.text?.takeIf { it.isNotBlank() }?.let {
-                        ToolDocument(ToolDisclosureUi("子任务输出", ToolRichDetails.scrub(it)))
-                    }
-                }, controls = {
-                    val actions = when (row.status) {
-                        "已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
-                        "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
-                        "暂停中", "停止中" -> emptyList()
-                        else -> if (records.any { it.owner == row.owner && it.text.isNotBlank() }) emptyList() else listOf(ToolCardAction.READ_TASK_RESULT)
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        actions.forEach { action -> ToolMiniAction(text = if (row.contextLimited && action == ToolCardAction.RESUME_TASK) "压缩并继续" else action.label,
-                            onClick = { onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner))) }) }
-                    }
-                })
-            } }
+            loading -> Text("正在读取任务…", style = MiuixTheme.textStyles.footnote1)
+            failed -> Text("任务记录读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
+            rows.isEmpty() -> Text("暂无任务记录", style = MiuixTheme.textStyles.footnote1)
+            else -> ChildTaskList(rows, records) { row, action ->
+                onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner)))
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ChildTaskList(
+    rows: List<SubAgentStatusRow>,
+    records: List<ChildTaskRecord>,
+    onAction: (SubAgentStatusRow, ToolCardAction) -> Unit,
+) {
+    var showCompleted by remember(rows.map { it.owner }) { mutableStateOf(false) }
+    val allCompleted = childTaskBatchCompleted(rows)
+    val colors = MiuixTheme.colorScheme
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        if (allCompleted) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("tool-child-batch-summary")
+                .semantics { stateDescription = if (showCompleted) "已展开" else "已折叠" }
+                .clickable(role = Role.Button, onClickLabel = if (showCompleted) "收起任务" else "查看任务结果") {
+                    showCompleted = !showCompleted
+                }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${rows.size} 项任务已完成", Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1)
+                Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp).settingsDisclosureRotation(showCompleted, expandedDegrees = 180f),
+                    tint = colors.onSurfaceVariantSummary)
+            }
+        } else {
+            Text(childTaskProgress(rows), style = MiuixTheme.textStyles.footnote1)
+        }
+        SettingsExpandableContent(!allCompleted || showCompleted) {
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                rows.forEachIndexed { index, row -> key(row.owner) {
+                    val record = records.firstOrNull { it.owner == row.owner }
+                    ChildTaskDisclosure(row, taskTitle = childTaskTitle(record?.prompt, record?.index ?: index),
+                        agent = record?.display?.agentName ?: "子代理", details = {
+                            Text(ToolRichDetails.scrub(row.model, limit = 160), style = MiuixTheme.textStyles.footnote1)
+                            record?.let {
+                                ToolDocument(ToolDisclosureUi("任务", ToolRichDetails.scrub(it.prompt)))
+                                it.text.takeIf { text -> text.isNotBlank() }?.let { text ->
+                                    ToolDocument(ToolDisclosureUi("结果", ToolRichDetails.scrub(text)))
+                                }
+                                it.detail?.let { detail -> ToolDocument(ToolDisclosureUi("原因", ToolRichDetails.scrub(detail))) }
+                            }
+                        }, controls = {
+                            val actions = when (row.status) {
+                                "已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
+                                "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
+                                "暂停中", "停止中" -> emptyList()
+                                else -> if (record?.text?.isNotBlank() == true) emptyList() else listOf(ToolCardAction.READ_TASK_RESULT)
+                            }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                actions.forEach { action -> ToolMiniAction(
+                                    text = if (row.contextLimited && action == ToolCardAction.RESUME_TASK) "压缩并继续" else action.label,
+                                    onClick = { onAction(row, action) }) }
+                            }
+                        })
+                } }
+            }
         }
     }
 }
@@ -106,6 +145,8 @@ internal fun ChildTaskDisclosure(
     row: SubAgentStatusRow,
     details: @Composable () -> Unit,
     controls: @Composable () -> Unit,
+    taskTitle: String = row.agent,
+    agent: String? = null,
 ) {
     var expanded by remember(row.owner) { mutableStateOf(false) }
     val colors = MiuixTheme.colorScheme
@@ -115,8 +156,16 @@ internal fun ChildTaskDisclosure(
             .clickable(role = Role.Button, onClickLabel = if (expanded) "折叠子任务" else "展开子任务") { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(ToolRichDetails.scrub(row.agent, limit = 80), Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1)
-            Text(row.status, color = if (row.completed) colors.primary else colors.onSurfaceVariantSummary,
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(taskTitle, style = MiuixTheme.textStyles.footnote1, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                agent?.let { Text(ToolRichDetails.scrub(it, limit = 80), style = MiuixTheme.textStyles.footnote1,
+                    color = colors.onSurfaceVariantSummary) }
+            }
+            Text(row.status, color = when {
+                row.completed -> colors.primary
+                row.status in setOf("未执行", "结果未知", "状态未确认", "上下文超限") -> colors.error
+                else -> colors.onSurfaceVariantSummary
+            },
                 style = MiuixTheme.textStyles.footnote1)
             Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp).settingsDisclosureRotation(expanded, expandedDegrees = 180f),
                 tint = colors.onSurfaceVariantSummary)

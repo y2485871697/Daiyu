@@ -10,7 +10,14 @@ CLOUD_SCOPES = {**SCOPES, 'delegation': (
     ':core-domain:test --tests app.daiyu.android.domain.delegation.* --tests app.daiyu.android.domain.tools.* '
     ':app:testDebugUnitTest --tests app.daiyu.android.delegation.* --tests app.daiyu.android.integration.tools.* '
     '--tests app.daiyu.android.backup.* --tests app.daiyu.android.browser.* --tests app.daiyu.android.shizuku.* '
-    '--tests app.daiyu.android.terminal.* :app:compileDebugAndroidTestKotlin')}
+    '--tests app.daiyu.android.terminal.* '
+    '--tests app.daiyu.android.ui.screens.chat.conversation.BatchDelegationPresentationTest '
+    '--tests app.daiyu.android.ui.screens.chat.conversation.ChildTaskPresentationTest '
+    '--tests app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest '
+    '--tests app.daiyu.android.ui.screens.chat.conversation.ToolCardPresentationTest '
+    '--tests app.daiyu.android.ui.screens.chat.conversation.ToolBodyLayoutTest '
+    '--tests app.daiyu.android.ui.screens.chat.conversation.SubAgentStatusRowsTest '
+    ':app:compileDebugAndroidTestKotlin')}
 CLOUD_SCOPES['context'] = (
     ':core-domain:test --tests app.daiyu.android.domain.context.* '
     ':app:testDebugUnitTest --tests app.daiyu.android.context.* '
@@ -35,6 +42,12 @@ DELEGATION_PACKAGES = (
     ('app', 'app.daiyu.android.browser.'),
     ('app', 'app.daiyu.android.shizuku.'),
     ('app', 'app.daiyu.android.terminal.'),
+    ('app', 'app.daiyu.android.ui.screens.chat.conversation.BatchDelegationPresentationTest'),
+    ('app', 'app.daiyu.android.ui.screens.chat.conversation.ChildTaskPresentationTest'),
+    ('app', 'app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest'),
+    ('app', 'app.daiyu.android.ui.screens.chat.conversation.ToolCardPresentationTest'),
+    ('app', 'app.daiyu.android.ui.screens.chat.conversation.ToolBodyLayoutTest'),
+    ('app', 'app.daiyu.android.ui.screens.chat.conversation.SubAgentStatusRowsTest'),
 )
 UNIT_REPORTS = ('core-domain/build/test-results/test', 'app/build/test-results/testDebugUnitTest')
 

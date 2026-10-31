@@ -55,6 +55,7 @@ internal object ToolRichDetails {
 
     fun project(category: String, toolName: String, arguments: String, result: String?): ToolRichDetailsUi {
         val args = json(arguments)
+        val launchingDelegation = category == "delegation" && toolName in setOf("run_child_models", "start_child_tasks")
         val encodedScreenshot = toolName == "screen" && args?.optString("operation") == "screenshot"
         val envelope = if (encodedScreenshot) null else json(result, if (category in setOf("terminal", "background_job")) 1_048_576 else MAX_INPUT)
         val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action", "terminal", "background_job"))
@@ -295,17 +296,19 @@ internal object ToolRichDetails {
                 list(output, "artifacts", "产物记录", listOf("id" to "标识", "mime" to "格式", "width" to "宽度", "height" to "高度"))
             }
             "delegation", "child_control" -> {
-                listOf("task_id" to "目标任务", "group_id" to "组", "kind" to "控制动作", "action" to "请求动作").forEach { (key, label) -> field(args, key, label) }
-                documents(args, "guidance" to "指导内容", "instruction" to "指导内容", "task" to "任务说明")
-                list(output, "results", "已读取子任务结果", listOf("child_run_id" to "子任务", "profile_id" to "代理", "status" to "返回状态"))
-                list(output, "tasks", "工具返回任务记录", listOf("id" to "标识", "child_run_id" to "子任务", "task_id" to "任务", "profile_id" to "代理", "model" to "模型", "role" to "职责", "state" to "返回状态", "status" to "返回状态", "result_id" to "结果标识"))
-                documents(output, "partial_result" to "已保留片段", "partial" to "已保留片段", "result" to "已读取结果", "checkpoint" to "检查点摘要")
-                if (toolName == "get_child_task") {
-                    fields(output, "status" to "记录状态", "offset" to "读取偏移", "next_text_offset" to "正文下次偏移", "next_progress_offset" to "进度下次偏移")
-                    documents(output, "text" to "已读取结果", "progress" to "任务进度", "detail" to "任务详情")
+                if (!launchingDelegation) {
+                    listOf("task_id" to "目标任务", "group_id" to "组", "kind" to "控制动作", "action" to "请求动作").forEach { (key, label) -> field(args, key, label) }
+                    documents(args, "guidance" to "指导内容", "instruction" to "指导内容", "task" to "任务说明")
+                    list(output, "results", "已读取子任务结果", listOf("child_run_id" to "子任务", "profile_id" to "代理", "status" to "返回状态"))
+                    list(output, "tasks", "工具返回任务记录", listOf("id" to "标识", "child_run_id" to "子任务", "task_id" to "任务", "profile_id" to "代理", "model" to "模型", "role" to "职责", "state" to "返回状态", "status" to "返回状态", "result_id" to "结果标识"))
+                    documents(output, "partial_result" to "已保留片段", "partial" to "已保留片段", "result" to "已读取结果", "checkpoint" to "检查点摘要")
+                    if (toolName == "get_child_task") {
+                        fields(output, "status" to "记录状态", "offset" to "读取偏移", "next_text_offset" to "正文下次偏移", "next_progress_offset" to "进度下次偏移")
+                        documents(output, "text" to "已读取结果", "progress" to "任务进度", "detail" to "任务详情")
+                    }
+                    if (toolName == "control_child_task") field(output, "outcome", "控制回执")
+                    // Live children are rendered by the host, never promoted from provider JSON.
                 }
-                if (toolName == "control_child_task") field(output, "outcome", "控制回执")
-                // Live children are rendered by the host, never promoted from provider JSON.
             }
             "mcp" -> {
                 fields(args, "connection_id" to "连接", "transport" to "传输类型", "previous_revision" to "先前目录修订")
@@ -324,14 +327,14 @@ internal object ToolRichDetails {
         }
         // Raw payloads are optional, explicit disclosure only, and always independently scrubbed.
         // get_cookies/set_cookies deliberately have no body disclosure, even on explicit expansion.
-        if (!cookies && category != "user_question") {
+        if (!cookies && category != "user_question" && !launchingDelegation) {
             documents(output, "message" to "操作回执", "error" to "错误回执")
             if (envelope !== output) documents(envelope, "message" to "操作回执", "error" to "错误回执")
             if (category !in setOf("delegation", "child_control")) document(output, "result", "操作回执")
         }
         val unreadableTerminalReceipt = category in setOf("terminal", "background_job") && output == null &&
             result?.trimStart()?.firstOrNull() in setOf('{', '[')
-        if (!cookies && category != "user_question" && !unreadableTerminalReceipt) {
+        if (!cookies && category != "user_question" && !unreadableTerminalReceipt && !launchingDelegation) {
             if (!outputDocument && entries.isEmpty() && result != null && result.isNotBlank() &&
                 (output == null || category !in ToolCardPresentations.categories || category == "generic")) {
                 val cleaned = if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden)
@@ -342,16 +345,23 @@ internal object ToolRichDetails {
         val privacyRestricted = receiptStates.any {
             it.opt("privacy_redacted") == true || it.optString("status") in setOf("private_result_withheld", "private_result_consent_required")
         }
-        val failureStatus = receiptStates.map { it.optString("status") }.firstOrNull {
-            it in setOf("permission_denied", "unsupported", "unavailable", "no_cached_location")
+        val receiptStatus = if (launchingDelegation) receiptStates
+            .flatMap { listOf(it.optString("status"), it.optString("state")) }.map { it.lowercase(Locale.ROOT) }
+        else receiptStates.map { it.optString("status") }
+        val failureStatus = receiptStatus.firstOrNull {
+            it in setOf("permission_denied", "unsupported", "unavailable", "no_cached_location") ||
+                launchingDelegation && it in setOf("failed", "rejected", "not_executed")
         }
-        val failed = privacyRestricted || failureStatus != null || receiptStates.any { it.opt("ok") == false }
+        val failed = privacyRestricted || failureStatus != null || receiptStates.any { it.opt("ok") == false } ||
+            launchingDelegation && receiptStates.any { (it.opt("error") as? String)?.isNotBlank() == true }
         val failure = if (privacyRestricted) "结果未获展示授权" else when (failureStatus) {
             "permission_denied" -> "缺少本次操作所需权限"
             "no_cached_location" -> "没有可用的最近位置缓存"
             "unsupported" -> "设备不支持本次操作"
             "unavailable" -> "本次读取不可用"
-            else -> "本次调用未完成"
+            "rejected" -> "任务分配被拒绝"
+            "not_executed" -> "任务未执行"
+            else -> if (launchingDelegation) "未能分配任务" else "本次调用未完成"
         }
         val technical = if (cookies || encodedScreenshot || category == "user_question") emptyList() else buildList {
             if (arguments.isNotBlank()) add(ToolDisclosureUi("调用参数", if (args == null) scrub(arguments, hidden) else scrub(sanitizedJson(args, 0).toString(2), hidden), true))
@@ -359,7 +369,7 @@ internal object ToolRichDetails {
         }
         val compact = category in setOf("device_read", "system_action", "terminal", "background_job")
         val receipt = docs.firstOrNull { it.title in setOf("操作回执", "错误回执") }?.text
-        val prose = if (compact || failed || (!outputDocument && entries.isEmpty() && docs.none { it.title == "已记录返回" })) {
+        val prose = if (launchingDelegation || compact || failed || (!outputDocument && entries.isEmpty() && docs.none { it.title == "已记录返回" })) {
             val time = clean(output?.opt("local_iso"))
             val latitude = (output?.opt("latitude") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() in -90.0..90.0 }?.let { clean(it) }
             val longitude = (output?.opt("longitude") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() in -180.0..180.0 }?.let { clean(it) }
@@ -367,6 +377,11 @@ internal object ToolRichDetails {
             val body = when {
                 result.isNullOrBlank() -> "等待执行回执"
                 failed -> failure
+                launchingDelegation -> when {
+                    output == null -> "委派回执无法读取"
+                    receiptStatus.any { it in setOf("unknown", "unconfirmed") } -> "委派结果未确认"
+                    else -> ""
+                }
                 receipt != null -> receipt
                 category == "device_read" && time != null -> formatDeviceTime(time, clean(output?.opt("timezone")))
                 category == "device_read" && latitude != null && longitude != null -> {

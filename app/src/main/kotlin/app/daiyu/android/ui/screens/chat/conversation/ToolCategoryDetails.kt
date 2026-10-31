@@ -38,6 +38,7 @@ internal object ToolCategoryDetails {
 
     fun project(category: String, arguments: String, result: String?, toolName: String = "", terminalTarget: TerminalToolTarget? = null): ToolCategoryDetailsUi {
         val args = parse(arguments)
+        val launchingDelegation = category == "delegation" && toolName in setOf("run_child_models", "start_child_tasks")
         val envelope = parse(result)
         val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action"))
             envelope?.optJSONObject("data") ?: envelope else envelope
@@ -67,9 +68,12 @@ internal object ToolCategoryDetails {
                 "技能与资源" to "技能说明与兼容性以实际返回为准；阅读卡片不会安装或运行技能。"
             }
             "delegation", "child_control" -> {
-                count(args, "tasks", "请求任务数"); count(output, "tasks", "返回任务数"); count(output, "results", "返回结果数"); count(output, "available_profiles", "可用配置数")
-                boolean(output, "accepted", "completed", "new_request", "current_configuration_available", "settled"); state(output)
-                val tasks = output?.optJSONArray("tasks") ?: output?.optJSONArray("results")
+                count(args, "tasks", "请求任务数")
+                if (!launchingDelegation) {
+                    count(output, "tasks", "返回任务数"); count(output, "results", "返回结果数"); count(output, "available_profiles", "可用配置数")
+                    boolean(output, "accepted", "completed", "new_request", "current_configuration_available", "settled"); state(output)
+                }
+                val tasks = if (launchingDelegation) null else (output?.optJSONArray("tasks") ?: output?.optJSONArray("results"))
                 if (tasks != null) for (index in 0 until minOf(tasks.length(), 16)) {
                     val task = tasks.optJSONObject(index) ?: continue
                     val taskState = states[(task.opt("status") as? String)?.lowercase() ?: (task.opt("state") as? String)?.lowercase()]

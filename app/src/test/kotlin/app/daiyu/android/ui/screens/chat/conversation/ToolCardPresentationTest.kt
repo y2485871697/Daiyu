@@ -87,8 +87,8 @@ class ToolCardPresentationTest {
     @Test fun actualTaskArraysAndTerminalFlagsAreBoundedMetadataNotSuccessInference() {
         val queued = ToolCardPresentations.present("start_child_tasks", "{\"tasks\":[{\"prompt\":\"private\"}]}",
             "{\"accepted\":true,\"completed\":false,\"tasks\":[{\"child_run_id\":\"secret\"}]}")
-        assertTrue(queued.summary.contains("生命周期"))
-        assertTrue(queued.sections.any { it.text.contains("入队任务数：1") && it.text.contains("子任务已完成：否") })
+        assertEquals("任务数：1", queued.summary)
+        assertEquals(listOf(ToolDetailSectionUi("任务", "任务数：1")), queued.sections)
         assertFalse(queued.toString().contains("private"))
         assertFalse(queued.toString().contains("secret"))
         val pty = ToolCardPresentations.present("terminal_pty_read", "{}", "{\"wait_status\":7,\"state\":\"exited\",\"has_more\":false,\"total_bytes\":32}")

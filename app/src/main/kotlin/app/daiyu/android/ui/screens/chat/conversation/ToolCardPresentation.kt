@@ -86,24 +86,29 @@ internal object ToolCardPresentations {
             }))
         }.filter { it.isNotBlank() }.joinToString(" · ")
         val summary = when {
-            kind.first == "delegation" -> "委派调用与子任务生命周期分别记录"
+            kind.first == "delegation" -> params.ifBlank { "任务分工" }
             kind.first == "personal_search" -> "仅显示检索范围与数量，私密正文已隐藏"
             params.isNotBlank() -> params
             result == null -> "等待执行回执"
             else -> "已收到返回内容，状态以执行回执为准"
         }
+        val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromResult(toolName, result, output) else null
+        val details = ToolCategoryDetails.project(kind.first, arguments, result, toolName, target)
         val sections = buildList {
+            if (kind.first == "delegation") {
+                if (params.isNotBlank()) add(ToolDetailSectionUi("任务", params))
+                details.rich.prose?.let { add(ToolDetailSectionUi("结果", it.text)) }
+                return@buildList
+            }
             if (arguments.isNotBlank()) add(ToolDetailSectionUi("参数摘要", params.ifBlank { "自由文本、标识与敏感字段不在卡片中展开" }))
             add(ToolDetailSectionUi(if (kind.first in setOf("terminal", "background_job")) "输出摘要" else "结果摘要", returned.ifBlank { if (result == null) "尚无返回内容" else "已保存返回内容；原始正文不在卡片中展开" }))
-            if (kind.first == "delegation") add(ToolDetailSectionUi("子任务", "调用成功不代表子任务完成；后台任务以真实任务记录为准"))
             if (kind.first == "gui") add(ToolDetailSectionUi("操作回执", "动作已派发不等于业务目标已完成；历史观察不授予执行权"))
         }
-        val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromResult(toolName, result, output) else null
         val operationTitle = if (kind.first == "generic" && toolName.matches(Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}"))) {
             "执行其他工具 · $toolName"
         } else kind.second
         val title = target?.let { "$operationTitle · ${it.label}" } ?: operationTitle
-        return Presentation(kind.first, title, summary, sections, ToolCategoryDetails.project(kind.first, arguments, result, toolName, target), target?.label)
+        return Presentation(kind.first, title, summary, sections, details, target?.label)
     }
     private fun arrayCount(value: JSONObject?, key: String, label: String): String =
         value?.optJSONArray(key)?.let { "$label：${it.length()}" }.orEmpty()

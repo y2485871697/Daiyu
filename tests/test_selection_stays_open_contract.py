@@ -52,7 +52,15 @@ class SelectionStaysOpenContractTest(unittest.TestCase):
         self.assertNotIn("rememberBottomSheetAction", tone)
         panel = (SRC / "VoiceSettingsPanel.kt").read_text()
         self.assertIn("key(profile, dialog)", panel)
-        self.assertIn("retainOnSelect = true", panel)
+        asr = panel.split('"ASR_ADVANCED" -> ChatSelectionSheet', 1)[1].split('"DUPLEX_VOICE" ->', 1)[0]
+        self.assertIn("onDismiss = { dialog = null }", asr)
+        choice = asr.split("SettingsRadioRow(", 1)[1]
+        self.assertIn("if (current() && !busy)", choice)
+        self.assertIn("changeDraft(draft.copy(asrResource = resource))", choice)
+        self.assertIn("save((saved ?: VoiceConfiguration()).copy(asrResource = resource))", choice)
+        self.assertNotIn("dialog =", choice)
+        self.assertNotIn("rememberBottomSheetAction", asr)
+        self.assertNotIn("finishSelection", asr)
         self.assertIn('if (kind == "DOUBAO") dialog = null', panel)
         self.assertNotIn("dialog = null; busy = true", panel)
         account = (SRC / "VoiceAccountPanel.kt").read_text()

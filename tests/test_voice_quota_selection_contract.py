@@ -14,18 +14,16 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         cls.first = block(cls.panel, 'if (page == "CREATE" && step == 0)')
         cls.row = block(cls.first, 'item { SettingsCard(Modifier.testTag("voice-create-sync-card"))')
         cls.imported = block(cls.panel, 'if (page == "IMPORT") item')
-        cls.import_sheet = (block(cls.panel, 'importSlots.forEachIndexed')
-                            if 'importSlots.forEachIndexed' in cls.panel else '')
-        cls.sheet = (block(cls.panel, 'creationSlots.forEachIndexed')
-                     if 'creationSlots.forEachIndexed' in cls.panel else '')
+        cls.import_sheet = cls.panel.split('if (importSlotPicker && page == "IMPORT") VoiceTonePicker(', 1)[1].split('if (projectPicker)', 1)[0]
+        cls.sheet = cls.panel.split('if (slotPicker && page == "CREATE" && step == 0) VoiceTonePicker(', 1)[1].split('if (importSlotPicker', 1)[0]
 
     def test_creation_replaces_inline_choices_with_one_shared_sheet_entry(self):
         self.assertIn('SettingsRow("选择音色名额"', self.row)
         self.assertNotIn('查找我的音色名额', self.first)
         self.assertNotIn('SettingsRadioRow(', self.first)
         self.assertNotIn('voice-create-slots-card', self.first)
-        self.assertIn('OptionSelectionSheet(', self.panel)
-        self.assertIn('OptionSelectionItem(', self.sheet)
+        self.assertIn('VoiceTonePicker(', self.panel)
+        self.assertIn('VoiceToneOption(', self.sheet)
         self.assertIn('onDismiss = { slotPicker = false; operation?.cancel() }', self.panel)
         self.assertIn('personalVoiceSlotTitle(voice, index)', self.sheet)
         self.assertIn('voiceSlotSummary(voice)', self.sheet)
@@ -51,8 +49,8 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
                 self.assertNotIn(effect, text)
 
     def test_selection_rechecks_owner_state_and_only_updates_the_creation_draft(self):
-        for required in ('selected = !postpaid && slotId == voice.id', 'enabled = enabled && voice.canTrain',
-                         'if (enabled && !busy && current() && page == "CREATE" && step == 0 &&',
+        for required in ('selectedId = if (postpaid) "" else slotId', 'enabled = enabled && voice.canTrain',
+                         'voice != null && enabled && !busy && current() && page == "CREATE" && step == 0 &&',
                          'creationSlots.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }',
                          'slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null'):
             self.assertIn(required, self.sheet)
@@ -104,14 +102,15 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         for text in (entry, self.import_sheet):
             for effect in ('importExisting(', 'importPurchased(', '.save(', 'refreshProjects(', '.create(', '.load('):
                 self.assertNotIn(effect, text)
-        self.assertIn('selected = existingId == voice.id', self.import_sheet)
-        self.assertIn('enabled = enabled, cardStyle = true', self.import_sheet)
+        self.assertIn('selectedId = existingId', self.import_sheet)
+        self.assertIn('enabled = enabled, tag = "voice-import-slot:${voice.id}"', self.import_sheet)
         self.assertIn('page == "IMPORT"', self.import_sheet)
         self.assertIn('importCandidates.any { it.account == account?.fingerprint && it.id == voice.id && it.canImport }', self.import_sheet)
         self.assertIn('existingId = voice.id; confirmation = null', self.import_sheet)
-        self.assertNotIn('importSlotPicker = false', self.import_sheet)
+        callback = self.import_sheet.split('onSelect = { id ->', 1)[1]
+        self.assertNotIn('importSlotPicker = false', callback)
         self.assertNotIn('canTrain', self.import_sheet)
-        self.assertNotIn('name =', self.import_sheet)
+        self.assertNotIn('name =', callback)
         self.assertNotIn('voiceSlotSummary(', self.import_sheet)
         for marker in ('fun navigate(target:', 'fun back()'):
             self.assertIn('importSlotPicker = false', block(self.panel, marker))
@@ -159,9 +158,16 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
                       'Arrangement.spacedBy(itemSpacing)', 'Role.RadioButton',
                       'selected = selected, enabled = enabled', 'heightIn(min = 48.dp)'):
             self.assertIn(token, item)
-        self.assertEqual(2, self.panel.count('itemSpacing = 8.dp'))
-        self.assertIn('cardStyle = true', self.sheet)
-        self.assertIn('cardStyle = true', self.import_sheet)
+        self.assertNotIn('OptionSelectionSheet(', self.sheet + self.import_sheet)
+        for text in (self.sheet, self.import_sheet):
+            self.assertIn('VoiceToneOption(', text)
+            self.assertIn('category = "个人音色"', text)
+            self.assertIn('onSelect = { id ->', text)
+        picker = (SRC / 'VoiceTonePicker.kt').read_text()
+        self.assertIn('GroupedPickerSearch(', picker)
+        self.assertIn('pickerGroupSurface(', picker)
+        self.assertIn('enabled = voice.enabled', picker)
+        self.assertNotIn('onDismiss()', picker)
 
 
 if __name__ == '__main__':

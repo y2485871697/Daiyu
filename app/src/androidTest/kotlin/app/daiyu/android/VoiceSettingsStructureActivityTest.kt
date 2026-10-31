@@ -553,7 +553,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertSelectionSheet("voice-tone-dialog")
         val voices = app.daiyu.android.voice.providers.SpeechVoices.catalog(
             app.daiyu.android.voice.providers.SpeechEngine.OPENAI, "tts-1")
-        node("settings-radio:${voices.first { it.id == saved.voice }.name}").assertIsSelected()
+        node("voice-tone-option:${saved.voice}").assertIsSelected()
         backFromSelectionSheet()
         assertEquals(saved, fixture.controller.voiceRuntime.configuration.value)
         assertEquals(0, fixture.opens.get())
@@ -599,18 +599,23 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         node("settings-row:选择音色").performClick()
         assertSelectionSheet("voice-tone-dialog")
         listOf("女声", "男声").forEach { ui.onNodeWithText(it, substring = false).assertExists() }
-        listOf("Vivi", "小何", "云舟", "小天").forEach { node("settings-radio:$it").assertExists() }
+        val realtimeVoices = app.daiyu.android.voice.providers.realtimeSpeechVoices
+        node("voice-tone-search").performTextReplacement("女声")
+        realtimeVoices.take(2).forEach { node("voice-tone-option:${it.id}").assertExists() }
+        node("voice-tone-search").performTextReplacement("男声")
+        realtimeVoices.drop(2).forEach { node("voice-tone-option:${it.id}").assertExists() }
         backFromSelectionSheet()
         assertEquals(readingBefore, fixture.controller.voiceRuntime.configuration.value)
         node("settings-row:选择音色").performClick()
         assertSelectionSheet("voice-tone-dialog")
-        node("settings-radio:云舟").performClick()
+        node("voice-tone-search").performTextReplacement("云舟")
+        node("voice-tone-option:${app.daiyu.android.voice.providers.realtimeSpeechVoices[2].id}").performClick()
         ui.waitUntil(timeoutMillis = 5000) {
             fixture.controller.voiceRuntime.configuration.value?.duplexVoice ==
                 app.daiyu.android.voice.providers.realtimeSpeechVoices[2].id
         }
         assertSelectionSheet("voice-tone-dialog")
-        node("settings-radio:云舟").assertIsSelected()
+        node("voice-tone-option:${app.daiyu.android.voice.providers.realtimeSpeechVoices[2].id}").assertIsSelected()
         backFromSelectionSheet()
         node("voice-tone-dialog").assertDoesNotExist()
         assertEquals(readingBefore?.copy(duplexVoice = app.daiyu.android.voice.providers.realtimeSpeechVoices[2].id),

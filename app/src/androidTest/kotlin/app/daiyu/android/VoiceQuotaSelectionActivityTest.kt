@@ -207,8 +207,8 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
             .fetchSemanticsNode().boundsInRoot
         val lastCard = node("voice-create-slot:S_second").assertIsNotSelected().assertHeightIsAtLeast(48.dp)
             .fetchSemanticsNode().boundsInRoot
-        assertTrue(nextCard.top > firstCard.bottom)
-        assertTrue(lastCard.top > nextCard.bottom)
+        assertTrue(nextCard.top >= firstCard.bottom)
+        assertTrue(lastCard.top >= nextCard.bottom)
         node("voice-create-slot:S_second").performClick()
         node("voice-create-slot:S_second").assertIsSelected()
         node("voice-create-slot:S_available").assertIsNotSelected()
@@ -401,7 +401,8 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         creationQueryFails = true
         openPicker()
         node("voice-create-slot:S_available").assertDoesNotExist()
-        ui.onNodeWithText("音色名额查询失败", substring = true).assertExists()
+        ui.onNode(hasText("音色名额查询失败", substring = true) and
+            hasAnyAncestor(hasTestTag("voice-create-slot-picker"))).assertExists()
         assertNoSideEffects(expectedRequests = 5)
     }
 

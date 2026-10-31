@@ -54,7 +54,8 @@ class SharedSheetSpacingContractTest(unittest.TestCase):
         self.assertIn("top = if (inSheet) 8.dp else if (grouped) 24.dp else 28.dp", settings)
         self.assertIn("bottom = if (inSheet) 6.dp else if (grouped) 9.dp else 10.dp", settings)
         tones = source("VoiceSettingsDialogs.kt")
-        self.assertIn("SettingsSectionTitle(section)", tones)
+        self.assertIn("VoiceTonePicker(title, initial", tones)
+        self.assertNotIn("SettingsSectionTitle(section)", tones)
 
     def test_usage_bottom_sheet_matches_spacing_without_changing_centered_mode(self):
         usage = source("ui/components/UsagePresentation.kt")

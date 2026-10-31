@@ -9,8 +9,6 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
-import app.daiyu.android.ui.components.OptionSelectionSheet
-import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.screens.settings.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -602,46 +600,56 @@ internal fun VoiceAccountPanel(
             onSelect = { navigate(it) }, onDismiss = { menu = false }, isEnabled = { !busy && current() })
         if (addMenu) VoiceAddSheet(
             onSelect = { beginFlow(it) }, onDismiss = { addMenu = false }, isEnabled = { !busy && current() })
-        if (slotPicker && page == "CREATE" && step == 0) OptionSelectionSheet(
-            "选择音色名额", onDismiss = { slotPicker = false; operation?.cancel() }, modifier = Modifier.testTag("voice-create-slot-picker"), itemSpacing = 8.dp) {
-            when {
-                busy -> SettingsNote("正在查询云端音色名额…")
-                creationSlots.isEmpty() -> SettingsNote(notice.ifBlank { "云端暂无可用音色名额。" })
-            }
-            creationSlots.forEachIndexed { index, voice ->
-                OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + voiceSlotSummary(voice),
-                    selected = !postpaid && slotId == voice.id,
-                    enabled = enabled && voice.canTrain, cardStyle = true,
-                    modifier = Modifier.testTag("voice-create-slot:${voice.id}")) {
-                    if (enabled && !busy && current() && page == "CREATE" && step == 0 &&
-                        creationSlots.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
-                        slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null
-                    }
+        if (slotPicker && page == "CREATE" && step == 0) VoiceTonePicker(
+            title = "选择音色名额", selectedId = if (postpaid) "" else slotId,
+            options = creationSlots.mapIndexed { index, voice ->
+                VoiceToneOption(voice.id, personalVoiceSlotTitle(voice, index), category = "个人音色",
+                    summary = voice.id + " · " + voiceSlotSummary(voice),
+                    enabled = enabled && voice.canTrain, tag = "voice-create-slot:${voice.id}")
+            },
+            onDismiss = { slotPicker = false; operation?.cancel() },
+            modifier = Modifier.testTag("voice-create-slot-picker"),
+            message = when {
+                busy -> "正在查询云端音色名额…"
+                creationSlots.isEmpty() -> notice.ifBlank { "云端暂无可用音色名额。" }
+                else -> null
+            },
+            onSelect = { id ->
+                val voice = creationSlots.firstOrNull { it.id == id }
+                if (voice != null && enabled && !busy && current() && page == "CREATE" && step == 0 &&
+                    creationSlots.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
+                    slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null
                 }
-            }
-        }
-        if (importSlotPicker && page == "IMPORT") OptionSelectionSheet(
-            "选取我的名额", onDismiss = { importSlotPicker = false; operation?.cancel() },
-            modifier = Modifier.testTag("voice-import-slot-picker"), itemSpacing = 8.dp) {
-            when {
-                busy -> SettingsNote("正在查询云端已复刻声音…")
-                ak.isBlank() || sk.isBlank() || project.isBlank() -> {
-                    SettingsNote("请先保存同步账户信息，以查询云端已复刻的名额。")
+            },
+        )
+        if (importSlotPicker && page == "IMPORT") VoiceTonePicker(
+            title = "选取我的名额", selectedId = existingId,
+            options = importSlots.mapIndexed { index, voice ->
+                VoiceToneOption(voice.id, personalVoiceSlotTitle(voice, index), category = "个人音色",
+                    summary = voice.id + " · " + (if (voice.status == 4) "已激活" else "复刻成功"),
+                    enabled = enabled, tag = "voice-import-slot:${voice.id}")
+            },
+            onDismiss = { importSlotPicker = false; operation?.cancel() },
+            modifier = Modifier.testTag("voice-import-slot-picker"),
+            message = when {
+                busy -> "正在查询云端已复刻声音…"
+                ak.isBlank() || sk.isBlank() || project.isBlank() -> "请先保存同步账户信息，以查询云端已复刻的名额。"
+                importSlots.isEmpty() -> notice.ifBlank { "云端暂无可导入的已复刻声音。" }
+                else -> null
+            },
+            extraContent = {
+                if (!busy && (ak.isBlank() || sk.isBlank() || project.isBlank())) {
                     SettingsRow("同步音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
                 }
-                importSlots.isEmpty() -> SettingsNote(notice.ifBlank { "云端暂无可导入的已复刻声音。" })
-            }
-            importSlots.forEachIndexed { index, voice ->
-                OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + (if (voice.status == 4) "已激活" else "复刻成功"),
-                    selected = existingId == voice.id, enabled = enabled, cardStyle = true,
-                    modifier = Modifier.testTag("voice-import-slot:${voice.id}")) {
-                    if (enabled && !busy && current() && page == "IMPORT" &&
-                        importCandidates.any { it.account == account?.fingerprint && it.id == voice.id && it.canImport }) {
-                        existingId = voice.id; confirmation = null
-                    }
+            },
+            onSelect = { id ->
+                val voice = importSlots.firstOrNull { it.id == id }
+                if (voice != null && enabled && !busy && current() && page == "IMPORT" &&
+                    importCandidates.any { it.account == account?.fingerprint && it.id == voice.id && it.canImport }) {
+                    existingId = voice.id; confirmation = null
                 }
-            }
-        }
+            },
+        )
         if (projectPicker) ChatSelectionSheet("选择项目", onDismiss = { projectPicker = false },
             showCloseButton = false, titleFontSize = 20.sp) {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {

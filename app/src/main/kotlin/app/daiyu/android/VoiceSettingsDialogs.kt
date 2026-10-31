@@ -1,22 +1,7 @@
 package app.daiyu.android
 
-import app.daiyu.android.voice.providers.DoubaoVoiceIdentity
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextAlign
-import app.daiyu.android.ui.components.usagePalette
-import app.daiyu.android.ui.haptics.selectable
-import app.daiyu.android.ui.icons.DaiyuIcon
-import app.daiyu.android.ui.icons.DaiyuIcons
-import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
@@ -182,40 +167,6 @@ internal fun VoiceTextDialog(title: String, initial: String, password: Boolean =
 @Composable
 internal fun VoiceToneDialog(title: String, initial: String, choices: List<Pair<String, String>>,
     onSelect: (String) -> Unit, onDismiss: () -> Unit) {
-    val catalog = choices.distinctBy { it.first }
-    fun group(id: String): String = when {
-        id.startsWith("mimo-local-") || DoubaoVoiceIdentity.isPersonal(id) -> "个人声音"
-        "female" in id -> "女声"
-        "male" in id -> "男声"
-        else -> ""
-    }
-    ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false,
-        titleFontSize = 20.sp, titleTextAlign = TextAlign.Start) {
-        val sheetColors = usagePalette()
-        Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState())
-            .selectableGroup().testTag("voice-tone-dialog")) {
-            listOf("女声", "男声", "", "个人声音").forEach { section ->
-                val rows = catalog.filter { group(it.first) == section }
-                if (section.isNotEmpty() && rows.isNotEmpty()) SettingsSectionTitle(section)
-                rows.forEach { (id, label) ->
-                    val selected = id == initial
-                    Row(Modifier.fillMaxWidth().testTag("settings-radio:$label")
-                        .heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
-                        .background(if (selected) sheetColors.selectionContainer else Color.Transparent)
-                        .selectable(selected = selected, role = Role.RadioButton, onClick = { onSelect(id) })
-                        .padding(horizontal = 12.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(label, Modifier.weight(1f), fontSize = 16.sp, lineHeight = 24.sp,
-                            textAlign = TextAlign.Start,
-                            color = if (selected) sheetColors.selectionContent else sheetColors.text)
-                        Box(Modifier.size(22.dp).testTag("voice-tone-indicator:$id")
-                            .background(if (selected) sheetColors.accent else Color.Transparent, CircleShape),
-                            contentAlignment = Alignment.Center) {
-                            if (selected) DaiyuIcon(DaiyuIcons.Check, "已选择", tint = sheetColors.onPrimary, size = 14.dp)
-                        }
-                    }
-                }
-            }
-        }
-    }
+    VoiceTonePicker(title, initial, choices.map { (id, label) -> VoiceToneOption(id, label) },
+        onSelect, onDismiss, Modifier.testTag("voice-tone-dialog"))
 }

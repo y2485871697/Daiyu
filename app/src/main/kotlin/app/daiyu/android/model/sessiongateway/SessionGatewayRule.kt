@@ -10,9 +10,10 @@ data class SessionGatewayRule(
     val retention: String = DEFAULT_RETENTION,
     val keySource: String = DEFAULT_SOURCE,
     val keyField: String = DEFAULT_FIELD,
+    val enabled: Boolean = true,
 ) {
     fun matches(model: String, url: String): Boolean =
-        modelPattern.lineSequence().filter { it.isNotBlank() }.any { pattern ->
+        enabled && modelPattern.lineSequence().filter { it.isNotBlank() }.any { pattern ->
             runCatching { Regex(pattern).matches(model) }.getOrDefault(false)
         } && pathPattern.lineSequence().filter { it.isNotBlank() }.any { pattern ->
             runCatching { Regex(pattern).containsMatchIn(url) }.getOrDefault(false)
@@ -26,6 +27,7 @@ data class SessionGatewayRule(
     }
 
     fun validate() {
+        if (!enabled) return
         require(listOf(modelPattern, pathPattern, retention, keySource, keyField).all { it.length <= MAX_FIELD_LENGTH }) {
             "会话网关规则字段过长"
         }
@@ -39,12 +41,13 @@ data class SessionGatewayRule(
     }
 
     internal fun requireExecutable() {
+        if (!enabled) return
         validate()
         require(unsupportedSemantics() == null) { unsupportedSemantics().orEmpty() }
     }
 
     internal fun toJson(): JSONObject = JSONObject().put("modelPattern", modelPattern).put("pathPattern", pathPattern)
-        .put("retention", retention).put("keySource", keySource).put("keyField", keyField)
+        .put("retention", retention).put("keySource", keySource).put("keyField", keyField).put("enabled", enabled)
 
     companion object {
         const val DEFAULT_MODEL = "^gpt-.*$"
@@ -70,7 +73,8 @@ data class SessionGatewayRule(
             fun field(name: String, default: String): String = if (value.has(name))
                 value.get(name) as? String ?: error("Invalid session gateway field") else default
             return SessionGatewayRule(field("modelPattern", DEFAULT_MODEL), field("pathPattern", DEFAULT_PATH),
-                field("retention", DEFAULT_RETENTION), field("keySource", DEFAULT_SOURCE), field("keyField", DEFAULT_FIELD))
+                field("retention", DEFAULT_RETENTION), field("keySource", DEFAULT_SOURCE), field("keyField", DEFAULT_FIELD),
+                if (value.has("enabled")) value.get("enabled") as? Boolean ?: error("Invalid session gateway enablement") else true)
                 .also { require(listOf(it.modelPattern, it.pathPattern, it.retention, it.keySource, it.keyField).all { s -> s.length <= MAX_FIELD_LENGTH }) }
         }
     }

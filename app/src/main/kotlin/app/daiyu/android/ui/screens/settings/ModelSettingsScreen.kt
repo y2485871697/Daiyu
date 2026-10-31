@@ -125,7 +125,7 @@ internal fun ModelSettingsScreen(
     val submit: () -> Unit = {
         if (latestEnabled && latestDraft === draft && (!oauthOnly || draft.oauth != null)) {
             connection.cancel(); balance.cancel()
-            fieldsSaveError = draft.inlineFieldsSaveError()
+            fieldsSaveError = draft.providerRequestDraft(speechOnly).inlineFieldsSaveError()
             if (fieldsSaveError == null) onSave(draft)
         }
     }
@@ -150,7 +150,7 @@ internal fun ModelSettingsScreen(
                         colors = ButtonDefaults.textButtonColorsPrimary(),
                         modifier = Modifier.testTag("provider-oauth-login").fillMaxWidth().heightIn(min = 48.dp)
                             .padding(horizontal = 12.dp, vertical = 8.dp))
-                    SettingsNote(if (draft.oauth == null) "以 OpenAI 账号登录，授权后可创建提供商。" else "已登录 OpenAI Codex")
+                    if (draft.oauth != null) SettingsNote("已登录 OpenAI Codex")
                 } else if (!oauthOnly) SettingsTextField("API Key", draft.apiKey, { key ->
                     changeDraft(draft.copy(apiKey = key))
                 }, password = true, enabled = enabled, compact = true)
@@ -198,17 +198,11 @@ internal fun ModelSettingsScreen(
                 SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled, compact = true)
             }
         }
-        item(key = "provider_gateway") {
-            SettingsSectionTitle("会话 ID")
-            SettingsCard {
-                ProviderGatewayEditor(draft.sessionGateway, enabled) { changeDraft(draft.copy(sessionGateway = it)) }
-            }
-        }
-        item(key = "provider_headers") {
+        if (!speechOnly) item(key = "provider_headers") {
             SettingsSectionTitle("自定义请求头")
             SettingsCard { ProviderHeadersEditor(draft, enabled, changeDraft) }
         }
-        item(key = "provider_body") {
+        if (!speechOnly && draft.protocol == ProviderProtocol.MESSAGES) item(key = "provider_body") {
             SettingsSectionTitle("自定义请求体")
             SettingsCard { RequestBodyFieldsEditor(draft, enabled, engineeringUi, changeDraft) }
         }
@@ -221,7 +215,7 @@ internal fun ModelSettingsScreen(
                     }
                 }
             }
-            if (!speechOnly) item(key = "provider_balance") {
+            if (!speechOnly && onOAuthLogin == null) item(key = "provider_balance") {
                 ProviderBalanceFields(draft, enabled, changeDraft, testBalance, balance)
             }
         }

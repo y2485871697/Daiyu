@@ -92,6 +92,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         assertEquals(before.activeSlotId, after.activeSlotId)
         val editor = fixture.controller.providers.editor(added.slotId)
         assertEquals("", fixture.controller.providers.editing(editor).settings.model)
+        assertTrue(fixture.controller.providers.editing(editor).settings.requestOptions.sessionGateway.enabled)
         assertTrue(fixture.controller.providers.catalogSnapshot(editor).models.isEmpty())
         assertEquals(0, fixture.opens.get())
     }
@@ -170,6 +171,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("page:添加提供商")
         node("prompt-input").assertDoesNotExist()
         fillNew("Anthropic fixture")
+        reveal("model-body-fields", "添加提供商").assertExists()
         reveal("settings-field:API Key", "添加提供商").assertIsDisplayed()
         node("settings-field:Anthropic 版本").assertDoesNotExist()
         node("provider-endpoint-select").assertDoesNotExist()
@@ -179,6 +181,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         val after = fixture.controller.providers.snapshot()
         val added = after.providers.single { it.name == "Anthropic fixture" }
         assertFalse(added.enabled)
+        assertFalse(fixture.controller.providers.editing(fixture.controller.providers.editor(added.slotId)).settings.requestOptions.sessionGateway.enabled)
         assertEquals(app.daiyu.android.model.ProviderProtocol.MESSAGES,
             fixture.controller.providers.editing(fixture.controller.providers.editor(added.slotId)).settings.protocol)
         reveal("settings-field:API Key", "Anthropic fixture").assertIsDisplayed()
@@ -232,6 +235,12 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         val saved = fixture.controller.providers.editing(editor).settings
         assertEquals("synthetic-doubao-key", saved.apiKey)
         assertEquals("seed-tts-2.0", saved.model)
+        assertFalse(saved.requestOptions.sessionGateway.enabled)
+        assertTrue(saved.customHeaders.isEmpty)
+        assertEquals("", saved.requestOptions.customBody)
+        node("provider-session-gateway").assertDoesNotExist()
+        node("model-custom-headers").assertDoesNotExist()
+        node("model-body-fields").assertDoesNotExist()
         assertEquals(listOf("seed-tts-2.0", "seed-audio-1.0"),
             fixture.controller.providers.catalogSnapshot(editor).models.map { it.id })
         val originalIdentities = fixture.controller.providers.catalogSnapshot(editor).models.map { it.settings.localIdentity }

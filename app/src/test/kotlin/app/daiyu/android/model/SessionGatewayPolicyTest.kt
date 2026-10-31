@@ -140,4 +140,27 @@ class SessionGatewayPolicyTest {
         val absent = JSONObject(); SessionGateway.applyAnthropic(absent, null)
         assertFalse(absent.has("metadata"))
     }
+    @Test fun disabledRuleRoundTripsAndLegacyRulesKeepTheirEnablement() {
+        val disabled = SessionGatewayRule(enabled = false, retention = "unverified", keyField = "model")
+        assertEquals(disabled, SessionGatewayRule.decode(SessionGatewayRule.encode(disabled)))
+        val options = ProviderRequestOptions(sessionGateway = disabled)
+        assertEquals(options, ProviderRequestOptions.decode(options.encode()))
+        disabled.validate()
+        disabled.requireExecutable()
+        assertFalse(disabled.matches("gpt-5", "https://gateway.invalid/v1/responses"))
+        val legacy = JSONObject(SessionGatewayRule.encode(SessionGatewayRule())).also { it.remove("enabled") }
+        assertTrue(SessionGatewayRule.decode(legacy.toString()).enabled)
+        assertTrue(ProviderRequestOptions.decode("""{"custom_body":"","speed_mode":null,"codex":false}""").sessionGateway.enabled)
+    }
+
+    @Test fun disabledRuleAddsNeitherIdentityBodyNorHeadersEvenOnCodex() {
+        val rule = SessionGatewayRule(enabled = false, retention = "not-supported", keyField = "model")
+        val request = JSONObject().put("model", "gpt-5")
+        val original = request.toString()
+        SessionGateway.applyResponses(request, "https://chatgpt.com/backend-api/codex/responses", rule, context())
+        SessionGateway.applyAnthropic(request, context(), rule)
+        assertEquals(original, request.toString())
+        assertTrue(SessionGateway.headers("https://opencode.ai/v1/responses", context("bad\r\nid"), rule).isEmpty())
+    }
+
 }

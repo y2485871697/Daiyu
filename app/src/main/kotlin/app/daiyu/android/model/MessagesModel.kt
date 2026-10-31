@@ -105,8 +105,8 @@ class MessagesModel internal constructor(
             ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else request.opt("model") as? String)
             settings.requestOptions.sessionGateway.requireExecutable()
-            SessionGateway.applyAnthropic(request, sessionContext)
-            val sessionHeaders = SessionGateway.headers(endpoint, sessionContext)
+            SessionGateway.applyAnthropic(request, sessionContext, settings.requestOptions.sessionGateway)
+            val sessionHeaders = SessionGateway.headers(endpoint, sessionContext, settings.requestOptions.sessionGateway)
             val requestBytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->

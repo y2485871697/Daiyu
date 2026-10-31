@@ -68,7 +68,8 @@ internal class NewProviderDraft(protocol: ProviderProtocol, val speechOnly: Bool
         providerName = "豆包语音", endpoint = app.daiyu.android.voice.providers.DoubaoSpeech.BASE_URL,
         model = "seed-tts-2.0", providerEnabled = true,
     ) else if (oauthOnly) ModelSettingsDraftUi(providerName = "OpenAI Codex", endpoint = app.daiyu.android.model.oauth.CodexOAuthProtocol.BASE_URL,
-        responsesPath = "/responses") else ModelSettingsDraftUi(providerName = "")).selectProtocol(protocol))
+        responsesPath = "/responses") else ModelSettingsDraftUi(providerName = "")).selectProtocol(protocol)
+        .copy(sessionGateway = newProviderSessionGateway(protocol, speechOnly)))
     var balanceTestJob: kotlinx.coroutines.Job? = null
     val registration = ProviderRegistrationOwnership { draft.oauth?.let(discardOAuth) }
     fun attachOAuth(auth: app.daiyu.android.model.oauth.CodexAuth) {
@@ -87,12 +88,15 @@ private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(oauth = oauth, 
     anthropicVersion = requestOptions.anthropicVersion.orEmpty(),
     sessionGateway = requestOptions.sessionGateway,
     customHeaders = if (customHeaders.isEmpty) "" else customHeaders.encode())
-private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(),
-    responsesPath = responsesPath.trim(), model = model.trim(), apiKey = apiKey, oauth = oauth, protocol = protocol,
-    batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
-    customHeaders = app.daiyu.android.model.ProviderHeaders.parse(customHeaders),
-    requestOptions = base.requestOptions.copy(sessionGateway = sessionGateway, customBody = customBody, speedMode = speedMode, codex = codex,
-        anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }))
+private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings): ModelSettings {
+    val effective = providerRequestDraft()
+    return base.copy(endpoint = endpoint.trim(),
+        responsesPath = responsesPath.trim(), model = model.trim(), apiKey = apiKey, oauth = oauth, protocol = protocol,
+        batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
+        customHeaders = app.daiyu.android.model.ProviderHeaders.parse(effective.customHeaders),
+        requestOptions = base.requestOptions.copy(sessionGateway = sessionGateway, customBody = effective.customBody, speedMode = speedMode, codex = codex,
+            anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }))
+}
 
 @Composable
 internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: () -> Boolean,
@@ -405,7 +409,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             require(!newProvider.speechOnly || app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(submitted.endpoint))
                             submitted.providerBalanceConfiguration()?.validateProviderBinding()
                             require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null)
-                            require(submitted.headerFieldsValid && submitted.bodyFieldsValid)
+                            require(submitted.providerRequestDraft().let { it.headerFieldsValid && it.bodyFieldsValid })
                             submitted.providerSettings(ModelSettings("", "", "", false)).also { it.validateConnection() }
                         }
                         if (value.isFailure) newProvider.error = "未保存，请检查名称、连接配置及密钥。"
@@ -483,7 +487,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     val value = runCatching {
                         require(!app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(saved.endpoint) ||
                             app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(submitted.endpoint)) { "请使用豆包语音服务地址" }
-                        require(submitted.headerFieldsValid && submitted.bodyFieldsValid) { "请先修正请求头或请求体字段。" }
+                        require(submitted.providerRequestDraft().let { it.headerFieldsValid && it.bodyFieldsValid }) { "请先修正请求头或请求体字段。" }
                         require(submitted.savedProtocol == saved.protocol) { "编辑基线已变化，请重新打开详情。" }
                         require(!d.editing.requestOptionsUnavailable || submitted.requestOptionsReplacementAuthorized) {
                             "请求策略已损坏；替换或重置需要明确确认"
@@ -553,7 +557,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             fun connectionSettings(value: ModelSettingsDraftUi): ModelSettings? = try { value.providerSettings(saved) }
                 catch (_: IllegalArgumentException) { d.error = "自定义请求头无效，请检查后重试。"; null }
             val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
-                if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
+                if (!live() || !enabled || value.providerRequestDraft().let { !it.headerFieldsValid || !it.bodyFieldsValid } || requestCancelled() || d.draft !== value) false
                 else connectionSettings(value)?.let { settings ->
                     controller.testModelConnection(settings,
                         { cancelled() || requestCancelled() || d.draft !== value }) {
@@ -628,7 +632,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 isRemoteModel = { it.settings.source == app.daiyu.android.model.catalog.CatalogModelSource.REMOTE },
                 catalogConnectionSaved = runCatching { draft.providerSettings(saved) == saved }.getOrDefault(false),
                 fetchCatalog = { value, requestCancelled, deliver ->
-                    if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
+                    if (!live() || !enabled || value.providerRequestDraft().let { !it.headerFieldsValid || !it.bodyFieldsValid } || requestCancelled() || d.draft !== value) false
                     else connectionSettings(value)?.let { settings ->
                         controller.fetchModelCatalog(settings,
                             { cancelled() || requestCancelled() || d.draft !== value }) {

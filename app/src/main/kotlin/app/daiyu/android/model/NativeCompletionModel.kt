@@ -94,7 +94,7 @@ class NativeCompletionModel internal constructor(
             else require(!settings.requestOptions.sessionGateway.matches(settings.model, endpoint)) { "Gemini 不支持 OpenAI 会话网关请求字段" }
             ReasoningRequestPolicy.validate(request, settings.protocol, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else if (settings.protocol == ProviderProtocol.GEMINI) settings.model else request.opt("model") as? String)
-            val headers = SessionGateway.headers(endpoint, sessionContext)
+            val headers = SessionGateway.headers(endpoint, sessionContext, settings.requestOptions.sessionGateway)
             val bytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->

@@ -24,7 +24,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     private var saveCount = 0
     private fun showComponent() {
         mainThread {
-            draft = ModelSettingsDraftUi(protocol = fixture.settings.load().protocol)
+            draft = ModelSettingsDraftUi(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES)
             activity.setContent {
                 MiuixTheme {
                     Column(Modifier.fillMaxSize()) {
@@ -103,22 +103,38 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     fun testJsonBodyEditsOnlyDraftThenPersistsThroughTheExistingSave() {
         val before = fixture.settings.load()
         val metadata = """{"marker":true,"numeric":"123"}"""
-        setDraft("JSON editor unsent draft"); openModels()
-        addInlineBodyField("metadata", metadata)
+        setDraft("JSON editor unsent draft")
+        openProviderManagement()
+        reveal("provider-add-anthropic", "模型提供商").performClick()
+        reveal("provider-name", "添加提供商").performTextReplacement("Body fixture")
+        reveal("settings-field:Base URL", "添加提供商").performTextReplacement("https://fixture.invalid/v1")
+        reveal("settings-field:API Key", "添加提供商").performTextReplacement("synthetic-key")
+        fun openBody(page: String) {
+            reveal("model-body-fields", page)
+            if (ui.onAllNodesWithTag("model-body-field-add").fetchSemanticsNodes().isEmpty()) {
+                node("model-body-fields").performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+            }
+            reveal("model-body-field-add", page)
+        }
+        openBody("添加提供商")
+        reveal("model-body-field-add", "添加提供商").performClick()
+        reveal("model-body-field-name:0", "添加提供商").performTextReplacement("metadata")
+        reveal("model-body-field-value:0", "添加提供商").performTextReplacement(metadata)
         assertEquals(before, fixture.settings.load())
-        saveModel()
-        val body = JSONObject(fixture.settings.load().requestOptions.customBody)
-        assertTrue(body.getJSONObject("metadata").getBoolean("marker"))
-        assertEquals("123", body.getJSONObject("metadata").get("numeric"))
-        assertEquals(before.copy(requestOptions = before.requestOptions.copy(customBody = body.toString())), fixture.settings.load())
-        backToChat(activity)
-        openModels(); openInlineBodyFields()
-        inlineBodyControl("model-body-field-name:0").assertEditableText("metadata")
-        inlineBodyControl("model-body-field-value:0").assertEditableText(metadata)
-        inlineBodyControl("model-body-field-delete:0").assertIsEnabled().performClick()
-        assertTrue(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
-        saveModel()
-        assertFalse(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
+        reveal("model-save", "添加提供商").performClick()
+        awaitUniqueTag("page:Body fixture")
+        val slot = fixture.controller.providers.snapshot().providers.single { it.name == "Body fixture" }.slotId
+        fun body() = JSONObject(fixture.controller.providers.editing(fixture.controller.providers.editor(slot)).settings.requestOptions.customBody)
+        assertTrue(body().getJSONObject("metadata").getBoolean("marker"))
+        assertEquals("123", body().getJSONObject("metadata").get("numeric"))
+        openBody("Body fixture")
+        reveal("model-body-field-name:0", "Body fixture").assertEditableText("metadata")
+        reveal("model-body-field-value:0", "Body fixture").assertEditableText(metadata)
+        reveal("model-body-field-delete:0", "Body fixture").assertIsEnabled().performClick()
+        assertTrue(body().has("metadata"))
+        reveal("model-save", "Body fixture").performClick()
+        awaitControl("body removal saved") { !body().has("metadata") }
+        assertEquals(before, fixture.settings.load())
         backToChat(activity)
         assertDraft("JSON editor unsent draft")
         assertEquals(0, fixture.opens.get())

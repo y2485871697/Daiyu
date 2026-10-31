@@ -17,6 +17,7 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
     }
     private fun control(tag: String) = reveal(tag).scrollToVisible()
     fun testBodyUsesRawJsonInputAndBlocksInvalidSaveWithoutLosingRowsOnRemount() {
+        mainThread { draft = draft.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES) }
         render()
         addInlineBodyField("temperature", "not-json")
         assertFalse(draft.bodyFieldsValid)
@@ -33,27 +34,40 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         control("model-save").performClick()
         assertEquals(draft, saved); assertEquals(0, fixture.opens.get())
     }
-    fun testGatewayEditsAreInProviderDraftAndOldCallbackCannotRevertNewDraft() {
+    fun testGatewayIsHiddenAndUnrelatedEditsPreserveItsEffectivePolicy() {
+        mainThread { draft = draft.copy(sessionGateway = draft.sessionGateway.copy(keyField = "request_cache_key")) }
         render()
-        val gateway = control("provider-session-gateway")
-        val (oldRule, oldChange) = gateway.fetchSemanticsNode().config[RetainedProviderGatewayChange]
-        gateway.performClick()
-        control("settings-field:字段").performTextReplacement("request_cache_key")
-        ui.waitForIdle()
-        val current = draft
-        assertEquals("request_cache_key", current.sessionGateway.keyField)
-        mainThread { oldChange(oldRule.copy(modelPattern = "stale-pattern")) }
-        assertEquals(current, draft); assertSame(current, draft)
-        assertEquals("request_cache_key", draft.sessionGateway.keyField)
-        control("settings-field:模型正则（每一行一个）").performTextReplacement("current-pattern")
-        ui.waitForIdle()
-        node("settings-field:模型正则（每一行一个）").assertEditableText("current-pattern")
-        assertEquals("current modelPattern edit", "current-pattern", draft.sessionGateway.modelPattern)
-        assertEquals("newer keyField must remain", "request_cache_key", draft.sessionGateway.keyField)
-        assertEquals(current.sessionGateway.pathPattern, draft.sessionGateway.pathPattern)
-        assertEquals(current.sessionGateway.retention, draft.sessionGateway.retention)
-        assertEquals(current.sessionGateway.keySource, draft.sessionGateway.keySource)
-        assertEquals(current.copy(sessionGateway = current.sessionGateway.copy(modelPattern = "current-pattern")), draft)
-        assertNull(saved); assertEquals(0, fixture.opens.get())
+        node("provider-session-gateway").assertDoesNotExist()
+        ui.onNodeWithText("会话 ID").assertDoesNotExist()
+        val rule = draft.sessionGateway
+        control("settings-field:Base URL").performTextReplacement("https://fixture.invalid/v1")
+        assertEquals(rule, draft.sessionGateway)
+        control("model-save").performClick()
+        assertEquals(rule, saved?.sessionGateway)
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testRequestFieldsFollowProtocolAndSpeechEntryWithoutChangingHiddenDraft() {
+        val before = fixture.settings.load()
+        mainThread { draft = draft.copy(customBody = "not-json-hidden", bodyFieldsValid = false,
+            bodyFieldsError = "hidden body error") }
+        render()
+        node("model-body-fields").assertDoesNotExist()
+        control("model-custom-headers").assertExists()
+        control("model-save").performClick()
+        assertNotNull(saved)
+        assertEquals("not-json-hidden", draft.customBody)
+        mainThread { draft = draft.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES,
+            customBody = "", bodyFieldsValid = true, bodyFieldsError = null) }
+        render()
+        control("model-body-fields").assertExists()
+        mainThread { activity.setContent { MiuixTheme {
+            ModelSettingsScreen(draft, { draft = it }, { saved = it }, {}, {}, showCatalog = false, speechOnly = true)
+        } } }
+        awaitModelEditor()
+        node("model-custom-headers").assertDoesNotExist()
+        node("model-body-fields").assertDoesNotExist()
+        node("provider-session-gateway").assertDoesNotExist()
+        assertEquals(before, fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
     }
 }

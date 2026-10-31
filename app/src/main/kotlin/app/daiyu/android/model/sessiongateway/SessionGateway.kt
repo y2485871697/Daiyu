@@ -17,6 +17,7 @@ data class SessionGatewayContext(val conversationId: ConversationId) {
 object SessionGateway {
     fun applyResponses(request: JSONObject, finalUrl: String, rule: SessionGatewayRule,
                        context: SessionGatewayContext?) {
+        if (!rule.enabled) return
         rule.requireExecutable()
         if (context == null) return
         val model = request.opt("model") as? String ?: return
@@ -26,8 +27,8 @@ object SessionGateway {
     }
 
     /** Runtime-owned headers: caller must apply after any custom header merge on EVERY POST. */
-    fun headers(finalUrl: String, context: SessionGatewayContext?): Map<String, String> {
-        if (context == null) return emptyMap()
+    fun headers(finalUrl: String, context: SessionGatewayContext?, rule: SessionGatewayRule = SessionGatewayRule()): Map<String, String> {
+        if (!rule.enabled || context == null) return emptyMap()
         val id = context.conversationId.value
         require(id.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) { "会话标识不能用于请求头" }
         return buildMap {
@@ -40,8 +41,8 @@ object SessionGateway {
     }
 
     /** Historical protocol constants, not branding: changing either changes gateway identity. */
-    fun applyAnthropic(request: JSONObject, context: SessionGatewayContext?) {
-        if (context == null) return
+    fun applyAnthropic(request: JSONObject, context: SessionGatewayContext?, rule: SessionGatewayRule = SessionGatewayRule()) {
+        if (!rule.enabled || context == null) return
         val metadata = if (request.has("metadata")) request.optJSONObject("metadata") ?: return
             else JSONObject().also { request.put("metadata", it) }
         if (metadata.has("user_id")) return

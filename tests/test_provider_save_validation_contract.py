@@ -14,9 +14,9 @@ class ProviderSaveValidationContractTest(unittest.TestCase):
         submit = source.split('val submit: () -> Unit = {', 1)[1].split('val changeDraft:', 1)[0]
         self.assertIn('if (latestEnabled && latestDraft === draft && (!oauthOnly || draft.oauth != null))', submit)
         self.assertIn('connection.cancel(); balance.cancel()', submit)
-        self.assertIn('fieldsSaveError = draft.inlineFieldsSaveError()', submit)
+        self.assertIn('fieldsSaveError = draft.providerRequestDraft(speechOnly).inlineFieldsSaveError()', submit)
         self.assertIn('if (fieldsSaveError == null) onSave(draft)', submit)
-        self.assertEqual(1, source.count('draft.inlineFieldsSaveError()'))
+        self.assertEqual(1, source.count('draft.providerRequestDraft(speechOnly).inlineFieldsSaveError()'))
 
     def test_errors_are_not_rendered_in_field_or_gateway_editors(self):
         source = (SRC / 'ProviderInlineEditors.kt').read_text()

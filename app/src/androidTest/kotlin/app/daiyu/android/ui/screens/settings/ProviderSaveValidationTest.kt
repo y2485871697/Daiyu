@@ -52,7 +52,8 @@ class ProviderSaveValidationTest : WiredActivityTestCase() {
         val headerError = "第 1 项请求头名称不能为空"
         val bodyError = "字段值须为有效 JSON，且不能覆盖系统字段。"
         mainThread {
-            draft = draft.copy(headerFieldsValid = false, headerFieldsError = headerError,
+            draft = draft.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES,
+                headerFieldsValid = false, headerFieldsError = headerError,
                 headerFieldRows = listOf(ProviderFieldRow(0, "", "header-canary")),
                 bodyFieldsValid = false, bodyFieldsError = bodyError,
                 bodyFieldRows = listOf(ProviderFieldRow(0, "temperature", "not-json-canary")))
@@ -123,8 +124,8 @@ class ProviderSaveValidationTest : WiredActivityTestCase() {
     fun testInvalidGatewayUsesTheSameSaveSummary() {
         mainThread { draft = draft.copy(sessionGateway = draft.sessionGateway.copy(keyField = "model")) }
         render()
-        reveal("provider-session-gateway").performClick()
-        reveal("settings-field:字段").assertEditableText("model")
+        node("provider-session-gateway").assertDoesNotExist()
+        ui.onNodeWithText("会话 ID").assertDoesNotExist()
         ui.onNodeWithText("请检查网关字段。").assertDoesNotExist()
         val save = reveal("model-save").assertIsEnabled()
         ui.onNodeWithText("请检查网关字段。").assertDoesNotExist()

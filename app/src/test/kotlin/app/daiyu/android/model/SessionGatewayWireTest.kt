@@ -163,4 +163,39 @@ class SessionGatewayWireTest {
         }
         assertEquals(0, count)
     }
+    @Test fun disabledGatewaySuppressesIdentityOnEverySupportedTransport() {
+        val rule = SessionGatewayRule(enabled = false, retention = "unsupported", keyField = "model")
+        for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES,
+            ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)) {
+            val endpoint = when (protocol) {
+                ProviderProtocol.MESSAGES -> "https://opencode.ai/v1/messages"
+                ProviderProtocol.CHAT_COMPLETIONS -> "https://opencode.ai/v1/chat/completions"
+                ProviderProtocol.GEMINI -> "https://generativelanguage.googleapis.com/v1beta"
+                else -> config.endpoint
+            }
+            val events = when (protocol) {
+                ProviderProtocol.MESSAGES -> messages()
+                ProviderProtocol.CHAT_COMPLETIONS -> "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                ProviderProtocol.GEMINI -> "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}]}\n\n"
+                else -> responses()
+            }
+            val settings = config.copy(endpoint = endpoint, protocol = protocol,
+                requestOptions = ProviderRequestOptions(sessionGateway = rule))
+            val connection = Connection(events)
+            val connect: (URL) -> HttpsURLConnection = { connection }
+            val model: ModelPort = when (protocol) {
+                ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, sessionContext = context)
+                ProviderProtocol.MESSAGES -> MessagesModel(settings, 4096, connect, null, sessionContext = context)
+                else -> NativeCompletionModel(settings, connect, sessionContext = context)
+            }
+            model.open(history()).next(emptyList()) {}
+            assertFalse(connection.body().has("prompt_cache_key"))
+            assertFalse(connection.body().optJSONObject("metadata")?.has("user_id") == true)
+            assertNull(connection.getRequestProperty("session-id"))
+            assertNull(connection.getRequestProperty("thread-id"))
+            assertNull(connection.getRequestProperty("x-opencode-session"))
+            assertTrue(connection.closed)
+        }
+    }
+
 }

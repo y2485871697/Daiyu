@@ -312,7 +312,7 @@ class ResponsesModel internal constructor(
             if (videoPlan != null) app.daiyu.android.model.videos.VideoRequestPolicy.disableReasoning(request)
             ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else request.opt("model") as? String)
-            val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext)
+            val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext, settings.requestOptions.sessionGateway)
             // Video-only allowlist and exact history binding apply to the final merged payload
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.
             videoPlan?.validateRequest(settings, request, input)

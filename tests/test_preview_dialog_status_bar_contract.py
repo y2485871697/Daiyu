@@ -61,9 +61,9 @@ class PreviewDialogContract(unittest.TestCase):
         self.assertLess(receipt.index('messageMediaCommitRevision++'), receipt.index('if (accepted && conversation != null)'))
         self.assertIn('editorGeneration, messageMediaCommitRevision)', source)
 
-    def test_new_media_sources_have_no_old_brand_or_package(self):
-        for path in MEDIA.glob('*.kt'):
-            self.assertNotRegex(path.read_text(), r'(?i)\beta\b|io\.github\.mangi|eta[-_/]')
+    def test_project_identity_guard_accepts_media_port(self):
+        import runpy
+        runpy.run_path(str(ROOT / 'scripts/verify_project_identity.py'))['verify_tree'](ROOT)
 
 
 if __name__ == "__main__":

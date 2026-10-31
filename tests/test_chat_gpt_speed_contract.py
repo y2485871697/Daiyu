@@ -28,6 +28,31 @@ class ChatGptSpeedContractTest(unittest.TestCase):
         self.assertNotIn('reasoningPreference.set', host)
         self.assertNotIn('customBody =', host)
 
+    def test_speed_reload_preserves_only_the_current_providers_cached_runtime(self):
+        host = source('MainActivity.kt')
+        cycle = host.split('private fun cycleChatGptSpeed(', 1)[1].split('private fun refreshConfirmedModelLabel()', 1)[0]
+        self.assertIn('reloadConfirmedModelLabel(retainBalanceForProvider = expected.editor.slotId)', cycle)
+        reload = host.split('private fun reloadConfirmedModelLabel(', 1)[1].split('private fun refreshAutomaticCompression()', 1)[0]
+        before_read = reload.split('lifecycleScope.launch {', 1)[0]
+        self.assertIn('if (retainBalanceForProvider == null ||', before_read)
+        self.assertIn('controller.providerBalances.cached(retainBalanceForProvider) !== balanceRuntime', before_read)
+        self.assertEqual(1, before_read.count('balanceRuntime = null'))
+        self.assertIn('private fun refreshConfirmedModelLabel() = reloadConfirmedModelLabel(retainBalanceForProvider = null)', host)
+        self.assertIn('modelLabelRead === request', reload)
+        self.assertIn('selected?.id == conversation && editorGeneration == generation', reload)
+        self.assertIn('balanceRuntime = saved?.third', reload)
+        for forbidden in ('manualRefresh(', 'requestRefresh(', 'Thread.sleep', 'delay('):
+            self.assertNotIn(forbidden, reload)
+
+    def test_speed_regression_observes_balance_during_save_and_before_reload_completes(self):
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatGptSpeedActivityTest.kt').read_text()
+        self.assertIn('testSpeedReloadRetainsOnlyTheMatchingProviderBalanceBeforeReadBack', regression)
+        self.assertIn('"chat-send", "chat-composer-provider-balance"', regression)
+        self.assertIn('invokeHost(activity, "reloadConfirmedModelLabel", primary)', regression)
+        self.assertIn('assertSame(runtime, invokeHost(activity, "getBalanceRuntime"))', regression)
+        self.assertIn('assertNull(invokeHost(activity, "getBalanceRuntime"))', regression)
+        self.assertIn('beforeControls.getValue("chat-composer-provider-balance")', regression)
+
     def test_old_callbacks_are_revoked_at_visit_and_selection_boundaries(self):
         host = source('MainActivity.kt')
         selection = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('historySearchEpoch++', 1)[0]

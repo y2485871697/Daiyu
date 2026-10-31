@@ -57,7 +57,8 @@ jobs:
           records = []
           for pattern in ('test_model_switch_feedback_contract.py', 'test_selection_stays_open_contract.py',
                           'test_model_picker_caption_contract.py', 'test_model_selection_switch_state_contract.py',
-                          'test_voice_settings_parity_contract.py'):
+                          'test_voice_settings_parity_contract.py', 'test_chat_gpt_speed_contract.py',
+                          'test_model_picker_balance_contract.py', 'test_conversation_model_binding_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -77,6 +78,9 @@ jobs:
             -PdaiyuCheckGraph=model-picker-checks/task-graph.json \
             :app:compileDebugKotlin :app:testDebugUnitTest \
             --tests 'app.daiyu.android.VoiceSettingsParityTest' \
+            --tests 'app.daiyu.android.ChatGptSpeedSelectionTest' \
+            --tests 'app.daiyu.android.balance.ProviderBalanceRuntimeHostTest' \
+            --tests 'app.daiyu.android.balance.ProviderBalanceIndicatorTest' \
             --tests 'app.daiyu.android.title.TitleModelDefaultsTest' \
             --tests 'app.daiyu.android.ui.screens.chat.context.ContextManagementPresentationTest' \
             --tests 'app.daiyu.android.ui.components.subagent.SubAgentModelPickerProjectorTest' \
@@ -88,7 +92,8 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'VoiceSettingsParityTest', 'TitleModelDefaultsTest',
+          expected = {'VoiceSettingsParityTest', 'ChatGptSpeedSelectionTest',
+                      'ProviderBalanceRuntimeHostTest', 'ProviderBalanceIndicatorTest', 'TitleModelDefaultsTest',
                       'ContextManagementPresentationTest', 'SubAgentModelPickerProjectorTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}

@@ -7097,7 +7097,7 @@ class MainActivity : ComponentActivity() {
                 toast(chatGptSpeedToast(next))
             } else toast("速度切换未保存，请重新尝试")
             publishChat(rowsChanged = false)
-            refreshConfirmedModelLabel()
+            reloadConfirmedModelLabel(retainBalanceForProvider = expected.editor.slotId)
         } } catch (_: Exception) {
             owner.revoke()
             if (gptSpeedSaveOwner === owner) gptSpeedSaveOwner = null
@@ -7106,12 +7106,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun refreshConfirmedModelLabel() {
+    private fun refreshConfirmedModelLabel() = reloadConfirmedModelLabel(retainBalanceForProvider = null)
+
+    private fun reloadConfirmedModelLabel(retainBalanceForProvider: String?) {
         val request = Any()
         val conversation = selected?.id
         val generation = editorGeneration
         modelLabelRead = request
-        balanceRuntime = null
+        if (retainBalanceForProvider == null ||
+            controller.providerBalances.cached(retainBalanceForProvider) !== balanceRuntime) {
+            balanceRuntime = null
+        }
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) {
                 runCatching {

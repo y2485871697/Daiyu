@@ -20,10 +20,52 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.model.GptSpeedMode
+import app.daiyu.android.balance.*
+import app.daiyu.android.storage.ProviderRegistry
+import kotlinx.coroutines.runBlocking
 
 class ChatGptSpeedActivityTest : WiredActivityTestCase() {
-    override fun createFixture() = super.createFixture().also {
+    private val balanceHost = ProviderBalanceRuntimeHost { slot ->
+        BalanceRuntime(
+            ProviderBalanceStore(object : BalancePersistence {
+                private var bytes: ByteArray? = null
+                override fun read() = bytes?.clone()
+                override fun write(record: ByteArray?) { bytes = record?.clone() }
+            }).also { store ->
+                store.save(BalanceConfiguration(slot, "https://balance.example.test", "fixture-key",
+                    "", "CNY", BalanceOption(enabled = true, apiPath = "/balance", resultPath = "balance")))
+            }, BalanceQuery {
+                BalanceResult.Available(
+                    BalanceMoney("12.34".toBigDecimal(), "CNY"), 1234L)
+            })
+    }
+
+    override fun createFixture() = RunControlFixture(instrumentation.targetContext, providerBalanceHost = balanceHost).also {
         it.settings.save(it.settings.load().copy(model = "gpt-5"))
+        runBlocking { balanceHost.get(ProviderRegistry.PRIMARY).manualRefresh() }
+    }
+
+    override fun cleanupFixture() {
+        try { super.cleanupFixture() } finally { balanceHost.close() }
+    }
+
+    fun testSpeedReloadRetainsOnlyTheMatchingProviderBalanceBeforeReadBack() {
+        val primary = ProviderRegistry.PRIMARY
+        val runtime = runBlocking { balanceHost.get(primary) }
+        awaitUniqueTag("chat-composer-provider-balance")
+        mainThread {
+            assertSame(runtime, invokeHost(activity, "getBalanceRuntime"))
+            invokeHost(activity, "reloadConfirmedModelLabel", primary)
+            assertSame(runtime, invokeHost(activity, "getBalanceRuntime"))
+            invokeHost(activity, "reloadConfirmedModelLabel", java.util.UUID.randomUUID().toString())
+            assertNull(invokeHost(activity, "getBalanceRuntime"))
+        }
+        awaitUniqueTag("chat-composer-provider-balance")
+        mainThread {
+            invokeHost(activity, "refreshConfirmedModelLabel")
+            assertNull(invokeHost(activity, "getBalanceRuntime"))
+        }
+        awaitUniqueTag("chat-composer-provider-balance")
     }
 
     private fun awaitSpeed(mode: GptSpeedMode) {
@@ -130,7 +172,7 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
             val beforeModelRevision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
             val beforeMessages = node("chat-messages").fetchSemanticsNode().boundsInRoot
             val beforeComposer = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
-            val stableTags = listOf("chat-model", "chat-context", "chat-send")
+            val stableTags = listOf("chat-model", "chat-context", "chat-send", "chat-composer-provider-balance")
             val beforeControls = stableTags.associateWith { node(it).captureToImage() }
             val entered = java.util.concurrent.CountDownLatch(1)
             val release = java.util.concurrent.CountDownLatch(1)
@@ -169,6 +211,11 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
                 ui.runOnIdle { (invokeHost(activity, "getContextModelRevision") as Long) > beforeModelRevision }
             }
             node("chat-status").assertDoesNotExist()
+            node("chat-composer-provider-balance").assertIsDisplayed()
+            assertEquals("12.34", balanceHost.cached(ProviderRegistry.PRIMARY)
+                ?.state?.value?.amountValue?.toPlainString())
+            assertSamePixels("chat-composer-provider-balance", beforeControls.getValue("chat-composer-provider-balance"),
+                node("chat-composer-provider-balance").captureToImage())
             val afterMessages = node("chat-messages").fetchSemanticsNode().boundsInRoot
             assertEquals(beforeMessages.top, afterMessages.top, 1f)
             assertEquals(beforeMessages.bottom, afterMessages.bottom, 1f)

@@ -34,7 +34,7 @@ on:
       check_scope:
         description: 仅检查模式的补检范围
         type: choice
-        options: [all, unit, lint, delegation]
+        options: [all, unit, lint, delegation, context]
         default: all
       expected_sha:
         description: 构建或检查目标完整提交SHA（自动调度必填，手动可留空）
@@ -111,6 +111,10 @@ jobs:
             python -B -m unittest discover -s tests -p 'test_cooperation*.py' -v
             python -B -m unittest discover -s tests -p 'test_cloud*.py' -v
             python -B -m unittest discover -s tests -p 'test_child*.py' -v
+          elif [[ "$CHECK_SCOPE" == "context" ]]; then
+            for pattern in 'test_cloud*.py' 'test_summary*.py' 'test_context*.py' 'test_cold_start_summary.py' 'test_cooperation_unit_scope.py' 'test_windows_unit_skips.py' 'test_delegation_checks_scope.py'; do
+              python -B -m unittest discover -s tests -p "$pattern" -v
+            done
           else
             python scripts/acceptance/record_tool_tests.py --python python
           fi

@@ -142,6 +142,20 @@ internal class ProviderRepository(
                 }
             } catch (_: StaleProviderRegistryException) { CatalogCommitResult.STALE }
         }
+    /** Persisted summary choices retain model identity, not a one-shot editor revision.
+     * Refresh only the revisions under the existing leases; strict identity checks still run
+     * before the caller captures a request or creates a manual-operation ticket. */
+    internal fun <T> withSummaryCatalogTarget(target: ProviderCatalogRunTarget,
+        block: (ProviderCatalogRunTarget) -> T,
+    ): T = registry.access { state ->
+        check(requireProvider(state, target.editor.slotId).enabled) { "提供商未启用" }
+        val store = resolveStore(target.editor.slotId)
+        store.modelCatalog.readConfiguration { revision ->
+            val current = target.copy(editor = ProviderEditorSlot(target.editor.slotId, state.revision),
+                catalogRevision = revision)
+            withCatalogTarget(current) { _, _, _ -> block(current) }
+        }
+    }
     fun catalogEndpoint(target: ProviderCatalogRunTarget): String = withCatalogTarget(target) { store, _, _ ->
         store.catalogRequestEndpoint(target.apiModel)
     }

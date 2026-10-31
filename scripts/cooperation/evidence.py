@@ -11,7 +11,21 @@ CLOUD_SCOPES = {**SCOPES, 'delegation': (
     ':app:testDebugUnitTest --tests app.daiyu.android.delegation.* --tests app.daiyu.android.integration.tools.* '
     '--tests app.daiyu.android.backup.* --tests app.daiyu.android.browser.* --tests app.daiyu.android.shizuku.* '
     '--tests app.daiyu.android.terminal.* :app:compileDebugAndroidTestKotlin')}
-UNIT_SCOPES = {'unit', 'delegation'}
+CLOUD_SCOPES['context'] = (
+    ':core-domain:test --tests app.daiyu.android.domain.context.* '
+    ':app:testDebugUnitTest --tests app.daiyu.android.context.* '
+    '--tests app.daiyu.android.storage.ProviderRepositoryDeletionTest '
+    '--tests app.daiyu.android.storage.ProviderRegistryTest')
+UNIT_SCOPES = {'unit', 'delegation', 'context'}
+CONTEXT_PACKAGES = (
+    ('core-domain', 'app.daiyu.android.domain.context.'),
+    ('app', 'app.daiyu.android.context.'),
+)
+CONTEXT_STORAGE_CLASSES = {
+    'app.daiyu.android.storage.ProviderRepositoryDeletionTest',
+    'app.daiyu.android.storage.ProviderRegistryTest',
+}
+CONTEXT_RESOLUTION_CLASS = 'app.daiyu.android.context.SavedCatalogSummaryResolutionTest'
 DELEGATION_PACKAGES = (
     ('core-domain', 'app.daiyu.android.domain.delegation.'),
     ('core-domain', 'app.daiyu.android.domain.tools.'),
@@ -104,6 +118,24 @@ def verify_xml(archive, scope, platform=None):
                         raise ValueError('unit_report_failed_or_missing')
                     seen.add(identity)
                     skipped.append(dict(classname=identity[0], name=identity[1], reason=reason))
+            if scope == 'context':
+                covered = set()
+                classes = set()
+                for name, suite in named_reports:
+                    module = name.split('/')[0]
+                    for case in suite.findall('testcase'):
+                        classname = case.get('classname', '')
+                        group = next((p for p in CONTEXT_PACKAGES
+                                      if p[0] == module and classname.startswith(p[1])), None)
+                        if group is None and not (module == 'app' and classname in CONTEXT_STORAGE_CLASSES):
+                            raise ValueError('context_unexpected_test')
+                        if case.find('skipped') is None:
+                            classes.add(classname)
+                            if group is not None:
+                                covered.add(group)
+                if (covered != set(CONTEXT_PACKAGES)
+                        or not (CONTEXT_STORAGE_CLASSES | {CONTEXT_RESOLUTION_CLASS}) <= classes):
+                    raise ValueError('context_package_coverage_missing')
             if scope == 'delegation':
                 covered = set()
                 for name, suite in named_reports:

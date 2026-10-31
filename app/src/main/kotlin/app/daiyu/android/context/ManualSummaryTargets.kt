@@ -23,6 +23,16 @@ internal object ManualSummaryTargets {
     fun describe(repo: ProviderRepository, selection: ContextManagementSelection,
         conversationModel: app.daiyu.android.storage.ConversationModelBinding? = null,
     ): SummaryProfileDescriptor {
+        val binding = selection.binding ?: return describeCurrent(repo, selection, conversationModel)
+        val target = requireNotNull(CatalogSummaryBindings.decode(binding)) { "请选择本地目录模型" }
+        return repo.withSummaryCatalogTarget(target) { current ->
+            describeCurrent(repo, selection.copy(binding = CatalogSummaryBindings.encode(current)), conversationModel)
+        }
+    }
+
+    private fun describeCurrent(repo: ProviderRepository, selection: ContextManagementSelection,
+        conversationModel: app.daiyu.android.storage.ConversationModelBinding?,
+    ): SummaryProfileDescriptor {
         require(selection.protocol in selectable) { "摘要 API 仅支持 Chat Completions / Responses" }
         val selectedBinding = selection.binding ?: conversationModel?.let { binding ->
             repo.withConversationModel(binding) { editor, store, record, revision ->

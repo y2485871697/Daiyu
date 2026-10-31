@@ -55,27 +55,35 @@ internal object CatalogSummaryExecutionPolicy {
 }
 
 internal fun catalogSummaryConfiguration(context: Context, binding: SummaryModelBinding): SummaryProviderConfiguration {
+    val repository = ProviderRepository(context)
     val target = requireNotNull(CatalogSummaryBindings.decode(binding))
-    return CatalogSummaryExecutionPolicy.configuration(binding,
-        CatalogSummaryExecutionPolicy.summarySettings(ProviderRepository(context).freezeCatalog(target).settings))
+    return repository.withSummaryCatalogTarget(target) { current ->
+        CatalogSummaryExecutionPolicy.configuration(binding,
+            CatalogSummaryExecutionPolicy.summarySettings(repository.freezeCatalog(current).settings))
+    }
 }
 
 internal fun catalogSummaryDescriptor(context: Context, binding: SummaryModelBinding): SummaryProfileDescriptor {
+    val repository = ProviderRepository(context)
     val target = requireNotNull(CatalogSummaryBindings.decode(binding))
-    return catalogSummaryDescriptor(binding, ProviderRepository(context).catalogEndpoint(target))
+    return repository.withSummaryCatalogTarget(target) { current ->
+        catalogSummaryDescriptor(binding, current, repository.catalogEndpoint(current))
+    }
 }
 
-private fun catalogSummaryDescriptor(binding: SummaryModelBinding, endpoint: String): SummaryProfileDescriptor {
-    val target = requireNotNull(CatalogSummaryBindings.decode(binding))
-    return SummaryProfileDescriptor(binding, binding.providerId, endpoint, target.apiModel)
-}
+private fun catalogSummaryDescriptor(binding: SummaryModelBinding, current: app.daiyu.android.storage.ProviderCatalogRunTarget,
+    endpoint: String): SummaryProfileDescriptor = SummaryProfileDescriptor(binding,
+        CatalogSummaryBindings.encode(current).providerId, endpoint, current.apiModel)
 
 internal fun catalogSummaryConfiguration(context: Context, expected: SummaryProfileDescriptor): SummaryProviderConfiguration {
+    val repository = ProviderRepository(context)
     val target = requireNotNull(CatalogSummaryBindings.decode(expected.binding))
-    val frozen = ProviderRepository(context).freezeCatalog(target) { endpoint ->
-        if (catalogSummaryDescriptor(expected.binding, endpoint) != expected) throw SummaryProfileChangedException()
+    return repository.withSummaryCatalogTarget(target) { current ->
+        val frozen = repository.freezeCatalog(current) { endpoint ->
+            if (catalogSummaryDescriptor(expected.binding, current, endpoint) != expected) throw SummaryProfileChangedException()
+        }
+        CatalogSummaryExecutionPolicy.configuration(expected.binding, CatalogSummaryExecutionPolicy.summarySettings(frozen.settings))
     }
-    return CatalogSummaryExecutionPolicy.configuration(expected.binding, CatalogSummaryExecutionPolicy.summarySettings(frozen.settings))
 }
 
 internal fun SummaryProviderConfiguration.withSummaryProtocol(protocol: app.daiyu.android.model.ProviderProtocol?): SummaryProviderConfiguration =

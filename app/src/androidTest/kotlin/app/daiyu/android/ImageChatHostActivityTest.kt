@@ -18,6 +18,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.test.mock.MockContentResolver
 import androidx.compose.ui.test.*
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsActions
 import app.daiyu.android.domain.*
 import app.daiyu.android.media.ImageAttachmentOwner
@@ -26,6 +27,7 @@ import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.storage.ModelSettingsStore
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
+import app.daiyu.android.ui.screens.chat.conversation.MessageImageUi
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -248,6 +250,83 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         ui.onNodeWithContentDescription("消息图片 1").assertExists()
         assertEquals(2, documents.opens.get())
         assertEquals(listOf("正文在图片之前"), histories.single().first().blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+    }
+
+    private fun sendImageToHistory(): MessageImageUi {
+        setDraft("侧边栏图片回归")
+        pick(1); waitImages(1)
+        setImageCapability(null)
+        node("chat-send").performClick()
+        awaitControl("sidebar image committed") { calls.get() == 1 && controller.active == null }
+        ui.waitUntil(10_000) { !host().sending && host().session.attachments.state.value.items.isEmpty() }
+        val conversation = controller.database.conversations().single()
+        val reference = controller.database.messages(conversation.id).first().second.blocks
+            .filterIsInstance<MessageBlock.Image>().single().reference
+        node("chat-messages").performScrollToIndex(0)
+        ui.waitUntil(10_000) {
+            ui.onAllNodesWithContentDescription("消息图片 1", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        return MessageImageUi(reference.owner, reference)
+    }
+
+    fun testSidebarKeepsHistoryImageAndLoaderAcrossRepeatedOpenAndDismiss() {
+        val image = sendImageToHistory()
+        val loader = checkNotNull(host().historyLoader)
+        val draftLoader = host().draftLoader
+        repeat(2) {
+            val media = checkNotNull(host().mediaPreviews)
+            ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
+            ui.waitForIdle()
+            assertSame(loader, host().historyLoader)
+            assertSame(draftLoader, host().draftLoader)
+            assertFalse(media.isOpen())
+            assertNull(host().mediaPreviews)
+            ui.onNodeWithContentDescription("消息图片 1", useUnmergedTree = true).assertExists()
+            ui.onNodeWithTag("message-image-unavailable:1", useUnmergedTree = true).assertDoesNotExist()
+            val bitmap = kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    loader.load(image.expectedOwner, image.reference, 128)
+                }
+            }
+            assertNotNull(bitmap)
+            bitmap?.asAndroidBitmap()?.recycle()
+            var pickerOpened = false
+            mainThread { host().requestSelection(host().session.attachments.state.value.draft) { pickerOpened = true } }
+            assertFalse(pickerOpened)
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            ui.waitForIdle()
+            assertSame(loader, host().historyLoader)
+            assertTrue(checkNotNull(host().mediaPreviews).isOpen())
+            assertNotSame(media, host().mediaPreviews)
+        }
+        assertEquals(1, calls.get())
+        assertEquals(1, documents.opens.get())
+    }
+
+    fun testRealPageExitRevokesThumbnailRetainedWhileSidebarWasOpen() {
+        val image = sendImageToHistory()
+        val loader = checkNotNull(host().historyLoader)
+        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
+        ui.waitForIdle()
+        assertSame(loader, host().historyLoader)
+        node("drawer-dock-settings").performClick()
+        ui.waitForIdle()
+        assertNull(host().historyLoader)
+        assertNull(host().mediaPreviews)
+        try {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    loader.load(image.expectedOwner, image.reference, 128)
+                }
+            }
+            fail("A retained thumbnail loader must be revoked on real page exit")
+        } catch (_: kotlinx.coroutines.CancellationException) {
+            // Revoked reads remain cancellation, not a persisted unavailable image.
+        }
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ui.waitForIdle()
+        assertNotNull(host().historyLoader)
+        assertNotSame(loader, host().historyLoader)
     }
 
     fun testSwitchDuringImportCancelsOriginalOwnerAndCannotPopulateNewDraft() {

@@ -55,7 +55,7 @@ jobs:
           import json, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py'):
+          for pattern in ('test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py', 'test_image_sidebar_visibility_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)

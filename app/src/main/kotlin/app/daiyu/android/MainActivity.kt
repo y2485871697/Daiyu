@@ -1205,7 +1205,8 @@ class MainActivity : ComponentActivity() {
             }
             if (value != "chat") { cancelPaneConversationSelection(); dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
-            imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
+            imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value,
+                keepThumbnails = value == "chat")
             retainedPageState = value
             syncHaptics()
         }
@@ -6116,7 +6117,8 @@ class MainActivity : ComponentActivity() {
         offlineHost.invalidate()
         cancelShizukuEditor()
         cancelBrowserEditor()
-        updatePane(); speechHost.setVisible(false); imageHost.setVisible(false, selected?.id?.value)
+        updatePane(); speechHost.setVisible(false)
+        imageHost.setVisible(false, selected?.id?.value, keepThumbnails = retainedPage == "chat")
         sidebarVisible = true; publishChat()
     } }
     private fun dismissSidebar() {

@@ -76,6 +76,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     }
     var session by mutableStateOf(sessions.getOrPut(null) { Session(null) }); private set
     private var visible = true
+    private var thumbnailsVisible = true
     private var visit = 0L
     private var closed = false
     // Cancellation can lose the Controller's commit gate. Until that old receipt settles,
@@ -112,24 +113,39 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         renewPreviews(conversation)
     }
 
-    fun setVisible(value: Boolean, conversation: String?) {
-        if (closed || visible == value) return
+    fun setVisible(value: Boolean, conversation: String?, keepThumbnails: Boolean = false) {
+        val showThumbnails = value || keepThumbnails
+        if (closed || visible == value && thumbnailsVisible == showThumbnails) return
+        val interactionEnded = visible && !value
+        val thumbnailsChanged = thumbnailsVisible != showThumbnails
         visible = value
-        if (!value) {
+        thumbnailsVisible = showThumbnails
+        if (interactionEnded) {
             visit++
             cancelTransient(session)
             session.attempt?.cancel()
-            lease.close(); historyLoader = null; mediaPreviews = null
-        } else renewPreviews(conversation)
+        }
+        if (thumbnailsChanged && showThumbnails) {
+            renewPreviews(conversation)
+        } else {
+            if (!showThumbnails) { lease.close(); historyLoader = null }
+            renewMediaPreviews(conversation)
+        }
     }
 
     private fun renewPreviews(conversation: String?) {
         lease.close()
         lease = PreviewLease(controller, conversation)
-        if (!visible || closed) lease.close()
+        if (!thumbnailsVisible || closed) lease.close()
         draftLoader = lease.draftLoader
-        historyLoader = if (visible && !closed && conversation != null) lease.historyLoader else null
-        mediaPreviews = if (visible && !closed && conversation != null) lease else null
+        historyLoader = if (thumbnailsVisible && !closed && conversation != null) lease.historyLoader else null
+        renewMediaPreviews(conversation)
+    }
+
+    private fun renewMediaPreviews(conversation: String?) {
+        // A drawer retains visible thumbnails, not full-screen decoding or original streams.
+        mediaPreviews?.close()
+        mediaPreviews = if (visible && !closed && conversation != null) PreviewLease(controller, conversation) else null
     }
 
     fun syncConversation(conversation: String?) {
@@ -381,8 +397,8 @@ internal class ImageChatHost private constructor(controller: ChatController) {
 
     fun close() {
         if (closed) return
-        closed = true; visible = false; visit++
-        abandon(session); lease.close(); historyLoader = null; mediaPreviews = null
+        closed = true; visible = false; thumbnailsVisible = false; visit++
+        abandon(session); lease.close(); mediaPreviews?.close(); historyLoader = null; mediaPreviews = null
         controller.revokeImageProvider()
         changed = {}; notice = {}; settled = { _, _ -> }
     }
@@ -390,7 +406,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     private fun attach(changed: () -> Unit, notice: (String) -> Unit,
         settled: (ImageSendResult.Accepted, String) -> Unit): ImageChatHost {
         this.changed = changed; this.notice = notice; this.settled = settled
-        closed = false; visible = true; visit++
+        closed = false; visible = true; thumbnailsVisible = true; visit++
         session.abandoned = false
         renewPreviews(null)
         return this

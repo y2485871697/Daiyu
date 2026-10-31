@@ -7019,7 +7019,7 @@ class MainActivity : ComponentActivity() {
                 editingMessageBlocked = messageEditBlocked,
                 mainContextCompressing = controller.isMainContextCompressing(selected?.id),
                 preparingSendKey = pendingTextSend?.takeIf { pending ->
-                    controller.textSendState()?.let { it.ticket === pending.ticket && it.result == null } == true
+                    controller.textSendState()?.let { it.ticket === pending.ticket } == true
                 }?.ticket?.previewKey,
                 editorGeneration = editorGeneration,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value,

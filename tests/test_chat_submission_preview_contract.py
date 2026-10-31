@@ -41,7 +41,10 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertNotIn('text = "取消发送准备"', main)
         self.assertIn('val renderedTextSend = pendingTextSend', main)
         self.assertIn('onCancelSend = { renderedTextSend?.let(::cancelPendingTextSend) }', main)
-        self.assertIn('it.ticket === pending.ticket && it.result == null', main)
+        projection = main.split('preparingSendKey = pendingTextSend?.takeIf', 1)[1].split('editorGeneration =', 1)[0]
+        self.assertIn('it.ticket === pending.ticket', projection)
+        self.assertIn('?.ticket?.previewKey', projection)
+        self.assertNotIn('it.result', projection)
         self.assertIn('statusText = controller.problem ?: when {', main)
         composer = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('if (preparingSend) actions.onCancelSend()', composer)
@@ -49,6 +52,19 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertIn('if (preparingSend) Modifier else Modifier.controlGesture', composer)
         self.assertIn('preparingSend -> "取消发送"', composer)
         self.assertIn('!preparingSend && state.mainContextCompressing', composer)
+
+    def test_unconsumed_receipt_has_real_activity_and_palette_regressions(self):
+        activity = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/TextSendActivityTest.kt').read_text()
+        for oracle in ('testCommittedReceiptKeepsPreparingControlUntilUiConsumesIt',
+                       'testRejectedReceiptKeepsPreparingControlUntilUiConsumesIt',
+                       'TextSendDeliveryGate(fixture.controller)', 'publish.invoke(activity, false, null)',
+                       'assertEquals(submission.ticket.previewKey, projected.composer.preparingSendKey)',
+                       'assertSame(submission.ticket, checkNotNull(fixture.controller.textSendState()).ticket)'):
+            self.assertIn(oracle, activity)
+        chrome = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatChromeActivityTest.kt').read_text()
+        self.assertIn('testPreparingCancelUsesTheExistingActivePaletteInBothThemes', chrome)
+        self.assertIn('colors.appendContent.compositeOver(fill)', chrome)
+        self.assertIn('colors.appendContainer.compositeOver(behind)', chrome)
 
     def test_regeneration_preview_is_admission_scoped_and_rolls_back(self):
         controller = (APP / 'ChatController.kt').read_text()

@@ -331,11 +331,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 else -> "chat-control"
                             }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, primaryEnabled)),
                                 containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
-                                    else (if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
+                                    else (if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                         .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
                                 enabled = primaryEnabled || compressionBlocked, containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
                                 tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface
-                                    else if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
+                                    else if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
                                 onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }

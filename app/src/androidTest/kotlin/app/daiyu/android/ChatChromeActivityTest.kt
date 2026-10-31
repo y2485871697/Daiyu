@@ -517,6 +517,45 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testPreparingCancelUsesTheExistingActivePaletteInBothThemes() {
+        for (dark in listOf(false, true)) for (phase in ComposerPhase.entries) {
+            val state = mutableStateOf(composer().copy(text = "消息", phase = phase,
+                supplementAvailable = true))
+            show(state.value, dark = dark, opaqueBackground = true, readComposer = { state.value })
+            mainThread { state.value = state.value.copy(enabled = false, preparingSendKey = "owned-ticket") }
+            awaitVisualIdle()
+            node("chat-send").assertDoesNotExist()
+            node("chat-control").assertDoesNotExist()
+            val pixels = node("text-send-cancel").assertIsEnabled()
+                .assertContentDescriptionEquals("取消发送").captureToImage().toPixelMap()
+            val colors = requireNotNull(actionColors)
+            val behind = pixels[0, pixels.height / 2]
+            val fill = colors.appendContainer.compositeOver(behind)
+            val content = colors.appendContent.compositeOver(fill)
+            fun assertPixel(expected: Color, actual: Color) {
+                assertEquals("red dark=$dark phase=$phase", expected.red, actual.red, .015f)
+                assertEquals("green dark=$dark phase=$phase", expected.green, actual.green, .015f)
+                assertEquals("blue dark=$dark phase=$phase", expected.blue, actual.blue, .015f)
+            }
+            assertPixel(fill, pixels[pixels.width / 2, pixels.height / 5])
+            assertPixel(fill, pixels[pixels.width / 2, pixels.height / 2])
+            val dr = content.red - fill.red
+            val dg = content.green - fill.green
+            val db = content.blue - fill.blue
+            val contrast = dr * dr + dg * dg + db * db
+            assertTrue("active stop must have visible ink", contrast > 0f)
+            val coverage = (pixels.width / 3 until pixels.width * 2 / 3).maxOf { x ->
+                (pixels.height / 3 until pixels.height * 2 / 3).maxOf { y ->
+                    val pixel = pixels[x, y]
+                    ((pixel.red - fill.red) * dr + (pixel.green - fill.green) * dg +
+                        (pixel.blue - fill.blue) * db) / contrast
+                }
+            }
+            // A hollow one-pixel stroke may straddle pixels; disabled ink never exceeds .38.
+            assertTrue("stop ink must not use disabled alpha: $coverage", coverage > .48f)
+        }
+    }
+
     fun testEmptySendKeepsItsCircularBackgroundWithoutBecomingClickable() {
         for (dark in listOf(false, true)) for (canSend in listOf(false, true)) {
             val sent = mutableListOf<String>()

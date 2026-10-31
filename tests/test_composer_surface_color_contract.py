@@ -31,10 +31,10 @@ class ComposerSurfaceColorContractTest(unittest.TestCase):
         self.assertIn('appendContainer = buttons.primary', appearance)
         self.assertIn('appendContent = buttons.onPrimary', appearance)
         composer = (CHAT / 'ChatComposer.kt').read_text()
-        self.assertIn('if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer', composer)
-        self.assertIn('if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent', composer)
-        self.assertIn('onLongClick = if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE)', composer)
-        self.assertIn('iconSize = if (!textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp', composer)
+        self.assertIn('if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer', composer)
+        self.assertIn('if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent', composer)
+        self.assertIn('onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE)', composer)
+        self.assertIn('iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp', composer)
 
 
     def test_disabled_light_idle_send_does_not_fade_its_background_again(self):

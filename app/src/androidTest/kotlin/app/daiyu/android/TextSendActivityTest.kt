@@ -121,6 +121,71 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertEquals(1, fixture.opens.get()); assertEquals(1, preparationCalls.get())
     }
 
+    fun testCommittedReceiptKeepsPreparingControlUntilUiConsumesIt() = verifyUnconsumedReceipt(false)
+
+    fun testRejectedReceiptKeepsPreparingControlUntilUiConsumesIt() = verifyUnconsumedReceipt(true)
+
+    private fun verifyUnconsumedReceipt(rejected: Boolean) {
+        rejectPreparation.set(rejected)
+        val text = "  retained until receipt consumption  "
+        val session = if (rejected) null else fixture.session(holdSeconds = 120)
+        setDraft(text); setSelection(2, 6)
+        node("chat-send").performClick()
+        awaitPreparing()
+        lateinit var submission: ChatController.TextSendState
+        lateinit var delivery: TextSendDeliveryGate
+        mainThread {
+            submission = checkNotNull(fixture.controller.textSendState())
+            delivery = TextSendDeliveryGate(fixture.controller)
+            delivery.hold()
+        }
+        try {
+            releasePreparation.countDown()
+            if (session != null) assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+            else awaitControl("worker receipt produced before UI delivery") {
+                fixture.controller.textSendState()?.result != null
+            }
+            mainThread {
+                val result = checkNotNull(fixture.controller.textSendState()).result
+                assertTrue(if (rejected) result is ChatController.TextSendResult.Rejected
+                    else result is ChatController.TextSendResult.Accepted)
+                assertNotNull(pendingSend(activity))
+                assertTrue(delivery.heldCount > 0)
+                val publish = MainActivity::class.java.declaredMethods.single {
+                    it.name == "publishChat" && it.parameterCount == 2
+                }.apply { isAccessible = true }
+                publish.invoke(activity, false, null)
+                val getter = MainActivity::class.java.declaredMethods.single {
+                    it.name == "getChatState" && it.parameterCount == 0
+                }.apply { isAccessible = true }
+                val projected = getter.invoke(activity) as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+                assertEquals(submission.ticket.previewKey, projected.composer.preparingSendKey)
+                assertEquals(text, projected.composer.text)
+                assertFalse(projected.composer.enabled)
+            }
+            ui.waitForIdle()
+            node("chat-send").assertDoesNotExist()
+            node("chat-control").assertDoesNotExist()
+            node("text-send-cancel").assertIsEnabled().performClick()
+            mainThread {
+                assertSame(submission.ticket, checkNotNull(fixture.controller.textSendState()).ticket)
+                assertNotNull("late cancel cannot discard the unconsumed receipt", fixture.controller.textSendState()?.result)
+                assertTrue(delivery.release() > 0)
+            }
+            awaitTextSendResult(activity)
+            node("text-send-cancel").assertDoesNotExist()
+            if (rejected) {
+                assertDraft(text); assertSelection(2, 6)
+                node("chat-send").assertIsEnabled()
+                assertEquals(0, fixture.opens.get())
+            } else {
+                assertDraft(""); assertSelection(0, 0)
+                node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
+                finish(checkNotNull(session))
+            }
+        } finally { mainThread { delivery.close() }; session?.release?.countDown() }
+    }
+
     fun testRejectedCallbackRetainsExactDraftAndSelection() {
         rejectPreparation.set(true)
         val text = "  拒绝后保留\n尾部  "

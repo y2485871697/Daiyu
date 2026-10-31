@@ -33,7 +33,7 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("sharedPool?.invoke(selected)",text)
         self.assertIn("selectedModel.sameSelection(definition.current())",text)
         selected = text.split("store?.selected(record, selectedModel.display)",1)[1]
-        self.assertLess(selected.index("selectedModel.sameSelection(definition.current())"), selected.index("val transport = port.open"))
+        self.assertLess(selected.index("selectedModel.sameSelection(definition.current())"), selected.index("port.open(history, definitions)"))
         self.assertIn("else if (acquired) checkNotNull(permit).release()",text)
         self.assertIn("acquired = false; lease = null; permit = null",text)
         self.assertIn("if (!workerFinished || !cleanupFinished || !toolsDrained || itemReleased) false",text)

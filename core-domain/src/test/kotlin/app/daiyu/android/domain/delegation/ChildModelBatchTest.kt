@@ -373,4 +373,22 @@ class ChildModelBatchTest {
         }
     }
 
+    @Test fun uncertainTextRequestDoesNotCancelOtherIndependentTextRequests() {
+        val records = Records(); val entered = CountDownLatch(3); val failed = CountDownLatch(1)
+        val child = port { history, sink ->
+            entered.countDown(); check(entered.await(5, TimeUnit.SECONDS))
+            val prompt = history.single().blocks.filterIsInstance<MessageBlock.Text>().single().text
+            if (prompt == "bad") { failed.countDown(); throw ModelRequestException(ModelFailure.NETWORK) }
+            check(failed.await(5, TimeUnit.SECONDS)); Thread.sleep(150)
+            sink(ModelEvent.TextFinal("answer", "retained-$prompt"))
+        }
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 0) { child }), store = records))
+        try {
+            assertTrue(batch.execute(context(), listOf("bad", "slow-a", "slow-b").map { ChildModelTask("one", it) }) is ExecutionReceipt.Unknown)
+            val rows = records.list(parent.conversationId.value)
+            assertEquals(1, rows.count { it.status == ChildTaskStatus.UNKNOWN })
+            assertEquals(setOf("retained-slow-a", "retained-slow-b"), rows.filter { it.status == ChildTaskStatus.COMPLETED }.map { it.text }.toSet())
+        } finally { batch.close() }
+    }
+
 }

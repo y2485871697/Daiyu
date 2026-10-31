@@ -135,6 +135,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         if (snapshot.isEmpty() || snapshot.any {
             it.profileId !in models || it.prompt.isBlank() || it.prompt.length > 4096 || bytes(it.prompt) > 16 * 1024
         }) return ExecutionReceipt.NotExecuted("invalid_child_tasks")
+        val textOnlyBatch = snapshot.all { models.getValue(it.profileId).role == ChildModelRole.REVIEW }
         val parent: RunExecutionOwner
         val parentSession: SessionCapabilities
         val parentAuthorization: TaskAuthorization
@@ -520,7 +521,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             while (remaining > 0) {
                 if (cancelled()) return uncertain("child_batch_cancelled")
                 if (!beforeDeadline()) return uncertain("child_batch_timeout")
-                if (failures.get()) return uncertain("child_result_unconfirmed")
+                if (failures.get() && !textOnlyBatch) return uncertain("child_result_unconfirmed")
                 val (index, result) = completions.poll(25, TimeUnit.MILLISECONDS) ?: continue
                 if (result == null) { remaining--; continue }
                 check(result.index == index)
@@ -529,6 +530,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                 check(results[result.index] == null)
                 results[result.index] = result; remaining--
             }
+            if (failures.get()) return uncertain("child_result_unconfirmed")
             if (results.any { it == null }) return uncertain("child_profile_revoked")
             val output = results.map { checkNotNull(it) }
             if (output.sumOf { bytes(it.text).toLong() } > 256 * 1024) return uncertain("child_batch_output_too_large")

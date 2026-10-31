@@ -3,5 +3,11 @@ gradle.taskGraph.whenReady { graph ->
         t.name ==~ /(?i)^(assemble|sign|install|uninstall|connected|managedDevice).*/ ||
         t.name ==~ /(?i)^(package|bundle).*(apk|debug|release|androidtest)$/
     }
+    def report = gradle.startParameter.projectProperties['daiyuCheckGraph']
+    if (report) {
+        def output = new File(report)
+        output.parentFile.mkdirs()
+        output.text = groovy.json.JsonOutput.toJson(graph.allTasks*.path)
+    }
     if (!forbidden.empty) throw new GradleException("Checks-only rejected APK/emulator tasks: " + forbidden*.path)
 }

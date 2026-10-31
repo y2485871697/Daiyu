@@ -26,7 +26,8 @@ data class ChildTaskRecord(
     val revision: Long = 0,
     val sourceTaskId: String? = null,
     val commandKind: ChildTaskCommandKind? = null,
-    val display: ChildTaskDisplay? = null
+    val display: ChildTaskDisplay? = null,
+    val access: ChildToolAccess = ChildToolAccess.NONE
 ) {
     init {
         require(revision >= 0)

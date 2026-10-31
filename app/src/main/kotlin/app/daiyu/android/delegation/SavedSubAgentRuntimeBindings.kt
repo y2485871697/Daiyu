@@ -2,6 +2,7 @@ package app.daiyu.android.delegation
 
 import app.daiyu.android.domain.ModelPort
 import app.daiyu.android.domain.delegation.ChildModelDefinition
+import app.daiyu.android.domain.delegation.ChildModelRole
 import app.daiyu.android.domain.delegation.ChildTaskDisplay
 import app.daiyu.android.model.*
 import app.daiyu.android.storage.ModelSettings
@@ -36,7 +37,7 @@ internal class SavedSubAgentRuntimeBindings(
             val provider = requireNotNull(providers.singleOrNull { it.id == profile.providerId && it.isEnabled }) {
                 "Saved child provider is unavailable"
             }
-            require(profile.role == "review") { "Only text children are supported" }
+            require(profile.role in setOf("implementation", "review")) { "Only text children are supported" }
             val model = requireNotNull(provider.models.singleOrNull { it.id == profile.modelId && it.isEnabled }) {
                 "Saved child model is unavailable"
             }
@@ -68,7 +69,8 @@ internal class SavedSubAgentRuntimeBindings(
             val display = ChildTaskDisplay(binding.profile.name, binding.child.model, binding.modelName)
             val original = ChildModelDefinition(frozen.poolKey(owner, binding.profile.id), frozen.parallelLimit(binding.profile.id, model), display,
                 latest = null, selection = binding.child, valid = { profileCurrent(binding.profile.id) },
-                admissionAllowed = { !modelDeleted(binding.profile) }) { runModel(binding.child) }
+                admissionAllowed = { !modelDeleted(binding.profile) },
+                role = if (binding.profile.role == "implementation") ChildModelRole.IMPLEMENTATION else ChildModelRole.REVIEW) { runModel(binding.child) }
             val lastSelection = java.util.concurrent.atomic.AtomicReference(binding.profile to original)
             fun deletedSelection(): Boolean {
                 val last = lastSelection.get().first
@@ -91,7 +93,7 @@ internal class SavedSubAgentRuntimeBindings(
                             if (deletedSelection()) lastSelection.get().second else throw failure
                         }
                     }, selection = binding.child, valid = { profileCurrent(binding.profile.id) },
-                    admissionAllowed = { !deletedSelection() }) { runModel(binding.child) }
+                    admissionAllowed = { !deletedSelection() }, role = original.role) { runModel(binding.child) }
         }
         return FrozenSubAgentModels(definitions, current, latest = if (latestConfig == null || latestModels == null) null else ({
             val next = latestConfig()

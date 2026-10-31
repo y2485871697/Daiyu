@@ -85,7 +85,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
         val conversation = legacy(context, helper)
         val before = context.openOrCreateDatabase("conversations.db", 0, null).use { raw -> witnesses(raw) to messages(raw) }
         val sql = helper.readableDatabase
-        assertEquals(30, sql.version)
+        assertEquals(31, sql.version)
         val rows = SQLiteChildTaskStore(helper).list(conversation.value)
         assertEquals(1, rows.size)
         val old = rows.single()
@@ -121,7 +121,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             })
         }
         val sql = helper.readableDatabase
-        assertEquals(30, sql.version)
+        assertEquals(31, sql.version)
         assertEquals(before.first, messages(sql)); assertEquals(before.second, witnesses(sql))
         assertEquals(before.third, sidecars(sql))
         val history = helper.messages(conversation)
@@ -153,6 +153,40 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             assertFalse(raw.rawQuery("SELECT 1 FROM sqlite_master WHERE name='child_task_commands'", null).use { it.moveToFirst() })
         }
     }
+    fun testVersionThirtyAddsNullableAccessWithoutChangingLegacyHistory() {
+        val (context, helper) = fixture()
+        val conversation = legacy(context, helper)
+        lateinit var oldColumns: List<String>
+        lateinit var oldMessages: List<List<String?>>
+        lateinit var oldWitnesses: List<List<String?>>
+        context.openOrCreateDatabase("conversations.db", 0, null).use { raw ->
+            SQLiteChildTaskStore.installCommandSchema(raw); SQLiteChildTaskStore.installDisplaySchema(raw)
+            assertFalse(columns(raw).contains("tool_access_json"))
+            oldColumns = columns(raw); oldMessages = messages(raw); oldWitnesses = witnesses(raw)
+            raw.version = 30
+        }
+        val sql = helper.writableDatabase
+        assertEquals(31, sql.version); assertEquals(oldColumns + "tool_access_json", columns(sql))
+        assertEquals(oldMessages, messages(sql)); assertEquals(oldWitnesses, witnesses(sql))
+        sql.rawQuery("PRAGMA table_info(child_tasks)", null).use { c ->
+            var found = false
+            while (c.moveToNext()) if (c.getString(1) == "tool_access_json") {
+                found = true; assertEquals("TEXT", c.getString(2)); assertEquals(0, c.getInt(3)); assertTrue(c.isNull(4))
+            }
+            assertTrue(found)
+        }
+        sql.rawQuery("SELECT tool_access_json FROM child_tasks WHERE task_id='old-child'", null).use {
+            assertTrue(it.moveToFirst()); assertTrue(it.isNull(0))
+        }
+        val task = SQLiteChildTaskStore(helper).list(conversation.value).single()
+        assertEquals("old prompt", task.prompt); assertEquals("old result", task.text)
+        assertEquals(app.daiyu.android.domain.delegation.ChildToolAccess.NONE, task.access)
+        SQLiteChildTaskStore.installAccessSchema(sql)
+        assertEquals(oldColumns + "tool_access_json", columns(sql))
+        helper.close(); assertEquals(31, helper.readableDatabase.version)
+        assertEquals(task, SQLiteChildTaskStore(helper).list(conversation.value).single())
+    }
+
     fun testVersionTwentyAddsOnlyNullableDisplaySnapshots() {
         val (context, helper) = fixture()
         val conversation = legacy(context, helper)
@@ -161,7 +195,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             raw.version = 20
         }
         val migrated = helper.readableDatabase
-        assertEquals(30, migrated.version)
+        assertEquals(31, migrated.version)
         assertTrue(columns(migrated).containsAll(listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot")))
         val task = SQLiteChildTaskStore(helper).list(conversation.value).single()
         assertNull(task.display)

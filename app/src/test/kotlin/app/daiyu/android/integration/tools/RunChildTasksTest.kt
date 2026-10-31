@@ -210,7 +210,7 @@ class RunChildTasksTest {
             val tool = RunChildTasks(supervisor, binding, setOf("review")).tool()
             assertEquals(ToolEffect.READ_ONLY, tool.definition.effect)
             assertEquals("delegation.text.background_review", tool.definition.capability)
-            assertThrows(IllegalArgumentException::class.java) { tool.definition.schema.parse("""{"tasks":[],"tools":["write_file"]}""") }
+            assertThrows(IllegalArgumentException::class.java) { tool.definition.schema.parse("""{"tasks":[{"profile_id":"review","prompt":"Review"}],"tools":["write_file"]}""") }
         } finally { close(supervisor, model) }
     }
 }

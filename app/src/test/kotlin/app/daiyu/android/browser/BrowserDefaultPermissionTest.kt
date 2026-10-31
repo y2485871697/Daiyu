@@ -253,6 +253,11 @@ class BrowserDefaultPermissionTest {
         val preparation = child(limitedParent, childScope)
         assertFalse("navigate" in preparation.preview.allowedActions)
         assertTrue("new_tab" in preparation.preview.allowedActions)
+        val schema = RunBrowserTools.definition(true, preparation.preview.allowedActions).schema
+        assertEquals(setOf("new_tab", "close_tab"),
+            (schema.fields.single { it.name == "action" }.type as ArgumentType.Text).choices)
+        schema.parse(newTab)
+        rejected { schema.parse(navigation) }
         rejected { BrowserDefaultPermission.child(
             BrowserGrant(BrowserOwner("sibling", BrowserOwnerKind.CHILD), BrowserAccess.FULL), childScope,
             checkNotNull(parent.preview.defaultPermission)) }

@@ -2014,6 +2014,17 @@ class ChatController internal constructor(private val application:Application,
             if (!runCatching { models.isCurrent() }.getOrDefault(false)) return ChildTaskCommandReceipt.Rejected("child_model_configuration_changed")
             if (command.profileId !in models) return ChildTaskCommandReceipt.Rejected("invalid_child_profile")
             if (preparationCancelled(token)) return ChildTaskCommandReceipt.Rejected("cancelled_before_admission")
+            val workspace = freezeWorkspace(token, conversation)
+            val platform = platformSettings.freeze()
+            val browser = browserSettings.snapshot()
+            val directProfile = checkNotNull(assistantStore.read(checkNotNull(frozenAssistantId)))
+            val directConfig = freezeConversationProvider(conversation).settings
+            val childCapabilities = AndroidToolRegistry.capabilitiesFor(
+                if (platform.allDeviceTools) ReadOnlyTool.entries.toSet() else directConfig.enabledTools(), platform.platformAllowed) +
+                setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, RunCommandTools.CAPABILITY) +
+                (if (browser.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) emptySet()
+                 else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY))
+            val executionTools = executionChildTools(application, directProfile, toolLedger, workspace, browser, platform.resultPolicy, shizukuAccess)
             val run = RunId(UUID.randomUUID().toString())
             val acceptedAt = System.currentTimeMillis()
             val user = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.USER_ROLE,
@@ -2025,6 +2036,7 @@ class ChatController internal constructor(private val application:Application,
             val currentConfiguration = childPreferences.snapshot(key)
             supervisor.reconcile(conversation.value) { pool -> childPoolLimit(currentConfiguration, key, pool) }
             return ChildTaskCommandHost.run(initial, command, supervisor, models, database, runtime,
+                capabilities = childCapabilities, toolAssembly = executionTools,
                 cancelled = { preparationCancelled(token) }, onChanged = ::backgroundTasksChanged,
                 retain = { tasks -> synchronized(this) {
                     check(!closed && !preparationCancelled(token))
@@ -4034,11 +4046,13 @@ class ChatController internal constructor(private val application:Application,
                 },
                 resume = ::resumeChildTask, pause = ::pauseChildTask, stop = ::stopChildTask,
                 currentProfiles = currentChildProfiles)
+            val executionChildren = if (!withChildren || !ordinaryRun) null else executionChildTools(application,
+                checkNotNull(ordinaryAssistant), toolLedger, workspace, checkNotNull(ordinaryBrowserSettings), platformSnapshot.resultPolicy, shizukuAccess)
             val children = if (!withChildren) null else RunChildModels(
                 ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
                     onProfilesChanged = ::scheduleDeletedModelCleanup,
                     usageRecorder = checkNotNull(runtimeStore).childUsage,
-                    currentModels = currentChildModels).also { batch ->
+                    currentModels = currentChildModels, toolAssembly = executionChildren).also { batch ->
                     synchronized(this) { childModelBatches[batch] = conversationId.value }
                 }, childModels.keys, currentProfiles = currentChildProfiles)
             preparingChildren = children
@@ -4081,7 +4095,7 @@ class ChatController internal constructor(private val application:Application,
                     supervisor.reconcile(conversationId.value) { pool -> childPoolLimit(currentConfiguration, ownerKey, pool) }
                     synchronized(this) {
                         check(!closed)
-                        val binding=supervisor.bind(owner,grants,authorization,admittedModels,::backgroundTasksChanged)
+                        val binding=supervisor.bind(owner,grants,authorization,admittedModels, executionChildren, ::backgroundTasksChanged)
                         RunChildTasks(supervisor, binding, admittedModels.keys, currentChildModels, currentChildProfiles).also { tasks ->
                             backgroundRuns[run] = tasks
                             resources?.takeIf { it.initial.runId == run && it.childrenPauseRequested }?.let { lifetime ->

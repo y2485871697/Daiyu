@@ -3,10 +3,12 @@ import argparse
 import os
 from pathlib import Path
 import re
+import json
+import shutil
 import subprocess
 import sys
 import zipfile
-from evidence import SCOPES, UNIT_REPORTS, atomic_json, configuration, digest, verify_xml
+from evidence import SCOPES, CLOUD_SCOPES, UNIT_SCOPES, UNIT_REPORTS, atomic_json, configuration, digest, verify_xml
 
 
 def verify_revision():
@@ -43,15 +45,34 @@ def run(scope):
         folder.mkdir(exist_ok=True)
         command = [str(root / ('gradlew.bat' if os.name == 'nt' else 'gradlew')),
                    '--no-daemon', '--parallel', '--build-cache', '--warning-mode=fail',
-                   '--console=plain', '-I', 'scripts/cooperation/checks_only.init.gradle', *SCOPES[item].split()]
+                   '--console=plain', '-I', 'scripts/cooperation/checks_only.init.gradle', *CLOUD_SCOPES[item].split()]
+        if item == 'delegation':
+            command[command.index('-I'):command.index('-I')] = ['-PdaiyuCheckGraph=' + str(folder / 'task-graph.json')]
+        if item in UNIT_SCOPES:
+            for reports in UNIT_REPORTS:
+                shutil.rmtree(root / reports, ignore_errors=True)
+        for name in ('androidtest-compile.json', 'task-graph.json'):
+            (folder / name).unlink(missing_ok=True)
         with (folder / 'check.log').open('wb') as log:
             code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
-        report_roots = [root / p for p in UNIT_REPORTS] if item == 'unit' else [root / 'app/build/reports']
+        if item == 'delegation' and code == 0:
+            target = ':app:compileDebugAndroidTestKotlin'
+            graph = json.loads((folder / 'task-graph.json').read_text(encoding='utf-8'))
+            text = (folder / 'check.log').read_text(encoding='utf-8', errors='replace')
+            match = re.search(r'^> Task ' + re.escape(target) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', text, re.MULTILINE)
+            if target not in graph or match is None or match.group(1) in ('NO-SOURCE', 'SKIPPED'):
+                code = 1
+            else:
+                atomic_json(folder / 'androidtest-compile.json', dict(task=target,
+                    outcome=match.group(1) or 'EXECUTED', instrumentation_run=False))
+        report_roots = [root / p for p in UNIT_REPORTS] if item in UNIT_SCOPES else [root / 'app/build/reports']
         with zipfile.ZipFile(folder / 'reports.zip', 'w', zipfile.ZIP_DEFLATED) as z:
             for reports in report_roots:
                 for p in reports.rglob('*.xml'):
-                    base = root if item == 'unit' else reports
+                    base = root if item in UNIT_SCOPES else reports
                     z.write(p, p.relative_to(base).as_posix())
+            if item == 'delegation' and (folder / 'androidtest-compile.json').exists():
+                z.write(folder / 'androidtest-compile.json', 'androidtest-compile.json')
         report_summary = {}
         if code == 0:
             try:
@@ -65,7 +86,7 @@ def run(scope):
         if packages: code = code or 1
         record = dict(check_id='github-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['RUNNER_OS'],
                       check_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), source_sha=sha,
-                      config_id=config, scope=item, task=SCOPES[item], command=command,
+                      config_id=config, scope=item, task=CLOUD_SCOPES[item], command=command,
                       incremental_base_sha=sha, diff='none; exact checkout, Gradle cache enabled',
                       environment=dict(os=os.environ['RUNNER_OS'], jdk='27', gradle='9.8.1', agp='9.5.0-alpha09'),
                       exit_code=code, result='passed' if code == 0 else 'failed', apk_built=bool(packages), package_scan='passed' if not packages else 'failed', discovered_packages=packages, source_changed=source_changed,
@@ -82,7 +103,7 @@ def run(scope):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--scope', choices=('all', 'unit', 'lint'), default='all')
+    parser.add_argument('--scope', choices=('all', *CLOUD_SCOPES), default='all')
     parser.add_argument('--verify-revision-only', action='store_true')
     args = parser.parse_args(argv)
     if args.verify_revision_only:

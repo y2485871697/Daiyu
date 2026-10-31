@@ -10,15 +10,16 @@ import app.daiyu.android.integration.tools.RunChildTasks
 internal object ChildTaskCommandHost {
     fun run(initial: Message, command: ChildTaskCommand, supervisor: RetainedChildTasks,
         models: Map<String, ChildModelDefinition>, store: ConversationStore, runtime: RuntimeStore,
-        cancelled: () -> Boolean, onChanged: () -> Unit, retain: (RunChildTasks) -> Unit): ChildTaskCommandReceipt {
+        cancelled: () -> Boolean, onChanged: () -> Unit, retain: (RunChildTasks) -> Unit,
+        capabilities: Set<String> = emptySet(), toolAssembly: ChildToolAssemblyFactory? = null): ChildTaskCommandReceipt {
         var tasks: RunChildTasks? = null
         var result: ChildTaskCommandReceipt = ChildTaskCommandReceipt.Unconfirmed("child_command_unconfirmed")
-        val session = SessionCapabilities(initial.runId.value, setOf(RunChildTasks.CAPABILITY))
+        val session = SessionCapabilities(initial.runId.value, capabilities + RunChildTasks.CAPABILITY)
         val authorization = TaskAuthorization(session.sessionId, initial.runId.value)
         val receiver = object : ReceiptBatchToolExecutor {
             override fun bindOwner(owner: RunExecutionOwner) {
                 check(!cancelled())
-                val accepted = RunChildTasks(supervisor, supervisor.bind(owner, session, authorization, models, onChanged), models.keys)
+                val accepted = RunChildTasks(supervisor, supervisor.bind(owner, session, authorization, models, toolAssembly, onChanged), models.keys)
                 tasks = accepted
                 retain(accepted)
             }

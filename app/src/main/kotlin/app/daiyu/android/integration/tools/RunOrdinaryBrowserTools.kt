@@ -16,7 +16,7 @@ import app.daiyu.android.domain.tools.*
 import java.util.concurrent.CompletableFuture
 
 /** Advertising never creates a WebView. First admitted execution opens this run's one host. */
-internal class RunOrdinaryBrowserTools(
+internal class RunOrdinaryBrowserTools private constructor(
     private val context: Context,
     owner: RunExecutionOwner,
     authorization: TaskAuthorization,
@@ -24,12 +24,38 @@ internal class RunOrdinaryBrowserTools(
     assistantMessageId: MessageId,
     settings: BrowserSettings,
     private val opened: (CatalogBrowserBinding) -> Unit,
-) : RunOwnedToolScope(owner, authorization) {
-    private val grant = BrowserGrant(BrowserOwner(owner.runId.value, BrowserOwnerKind.MAIN), settings.access)
-    private val permission = BrowserDefaultPermission.main(grant)
-    private val preparation = BrowserRunPreparation.prepare(
+    private val childScope: app.daiyu.android.domain.delegation.ChildRunScope?,
+    parentBrowserPermission: BrowserDefaultPermission?,
+ ) : RunOwnedToolScope(owner, authorization) {
+    constructor(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
+        assistant: AssistantProfile, assistantMessageId: MessageId, settings: BrowserSettings,
+        opened: (CatalogBrowserBinding) -> Unit) : this(context, owner, authorization, assistant,
+        assistantMessageId, settings, opened, null, null)
+
+    companion object {
+        fun child(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
+            assistant: AssistantProfile, assistantMessageId: MessageId, settings: BrowserSettings,
+            scope: app.daiyu.android.domain.delegation.ChildRunScope,
+            parentPermission: BrowserDefaultPermission): RunOrdinaryBrowserTools =
+            RunOrdinaryBrowserTools(context, owner, authorization, assistant, assistantMessageId,
+                settings, {}, scope, parentPermission)
+    }
+
+    private val grant = BrowserGrant(BrowserOwner(owner.runId.value,
+        if (childScope == null) BrowserOwnerKind.MAIN else BrowserOwnerKind.CHILD), settings.access)
+    private val permission = if (childScope == null) {
+        require(parentBrowserPermission == null)
+        BrowserDefaultPermission.main(grant)
+    } else {
+        require(owner.runId.value == childScope.owner.childRunId && owner.conversationId.value == childScope.owner.conversationId &&
+            assistantMessageId.value == childScope.owner.assistantMessageId && authorization === childScope.authorization)
+        BrowserDefaultPermission.child(grant, childScope, checkNotNull(parentBrowserPermission))
+    }
+    private val preparation = if (childScope == null) BrowserRunPreparation.prepare(
         BrowserRunIdentity(owner.conversationId, owner.runId, assistant.id, assistantMessageId),
-        settings, grant, permission.actions, defaultPermission = permission)
+        settings, grant, permission.actions, defaultPermission = permission) else
+        BrowserRunPreparation.prepareChild(childScope, assistant.id, settings, grant, permission.actions,
+            defaultPermission = permission)
     private val confirmed = preparation.confirm(preparation.preview)
     private val main = Handler(Looper.getMainLooper())
     private var opening: CompletableFuture<CatalogBrowserBinding?>? = null
@@ -45,7 +71,7 @@ internal class RunOrdinaryBrowserTools(
     }
     override val tools = if (settings.access == BrowserAccess.DISABLED) emptyList() else listOf(false, true).map { write ->
         object : RegisteredTool {
-            override val definition = RunBrowserTools.definition(write)
+            override val definition = RunBrowserTools.definition(write, permission.actions)
             override fun prepare(arguments: ToolArguments): PreparedTool {
                 RunBrowserTools.validate(arguments.canonicalJson(), write)
                 require(arguments.text("action") in permission.actions) { "browser_action_not_authorized" }

@@ -28,13 +28,16 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("currentProfiles?.invoke() ?: profiles",tool)
     def test_hot_request_claim_rechecks_selection_and_shares_actual_pool(self):
         text = (DOMAIN / "ChildModelBatch.kt").read_text()
-        self.assertIn("selectedModel = definition.current()",text)
-        self.assertIn("sharedPool?.invoke(selectedModel)",text)
+        self.assertIn("selectedModel = awaitSelection()",text)
+        self.assertIn("val selected = definition.current()",text)
+        self.assertIn("sharedPool?.invoke(selected)",text)
         self.assertIn("selectedModel.sameSelection(definition.current())",text)
         selected = text.split("store?.selected(record, selectedModel.display)",1)[1]
         self.assertLess(selected.index("selectedModel.sameSelection(definition.current())"), selected.index("val transport = port.open"))
-        self.assertIn("checkNotNull(permit).release(); acquired = false",text)
-        self.assertIn("if (!workerFinished || !cleanupFinished || itemReleased) false",text)
+        self.assertIn("else if (acquired) checkNotNull(permit).release()",text)
+        self.assertIn("acquired = false; lease = null; permit = null",text)
+        self.assertIn("if (!workerFinished || !cleanupFinished || !toolsDrained || itemReleased) false",text)
+        self.assertIn("if (assembly != null) awaitRequestBoundary()",text)
         self.assertIn("(transport as ResumableModelSession).resume(attemptSink)",text)
     def test_non_destructive_edits_hot_apply_and_destructive_edits_revoke(self):
         text = (APP / "delegation/SubAgentHotUpdatePolicy.kt").read_text()

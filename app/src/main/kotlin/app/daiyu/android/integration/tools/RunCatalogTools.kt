@@ -75,6 +75,7 @@ internal class RunCatalogTools(
     private val ordinaryFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> List<RunOwnedToolScope>)? = null,
     private val workspacePin: AutoCloseable? = null,
     private val referenceReader: app.daiyu.android.references.ConversationReferenceReader? = null,
+    private val allowedToolNames: Set<String>? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -290,7 +291,7 @@ internal class RunCatalogTools(
                 generation?.registeredTools?.forEach { registry.register(it) }
                 virtualDisplay?.registeredTools?.forEach { registry.register(it) }
                 retainedVirtualDisplaySession?.registeredTools(bound, capabilities, authorization)?.forEach { registry.register(it) }
-                val snapshot = registry.snapshot()
+                val snapshot = registry.snapshot().let { catalog -> allowedToolNames?.let(catalog::restrictedTo) ?: catalog }
                 // Exact, short-lived screen confirmations never suspend through a user barrier.
                 // A suspended receipt completes outside this catalog's final-result boundary.
                 // Fail closed instead of allowing that completion to bypass the GUI Unknown fence.
@@ -298,7 +299,8 @@ internal class RunCatalogTools(
                     "gui_user_barrier_not_supported"
                 }
                 val result = CatalogModelBridge(snapshot, capabilities, ledger, conversationId, runId, authorization) {
-                    liveMcp?.let { snapshot.withAdditional(it.registeredTools()) } ?: snapshot
+                    val latest = liveMcp?.let { snapshot.withAdditional(it.registeredTools()) } ?: snapshot
+                    allowedToolNames?.let(latest::restrictedTo) ?: latest
                 }
                 result.bindOwner(bound)
                 synchronized(closeLock) {

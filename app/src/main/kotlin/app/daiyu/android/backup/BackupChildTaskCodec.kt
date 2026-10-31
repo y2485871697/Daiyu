@@ -11,10 +11,11 @@ internal object BackupChildTaskCodec {
         "task_group_id", "generation", "task_index", "assistant_message_id", "profile_id", "prompt", "status", "text", "detail",
         "control_revision", "source_task_id", "command_kind")
     private val displayColumns = listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot")
-    private val taskColumns = legacyTaskColumns + displayColumns
+    private val v5TaskColumns = legacyTaskColumns + displayColumns
+    private val taskColumns = v5TaskColumns + "tool_access_json"
     private fun withDisplayColumns(row: JSONObject): JSONObject = JSONObject().apply {
         row.keys().forEach { key -> put(key, row.get(key)) }
-        displayColumns.forEach { key -> if (!has(key)) put(key, JSONObject.NULL) }
+        (displayColumns + "tool_access_json").forEach { key -> if (!has(key)) put(key, JSONObject.NULL) }
     }
     private val commandColumns = listOf("call_id", "fingerprint", "source_id", "successor_id", "expected_revision", "acknowledged")
     private val legacyUsageColumns = listOf("task_id", "request_id", "request_owner", "attempt_id", "operation", "checkpoint_revision",
@@ -42,14 +43,14 @@ internal object BackupChildTaskCodec {
             if (conversation == null) "" else " WHERE source_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
         val usage = BackupHistoryRows.read(db, "child_request_usage", usageColumns,
             if (conversation == null) "" else " WHERE task_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
-        return JSONObject().put("version", 5).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
+        return JSONObject().put("version", 6).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
     }
     fun validate(value: JSONObject?, messages: JSONArray): Validated {
         if (value == null) return Validated(emptyList(), emptyList(), emptyList())
         with(BackupHistoryRows) {
-            fields(value, listOf("version", "tasks", "commands", "usage")); val version = number(value, "version"); require(version in 1L..5L)
+            fields(value, listOf("version", "tasks", "commands", "usage")); val version = number(value, "version"); require(version in 1L..6L)
             val tasks = rows(value.getJSONArray("tasks")).map { row ->
-                fields(row, if (version < 3L) legacyTaskColumns else taskColumns)
+                fields(row, if (version < 3L) legacyTaskColumns else if (version < 6L) v5TaskColumns else taskColumns)
                 withDisplayColumns(row)
             }; val commands = rows(value.getJSONArray("commands"))
             val usage = rows(value.getJSONArray("usage")).map { row ->
@@ -127,7 +128,8 @@ internal object BackupChildTaskCodec {
             if (row.isNull("source_task_id")) null else id(row, "source_task_id"),
             if (row.isNull("command_kind")) null else ChildTaskCommandKind.valueOf(text(row, "command_kind")),
             if (displayColumns.all(row::isNull)) null else ChildTaskDisplay(
-                text(row, "agent_name_snapshot"), text(row, "model_id_snapshot"), text(row, "model_name_snapshot")))
+                text(row, "agent_name_snapshot"), text(row, "model_id_snapshot"), text(row, "model_name_snapshot")),
+            if (row.isNull("tool_access_json")) ChildToolAccess.NONE else ChildToolAccess.fromJson(text(row, "tool_access_json")))
     }
     internal fun terminal(row: JSONObject): JSONObject = JSONObject(row.toString()).apply {
         when (getString("status")) {
@@ -149,7 +151,11 @@ internal object BackupChildTaskCodec {
             BackupHistoryRows.verify(db, "child_tasks", terminal(row))
             val retained = history[row.getString("task_id")] ?: error("备份历史回执缺失")
             val keys = retained.keys().asSequence().toSet()
-            BackupHistoryRows.fields(retained, if (keys == legacyTaskColumns.toSet()) legacyTaskColumns else taskColumns)
+            BackupHistoryRows.fields(retained, when (keys) {
+                legacyTaskColumns.toSet() -> legacyTaskColumns
+                v5TaskColumns.toSet() -> v5TaskColumns
+                else -> taskColumns
+            })
             val normalized = withDisplayColumns(retained)
             record(normalized)
             check(BackupHistoryRows.same(normalized, row)) { "备份历史回执不匹配" }

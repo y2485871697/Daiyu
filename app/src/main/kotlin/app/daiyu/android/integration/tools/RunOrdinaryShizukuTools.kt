@@ -7,7 +7,8 @@ import java.util.UUID
 
 internal class RunOrdinaryShizukuTools(owner: RunExecutionOwner, authorization: TaskAuthorization,
     private val capabilities: SessionCapabilities, private val access: ShizukuAuthorization,
-    private val uid: Int, private val mode: app.daiyu.android.runningmode.RunningMode) : RunOwnedToolScope(owner, authorization) {
+    private val uid: Int, private val mode: app.daiyu.android.runningmode.RunningMode,
+    private val isolatedAccess: (() -> ShizukuAuthorization)? = null) : RunOwnedToolScope(owner, authorization) {
     private var attempted = false
     private var backend: ShizukuBackend? = null
     private val scope = UUID.randomUUID().toString()
@@ -38,7 +39,8 @@ internal class RunOrdinaryShizukuTools(owner: RunExecutionOwner, authorization: 
             beginCreation()
             attempted = true
             try {
-                val connection = retain(access.connect(uid))
+                val runAccess = isolatedAccess?.invoke()?.let { retain(it) } ?: access
+                val connection = retain(runAccess.connect(uid))
                 val real = connection.openBackend(scope)
                 backend = retain(real) { done -> real.closeWithResult { result -> done(result.catalogResult()) } }
             } finally { endCreation() }

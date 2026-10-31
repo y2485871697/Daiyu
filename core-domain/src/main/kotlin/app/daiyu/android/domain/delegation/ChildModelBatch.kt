@@ -15,21 +15,24 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 
-data class ChildModelTask(val profileId: String, val prompt: String)
+data class ChildModelTask(val profileId: String, val prompt: String, val access: ChildToolAccess = ChildToolAccess.NONE)
 
 /** An exact host-frozen selection. Zero means no extra model-pool limit. */
 class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val display: ChildTaskDisplay?, val create: () -> ModelPort) {
+    var role: ChildModelRole = ChildModelRole.REVIEW
+        private set
     private var latest: (() -> ChildModelDefinition)? = null
     private var selection: Any? = null
     private var valid: () -> Boolean = { true }
     private var admissionAllowed: () -> Boolean = { true }
     constructor(poolKey: String, parallelLimit: Int, display: ChildTaskDisplay?,
         latest: (() -> ChildModelDefinition)?, selection: Any, valid: () -> Boolean = { true },
-        admissionAllowed: () -> Boolean = { true }, create: () -> ModelPort) : this(poolKey, parallelLimit, display, create) {
+        admissionAllowed: () -> Boolean = { true }, role: ChildModelRole = ChildModelRole.REVIEW, create: () -> ModelPort) : this(poolKey, parallelLimit, display, create) {
         this.latest = latest
         this.selection = selection
         this.valid = valid
         this.admissionAllowed = admissionAllowed
+        this.role = role
     }
     fun isValid(): Boolean = valid()
     fun acceptsNewTask(): Boolean = admissionAllowed()
@@ -40,8 +43,10 @@ class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val disp
         return selected
     }
     fun sameSelection(other: ChildModelDefinition): Boolean = poolKey == other.poolKey && parallelLimit == other.parallelLimit &&
-        display == other.display && (selection ?: this) == (other.selection ?: other)
+        role == other.role && display == other.display && (selection ?: this) == (other.selection ?: other)
     constructor(poolKey: String, parallelLimit: Int, create: () -> ModelPort) : this(poolKey, parallelLimit, null, create)
+    constructor(poolKey: String, parallelLimit: Int, role: ChildModelRole, create: () -> ModelPort) :
+        this(poolKey, parallelLimit, null, create) { this.role = role }
     init { require(poolKey.isNotBlank()); require(parallelLimit >= 0) }
 }
 
@@ -52,7 +57,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private val currentModels: (() -> Map<String, ChildModelDefinition>)? = null,
     private val onProgress: (ChildRunOwner, String) -> Unit = { _, _ -> },
     private val sharedPool: ((ChildModelDefinition) -> ChildPoolLease)? = null,
-    private val onProfilesChanged: () -> Unit = {}) : AutoCloseable {
+    private val onProfilesChanged: () -> Unit = {},
+    private val toolAssembly: ChildToolAssemblyFactory? = null) : AutoCloseable {
     private val models = models.toMap()
     private fun limits(models: Map<String, ChildModelDefinition>) = models.values.groupBy { it.poolKey }.mapValues { (_, entries) ->
         require(entries.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
@@ -83,6 +89,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private var cleanupPins = 0
     private var generation = 0L
     private val runners = mutableSetOf<ChatRunner>()
+    private val assemblies = mutableSetOf<ChildToolAssembly>()
     private var pauseControl: ChildTaskPauseControl? = null
     private val observers = mutableListOf<() -> Unit>()
 
@@ -110,7 +117,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         require(pause == null || records.size == 1) { "pause_requires_exact_child" }
         require(preceding == null || (records.size == 1 && preceding.status == ChildTaskStatus.COMPLETED &&
             records.single().sourceTaskId == preceding.owner.childRunId && records.single().commandKind == ChildTaskCommandKind.APPEND))
-        return executeBatch(context, records.map { ChildModelTask(it.profileId, it.prompt) }, records, pause, preceding)
+        return executeBatch(context, records.map { ChildModelTask(it.profileId, it.prompt, it.access) }, records, pause, preceding)
     }
 
     private fun executeBatch(context: ToolExecutionContext, tasks: List<ChildModelTask>,
@@ -174,7 +181,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             val records = queued ?: snapshot.mapIndexed { index, task ->
                 ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value, group, current,
                     UUID.randomUUID().toString(), UUID.randomUUID().toString()), parent.assistantMessageId.value,
-                    parent.ownerId, index, task.profileId, task.prompt, display = models.getValue(task.profileId).display)
+                    parent.ownerId, index, task.profileId, task.prompt, display = models.getValue(task.profileId).display,
+                    access = if (models.getValue(task.profileId).role == ChildModelRole.IMPLEMENTATION)
+                        checkNotNull(toolAssembly) { "child_execution_tools_unavailable" }.restrict(parentSession, task.access) else ChildToolAccess.NONE)
             }
             if (queued == null) store?.enqueue(parent, records)
             snapshot.forEachIndexed { index, task ->
@@ -196,12 +205,16 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         // A permit belongs to this item until BOTH its worker and transport drain.
                         // Keep outstanding pinned through the lock-free release as well, so idle
                         // observers cannot retire the batch while a release is still in flight.
+                        var assembly: ChildToolAssembly? = null
+                        var toolsDrained = true
+                        var assemblyDrain: ChildToolDrain? = null
+                        var poolSelection: ChildModelDefinition? = null
                         var workerFinished = false
                         var cleanupFinished = true // No transport exists on pre-open failures.
                         var itemReleased = false
                         fun releaseItemIfReady() {
                             val release = synchronized(gate) {
-                                if (!workerFinished || !cleanupFinished || itemReleased) false
+                                if (!workerFinished || !cleanupFinished || !toolsDrained || itemReleased) false
                                 else { itemReleased = true; true }
                             }
                             if (!release) return
@@ -210,10 +223,64 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             onProfilesChanged()
                             notifyIfIdle()
                         }
+                        fun awaitSelection(): ChildModelDefinition {
+                            while (true) {
+                                check(!cancelled() && beforeDeadline())
+                                check(pause?.awaitBoundary(boundary = { lease?.enterBoundary() }) != false)
+                                val selected = definition.current()
+                                check(selected.role == definition.role) { "child_role_changed" }
+                                if (poolSelection?.sameSelection(selected) != true) {
+                                    if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
+                                    acquired = false; lease = null; permit = null
+                                    lease = sharedPool?.invoke(selected)
+                                    permit = if (lease != null) null else synchronized(gate) {
+                                        localPools.getOrPut(selected.poolKey) { ChildModelPool(selected.parallelLimit) }
+                                            .also { limits[selected.poolKey] = it.semaphore }.semaphore
+                                    }
+                                    poolSelection = selected
+                                }
+                                if (lease != null) {
+                                    acquired = checkNotNull(lease).tryAcquire()
+                                } else if (!acquired) acquired = checkNotNull(permit).tryAcquire(25, TimeUnit.MILLISECONDS)
+                                if (!acquired) { poolWaiting(true); Thread.sleep(25); continue }
+                                check(!cancelled() && beforeDeadline())
+                                if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) continue
+                                if (!selected.sameSelection(definition.current())) continue
+                                if (lease?.leaveBoundary() == false) { poolWaiting(true); Thread.sleep(25); continue }
+                                poolWaiting(false)
+                                if (!journalStarted) { store?.started(record); journalStarted = true }
+                                return selected
+                            }
+                        }
+                        fun requireCurrentRole() {
+                            check(definition.current().role == definition.role) { "child_role_changed" }
+                        }
+                        fun awaitRequestBoundary() {
+                            requireCurrentRole()
+                            check(!cancelled() && beforeDeadline())
+                            lease?.enterBoundary()
+                            check(pause?.awaitBoundary(boundary = { lease?.enterBoundary() }) != false)
+                            while (lease != null) {
+                                check(!cancelled() && beforeDeadline())
+                                check(pause?.awaitBoundary(boundary = { lease?.enterBoundary() }) != false)
+                                if (checkNotNull(lease).tryAcquire() && checkNotNull(lease).leaveBoundary()) { poolWaiting(false); break }
+                                poolWaiting(true); Thread.sleep(25)
+                            }
+                            check(!cancelled() && beforeDeadline())
+                            requireCurrentRole()
+                        }
                         try {
                             if (!cancelled() && beforeDeadline()) {
                                 val child = record.owner
-                                val scope = ChildRunScope.capture(child, parentSession, parentAuthorization, emptySet())
+                                if (definition.role == ChildModelRole.IMPLEMENTATION) {
+                                    awaitSelection()
+                                    val factory = checkNotNull(toolAssembly) { "child_execution_tools_unavailable" }
+                                    assembly = factory.create(child, parentSession, parentAuthorization, record.access)
+                                    synchronized(gate) { toolsDrained = false; cleanupPins++; assemblies.add(checkNotNull(assembly)) }
+                                    check(assembly!!.scope.owner == child) { "child_assembly_owner_mismatch" }
+                                    check(!cancelled() && assembly!!.prepareOnWorker() && !cancelled())
+                                }
+                                val scope = assembly?.scope ?: ChildRunScope.capture(child, parentSession, parentAuthorization, emptySet())
                                 val initial = Message(MessageId(child.assistantMessageId), parent.conversationId, RunId(child.childRunId),
                                     Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
                                 val user = Message(MessageId(UUID.randomUUID().toString()), initial.conversationId, initial.runId,
@@ -225,53 +292,26 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     override val definitions = emptyList<app.daiyu.android.domain.ToolDefinition>()
                                     override fun execute(invocation: ToolInvocation): String = error("child_tools_disabled")
                                 }
+                                val tools = assembly?.tools ?: noTools
                                 val selected = object : ModelPort {
-                                    override fun open(history: List<Message>): ModelSession = open(history, noTools.definitions)
+                                    override fun open(history: List<Message>): ModelSession = open(history, tools.definitions)
                                     override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
-                                        check(definitions.isEmpty())
+                                        check(assembly != null || definitions.isEmpty())
                                         check(!cancelled() && beforeDeadline())
                                         check(pause?.awaitBoundary() != false)
                                         check(!cancelled() && beforeDeadline())
                                         var selectedModel: ChildModelDefinition
                                         var port: ModelPort
                                         while (true) {
-                                            check(pause?.awaitBoundary() != false)
-                                            check(!cancelled() && beforeDeadline())
-                                            selectedModel = definition.current()
-                                            lease?.close()
-                                            lease = sharedPool?.invoke(selectedModel) ?: synchronized(gate) {
-                                                localPools.getOrPut(selectedModel.poolKey) {
-                                                    ChildModelPool(selectedModel.parallelLimit).also {
-                                                        limits[selectedModel.poolKey] = it.semaphore
-                                                    }
-                                                }.lease()
-                                            }
-                                            while (!acquired && !cancelled() && beforeDeadline() &&
-                                                (pause == null || pause.snapshot() == ChildTaskPauseState.ACTIVE) &&
-                                                selectedModel.sameSelection(definition.current()))
-                                                acquired = if (lease != null) {
-                                                    if (checkNotNull(lease).tryAcquire()) { poolWaiting(false); true }
-                                                    else { poolWaiting(true); Thread.sleep(25); false }
-                                                } else checkNotNull(permit).tryAcquire(25, TimeUnit.MILLISECONDS)
-                                            check(!cancelled() && beforeDeadline())
-                                            if (!acquired) continue
-                                            if (!selectedModel.sameSelection(definition.current())) {
-                                                if (lease != null) { lease?.close(); lease = null } else checkNotNull(permit).release(); acquired = false; continue
-                                            }
-                                            if (!journalStarted) { store?.started(record); journalStarted = true }
-                                            if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) {
-                                                if (lease != null) { lease?.close(); lease = null } else checkNotNull(permit).release(); acquired = false; continue
-                                            }
+                                            selectedModel = awaitSelection()
                                             port = selectedModel.create()
-                                            if ((pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) ||
-                                                !selectedModel.sameSelection(definition.current())) {
-                                                if (lease != null) { lease?.close(); lease = null } else checkNotNull(permit).release(); acquired = false; continue
-                                            }
+                                            if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) continue
+                                            if (!selectedModel.sameSelection(definition.current())) continue
+                                            if (lease?.leaveBoundary() == false) continue
                                             store?.selected(record, selectedModel.display)
                                             record = record.copy(display = selectedModel.display)
-                                            if ((pause == null || pause.snapshot() == ChildTaskPauseState.ACTIVE) &&
-                                                selectedModel.sameSelection(definition.current()) && (lease?.leaveBoundary() != false)) break
-                                            if (lease != null) { lease?.close(); lease = null } else checkNotNull(permit).release(); acquired = false
+                                            if (!selectedModel.sameSelection(definition.current())) continue
+                                            break
                                         }
                                         val revoked = context.cancelled()
                                         synchronized(gate) {
@@ -285,13 +325,18 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         return object : ModelSession {
                                             override fun cancel() {
                                                 if (!cancelStarted.compareAndSet(false, true)) return
-                                                try { transport.cancel() }
+                                                var confirmed = false
+                                                try { transport.cancel(); confirmed = true }
                                                 finally {
-                                                    synchronized(gate) { cleanupFinished = true; cleanupPins-- }
+                                                    synchronized(gate) {
+                                                        cleanupFinished = confirmed || assembly == null
+                                                        if (cleanupFinished) cleanupPins--
+                                                    }
                                                     releaseItemIfReady()
                                                 }
                                             }
                                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                                                if (assembly != null) awaitRequestBoundary()
                                                 val texts = mutableMapOf<String, Int>()
                                                 val progress = linkedMapOf<String, String>()
                                                 var rejected: Exception? = null
@@ -312,10 +357,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                             progress[id] = if (final) text else progress[id].orEmpty() + text
                                                             onProgress(child, progress.values.joinToString(""))
                                                         }
-                                                        is ModelEvent.ToolReady -> throw ModelRequestException(ModelFailure.PROTOCOL)
+                                                        is ModelEvent.ToolReady -> if (assembly == null) throw ModelRequestException(ModelFailure.PROTOCOL) else sink(event)
                                                         is ModelEvent.Usage -> sink(event)
-                                                        // No continuation or reasoning projection in this first stage.
-                                                        else -> Unit
+                                                        else -> if (assembly != null) sink(event)
                                                     } } catch (failure: Exception) { rejected = failure; throw failure }
                                                 }
                                                 var continuing = false
@@ -367,11 +411,24 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         }
                                     }
                                 }
-                                val runner = ChatRunner(selected, memory, noTools, RunnerOptions(maxRounds = 1,
+                                val receipts = assembly?.receipts?.let { delegate -> object : app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor by delegate {
+                                    override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult> {
+                                        check(pause?.awaitBoundary() != false && !cancelled())
+                                        requireCurrentRole()
+                                        return delegate.execute(message, invocations, cancelled)
+                                    }
+                                    override fun start(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): ReceiptBatchStart {
+                                        check(pause?.awaitBoundary() != false && !cancelled())
+                                        requireCurrentRole()
+                                        return delegate.start(message, invocations, cancelled)
+                                    }
+                                } }
+                                val runner = ChatRunner(selected, memory, tools, RunnerOptions(maxRounds = if (assembly == null) 1 else 64,
+                                    receiptBatchExecutor = receipts,
                                     runtimeStore = usageRecorder?.let { recorder -> object : RuntimeStore {
                                         override fun save(checkpoint: RunCheckpoint) = recorder.record(record, checkpoint)
                                     } },
-                                    validateBatch = { require(it.isEmpty()) { "child_tools_disabled" } })) { scope.requireOwner(it) }
+                                    validateBatch = { require(assembly != null || it.isEmpty()) { "child_tools_disabled" } })) { scope.requireOwner(it) }
                                 val attached = synchronized(gate) { if (closed) false else { runners.add(runner); runnerDefinitions[runner] = definition; true } }
                                 try {
                                     if (attached && !cancelled()) {
@@ -392,6 +449,23 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             }
                         } catch (_: Exception) { /* A sent request is uncertain; never reopen it. */ }
                         finally {
+                            assembly?.let { resource ->
+                                try { resource.close() }
+                                catch (_: Exception) { synchronized(gate) { assemblyDrain = ChildToolDrain.Unknown("child_tool_close_failed") } }
+                                try { resource.observeClose { result ->
+                                    val drained = synchronized(gate) {
+                                        if (assemblyDrain != null) false else {
+                                            assemblyDrain = result
+                                            if (result == ChildToolDrain.Drained) {
+                                                toolsDrained = true; cleanupPins--; assemblies.remove(resource); true
+                                            } else false
+                                        }
+                                    }
+                                    if (drained) releaseItemIfReady()
+                                } } catch (_: Exception) {
+                                    synchronized(gate) { if (assemblyDrain == null) assemblyDrain = ChildToolDrain.Unknown("child_tool_drain_unconfirmed") }
+                                }
+                            }
                             pause?.terminate()
                             try {
                                 val result = completion
@@ -455,9 +529,10 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         val active = synchronized(gate) {
             closed = true
             pauseControl?.terminate()
-            runners.toList()
+            runners.toList() to assemblies.toList()
         }
-        active.forEach { it.stop() }
+        active.first.forEach { it.stop() }
+        active.second.forEach { runCatching { it.close() } }
         workers.shutdown()
         notifyIfIdle()
     }

@@ -34,7 +34,7 @@ on:
       check_scope:
         description: 仅检查模式的补检范围
         type: choice
-        options: [all, unit, lint]
+        options: [all, unit, lint, delegation]
         default: all
       expected_sha:
         description: 构建或检查目标完整提交SHA（自动调度必填，手动可留空）
@@ -72,7 +72,7 @@ concurrency:
 jobs:
   checks:
     name: 只检查 ${{ matrix.os }}
-    if: inputs.mode == 'checks'
+    if: inputs.mode == 'checks' && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -103,8 +103,17 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: 独立边界与脚本检查
         shell: bash
+        env:
+          CHECK_SCOPE: ${{ inputs.check_scope }}
         run: |
-          python scripts/acceptance/record_tool_tests.py --python python
+          if [[ "$CHECK_SCOPE" == "delegation" ]]; then
+            python -B -m unittest discover -s tests -p 'test_delegation*.py' -v
+            python -B -m unittest discover -s tests -p 'test_cooperation*.py' -v
+            python -B -m unittest discover -s tests -p 'test_cloud*.py' -v
+            python -B -m unittest discover -s tests -p 'test_child*.py' -v
+          else
+            python scripts/acceptance/record_tool_tests.py --python python
+          fi
           python scripts/verify_boundaries.py
           bash -n scripts/smoke_boot.sh
       - name: 准备固定离线语音 JNI（不打包）
@@ -132,6 +141,27 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: error
+  delegation-matrix:
+    name: 子代理定向矩阵核验
+    if: inputs.mode == 'checks' && inputs.check_scope == 'delegation' && github.ref == 'refs/heads/main'
+    needs: checks
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼检查报告-ubuntu-26.04
+          path: reports/linux
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼检查报告-windows-latest
+          path: reports/windows
+      - name: 核实同次运行身份及Windows跳过对应Linux执行
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 scripts/cooperation/verify_delegation_matrix.py reports/windows/cooperation-reports/delegation reports/linux/cooperation-reports/delegation
   build:
     name: 单测、检查与开发包
     if: inputs.mode == 'build' && github.ref == 'refs/heads/main'

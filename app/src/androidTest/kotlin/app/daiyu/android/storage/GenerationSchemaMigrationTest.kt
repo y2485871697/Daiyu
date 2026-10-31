@@ -248,7 +248,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
 
     fun testFreshInstallHasBothTablesOwnerIndexAndStrictNumericConstraints() {
         val f = fixture(); val helper = f.helper(); val db = helper.writableDatabase
-        assertEquals(30, db.version)
+        assertEquals(31, db.version)
         assertVideoSidecarSchema(db)
         assertEquals(0, count(db, "message_video_inputs"))
         assertTrue(tableExists(db, "generation_attempts")); assertTrue(tableExists(db, "generation_outputs"))
@@ -267,7 +267,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         }
         helper.close()
         val reopenedDb = f.helper().writableDatabase
-        assertEquals(30, reopenedDb.version)
+        assertEquals(31, reopenedDb.version)
         assertVideoSidecarSchema(reopenedDb)
         assertEquals(before, snapshot(reopenedDb))
     }
@@ -325,7 +325,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
             val after = snapshot(db)
             helper.close()
             val reopenedDb = f.helper().writableDatabase
-            assertEquals(30, reopenedDb.version)
+            assertEquals(31, reopenedDb.version)
             assertModelSelectionSchema(reopenedDb)
             assertVideoSidecarSchema(reopenedDb)
             assertEquals(after, snapshot(reopenedDb))
@@ -381,7 +381,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
             snapshot(db)
         }
         val helper = f.helper(); val db = helper.writableDatabase
-        assertEquals(30, db.version)
+        assertEquals(31, db.version)
         assertVideoSidecarSchema(db)
         assertVideoWitnessSchema(db)
         assertEquals(0, count(db, "message_video_inputs"))
@@ -417,7 +417,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
             SQLiteGenerationAttemptStore({ db }, f.binding).reserve(f.attempt))
         helper.close()
         val reopened = f.helper(); val reopenedDb = reopened.writableDatabase
-        assertEquals(30, reopenedDb.version)
+        assertEquals(31, reopenedDb.version)
         assertVideoSidecarSchema(reopenedDb)
         assertVideoWitnessSchema(reopenedDb)
         assertEquals(after, snapshot(reopenedDb))
@@ -456,7 +456,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         }
         val before = f.raw().use(::snapshot)
         val helper = f.helper(); val db = helper.writableDatabase
-        assertEquals(30, db.version)
+        assertEquals(31, db.version)
         assertVideoSidecarSchema(db)
         listOf("generation_outputs", "generation_attempts", "conversations", "messages", "composer").forEach {
             assertEquals(it, before[it], snapshot(db)[it])
@@ -477,7 +477,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         assertTrue(rejected { db.execSQL("UPDATE generation_outputs SET width=4294967297") } is SQLiteConstraintException)
         helper.close()
         val reopened = f.helper()
-        assertEquals(30, reopened.readableDatabase.version)
+        assertEquals(31, reopened.readableDatabase.version)
         assertVideoSidecarSchema(reopened.readableDatabase)
         assertEquals(found, f.outputStore(reopened).find(f.attempt, 0))
         reopened.readableDatabase.rawQuery("SELECT outcome FROM generation_attempts", null).use {
@@ -539,7 +539,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
             db.execSQL("UPDATE generation_outputs SET receipt=?", arrayOf(receipt))
         }
         val helper = f.helper(); val db = helper.writableDatabase
-        assertEquals(30, db.version); assertEquals(1, count(db, "generation_outputs"))
+        assertEquals(31, db.version); assertEquals(1, count(db, "generation_outputs"))
         assertVideoSidecarSchema(db)
         assertTrue(tableExists(db, "assistants")); assertTrue(tableExists(db, "generation_attempts"))
         assertEquals("retained draft", helper.conversations().single().draft)

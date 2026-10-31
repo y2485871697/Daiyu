@@ -26,7 +26,7 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
         context = object : ContextWrapper(base) { override fun getFilesDir(): File = files }
         database = ConversationDatabase(context)
         service = ContextService(context, database)
-        assertEquals(30, database.writableDatabase.version)
+        assertEquals(31, database.writableDatabase.version)
         // Production helper, not a test-only manual schema installation.
         assertTrue(database.writableDatabase.rawQuery("SELECT 1 FROM sqlite_master WHERE name='conversation_title_revisions'", null).use { it.moveToFirst() })
     }
@@ -92,7 +92,7 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
             }
             database.close()
             database = ConversationDatabase(context); service = ContextService(context, database)
-            assertEquals(30, database.writableDatabase.version)
+            assertEquals(31, database.writableDatabase.version)
             val captured = adapter().capture(id)!!
             assertTrue(adapter().isCurrent(captured)); assertFalse(captured.titleTouched)
             assertEquals("新会话", captured.originalTitle)

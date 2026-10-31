@@ -67,7 +67,7 @@ class ConversationModelBindingDatabaseTest : InstrumentationTestCase() {
         database.writableDatabase.execSQL("DROP TABLE conversation_model_selections")
         database.writableDatabase.version = 29
         database.close(); database = ConversationDatabase(context)
-        assertEquals(30, database.readableDatabase.version)
+        assertEquals(31, database.readableDatabase.version)
         database.initializeModelBindings(a)
         assertEquals(a, database.modelBinding(source.id))
         assertEquals(source.assistantId, database.assistantId(source.id))

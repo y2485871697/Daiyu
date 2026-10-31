@@ -6,6 +6,22 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 SCOPES = {'unit': ':core-domain:test :app:testDebugUnitTest', 'lint': ':app:lintDebug'}
+CLOUD_SCOPES = {**SCOPES, 'delegation': (
+    ':core-domain:test --tests app.daiyu.android.domain.delegation.* --tests app.daiyu.android.domain.tools.* '
+    ':app:testDebugUnitTest --tests app.daiyu.android.delegation.* --tests app.daiyu.android.integration.tools.* '
+    '--tests app.daiyu.android.backup.* --tests app.daiyu.android.browser.* --tests app.daiyu.android.shizuku.* '
+    '--tests app.daiyu.android.terminal.* :app:compileDebugAndroidTestKotlin')}
+UNIT_SCOPES = {'unit', 'delegation'}
+DELEGATION_PACKAGES = (
+    ('core-domain', 'app.daiyu.android.domain.delegation.'),
+    ('core-domain', 'app.daiyu.android.domain.tools.'),
+    ('app', 'app.daiyu.android.delegation.'),
+    ('app', 'app.daiyu.android.integration.tools.'),
+    ('app', 'app.daiyu.android.backup.'),
+    ('app', 'app.daiyu.android.browser.'),
+    ('app', 'app.daiyu.android.shizuku.'),
+    ('app', 'app.daiyu.android.terminal.'),
+)
 UNIT_REPORTS = ('core-domain/build/test-results/test', 'app/build/test-results/testDebugUnitTest')
 
 
@@ -19,7 +35,8 @@ def configuration(repo):
              'gradle/wrapper/gradle-wrapper.properties', 'gradle/wrapper/gradle-wrapper.jar',
              'scripts/cooperation/checks_only.init.gradle', 'scripts/cooperation/cloud_checks.py',
              'scripts/cooperation/pc_checks.ps1', 'scripts/cooperation/evidence.py',
-             'scripts/cooperation/windows_unit_skips.json', '.github/workflows/build.yml']
+             'scripts/cooperation/windows_unit_skips.json', 'scripts/cooperation/verify_delegation_matrix.py',
+             '.github/workflows/build.yml']
     h = hashlib.sha256()
     for name in paths:
         h.update(name.encode() + b'\0' + Path(repo, name).read_bytes() + b'\0')
@@ -40,7 +57,7 @@ def read_json(path):
 
 def validate_record(record, sha, config, scope):
     if (record.get('source_sha') != sha or record.get('config_id') != config
-            or record.get('scope') != scope or record.get('task') != SCOPES[scope]
+            or record.get('scope') != scope or record.get('task') != CLOUD_SCOPES[scope]
             or not record.get('check_id') or not isinstance(record.get('check_attempt'), int)
             or record['check_attempt'] < 1 or record.get('exit_code') is None):
         raise ValueError('check_identity_or_terminal_mismatch')
@@ -54,7 +71,7 @@ def verify_xml(archive, scope, platform=None):
             p = PurePosixPath(n.replace('\\', '/'))
             if p.is_absolute() or '..' in p.parts or ':' in n:
                 raise ValueError('unsafe_report_path')
-        if scope == 'unit':
+        if scope in UNIT_SCOPES:
             named_reports = [(n.replace('\\', '/'), ET.fromstring(z.read(n))) for n in z.namelist()
                              if n.replace('\\', '/').split('/')[-1].startswith('TEST-') and n.endswith('.xml')]
             reports = [t for _, t in named_reports]
@@ -87,9 +104,29 @@ def verify_xml(archive, scope, platform=None):
                         raise ValueError('unit_report_failed_or_missing')
                     seen.add(identity)
                     skipped.append(dict(classname=identity[0], name=identity[1], reason=reason))
+            if scope == 'delegation':
+                covered = set()
+                for name, suite in named_reports:
+                    module = name.split('/')[0]
+                    for case in suite.findall('testcase'):
+                        group = next((p for p in DELEGATION_PACKAGES
+                                      if p[0] == module and case.get('classname', '').startswith(p[1])), None)
+                        if group is None:
+                            raise ValueError('delegation_unexpected_test')
+                        if case.find('skipped') is None:
+                            covered.add(group)
+                if covered != set(DELEGATION_PACKAGES):
+                    raise ValueError('delegation_package_coverage_missing')
+                summary = json.loads(z.read('androidtest-compile.json'))
+                if (summary.get('task') != ':app:compileDebugAndroidTestKotlin'
+                        or summary.get('outcome') not in ('EXECUTED', 'UP-TO-DATE', 'FROM-CACHE')
+                        or summary.get('instrumentation_run') is not False):
+                    raise ValueError('androidtest_compile_not_verified')
             count = sum(int(t.get('tests', '0')) for t in reports)
             return {'tests_passed': count - len(skipped), 'tests_skipped': len(skipped),
                     'skipped_tests': skipped}
+        if scope != 'lint':
+            raise ValueError('unknown_check_scope')
         names = [n for n in z.namelist() if n.endswith('lint-results-debug.xml')]
         if len(names) != 1:
             raise ValueError('lint_report_missing')
@@ -102,9 +139,9 @@ def verify_xml(archive, scope, platform=None):
         return {'lint_errors': 0, 'lint_warnings': sum(i.get('severity') == 'Warning' for i in issues)}
 
 
-def verify_unit_matrix(windows_archive, linux_archive):
-    windows = verify_xml(windows_archive, 'unit', platform='Windows')
-    verify_xml(linux_archive, 'unit', platform='Linux')
+def verify_unit_matrix(windows_archive, linux_archive, scope='unit'):
+    windows = verify_xml(windows_archive, scope, platform='Windows')
+    verify_xml(linux_archive, scope, platform='Linux')
     passed = set()
     duplicates = set()
     with zipfile.ZipFile(linux_archive) as z:
@@ -150,9 +187,9 @@ def verify_bundle(directory, sha, config, scope, receiving=False):
                 if member['environment']['os'] != {'ubuntu-26.04': 'Linux', 'windows-latest': 'Windows'}[platform]:
                     raise ValueError('cloud_matrix_platform_mismatch')
                 matrix_directories[platform] = sibling
-            if scope == 'unit':
+            if scope in UNIT_SCOPES:
                 verify_unit_matrix(matrix_directories['windows-latest'] / 'reports.zip',
-                                   matrix_directories['ubuntu-26.04'] / 'reports.zip')
+                                   matrix_directories['ubuntu-26.04'] / 'reports.zip', scope)
         artifact = read_json(base / (str(proof['artifact_id']) + '.json'))
         archive = base / (str(proof['artifact_id']) + '.zip')
         run = read_json(base / 'run.json')

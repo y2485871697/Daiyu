@@ -15,18 +15,18 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
 
     fun tool(): RegisteredTool = object : RegisteredTool {
         override val definition = ToolDefinition(TOOL_NAME, 1,
-            "提交后台审查子任务，可能产生模型费用。回执只确认排队持久化；任务可在主回复结束后继续，没有工具或写权限，不自动重试。",
+            "提交后台子任务，可能产生模型费用。回执仅确认排队持久化，主回复结束后继续。执行角色使用父任务允许的可委派工具；tool_names可收窄，空数组禁用；browser_access为full/read_only/disabled，默认full但不超过父权限。审查角色仅文本审查，不递归委派或自动重试；继续和追加保留原工具范围。",
             CAPABILITY, ToolEffect.READ_ONLY,
             ToolSchema(listOf(ArgumentField("tasks", ArgumentType.ArrayValue(
                 ArgumentType.ObjectValue(ToolSchema(listOf(
                     ArgumentField("profile_id", ArgumentType.Text(200, minimumLength = 1)),
                     ArgumentField("prompt", ArgumentType.Text(4096, minimumLength = 1))
-                ))), minimumItems = 1, maximumItems = null)))))
+                ) + ChildToolAccessArguments.fields)), minimumItems = 1, maximumItems = null)))))
 
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val tasks = arguments.array("tasks").map {
                 val task = it as ToolArguments
-                ChildModelTask(task.text("profile_id"), task.text("prompt"))
+                ChildModelTask(task.text("profile_id"), task.text("prompt"), ChildToolAccessArguments.parse(task))
             }
             val available = currentProfiles?.invoke() ?: profiles
             require(tasks.all { it.prompt.isNotBlank() && it.profileId in available }) { "invalid_arguments" }

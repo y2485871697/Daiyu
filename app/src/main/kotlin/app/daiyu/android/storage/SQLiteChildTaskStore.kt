@@ -166,6 +166,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         put("prompt", task.prompt); put("status", task.status.name); put("text", task.text); put("detail", task.detail)
         put("agent_name_snapshot", task.display?.agentName); put("model_id_snapshot", task.display?.modelId)
         put("model_name_snapshot", task.display?.modelName)
+        if (task.access != ChildToolAccess.NONE) put("tool_access_json", task.access.toJson()) else putNull("tool_access_json")
         put("control_revision", task.revision); put("source_task_id", task.sourceTaskId); put("command_kind", task.commandKind?.name)
     }
 
@@ -176,13 +177,14 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         c.getLong(14), if (c.isNull(15)) null else c.getString(15),
         if (c.isNull(16)) null else ChildTaskCommandKind.valueOf(c.getString(16)),
         if (c.isNull(17) && c.isNull(18) && c.isNull(19)) null else
-            ChildTaskDisplay(c.getString(17), c.getString(18), c.getString(19)))
+            ChildTaskDisplay(c.getString(17), c.getString(18), c.getString(19)),
+        if (c.isNull(20)) ChildToolAccess.NONE else ChildToolAccess.fromJson(c.getString(20)))
 
     companion object {
         private const val TABLE = "child_tasks"
         private val COLUMNS = arrayOf("task_id", "conversation_id", "parent_run_id", "parent_message_id", "parent_owner_id",
             "task_group_id", "generation", "task_index", "assistant_message_id", "profile_id", "prompt", "status", "text", "detail",
-            "control_revision", "source_task_id", "command_kind", "agent_name_snapshot", "model_id_snapshot", "model_name_snapshot")
+            "control_revision", "source_task_id", "command_kind", "agent_name_snapshot", "model_id_snapshot", "model_name_snapshot", "tool_access_json")
         private val TERMINAL = setOf(ChildTaskStatus.COMPLETED, ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN)
 
         fun installSchema(db: SQLiteDatabase) {
@@ -194,6 +196,16 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
             db.execSQL("CREATE INDEX IF NOT EXISTS child_tasks_conversation ON child_tasks(conversation_id,seq)")
             installCommandSchema(db)
             installDisplaySchema(db)
+            installAccessSchema(db)
+        }
+
+        fun installAccessSchema(db: SQLiteDatabase) {
+            val exists = db.rawQuery("PRAGMA table_info(child_tasks)", null).use { c ->
+                var found = false
+                while (c.moveToNext()) if (c.getString(1) == "tool_access_json") found = true
+                found
+            }
+            if (!exists) db.execSQL("ALTER TABLE child_tasks ADD COLUMN tool_access_json TEXT")
         }
 
         fun installDisplaySchema(db: SQLiteDatabase) {

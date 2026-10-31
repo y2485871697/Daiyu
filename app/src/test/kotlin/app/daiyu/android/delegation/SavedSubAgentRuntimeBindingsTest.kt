@@ -229,11 +229,24 @@ class SavedSubAgentRuntimeBindingsTest {
             config to provider.copy(models = listOf(child.copy(isEnabled = false))),
             config to provider.copy(models = listOf(child.copy(supportsImageGeneration = true))),
             config.copy(profiles = listOf(profile.copy(role = "image_generation"))) to provider,
-            config.copy(profiles = listOf(profile.copy(role = "implementation"))) to provider,
+            config.copy(profiles = listOf(profile.copy(role = "video_generation"))) to provider,
         )) assertThrows(IllegalArgumentException::class.java) {
             bindings.freeze(owner, configured, listOf(source), resolver)
         }
         assertEquals(0, reads)
+    }
+
+    @Test fun implementationAndReviewBothBindTheExplicitSavedModel() {
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        for (role in listOf("implementation", "review")) {
+            val definition = bindings.freeze(owner, config.copy(profiles = listOf(profile.copy(role = role))),
+                listOf(provider), { _, _ -> saved }).getValue(profile.id)
+            assertEquals(if (role == "implementation") app.daiyu.android.domain.delegation.ChildModelRole.IMPLEMENTATION
+                else app.daiyu.android.domain.delegation.ChildModelRole.REVIEW, definition.role)
+            definition.create()
+        }
+        assertEquals(listOf(child.modelId, child.modelId), captured.map { it.model })
     }
 
     @Test fun changedOwnerOrCatalogRevisionInvalidatesPreparationWithoutChangingOldModels() {

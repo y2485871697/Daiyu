@@ -764,7 +764,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 fun recovered() {
                     if (!stagingTransportBatch && effectiveOutput) {
                         val recoveredBudget = reconnectBudget
-                        recoveredBudget?.finish("succeeded")
+                        recoveredBudget?.recovered()
                         if (reconnectBudget === recoveredBudget) reconnectBudget = null
                     }
                 }

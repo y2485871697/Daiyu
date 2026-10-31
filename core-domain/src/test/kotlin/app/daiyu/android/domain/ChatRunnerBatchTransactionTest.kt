@@ -106,15 +106,19 @@ class ChatRunnerBatchTransactionTest {
     @Test fun firstEffectiveAcknowledgedBatchClosesErrorOnlyAfterAtomicCommit() {
         val statuses = mutableListOf<String>()
         var firstEffectiveCommit = true
+        var recoveredCalls = 0
         val runtime = object : Runtime() {
             override fun commitCheckpoint(checkpoint: RunCheckpoint) {
                 if (checkpoint.transport?.sequence == 2L && firstEffectiveCommit) {
-                    assertTrue(statuses.isEmpty()); firstEffectiveCommit = false
+                    assertTrue(statuses.isEmpty()); assertEquals(0, recoveredCalls); firstEffectiveCommit = false
                 }
                 super.commitCheckpoint(checkpoint)
             }
         }
-        val budget = object : Budget() { override fun finish(status: String) { statuses.add(status) } }
+        val budget = object : Budget() {
+            override fun finish(status: String) { statuses.add(status) }
+            override fun recovered() { recoveredCalls++; finish("succeeded") }
+        }
         val session = object : Session() {
             override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
                 assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(0, ModelEvent.TextDelta("t", "prefix"))))
@@ -132,6 +136,7 @@ class ChatRunnerBatchTransactionTest {
         assertEquals(RunStatus.COMPLETED, result.status)
         assertEquals("prefixsuffix", result.blocks.filterIsInstance<MessageBlock.Text>().single().text)
         assertEquals(listOf("succeeded"), statuses)
+        assertEquals(1, recoveredCalls)
     }
 
     @Test fun failedBatchCommitCannotLeakDirtyStateIntoLaterCheckpoint() = failedCommit(false)

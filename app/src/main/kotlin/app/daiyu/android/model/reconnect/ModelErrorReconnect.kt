@@ -165,10 +165,14 @@ internal class ModelErrorReconnect(
         windowMs?.let { (it - elapsedLocked()).coerceAtLeast(0) }
     }
 
-    fun finish(status: String) = synchronized(lock) {
+    fun finish(status: String) = complete(status, committedOutput = false)
+
+    fun recovered() = complete("succeeded", committedOutput = true)
+
+    private fun complete(status: String, committedOutput: Boolean) = synchronized(lock) {
         if (terminal) return@synchronized
         // A committed accepted output closes this error even if pause raced its ACK.
-        val finalStatus = if (pausedAtMs != null && status != "succeeded") "stopped" else status
+        val finalStatus = if (pausedAtMs != null && !committedOutput) "stopped" else status
         if (finalStatus == "succeeded" && (expired || (windowMs != null && elapsedLocked() >= windowMs))) {
             expired = true
             throw ReconnectDeadlineException(lastReason, lateSuccess = true)

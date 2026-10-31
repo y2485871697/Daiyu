@@ -43,6 +43,7 @@ class FrozenReconnectAdapter private constructor(
                     return AutoCloseable { retained.detach(scope) }
                 }
                 override fun finish(status: String) = retained.finish(status)
+                override fun recovered() = retained.recovered()
             }
         })
     }

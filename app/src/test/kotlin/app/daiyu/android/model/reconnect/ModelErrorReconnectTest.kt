@@ -182,6 +182,18 @@ class ModelErrorReconnectTest {
         assertEquals(count, events.size)
     }
 
+    @Test fun committedOutputCanCloseRecoveryWhenPauseRacesItsReceipt() {
+        val clock = Clock(); val control = Control(); val events = mutableListOf<ReconnectChanged>()
+        val reconnect = state(clock, events); val binding = reconnect.bind(control)
+        reconnect.start(); clock.advance(1_000); control.pause(); clock.advance(60_000)
+        reconnect.recovered()
+        assertEquals("succeeded", events.last().status)
+        assertEquals(1_000L, events.last().elapsedMs)
+        assertEquals(1, events.map { it.reconnectId }.distinct().size)
+        val count = events.size; control.resume(); clock.advance(60_000)
+        assertEquals(count, events.size); binding.close()
+    }
+
     @Test fun alreadyPausedCannotStartTimerAcceptSuccessOrUseAttachedTransport() {
         val clock = Clock(); val control = Control().also { it.pause() }; val events = mutableListOf<ReconnectChanged>()
         val reconnect = state(clock, events); val binding = reconnect.bind(control)

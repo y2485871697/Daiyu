@@ -128,6 +128,8 @@ interface TransportReconnectBudget {
     fun setPaused(paused: Boolean, revision: Long)
     fun attach(disconnect: () -> Unit): AutoCloseable
     fun finish(status: String)
+    /** An effective output has already committed; pause cannot revoke that receipt. */
+    fun recovered() = finish("succeeded")
 }
 fun interface TransportReconnectBudgetFactory {
     fun create(round: Int, reason: ModelFailure, diagnostic: ModelRequestDiagnostic?): TransportReconnectBudget

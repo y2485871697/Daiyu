@@ -231,7 +231,11 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         runtime = source('ControllerVoiceRuntime.kt')
         save = runtime.split('suspend fun save(', 1)[1].split('suspend fun saveAccount(', 1)[0]
         self.assertIn('failed = true', save)
-        self.assertIn('check(vault.load().apiKey == encoded)', save)
+        self.assertIn('persist("voice_save_unconfirmed")', save)
+        persist = runtime.split('private suspend fun persist(', 1)[1].split('fun accountCurrent(', 1)[0]
+        self.assertIn('check(vault.load().apiKey == encoded)', persist)
+        self.assertLess(persist.index('vault.save(envelope(encoded))'), persist.index('check(vault.load().apiKey == encoded)'))
+        self.assertLess(persist.index('check(vault.load().apiKey == encoded)'), persist.index('publish(next); failed = false'))
         self.assertNotIn('VoiceProfileEnvelope(emptyMap()', save)
 
     def test_personal_accounts_do_not_replace_the_whole_playback_profile(self):

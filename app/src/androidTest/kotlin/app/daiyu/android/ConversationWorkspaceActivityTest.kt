@@ -102,7 +102,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
                 ChatMenuLayer(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
                         ChatComposer(ComposerUi(text = composerDraft, editorGeneration = editorGeneration),
-                            ChatScreenActions(onTextChange = { composerDraft = it }, onOpenWorkspace = { opens++ }, onVoiceLongPress = { voiceLongPresses++ }))
+                            ChatScreenActions(onTextChange = { composerDraft = it }, onOpenWorkspace = { opens++ }, onVoiceLongPress = { voiceLongPresses++; true }))
                     }
                 }
             }

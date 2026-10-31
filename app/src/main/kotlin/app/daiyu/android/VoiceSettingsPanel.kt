@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import app.daiyu.android.ui.navigation.PageBackStack
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -338,7 +339,7 @@ internal fun VoiceSettingsPanel(
                                 TextButton("保存连接设置", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                                     .fillMaxWidth().testTag("voice-save"),
                                     minHeight = 48.dp, cornerRadius = 24.dp,
-                                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                                    colors = ButtonDefaults.textButtonColorsPrimary(color = DaiyuPalette.switchTrack),
                                     enabled = !busy && draft.asrKey.isNotBlank(),
                                     onClick = { if (current()) save(recognitionConfiguration().copy(asrKey = draft.asrKey.trim())) })
                                 SettingsRow("高级：更换识别服务", tag = "voice-asr-advanced",

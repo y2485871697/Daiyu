@@ -99,6 +99,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     onOpenWorkspace: () -> Unit = actions.onOpenWorkspace,
     onVoiceAnchorBounds: (Rect) -> Unit = {},
     callUi: DoubaoCallUi? = null,
+    callMotion: DoubaoCallMotionState? = null,
     attachmentContent: @Composable () -> Unit = {}) {
     var lifecycleDismissInProgress by remember { mutableStateOf(false) }
     app.daiyu.android.ui.components.DismissImeOnStop { dismiss ->
@@ -135,7 +136,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     }
     var showContextTokens by rememberSaveable { mutableStateOf(false) }
     var attachments by remember(state.editorGeneration, actions.editingMessageKey, state.enabled) { mutableStateOf(false) }
-    var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes) { mutableStateOf(false) }
+    var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes, callUi?.sessionKey) { mutableStateOf(false) }
     val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
     val preparingSend = state.preparingSendKey != null
@@ -344,20 +345,24 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         SpeechMorphButton(
                             generating = state.showGenerationLoading(),
                             listening = state.listening,
-                            enabled = voiceMenuEnabled && callUi?.presentation != DoubaoCallPresentation.CLOSING,
-                            description = if (state.voiceMode == ChatMenuAction.VOICE_DOUBAO) {
-                                if (callUi != null) "展开豆包实时通话" else "开始豆包实时通话"
-                            } else null,
+                            // Closing remains gesture-enabled so a long press can say "请先挂断".
+                            enabled = callUi != null || voiceMenuEnabled,
+                            description = if (callUi != null) "挂断豆包实时通话"
+                                else if (state.voiceMode == ChatMenuAction.VOICE_DOUBAO) "开始豆包实时通话" else null,
+                            callMotion = callMotion,
                             modifier = Modifier.onGloballyPositioned { onVoiceAnchorBounds(it.boundsInRoot()) },
-                            onClick = { if (state.voiceMode in state.voiceModes) actions.onVoice() },
-                            onLongClick = if (voiceMenuEnabled) ({ actions.onVoiceLongPress(); voiceModes = true }) else null,
+                            onClick = { if (callUi != null || state.voiceMode in state.voiceModes) actions.onVoice() },
+                            onLongClick = if (callUi != null || voiceMenuEnabled) ({
+                                val admitted = actions.onVoiceLongPress()
+                                if (admitted && callUi == null) voiceModes = true
+                            }) else null,
                         )
                     }
                 }
         }
     }
     if (attachments) ChatAttachmentSheet({ attachments = false }, actions.onMenuAction)
-    ChatVoiceModeMenu(voiceModes && voiceMenuEnabled, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
+    ChatVoiceModeMenu(voiceModes && voiceMenuEnabled && callUi == null, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
 }
 
 @Composable

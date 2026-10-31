@@ -39,6 +39,7 @@ internal fun SpeechMorphButton(
     onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     description: String? = null,
+    callMotion: DoubaoCallMotionState? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -76,12 +77,16 @@ internal fun SpeechMorphButton(
     ) {
         ContainedMorphLoadingIndicator(
             modifier = Modifier.testTag("chat-voice-indicator").graphicsLayer {
-                val scale = diameter.value / 20.dp
+                // Read the SAME genie progress in the layer, never once per frame in composition.
+                val progress = callMotion?.progress?.value ?: 0f
+                val scale = maxOf(diameter.value / 20.dp, callEntryScale(progress))
                 scaleX = scale
                 scaleY = scale
+                rotationZ = callEntryRotation(progress)
             },
             indicatorSize = 20.dp,
-            animate = generating || listening || showPressFeedback,
+            // Call motion adds activity; it must never replace generation/listening's oscillator.
+            animate = generating || listening || showPressFeedback || callMotion?.transforming == true,
         )
     }
 }

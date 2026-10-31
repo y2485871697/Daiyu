@@ -131,7 +131,7 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
     def test_save_is_full_width_round_theme_accent_below_key(self):
         save = self.asr.split('TextButton("保存连接设置"', 1)[1].split('SettingsRow("高级：更换识别服务"', 1)[0]
         for marker in ['.fillMaxWidth().testTag("voice-save")', 'minHeight = 48.dp',
-                       'cornerRadius = 24.dp', 'ButtonDefaults.textButtonColorsPrimary()',
+                       'cornerRadius = 24.dp', 'ButtonDefaults.textButtonColorsPrimary(color = DaiyuPalette.switchTrack)',
                        'enabled = !busy && draft.asrKey.isNotBlank()',
                        'if (current()) save(recognitionConfiguration().copy(asrKey = draft.asrKey.trim()))']:
             self.assertIn(marker, save)

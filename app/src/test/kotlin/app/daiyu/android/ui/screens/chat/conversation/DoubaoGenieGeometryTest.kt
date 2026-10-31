@@ -9,6 +9,69 @@ class DoubaoGenieGeometryTest {
 
     private fun near(expected: Float, actual: Float) = assertEquals(expected, actual, .015f)
 
+    @Test fun previewTimingAndSymbolsAreExact() {
+        assertEquals(420, DoubaoGenieGeometry.DURATION_MILLIS)
+        assertEquals("m7 10 5 5 5-5M7 5h10", DoubaoGenieGeometry.COLLAPSE_PATH)
+        assertEquals("M14 4h6v6m-6 0 6-6M10 20H4v-6m0 6 6-6", DoubaoGenieGeometry.EXPAND_PATH)
+        near(66f, DoubaoGenieGeometry.ORB_DIAMETER)
+        near(7f, DoubaoGenieGeometry.HALO_INSET)
+        near(37f, DoubaoGenieGeometry.MINI_DIAMETER)
+    }
+
+    @Test fun wavesUsePreviewBaseHeightsNegativeDelaysAndCssEasing() {
+        val base = listOf(12f, 21f, 29f, 20f, 11f)
+        val delays = listOf(0f, 500f, 900f, 300f, 700f)
+        base.indices.forEach { i ->
+            near(base[i] * .55f, DoubaoGenieGeometry.orbFrame(1450f - delays[i]).barHeights[i])
+            near(base[i], DoubaoGenieGeometry.orbFrame(2175f - delays[i]).barHeights[i])
+            near(base[i], DoubaoGenieGeometry.orbFrame(1125f - delays[i], responding = true).barHeights[i])
+        }
+        val start = DoubaoGenieGeometry.orbFrame(0f)
+        val later = DoubaoGenieGeometry.orbFrame(190f)
+        assertNotEquals(start.barHeights, later.barHeights)
+        assertNotEquals(start.barHeights, DoubaoGenieGeometry.orbFrame(0f, responding = true).barHeights)
+        near(1f, start.haloScale); near(.45f, start.haloAlpha)
+        near(1.055f, DoubaoGenieGeometry.orbFrame(1500f).haloScale)
+        near(.8f, DoubaoGenieGeometry.orbFrame(1500f).haloAlpha)
+        near(180f, DoubaoGenieGeometry.orbFrame(750f).spinnerDegrees)
+        near(1f, DoubaoGenieGeometry.orbFrame(1500f, still = true).haloScale)
+    }
+
+    @Test fun miniUsesAnIndependentPoint65WaveNotThirtySevenOverSixtySix() {
+        val full = DoubaoGenieGeometry.orbFrame(310f)
+        val mini = DoubaoGenieGeometry.orbFrame(310f, compact = true)
+        full.barHeights.zip(mini.barHeights).forEach { (a, b) -> near(a * .65f, b) }
+        val connecting = DoubaoGenieGeometry.orbFrame(1150f, compact = true, connecting = true)
+        listOf(12f, 21f, 29f, 20f, 11f).zip(connecting.barHeights).forEach { (a, b) -> near(a * .65f, b) }
+        assertNotEquals(connecting.barHeights,
+            DoubaoGenieGeometry.orbFrame(300f, compact = true, connecting = true).barHeights)
+    }
+
+    @Test fun consumedStateStylesMatchPreviewAndMiniNeverUsesSpinner() {
+        val listening = DoubaoGenieGeometry.orbStyle(DoubaoGenieGeometry.OrbMode.LISTENING, false)
+        assertEquals(0xFFEEE6FBL, listening.background)
+        assertEquals(0xFFA18AC7L, listening.bars)
+        assertEquals(0xFFF6F2FCL, listening.halo)
+        assertTrue(listening.glow)
+        val response = DoubaoGenieGeometry.orbStyle(DoubaoGenieGeometry.OrbMode.RESPONDING, false)
+        assertEquals(0xFFE9DDF9L, response.background)
+        assertEquals(0xFF9471BDL, response.bars)
+        DoubaoGenieGeometry.OrbMode.values().forEach { state ->
+            val mini = DoubaoGenieGeometry.orbStyle(state, true)
+            assertEquals(0xFFEEE5F9L, mini.background)
+            assertEquals(0xFFA58CC5L, mini.bars)
+            assertEquals(0xFF9F87BAL, mini.icon)
+            assertFalse(mini.spinner)
+            val full = DoubaoGenieGeometry.orbStyle(state, false)
+            if (state == DoubaoGenieGeometry.OrbMode.MUTED || state == DoubaoGenieGeometry.OrbMode.ENDED) {
+                assertTrue(full.still); assertFalse(full.showWave); assertFalse(full.glow)
+            }
+            if (state == DoubaoGenieGeometry.OrbMode.CONNECTING || state == DoubaoGenieGeometry.OrbMode.RECONNECTING) {
+                assertTrue(full.spinner); assertFalse(full.showWave); assertTrue(mini.showWave)
+            }
+        }
+    }
+
     @Test fun endpointsAreTheTwentyPixelAnchorAndTheFullPanel() {
         for (i in 0..64) {
             val u = i / 64f

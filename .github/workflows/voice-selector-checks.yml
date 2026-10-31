@@ -57,7 +57,8 @@ jobs:
           records = []
           for pattern in ('test_voice_tone_selection_contract.py', 'test_appearance_blur_sheet_contract.py',
                           'test_shared_sheet_spacing_contract.py', 'test_sheet_selection_exit_contract.py',
-                          'test_voice_settings_palette_contract.py', 'test_voice_quota_selection_contract.py',
+                          'test_voice_settings_palette_contract.py', 'test_voice_recognition_layout_contract.py',
+                          'test_voice_quota_selection_contract.py',
                           'test_managed_input_contract.py', 'test_model_picker_balance_contract.py',
                           'test_model_name_alignment_contract.py', 'test_model_picker_caption_contract.py',
                           'test_option_selection_sheet_contract.py', 'test_disclosure_consistency_contract.py'):

@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,7 +26,10 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -88,8 +92,12 @@ data class DoubaoCallActions(
     val onCloseAnimationFinished: (Long) -> Unit = {},
 )
 
+internal class DoubaoCallMotionState {
+    val progress = Animatable(0f)
+    var transforming by mutableStateOf(false)
+}
+
 private val CallInk = Color(0xFF34313F)
-private val CallMutedInk = Color(0xFF92899F)
 private val CallLavender = Color(0xFFF3EFF8)
 private val CallRed = Color(0xFFE77983)
 
@@ -106,9 +114,11 @@ internal fun DoubaoCallOverlay(
     anchorBounds: Rect,
     modifier: Modifier = Modifier,
     composerTop: Float? = null,
+    motion: DoubaoCallMotionState? = null,
 ) {
     key(state.sessionKey) {
-        DoubaoCallSession(state, actions, anchorBounds, modifier, composerTop)
+        val fallbackMotion = remember { DoubaoCallMotionState() }
+        DoubaoCallSession(state, actions, anchorBounds, modifier, composerTop, motion ?: fallbackMotion)
     }
 }
 
@@ -119,12 +129,14 @@ private fun DoubaoCallSession(
     anchorBounds: Rect,
     modifier: Modifier,
     composerTop: Float?,
+    motion: DoubaoCallMotionState,
 ) {
     val density = LocalDensity.current
     val layer = rememberGraphicsLayer()
-    val progress = remember { Animatable(if (state.presentation == DoubaoCallPresentation.MINI) 1f else 0f) }
+    val progress = motion.progress
     var snapshotReady by remember { mutableStateOf(false) }
-    // Not snapshot state: this is only a display-list recording cache, owned by the draw pass.
+    var frozenBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    // Record every live frame, including entrance and mini, so closing captures the LAST frame.
     val recording = remember { CallRecording() }
     var presented by remember { mutableStateOf(false) }
     var completionReported by remember { mutableStateOf(false) }
@@ -134,17 +146,21 @@ private fun DoubaoCallSession(
     val latestActions by rememberUpdatedState(actions)
     val latestState by rememberUpdatedState(state)
     val closing = state.presentation == DoubaoCallPresentation.CLOSING
-    // A display-list can still reference live clip/shadow child layers. Freeze the component's
-    // inputs, not just its recording, once per session; even owners without an end timestamp
-    // must stop the clock and cannot change captions, status or control appearance mid-close.
+    // Keep the last LIVE inputs too: an owner may publish ENDED and new captions with CLOSING.
+    // Actual visual freezing is the raster below, never a claim that immutable state freezes layers.
+    var lastLivePicture by remember { mutableStateOf(state) }
     var closingPicture by remember { mutableStateOf<DoubaoCallUi?>(null) }
     if (closing && closingPicture == null) {
-        closingPicture = state.copy(endedAtMillis = state.endedAtMillis ?: SystemClock.elapsedRealtime())
+        closingPicture = lastLivePicture.copy(endedAtMillis = SystemClock.elapsedRealtime())
     }
     val picture = if (closing) checkNotNull(closingPicture) else state
     val mini = if (closing) retainedMini else state.presentation == DoubaoCallPresentation.MINI
     SideEffect {
-        if (!closing) retainedMini = mini
+        if (!closing) {
+            retainedMini = mini
+            lastLivePicture = state
+            closingPicture = null
+        }
     }
 
     LaunchedEffect(state.presentation) {
@@ -152,11 +168,14 @@ private fun DoubaoCallSession(
         presented = true
         when (state.presentation) {
             DoubaoCallPresentation.MINI -> {
+                motion.transforming = false
+                frozenBitmap = null
                 progress.snapTo(1f)
-                snapshotReady = false
             }
             DoubaoCallPresentation.EXPANDED -> {
+                frozenBitmap = null
                 if (firstPresentation) {
+                    motion.transforming = true
                     // Never start the clock on an empty/unrecorded GraphicsLayer.
                     snapshotFlow { snapshotReady }.first { it }
                     progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = LinearEasing))
@@ -164,12 +183,17 @@ private fun DoubaoCallSession(
                     // Minimize/restore is intentionally immediate, not another Genie entrance.
                     progress.snapTo(1f)
                 }
+                motion.transforming = false
             }
             DoubaoCallPresentation.CLOSING -> {
-                // Capture the immutable closing picture even during entrance: the opening
-                // recording may predate the final captions/status. Do not reset progress.
-                snapshotReady = false
+                motion.transforming = true
+                // A display list can reference mutable child layers. Rasterize the last recorded
+                // live frame BEFORE reversing; never record the owner's CLOSING/ENDED content.
+                // If closed before the first draw, the draw pass supplies one fallback recording.
                 snapshotFlow { snapshotReady }.first { it }
+                val bitmap = layer.toImageBitmap()
+                coroutineContext.ensureActive()
+                frozenBitmap = bitmap
                 val remaining = (DoubaoGenieGeometry.DURATION_MILLIS * progress.value).roundToInt()
                 progress.animateTo(0f, tween(remaining.coerceAtLeast(1), easing = LinearEasing))
                 // Give the p=0 surface a draw opportunity before the owner unmounts it. A zero
@@ -180,12 +204,16 @@ private fun DoubaoCallSession(
                 if (!completionReported && latestState.sessionKey == state.sessionKey &&
                     latestState.presentation == DoubaoCallPresentation.CLOSING) {
                     completionReported = true
+                    motion.transforming = false
                     latestActions.onCloseAnimationFinished(state.sessionKey)
                 }
             }
         }
     }
 
+    DisposableEffect(motion) {
+        onDispose { motion.transforming = false }
+    }
     BackHandler(enabled = state.presentation == DoubaoCallPresentation.EXPANDED) {
         latestActions.onMinimize()
     }
@@ -245,18 +273,20 @@ private fun DoubaoCallSession(
                 .then(closeInput)
                 .testTag(if (mini) "doubao-call-mini" else "doubao-call-expanded")
                 .drawWithContent {
+                    val captureSize = IntSize(size.width.roundToInt(), size.height.roundToInt())
+                    if (!closing || !snapshotReady) {
+                        // Recording the complete live surface every draw includes waves, halo,
+                        // timer and child layers. A close/resize NEVER replaces the frozen raster.
+                        layer.record(size = captureSize) { this@drawWithContent.drawContent() }
+                        recording.size = captureSize
+                        snapshotReady = true
+                    }
                     if (!morphing) {
-                        // Stable content remains live (not a stale screenshot of a running timer).
-                        drawContent()
+                        drawLayer(layer)
                     } else {
-                        val captureSize = IntSize(size.width.roundToInt(), size.height.roundToInt())
-                        if (!snapshotReady || recording.size != captureSize) {
-                            // Resize re-records once at the new layout size; it cannot reuse an
-                            // invalid old texture, nor reset progress or a closing completion.
-                            layer.record(size = captureSize) { this@drawWithContent.drawContent() }
-                            recording.size = captureSize
-                            snapshotReady = true
-                        }
+                        val bitmap = frozenBitmap
+                        val sourceWidth = (bitmap?.width ?: recording.size.width).toFloat()
+                        val sourceHeight = (bitmap?.height ?: recording.size.height).toFloat()
                         val endpointSize = with(density) { 20.dp.toPx() }
                         val anchor = DoubaoGenieGeometry.Bounds(
                             anchorBounds.center.x - endpointSize / 2f - panelBounds.left,
@@ -264,13 +294,13 @@ private fun DoubaoCallSession(
                             endpointSize, endpointSize,
                         )
                         val panel = DoubaoGenieGeometry.Bounds(0f, 0f, size.width, size.height)
-                        DoubaoGenieGeometry.strips(progress.value, anchor, panel).forEach { strip ->
+                        DoubaoGenieGeometry.strips(progress.value, anchor, panel, sourceWidth, sourceHeight).forEach { strip ->
                             withTransform({
                                 transform(Matrix(strip.matrix))
-                                clipRect(0f, 0f, size.width, strip.sourceHeight)
+                                clipRect(0f, 0f, sourceWidth, strip.sourceHeight)
                                 translate(0f, -strip.sourceY)
                             }) {
-                                drawLayer(layer)
+                                if (bitmap != null) drawImage(bitmap) else drawLayer(layer)
                             }
                         }
                     }
@@ -281,9 +311,9 @@ private fun DoubaoCallSession(
                 .border(1.dp, Color.White, shape),
         ) {
             if (mini) {
-                MiniCallContent(picture, clock, interactive, dragHandle, latestActions.onExpand)
+                MiniCallContent(picture, clock, interactive, dragHandle, latestActions.onExpand, running = !closing)
             } else {
-                ExpandedCallContent(picture, clock, interactive, dragHandle, latestActions)
+                ExpandedCallContent(picture, clock, interactive, dragHandle, latestActions, running = !closing)
             }
         }
     }
@@ -331,6 +361,7 @@ private fun ExpandedCallContent(
     enabled: Boolean,
     dragHandle: Modifier,
     actions: DoubaoCallActions,
+    running: Boolean,
 ) {
     Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 12.dp)) {
         // The original drag zone extends 7dp into each horizontal padding; the heading adds
@@ -359,7 +390,7 @@ private fun ExpandedCallContent(
                     .semantics { contentDescription = "收起通话" }
                     .clickable(enabled = enabled, role = Role.Button, onClick = actions.onMinimize),
                 contentAlignment = Alignment.Center,
-            ) { CallGlyph(CallControl.MINIMIZE, CallMutedInk, Modifier.size(20.dp)) }
+            ) { CallGlyph(CallControl.MINIMIZE, Color(0xFFA59AB4), Modifier.size(20.dp)) }
         }
         }
         // At the original 374dp size the body is 304dp: focus 143, captions 64, controls 78,
@@ -373,7 +404,7 @@ private fun ExpandedCallContent(
                 verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically)) {
                 // CSS's 66dp orb has an out-of-layout 7dp halo.
                 Box(Modifier.size(66.dp), contentAlignment = Alignment.Center) {
-                    CallWave(state.visualState, Modifier.requiredSize(80.dp))
+                    CallWave(state.orbState(), Modifier.requiredSize(80.dp), running = running)
                 }
                 Text(state.statusLabel(), color = Color(0xFF51445F), fontSize = 19.sp, lineHeight = 28.sp,
                     fontWeight = FontWeight(550),
@@ -424,6 +455,7 @@ private fun MiniCallContent(
     enabled: Boolean,
     dragHandle: Modifier,
     onExpand: () -> Unit,
+    running: Boolean,
 ) {
     val latestExpand by rememberUpdatedState(onExpand)
     Row(Modifier.fillMaxSize().padding(start = 13.dp, end = 9.dp),
@@ -432,12 +464,12 @@ private fun MiniCallContent(
             .pointerInput(enabled) {
                 if (enabled) detectTapGestures { latestExpand() }
             }.testTag("doubao-call-drag-handle"),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CallWave(state.visualState, Modifier.size(37.dp), compact = true)
-            Column(Modifier.weight(1f)) {
-                Text(state.statusLabel(), color = Color(0xFF675477), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+            CallWave(state.orbState(), Modifier.size(37.dp), compact = true, running = running)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(state.statusLabel(), color = Color(0xFF675477), fontSize = 12.sp, fontWeight = FontWeight(550), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Box(Modifier.size(4.dp).background(Color(0xFFAC97CD), RoundedCornerShape(2.dp)))
+                    Box(Modifier.size(4.dp).background(Color(0xFFAE95CA), RoundedCornerShape(2.dp)))
                     Text(clock, Modifier.testTag("doubao-call-clock"), color = Color(0xFFB0A2BD), fontSize = 10.sp)
                     Text("豆包实时通话", color = Color(0xFFB0A2BD), fontSize = 10.sp, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
@@ -449,7 +481,7 @@ private fun MiniCallContent(
                 .semantics { contentDescription = "展开通话" }
                 .clickable(enabled = enabled, role = Role.Button, onClick = onExpand),
             contentAlignment = Alignment.Center,
-        ) { CallGlyph(CallControl.EXPAND, CallMutedInk, Modifier.size(20.dp)) }
+        ) { CallGlyph(CallControl.EXPAND, Color(0xFFA391B7), Modifier.size(19.dp)) }
     }
 }
 
@@ -482,44 +514,90 @@ private fun CallControlButton(
     }
 }
 
-/** The lavender five-bar orb is not the dark-purple composer/entry glyph. */
+private fun DoubaoCallUi.orbState(): DoubaoCallVisualState =
+    if (muted && visualState !in listOf(DoubaoCallVisualState.ENDED, DoubaoCallVisualState.ERROR))
+        DoubaoCallVisualState.MUTED else visualState
+
+/** Preview .voice-orb/.mini-orb, including the two hairlines and inset light, not a flat disc. */
 @Composable
-private fun CallWave(state: DoubaoCallVisualState, modifier: Modifier, compact: Boolean = false) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.matchParentSize()) {
-            val unit = size.minDimension / if (compact) 66f else 80f
-            val center = this.center
-            if (!compact) drawCircle(Color(if (state == DoubaoCallVisualState.MUTED) 0xFFF5F1F8 else 0xFFF6F2FC), 40f * unit, center)
-            val fill = when (state) {
-                DoubaoCallVisualState.RESPONDING -> Color(0xFFE9DDF9)
-                DoubaoCallVisualState.MUTED -> Color(0xFFEEE9F2)
-                DoubaoCallVisualState.ENDED -> Color(0xFFEFEAF4)
-                else -> Color(if (compact) 0xFFEEE5F9 else 0xFFEEE6FB)
+internal fun CallWave(
+    state: DoubaoCallVisualState,
+    modifier: Modifier,
+    compact: Boolean = false,
+    running: Boolean = true,
+    phaseMillis: Float? = null,
+) {
+    var elapsed by remember { mutableFloatStateOf(0f) }
+    var reducedMotion by remember { mutableStateOf(false) }
+    LaunchedEffect(running, phaseMillis) {
+        if (!running || phaseMillis != null) return@LaunchedEffect
+        var previous = 0L
+        while (true) {
+            val scale = coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f
+            reducedMotion = scale == 0f
+            if (reducedMotion) break
+            // Infinite-animation policy lets Compose tests idle while the real mini keeps moving.
+            withInfiniteAnimationFrameNanos { now ->
+                if (previous != 0L) elapsed += (now - previous) / 1_000_000f / scale
+                previous = now
             }
-            drawCircle(fill, 33f * unit, center)
-            if (state == DoubaoCallVisualState.MUTED || state == DoubaoCallVisualState.ENDED) return@Canvas
-            if (!compact && state in listOf(DoubaoCallVisualState.CONNECTING, DoubaoCallVisualState.RECONNECTING)) {
-                val radius = 14f * unit
-                drawArc(Color(0xFFD6C7E9), 0f, 360f, false,
-                    topLeft = Offset(center.x - radius, center.y - radius),
-                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2), style = Stroke(2f * unit))
-                drawArc(Color(0xFF9577BB), -90f, 90f, false,
-                    topLeft = Offset(center.x - radius, center.y - radius),
-                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2), style = Stroke(2f * unit, cap = StrokeCap.Round))
+        }
+    }
+    val ended = state == DoubaoCallVisualState.ENDED || state == DoubaoCallVisualState.ERROR
+    val muted = state == DoubaoCallVisualState.MUTED
+    val connecting = state == DoubaoCallVisualState.CONNECTING || state == DoubaoCallVisualState.RECONNECTING
+    val style = DoubaoGenieGeometry.orbStyle(DoubaoGenieGeometry.OrbMode.valueOf(state.name), compact)
+    val frame = DoubaoGenieGeometry.orbFrame(phaseMillis ?: elapsed,
+        responding = state == DoubaoCallVisualState.RESPONDING, compact = compact,
+        connecting = connecting, still = muted || ended || reducedMotion)
+    Box(modifier.testTag(if (compact) "doubao-call-mini-orb" else "doubao-call-orb"), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.matchParentSize()) {
+            val unit = size.minDimension / if (compact) 37f else 80f
+            val center = this.center
+            val radius = (if (compact) 18.5f else 33f) * unit
+            if (!compact) {
+                drawCircle(Color(style.halo), 40f * unit, center)
+                // :before inset:-7px; CSS scales the 80px border, not the inner 66px ball.
+                drawCircle(Color(0xFFE9DFF7).copy(alpha = frame.haloAlpha),
+                    39.5f * unit * frame.haloScale, center, style = Stroke(unit * frame.haloScale))
+            }
+            drawCircle(Color(style.background), radius, center)
+            if (!compact) {
+                // CSS inset 0 0 17px #f8f4ff: radial approximation, retaining the exact base
+                // colour in the centre and adding soft light only in the outer 17dp.
+                if (style.glow) drawCircle(Brush.radialGradient(
+                    0f to Color.Transparent, .48f to Color.Transparent,
+                    1f to Color(0xFFF8F4FF).copy(alpha = .78f), center = center, radius = radius), radius, center)
+                // :after inset:7px; 52px border box -> 25.5px stroke-centre radius.
+                drawCircle(Color(0x77E0D4EF), 25.5f * unit, center, style = Stroke(unit))
+            }
+            if (!style.showWave && !style.spinner) return@Canvas
+            if (style.spinner) {
+                // 28px CSS border-box, 2px border -> stroke-centre radius 13px.
+                val r = 13f * unit
+                val topLeft = Offset(center.x - r, center.y - r)
+                val arcSize = androidx.compose.ui.geometry.Size(r * 2, r * 2)
+                drawArc(Color(0xFFD6C7E9), 0f, 360f, false, topLeft, arcSize, style = Stroke(2f * unit))
+                drawArc(Color(0xFF9577BB), -135f + frame.spinnerDegrees, 90f, false,
+                    topLeft, arcSize, style = Stroke(2f * unit))
                 return@Canvas
             }
-            val heights = if (state == DoubaoCallVisualState.RESPONDING) listOf(14f, 27f, 34f, 23f, 12f)
-                else listOf(12f, 21f, 29f, 20f, 11f)
-            heights.forEachIndexed { index, height ->
-                val x = center.x + (index - 2) * 6f * unit
-                drawLine(Color(0xFFA18AC7), Offset(x, center.y - (height - 3f) * unit / 2),
-                    Offset(x, center.y + (height - 3f) * unit / 2), 3f * unit, StrokeCap.Round)
+            val barScale = if (compact) .65f else 1f
+            val barColor = Color(style.bars)
+            frame.barHeights.forEachIndexed { index, animatedHeight ->
+                val height = if (reducedMotion) listOf(12f, 21f, 29f, 20f, 11f)[index] * barScale else animatedHeight
+                val width = 3f * barScale * unit
+                val x = center.x + (index - 2) * 6f * barScale * unit
+                drawRoundRect(barColor, Offset(x - width / 2f, center.y - height * unit / 2f),
+                    androidx.compose.ui.geometry.Size(width, height * unit),
+                    androidx.compose.ui.geometry.CornerRadius(width / 2f))
             }
         }
         val iconSize = if (compact) 18.dp else 25.dp
-        when (state) {
-            DoubaoCallVisualState.MUTED -> CallGlyph(CallControl.MIC, Color(0xFFB1A4BD), Modifier.size(iconSize), active = true)
-            DoubaoCallVisualState.ENDED -> CallGlyph(CallControl.HANG_UP, Color(0xFFAD9CBA), Modifier.size(iconSize))
+        val iconColor = Color(style.icon)
+        when {
+            muted -> CallGlyph(CallControl.MIC, iconColor, Modifier.size(iconSize), active = true)
+            ended -> CallGlyph(CallControl.HANG_UP, iconColor, Modifier.size(iconSize))
             else -> Unit
         }
     }
@@ -567,13 +645,10 @@ private fun CallGlyph(control: CallControl, color: Color, modifier: Modifier, ac
                     }
                     drawPath(p, color)
                 }
-                CallControl.MINIMIZE -> {
-                    drawLine(color, Offset(5f, 9f), Offset(12f, 16f), line, StrokeCap.Round)
-                    drawLine(color, Offset(12f, 16f), Offset(19f, 9f), line, StrokeCap.Round)
-                }
-                CallControl.EXPAND -> {
-                    drawLine(color, Offset(5f, 15f), Offset(12f, 8f), line, StrokeCap.Round)
-                    drawLine(color, Offset(12f, 8f), Offset(19f, 15f), line, StrokeCap.Round)
+                CallControl.MINIMIZE, CallControl.EXPAND -> {
+                    val svg = if (control == CallControl.MINIMIZE) DoubaoGenieGeometry.COLLAPSE_PATH else DoubaoGenieGeometry.EXPAND_PATH
+                    drawPath(PathParser().parsePathString(svg).toPath(), color,
+                        style = Stroke(1.7f, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 }
             }
         }

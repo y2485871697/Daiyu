@@ -11,6 +11,15 @@ class DaiyuPromptCacheContractTest(unittest.TestCase):
   self.assertIn('item(key = "provider_cache_retention")',s)
   self.assertIn('DaiyuPromptCacheFields(draft, enabled, changeDraft)',s)
   self.assertIn('!speechOnly && draft.protocol == ProviderProtocol.MESSAGES',s)
+ def test_cache_has_its_own_section_instead_of_belonging_to_headers(self):
+  s=(U/'ModelSettingsScreen.kt').read_text()
+  header=s.split('item(key = "provider_headers") {',1)[1].split('if (!speechOnly &&',1)[0]
+  cache=s.split('item(key = "provider_cache_retention") {',1)[1].split('if (providerName != null)',1)[0]
+  self.assertIn('SettingsSectionTitle("自定义请求头")',header)
+  self.assertNotIn('DaiyuPromptCacheFields(',header)
+  self.assertIn('SettingsSectionTitle("提示缓存")',cache)
+  self.assertLess(cache.index('SettingsSectionTitle("提示缓存")'),cache.index('SettingsCard { DaiyuPromptCacheFields('))
+  self.assertNotIn('ProviderHeadersEditor(',cache)
  def test_choice_row_has_three_exact_labels_and_no_description(self):
   s=(U/'DaiyuPromptCacheFields.kt').read_text()
   for text in ['缓存保留时长','不保留','5分钟','1小时','ProviderChoiceRow(']:self.assertIn(text,s)

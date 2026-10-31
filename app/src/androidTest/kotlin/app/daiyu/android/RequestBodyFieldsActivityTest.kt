@@ -109,7 +109,9 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         reveal("provider-name", "添加提供商").performTextReplacement("Cache fixture")
         reveal("settings-field:Base URL", "添加提供商").performTextReplacement("https://fixture.invalid/v1")
         reveal("settings-field:API Key", "添加提供商").performTextReplacement("synthetic-key")
-        reveal("provider-cache-retention", "添加提供商").performClick()
+        reveal("provider-cache-retention", "添加提供商").assertIsDisplayed()
+        ui.onNodeWithText("提示缓存").assertIsDisplayed()
+        node("provider-cache-retention").performClick()
         node("provider-cache-retention:1h").assertExists()
         node("provider-cache-retention:5m").performClick()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
@@ -119,7 +121,9 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         val slot = fixture.controller.providers.snapshot().providers.single { it.name == "Cache fixture" }.slotId
         fun retention() = fixture.controller.providers.editing(fixture.controller.providers.editor(slot)).settings.requestOptions.promptCacheRetention
         assertEquals(app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES, retention())
-        reveal("provider-cache-retention", "Cache fixture").performClick()
+        reveal("provider-cache-retention", "Cache fixture").assertIsDisplayed()
+        ui.onNodeWithText("提示缓存").assertIsDisplayed()
+        node("provider-cache-retention").performClick()
         node("provider-cache-retention:5m").assertExists()
         node("provider-cache-retention:none").performClick()
         assertEquals(app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES, retention())

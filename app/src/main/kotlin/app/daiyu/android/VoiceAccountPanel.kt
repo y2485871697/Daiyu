@@ -4,6 +4,7 @@ import app.daiyu.android.ui.navigation.PageBackStack
 import android.net.Uri
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.widget.Toast
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.components.OptionSelectionSheet
@@ -131,6 +132,7 @@ internal fun VoiceAccountPanel(
     var name by remember(frozenConfiguration.revision) { mutableStateOf("") }
     var existingId by remember(frozenConfiguration.revision) { mutableStateOf("") }
     var slotId by remember(frozenConfiguration.revision) { mutableStateOf("") }
+    var manualSlotId by remember(frozenConfiguration.revision) { mutableStateOf("") }
     var postpaid by remember(frozenConfiguration.revision) { mutableStateOf(false) }
     var sampleUri by remember(frozenConfiguration.revision) { mutableStateOf<Uri?>(null) }
     var sampleName by remember(frozenConfiguration.revision) { mutableStateOf("") }
@@ -224,6 +226,7 @@ internal fun VoiceAccountPanel(
     var accountKey by remember(frozenConfiguration.revision) { mutableStateOf(frozenConfiguration.key) }
     val creationSlots = personalVoiceSlots(voices, creating = true, postpaid = false)
         .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }
+    val creationSlotId = manualSlotId.trim().ifBlank { slotId }
     val importSlots = importCandidates.filter { it.canImport }.sortedBy { it.name }
         .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+|etaClone[a-fA-F0-9]{32}")) }
     fun navigate(target: String) {
@@ -245,7 +248,7 @@ internal fun VoiceAccountPanel(
     }
     fun beginFlow(target: String) {
         if (!current() || busy) return
-        name = ""; existingId = ""; slotId = ""; postpaid = false; sampleUri = null
+        name = ""; existingId = ""; slotId = ""; manualSlotId = ""; postpaid = false; sampleUri = null
         manualId = false; advancedCreation = false; agreed = false; step = 0
         samplePicker.invalidate(); pickerPending = false
         navigate(target)
@@ -437,18 +440,22 @@ internal fun VoiceAccountPanel(
                 item { SettingsCard(Modifier.testTag("voice-create-name-card")) {
                     AccountField("声音名称", name, busy) { name = it.take(80); confirmation = null }
                 } }
-                item { SettingsCard(Modifier.testTag("voice-create-advanced-card")) {
-                    SettingsRow("高级：新建后付费音色", onClick = { advancedCreation = !advancedCreation }, trailing = {
+                if (manualSlotId.isBlank()) item { SettingsCard(Modifier.testTag("voice-create-advanced-card")) {
+                    SettingsRow("高级：新建后付费音色", onClick = if (!enabled) null else ({ advancedCreation = !advancedCreation }), trailing = {
                         DaiyuIcon(DaiyuIcons.ChevronRight, if (advancedCreation) "收起" else "展开",
                             modifier = Modifier.settingsDisclosureRotation(advancedCreation),
                             tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
                     })
                     SettingsExpandableContent(advancedCreation) {
-                        SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
+                        SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) {
+                            postpaid = it
+                            if (it) { slotId = ""; manualSlotId = ""; manualId = false }
+                            confirmation = null
+                        }
                     }
                 } }
-                item { SettingsCard(Modifier.testTag("voice-create-sync-card")) {
-                    SettingsRow("选择音色名额", summary = if (postpaid) null else creationSlots
+                if (!postpaid && manualSlotId.isBlank()) item { SettingsCard(Modifier.testTag("voice-create-sync-card")) {
+                    SettingsRow("选择音色名额", summary = creationSlots
                         .withIndex().firstOrNull { it.value.id == slotId }
                         ?.let { personalVoiceSlotTitle(it.value, it.index) + " · " + it.value.id } ?: slotId.takeIf { it.isNotBlank() },
                         showChevron = true, onClick = if (!enabled) null else ({
@@ -459,7 +466,7 @@ internal fun VoiceAccountPanel(
                             }
                         }))
                 } }
-                item { SettingsCard(Modifier.testTag("voice-create-manual-card")) {
+                if (!postpaid && slotId.isBlank()) item { SettingsCard(Modifier.testTag("voice-create-manual-card")) {
                     SettingsRow("备用方式：从控制台复制 ID", onClick = if (busy) null else ({ manualId = !manualId }), trailing = {
                         DaiyuIcon(DaiyuIcons.ChevronRight, if (manualId) "收起" else "展开",
                             modifier = Modifier.settingsDisclosureRotation(manualId),
@@ -467,11 +474,32 @@ internal fun VoiceAccountPanel(
                     })
                     SettingsExpandableContent(manualId) {
                         SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
-                        AccountField("名额 ID", slotId, busy) { slotId = it; confirmation = null }
+                        AccountField("名额 ID", manualSlotId, busy) { manualSlotId = it; slotId = ""; postpaid = false; confirmation = null }
                     }
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-next-sample-card")) {
-                    SettingsRow("下一步：选择录音", showChevron = true, onClick = if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null else ({ clearPageFeedback(); step = 1; agreed = false }))
+                    SettingsRow("下一步：选择录音", showChevron = true, onClick = if (!enabled || name.isBlank() || (!postpaid && (!creationSlotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == creationSlotId }?.canTrain == false))) null else ({
+                        if (postpaid) { clearPageFeedback(); step = 1; agreed = false }
+                        else {
+                            val id = creationSlotId; val a = ak; val s = sk; val p = project
+                            execute("名额校验失败，请检查账户与项目后重试。") { report ->
+                                val origin = feedback.visit
+                                val remote = resources.voices.findTrainingSlot(speech!!, id, a, s, p)
+                                currentCoroutineContext().ensureActive()
+                                check(current() && page == "CREATE" && step == 0 && !postpaid &&
+                                    creationSlotId == id && ak == a && sk == s && project == p && feedback.visit == origin)
+                                val message = when {
+                                    remote == null -> "没有该名额 ID"
+                                    !remote.canTrain -> "该名额正在制作、已锁定或次数已用完"
+                                    else -> null
+                                }
+                                if (message != null) {
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                    report(message)
+                                } else { clearPageFeedback(); step = 1; agreed = false }
+                            }
+                        }
+                    }))
                 } }
             }
             if (page == "CREATE" && step == 1) {
@@ -494,14 +522,14 @@ internal fun VoiceAccountPanel(
                 item { SettingsSectionTitle("3. 确认制作") }
                 item { SettingsCard(Modifier.testTag("voice-create-summary-card")) {
                     SettingsRow("名称", summary = name)
-                    SettingsRow(if (postpaid) "新建后付费音色" else "已有名额", summary = if (postpaid) null else slotId)
+                    SettingsRow(if (postpaid) "新建后付费音色" else "已有名额", summary = if (postpaid) null else creationSlotId)
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-consent-card")) {
                     SettingsSwitchRow("我有权使用此录音并同意本次上传制作", agreed, enabled = enabled) { agreed = it }
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-submit-card")) {
                     SettingsRow("确认上传并制作", tag = "voice-training-submit", showChevron = true, onClick = if (!enabled || !agreed || sampleUri == null) null else ({
-                        val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else slotId
+                        val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else creationSlotId
                         ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。${if (slot != null && voices.any { it.id == slot && !it.unused }) "将消耗此名额的剩余复刻次数并覆盖已有声音，不占用新名额。" else ""}结果未知时只查询原音色，不重复提交。${if (slot == null) "\n\n须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。" else ""}", "制作结果未确认，请在原音色菜单查询状态，不要重复提交。") { report ->
                             val origin = feedback.visit
                             val sample = try { PersonalVoices.readSample(context, uri) }
@@ -540,7 +568,7 @@ internal fun VoiceAccountPanel(
                     modifier = Modifier.testTag("voice-create-slot:${voice.id}")) {
                     if (enabled && !busy && current() && page == "CREATE" && step == 0 &&
                         resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
-                        slotId = voice.id; postpaid = false; confirmation = null; slotPicker = false
+                        slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null; slotPicker = false
                     }
                 }
             }

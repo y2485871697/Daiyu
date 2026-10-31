@@ -1,6 +1,16 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.activity.compose.setContent
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.voice.account.*
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import okio.Buffer
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
 import kotlinx.coroutines.runBlocking
@@ -83,8 +93,10 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     }
 
     private var voicePreferencesSnapshot: Map<String, *>? = null
+    private val creationCleanups = mutableListOf<() -> Unit>()
     override fun cleanupAfterLegacy() {
         try {
+            creationCleanups.forEach { it() }
             voicePreferencesSnapshot?.let { values ->
                 val editor = instrumentation.targetContext.getSharedPreferences("voice-settings", 0).edit().clear()
                 values.forEach { (key, value) -> when (value) {
@@ -627,14 +639,43 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     fun testCreationButtonsMatchOuterSettingsCardsAndKeepDraftGuards() {
         systemProfiles()
         runBlocking { fixture.controller.voiceRuntime.saveAccount(VoiceConfiguration(engine = "DOUBAO", provider = "fixture",
-            endpoint = "https://openspeech.bytedance.com", key = "synthetic-only", model = "seed-tts-2.0",
+            endpoint = "https://openspeech.bytedance.com", key = "synthetic-${UUID.randomUUID()}", model = "seed-tts-2.0",
             voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)) }
         val reading = fixture.controller.voiceRuntime.configuration.value
         val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
         val account = fixture.controller.voiceRuntime.accountConfigurations.value.getValue("DOUBAO")
         enter()
         val outer = node("voice-recognition-input-card").fetchSemanticsNode().boundsInRoot
-        section("我的声音"); node("voice-account-open").performClick()
+        val requests = AtomicInteger()
+        val root = File(instrumentation.targetContext.cacheDir, "creation-cards-${UUID.randomUUID()}").apply { check(mkdirs()) }
+        val index = File(root, "voices.json")
+        val transport = AccountHttpTransport { request, _ ->
+            requests.incrementAndGet()
+            check(request.url.host == "open.volcengineapi.com") { "No synthesis or training" }
+            val body = JSONObject(Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+            check(!body.has("audio"))
+            check(body.getString("ProjectName") == "default")
+            val state = body.getString("State")
+            val items = JSONArray().apply { if (state == "Unknown") put(JSONObject()
+                .put("SpeakerID", "S_synthetic_slot").put("State", "Unknown").put("AvailableTrainingTimes", 3)) }
+            AccountResponse(200, JSONObject().put("Result", JSONObject().put("TotalCount", items.length())
+                .put("Statuses", items)).toString().toByteArray())
+        }
+        val resources = VoiceAccountResources(PersonalVoices(index, transport),
+            VoiceCatalogPreferences(VoiceCatalogSecretStore(instrumentation.targetContext)), transport)
+        val owner = VoiceAccountIdentity.from(account.speech()).fingerprint
+        creationCleanups += { resources.preferences.clear(owner); root.deleteRecursively() }
+        runBlocking { resources.preferences.save(owner, "synthetic-ak", "synthetic-sk", "default") }
+        val preferences = instrumentation.targetContext.getSharedPreferences("voice_account_control_secret_v1", 0).all.toMap()
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                VoiceAccountPanel(account, resources, VoiceAccountPreviewPort { _, _ -> error("No playback") },
+                    isCurrent = { it == fixture.controller.voiceRuntime.accountConfigurations.value["DOUBAO"] },
+                    onSelect = { _, _ -> error("No voice selection") }, onBack = {}, stopPreviewStrictly = { true })
+            }
+        } }
+        awaitUniqueTag("voice-account-add")
+        awaitNodeWindowFocus(node("voice-account-add"))
         node("voice-account-add").performClick()
         ui.onNodeWithTag("voice-personal-action:CREATE").performClick()
         awaitUniqueTag("page:制作声音")
@@ -673,7 +714,10 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         ui.onAllNodesWithText("优先使用已有或免费名额", substring = true).assertCountEquals(0)
         awaitImeFrame(reopenedSlot, visible = true)
         reopenedSlot.performTextReplacement("S_synthetic_slot")
+        assertEquals(0, requests.get())
         reveal("settings-row:下一步：选择录音", "制作声音").performClick()
+        awaitUniqueTag("voice-training-sample")
+        assertEquals(4, requests.get())
         node("voice-training-sample").assert(hasAnyAncestor(hasTestTag("voice-create-sample-card")))
         ui.onAllNodesWithText("选择文件不会上传", substring = false).assertCountEquals(0)
         ui.onAllNodesWithText("支持 WAV / MP3 / OGG / M4A / AAC", substring = true).assertCountEquals(0)
@@ -692,6 +736,9 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
         assertEquals(account, fixture.controller.voiceRuntime.accountConfigurations.value.getValue("DOUBAO"))
         assertEquals(0, fixture.opens.get())
+        assertFalse(index.exists())
+        assertEquals(preferences, instrumentation.targetContext.getSharedPreferences("voice_account_control_secret_v1", 0).all)
+        assertEquals(4, requests.get())
     }
 
 

@@ -46,7 +46,7 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
             for old in ('VoiceSettingsCard', 'TextButton(', '.background(', '.clip('):
                 self.assertNotIn(old, step)
         self.assertIn('SettingsRow("名称", summary = name)', self.steps[2])
-        self.assertIn('summary = if (postpaid) null else slotId', self.steps[2])
+        self.assertIn('summary = if (postpaid) null else creationSlotId', self.steps[2])
 
     def test_first_step_preserves_edit_selection_fallback_and_navigation(self):
         first = self.steps[0]
@@ -58,13 +58,38 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
             'if (resources.voices.state.value.any { it.account == account?.fingerprint &&',
             'else navigate("SYNC")',
             'if (busy) null else ({ manualId = !manualId })',
-            'AccountField("名额 ID", slotId, busy)',
-            'if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null',
+            'AccountField("名额 ID", manualSlotId, busy)',
+            'if (!enabled || name.isBlank() || (!postpaid && (!creationSlotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == creationSlotId }?.canTrain == false))) null',
             'step = 1; agreed = false',
         ):
             self.assertIn(required, first)
         self.assertNotIn('voice-create-slots-card', first)
         self.assertNotIn('SettingsRadioRow(', first)
+        self.assertNotIn('resources.voices.create(', first)
+
+    def test_creation_sources_are_separate_and_visibility_is_mutually_exclusive(self):
+        first = self.steps[0]
+        self.assertIn('var manualSlotId by remember(frozenConfiguration.revision)', self.panel)
+        self.assertIn('if (manualSlotId.isBlank()) item { SettingsCard', first)
+        self.assertIn('if (!postpaid && manualSlotId.isBlank()) item { SettingsCard', first)
+        self.assertIn('if (!postpaid && slotId.isBlank()) item { SettingsCard', first)
+        self.assertIn('AccountField("名额 ID", manualSlotId, busy)', first)
+        self.assertIn('manualSlotId = it; slotId = ""; postpaid = false', first)
+        self.assertIn('if (it) { slotId = ""; manualSlotId = ""; manualId = false }', first)
+        self.assertIn('val creationSlotId = manualSlotId.trim().ifBlank { slotId }', self.panel)
+
+    def test_next_verifies_cloud_slot_before_recording_and_toasts_missing_id(self):
+        first = self.steps[0]
+        self.assertIn('if (postpaid) { clearPageFeedback(); step = 1; agreed = false }', first)
+        self.assertIn('resources.voices.findTrainingSlot(speech!!, id, a, s, p)', first)
+        self.assertIn('page == "CREATE" && step == 0 && !postpaid', first)
+        self.assertIn('creationSlotId == id && ak == a && sk == s && project == p', first)
+        self.assertIn('feedback.visit == origin', first)
+        self.assertIn('Toast.makeText(context, message, Toast.LENGTH_SHORT).show()', first)
+        self.assertIn('remote == null -> "没有该名额 ID"', first)
+        self.assertIn('!remote.canTrain', first)
+        self.assertLess(first.index('findTrainingSlot('), first.index('remote == null'))
+        self.assertNotIn('readSample(', first)
         self.assertNotIn('resources.voices.create(', first)
 
     def test_sample_selection_does_not_read_or_upload_audio(self):
@@ -103,8 +128,8 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
         self.assertIn('summary = if (sampleUri == null) null else sampleName', self.steps[1])
         self.assertNotIn('选择文件不会上传', self.steps[1])
         self.assertIn('SettingsRow("名称", summary = name)', self.steps[2])
-        self.assertIn('summary = if (postpaid) null else slotId', self.steps[2])
-        self.assertIn('AccountField("名额 ID", slotId, busy)', self.steps[0])
+        self.assertIn('summary = if (postpaid) null else creationSlotId', self.steps[2])
+        self.assertIn('AccountField("名额 ID", manualSlotId, busy)', self.steps[0])
 
     def test_creation_entry_and_return_do_not_reuse_another_pages_notice(self):
         begin = block(self.panel, 'fun beginFlow(target: String)')

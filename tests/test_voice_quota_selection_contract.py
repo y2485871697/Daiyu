@@ -47,7 +47,7 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         for required in ('selected = !postpaid && slotId == voice.id', 'enabled = enabled && voice.canTrain',
                          'if (enabled && !busy && current() && page == "CREATE" && step == 0 &&',
                          'resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }',
-                         'slotId = voice.id; postpaid = false; confirmation = null; slotPicker = false'):
+                         'slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null; slotPicker = false'):
             self.assertIn(required, self.sheet)
         self.assertIn('var slotPicker by remember(frozenConfiguration.revision)', self.panel)
         self.assertIn('slotPicker = false', block(self.panel, 'fun navigate(target: String)'))

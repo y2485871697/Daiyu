@@ -137,6 +137,14 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             verified.takeIf { it.canImport }
         }
     }
+    suspend fun findTrainingSlot(config: SpeechProviderConfig, id: String, ak: String, sk: String, project: String): Voice? {
+        val account = VoiceAccountIdentity.from(config)
+        val valid = trainingIdentity(id)
+        val slot = DoubaoVoiceCatalog(transport).list(ak, sk, project).firstOrNull { it.id == valid } ?: return null
+        currentCoroutineContext().ensureActive()
+        return (find(valid, config) ?: Voice(valid, slot.name, account.fingerprint))
+            .copy(catalogState = slot.state, remaining = slot.remaining)
+    }
     suspend fun importPurchased(config: SpeechProviderConfig, ak: String, sk: String, project: String): Int {
         val account = VoiceAccountIdentity.from(config)
         val slots = DoubaoVoiceCatalog(transport).list(ak, sk, project)

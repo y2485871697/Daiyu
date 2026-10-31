@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityEvent
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.key
 import androidx.compose.ui.geometry.Offset
@@ -24,6 +25,10 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private val roots = mutableListOf<File>()
     private val importAccountCleanup = mutableListOf<() -> Unit>()
     private var importQueryFails = false
+    private var creationQueryFails = false
+    private var creationRemoteIds = listOf("S_available")
+    private var creationRemaining = 3
+    private var creationRemoteState = "Unknown"
     private lateinit var index: File
     private lateinit var beforeIndex: String
     private lateinit var beforePreferences: Map<String, *>
@@ -32,7 +37,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
 
     private fun mount(available: Boolean, unavailable: Boolean = false, secondAvailable: Boolean = false,
         flow: String = "CREATE", ready: Boolean = false, uncertain: Boolean = false, queryStatus: Int? = null,
-        active: Boolean = false, cloned: Boolean = false) {
+        active: Boolean = false, cloned: Boolean = false, verifySlot: Boolean = false) {
         frozen = VoiceConfiguration(engine = "DOUBAO", provider = "quota-fixture",
             endpoint = "https://openspeech.bytedance.com", key = "synthetic-${UUID.randomUUID()}",
             model = "seed-tts-2.0", voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)
@@ -83,6 +88,18 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                         .put("available_training_times", if (body.getString("speaker_id") == "S_exhausted") 0 else 3)
                         .put("speaker_status", JSONArray().put(JSONObject().put("model_type", 4)))
                 }
+            } else if (verifySlot) {
+                check(!creationQueryFails) { "Synthetic creation query failure" }
+                check(request.url.host == "open.volcengineapi.com") { "Validation must not upload or train" }
+                val body = JSONObject(Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+                check(!body.has("audio"))
+                val state = body.getString("State")
+                val ids = if (state == creationRemoteState) creationRemoteIds else emptyList()
+                JSONObject().put("Result", JSONObject().put("TotalCount", ids.size)
+                    .put("Statuses", JSONArray().apply { ids.forEach {
+                        put(JSONObject().put("SpeakerID", it).put("State", state)
+                            .put("AvailableTrainingTimes", creationRemaining))
+                    } }))
             } else {
                 check(queryStatus != null) { "No implicit request" }
                 JSONObject().put("code", 0).put("status", queryStatus).put("speaker_status", JSONArray())
@@ -91,7 +108,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         }
         resources = VoiceAccountResources(PersonalVoices(index, transport),
             VoiceCatalogPreferences(VoiceCatalogSecretStore(instrumentation.targetContext)), transport)
-        if (flow == "IMPORT") {
+        if (flow == "IMPORT" || verifySlot) {
             val preferences = resources.preferences
             preferences.save(account, "synthetic-import-ak", "synthetic-import-sk", "default")
             importAccountCleanup += { preferences.clear(account) }
@@ -184,21 +201,139 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         awaitPickerClosed()
         awaitUniqueTag("page:制作声音")
         reveal("settings-field:声音名称", "制作声音").assertTextContains("draft name")
-        reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
-        reveal("settings-field:名额 ID", "制作声音").assertTextContains("S_second")
+        node("voice-create-manual-card").assertDoesNotExist()
+        reveal("settings-row:高级：新建后付费音色", "制作声音").assertExists()
         assertNoSideEffects()
     }
 
-    fun testPostpaidDoesNotHideExistingQuotasAndSelectionSwitchesBackToPrepaid() {
+    fun testPostpaidHidesSelectionAndFallbackAndNeedsNoSlotQuery() {
         mount(available = true)
+        enterDraftName("postpaid voice")
+        openPicker()
+        node("voice-create-slot:S_available").performClick()
+        awaitPickerClosed()
         reveal("settings-row:高级：新建后付费音色", "制作声音").performClick()
         reveal("settings-switch:新建后付费音色", "制作声音").performClick()
         node("settings-switch:新建后付费音色").assertIsOn()
-        openPicker()
-        node("voice-create-slot:S_available").assertIsNotSelected().performClick()
-        awaitPickerClosed()
-        reveal("settings-switch:新建后付费音色", "制作声音").assertIsOff()
+        node("voice-create-sync-card").assertDoesNotExist()
+        node("voice-create-manual-card").assertDoesNotExist()
+        reveal("settings-row:下一步：选择录音", "制作声音").performClick()
+        awaitUniqueTag("voice-training-sample")
         assertNoSideEffects()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("voice-create-name-card")
+        reveal("settings-switch:新建后付费音色", "制作声音").performClick()
+        reveal("voice-create-sync-card", "制作声音").assertExists()
+        reveal("voice-create-manual-card", "制作声音").assertExists()
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
+        assertNoSideEffects()
+    }
+
+    private fun enterManualSlot(id: String) {
+        reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
+        reveal("settings-field:名额 ID", "制作声音").performTextReplacement(id)
+        dismissIme()
+    }
+
+    fun testManualInputHidesOtherSourcesAndClearingRestoresThemWithoutCopyingSelection() {
+        mount(available = true)
+        enterManualSlot("S_manual")
+        node("voice-create-advanced-card").assertDoesNotExist()
+        node("voice-create-sync-card").assertDoesNotExist()
+        reveal("settings-field:名额 ID", "制作声音").assertTextContains("S_manual")
+            .performTextReplacement("")
+        dismissIme()
+        reveal("voice-create-advanced-card", "制作声音").assertExists()
+        reveal("voice-create-sync-card", "制作声音").assertExists()
+        openPicker()
+        node("voice-create-slot:S_available").performClick()
+        awaitPickerClosed()
+        node("voice-create-manual-card").assertDoesNotExist()
+        assertNoSideEffects()
+    }
+
+    fun testManualSlotIsVerifiedBeforeRecordingWithoutUploadOrSave() {
+        mount(available = false, verifySlot = true)
+        enterDraftName("manual voice")
+        enterManualSlot("S_available")
+        reveal("settings-row:下一步：选择录音", "制作声音").performClick()
+        awaitUniqueTag("voice-training-sample")
+        assertNoSideEffects(expectedRequests = 4)
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("voice-create-name-card")
+        node("voice-create-sync-card").assertDoesNotExist()
+        reveal("settings-field:名额 ID", "制作声音").assertTextContains("S_available")
+        assertNoSideEffects(expectedRequests = 4)
+    }
+
+    fun testSelectedClonedSlotPassesFreshVerificationAndKeepsItsId() {
+        creationRemoteState = "Success"
+        mount(available = true, ready = true, verifySlot = true)
+        enterDraftName("overwrite voice")
+        openPicker()
+        node("voice-create-slot:S_available").performClick()
+        awaitPickerClosed()
+        reveal("settings-row:下一步：选择录音", "制作声音").performClick()
+        awaitUniqueTag("voice-training-sample")
+        assertNoSideEffects(expectedRequests = 4)
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("voice-create-name-card")
+        reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
+        node("voice-create-manual-card").assertDoesNotExist()
+        assertNoSideEffects(expectedRequests = 4)
+    }
+
+    private fun awaitCreationRejected(message: String) {
+        val toast = instrumentation.uiAutomation.executeAndWaitForEvent(
+            { reveal("settings-row:下一步：选择录音", "制作声音").performClick() },
+            { it.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED && it.text.any { text -> text.toString() == message } },
+            5_000)
+        try { assertTrue(toast.text.any { it.toString() == message }) }
+        finally { toast.recycle() }
+        node("voice-training-sample").assertDoesNotExist()
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasClickAction()
+    }
+
+    fun testMissingManualSlotToastsAndKeepsDraftOnFirstStep() {
+        mount(available = true, verifySlot = true)
+        enterDraftName("missing manual")
+        enterManualSlot("S_missing")
+        awaitCreationRejected("没有该名额 ID")
+        reveal("settings-field:名额 ID", "制作声音").assertTextContains("S_missing")
+        assertNoSideEffects(expectedRequests = 4)
+    }
+
+    fun testSelectedSlotRemovedFromCloudIsNotTrustedFromLocalCache() {
+        creationRemoteIds = emptyList()
+        mount(available = true, verifySlot = true)
+        enterDraftName("stale selection")
+        openPicker()
+        node("voice-create-slot:S_available").performClick()
+        awaitPickerClosed()
+        awaitCreationRejected("没有该名额 ID")
+        reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
+        assertNoSideEffects(expectedRequests = 4)
+    }
+
+    fun testCloudExhaustionRejectsWithoutTreatingSlotAsMissing() {
+        creationRemaining = 0
+        mount(available = true, verifySlot = true)
+        enterDraftName("exhausted")
+        enterManualSlot("S_available")
+        awaitCreationRejected("该名额正在制作、已锁定或次数已用完")
+        assertNoSideEffects(expectedRequests = 4)
+    }
+
+    fun testCloudFailureDoesNotAdvanceOrClaimTheIdIsMissing() {
+        creationQueryFails = true
+        mount(available = true, verifySlot = true)
+        enterDraftName("query failure")
+        enterManualSlot("S_available")
+        reveal("settings-row:下一步：选择录音", "制作声音").performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("名额校验失败", substring = true).fetchSemanticsNodes().size == 1 }
+        node("voice-training-sample").assertDoesNotExist()
+        ui.onAllNodesWithText("没有该名额 ID").assertCountEquals(0)
+        assertNoSideEffects(expectedRequests = 1)
     }
 
     fun testEmptyQuotasNavigateToSyncWithoutReadingOrSavingAndPreserveDraft() {

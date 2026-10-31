@@ -96,6 +96,7 @@ jobs:
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert all(any(group in name for name in names) for group in expected_groups), (names, expected_groups)
+          assert 'ChatMediaPreviewVideoControlsTest' in names, names
           assert all(any(group in name for group in expected_groups) for name in names), names
           assert all(int(s.attrib['tests']) > 0 for s in suites)
           assert all(int(s.attrib.get(k, 0)) == 0 for s in suites for k in ('failures', 'errors', 'skipped'))

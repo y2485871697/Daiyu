@@ -24,6 +24,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -36,26 +37,35 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
     val lifecycleState by lifecycle.currentStateFlow.collectAsState()
     val currentActive by rememberUpdatedState(active)
     val view = remember(context, item.key) { VideoView(context) }
+    var controls by remember(item.key) { mutableStateOf(ChatMediaPreviewVideoControlsState()) }
     var loading by remember(item) { mutableStateOf(false) }
     var failed by remember(item) { mutableStateOf(false) }
-    val shouldPlay = chatMediaPreviewVideoShouldPlay(active, lifecycleState.isAtLeast(Lifecycle.State.RESUMED))
+    var prepared by remember(item.key) { mutableStateOf(false) }
+    val resumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val shouldStage = chatMediaPreviewVideoShouldPlay(active, resumed)
 
     DisposableEffect(view, lifecycle) {
         val observer = LifecycleEventObserver { _, _ ->
-            // Pause synchronously on background/navigation, before a recomposition can cancel staging.
-            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) view.pause()
+            // Pause synchronously on background/navigation, before cancellation releases the private file.
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                view.pause()
+                if (prepared) controls = controls.positionChanged(view.currentPosition)
+            }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
+            if (prepared) controls = controls.positionChanged(view.currentPosition)
+            prepared = false
             view.setOnPreparedListener(null)
             view.setOnErrorListener(null)
             view.stopPlayback()
         }
     }
-    LaunchedEffect(item, view, shouldPlay) {
-        if (!shouldPlay) {
+    LaunchedEffect(item, view, shouldStage) {
+        if (!shouldStage) {
             view.pause()
+            controls = controls.hidden()
             return@LaunchedEffect
         }
         loading = true
@@ -65,8 +75,11 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
                 try {
                     view.setOnPreparedListener { player ->
                         player.isLooping = true
+                        controls = controls.prepared(player.duration)
+                        prepared = true
                         loading = false
-                        if (chatMediaPreviewVideoShouldPlay(
+                        view.seekTo(controls.positionMillis)
+                        if (controls.shouldPlay(
                                 currentActive,
                                 lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED),
                             )) {
@@ -76,14 +89,20 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
                         }
                     }
                     view.setOnErrorListener { _, _, _ ->
+                        prepared = false
                         loading = false
                         failed = true
+                        controls = controls.hidden()
                         true
                     }
                     view.setVideoURI(Uri.fromFile(file))
-                    // The private file belongs to this suspended playback lifetime, not just preparation.
+                    // Pausing or scrubbing must not restart staging or delete the playback file.
                     awaitCancellation()
                 } finally {
+                    if (prepared) controls = controls.positionChanged(view.currentPosition)
+                    prepared = false
+                    controls = controls.hidden()
+                    loading = false
                     view.setOnPreparedListener(null)
                     view.setOnErrorListener(null)
                     view.stopPlayback()
@@ -96,12 +115,24 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             failed = true
         }
     }
+    LaunchedEffect(view, prepared, shouldStage, controls.playRequested, controls.seeking) {
+        if (!prepared || !shouldStage) return@LaunchedEffect
+        if (!controls.shouldPlay(active, resumed)) {
+            view.pause()
+            return@LaunchedEffect
+        }
+        view.start()
+        while (true) {
+            delay(200)
+            controls = controls.positionChanged(view.currentPosition)
+        }
+    }
     Box(modifier) {
         AndroidView(
             factory = { view },
             modifier = Modifier.fillMaxSize(),
             onReset = null,
-            update = { if (!shouldPlay) it.pause() },
+            update = { if (!controls.shouldPlay(active, resumed)) it.pause() },
             onRelease = { it.stopPlayback() },
         )
         when {
@@ -115,5 +146,30 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
                 modifier = Modifier.align(Alignment.Center), size = 28.dp, strokeWidth = 2.5.dp,
             )
         }
+        ChatMediaPreviewVideoControls(
+            state = controls,
+            active = active,
+            ready = prepared && !failed,
+            onToggleVisibility = { controls = controls.toggleVisibility() },
+            onTogglePlayback = {
+                if (prepared && shouldStage) {
+                    view.pause()
+                    controls = controls.positionChanged(view.currentPosition).togglePlayback()
+                }
+            },
+            onScrub = { fraction ->
+                if (prepared && shouldStage) {
+                    view.pause()
+                    controls = controls.positionChanged(view.currentPosition).scrub(fraction)
+                }
+            },
+            onSeekFinished = {
+                if (prepared && shouldStage && controls.seeking) {
+                    view.seekTo(controls.displayedPositionMillis)
+                    controls = controls.finishSeeking()
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }

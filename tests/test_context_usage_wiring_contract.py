@@ -21,7 +21,7 @@ class ContextUsageWiringContractTest(unittest.TestCase):
         commit = source.split('private fun commit(', 1)[1].split('@Synchronized override fun readCommitted', 1)[0]
         self.assertLess(commit.index('transactions.run { db ->'), commit.index('CloudContextUsageStore.record'))
         self.assertLess(commit.index('拒绝过期或异主检查点'), commit.index('CloudContextUsageStore.record'))
-        self.assertLess(commit.index('database.writeRuntimeMessage(db, m)'), commit.index('CloudContextUsageStore.record'))
+        self.assertLess(commit.index('database.writeRuntimeMessage(db, m, decodeReuse)'), commit.index('CloudContextUsageStore.record'))
         self.assertIn('if (contextChanged) contextUsageRevision++', commit)
         self.assertIn('it.first.id == m.id && it.first.runId == m.runId', commit)
 

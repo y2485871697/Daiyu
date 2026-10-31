@@ -149,14 +149,14 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         single = block(store, 'suspend fun findTrainingSlot(')
         self.assertIn('listTrainingSlots(config, ak, sk, project).firstOrNull { it.id == valid }', single)
 
-    def test_quota_cards_opt_in_without_changing_other_choice_defaults(self):
+    def test_quota_cards_keep_card_geometry_and_reference_choice_defaults(self):
         item = (SRC / 'ui/components/OptionSelectionSheet.kt').read_text()
-        for token in ('cardStyle: Boolean = false', 'itemSpacing: Dp = 3.dp',
+        for token in ('cardStyle: Boolean = false', 'itemSpacing: Dp = 0.dp',
                       'RoundedCornerShape(16.dp)', 'RoundedCornerShape(12.dp)',
-                      'cardStyle && selected -> SolidColor(colors.selectionContainer)', 'cardStyle -> Brush.linearGradient(colors.sheet)',
+                      'selected -> SolidColor(colors.selectionContainer)', 'cardStyle -> Brush.linearGradient(colors.sheet)',
                       'Modifier.border(1.dp', 'colors.selectionContent', 'colors.edge',
                       'Arrangement.spacedBy(itemSpacing)', 'Role.RadioButton',
-                      'selected = selected, enabled = enabled', 'heightIn(min = 48.dp)'):
+                      'selected = selected, enabled = enabled', 'heightIn(min = if (cardStyle) 48.dp else 56.dp)'):
             self.assertIn(token, item)
         self.assertNotIn('OptionSelectionSheet(', self.sheet + self.import_sheet)
         for text in (self.sheet, self.import_sheet):

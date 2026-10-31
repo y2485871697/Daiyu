@@ -300,4 +300,77 @@ class ChildModelBatchTest {
         } finally { batch.close() }
     }
 
+
+    @Test fun knownProviderFailuresKeepAllSixResultsAndNeverCancelSlowSiblings() {
+        val records = Records(); val entered = CountDownLatch(6); val rejected = CountDownLatch(4)
+        val calls = AtomicInteger()
+        val child = port { history, sink ->
+            calls.incrementAndGet(); entered.countDown(); check(entered.await(5, TimeUnit.SECONDS))
+            val index = history.single().blocks.filterIsInstance<MessageBlock.Text>().single().text.toInt()
+            if (index < 4) { rejected.countDown(); throw ModelRequestException(ModelFailure.RATE_LIMIT) }
+            check(rejected.await(5, TimeUnit.SECONDS)); Thread.sleep(100)
+            sink(ModelEvent.TextFinal("answer", "kept-$index"))
+        }
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 0) { child }), store = records))
+        try {
+            val result = batch.execute(context(), (0..5).map { ChildModelTask("one", "$it") }) as ExecutionReceipt.Confirmed
+            assertTrue(result.isError); assertTrue(result.payload.startsWith("{\"ok\":false"))
+            val rows = records.list(parent.conversationId.value).sortedBy { it.index }
+            assertEquals(6, rows.size); assertEquals(6, calls.get())
+            assertEquals(6, rows.map { it.owner.childRunId }.toSet().size)
+            rows.take(4).forEach {
+                assertEquals(ChildTaskStatus.FAILED, it.status)
+                assertEquals(ModelFailure.RATE_LIMIT.userMessage, it.detail)
+                assertTrue(result.payload.contains(it.owner.childRunId))
+            }
+            rows.drop(4).forEach {
+                assertEquals(ChildTaskStatus.COMPLETED, it.status)
+                assertTrue(result.payload.contains(it.text)); assertEquals("kept-${it.index}", it.text)
+            }
+            assertTrue(result.payload.contains("\"automatic_retry\":false"))
+        } finally { batch.close() }
+    }
+
+    @Test fun confirmedRejectionFromOpenHasAConfirmedFailureReceiptWithoutRetry() {
+        val opens = AtomicInteger(); val records = Records()
+        val child = ModelPort { opens.incrementAndGet(); throw ModelRequestException(ModelFailure.AUTHENTICATION) }
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }), store = records))
+        try {
+            val result = batch.execute(context(), listOf(ChildModelTask("one", "task"))) as ExecutionReceipt.Confirmed
+            assertTrue(result.isError); assertEquals(1, opens.get())
+            assertEquals(ChildTaskStatus.FAILED, records.rows.values.single().status)
+        } finally { batch.close() }
+    }
+
+    @Test fun transportUncertaintyKeepsUnknownAndPreservesSafeFailureReason() {
+        for (kind in listOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT, ModelFailure.INCOMPLETE, ModelFailure.PROTOCOL)) {
+            val records = Records(); val calls = AtomicInteger()
+            val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) {
+                port { _, _ -> calls.incrementAndGet(); throw ModelRequestException(kind) }
+            }), store = records))
+            val idle = CountDownLatch(1)
+            try {
+                assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Unknown)
+                batch.closeWhenIdle { idle.countDown() }; assertTrue(idle.await(5, TimeUnit.SECONDS))
+                assertEquals(ChildTaskStatus.UNKNOWN, records.rows.values.single().status)
+                assertEquals(kind.userMessage, records.rows.values.single().detail); assertEquals(1, calls.get())
+            } finally { batch.close() }
+        }
+    }
+
+    @Test fun failedResultWriteCannotBecomeConfirmedAndPolicyRejectionCannotMasqueradeAsProviderFailure() {
+        for (policyViolation in listOf(false, true)) {
+            val records = Records(if (policyViolation) null else "finish")
+            val child = port { _, sink ->
+                if (policyViolation) try {
+                    sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("evil"), "write_file", "{}")))
+                } catch (_: Exception) {}
+                throw ModelRequestException(ModelFailure.RATE_LIMIT)
+            }
+            val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }), store = records))
+            try { assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Unknown) }
+            finally { batch.close() }
+        }
+    }
+
 }

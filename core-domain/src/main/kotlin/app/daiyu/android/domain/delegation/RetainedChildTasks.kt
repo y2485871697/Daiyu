@@ -351,7 +351,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 if (snapshots(binding).none { it.record.owner == command.source.owner })
                     return ChildTaskCommandReceipt.Rejected("child_source_not_controlled")
                 // Model arguments are not the records UI's one-shot human confirmation.
-                if (command.acknowledgePossibleExecution || source.status == ChildTaskStatus.UNKNOWN ||
+                if (command.acknowledgePossibleExecution || source.status in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED) ||
                     (command.kind == ChildTaskCommandKind.REPLACE && source.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING)))
                     return ChildTaskCommandReceipt.Rejected("child_ui_confirmation_required")
             }

@@ -238,6 +238,7 @@ private fun TaskRecordCard(record: ChildTaskRecord, live: RetainedChildTask?, en
         ChildTaskStatus.COMPLETED -> R.string.business_task_completed
         ChildTaskStatus.NOT_EXECUTED -> R.string.business_task_not_executed
         ChildTaskStatus.UNKNOWN -> R.string.business_task_unknown
+        ChildTaskStatus.FAILED -> R.string.business_task_failed
     }
     SettingsCard(Modifier.padding(bottom = 12.dp).testTag("child-task:${record.owner.childRunId}")) {
         Column(Modifier.padding(16.dp)) {
@@ -246,12 +247,12 @@ private fun TaskRecordCard(record: ChildTaskRecord, live: RetainedChildTask?, en
             Text("修订 ${record.revision}", style = MiuixTheme.textStyles.footnote1)
             record.sourceTaskId?.let { Text("来源 $it · ${record.commandKind?.name}", style = MiuixTheme.textStyles.footnote1) }
             if (onCommand != null) {
-                if (record.status !in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.NOT_EXECUTED))
+                if (record.status !in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.FAILED))
                     TextButton("定向追加指令", onClick = { onCommand(ChildTaskCommandKind.APPEND) }, enabled = enabled,
                         modifier = Modifier.testTag("child-task-append:${record.owner.childRunId}"))
                 TextButton("替换为新任务", onClick = { onCommand(ChildTaskCommandKind.REPLACE) }, enabled = enabled,
                     modifier = Modifier.testTag("child-task-replace:${record.owner.childRunId}"))
-                if (record.status in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.NOT_EXECUTED))
+                if (record.status in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.FAILED))
                     TextButton("失败任务明确新派", onClick = { onCommand(ChildTaskCommandKind.REDISPATCH) }, enabled = enabled,
                         modifier = Modifier.testTag("child-task-redispatch:${record.owner.childRunId}"))
             }

@@ -2,7 +2,7 @@ package app.daiyu.android.domain.delegation
 
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 
-enum class ChildTaskStatus { QUEUED, RUNNING, COMPLETED, NOT_EXECUTED, UNKNOWN }
+enum class ChildTaskStatus { QUEUED, RUNNING, COMPLETED, NOT_EXECUTED, UNKNOWN, FAILED }
 
 data class ChildTaskDisplay(val agentName: String, val modelId: String, val modelName: String) {
     init {
@@ -39,6 +39,7 @@ data class ChildTaskRecord(
         require(prompt.isNotBlank() && prompt.length <= 4096 && prompt.toByteArray(Charsets.UTF_8).size <= 16 * 1024)
         require(text.toByteArray(Charsets.UTF_8).size <= 64 * 1024)
         require(detail == null || (detail.isNotBlank() && detail.length <= 200))
+        require(status != ChildTaskStatus.FAILED || detail != null)
         require(if (status == ChildTaskStatus.COMPLETED) text.isNotBlank() && detail == null else text.isEmpty())
     }
 }

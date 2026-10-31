@@ -36,9 +36,9 @@ data class ChildTaskCommand(
         if (current.owner != source.owner || current.parentOwnerId != source.parentOwnerId ||
             current.parentMessageId != source.parentMessageId || current.revision != source.revision) return "child_source_stale"
         return when {
-            kind == ChildTaskCommandKind.REDISPATCH && current.status !in setOf(ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN) -> "child_not_failed"
-            kind == ChildTaskCommandKind.APPEND && current.status in setOf(ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN) -> "child_append_requires_result"
-            (current.status == ChildTaskStatus.UNKNOWN || (kind == ChildTaskCommandKind.REPLACE &&
+            kind == ChildTaskCommandKind.REDISPATCH && current.status !in setOf(ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED) -> "child_not_failed"
+            kind == ChildTaskCommandKind.APPEND && current.status in setOf(ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED) -> "child_append_requires_result"
+            (current.status in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED) || (kind == ChildTaskCommandKind.REPLACE &&
                 current.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))) && !acknowledgePossibleExecution -> "child_execution_confirmation_required"
             else -> null
         }

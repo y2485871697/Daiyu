@@ -132,7 +132,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
             check(prior.status !in TERMINAL && (status != ChildTaskStatus.RUNNING || prior.status == ChildTaskStatus.QUEUED)) {
                 "child_task_already_finished"
             }
-            check(status != ChildTaskStatus.COMPLETED || prior.status == ChildTaskStatus.RUNNING)
+            check(status !in setOf(ChildTaskStatus.COMPLETED, ChildTaskStatus.FAILED) || prior.status == ChildTaskStatus.RUNNING)
             val update = ContentValues().apply { put("status", next.status.name); put("text", next.text); put("detail", next.detail) }
             check(db.update(TABLE, update, "task_id=? AND status=?", arrayOf(task.owner.childRunId, prior.status.name)) == 1)
         }
@@ -185,7 +185,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         private val COLUMNS = arrayOf("task_id", "conversation_id", "parent_run_id", "parent_message_id", "parent_owner_id",
             "task_group_id", "generation", "task_index", "assistant_message_id", "profile_id", "prompt", "status", "text", "detail",
             "control_revision", "source_task_id", "command_kind", "agent_name_snapshot", "model_id_snapshot", "model_name_snapshot", "tool_access_json")
-        private val TERMINAL = setOf(ChildTaskStatus.COMPLETED, ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN)
+        private val TERMINAL = setOf(ChildTaskStatus.COMPLETED, ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED)
 
         fun installSchema(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE IF NOT EXISTS child_tasks(seq INTEGER PRIMARY KEY AUTOINCREMENT,task_id TEXT UNIQUE NOT NULL," +

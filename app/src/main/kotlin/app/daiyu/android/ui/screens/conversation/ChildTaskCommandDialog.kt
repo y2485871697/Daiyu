@@ -22,7 +22,7 @@ import app.daiyu.android.ui.haptics.miuix.TextButton
 internal val ChildTaskCommandDialogAction = SemanticsPropertyKey<() -> Unit>("ChildTaskCommandDialogAction")
 
 internal fun childCommandNeedsAcknowledgement(record: ChildTaskRecord, kind: ChildTaskCommandKind): Boolean =
-    record.status == ChildTaskStatus.UNKNOWN || (kind == ChildTaskCommandKind.REPLACE &&
+    record.status in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED) || (kind == ChildTaskCommandKind.REPLACE &&
         record.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
 
 @Composable

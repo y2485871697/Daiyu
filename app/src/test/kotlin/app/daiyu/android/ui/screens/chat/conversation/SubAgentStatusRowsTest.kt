@@ -56,4 +56,11 @@ class SubAgentStatusRowsTest {
         assertFalse(row.completed)
         assertTrue(subAgentStatusRows(emptyList(), emptyList()).isEmpty())
     }
+
+    @Test fun knownFailureIsNotUnknownRunningOrCompleted() {
+        val failed = task().copy(status = ChildTaskStatus.FAILED, detail = "provider rejected")
+        val row = subAgentStatusRows(listOf(failed), emptyList()).single()
+        assertEquals("失败", row.status); assertFalse(row.completed)
+    }
+
 }

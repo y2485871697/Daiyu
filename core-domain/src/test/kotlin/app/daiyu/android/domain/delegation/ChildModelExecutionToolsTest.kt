@@ -182,4 +182,23 @@ class ChildModelExecutionToolsTest {
             assertTrue(idle.await(5, TimeUnit.SECONDS))
         } finally { supervisor.close() }
     }
+
+    @Test fun providerFailureAfterExecutingChildToolDoesNotClearUnknownBoundary() {
+        val parent = Parent(); val assembly = Assembly(); val requests = AtomicInteger()
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                if (requests.incrementAndGet() == 1)
+                    sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "fixture", "{}")))
+                else throw ModelRequestException(ModelFailure.RATE_LIMIT)
+            }
+            override fun cancel() {}
+        } }
+        val batch = parent.bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1, ChildModelRole.IMPLEMENTATION) { model }),
+            toolAssembly = factory(assembly)))
+        try {
+            assertTrue(batch.execute(parent.context(), listOf(ChildModelTask("one", "read once", ChildToolAccess.DEFAULT))) is ExecutionReceipt.Unknown)
+            assertEquals(1, assembly.executions.get()); assertEquals(2, requests.get())
+        } finally { batch.close() }
+    }
+
 }

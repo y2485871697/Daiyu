@@ -488,4 +488,19 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         assertEquals(display, recovered.display)
     }
 
+
+    fun testKnownFailureIsDurableTerminalAndRequiresAStartedRequest() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val record = tasks(owner, 1).single(); val store = runtime.childTasks
+        store.enqueue(owner, listOf(record))
+        rejects { store.finished(record, ChildTaskStatus.FAILED, detail = "provider rejected") }
+        store.started(record); store.finished(record, ChildTaskStatus.FAILED, detail = "provider rejected")
+        val read = store.list(owner.conversationId.value).single()
+        assertEquals(ChildTaskStatus.FAILED, read.status); assertEquals("provider rejected", read.detail)
+        rejects { store.started(record) }
+        rejects { store.finished(record, ChildTaskStatus.COMPLETED, "must not overwrite") }
+        runtime.recoverPending()
+        assertEquals(read, store.list(owner.conversationId.value).single())
+    }
+
 }

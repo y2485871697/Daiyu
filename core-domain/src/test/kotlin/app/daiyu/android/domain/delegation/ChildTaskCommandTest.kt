@@ -43,4 +43,14 @@ class ChildTaskCommandTest {
             command.copy(acknowledgePossibleExecution = true), command.copy(source = source.copy(parentOwnerId = "other")))
             .forEach { assertNotEquals(old, it.fingerprint()) }
     }
+
+    @Test fun knownFailureStillRequiresExplicitNewRequestAndCannotAppendMissingResult() {
+        val failed = source.copy(status = ChildTaskStatus.FAILED, text = "", detail = "provider rejected")
+        val retry = command(ChildTaskCommandKind.REDISPATCH).copy(source = failed)
+        assertEquals("child_execution_confirmation_required", retry.validateSource(failed))
+        assertNull(retry.copy(acknowledgePossibleExecution = true).validateSource(failed))
+        assertEquals("child_append_requires_result", command().copy(source = failed).validateSource(failed))
+        assertEquals("child_execution_confirmation_required", command(ChildTaskCommandKind.REPLACE).copy(source = failed).validateSource(failed))
+    }
+
 }

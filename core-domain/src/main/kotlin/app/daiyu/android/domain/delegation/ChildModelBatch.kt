@@ -107,7 +107,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         this.owner = owner; this.session = session; this.authorization = authorization
     }
 
-    private data class Completion(val index: Int, val child: ChildRunOwner, val message: Message, val text: String)
+    private data class Completion(val index: Int, val child: ChildRunOwner, val message: Message, val text: String,
+        val status: ChildTaskStatus = ChildTaskStatus.COMPLETED, val detail: String? = null)
 
     fun execute(context: ToolExecutionContext, tasks: List<ChildModelTask>): ExecutionReceipt =
         executeBatch(context, tasks, null, null, null)
@@ -197,6 +198,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         var completion: Completion? = null
                         var record = records[index]
                         var requestStarted = false
+                        var requestFailure: ModelRequestException? = null
                         val definition = models.getValue(task.profileId)
                         var permit: Semaphore? = null
                         var acquired = false
@@ -330,7 +332,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             requestStarted = true
                                             started.set(true)
                                         }
-                                        val transport = port.open(history, definitions)
+                                        val transport = try { port.open(history, definitions) }
+                                        catch (failure: ModelRequestException) { requestFailure = failure; throw failure }
                                         val cancelStarted = AtomicBoolean(false)
                                         synchronized(gate) { cleanupFinished = false; cleanupPins++ }
                                         return object : ModelSession {
@@ -394,6 +397,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                         // transport-reported safe continuation may park here.
                                                         val resumable = transport as? ResumableModelSession
                                                         val kind = (failure as? ModelRequestException)?.failure
+                                                        if (rejected == null && failure is ModelRequestException) requestFailure = failure
                                                         if (rejected != null || cancelled() || !beforeDeadline() ||
                                                             kind !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT) ||
                                                             resumable?.canResume != true) throw failure
@@ -451,10 +455,19 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         ) } ?: emptyList()
                                         val result = runner.run(initial, previous + user)
                                         scope.requireOwner(result)
-                                        check(result.status == RunStatus.COMPLETED && !cancelled())
-                                        val text = result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
-                                        check(text.isNotBlank() && bytes(text) <= MAX_OUTPUT)
-                                        completion = Completion(index, child, result, text)
+                                        check(!cancelled())
+                                        val failure = requestFailure
+                                        if (result.status == RunStatus.FAILED && definition.role == ChildModelRole.REVIEW &&
+                                            assembly == null && failure != null && !failure.transportInterrupted &&
+                                            failure.failure in CONFIRMED_MODEL_FAILURES && result.error == failure.userMessage) {
+                                            completion = Completion(index, child, result, "", ChildTaskStatus.FAILED,
+                                                failure.userMessage.take(200))
+                                        } else {
+                                            check(result.status == RunStatus.COMPLETED)
+                                            val text = result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
+                                            check(text.isNotBlank() && bytes(text) <= MAX_OUTPUT)
+                                            completion = Completion(index, child, result, text)
+                                        }
                                     } else runner.stop()
                                 } finally { synchronized(gate) { runners.remove(runner); runnerDefinitions.remove(runner) } }
                             }
@@ -480,10 +493,10 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             pause?.terminate()
                             try {
                                 val result = completion
-                                if (result != null) store?.finished(record, ChildTaskStatus.COMPLETED, result.text)
+                                if (result != null) store?.finished(record, result.status, result.text, result.detail)
                                 else store?.finished(record,
                                     if (requestStarted) ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
-                                    detail = if (requestStarted) "child_result_unconfirmed" else "child_not_sent")
+                                    detail = if (requestStarted) requestFailure?.userMessage?.take(200) ?: "child_result_unconfirmed" else "child_not_sent")
                             } catch (_: Exception) {
                                 completion = null
                             } finally {
@@ -519,13 +532,16 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             if (results.any { it == null }) return uncertain("child_profile_revoked")
             val output = results.map { checkNotNull(it) }
             if (output.sumOf { bytes(it.text).toLong() } > 256 * 1024) return uncertain("child_batch_output_too_large")
-            val payload = output.joinToString(",", "{\"ok\":true,\"task_group_id\":${jsonQuote(group)},\"generation\":$recordGeneration,\"results\":[", "]}") {
+            val allSucceeded = output.all { it.status == ChildTaskStatus.COMPLETED }
+            val payload = output.joinToString(",", "{\"ok\":$allSucceeded,\"task_group_id\":${jsonQuote(group)},\"generation\":$recordGeneration,\"results\":[", "]}") {
                 "{\"index\":${it.index},\"profile_id\":${jsonQuote(snapshot[it.index].profileId)}," +
-                    "\"child_run_id\":${jsonQuote(it.child.childRunId)},\"assistant_message_id\":${jsonQuote(it.message.id.value)},\"text\":${jsonQuote(it.text)}}"
+                    "\"child_run_id\":${jsonQuote(it.child.childRunId)},\"assistant_message_id\":${jsonQuote(it.message.id.value)}," +
+                    "\"status\":${jsonQuote(it.status.name)},\"text\":${jsonQuote(it.text)}" +
+                    (it.detail?.let { detail -> ",\"detail\":${jsonQuote(detail)},\"request_may_have_executed\":true,\"automatic_retry\":false" } ?: "") + "}"
             }
             if (bytes(payload) > 1024 * 1024) return uncertain("child_receipt_too_large")
             if (cancelled()) return uncertain("child_batch_cancelled")
-            return ExecutionReceipt.Confirmed(payload)
+            return ExecutionReceipt.Confirmed(payload, isError = !allSucceeded)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt(); return uncertain("child_wait_interrupted")
         } catch (_: Exception) { return uncertain("child_batch_unconfirmed") }
@@ -563,6 +579,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
 
     companion object {
         private const val MAX_OUTPUT = 64 * 1024
+        private val CONFIRMED_MODEL_FAILURES = setOf(ModelFailure.AUTHENTICATION, ModelFailure.PERMISSION,
+            ModelFailure.ENDPOINT, ModelFailure.REDIRECT, ModelFailure.RATE_LIMIT, ModelFailure.SERVER,
+            ModelFailure.CONFIGURATION, ModelFailure.REQUEST)
         private fun bytes(text: String) = text.toByteArray(Charsets.UTF_8).size
     }
 }

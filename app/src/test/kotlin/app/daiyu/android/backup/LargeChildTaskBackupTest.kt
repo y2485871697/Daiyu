@@ -27,4 +27,15 @@ class LargeChildTaskBackupTest {
         for (index in listOf(-1L, Int.MAX_VALUE.toLong() + 1))
             assertThrows(IllegalArgumentException::class.java) { validate(listOf(task(index))) }
     }
+    @Test fun knownFailureKeepsItsStatusAndSafeReasonAcrossBackupValidationAndHistoricalRestore() {
+        val failed = task(0).put("status", "FAILED").put("text", "").put("detail", "provider rejected")
+        val validated = validate(listOf(failed)).tasks.single()
+        val history = BackupChildTaskCodec.terminal(validated)
+        assertEquals("FAILED", history.getString("status"))
+        assertEquals("provider rejected", history.getString("detail"))
+        assertEquals("", history.getString("text"))
+        assertEquals(history.toString(), BackupChildTaskCodec.terminal(history).toString())
+        assertEquals("UNKNOWN", BackupChildTaskCodec.terminal(task(1).put("status", "RUNNING").put("text", "")).getString("status"))
+    }
+
 }

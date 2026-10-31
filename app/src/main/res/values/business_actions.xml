@@ -18,6 +18,7 @@
     <string name="business_task_running">Running</string>
     <string name="business_task_completed">Completed</string>
     <string name="business_task_not_executed">Not executed</string>
+    <string name="business_task_failed">Failed</string>
     <string name="business_task_unknown">Outcome unknown</string>
     <string name="business_task_parent">Parent run: %1$s</string>
     <string name="business_task_prompt">Task</string>

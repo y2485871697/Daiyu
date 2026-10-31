@@ -25,6 +25,7 @@ internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<Retai
             record.status == ChildTaskStatus.COMPLETED -> "已完成"
             record.status == ChildTaskStatus.NOT_EXECUTED -> "未执行"
             record.status == ChildTaskStatus.UNKNOWN -> "结果未知"
+            record.status == ChildTaskStatus.FAILED -> "失败"
             task != null && !task.settled && task.stopRequested -> "停止中"
             task != null && !task.settled && task.contextLimited -> "上下文超限"
             task != null && !task.settled && task.pauseState == ChildTaskPauseState.PAUSED -> "已暂停"

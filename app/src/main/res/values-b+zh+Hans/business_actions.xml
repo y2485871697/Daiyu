@@ -18,6 +18,7 @@
     <string name="business_task_running">运行中</string>
     <string name="business_task_completed">已完成</string>
     <string name="business_task_not_executed">未执行</string>
+    <string name="business_task_failed">失败</string>
     <string name="business_task_unknown">结果未知</string>
     <string name="business_task_parent">父运行：%1$s</string>
     <string name="business_task_prompt">任务</string>

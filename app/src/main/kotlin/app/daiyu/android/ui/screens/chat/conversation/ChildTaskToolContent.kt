@@ -163,7 +163,7 @@ internal fun ChildTaskDisclosure(
             }
             Text(row.status, color = when {
                 row.completed -> colors.primary
-                row.status in setOf("未执行", "结果未知", "状态未确认", "上下文超限") -> colors.error
+                row.status in setOf("失败", "未执行", "结果未知", "状态未确认", "上下文超限") -> colors.error
                 else -> colors.onSurfaceVariantSummary
             },
                 style = MiuixTheme.textStyles.footnote1)

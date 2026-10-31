@@ -18,7 +18,7 @@ class ProviderCapabilityVisibilityContractTest(unittest.TestCase):
     def test_headers_are_hidden_for_speech_and_body_only_for_anthropic(self):
         s=(UI/"ModelSettingsScreen.kt").read_text()
         self.assertIn('if (!speechOnly) item(key = "provider_headers")',s)
-        self.assertIn('if (!speechOnly && draft.protocol == ProviderProtocol.MESSAGES) item(key = "provider_body")',s)
+        self.assertIn('if (!speechOnly && draft.protocol == ProviderProtocol.MESSAGES) item(key = "provider_cache_retention")',s)
         self.assertIn('draft.providerRequestDraft(speechOnly).inlineFieldsSaveError()',s)
     def test_only_new_oauth_page_loses_balance(self):
         s=(UI/"ModelSettingsScreen.kt").read_text()

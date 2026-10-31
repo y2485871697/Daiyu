@@ -18,7 +18,7 @@ import org.json.JSONObject
 
 class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     override val engineeringUi: Boolean
-        get() = name != "testJsonBodyEditsOnlyDraftThenPersistsThroughTheExistingSave"
+        get() = name != "testCacheChoicePersistsThroughProviderSaveAndReopen"
     private var draft by mutableStateOf(ModelSettingsDraftUi())
     private var saved: ModelSettingsDraftUi? = null
     private var saveCount = 0
@@ -28,6 +28,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
             activity.setContent {
                 MiuixTheme {
                     Column(Modifier.fillMaxSize()) {
+                        RequestBodyFieldsEditor(draft, true, true, { draft = it })
                         ModelSettingsScreen(draft, onDraftChange = { draft = it },
                             onSave = { saved = it; saveCount++ }, onFetchCatalog = { error("no fetch") },
                             onBack = {}, modifier = Modifier.weight(1f), engineeringUi = true, showCatalog = false)
@@ -100,43 +101,34 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         fieldControl("model-body-field-apply").assertExists()
         assertEquals(0, fixture.opens.get())
     }
-    fun testJsonBodyEditsOnlyDraftThenPersistsThroughTheExistingSave() {
+    fun testCacheChoicePersistsThroughProviderSaveAndReopen() {
         val before = fixture.settings.load()
-        val metadata = """{"marker":true,"numeric":"123"}"""
-        setDraft("JSON editor unsent draft")
+        setDraft("Cache setting unsent draft")
         openProviderManagement()
         reveal("provider-add-anthropic", "模型提供商").performClick()
-        reveal("provider-name", "添加提供商").performTextReplacement("Body fixture")
+        reveal("provider-name", "添加提供商").performTextReplacement("Cache fixture")
         reveal("settings-field:Base URL", "添加提供商").performTextReplacement("https://fixture.invalid/v1")
         reveal("settings-field:API Key", "添加提供商").performTextReplacement("synthetic-key")
-        fun openBody(page: String) {
-            reveal("model-body-fields", page)
-            if (ui.onAllNodesWithTag("model-body-field-add").fetchSemanticsNodes().isEmpty()) {
-                node("model-body-fields").performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
-            }
-            reveal("model-body-field-add", page)
-        }
-        openBody("添加提供商")
-        reveal("model-body-field-add", "添加提供商").performClick()
-        reveal("model-body-field-name:0", "添加提供商").performTextReplacement("metadata")
-        reveal("model-body-field-value:0", "添加提供商").performTextReplacement(metadata)
+        reveal("provider-cache-retention", "添加提供商").performClick()
+        node("provider-cache-retention:1h").assertExists()
+        node("provider-cache-retention:5m").performClick()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         assertEquals(before, fixture.settings.load())
         reveal("model-save", "添加提供商").performClick()
-        awaitUniqueTag("page:Body fixture")
-        val slot = fixture.controller.providers.snapshot().providers.single { it.name == "Body fixture" }.slotId
-        fun body() = JSONObject(fixture.controller.providers.editing(fixture.controller.providers.editor(slot)).settings.requestOptions.customBody)
-        assertTrue(body().getJSONObject("metadata").getBoolean("marker"))
-        assertEquals("123", body().getJSONObject("metadata").get("numeric"))
-        openBody("Body fixture")
-        reveal("model-body-field-name:0", "Body fixture").assertEditableText("metadata")
-        reveal("model-body-field-value:0", "Body fixture").assertEditableText(metadata)
-        reveal("model-body-field-delete:0", "Body fixture").assertIsEnabled().performClick()
-        assertTrue(body().has("metadata"))
-        reveal("model-save", "Body fixture").performClick()
-        awaitControl("body removal saved") { !body().has("metadata") }
+        awaitUniqueTag("page:Cache fixture")
+        val slot = fixture.controller.providers.snapshot().providers.single { it.name == "Cache fixture" }.slotId
+        fun retention() = fixture.controller.providers.editing(fixture.controller.providers.editor(slot)).settings.requestOptions.promptCacheRetention
+        assertEquals(app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES, retention())
+        reveal("provider-cache-retention", "Cache fixture").performClick()
+        node("provider-cache-retention:5m").assertExists()
+        node("provider-cache-retention:none").performClick()
+        assertEquals(app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES, retention())
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        reveal("model-save", "Cache fixture").performClick()
+        awaitControl("cache retention saved") { retention() == app.daiyu.android.model.DaiyuPromptCacheRetention.NONE }
         assertEquals(before, fixture.settings.load())
         backToChat(activity)
-        assertDraft("JSON editor unsent draft")
+        assertDraft("Cache setting unsent draft")
         assertEquals(0, fixture.opens.get())
     }
     fun testPausedFieldApplyCapabilityCannotChangeTheComponentDraftOrSave() {

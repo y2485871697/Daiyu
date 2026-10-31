@@ -11,13 +11,11 @@ internal fun newProviderSessionGateway(protocol: ProviderProtocol, speechOnly: B
 internal fun ModelSettingsDraftUi.providerRequestDraft(
     speechOnly: Boolean = DoubaoSpeech.isOpenspeech(endpoint),
 ): ModelSettingsDraftUi {
-    val bodyAllowed = !speechOnly && protocol == ProviderProtocol.MESSAGES
-    if (!speechOnly && bodyAllowed) return this
     return copy(
-        customBody = if (bodyAllowed) customBody else "",
-        bodyFieldsValid = if (bodyAllowed) bodyFieldsValid else true,
-        bodyFieldRows = if (bodyAllowed) bodyFieldRows else null,
-        bodyFieldsError = if (bodyAllowed) bodyFieldsError else null,
+        customBody = "",
+        bodyFieldsValid = true,
+        bodyFieldRows = null,
+        bodyFieldsError = null,
         customHeaders = if (speechOnly) "" else customHeaders,
         headerFieldsValid = if (speechOnly) true else headerFieldsValid,
         headerFieldRows = if (speechOnly) null else headerFieldRows,

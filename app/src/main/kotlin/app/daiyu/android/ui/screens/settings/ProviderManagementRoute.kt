@@ -84,6 +84,7 @@ private class ProviderConfirm(val title: String, val message: String, val destru
 private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(oauth = oauth, protocol = protocol, endpoint = endpoint,
     responsesPath = responsesPath, apiKey = apiKey, model = model, batteryEnabled = batteryEnabled,
     deviceStatusEnabled = deviceStatusEnabled, customBody = requestOptions.customBody,
+    promptCacheRetention = requestOptions.promptCacheRetention,
     speedMode = requestOptions.speedMode, codex = requestOptions.codex,
     anthropicVersion = requestOptions.anthropicVersion.orEmpty(),
     sessionGateway = requestOptions.sessionGateway,
@@ -95,6 +96,7 @@ private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings): ModelSet
         batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
         customHeaders = app.daiyu.android.model.ProviderHeaders.parse(effective.customHeaders),
         requestOptions = base.requestOptions.copy(sessionGateway = sessionGateway, customBody = effective.customBody, speedMode = speedMode, codex = codex,
+            promptCacheRetention = promptCacheRetention,
             anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }))
 }
 

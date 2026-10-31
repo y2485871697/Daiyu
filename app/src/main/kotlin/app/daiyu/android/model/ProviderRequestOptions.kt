@@ -14,6 +14,7 @@ data class ProviderRequestOptions(
     val sessionGateway: SessionGatewayRule = SessionGatewayRule(),
     val anthropicVersion: String? = null,
     val openAiWebSearchEnabled: Boolean = false,
+    val promptCacheRetention: DaiyuPromptCacheRetention = DaiyuPromptCacheRetention.ONE_HOUR,
 ) {
     override fun toString(): String =
         "ProviderRequestOptions(customBody=<redacted>, speedMode=$speedMode, codex=$codex)"
@@ -107,6 +108,7 @@ data class ProviderRequestOptions(
     internal fun encode(): String = JSONObject().put("custom_body", customBody)
         .put("speed_mode", speedMode?.name ?: JSONObject.NULL).put("codex", codex)
         .put("session_gateway", sessionGateway.toJson())
+        .put(DaiyuPromptCacheRetention.STORAGE_KEY, promptCacheRetention.wireValue)
         .also {
             if (anthropicVersion != null) it.put("anthropic_version", anthropicVersion)
             if (openAiWebSearchEnabled) it.put("openai_web_search_enabled", true)
@@ -133,7 +135,7 @@ data class ProviderRequestOptions(
                 val value = MessagesRequest.jsonObject(raw, 3)
                 val keys = value.keys().asSequence().toSet()
                 val legacyKeys = setOf("custom_body", "speed_mode", "codex")
-                require(keys.containsAll(legacyKeys) && keys.all { it in legacyKeys + setOf("session_gateway", "anthropic_version", "openai_web_search_enabled") })
+                require(keys.containsAll(legacyKeys) && keys.all { it in legacyKeys + setOf("session_gateway", "anthropic_version", "openai_web_search_enabled", DaiyuPromptCacheRetention.STORAGE_KEY) })
                 val body = value.get("custom_body") as? String ?: error("body")
                 val codex = value.get("codex") as? Boolean ?: error("codex")
                 val speed = value.get("speed_mode")
@@ -144,7 +146,9 @@ data class ProviderRequestOptions(
                     value.get("anthropic_version") as? String ?: error("version") else null
                 val search = if (value.has("openai_web_search_enabled"))
                     value.get("openai_web_search_enabled") as? Boolean ?: error("web search") else false
-                ProviderRequestOptions(body, mode, codex, rule, version, search)
+                val retention = if (value.has(DaiyuPromptCacheRetention.STORAGE_KEY))
+                    DaiyuPromptCacheRetention.decode(value.get(DaiyuPromptCacheRetention.STORAGE_KEY)) else DaiyuPromptCacheRetention.ONE_HOUR
+                ProviderRequestOptions(body, mode, codex, rule, version, search, retention)
             } catch (_: Exception) {
                 throw IllegalStateException("模型请求配置无效；请重新保存")
             }

@@ -112,7 +112,7 @@ class ProviderSummaryModelTest {
             assertFalse(body.has("tool_choice"))
             assertTrue(body.getBoolean("stream"))
             val native = if (protocol == ProviderProtocol.RESPONSES) "instructions" else "system"
-            assertTrue(body.getString(native).contains("不调用任何工具"))
+            assertTrue((if (protocol == ProviderProtocol.MESSAGES) body.getJSONArray(native).getJSONObject(0).getString("text") else body.getString(native)).contains("不调用任何工具"))
             assertFalse(body.has(if (protocol == ProviderProtocol.RESPONSES) "system" else "instructions"))
             if (protocol == ProviderProtocol.RESPONSES) {
                 assertEquals("Bearer synthetic-summary-key", wire.getRequestProperty("Authorization"))

@@ -16,23 +16,26 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         awaitModelEditor()
     }
     private fun control(tag: String) = reveal(tag).scrollToVisible()
-    fun testBodyUsesRawJsonInputAndBlocksInvalidSaveWithoutLosingRowsOnRemount() {
+    fun testCacheChoicesOnlyEditDraftAndSurviveRemountBeforeSave() {
         mainThread { draft = draft.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES) }
         render()
-        addInlineBodyField("temperature", "not-json")
-        assertFalse(draft.bodyFieldsValid)
-        assertEquals("not-json", draft.bodyFieldRows!!.single().value)
-        attemptBlockedInlineBodySave(); assertNull(saved)
+        control("provider-cache-retention").assertExists()
+        ui.onNodeWithText("1小时").assertExists()
+        node("model-body-fields").assertDoesNotExist()
+        control("provider-cache-retention").performClick()
+        for (value in app.daiyu.android.model.DaiyuPromptCacheRetention.entries) {
+            node("provider-cache-retention:${value.wireValue}").assertExists().performClick()
+            assertEquals(value, draft.promptCacheRetention)
+            assertNull(saved)
+            node("provider-cache-retention-menu").assertExists()
+        }
+        node("provider-cache-retention:5m").performClick()
         render()
-        openInlineBodyFields()
-        inlineBodyControl("model-body-field-value:0").assertEditableText("not-json")
-        assertFalse(draft.bodyFieldsValid)
-        attemptBlockedInlineBodySave(); assertNull(saved)
-        inlineBodyControl("model-body-field-value:0").performTextReplacement("0.1234567890123456789")
-        assertTrue(draft.bodyFieldsValid)
-        assertTrue(draft.customBody.contains("0.1234567890123456789"))
+        control("provider-cache-retention").assertExists()
+        ui.onNodeWithText("5分钟").assertExists()
         control("model-save").performClick()
-        assertEquals(draft, saved); assertEquals(0, fixture.opens.get())
+        assertEquals(app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES, saved?.promptCacheRetention)
+        assertEquals(0, fixture.opens.get())
     }
     fun testGatewayIsHiddenAndUnrelatedEditsPreserveItsEffectivePolicy() {
         mainThread { draft = draft.copy(sessionGateway = draft.sessionGateway.copy(keyField = "request_cache_key")) }
@@ -52,6 +55,7 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
             bodyFieldsError = "hidden body error") }
         render()
         node("model-body-fields").assertDoesNotExist()
+        node("provider-cache-retention").assertDoesNotExist()
         control("model-custom-headers").assertExists()
         control("model-save").performClick()
         assertNotNull(saved)
@@ -59,12 +63,13 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         mainThread { draft = draft.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES,
             customBody = "", bodyFieldsValid = true, bodyFieldsError = null) }
         render()
-        control("model-body-fields").assertExists()
+        control("provider-cache-retention").assertExists()
         mainThread { activity.setContent { MiuixTheme {
             ModelSettingsScreen(draft, { draft = it }, { saved = it }, {}, {}, showCatalog = false, speechOnly = true)
         } } }
         awaitModelEditor()
         node("model-custom-headers").assertDoesNotExist()
+        node("provider-cache-retention").assertDoesNotExist()
         node("model-body-fields").assertDoesNotExist()
         node("provider-session-gateway").assertDoesNotExist()
         assertEquals(before, fixture.settings.load())

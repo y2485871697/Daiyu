@@ -133,7 +133,7 @@ class SessionGatewayWireTest {
             val body = connection.body()
             assertEquals(anchor, body.getJSONObject("metadata").getString("user_id"))
             assertEquals("kept", body.getJSONObject("metadata").getString("custom"))
-            assertEquals("runtime system", body.getString("system"))
+            assertEquals("runtime system", body.getJSONArray("system").getJSONObject(0).getString("text"))
             assertFalse(body.has("prompt_cache_key")); assertFalse(body.has("project")); assertFalse(body.has("ttl"))
             assertEquals("durable-owner", connection.getRequestProperty("session-id"))
             assertEquals("durable-owner", connection.getRequestProperty("thread-id"))

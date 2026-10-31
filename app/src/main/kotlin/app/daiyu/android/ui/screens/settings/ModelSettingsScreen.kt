@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.model.DaiyuPromptCacheRetention
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.components.OptionSelectionSheet
@@ -64,6 +65,7 @@ internal data class ModelSettingsDraftUi(
     val providerEnabled: Boolean = false,
     val balanceOption: app.daiyu.android.balance.BalanceOption = app.daiyu.android.balance.BalanceOption(),
     val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration? = null,
+    val promptCacheRetention: DaiyuPromptCacheRetention = DaiyuPromptCacheRetention.ONE_HOUR,
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
@@ -202,9 +204,8 @@ internal fun ModelSettingsScreen(
             SettingsSectionTitle("自定义请求头")
             SettingsCard { ProviderHeadersEditor(draft, enabled, changeDraft) }
         }
-        if (!speechOnly && draft.protocol == ProviderProtocol.MESSAGES) item(key = "provider_body") {
-            SettingsSectionTitle("自定义请求体")
-            SettingsCard { RequestBodyFieldsEditor(draft, enabled, engineeringUi, changeDraft) }
+        if (!speechOnly && draft.protocol == ProviderProtocol.MESSAGES) item(key = "provider_cache_retention") {
+            SettingsCard { DaiyuPromptCacheFields(draft, enabled, changeDraft) }
         }
         if (providerName != null) {
             item(key = "provider_enabled") {

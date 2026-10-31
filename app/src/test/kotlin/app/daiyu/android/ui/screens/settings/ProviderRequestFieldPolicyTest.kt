@@ -21,7 +21,7 @@ class ProviderRequestFieldPolicyTest {
         assertFalse(NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true, discardOAuth = {}).draft.sessionGateway.enabled)
     }
     @Test fun hiddenBodyIsExcludedFromValidationWithoutMutatingOriginalDraft() {
-        for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)) {
+        for (protocol in ProviderProtocol.entries) {
             val draft = ModelSettingsDraftUi(protocol = protocol, customBody = "bad-json", bodyFieldsValid = false,
                 bodyFieldsError = "hidden error", bodyFieldRows = listOf(ProviderFieldRow(0, "marker", "bad-json")))
             val effective = draft.providerRequestDraft(false)
@@ -35,11 +35,15 @@ class ProviderRequestFieldPolicyTest {
             assertFalse(draft.bodyFieldsValid)
         }
     }
-    @Test fun anthropicRetainsItsBodyErrorsAndCustomHeaders() {
+    @Test fun anthropicIgnoresTheReplacedBodyEditorButRetainsHeadersAndCacheChoice() {
         val draft = ModelSettingsDraftUi(protocol = ProviderProtocol.MESSAGES, bodyFieldsValid = false,
-            bodyFieldsError = "visible body error", customHeaders = """{"x-project":"retained"}""")
-        assertSame(draft, draft.providerRequestDraft(false))
-        assertEquals("visible body error", draft.providerRequestDraft(false).inlineFieldsSaveError())
+            bodyFieldsError = "hidden body error", customHeaders = """{"x-project":"retained"}""",
+            promptCacheRetention = app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES)
+        val effective = draft.providerRequestDraft(false)
+        assertNull(effective.inlineFieldsSaveError())
+        assertEquals(draft.customHeaders, effective.customHeaders)
+        assertEquals(draft.promptCacheRetention, effective.promptCacheRetention)
+        assertFalse(draft.bodyFieldsValid)
     }
     @Test fun speechIgnoresBothHiddenFieldErrorsAndNeverChangesSource() {
         val draft = ModelSettingsDraftUi(protocol = ProviderProtocol.MESSAGES, customBody = "bad-body", customHeaders = "bad-headers",

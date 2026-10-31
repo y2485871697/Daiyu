@@ -224,7 +224,8 @@ class TitleModelCoordinator internal constructor(
                 model = app.daiyu.android.model.ReasoningRequestPolicy.requestModel(provider.model, provider.requestOptions),
                 requestOptions = ProviderRequestOptions(
                     customBody = body, codex = provider.requestOptions.codex,
-                    anthropicVersion = provider.requestOptions.anthropicVersion),
+                    anthropicVersion = provider.requestOptions.anthropicVersion,
+                    promptCacheRetention = provider.requestOptions.promptCacheRetention),
                 batteryEnabled = false, deviceStatusEnabled = false).requestSnapshot()
         }
     }

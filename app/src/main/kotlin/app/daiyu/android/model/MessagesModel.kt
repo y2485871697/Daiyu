@@ -98,7 +98,7 @@ class MessagesModel internal constructor(
                 val item = MessagesRequest.message("user", content)
                 messages.put(item); ownItems.add(item.toString())
             }
-            val request = MessagesRequest.withAssistantInstructions(
+            var request = MessagesRequest.withAssistantInstructions(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
@@ -107,6 +107,7 @@ class MessagesModel internal constructor(
             settings.requestOptions.sessionGateway.requireExecutable()
             SessionGateway.applyAnthropic(request, sessionContext, settings.requestOptions.sessionGateway)
             val sessionHeaders = SessionGateway.headers(endpoint, sessionContext, settings.requestOptions.sessionGateway)
+            request = DaiyuPromptCaching.apply(request, settings.requestOptions.promptCacheRetention)
             val requestBytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->

@@ -7227,7 +7227,8 @@ class MainActivity : ComponentActivity() {
     private fun ModelSettingsDraftUi.toSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(), model = model.trim(),
         apiKey = apiKey, protocol = protocol, responsesPath = responsesPath.trim(), batteryEnabled = batteryEnabled,
         deviceStatusEnabled = deviceStatusEnabled, requestOptions = base.requestOptions.copy(
-            customBody = providerRequestDraft().customBody, speedMode = speedMode, codex = codex))
+            customBody = providerRequestDraft().customBody, speedMode = speedMode, codex = codex,
+            promptCacheRetention = promptCacheRetention))
     private fun saveModelSettings(value: ModelSettingsDraftUi) {
         try {
             requireActivityUsable(); check(retainedPage == "models" && modelDraft === value)

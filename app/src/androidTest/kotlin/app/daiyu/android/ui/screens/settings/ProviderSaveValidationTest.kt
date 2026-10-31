@@ -64,10 +64,10 @@ class ProviderSaveValidationTest : WiredActivityTestCase() {
         ui.onNodeWithText(headerError).assertDoesNotExist()
         ui.onNodeWithText(bodyError).assertDoesNotExist()
         val save = reveal("model-save").assertIsEnabled()
-        ui.onNodeWithText("$headerError\n$bodyError").assertDoesNotExist()
+        ui.onNodeWithText(headerError).assertDoesNotExist()
         save.performClick()
         reveal("model-save").assertIsDisplayed()
-        val summary = ui.onNodeWithText("$headerError\n$bodyError")
+        val summary = ui.onNodeWithText(headerError)
         summary.assertIsDisplayed()
         assertTrue(summary.fetchSemanticsNode().boundsInRoot.bottom <=
             node("model-save").fetchSemanticsNode().boundsInRoot.top)

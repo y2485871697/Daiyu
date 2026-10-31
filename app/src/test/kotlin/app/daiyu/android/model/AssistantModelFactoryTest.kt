@@ -85,7 +85,7 @@ class AssistantModelFactoryTest {
         val model = MessagesModel(config, 4096, { connection }, null, assistant.systemPrompt)
         send(model.open(history()))
         val request = connection.json()
-        assertEquals("必须保留的既有规则\n\n" + assistant.systemPrompt, request.getString("system"))
+        assertEquals("必须保留的既有规则\n\n" + assistant.systemPrompt, request.getJSONArray("system").getJSONObject(0).getString("text"))
         assertFalse(request.has("instructions"))
         assertEquals("custom-model", request.getString("model"))
         assertEquals(123, request.getInt("max_tokens"))
@@ -136,7 +136,7 @@ class AssistantModelFactoryTest {
             val model: ModelPort = if (protocol == ProviderProtocol.RESPONSES) ResponsesModel(config) { connection }
                 else MessagesModel(config) { connection }
             send(model.open(history()))
-            assertEquals("existing", connection.json().getString(key))
+            assertEquals("existing", if (protocol == ProviderProtocol.MESSAGES) connection.json().getJSONArray(key).getJSONObject(0).getString("text") else connection.json().getString(key))
         }
     }
 

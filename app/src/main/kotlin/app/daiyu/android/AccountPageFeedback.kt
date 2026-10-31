@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import app.daiyu.android.voice.account.PersonalVoiceQueryFailure
 import app.daiyu.android.voice.account.VoiceCatalogFailure
 import app.daiyu.android.voice.account.AccountTransportException
 
@@ -11,6 +12,7 @@ internal data class AccountPageFeedback(val visit: Long = 0, val text: String = 
 }
 
 internal fun voiceAccountFailure(failure: Exception, fallback: String?): String = when (failure) {
+    is PersonalVoiceQueryFailure -> failure.safeMessage
     is VoiceCatalogFailure -> failure.safeMessage
     is AccountTransportException -> failure.safeMessage
     else -> fallback ?: "操作未完成，请核对账户、权限或本机存储后重试。"

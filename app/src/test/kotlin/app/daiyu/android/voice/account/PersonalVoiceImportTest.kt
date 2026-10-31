@@ -143,6 +143,171 @@ class PersonalVoiceImportTest {
         assertEquals(6, calls)
     }
 
+    @Test fun documentedCodeLessQueryLoadsCloudClonesWithoutSavingOrTraining() = runBlocking {
+        val index = File(folder.root, "code-less-list.json")
+        var queries = 0
+        val store = PersonalVoices(index, AccountHttpTransport { request, _ ->
+            val payload = body(request)
+            if (request.url.host == "open.volcengineapi.com") {
+                val state = payload.getString("State")
+                response(catalog(when (state) {
+                    "Success" -> listOf("S_ready")
+                    "Active" -> listOf("S_active")
+                    else -> emptyList()
+                }, state))
+            } else {
+                assertTrue(request.url.encodedPath.endsWith("/get_voice"))
+                assertFalse(payload.has("audio"))
+                queries++
+                val id = payload.getString("speaker_id")
+                response(voice(if (id == "S_active") 4 else 2).apply {
+                    remove("code"); put("speaker_id", id)
+                })
+            }
+        })
+        store.load()
+        assertEquals(setOf("S_ready", "S_active"),
+            store.listImportable(config(), "ak", "sk", "project").map { it.id }.toSet())
+        assertEquals(2, queries)
+        assertTrue(store.state.value.isEmpty()); assertFalse(index.exists())
+    }
+
+    @Test fun documentedCodeLessQueryImportsAndRefreshesOriginalVoice() = runBlocking {
+        val index = File(folder.root, "code-less-import.json")
+        var calls = 0
+        val store = PersonalVoices(index, AccountHttpTransport { request, _ ->
+            assertTrue(request.url.encodedPath.endsWith("/get_voice")); calls++
+            val payload = body(request)
+            assertEquals("S_existing", payload.getString("speaker_id"))
+            response(voice(2).apply { remove("code"); put("speaker_id", "S_existing") })
+        })
+        store.load()
+        val imported = store.importExisting(config(), "S_existing", "remark")
+        assertEquals("S_existing", imported.id); assertTrue(imported.canImport)
+        assertEquals("remark", imported.name); assertFalse(imported.accepted)
+        store.refresh(imported, config())
+        assertEquals(2, calls)
+        assertEquals(listOf("S_existing"), store.state.value.map { it.id })
+    }
+
+    @Test fun codeLessQueryWithoutOptionalIdentityEchoUsesRequestedId() = runBlocking {
+        val store = PersonalVoices(File(folder.root, "no-echo.json"), AccountHttpTransport { request, _ ->
+            assertEquals("S_existing", body(request).getString("speaker_id"))
+            response(voice(2).apply { remove("code") })
+        })
+        store.load()
+        assertEquals("S_existing", store.importExisting(config(), "S_existing", "remark").id)
+    }
+
+    @Test fun codeLessCustomQueriesKeepOriginalIdentityAndRejectMismatchedEcho() = runBlocking {
+        val id = "Daiyu" + "a".repeat(32)
+        for (placeholder in listOf(false, true)) {
+            val store = PersonalVoices(File(folder.root, "custom-$placeholder.json"), AccountHttpTransport { request, _ ->
+                val payload = body(request)
+                assertEquals("custom_speaker_id", payload.getString("speaker_id"))
+                assertEquals(id, payload.getString("custom_speaker_id"))
+                response(voice(2).apply {
+                    remove("code"); put("speaker_id", if (placeholder) "custom_speaker_id" else id)
+                    if (placeholder) put("custom_speaker_id", id)
+                })
+            })
+            store.load()
+            assertEquals(id, store.importExisting(config(), id, "custom").id)
+        }
+        val index = File(folder.root, "custom-mismatch.json")
+        val store = PersonalVoices(index, AccountHttpTransport { _, _ -> response(voice(2).apply {
+            remove("code"); put("speaker_id", "custom_speaker_id"); put("custom_speaker_id", "Daiyu" + "b".repeat(32))
+        }) })
+        store.load()
+        try { store.importExisting(config(), id, "custom"); fail("Mismatched custom echo accepted") }
+        catch (_: PersonalVoiceQueryFailure) { }
+        assertFalse(index.exists())
+    }
+
+    @Test fun codeLessUnreadyQueriesNeverImportOrWriteAnIndex() = runBlocking {
+        for (status in listOf(0, 1, 3)) {
+            val index = File(folder.root, "unready-$status.json")
+            val store = PersonalVoices(index, AccountHttpTransport { request, _ ->
+                assertTrue(request.url.encodedPath.endsWith("/get_voice"))
+                response(JSONObject().put("speaker_id", "S_existing").put("status", status))
+            })
+            store.load()
+            try { store.importExisting(config(), "S_existing", "name"); fail("Unready voice imported: $status") }
+            catch (_: IllegalArgumentException) { }
+            assertFalse(index.exists()); assertTrue(store.state.value.isEmpty())
+        }
+    }
+
+    @Test fun codeLessQueryRejectsEmptyMalformedAndWrongIdentityWithoutSaving() = runBlocking {
+        val malformed = listOf(
+            JSONObject(),
+            voice(2).apply { remove("code"); put("speaker_id", "S_other") },
+            voice(2).apply { remove("code"); put("speaker_id", "S_other"); put("custom_speaker_id", "S_existing") },
+            voice(2).apply { remove("code"); put("speaker_id", "S_existing"); put("status", "2") },
+            voice(2).apply { remove("code"); put("speaker_id", "S_existing"); put("status", 2.5) },
+            voice(2).apply { remove("code"); put("speaker_id", "S_existing"); remove("speaker_status") },
+            voice(2).apply { remove("code"); put("speaker_id", "S_existing"); put("speaker_status", JSONArray().put("bad")) },
+            voice(2).apply { remove("code"); put("speaker_id", "S_existing"); put("speaker_status", JSONArray().put(JSONObject().put("model_type", "5"))) },
+        )
+        for ((number, value) in malformed.withIndex()) {
+            val index = File(folder.root, "malformed-$number.json")
+            val store = PersonalVoices(index, AccountHttpTransport { _, _ -> response(value) })
+            store.load()
+            try { store.importExisting(config(), "S_existing", "remark"); fail("Malformed query accepted: $number") }
+            catch (_: PersonalVoiceQueryFailure) { }
+            assertFalse(index.exists()); assertTrue(store.state.value.isEmpty())
+        }
+    }
+
+    @Test fun explicitErrorOrInvalidCodeCannotBeRescuedBySuccessfulPayload() = runBlocking {
+        for ((number, code) in listOf("12345", "\"0\"", "\"20000000\"", "0.0", "0.5", "null").withIndex()) {
+            val index = File(folder.root, "error-$number.json")
+            val store = PersonalVoices(index, AccountHttpTransport { _, _ ->
+                val payload = voice(2).put("speaker_id", "S_existing").apply { remove("code") }
+                val json = payload.toString().dropLast(1) + ",\"code\":$code}"
+                AccountResponse(200, json.toByteArray())
+            })
+            store.load()
+            try { store.importExisting(config(), "S_existing", "remark"); fail("Explicit code accepted: $code") }
+            catch (failure: PersonalVoiceQueryFailure) { assertTrue(failure.safeMessage.contains("HTTP 200")) }
+            assertFalse(index.exists())
+        }
+    }
+
+    @Test fun failedHttpAndInvalidJsonExposeOnlySafeQueryReason() = runBlocking {
+        for (http in listOf(401, 403, 429, 503, 200)) {
+            val index = File(folder.root, "http-$http.json")
+            val store = PersonalVoices(index, AccountHttpTransport { _, _ ->
+                AccountResponse(http, "secret-api-key raw service message".toByteArray())
+            })
+            store.load()
+            try { store.importExisting(config(), "S_existing", "remark"); fail("HTTP error accepted") }
+            catch (failure: PersonalVoiceQueryFailure) {
+                assertFalse(failure.safeMessage.contains("secret")); assertNull(failure.cause)
+                if (http == 200) assertTrue(failure.safeMessage.contains("响应格式无效"))
+                else assertTrue(failure.safeMessage.contains("HTTP $http"))
+            }
+            assertFalse(index.exists())
+        }
+    }
+
+    @Test fun codeLessTrainingResponseStillKeepsUnknownSubmissionAndDoesNotRetry() = runBlocking {
+        val index = File(folder.root, "training.json")
+        var calls = 0
+        val store = PersonalVoices(index, AccountHttpTransport { request, _ ->
+            assertTrue(request.url.encodedPath.endsWith("/voice_clone")); calls++
+            response(voice(2).apply { remove("code"); put("speaker_id", "S_existing") })
+        })
+        store.load()
+        try {
+            store.create(config(), PersonalVoices.Sample.of(byteArrayOf(1, 2), "wav"), "name", "S_existing", true)
+            fail("Training must not borrow query's code-less success rule")
+        } catch (_: IllegalStateException) { }
+        assertEquals(1, calls)
+        assertTrue(store.state.value.single().uncertain)
+        assertEquals("S_existing", store.state.value.single().id)
+    }
+
     @Test fun importEligibilityIsNotTrainingQuotaOrLocalAcceptance() {
         val ready = PersonalVoices.Voice("S_ready", "voice", "account", status = 2,
             models = setOf(5), catalogState = "Success", remaining = 0)

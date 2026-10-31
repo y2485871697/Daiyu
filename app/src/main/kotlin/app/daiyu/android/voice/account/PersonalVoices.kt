@@ -19,10 +19,13 @@ import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+
+internal class PersonalVoiceQueryFailure(val safeMessage: String) : IllegalStateException(safeMessage)
 
 /**
  * Account-scoped personal voice management. Instance-owned with explicit
@@ -243,10 +246,40 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             .header("X-Api-Key", key).header("X-Api-Request-Id", UUID.randomUUID().toString())
             .post(body.toString().toRequestBody("application/json".toMediaType())).build()
         val response = transport.execute(request, 1024 * 1024)
-        val root = JSONObject(response.bytes.toString(Charsets.UTF_8))
-        // Missing code is not proof of business success.
-        if (response.status !in 200..299 || root.optInt("code", -1) !in setOf(0, 20000000))
+        if (path == "get_voice" && response.status !in 200..299) throw queryFailure(response.status)
+        val root = try { JSONObject(response.bytes.toString(Charsets.UTF_8)) }
+        catch (failure: JSONException) {
+            if (path == "get_voice") throw PersonalVoiceQueryFailure("音色查询响应格式无效，请重新查询。")
+            throw failure
+        }
+        if (path == "get_voice") {
+            val code = root.opt("code")
+            val codedSuccess = (code is Int || code is Long) && (code as Number).toLong() in setOf(0L, 20000000L)
+            // get_voice's documented HTTP 200 response can omit code; require the actual query payload instead.
+            if (root.has("code")) {
+                if (!codedSuccess) throw queryFailure(response.status)
+            } else {
+                val status = root.opt("status")
+                val models = root.opt("speaker_status")
+                val responseId = root.opt("speaker_id") as? String
+                val expectedCustomId = body.opt("custom_speaker_id") as? String
+                val identityMatches = if (expectedCustomId == null) responseId == body.opt("speaker_id")
+                    else responseId == expectedCustomId || (responseId == "custom_speaker_id" &&
+                        root.opt("custom_speaker_id") == expectedCustomId)
+                val returnedIdentity = root.has("speaker_id") || root.has("custom_speaker_id")
+                val validModels = models is JSONArray && (0 until models.length()).all {
+                    val model = models.optJSONObject(it)?.opt("model_type")
+                    model is Int || model is Long
+                }
+                if (response.status != 200 || (returnedIdentity && !identityMatches) || status !is Int || status !in 0..4 ||
+                    (status in setOf(2, 4) && !validModels) ||
+                    (root.has("speaker_status") && !validModels)) {
+                    throw PersonalVoiceQueryFailure("音色查询响应不完整或音色 ID 不匹配，请重新查询。")
+                }
+            }
+        } else if (response.status !in 200..299 || root.optInt("code", -1) !in setOf(0, 20000000)) {
             throw VoiceRequestException(response.status)
+        }
         return root
     }
     private fun updated(voice: Voice, root: JSONObject): Voice {
@@ -260,6 +293,12 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             uncertain = voice.uncertain && status !in 1..4,
             error = if (voice.uncertain && status !in 1..4) "状态仍未知；请查询原音色，不会重复训练" else "")
     }
+    private fun queryFailure(http: Int) = PersonalVoiceQueryFailure(when (http) {
+        401 -> "音色查询鉴权失败：HTTP 401，请核对语音 API Key。"
+        403 -> "音色查询权限不足：HTTP 403，请核对语音 API Key 与音色所属项目。"
+        429 -> "音色查询过于频繁：HTTP 429，请稍后重试。"
+        else -> "音色查询失败：HTTP $http，请稍后重新查询。"
+    })
     private class VoiceRequestException(val http: Int) : IllegalStateException("豆包账户请求 HTTP $http")
     companion object {
         const val MAX_SAMPLE_BYTES = 10 * 1024 * 1024

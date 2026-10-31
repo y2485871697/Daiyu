@@ -25,6 +25,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private val roots = mutableListOf<File>()
     private val importAccountCleanup = mutableListOf<() -> Unit>()
     private var importQueryFails = false
+    private var importVoiceQueryFails = false
     private var creationQueryFails = false
     private var creationRemoteIds = listOf("S_available")
     private var creationRemaining = 3
@@ -85,7 +86,9 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                         } }))
                 } else {
                     check(request.url.encodedPath.endsWith("/get_voice")) { "Import must not train" }
-                    JSONObject().put("code", 0).put("status", 2)
+                    if (importVoiceQueryFails) throw PersonalVoiceQueryFailure(
+                        "音色查询权限不足：HTTP 403，请核对语音 API Key 与音色所属项目。")
+                    JSONObject().put("speaker_id", body.getString("speaker_id")).put("status", 2)
                         .put("available_training_times", if (body.getString("speaker_id") == "S_exhausted") 0 else 3)
                         .put("speaker_status", JSONArray().put(JSONObject().put("model_type", 4)))
                 }
@@ -475,6 +478,31 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         ui.onNode(error).assertIsDisplayed()
         node("voice-import-slot:S_available").assertDoesNotExist()
         assertNoSideEffects(expectedRequests = 6)
+    }
+
+    fun testImportQueryReasonSurvivesPickerAndRecoversAfterReopen() {
+        mount(available = true, flow = "IMPORT")
+        importVoiceQueryFails = true
+        reveal("settings-row:选取我的名额", "导入声音").performClick()
+        awaitUniqueTag("voice-import-slot-picker")
+        awaitNodeWindowFocus(node("voice-import-slot-picker"))
+        val reason = hasText("音色查询权限不足：HTTP 403，请核对语音 API Key 与音色所属项目。") and
+            hasAnyAncestor(hasTestTag("voice-import-slot-picker"))
+        ui.waitUntil(5_000) { ui.onAllNodes(reason).fetchSemanticsNodes().size == 1 }
+        ui.onNode(reason).assertIsDisplayed()
+        ui.onNode(hasText("已复刻名额查询失败", substring = true) and
+            hasAnyAncestor(hasTestTag("voice-import-slot-picker"))).assertDoesNotExist()
+        node("voice-import-slot:S_available").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot-picker").fetchSemanticsNodes().isEmpty() }
+        importVoiceQueryFails = false
+        reveal("settings-row:选取我的名额", "导入声音").performClick()
+        awaitUniqueTag("voice-import-slot-picker")
+        awaitNodeWindowFocus(node("voice-import-slot-picker"))
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot:S_available").fetchSemanticsNodes().size == 1 }
+        node("voice-import-slot:S_available").assertIsEnabled()
+        ui.onNode(reason).assertDoesNotExist()
+        assertNoSideEffects(expectedRequests = 10)
     }
 
     fun testPendingNameShowsRetryWithoutImplicitRequestsOrRecreation() {

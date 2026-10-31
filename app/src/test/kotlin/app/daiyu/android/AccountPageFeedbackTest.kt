@@ -44,6 +44,10 @@ class AccountPageFeedbackTest {
         assertEquals(failure.safeMessage, voiceAccountFailure(failure, "请核对 AK／SK 和 IAM 权限"))
         assertFalse(voiceAccountFailure(failure, null).contains("IAM"))
     }
+    @Test fun controlledVoiceQueryReasonReplacesGenericAccountFallback() {
+        val failure = app.daiyu.android.voice.account.PersonalVoiceQueryFailure("音色查询响应格式无效，请重新查询。")
+        assertEquals(failure.safeMessage, voiceAccountFailure(failure, "已复刻名额查询失败，请检查账户与项目后重试。"))
+    }
     @Test fun trainingKeepsItsOwnUnknownSubmissionWarning() {
         assertEquals("制作结果未确认，请查询原音色，不要重复提交。",
             voiceAccountFailure(IllegalStateException("secret"), "制作结果未确认，请查询原音色，不要重复提交。"))

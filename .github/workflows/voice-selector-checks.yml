@@ -1,0 +1,112 @@
+name: 代鱼音色选择器检查
+run-name: 代鱼音色选择器检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 检查目标完整提交SHA
+        type: string
+        required: true
+      check_id:
+        description: 本次定向检查标识
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-voice-selector-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  workflow:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      SKIP_JDK_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 核对检查源码
+        run: |
+          test -n "$EXPECTED_SHA"
+          python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            27
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 音色及共享弹层定向契约
+        shell: bash
+        run: |
+          mkdir -p voice-selector-checks
+          set -o pipefail
+          python3 -B - 2>&1 <<'PYCONTRACT' | tee voice-selector-checks/contracts.log
+          import json, unittest
+          from pathlib import Path
+          records = []
+          for pattern in ('test_voice_tone_selection_contract.py', 'test_appearance_blur_sheet_contract.py',
+                          'test_shared_sheet_spacing_contract.py', 'test_sheet_selection_exit_contract.py',
+                          'test_voice_settings_palette_contract.py'):
+              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              assert suite.countTestCases() > 0, pattern
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              assert result.wasSuccessful() and not result.skipped, pattern
+              records.append(dict(pattern=pattern, tests=result.testsRun, skipped=0))
+          Path('voice-selector-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
+          PYCONTRACT
+          python3 scripts/verify_boundaries.py
+      - name: 准备既有离线语音依赖（不打包）
+        run: |
+          ./gradlew --no-daemon --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=voice-selector-checks/prepare-task-graph.json \
+            :app:prepareOfflineSpeechRuntime
+      - name: 音色及Android回归声明编译（不打包）
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --parallel --build-cache --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=voice-selector-checks/task-graph.json \
+            :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin 2>&1 | tee voice-selector-checks/gradle.log
+      - name: 核对编译报告及零安装包
+        run: |
+          python3 - <<'PYRECORD'
+          import json, os, re
+          from pathlib import Path
+          graph = json.loads(Path('voice-selector-checks/task-graph.json').read_text())
+          log = Path('voice-selector-checks/gradle.log').read_text()
+          outcomes = {}
+          for task in (':app:compileDebugKotlin', ':app:compileDebugAndroidTestKotlin'):
+              assert task in graph, task
+              match = re.search(r'^> Task ' + re.escape(task) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
+              assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
+              outcomes[task] = match.group(1) or 'EXECUTED'
+          packages = [str(p) for p in Path.cwd().rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
+          assert not packages, packages
+          record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+                        attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), compile_outcomes=outcomes,
+                        contracts=json.loads(Path('voice-selector-checks/contracts.json').read_text()),
+                        apk_built=False, instrumentation_run=False)
+          Path('voice-selector-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(record, ensure_ascii=False))
+          PYRECORD
+      - name: 上传检查证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 音色选择器定向检查
+          path: |
+            voice-selector-checks/
+          if-no-files-found: error

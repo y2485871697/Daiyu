@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -42,6 +43,7 @@ internal fun ChatSelectionSheet(
     subtitleFontSize: TextUnit = 12.sp,
     footer: @Composable RowScope.() -> Unit = {},
     dismissEnabled: Boolean = true,
+    titleTextAlign: TextAlign? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
@@ -61,7 +63,7 @@ internal fun ChatSelectionSheet(
             Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)
                 .heightIn(min = if (showCloseButton) 40.dp else 0.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(title, modifier = Modifier.fillMaxWidth(), color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
+                    Text(title, modifier = Modifier.fillMaxWidth(), color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = titleTextAlign)
                     subtitle?.let { Text(it, color = colors.muted, fontSize = subtitleFontSize, lineHeight = 18.sp,
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) }
                 }

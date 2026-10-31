@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.icons.ChatPreviewIcons
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import androidx.compose.foundation.Indication
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -67,7 +68,7 @@ internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Mod
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = chrome.toolbar, iconSize = 22.dp)
+        ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = assistantPreviewPalette().primary, iconSize = 22.dp)
         Box {
             val moreShape = RoundedCornerShape(10.dp)
             ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },

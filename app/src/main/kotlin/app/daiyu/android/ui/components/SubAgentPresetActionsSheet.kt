@@ -25,14 +25,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.SubAgentPreset
-import app.daiyu.android.ui.components.subagent.conversationAgentColors
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
     val density = LocalDensity.current
-    val colors = conversationAgentColors()
     val palette = assistantPreviewPalette()
     // Start at the settled anchor so Material does not add a second entry translation.
     // Its gesture, hide and predictive-back state machine remains unchanged.
@@ -52,8 +50,7 @@ internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () ->
             .semantics { contentDescription = "子代理组操作面板" }) {
             Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(modifier = Modifier.testTag("subagent-preset-badge"),
-                    shape = RoundedCornerShape(12.dp), color = colors.soft) {
+                Box(Modifier.testTag("subagent-preset-badge")) {
                     Icon(Icons.Rounded.AccountTree, null,
                         Modifier.padding(8.dp).size(24.dp).testTag("subagent-preset-glyph"), tint = palette.primary)
                 }

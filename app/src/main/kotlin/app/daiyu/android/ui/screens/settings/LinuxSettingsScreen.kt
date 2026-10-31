@@ -157,7 +157,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                                     installation?.discarding == true -> "正在取消未完成安装…"
                                     installation?.busy == true -> "正在安装…"
                                     !state.listConfirmed -> "环境状态暂时无法读取"
-                                    installed && terminal?.linux?.state == "FILES_READY" && selected?.executionMode == mode && terminal.linux.distribution.equals(distribution, true) -> "环境文件已就绪"
+                                    installed && terminal?.linux?.state == "FILES_READY" && selected?.executionMode == mode && terminal.linux.distribution.equals(distribution, true) -> "环境已就绪"
                                     installed && terminal?.linux?.selected in matching.map { LinuxGenerationRef(it.environmentId, it.generation) } && terminal?.linux?.state == "BROKEN" -> "环境暂时不可用，请重新检查"
                                     installed && terminal?.linux?.state == "RUNNER_UNKNOWN" -> "环境运行状态待确认"
                                     installed && matching.any { controller.availableThisProcess(LinuxGenerationRef(it.environmentId, it.generation)) } -> "环境已安装"

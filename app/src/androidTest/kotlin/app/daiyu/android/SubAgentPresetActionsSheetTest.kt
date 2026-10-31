@@ -9,7 +9,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
@@ -23,7 +22,7 @@ import app.daiyu.android.delegation.ConversationSubAgentConfig
 import app.daiyu.android.delegation.SubAgentPreset
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.SubAgentPresetActionsSheet
-import app.daiyu.android.ui.components.subagent.conversationAgentColors
+import app.daiyu.android.ui.components.SubAgentPresetCard
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
 class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
@@ -45,7 +44,7 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
             deletes = 0
             activity.setContent {
                 AgentAppTheme(appearance, applyInterfaceScale = false) {
-                    val badgeBackground = conversationAgentColors().soft.compositeOver(MaterialTheme.colorScheme.surface)
+                    val badgeBackground = MaterialTheme.colorScheme.surface
                     val glyphColor = assistantPreviewPalette().primary
                     val window = LocalWindowInfo.current.containerSize
                     val density = LocalDensity.current.density
@@ -204,7 +203,7 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
         assertEquals(listOf(0, 0, 0), listOf(dismisses, renames, deletes))
     }
 
-    fun testHeaderUsesReferenceAccentColorsInLightDarkAndPureBlackThemes() {
+    fun testHeaderHasNoBackgroundAndUsesPrimaryInLightDarkAndPureBlackThemes() {
         for (dark in listOf(false, true)) for (pureBlack in listOf(false, true)) {
             installClosed(AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
@@ -234,6 +233,34 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
             ui.runOnIdle { open = false }
             ui.waitForIdle()
             node(tag).assertDoesNotExist()
+        }
+    }
+
+    fun testGroupCardIconUsesTheSamePrimaryAsDoneAndKeepsItsClick() {
+        for (dark in listOf(false, true)) {
+            var clicks = 0
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                        val primary = assistantPreviewPalette().primary
+                        SideEffect { expectedGlyph = primary }
+                        SubAgentPresetCard(SubAgentPreset("card-fixture", "Fixture", ConversationSubAgentConfig(emptyList())),
+                            enabled = true, actionLabel = "打开组", settingsStyle = true, onClick = { clicks++ })
+                    }
+                }
+            }
+            ui.waitForIdle()
+            val icon = ui.onNodeWithTag("subagent-preset-card-glyph", useUnmergedTree = true).assertIsDisplayed()
+            val pixels = captureScreenNode(icon).toPixelMap()
+            val hasPrimaryPixel = (0 until pixels.width).any { x -> (0 until pixels.height).any { y ->
+                val color = pixels[x, y]
+                kotlin.math.abs(expectedGlyph.red - color.red) < .01f &&
+                    kotlin.math.abs(expectedGlyph.green - color.green) < .01f &&
+                    kotlin.math.abs(expectedGlyph.blue - color.blue) < .01f
+            } }
+            assertTrue("Group card uses the same primary as Done", hasPrimaryPixel)
+            ui.onNodeWithContentDescription("打开组").assertHasClickAction().performClick()
+            ui.runOnIdle { assertEquals(1, clicks) }
         }
     }
 

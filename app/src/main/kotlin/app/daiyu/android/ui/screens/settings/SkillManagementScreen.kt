@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -200,7 +201,7 @@ internal fun SkillManagementScreen(
             }
         } else if (state != null && state.entries.isEmpty()) {
             item(key = "skills_empty") {
-                SkillSettingsCard { SettingsRow("尚未安装技能") }
+                SkillSettingsCard { SettingsRow("尚未安装技能", textModifier = Modifier.wrapContentWidth(Alignment.CenterHorizontally)) }
             }
         } else if (state != null && !engineeringUi) {
             listOf(true to "内置", false to "用户安装").forEach { (builtin, title) ->

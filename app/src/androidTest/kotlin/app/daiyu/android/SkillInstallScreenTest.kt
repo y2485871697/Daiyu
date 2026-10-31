@@ -87,6 +87,30 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         ready("skills-confirm-install")
     }
 
+    fun testProductEmptyTextIsHorizontallyCenteredInsideOriginalRow() {
+        assertTrue(skills.manager.snapshot().entries.isEmpty())
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                        val density = LocalDensity.current
+                        CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                            SkillManagementScreen(managementFactory = { skills.manager }, onBack = {})
+                        }
+                    }
+                }
+            }
+            ready("skills-import-zip")
+            ui.waitUntil(10_000) { ui.onAllNodesWithText("尚未安装技能").fetchSemanticsNodes().isNotEmpty() }
+            val row = node("settings-row:尚未安装技能").assertHeightIsAtLeast(64.dp).fetchSemanticsNode().boundsInRoot
+            val text = ui.onNodeWithText("尚未安装技能", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val install = node("skills-import-zip").assertHasClickAction().assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("Empty text stays centered inside its card row", row.center.x, text.center.x, 1f)
+            assertTrue("Import entry remains above the empty card", install.bottom <= row.top)
+            assertTrue(skills.manager.snapshot().entries.isEmpty())
+        }
+    }
+
     fun testCreateOnlyInstallNeedsPreviewAndShowsCommittedResult() {
         show()
         preview()

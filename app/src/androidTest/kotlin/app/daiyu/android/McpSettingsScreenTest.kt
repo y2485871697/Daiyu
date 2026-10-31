@@ -426,7 +426,8 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             assertEquals("synthetic-fixture-token", store.snapshot().servers.single().bearer)
             val beforeRevocation = store.snapshot()
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            node("mcp-settings-status").assertTextEquals("已保存；旧的本轮批准已失效，尚未连接服务器。")
+            node("mcp-settings-status").assertDoesNotExist()
+            ui.onNodeWithText("已保存；旧的本轮批准已失效，尚未连接服务器。").assertDoesNotExist()
             assertTrue(owner.current())
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
             assertFalse(owner.current())

@@ -13,11 +13,13 @@ class SubAgentPresetActionsThemeContractTest(unittest.TestCase):
         self.assertIn('Modifier.padding(8.dp).size(24.dp).testTag("subagent-preset-glyph")', source)
         self.assertNotIn('Modifier.padding(14.dp).size(28.dp)', source)
 
-    def test_only_header_pairs_reference_secondary_background_with_primary_glyph(self):
+    def test_header_has_no_background_and_uses_reference_primary_glyph(self):
         header = SHEET.read_text().split('            HorizontalDivider(', 1)[0]
-        self.assertIn('val colors = conversationAgentColors()', header)
         self.assertIn('val palette = assistantPreviewPalette()', header)
-        self.assertIn('shape = RoundedCornerShape(12.dp), color = colors.soft', header)
+        self.assertIn('Box(Modifier.testTag("subagent-preset-badge"))', header)
+        self.assertNotIn('Surface(', header)
+        self.assertNotIn('colors.soft', header)
+        self.assertNotIn('.background(', header)
         self.assertIn('tint = palette.primary', header)
         self.assertNotIn('isSystemInDarkTheme', header)
 

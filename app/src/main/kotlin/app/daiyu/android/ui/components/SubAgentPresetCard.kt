@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -24,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.SubAgentPreset
-import app.daiyu.android.ui.icons.daiyuIconColor
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 
@@ -114,7 +115,7 @@ internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, action
                 .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     onClick()
                 }.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Icon(Icons.Rounded.AccountTree, null, tint = daiyuIconColor(Icons.Rounded.AccountTree))
+                Icon(Icons.Rounded.AccountTree, null, Modifier.testTag("subagent-preset-card-glyph"), tint = assistantPreviewPalette().primary)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(preset.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text("${preset.config.profiles.size} 个子代理 · ${if (preset.config.enabled) "自动委派已开启" else "自动委派已关闭"}", style = MaterialTheme.typography.bodySmall)

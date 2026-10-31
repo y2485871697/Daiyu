@@ -108,7 +108,7 @@ import kotlinx.coroutines.withContext
                         val saved = result.getOrThrow()
                         snapshot = saved; editing = false; deleting = false
                         selectedId = if (remove) null else savedId
-                        status = "已保存；旧的本轮批准已失效，尚未连接服务器。"
+                        status = ""
                         if (added) {
                             status = "已添加，正在刷新工具目录。"
                             val discovery = withContext(Dispatchers.IO) {
@@ -177,7 +177,7 @@ import kotlinx.coroutines.withContext
                     }
                 }
             }) {
-            if (selected == null && (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。")) item(key = "status") {
+            if (selected == null && status.isNotBlank() && (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。")) item(key = "status") {
                 top.yukonga.miuix.kmp.basic.Text(status,
                     modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp).testTag("mcp-settings-status"),
                     style = MiuixTheme.textStyles.body2)

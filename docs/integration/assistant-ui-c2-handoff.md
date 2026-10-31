@@ -2,13 +2,13 @@
 
 ## 范围
 
-按最后范围调整，本任务只交付助手；思考按钮弹窗及推理策略由另一个任务负责。本任务未修改 MainActivity、ChatController 或 `.eta-reference`。
+按最后范围调整，本任务只交付助手；思考按钮弹窗及推理策略由另一个任务负责。本任务未修改 MainActivity、ChatController 或 `[historical-source-snapshot]`。
 
-参考源为只读 `.eta-reference`。界面的 Miuix 组件、布局数值、原文、原技能图标和头像裁剪逻辑均从参考抽取；不新增界面说明文字。现有 `AssistantAvatar`、`MiuixScaffoldPage`、`MiuixDialogActions`、`TouchHaptics` 直接复用。原助手选择器使用 `WindowDialog`，没有把它改成 `EtaDropdownMenu`。
+参考源为只读 `[historical-source-snapshot]`。界面的 Miuix 组件、布局数值、原文、原技能图标和头像裁剪逻辑均从参考抽取；不新增界面说明文字。现有 `AssistantAvatar`、`MiuixScaffoldPage`、`MiuixDialogActions`、`TouchHaptics` 直接复用。原助手选择器使用 `WindowDialog`，没有把它改成 `DaiyuDropdownMenu`。
 
 ## 文件映射
 
-所有新 Kotlin 包前缀为 `app.daiyu.android`，以下旧路径均相对于 `.eta-reference/kotlin/`：
+所有新 Kotlin 包前缀为 `app.daiyu.android`，以下旧路径均相对于 `[historical-source-snapshot]/kotlin/`：
 
 | 原路径 | 新路径（相对于 app/src/main/kotlin/app/daiyu/android/） |
 | --- | --- |
@@ -20,7 +20,7 @@
 | `ui/screens/skills/SkillSwitchRow.kt` 的 `showMenu=false` 分支及 `ui/components/PreferenceIcon.kt` | 编辑页内私有 `AssistantSkillSwitchRow`，保留原 Refresh / DesignServices / Extension 图标和尺寸 |
 | `ui/screens/assistants/AvatarCropDialog.kt` | `ui/screens/assistants/AvatarCropDialog.kt`（除包名和 R import 外照搬） |
 
-`.eta-reference/res/values{,-b+zh+Hans,-b+zh+Hant}/strings.xml` 中实际使用的助手 key → `app/src/main/res/values{,-b+zh+Hans,-b+zh+Hant}/assistant_ui.xml`；既有 action_save、action_cancel、action_delete、route_skills 复用，未重复定义。
+`[historical-source-snapshot]/res/values{,-b+zh+Hans,-b+zh+Hant}/strings.xml` 中实际使用的助手 key → `app/src/main/res/values{,-b+zh+Hans,-b+zh+Hant}/assistant_ui.xml`；既有 action_save、action_cancel、action_delete、route_skills 复用，未重复定义。
 
 新增 JVM JUnit4 测试：`app/src/test/kotlin/app/daiyu/android/assistants/AssistantStoreTest.kt`。
 

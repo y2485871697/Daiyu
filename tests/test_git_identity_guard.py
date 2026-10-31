@@ -29,7 +29,7 @@ class GitIdentityGuardTest(unittest.TestCase):
         self.run_git("remote", "add", "origin", "https://github.com/y2485871697/Daiyu.git")
         self.tree = self.run_git("mktree", data="").stdout.strip()
         self.counter = 0
-        self.base = self.commit(parents=[], identity=("Eta Agent", "agent@localhost", "Eta Agent", "agent@localhost"))
+        self.base = self.commit(parents=[], identity=("Legacy Fixture", "agent@localhost", "Legacy Fixture", "agent@localhost"))
         self.run_git("update-ref", "refs/heads/main", self.base)
         (self.root / "scripts/git-hooks").mkdir(parents=True)
         original = (SOURCE / "scripts/git-hooks/pre-push").read_text(encoding="utf-8")
@@ -93,7 +93,7 @@ class GitIdentityGuardTest(unittest.TestCase):
 
     def test_merge_second_parent_is_checked(self):
         good = self.commit()
-        bad = self.commit(identity=(NAME, EMAIL, "Eta Agent", "agent@localhost"))
+        bad = self.commit(identity=(NAME, EMAIL, "Legacy Fixture", "agent@localhost"))
         self.check_hook(self.row(self.commit(parents=[good, bad])), False)
 
     def test_merged_old_history_is_rejected(self):
@@ -128,7 +128,7 @@ class GitIdentityGuardTest(unittest.TestCase):
         self.authorize_initial_push()
         target = "https://github.com/y2485871697/Daiyu.git"
         self.check_hook(self.row(self.commit(), remote=ZERO), True, target=target)
-        bad = self.commit(identity=("Eta Agent", "agent@localhost", NAME, EMAIL))
+        bad = self.commit(identity=("Legacy Fixture", "agent@localhost", NAME, EMAIL))
         self.check_hook(self.row(self.commit(parents=[bad]), remote=ZERO), False, target=target)
 
     def test_initial_push_rejects_another_repository_and_missing_anchor(self):

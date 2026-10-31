@@ -147,7 +147,7 @@ class PersonalVoiceNameSyncTest {
         val store = PersonalVoices(File(folder.root, "custom.json"), AccountHttpTransport { request, _ ->
             uploads++; assertTrue(request.url.encodedPath.endsWith("/voice_clone")); accepted()
         })
-        val id = create(store, null); assertTrue(id.startsWith("etaClone")); assertFalse(store.state.value.single().nameSyncPending)
+        val id = create(store, null); assertTrue(id.matches(Regex("Daiyu[0-9a-f]{32}"))); assertFalse(store.state.value.single().nameSyncPending)
         sync(store); assertEquals(1, uploads)
     }
 

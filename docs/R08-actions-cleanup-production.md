@@ -2,7 +2,7 @@
 
 ## 范围和交付状态
 
-本增量沿用基线 `af18af3` 的唯一 `ControllerVirtualDisplayRuntime`、持久 lease/journal、原 owner/client，以及中央 `RunCatalogTools` / registry / dispatcher / ledger / 整批最终结果反馈。没有新 runtime、目录、授权总账、owner launcher、Manifest 路由、CI 或清单。没有改 MainActivity、ChatController 或旧 Eta。没有新复制 backend-kit 文件；既有授权/许可文件不变。
+本增量沿用基线 `af18af3` 的唯一 `ControllerVirtualDisplayRuntime`、持久 lease/journal、原 owner/client，以及中央 `RunCatalogTools` / registry / dispatcher / ledger / 整批最终结果反馈。没有新 runtime、目录、授权总账、owner launcher、Manifest 路由、CI 或清单。没有改 MainActivity、ChatController 或历史自有源码。没有新复制 backend-kit 文件；既有授权/许可文件不变。
 
 **新增的是可嵌入的非 Main Compose 编辑/收尾审批面和精确方法接缝，不声称现有 Main 已切到新界面。** 父集成需替换 Main 固定 Start/Initialize/Release 计划入口并提供显式收尾入口，见下文。没有 shell、设备操作或构建/测试执行权限；本文列出的是源码与待执行测试，不是通过报告。
 

@@ -5,7 +5,7 @@
 - 本轮复杂度修复按任务给定的已暂存 Markdown 候选基线 `2ebd2ba` 工作；本子任务环境仅有工作树文件接口，无 Shell/Git 命令，未独立查询提交号，也无法创建提交。非空提交由父代理审阅净改动后统一完成；不把工作树修改冒称为提交。
 - 已读生产消费者 `ui/screens/chat/conversation/MessageMarkdown.kt`、原 `MarkdownText.kt`、现有 span/Compose 仪器测试以及 `app/build.gradle.kts`。消费者原本已接通，本次不重接消息投影或内容分段。
 - 已声明的应用依赖中未发现可直接复用的 Markdown 引擎。复用 Android `Spanned`/`StyleSpan`/`TypefaceSpan`/`URLSpan`、现有 Compose 与 Miuix，未新增库、Gradle 输入、下载或网络访问。
-- 仅修改 Markdown renderer、其解析 helper、对应测试及本文档。未修改 Main、ChatTurnMapper、ChatMessageList、ChatScreenModels、Controller、schema、清单、CI 或旧 Eta。
+- 仅修改 Markdown renderer、其解析 helper、对应测试及本文档。未修改 Main、ChatTurnMapper、ChatMessageList、ChatScreenModels、Controller、schema、清单、CI 或历史自有源码。
 
 ## 实现
 

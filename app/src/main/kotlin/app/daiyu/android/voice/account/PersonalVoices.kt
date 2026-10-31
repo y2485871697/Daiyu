@@ -1,5 +1,7 @@
 package app.daiyu.android.voice.account
 
+import app.daiyu.android.voice.providers.DoubaoVoiceIdentity
+
 import android.content.Context
 import android.net.Uri
 import android.util.AtomicFile
@@ -23,7 +25,7 @@ import java.io.File
 import java.util.UUID
 
 /**
- * Retained/adapted from frozen doubao/PersonalVoices. Instance-owned, account scoped, explicit
+ * Account-scoped personal voice management. Instance-owned with explicit
  * suspend operations; no singleton scope, launch-on-load, polling, upload retries or cloud delete.
  */
 internal class PersonalVoices(private val file: File, private val transport: AccountHttpTransport) {
@@ -100,7 +102,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         return state.value.firstOrNull { it.id == id && it.account == account }
     }
     fun selected(id: String, config: SpeechProviderConfig): DoubaoPersonalVoice? {
-        if (!id.startsWith("S_") && !id.startsWith("etaClone")) return null
+        if (!DoubaoVoiceIdentity.isPersonal(id)) return null
         val voice = find(id, config)
         require(voice != null && voice.tts && voice.accepted) { "个人音色不可用，请检查训练状态、账户和首次使用确认" }
         return voice.providerVoice()
@@ -265,14 +267,17 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         fun forContext(context: Context, transport: AccountHttpTransport = OkHttpAccountTransport()) =
             PersonalVoices(File(context.applicationContext.filesDir, "voice-account/personal-voices.json"), transport)
         internal fun existingIdentity(id: String): String = id.trim().also {
-            require(it.matches(Regex("S_[A-Za-z0-9_-]+|etaClone[a-fA-F0-9]{32}"))) { "请填写已有的 S_ 或 etaClone 音色 ID" }
+            require(DoubaoVoiceIdentity.isPersonal(it)) { "请填写已有的 S_ 或 Daiyu 音色 ID" }
         }
         internal fun trainingIdentity(slotId: String?): String {
-            if (slotId == null) return "etaClone" + UUID.randomUUID().toString().replace("-", "")
-            return slotId.trim().also { require(it.matches(Regex("S_[A-Za-z0-9_-]+"))) { "请填写控制台已有的 S_ 音色 ID，不能自行编造" } }
+            if (slotId == null) return "Daiyu" + UUID.randomUUID().toString().replace("-", "")
+            return slotId.trim().also { require(DoubaoVoiceIdentity.isSlot(it)) { "请填写控制台已有的 S_ 音色 ID，不能自行编造" } }
         }
-        internal fun identity(voice: Voice): JSONObject = if (voice.id.startsWith("S_")) JSONObject().put("speaker_id", voice.id)
-            else JSONObject().put("speaker_id", "custom_speaker_id").put("custom_speaker_id", voice.id)
+        internal fun identity(voice: Voice): JSONObject {
+            val id = existingIdentity(voice.id)
+            return if (DoubaoVoiceIdentity.isSlot(id)) JSONObject().put("speaker_id", id)
+                else JSONObject().put("speaker_id", "custom_speaker_id").put("custom_speaker_id", id)
+        }
         suspend fun readSample(context: Context, uri: Uri): Sample = withContext(Dispatchers.IO) {
             val format = when (context.contentResolver.getType(uri)) {
                 "audio/wav", "audio/x-wav" -> "wav"

@@ -17,9 +17,9 @@
       "target": "ui/components/MiuixDialogActions.kt"
     },
     {
-      "source": "ui/components/EtaDropdownMenu.kt",
+      "source": "ui/components/DaiyuDropdownMenu.kt",
       "source_sha256": "c2fb6434eb842f0877bb799d6ec372662ae68a77c5ceacf01a010b8f8acf7b28",
-      "target": "ui/components/EtaDropdownMenu.kt"
+      "target": "ui/components/DaiyuDropdownMenu.kt"
     },
     {
       "source": "ui/components/AdaptiveTopAppBar.kt",

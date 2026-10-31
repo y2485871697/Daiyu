@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.voice.providers.DoubaoVoiceIdentity
+
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
@@ -63,7 +65,7 @@ internal class ActivityVoiceAccountPreviewHost(
         sameConfiguration(configuration, request.configuration) &&
         request.configuration.engine == SpeechEngine.DOUBAO &&
         !request.configuration.model.contains("seed-audio", ignoreCase = true) &&
-        (request.voice.id.startsWith("S_") || request.voice.id.startsWith("etaClone")) &&
+        DoubaoVoiceIdentity.isPersonal(request.voice.id) &&
         (if (request.demoOnly) request.voice.account == VoiceAccountIdentity.from(request.configuration).fingerprint &&
             request.voice.status in setOf(2, 4) && request.voice.models.any { it in setOf(4, 5) }
          else request.voice.availableFor(VoiceAccountIdentity.from(request.configuration).key)) && admission(request)

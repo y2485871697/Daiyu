@@ -66,7 +66,7 @@ class FullBackupArchiveTest {
             assertThrows(Exception::class.java) { FullBackupArchive.read(source, temp.root) }
         }
     }
-    @Test fun completeArchiveIsDetectedByInputSpoolAndLegacyZipStaysLegacy() {
+    @Test fun completeArchiveIsDetectedAndUnrecognizedArchivesAreRejected() {
         val bytes = archive()
         val source = BackupImportSource.prepare(temp.root) { bytes.inputStream() }
         try {
@@ -76,8 +76,8 @@ class FullBackupArchiveTest {
         val legacy = ByteArrayOutputStream().also { stream -> ZipOutputStream(stream).use {
             it.putNextEntry(ZipEntry("old.json")); it.write("{}".toByteArray()); it.closeEntry()
         } }.toByteArray()
-        val old = BackupImportSource.prepare(temp.root) { legacy.inputStream() }
-        try { assertEquals(BackupImportSource.Kind.LEGACY, old.kind) } finally { assertTrue(old.delete()) }
+        assertThrows(Exception::class.java) { BackupImportSource.prepare(temp.root) { legacy.inputStream() } }
+        assertTrue(temp.root.listFiles()!!.none { it.name.startsWith("backup-import-") })
     }
     @Test fun brokenZipProbeDoesNotMisclassifyPlainBackup() {
         assertFalse(FullBackupArchive.recognizes(file("{}".toByteArray())))

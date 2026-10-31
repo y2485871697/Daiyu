@@ -71,7 +71,7 @@ class SettingsSponsorContractTest(unittest.TestCase):
         self.assertIn('wechatSelected = true', sheet)
         self.assertIn('wechatSelected = false', sheet)
 
-    def test_qr_images_are_byte_identical_to_original_eta(self):
+    def test_qr_images_are_byte_identical_to_maintainer_original(self):
         expected = {
             'donate_wechat.png': '125f3c2b915a8475387de9c150dd890a7154a28120d4c885d7347edf4e8a9383',
             'donate_alipay.jpg': '9597129b69f475b157149995f5ed4e13b24f69a47d58ee848378c60fa12c5095',

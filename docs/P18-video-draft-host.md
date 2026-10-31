@@ -10,7 +10,7 @@
 
 没有修改 Main、ChatController、DB、任何现有 Image 实现或 VideoAssetStore；没有网络发送，也没有创建假的 `SendResult.Accepted`。所有新增生产类型为 `internal`，包名 `app.daiyu.android`，供同模块父接线使用。
 
-依据现有 `AndroidVideoAttachments.import/preview`、`VideoAssetStore.prepare/openOriginal/remove` 的真实契约实现：import 保存原字节，preview 是单独 JPEG 元数据；`prepare` 复制消息原件但**不等于 DB 接受**。不读取旧 Eta。
+依据现有 `AndroidVideoAttachments.import/preview`、`VideoAssetStore.prepare/openOriginal/remove` 的真实契约实现：import 保存原字节，preview 是单独 JPEG 元数据；`prepare` 复制消息原件但**不等于 DB 接受**。不读取历史自有源码。
 
 ## 精确 API
 

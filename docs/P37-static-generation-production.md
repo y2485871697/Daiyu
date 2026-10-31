@@ -4,7 +4,7 @@
 
 基线任务指定 `72342beb`，当前完整包 v4 已包含 `runtime_usage_history`。本次把已有 `StaticGenerationOutput` / `StaticGenerationCodec` / `StaticGenerationAssets` 接到真实消息操作、只读原件展示/保存和完整包 **v5**，不是另交一个目的端叶子。没有新增执行恢复、POST、付费授权、下载权限、attempt 或 live receipt 的生产写入。
 
-仅使用工作树文件工具：不能独立读取 Git HEAD、验证 detached/main、运行 diff-check、编译、JVM、instrumentation、Lint、设备或云端 CI。本次测试均为**新增/更新的未执行源码**，不是通过报告；必须由父代理审核并实际执行后验收。未修改 `docs/重构清单.md`、`更新说明.md`、旧 Eta adapter 或 P26。
+仅使用工作树文件工具：不能独立读取 Git HEAD、验证 detached/main、运行 diff-check、编译、JVM、instrumentation、Lint、设备或云端 CI。本次测试均为**新增/更新的未执行源码**，不是通过报告；必须由父代理审核并实际执行后验收。未修改 `docs/重构清单.md`、`更新说明.md`、历史自有源码 adapter 或 P26。
 
 ## 精确生产入口及参数
 

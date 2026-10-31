@@ -25,7 +25,7 @@ INVENTORY = BUNDLE + "bundle.sha256.json"
 INDEX = "THIRD_PARTY/license-bundle/source-index.md"
 PROOT_ARTIFACTS = "THIRD_PARTY/proot/artifacts.json"
 NATIVE_SOURCES = tuple(ASSETS + "native-sources/" + name + ".tgz" for name in (
-    "proot", "talloc", "shmem", "eta-native-build",
+    "proot", "talloc", "shmem", "daiyu-native-build",
 ))
 # Copies are complete repository originals, not reconstructed license templates.
 COPIES = (

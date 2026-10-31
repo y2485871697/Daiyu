@@ -14,8 +14,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/NOTICE-proot.txt",
-      "bytes": 3034,
-      "sha256": "982c614c2f8b3c0e2671b33e4224efdafded70b94137b1797366380bc3ad3354"
+      "bytes": 3360,
+      "sha256": "3a65e3c74a395dc7ac92c43d212f8dff048ec75ad06441313a789ba24555a40e"
     },
     {
       "path": "app/src/main/assets/licenses/P32-voice-network-LICENSES.md",
@@ -39,8 +39,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/linux-installer/NOTICE.md",
-      "bytes": 4055,
-      "sha256": "2ac512dac6ad59e9f77d32bc9d677a8df9c852a55f9dcbfa3e3bc8667716404f"
+      "bytes": 3100,
+      "sha256": "d26ad65c3559f6d60ba0166ddd3ac6bfa20c1c3586bc006c52844020df0d6ed9"
     },
     {
       "path": "app/src/main/assets/licenses/maven/commons-codec-1.19.0/LICENSE.txt",
@@ -84,8 +84,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/openminis/NOTICE.md",
-      "bytes": 3586,
-      "sha256": "8511226fb24fed1af1a2e7187ce1bf97913aa5d6db663486a5c19ac435984ab8"
+      "bytes": 3909,
+      "sha256": "71bf93d6096826e74b10e3d50e1e88620e64ac4d4d06f9b869af4de064de0248"
     },
     {
       "path": "app/src/main/assets/licenses/proot-5.1.107.92.txt",
@@ -139,18 +139,18 @@
     },
     {
       "path": "app/src/main/assets/licenses/sherpa-ncnn/NOTICE.md",
-      "bytes": 4180,
-      "sha256": "b3324122d7a8173c35e7ee2824315530a553816e54f569b0f497d247fb112d2e"
+      "bytes": 4184,
+      "sha256": "c3f4107377634d31d0c6685dc503b64ad3088ff826f6f7abaeac197624d51344"
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 16329,
-      "sha256": "dcb99586dcef49123d202ecdeeb6fe0da24b52ca8d4b0878ed76a88f98cc7835"
+      "bytes": 15788,
+      "sha256": "d1de34cffeff83971b7a1a800b9e8194cc161e7f5467fa98f5c154e93dbe0fbf"
     },
     {
       "path": "app/src/main/assets/licenses/sponsor-assets/sources.json",
-      "bytes": 913,
-      "sha256": "695350dd55e6a546646d9c4dedbc6d0ab9a7fe110e28acb974e528593b216a9a"
+      "bytes": 1131,
+      "sha256": "06a672c2e880d43d5d03d9826d6d3d2b9a3d7acf2349339c84a2f073a129b77b"
     },
     {
       "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",
@@ -164,8 +164,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/virtual-display-owner/NOTICE.md",
-      "bytes": 3369,
-      "sha256": "162498e4e227c11e80afe3edefaeac47a6e8783450deaf25ea7630d7fe16b43e"
+      "bytes": 1296,
+      "sha256": "ebeac6815b902eb229b89139c8bee9030d84922fcdf2bb3093b2267eff038614"
     },
     {
       "path": "app/src/main/assets/licenses/whale-maid/LICENSE",

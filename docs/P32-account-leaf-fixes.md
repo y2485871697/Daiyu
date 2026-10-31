@@ -2,7 +2,7 @@
 
 ## 范围与来源
 
-本次仅修改 `VoiceAccountPanel.kt`、`voice/account/DoubaoVoiceCatalog.kt`、对应测试与本文。未修改 Main、Controller、runtime、control、唯一清单或旧 Eta；未推送。依据是分配工作树中的上述源码，以及只读核对的 `PersonalVoicePreview.kt`、`ActivityVoiceAccountPreviewHost.kt`、`PersonalVoices.kt` 和既有账户测试；未取得网页资料，也未进行付费网络请求。
+本次仅修改 `VoiceAccountPanel.kt`、`voice/account/DoubaoVoiceCatalog.kt`、对应测试与本文。未修改 Main、Controller、runtime、control、唯一清单或历史自有源码；未推送。依据是分配工作树中的上述源码，以及只读核对的 `PersonalVoicePreview.kt`、`ActivityVoiceAccountPreviewHost.kt`、`PersonalVoices.kt` 和既有账户测试；未取得网页资料，也未进行付费网络请求。
 
 ## 1. 任何 execute 操作先严格停试听，失败保持拒绝
 

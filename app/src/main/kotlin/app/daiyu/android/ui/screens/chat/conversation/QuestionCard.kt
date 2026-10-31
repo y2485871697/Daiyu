@@ -3,7 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
 import app.daiyu.android.ui.app.DaiyuPalette
-import app.daiyu.android.ui.components.etaInputContainerColor
+import app.daiyu.android.ui.components.daiyuInputContainerColor
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -359,7 +359,7 @@ private fun QuestionInput(
 ) {
     val colors = questionCardColors()
     val shape = RoundedCornerShape(14.dp)
-    val container = etaInputContainerColor()
+    val container = daiyuInputContainerColor()
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     BasicTextField(value = value, onValueChange = { onValueChange(questionTextLimit(it)) }, enabled = enabled,

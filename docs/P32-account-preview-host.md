@@ -11,7 +11,7 @@
 - `app/src/androidTest/kotlin/app/daiyu/android/ActivityVoiceAccountPreviewHostAndroidTest.kt`
 - 本文档。
 
-不修改账户叶子、MainActivity、ControllerVoiceRuntime、RemoteVoiceHostPlayer、VoiceSettingsPanel、provider 或 network。没有浏览旧 Eta、实际凭据或外网。实现依据为当前树的 `VoiceHostPlayer`/`VoiceHost`（MainActivity 内）、`ProductionSpeechOutput`、`RemoteVoiceHostPlayer`、`VoiceSession.kt`、`VoiceProviderApi.kt`、`DoubaoSpeech.kt`、`OkHttpVoiceTransport.kt` 与冻结账户端口。没有新增依赖、Manifest 或最低 API 要求，使用的 Android/Java API 均可在 API26 使用；这不是 API26 实测结论。
+不修改账户叶子、MainActivity、ControllerVoiceRuntime、RemoteVoiceHostPlayer、VoiceSettingsPanel、provider 或 network。没有浏览历史自有源码、实际凭据或外网。实现依据为当前树的 `VoiceHostPlayer`/`VoiceHost`（MainActivity 内）、`ProductionSpeechOutput`、`RemoteVoiceHostPlayer`、`VoiceSession.kt`、`VoiceProviderApi.kt`、`DoubaoSpeech.kt`、`OkHttpVoiceTransport.kt` 与冻结账户端口。没有新增依赖、Manifest 或最低 API 要求，使用的 Android/Java API 均可在 API26 使用；这不是 API26 实测结论。
 
 **本 adapter 不下载 request.demoUrl。** 它使用现有 `SpeechSynthesisClient(OkHttpVoiceTransport(...)).synthesize(configuration, PREVIEW_TEXT, voice.id, voice)`，明确传入第四个 `providers.DoubaoPersonalVoice`，文本固定为：
 

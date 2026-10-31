@@ -63,7 +63,7 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
                         ?: throw VoiceCatalogFailure("音色列表 SpeakerID 缺失或格式无效，未取得完整列表。")
                     checkCatalog(id.matches(Regex("S_[A-Za-z0-9_-]+"))) { "音色列表包含无效槽位，未取得完整列表" }
                     checkCatalog(stateIds.add(id)) { "音色列表包含重复槽位，未取得完整列表" }
-                    // Separate state requests are not one snapshot: keep the latest observation, as in Eta.
+                    // Separate state requests are not one snapshot: keep the latest observation, as in the prior observation contract.
                     result[id] = Slot(id, item.optString("Alias").ifBlank { id }, item.optString("State", state),
                         item.optInt("AvailableTrainingTimes", -1))
                 }

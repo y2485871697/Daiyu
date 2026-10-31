@@ -500,7 +500,7 @@ case "$*" in
  'install '*) printf 'Success\n'; [ "$CASE" != install-fail ] || exit 7 ;;
  'shell cmd package '*)
   [ "$*" = 'shell cmd package list packages' ] || { printf 'Unsupported mock package command\n'; exit 255; }
-  if [ "$CASE" = old-package ]; then printf 'package:io.github.mangi.eta\n'
+  if [ "$CASE" = unrelated-package ]; then printf 'package:app.daiyu.android\npackage:another.application\n'
   else printf 'package:app.daiyu.android\n'; fi ;;
  'shell am instrument '*)
   printf '%s\n' "$@" > smoke/instrumentation-args.txt
@@ -1242,8 +1242,11 @@ exit 0
                 self.assertNotEqual(self.smoke(case=case).returncode, 0)
                 self.assertFalse((self.root / 'smoke/boot.xml').exists())
 
+    def test_unrelated_installed_application_does_not_couple_boot_to_another_project(self):
+        self.assertEqual(self.smoke(case='unrelated-package').returncode, 0)
+
     def test_business_gates_remain(self):
-        for case in ['count', 'failure', 'old-package', 'crash', 'native-crash', 'png', 'foreign-ui',
+        for case in ['count', 'failure', 'crash', 'native-crash', 'png', 'foreign-ui',
                      'missing-send', 'missing-editor', 'malformed-ui', 'old-title-only']:
             result = self.smoke(case=case)
             with self.subTest(case=case):

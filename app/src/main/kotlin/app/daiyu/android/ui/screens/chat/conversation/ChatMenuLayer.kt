@@ -31,7 +31,7 @@ import app.daiyu.android.ui.components.LocalPopupMotion
 import app.daiyu.android.ui.components.PopupMotion
 import app.daiyu.android.ui.components.PopupExitRetentionMillis
 import app.daiyu.android.ui.components.rememberPopupMotion
-import app.daiyu.android.ui.components.etaMenuClipReveal
+import app.daiyu.android.ui.components.daiyuMenuClipReveal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -270,7 +270,7 @@ internal fun ChatGlassMenuSurface(
         ChatMenuShadows(motion, dark, Modifier.matchParentSize())
         Column(Modifier
             .graphicsLayer { alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f) }
-            .etaMenuClipReveal(
+            .daiyuMenuClipReveal(
                 fractionProgress = { menuRevealFraction(motion) },
                 preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
                 clipWhenFullyRevealed = false,

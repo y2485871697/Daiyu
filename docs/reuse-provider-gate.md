@@ -5,7 +5,7 @@
 - 已核准自研来源基线：`f001fb82`（本次任务指定的固定快照）。
 - 自研引入/扩展历史：`47f5258afd9c8035583b4e3a1132d4dbde46668f`（`47f5258a`）、`e75e7e761d9143ba87c35d1dff5ef2b24f3e67c7`（`e75e7e76`）。
 - 此组件不属于比较上游 `c16a5873`；不将其归为该上游作者源码。
-- 原路径：`app/src/main/kotlin/io/github/mangi/eta/agent/model/ProviderEventDeliveryGate.kt`，及原同包 `ProviderEventDeliveryGateTest.kt`。
+- 原路径：`app/src/main/kotlin/[historical-package-omitted]/agent/model/ProviderEventDeliveryGate.kt`，及原同包 `ProviderEventDeliveryGateTest.kt`。
 - 实现依据为父代理复制至本工作树 `docs/refactor-input/reuse-provider-gate/` 的源码、原测试、历史记录和两份补丁；未访问外部工作树。两份补丁均展示同一闸门内容（blob 缩写 `a1584940`），历史文本记录 `e75e7e76`。固定快照归属及上游排除来自本次核准任务；本实现代理未独立读取这些提交或比较上游仓库。
 
 本说明保留来源 SHA 和迁移边界，不附旧宿主源码或补丁；临时复制输入在迁移核对后删除，不纳入提交。

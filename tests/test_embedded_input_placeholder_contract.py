@@ -24,8 +24,8 @@ class EmbeddedInputPlaceholderContractTest(unittest.TestCase):
                          'minLines = if (multiline && !embedded) 4 else 1', 'maxLines = if (multiline) 8 else 1'):
             self.assertIn(retained, field)
 
-    def test_eta_outlined_floating_labels_are_not_converted(self):
-        field = (UI / "components/EtaFormTextField.kt").read_text()
+    def test_daiyu_outlined_floating_labels_are_not_converted(self):
+        field = (UI / "components/DaiyuFormTextField.kt").read_text()
         self.assertIn('label = { Text(hint) }', field)
         self.assertNotIn('placeholder = {', field)
         for state in ('focused', 'unfocused', 'disabled'):

@@ -6,8 +6,7 @@ import java.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 
-// Retained/adapted supplier builders and decoders from old f001fb82 tts/SpeechProtocols.kt.
-// Only configuration/HTTP representation and bounded decoding have been replaced; see migration notice.
+// Supplier-specific speech request builders and bounded response decoders.
 object SpeechProtocols {
     fun request(config: SpeechProviderConfig, text: String, voice: String): VoiceHttpRequest = when (config.engine) {
         SpeechEngine.OPENAI, SpeechEngine.GROQ, SpeechEngine.COSYVOICE, SpeechEngine.MOSS -> openAi(config, text, voice, config.engine == SpeechEngine.GROQ)

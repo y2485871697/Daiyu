@@ -9,7 +9,7 @@ import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
-import app.daiyu.android.ui.components.etaInputContainerColor
+import app.daiyu.android.ui.components.daiyuInputContainerColor
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -25,7 +25,7 @@ class ProviderSettingsThemeTest : WiredActivityTestCase() {
                             val palette = AssistantPreviewPalette(dark)
                             val miuix = MiuixTheme.colorScheme
                             val material = MaterialTheme.colorScheme
-                            val inputContainer = etaInputContainerColor()
+                            val inputContainer = daiyuInputContainerColor()
                             SideEffect {
                                 assertEquals(palette.primary, miuix.primary)
                                 assertEquals(palette.onPrimary, miuix.onPrimary)

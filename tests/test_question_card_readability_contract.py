@@ -21,7 +21,7 @@ class QuestionCardReadabilityContractTest(unittest.TestCase):
     def test_other_and_note_use_full_width_soft_multiline_fields(self):
         text = CARD.read_text()
         field = text.split('private fun QuestionInput(', 1)[1].split('\n@Composable', 1)[0]
-        self.assertIn('val container = etaInputContainerColor()', field)
+        self.assertIn('val container = daiyuInputContainerColor()', field)
         self.assertIn('RoundedCornerShape(14.dp)', field)
         self.assertIn('modifier.managedInput().fillMaxWidth()', field)
         self.assertIn('minLines = 1', field)

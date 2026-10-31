@@ -18,7 +18,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Retained/adapted from old f001fb82 voice/mimo/MimoPersonalVoices.kt.
+ * App-private MiMo reference voice storage and validation.
  * One instance per app-private directory; no process singleton, settings or credential storage.
  * The parent owns this instance and explicitly authorizes sending a selected reference to MiMo.
  */

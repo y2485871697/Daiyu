@@ -2,7 +2,7 @@
 
 ## 交付范围与状态
 
-本补丁只修改 catalog/store、`ModelSettingsStore` 必要方法、独立聊天 picker/helper 及测试；**未修改 MainActivity、ChatController、ModelSettings data class/codec、目录文件 schema、CI、唯一清单或旧 Eta**。没有重做勾选追加；原 `SavedModelCatalogStore.appendSelected` / `compareAndAppend` 保留。
+本补丁只修改 catalog/store、`ModelSettingsStore` 必要方法、独立聊天 picker/helper 及测试；**未修改 MainActivity、ChatController、ModelSettings data class/codec、目录文件 schema、CI、唯一清单或历史自有源码**。没有重做勾选追加；原 `SavedModelCatalogStore.appendSelected` / `compareAndAppend` 保留。
 
 **Main 仍未接入本地目录聊天选择。** 目前其 `openChatModels` 仍构造“当前模型 + 实时远端”列表，`selectChatModel` 仍调用字符串版 Controller 方法。下面是父代理应完成的接线，不应把本交付描述成 Main 已上线该入口。
 

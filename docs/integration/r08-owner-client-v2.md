@@ -11,7 +11,7 @@ The implementation was written against this repository's Java `OwnerProtocol`,
 `OwnerOperationIdentity`, `OwnerReceiptCoordinator`, `OwnerReceiptStore`, `OwnerIpcServer` and
 `VirtualDisplayOwnerMain`. `OwnerV2Contract` is a same-package adapter to the existing Java
 normalizer and canonical identity functions, not another definition of effective parameters.
-No external Eta files or algorithms were copied or read for this implementation; no external
+No external 历史自有源码 files or algorithms were copied or read for this implementation; no external
 attribution or license grant is implied. Existing repository licensing applies to this new code.
 
 ## Host-only API (not a tool API)

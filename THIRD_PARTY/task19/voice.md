@@ -1,5 +1,7 @@
 # T03 / T07：语音来源与制品绑定
 
+当前归属：用户明确确认本节语音业务实现为其 fork 后原创，保留代码与既有行为；历史输入只定位版本，不据以推定上游作者或要求重写。实际第三方网络库、引擎、JNI 主体及模型各按其真实来源与许可保留。以下阶段记录中的原创待核措辞不再适用于本项。
+
 基线ae6e834；只读核验824aed2f已完成。现有RikkaHub NOTICE严格限两段Provider地址语义，不改成整个网络/聊天/TTS模块。固定上游c94237eaa36c84816ab7e2e6dee9ce82477d4725原LICENSE与已存副本字节相同，34523B，SHA256见upstream-licenses/sources.json。
 
 ## 已登记改编
@@ -14,7 +16,7 @@
 
 固定speech/src/main/java/me/rerere/tts/provider/providers/存在ElevenLabs、FishAudio、Gemini、Groq、MiMo、MiniMax、OpenAI、Qwen、Step、System、Volcengine、XAI的TTSProvider文件。目录与根AGPLv3是定位证据，不证明特定builder/decoder/音色已迁入；具体文件头、NOTICE与依赖仍要核。
 
-14号需按实际保留单元交：builder参数/函数、decoder/分帧格式、音色表/试听素材、冻结旧发布SHA/path/hash、本地移植补丁、上游固定source path/commit/license、目标path/候选SHA。自研语音控制/UI/取消owner与第三方适配、Eta继承封装分别列，不重做已确认自研。
+14号需按实际保留单元交：builder参数/函数、decoder/分帧格式、音色表/试听素材、冻结旧发布SHA/path/hash、本地移植补丁、上游固定source path/commit/license、目标path/候选SHA。自研语音控制/UI/取消owner与第三方适配、历史适配封装分别列，不重做已确认自研。
 
 ## 运行库、JNI与模型分开
 

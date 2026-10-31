@@ -5,7 +5,7 @@ import java.util.Collections
 
 /**
  * Fixed transport metadata, not an installed-environment registry or download approval.
- * Source: user-authorized Eta adaptation kit, baseline 2a7e7ab92b98da5a3711611017021441e7a8053c
+ * Maintainer-owned rootfs catalog; historical input baseline 2a7e7ab92b98da5a3711611017021441e7a8053c
  * (AlpineEnvironmentInstaller / DebianEnvironmentInstaller). No network verification implied.
  * Debian payloads are Termux proot-distro releases, NOT official Debian rootfs artifacts.
  */

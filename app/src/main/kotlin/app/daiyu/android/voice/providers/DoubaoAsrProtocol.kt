@@ -8,7 +8,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import org.json.JSONObject
 
-// Migrated/adapted from old f001fb82 voice/doubao/DoubaoAsrProtocol.kt; see docs/P32-voice-providers.md.
+// Doubao ASR framing and response decoding; see docs/P32-voice-providers.md.
 object DoubaoAsrProtocol {
     const val URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
     const val MAX_PACKET_BYTES = 1_048_576

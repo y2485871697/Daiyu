@@ -1035,7 +1035,7 @@ class MainActivity : ComponentActivity() {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
             if (value && !sidebarVisibleState) revokeCommandApproval()
-            if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -1052,54 +1052,6 @@ class MainActivity : ComponentActivity() {
         // Explicit navigation closes the page; lifecycle revocation keeps only a paused shell.
         if (closeRoute && retainedPage == "context-management") retainedPage = "chat"
         return visit != null
-    }
-    private var legacyPage by mutableStateOf<LegacyLibraryHost.Page?>(null)
-    private var legacyVisit: java.util.concurrent.atomic.AtomicBoolean? = null
-    private data class LegacySelection(val code: Int, val deliver: (Uri?) -> Unit)
-    private var pendingLegacy: LegacySelection? = null
-    private var nextLegacyCode = 12000
-    private var legacyPickerHop = false
-    private var legacyLaunchersReady = false
-    private fun revokeLegacyLibrary() {
-        legacyVisit?.set(false); legacyVisit = null
-        legacyPage?.revoke(); legacyPage = null
-        legacyPickerHop = false
-        // Outstanding launcher slots remain tombstones until their exact callback drains.
-    }
-    private fun openLegacyLibrary() {
-        checkBackupAvailable()
-        revokeLegacyLibrary()
-        retainedPage = "legacy-library"
-        val active = java.util.concurrent.atomic.AtomicBoolean(true)
-        legacyVisit = active
-        legacyPage = controller.legacyLibrary.openPage { active.get() }
-    }
-    @Suppress("DEPRECATION")
-    private fun launchLegacyPicker(intent: Intent, deliver: (Uri?) -> Unit) {
-        if (!legacyLaunchersReady || pendingLegacy != null || pendingBackupRequest != null ||
-            !activityUsable() || retainedPage != "legacy-library" || nextLegacyCode !in 12000 until 14000) {
-            deliver(null); return
-        }
-        val selection = LegacySelection(nextLegacyCode++, deliver)
-        pendingLegacy = selection; legacyPickerHop = true
-        try { startActivityForResult(intent, selection.code) }
-        catch (_: Exception) {
-            if (pendingLegacy === selection) pendingLegacy = null
-            legacyPickerHop = false; selection.deliver(null)
-        }
-    }
-    private fun pickLegacySource(request: LegacyLibraryHost.SourcePicker) {
-        launchLegacyPicker(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "application/zip", "application/octet-stream"))
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }, request::result)
-    }
-    private fun pickLegacyTarget(request: LegacyLibraryHost.SavePicker) {
-        launchLegacyPicker(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE); type = request.mimeType
-            putExtra(Intent.EXTRA_TITLE, request.suggestedName)
-        }, request::result)
     }
     private class BrowserResumeTarget(val conversationId: ConversationId?, val owner: WorkStepOwnerUi?) {
         var presentation = app.daiyu.android.browser.BrowserSheetUiState()
@@ -1190,7 +1142,7 @@ class MainActivity : ComponentActivity() {
             if (value != "browser") closeBrowserVisualVisit()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState) revokeContextManagementEntry(closeRoute = false)
-            if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
+            if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup() }
             if (value != retainedPageState) { gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null }
             if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {
@@ -2141,7 +2093,6 @@ class MainActivity : ComponentActivity() {
         interactiveModeObservation = controller.interactiveMode.observe { interactiveModeEnabled = it }
         appearance = loadAppearance()
         activityCallbacksAllowed = true
-        nextLegacyCode = state?.getInt("legacy-next-code", 12000)?.coerceIn(12000, 14000) ?: 12000
         pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf {
             it != 0 && it != 101 && it != 103 && it != 107 && it !in 12000..65534
         }
@@ -2584,18 +2535,6 @@ class MainActivity : ComponentActivity() {
                             requestOptionsUnavailable = editingSettings?.requestOptionsUnavailable == true,
                         ) }
                     }
-                    "legacy-library" -> {
-                        val page = legacyPage
-                        if (page != null) LegacyLibraryScreen(page, ::pickLegacySource, ::pickLegacyTarget,
-                            onBack = { retainedPage = "backup" })
-                        else app.daiyu.android.ui.screens.settings.SettingsScaffoldPage("旧版兼容资料库",
-                            onBack = { retainedPage = "backup" }, compactTitle = true) {
-                            item("reopen") {
-                                app.daiyu.android.ui.haptics.miuix.TextButton("重新打开资料库",
-                                    onClick = { backupGuard { openLegacyLibrary() } })
-                            }
-                        }
-                    }
                     "backup" -> {
                         val exportOwner = backupExportPageOwner
                         BackupScreen(
@@ -2609,7 +2548,6 @@ class MainActivity : ComponentActivity() {
                         onExportComplete = { if (backupExportPageCurrent(exportOwner)) backupGuard { pickBackup(true, true) } },
                         onImportCompact = { backupGuard { pickBackup(false, false) } },
                         onImportComplete = { backupGuard { pickBackup(false, true) } },
-                        onOpenLegacyLibrary = { backupGuard { openLegacyLibrary() } },
                         restorePreviewText = restorePreviewText,
                         onPreviewRestore = { backupGuard { previewConfigurationRestore() } },
                         onRestoreConfiguration = { confirmConfigurationRestore() },
@@ -5607,7 +5545,6 @@ class MainActivity : ComponentActivity() {
         state.putString("terminal-return-page", terminalReturnPage)
         state.putString("linux-settings-return-page", linuxSettingsReturnPage)
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
-        state.putInt("legacy-next-code", nextLegacyCode)
         state.putInt("pending-backup-request", pendingBackupRequest?.takeUnless { it == 101 || it == 103 } ?: 0)
         state.putStringArrayList("pending-conversation-exports", conversationExport.pendingConversationIds?.let { ArrayList(it) })
         if (retainedPage == "child-tasks") state.putString("task-records-conversation", taskRecordsConversationId)
@@ -5674,7 +5611,6 @@ class MainActivity : ComponentActivity() {
         super.onPostResume()
         controller.attachCommandApprovalUi(commandApprovalUi)
         controller.attachToolLocationUi(toolLocationUi)
-        legacyLaunchersReady = true
         // ActivityResult can arrive before RESUMED. Do not open a provider until then.
         val browserTarget = browserResumeTarget
         val browserEpoch = browserVisualEpoch
@@ -5731,11 +5667,6 @@ class MainActivity : ComponentActivity() {
         // Pending location UI cannot survive backgrounding. An already handed-off external GUI
         // overlay MUST survive this pause so the user can switch to the actual target app.
         taskLocationVisit?.let(::cancelTaskLocation)
-        val preserveLegacy = legacyPickerHop && retainedPage == "legacy-library" &&
-            pendingLegacy != null
-        legacyPickerHop = false
-        if (!preserveLegacy) revokeLegacyLibrary()
-
         // The outstanding DocumentsUI needs this pause to return its one-shot result.
         // Once consumed, a copy owns only this visit's atomic flag: backgrounding
         // revokes it, even if a blocked provider has not returned (not a drain).
@@ -5823,8 +5754,6 @@ class MainActivity : ComponentActivity() {
         paneRefreshPending = false
         revokePlatformActionVisit()
         taskLocationVisit?.let(::cancelTaskLocation)
-        revokeLegacyLibrary()
-        legacyLaunchersReady = false
         if (revokeContextManagementEntry()) editorGeneration++
         cancelDeferredOpenedBackup()
         revokeTerminalJobsVisit()
@@ -7439,7 +7368,7 @@ class MainActivity : ComponentActivity() {
             "将识别所选文件。代鱼备份会添加聊天记录，不覆盖现有记录；" +
                 "若包含 Linux 环境，将恢复到独立目录，不覆盖当前环境，也不自动授权运行；chroot 恢复需要 Root。" +
                 "若包含可恢复的模型配置，将另行确认。" +
-                "旧版格式会转入兼容资料库流程，不直接成为当前聊天记录。",
+                "仅支持当前应用的备份格式，不支持的格式不会导入。",
             "导入", action = {
             backupGuard {
                 check(backupImportVisit === visit && retainedPage == "backup" &&
@@ -7461,9 +7390,6 @@ class MainActivity : ComponentActivity() {
         if (backupImportVisit !== result.visit || !activityUsable() || retainedPage != "backup") return
         backupImportVisit = null
         backupGuard {
-            if (result.outcome.kind == app.daiyu.android.backup.BackupImportSource.Kind.LEGACY) {
-                openLegacyLibrary(); legacyPage?.requestSource()?.result(result.uri)
-            } else {
                 val candidate = result.outcome.linux
                 if (candidate == null) offerImportedConfiguration(result.outcome.hasConfiguration)
                 else {
@@ -7482,7 +7408,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }, backup = true)
                 }
-            }
         }
     }
     private fun offerImportedConfiguration(hasConfiguration: Boolean) {
@@ -7515,14 +7440,6 @@ class MainActivity : ComponentActivity() {
     }
     @Suppress("DEPRECATION") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode in 12000 until 14000) {
-            val captured = pendingLegacy
-            if (captured?.code != requestCode) return
-            pendingLegacy = null
-            captured.deliver(data?.data.takeIf { resultCode == RESULT_OK })
-            return
-        }
-
         val browserSelection = pendingBrowserDownload
         if (browserSelection?.requestCode == requestCode && pendingBackupRequest == requestCode) {
             // Consume once, even on cancellation/invalid URI. Distinct request codes ensure a

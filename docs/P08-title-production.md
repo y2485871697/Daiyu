@@ -8,8 +8,8 @@
 
 | 冻结来源（授权 full-detail-f001fb82/fork） | 原记录 git_blob | 原记录 SHA-256 |
 | --- | --- | --- |
-| `model/app/src/main/kotlin/io/github/mangi/eta/agent/model/ConversationTitleModel.kt` | `72eee641f436054cb57ecef3c25f79a925f73b4c` | `0b4210b59e03ebf1e9b396f1fac2985ca5ac9ddf2dafbe3f4eb339cc68fb5c2e` |
-| `model/app/src/test/kotlin/io/github/mangi/eta/agent/model/ConversationTitleModelTest.kt` | `a0f18d83a7fa3c8ecdfad8cbc28638cff1a71ee5` | `06c8989d36e70b4382729b2c23e5754c5def94235455c9890f13732ed0d90d37` |
+| `model/app/src/main/kotlin/[historical-package-omitted]/agent/model/ConversationTitleModel.kt` | `72eee641f436054cb57ecef3c25f79a925f73b4c` | `0b4210b59e03ebf1e9b396f1fac2985ca5ac9ddf2dafbe3f4eb339cc68fb5c2e` |
+| `model/app/src/test/kotlin/[historical-package-omitted]/agent/model/ConversationTitleModelTest.kt` | `a0f18d83a7fa3c8ecdfad8cbc28638cff1a71ee5` | `06c8989d36e70b4382729b2c23e5754c5def94235455c9890f13732ed0d90d37` |
 
 原记录 frozen_commit 为 `f001fb82eb9941e5673970c656f5c4d5370fbf7f`；参考包不是生产源码或本次交付文件。
 

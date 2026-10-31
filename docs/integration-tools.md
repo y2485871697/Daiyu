@@ -2,7 +2,7 @@
 
 ## 范围与证据
 
-这是新的中央注册、授权和账本接线基础，不替换旧暂停模块，不复刻 Eta，不声明 31 域已经接通。
+这是新的中央注册、授权和账本接线基础，不替换旧暂停模块，不复刻 历史自有源码，不声明 31 域已经接通。
 
 目前生产目录只注册两个已有真实后端：`get_battery_status` 和 `device_status`，调用 `app/.../platform/AndroidBatteryTool.kt` 中的 **AndroidReadOnlyTools**。没有占位成功工具，也没有默认注册 `ask_user` 或任何写工具。独立模块恢复后，由模块提供真实 `RegisteredTool` 再显式注册。原 `ModelPort`、`BatteryTool`、`Message`、`ModelEvent` 与旧 Android 后端文件未修改。
 

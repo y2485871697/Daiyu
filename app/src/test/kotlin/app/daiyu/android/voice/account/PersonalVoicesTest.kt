@@ -209,7 +209,7 @@ class PersonalVoicesTest {
             val error = failure { store.create(config(), sample(), "postpaid", null, true) }
             assertEquals(1, uploads)
             val pending = store.state.value.single()
-            assertTrue(pending.id.startsWith("etaClone"))
+            assertTrue(pending.id.matches(Regex("Daiyu[0-9a-f]{32}")))
             assertTrue(error.message.orEmpty().contains(pending.id))
             assertTrue(pending.uncertain); assertEquals(-1, pending.status)
             assertFalse(pending.canTrain); assertFalse(pending.tts); assertFalse(pending.accepted)

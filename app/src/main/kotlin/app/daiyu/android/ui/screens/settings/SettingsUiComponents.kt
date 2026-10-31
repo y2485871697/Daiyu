@@ -5,7 +5,7 @@ import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
 
 import app.daiyu.android.ui.components.LocalBottomSheetContent
-import app.daiyu.android.ui.components.etaInputContainerColor
+import app.daiyu.android.ui.components.daiyuInputContainerColor
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -191,7 +191,7 @@ internal fun SettingsTextField(
     compact: Boolean = false,
     embedded: Boolean = false,
 ) {
-    val container = etaInputContainerColor()
+    val container = daiyuInputContainerColor()
     val placeholder = hint.ifEmpty { if (compact || embedded) label else "" }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var secretVisible by remember(password) { mutableStateOf(false) }

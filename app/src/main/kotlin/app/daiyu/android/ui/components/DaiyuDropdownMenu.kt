@@ -62,7 +62,7 @@ private val MenuScreenMargin = 12.dp
 private const val MenuDismissGuardMs = 80L
 
 @Stable
-internal class EtaMenuState {
+internal class DaiyuMenuState {
     var expanded by mutableStateOf(false)
         private set
 
@@ -87,10 +87,10 @@ internal class EtaMenuState {
 }
 
 @Composable
-internal fun rememberEtaMenuState(): EtaMenuState = remember { EtaMenuState() }
+internal fun rememberDaiyuMenuState(): DaiyuMenuState = remember { DaiyuMenuState() }
 
 @Composable
-internal fun EtaDropdownMenu(
+internal fun DaiyuDropdownMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
@@ -130,7 +130,7 @@ internal fun EtaDropdownMenu(
     }
     val effectiveMaxHeight = maxHeight?.coerceAtMost(availableHeight) ?: availableHeight
     val positionProvider = remember(offsetXPx, offsetYPx, alignEnd, preferAbove, screenMarginPx) {
-        EtaMenuPositionProvider(offsetXPx, offsetYPx, alignEnd, preferAbove, screenMarginPx)
+        DaiyuMenuPositionProvider(offsetXPx, offsetYPx, alignEnd, preferAbove, screenMarginPx)
     }
     val transformOrigin = remember(alignEnd, preferAbove) {
         TransformOrigin(
@@ -177,7 +177,7 @@ internal fun EtaDropdownMenu(
                     .width(IntrinsicSize.Max)
                     .widthIn(min = minWidth, max = maxWidth)
                     .heightIn(max = effectiveMaxHeight)
-                    .etaMenuClipReveal(
+                    .daiyuMenuClipReveal(
                         fractionProgress = {
                             if (visibleState.targetState) fraction.value else 1f
                         },
@@ -233,7 +233,7 @@ internal fun rememberMenuVisibleHeight(view: View = LocalView.current): Int {
     return height
 }
 
-internal fun Modifier.etaMenuClipReveal(
+internal fun Modifier.daiyuMenuClipReveal(
     fractionProgress: () -> Float,
     preferAbove: Boolean,
     cornerRadius: Dp,
@@ -275,7 +275,7 @@ internal fun Modifier.etaMenuClipReveal(
     }
 }
 
-private class EtaMenuPositionProvider(
+private class DaiyuMenuPositionProvider(
     private val offsetXPx: Int,
     private val offsetYPx: Int,
     private val alignEnd: Boolean,

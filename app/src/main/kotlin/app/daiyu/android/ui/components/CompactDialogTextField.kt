@@ -28,7 +28,7 @@ internal fun CompactDialogTextField(
     modifier: Modifier = Modifier,
 ) {
     val colors = MiuixTheme.colorScheme
-    val container = etaInputContainerColor()
+    val container = daiyuInputContainerColor()
     val style = MiuixTheme.textStyles.body1.copy(fontSize = 14.sp, lineHeight = 21.sp, color = colors.onSurface)
     Box(Modifier.fillMaxWidth().padding(start = 9.dp, end = 9.dp, bottom = 13.dp)) {
         BasicTextField(

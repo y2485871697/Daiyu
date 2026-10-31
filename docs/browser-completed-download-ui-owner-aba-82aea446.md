@@ -4,7 +4,7 @@
 
 - 任务提供的候选基线标识：`82aea446`。本实现环境仅使用工作树文件工具，未读取 Git 元数据，因此未独立核验 HEAD / detached 状态。
 - 修改限于 `MainActivity.kt` 中 completed-download 的 UI / selection / worker owner，以及 `BrowserDownloadSaveActivityTest.kt`；本文件为独立交付 artifact。
-- 未改下载器、传输、controller、manifest、权限、共同清单或更新说明；未执行 shell、GUI、网络、建分支或 push，未读取旧 Eta 或凭据。
+- 未改下载器、传输、controller、manifest、权限、共同清单或更新说明；未执行 shell、GUI、网络、建分支或 push，未读取历史自有源码 或凭据。
 - **未执行编译或测试**。下述测试均为新增源码覆盖，不代表运行通过；构建及设备测试交由主代理执行。
 
 ## 问题与修复

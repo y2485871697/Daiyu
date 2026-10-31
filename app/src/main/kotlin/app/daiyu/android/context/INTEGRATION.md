@@ -29,7 +29,7 @@ val prepared = contextService.prepareSend(
 
 验证：新增 `ContextPolicyTest` 2 项 JVM 测试源码、`ContextServiceTest` 9 项仪器测试源码（已知超限、待发预算/阈值、无安全前缀、仍超限保旧档、摘要中取消、提交前取消回滚、线程中断、跨会话输入）；只做源码及调用兼容性静态核对，未执行构建/测试，不转授下方历史通过记录。完整测试留父代理统一执行；唯一清单由父代理按实际集成结果更新。
 
-来源：当前重写项目 `ConversationDatabase.kt`（生产 SQLite schema4；中立文本备份 format version1（沿用历史 schema3 契约））、`ModelSettings.kt`、`ResponsesModel.kt`；验收 `docs/refactor-input/acceptance.json` AC-033–035/050–052，features F11/F19。Context 最终来源 `f7f51c10`、配置人工恢复来源 `faa1a1d2`，随本次集成提交；进度与证据统一见 `docs/重构清单.md` 的 R03/R11/R12 三项成品集成记录。没有读取工作树外旧策略或复用 Eta 源码。保留候选压缩策略由父代理提供；这里的保守默认边界不能作为旧策略被取代的审查证据。
+来源：当前重写项目 `ConversationDatabase.kt`（生产 SQLite schema4；中立文本备份 format version1（沿用历史 schema3 契约））、`ModelSettings.kt`、`ResponsesModel.kt`；验收 `docs/refactor-input/acceptance.json` AC-033–035/050–052，features F11/F19。Context 最终来源 `f7f51c10`、配置人工恢复来源 `faa1a1d2`，随本次集成提交；进度与证据统一见 `docs/重构清单.md` 的 R03/R11/R12 三项成品集成记录。没有读取工作树外旧策略或复用 历史自有源码 源码。保留候选压缩策略由父代理提供；这里的保守默认边界不能作为旧策略被取代的审查证据。
 
 ## 主数据库唯一接线（v4 已实现；Context 生产分派仍未接通）
 

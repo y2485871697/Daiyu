@@ -5349,10 +5349,7 @@ class ChatController internal constructor(private val application:Application,
             var primaryFailure: Throwable? = null
             try {
                 report("读取结束：已读取 ${bytesRead} 字节", true)
-                if (source.kind == app.daiyu.android.backup.BackupImportSource.Kind.LEGACY) {
-                    outcome = BackupImportOutcome(source.kind)
-                    notice = "已识别旧版备份；请在资料库预览并确认导入"
-                } else if (source.kind == app.daiyu.android.backup.BackupImportSource.Kind.ARCHIVE) {
+                if (source.kind == app.daiyu.android.backup.BackupImportSource.Kind.ARCHIVE) {
                     report("正在核验数据与 Linux 备份", true)
                     app.daiyu.android.backup.FullBackupArchive.read(source.file, application.cacheDir) {
                         report("正在校验备份：已读取 $it 字节", false)
@@ -5459,20 +5456,7 @@ class ChatController internal constructor(private val application:Application,
         }.orEmpty()
     }
 
-    internal val legacyLibrary by lazy {
-        LegacyLibraryHost(application.contentResolver,
-            serviceFactory = { beforeCommit ->
-                app.daiyu.android.backup.legacy.LegacyImportService(
-                    database = { database.writableDatabase }, beforeCommit = beforeCommit)
-            },
-            gateway = LegacyLibraryHost.Gateway { work, completed ->
-                try {
-                    dataTask(failureNotice = "兼容库操作未确认；请重新读取历史核实，不自动重试。目标可能不完整。",
-                        completed = completed, work = { work(); "兼容库操作已结束，请查看资料库结果。" })
-                    true
-                } catch (_: Exception) { false }
-            })
-    }
+
 
     @Synchronized internal fun dataTask(importing:Boolean=false,failureNotice:String?=null,
         completed:(Boolean)->Unit = {},work:()->String?) {

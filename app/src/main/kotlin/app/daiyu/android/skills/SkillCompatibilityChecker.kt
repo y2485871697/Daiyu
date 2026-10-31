@@ -4,7 +4,7 @@ package app.daiyu.android.skills
  * 安装前与读取前共用的 Skill 运行时检测。
  * 只根据 SKILL.md 元数据和正文做静态判断，不执行脚本。
  *
- * Retained algorithm: see docs/skills-compatibility-source.md for source and open provenance.
+ * Shared static compatibility policy; see docs/skills-compatibility-source.md.
  * The entry overload is adapted from SkillIndexEntry to this domain's SkillHeader.
  */
 object SkillCompatibilityChecker {

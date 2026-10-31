@@ -1,5 +1,7 @@
 # P32：旧语音供应商协议迁入（独立、待父层接线）
 
+当前归属：用户明确确认本节语音业务实现为其 fork 后原创，保留代码与既有行为；历史输入只定位版本，不据以推定上游作者或要求重写。实际第三方网络库、引擎、JNI 主体及模型各按其真实来源与许可保留。以下阶段记录中的原创待核措辞不再适用于本项。
+
 ## 来源与范围
 
 本实现不是“全原创重写”，也不把旧项目归因为某个未经证实的 RikkaHub 固定版本。
@@ -7,7 +9,7 @@
 保留真实供应商 wire builder/decoder 和 MiMo 本地声音语义；新写配置、transport 边界及少量防御校验。
 
 读取依据：工作树内 `build/agent-input/SOURCE.json`、`frozen/snapshot-manifest.json`，以及下列
-`frozen/app/src/main/kotlin/io/github/mangi/eta/agent/voice/` 文件。
+`frozen/app/src/main/kotlin/[historical-package-omitted]/agent/voice/` 文件。
 下列 SHA-256 是 SOURCE.json **记录的值**（本次未通过 shell 重新计算）：
 
 |冻结源相对 voice 路径|记录 SHA-256|新位置（`app/src/main/kotlin/app/daiyu/android/voice/` 下）|
@@ -24,9 +26,7 @@
 `fork/.../voice/doubao/DoubaoAsrProtocolTest.kt`、`fork/.../voice/mimo/MimoCloneTest.kt`，
 并补充新注入边界、错误和持久化测试。测试并非供应商在线可用性证明。
 
-旧文件无逐文件版权头可供迁入；保留本记录和仓库已有 LICENSE／第三方通知，不抹除旧项目、
-原项目和贡献者的适用权利。`THIRD_PARTY/rikkahub/NOTICE.md` 中另一项 Responses 复用的
-固定提交不是这四个语音文件的来源证明。本次没有访问工作树外或网页。
+用户原创业务实现按本节最新确认保留；实际网络库、语音引擎、模型及其它第三方本体各保留真实许可、署名和适用通知。RikkaHub 或 OpenMinis 的另一模块告知不覆盖本模块。
 
 没有复制完整输入快照、SecretStore、旧 AgentModelClient、ProviderSetting、全局 settings、
 HTTP 单例、旧日志器、麦克风循环、UI 或播放器。没有将 `build/agent-input` 注册进 sourceSet，

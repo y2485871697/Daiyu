@@ -24,7 +24,6 @@ class BackupScreenTest : WiredActivityTestCase() {
                     onExportComplete = { exports.incrementAndGet() },
                     onImportCompact = { otherActions.incrementAndGet() },
                     onImportComplete = { imports.incrementAndGet() },
-                    onOpenLegacyLibrary = { otherActions.incrementAndGet() },
                     restorePreviewText = "",
                     onPreviewRestore = { otherActions.incrementAndGet() },
                     onRestoreConfiguration = { otherActions.incrementAndGet() },

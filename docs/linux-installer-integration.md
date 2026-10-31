@@ -10,10 +10,10 @@ The artifact constructor is internal: this is not an arbitrary user-URL download
 
 The supplied source research identifies the authorized input root:
 
-`/workspace/daiyu-coordination/main-01/backend-kit-v1/Eta-backend-adaptation-kit-v1/sources/eta/`
+`/workspace/daiyu-coordination/main-01/backend-kit-v1/maintainer-backend-input-v1/sources/maintainer-owned/`
 
 with baseline `2a7e7ab92b98da5a3711611017021441e7a8053c`, specifically
-`app/src/main/kotlin/io/github/mangi/eta/agent/terminal/AlpineEnvironmentInstaller.kt`,
+`app/src/main/kotlin/[historical-package-omitted]/agent/terminal/AlpineEnvironmentInstaller.kt`,
 `DebianEnvironmentInstaller.kt`, `RootlessLinuxInstaller.kt` and `VerifiedArtifactDownloader.kt`.
 The four metadata entries below are the fixed values supplied from that source research, not
 newly discovered downloads. The extractor is independently implemented against the supplied

@@ -1,34 +1,14 @@
-# Linux rootfs installer: source, authorization and dependencies
+# Linux rootfs installer: ownership and dependencies
 
-## Authorized backend source
+## Maintainer-owned implementation
 
 Required Notice: Copyright © 2026 蛮吉 (Mangi-11).
 
-The supplied Eta adaptation-kit provenance identifies baseline
-`2a7e7ab92b98da5a3711611017021441e7a8053c`, under
-`/workspace/daiyu-coordination/main-01/backend-kit-v1/Eta-backend-adaptation-kit-v1/sources/eta/`.
-Source research supplied for this task identified:
+The maintainer explicitly confirms that the installer, catalog and downloader adaptations are their original work developed after forking. Historical storage paths do not determine authorship. The supplied input baseline is `2a7e7ab92b98da5a3711611017021441e7a8053c`; it is a local version identifier, not an upstream library revision.
 
-- `app/src/main/kotlin/io/github/mangi/eta/agent/terminal/AlpineEnvironmentInstaller.kt`
-- `app/src/main/kotlin/io/github/mangi/eta/agent/terminal/DebianEnvironmentInstaller.kt`
-- `app/src/main/kotlin/io/github/mangi/eta/agent/terminal/RootlessLinuxInstaller.kt`
-- `app/src/main/kotlin/io/github/mangi/eta/agent/terminal/VerifiedArtifactDownloader.kt`
+The current implementation lives in `app/src/main/kotlin/app/daiyu/android/terminal/install/`. `TarLinuxRootfsExtraction` retains its path/link, resource, cancellation and durability checks. No installer behavior or rootfs record is changed by this ownership clarification.
 
-The original **PolyForm Noncommercial License 1.0.0**, including its Required Notice,
-is retained in the repository at
-[`docs/third-party/virtual-display-owner/LICENSE`](../../docs/third-party/virtual-display-owner/LICENSE).
-That text is the same supplied Eta baseline license already retained for the authorized backend
-migration; it is not replaced by the repository's root license. Preserve this notice and that
-license when distributing the adapted installer.
-
-The user has authorized migration, modification and distribution of the provided backend.
-This records that authorization without claiming it relicenses third-party dependencies or
-all rootfs packages. The four rootfs records were transcribed from the supplied source research.
-`TarLinuxRootfsExtraction` is independently implemented against the supplied extraction contract
-with additional empty-staging, path/link, resource, cancellation and durability checks. The
-approval boundary and single-URI/no-redirect transport remain local adapters. No old installBase,
-automatic mirrors, root shell or helper binaries were imported. The editing agent has not
-re-read the external source package or downloaded/verified the four remote payloads.
+The previously supplied PolyForm Noncommercial License 1.0.0 and Required Notice remain in `docs/third-party/virtual-display-owner/LICENSE`. This clarification does not rewrite that text, replace third-party licenses, or change the licenses of rootfs packages.
 
 ## Newly declared runtime libraries
 

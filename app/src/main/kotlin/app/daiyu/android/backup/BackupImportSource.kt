@@ -6,7 +6,7 @@ import java.io.InputStream
 
 /** One read of an untrusted provider, closed before any database or asset publication. */
 internal class BackupImportSource private constructor(internal val file: File, val kind: Kind) {
-    enum class Kind { COMPLETE, TEXT, LEGACY, ARCHIVE }
+    enum class Kind { COMPLETE, TEXT, ARCHIVE }
     fun open(): InputStream = file.inputStream()
     fun delete(): Boolean = !file.exists() || file.delete()
 
@@ -45,10 +45,9 @@ internal class BackupImportSource private constructor(internal val file: File, v
                     }
                 }
                 val zip = file.inputStream().use { it.read() == 'P'.code && it.read() == 'K'.code }
-                val kind = if (zip) { if (FullBackupArchive.recognizes(file)) Kind.ARCHIVE else Kind.LEGACY } else when (file.inputStream().use { BackupPackageSpool.detectFormat(it) }) {
+                val kind = if (zip) { require(FullBackupArchive.recognizes(file)) { "不支持的备份格式" }; Kind.ARCHIVE } else when (file.inputStream().use { BackupPackageSpool.detectFormat(it) }) {
                     "daiyu-neutral-complete" -> Kind.COMPLETE
                     "daiyu-neutral-text" -> Kind.TEXT
-                    "eta-backup", "eta-conversation" -> Kind.LEGACY
                     else -> error("不支持的备份格式")
                 }
                 return BackupImportSource(file, kind)

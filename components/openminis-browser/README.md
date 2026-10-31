@@ -13,7 +13,7 @@ six pinned upstream sources** from this snapshot via `StageBrowserCore` in
 `BrowserActionResult.kt`, `BrowserUseJS.kt`, `InterceptedDialogQueue.kt`, and
 `BrowserUseManager.kt`. It also includes `adapter/src/main/kotlin` and the app's
 browser host sources. The remaining preserved upstream files are not thereby enabled.
-No Eta `AgentBrowserSession`, `ChildBrowserSession`, `ChildBrowserSupport`,
+No external host `AgentBrowserSession`, `ChildBrowserSession`, `ChildBrowserSupport`,
 `ChildBrowserDownloads`, `BrowserHistoryStep` or empty logger is copied.
 The old candidate has 19 upstream-derived files; its `BrowserHistoryStep` is not
 upstream. `GoogleAuthRouter` is the genuine additional upstream file; it is retained

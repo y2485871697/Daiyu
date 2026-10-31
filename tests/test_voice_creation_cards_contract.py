@@ -149,7 +149,7 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
         for required in ('VoiceSettingsCard {', 'AccountField("备注名称（可空）", name, busy)',
                          'SettingsRow("选取我的名额"',
                          'AccountField("已有音色 ID", existingId, busy)',
-                         'if (!enabled || !existingId.matches(Regex("(?:S_|etaClone)[A-Za-z0-9_-]+"))) null',
+                         'if (!enabled || !DoubaoVoiceIdentity.isPersonal(existingId.trim())) null',
                          'resources.voices.importExisting(speech!!, id, n)'):
             self.assertIn(required, imported)
         self.assertNotIn('SettingsCard(', imported)

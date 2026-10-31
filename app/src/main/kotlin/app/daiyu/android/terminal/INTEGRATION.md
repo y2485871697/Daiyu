@@ -1,6 +1,6 @@
 # F17/F18 candidate integration — not runtime evidence
 
-The seven product files are the four Terminal/File sources, this note, and two corresponding androidTest files, delivered directly at their formal app source paths (not hidden docs). Supplied candidate source: `6c6d0ba3ef147b07fe0110e7d3b5b7ef21e695f3`, with the two narrowly scoped fixes below. No Controller, DB, Android Manifest, signing, build or old Eta integration changes.
+The seven product files are the four Terminal/File sources, this note, and two corresponding androidTest files, delivered directly at their formal app source paths (not hidden docs). Supplied candidate source: `6c6d0ba3ef147b07fe0110e7d3b5b7ef21e695f3`, with the two narrowly scoped fixes below. No Controller, DB, Android Manifest, signing, build or historical maintainer-owned code integration changes.
 
 ## Wiring and identity
 

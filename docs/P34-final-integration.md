@@ -78,4 +78,4 @@ val binding = preparation.openOnWorker(context, root)
 - `CatalogBrowserBindingAndroidTest`：隔离 app-private 空 filesDir、preview / confirm 不 mkdir、worker helper → 实际 AndroidBrowserRunHost / binding → 原 Runner owner 成功构造及物理 close；主线程 helper 在任何 mkdir 前拒绝。
 - `BrowserDownloadLedgerAndroidTest`：真实 Android 文件、生产下载管线（仅 HTTP connection fixture）、SQLite 关闭重开，实际 path / bytes / size / SHA-256 及 CONFIRMED / UNKNOWN 不二次 GET。
 
-父最终必须核验编译 / JVM / Lint / APK / API26 与 API37.2，包括本轮新方法的发现数。此处 fake HTTP 不冒充真实 TLS / 外网下载证据；还需受控真实 HTTPS、取消在途与磁盘失败 / native destroy 失败等设备回归。未访问网页、付费供应商或旧 Eta 活树，未改第三方固定源和许可。
+父最终必须核验编译 / JVM / Lint / APK / API26 与 API37.2，包括本轮新方法的发现数。此处 fake HTTP 不冒充真实 TLS / 外网下载证据；还需受控真实 HTTPS、取消在途与磁盘失败 / native destroy 失败等设备回归。未访问网页、付费供应商或历史自有源码 活树，未改第三方固定源和许可。

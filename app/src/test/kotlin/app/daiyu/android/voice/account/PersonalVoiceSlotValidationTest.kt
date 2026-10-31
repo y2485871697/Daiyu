@@ -130,7 +130,7 @@ class PersonalVoiceSlotValidationTest {
         val index = File(folder.root, "invalid.json")
         val store = PersonalVoices(index, AccountHttpTransport { _, _ -> calls++; error("No request") })
         store.load()
-        for (id in listOf("", " ", "made-up", "etaClone" + "a".repeat(32))) {
+        for (id in listOf("", " ", "made-up", "Daiyu" + "a".repeat(32))) {
             var rejected = false
             try { store.findTrainingSlot(config(), id, "ak", "sk", "project") }
             catch (_: IllegalArgumentException) { rejected = true }

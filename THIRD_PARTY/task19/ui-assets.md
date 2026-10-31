@@ -10,7 +10,7 @@
 https://github.com/AcidGr/dsh-web-whale-maid/blob/7389222e2176603b197076ab3823e44d85547b3b/LICENSE
 https://github.com/AcidGr/dsh-web-whale-maid/tree/7389222e2176603b197076ab3823e44d85547b3b/assets
 
-已核MIT文字及同名资产结构；这个参照commit不是已经证明的旧图导入版本。17号需交实际选定旧发布SHA、每张原/目标path/size/SHA256、上游对应源path/hash或裁切/缩放/重编码转换链、原LICENSE/NOTICE。17号已交本地源码清单`/workspace/daiyu-coordination/task-17/source-manifest.json`，source_revision为`3196270e361c82cc1f399218d914ec49de0d83cc`；其中WhaleMaid*.kt、WhaleMaidSettingsScreen.kt等是源码路径/字节数/摘要，不是旧冻结发布f001fb82的六张PNG清单，代码SHA256不能替代图片摘要。其用户确认自研P24/P29/P30/P31的scope不扩大到外源图片或整个Eta。图片原件/来源绑定缺口保持。用户自研UI不重新审原创。
+已核MIT文字及同名资产结构；这个参照commit不是已经证明的旧图导入版本。17号需交实际选定旧发布SHA、每张原/目标path/size/SHA256、上游对应源path/hash或裁切/缩放/重编码转换链、原LICENSE/NOTICE。17号已交本地源码清单`/workspace/daiyu-coordination/task-17/source-manifest.json`，source_revision为`3196270e361c82cc1f399218d914ec49de0d83cc`；其中WhaleMaid*.kt、WhaleMaidSettingsScreen.kt等是源码路径/字节数/摘要，不是旧冻结发布f001fb82的六张PNG清单，代码SHA256不能替代图片摘要。其用户确认自研P24/P29/P30/P31的scope不扩大到外源图片或整个历史自有源码。图片原件/来源绑定缺口保持。用户自研UI不重新审原创。
 
 用户自研宠物行为与外源图片分开保留。此时只可称上游许可参照已核，不能称六图hash来源绑定完成。
 
@@ -22,9 +22,4 @@ https://github.com/AcidGr/dsh-web-whale-maid/tree/7389222e2176603b197076ab3823e4
 
 ## T05 MoneyBag02
 
-实际引入补丁0e82d4d7c772890d5e78288f4d5d916fe06f27c7，标题“使用RikkaHub同款MoneyBag02图标”；新增旧ui/icons/MoneyBag02.kt，24×24三组Compose ImageVector路径，无原库许可头。原证据：
-`/workspace/daiyu-origin-audit/full-detail-f001fb82/targeted-evidence/balance-icon.patch`及同树sources/ui/fork下目标文件。
-
-该补丁支持定点追查RikkaHub，不足以确认最终图标库、原源版本、path、许可或矢量等同关系；一个候选路径未命中不等于上游没有图标。不凭MoneyBag02名字套用任何图标库。现RikkaHub NOTICE只覆盖Provider地址改编，不能覆盖图标；Material Icons依赖存在也不能证明该图来源。
-
-17号若迁入该符号，交最终文件、实际引入证据、直接源commit/path、原库许可/NOTICE及矢量转换对应。用户自研猫图标与64种配置资源只需保全/适配和业务验证，不重审原创。本包不迁入图片，不下载/转换资产，不标T04/T05完成。
+用户确认 MoneyBag02 为其 fork 后原创，历史存储位置、文件名或样式不证明第三方图标库归属。本项不再列为未知上游缺口；保留现有矢量、描边、缓存、余额显示与动画调用，不新增库或要求重画。实际第三方品牌图标、社区图标仍保留各自来源和许可。

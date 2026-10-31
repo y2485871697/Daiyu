@@ -18,7 +18,7 @@ import app.daiyu.android.R
 import app.daiyu.android.domain.tools.ExecutionReceipt
 import app.daiyu.android.integration.tools.CommandPermissionDefaults
 import app.daiyu.android.shizuku.*
-import app.daiyu.android.ui.components.EtaFormTextField
+import app.daiyu.android.ui.components.DaiyuFormTextField
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.screens.settings.SettingsCard
 import app.daiyu.android.ui.screens.settings.SettingsNote
@@ -187,11 +187,11 @@ internal fun ShizukuApprovalContent(
                 onClick = { onEdit(0, state.script, timeout.toLongOrNull() ?: 0) }, enabled = editable,
                 modifier = Modifier.testTag("shizuku-select-root"))
             state.selectedUid?.let { Text(stringResource(R.string.shizuku_selected, it)) }
-            EtaFormTextField(state.script,
+            DaiyuFormTextField(state.script,
                 onValueChange = { onEdit(state.selectedUid, it, timeout.toLongOrNull() ?: 0) },
                 hint = stringResource(R.string.shizuku_script), enabled = editable, minLines = 3,
                 modifier = Modifier.padding(top = 12.dp).testTag("shizuku-script"))
-            EtaFormTextField(timeout, onValueChange = {
+            DaiyuFormTextField(timeout, onValueChange = {
                 timeout = it
                 // Even an invalid/empty edit revokes the old approval immediately.
                 onEdit(state.selectedUid, state.script, it.toLongOrNull() ?: 0)

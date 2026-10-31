@@ -32,7 +32,7 @@
     "calls": 1
   },
   {
-    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/EtaFormTextField.kt",
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/DaiyuFormTextField.kt",
     "calls": 1
   },
   {

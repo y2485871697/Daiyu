@@ -128,7 +128,7 @@ class SessionGatewayWireTest {
         MessagesModel(settings, 4096, { connections[number++] }, null, "runtime system", context)
             .open(history()).next(emptyList()) {}
         val anchor = connections[0].body().getJSONObject("metadata").getString("user_id")
-        assertTrue(anchor.matches(Regex("eta-session-[0-9a-f]{64}")))
+        assertTrue(anchor.matches(Regex("daiyu-session-[0-9a-f]{64}")))
         for (connection in connections) {
             val body = connection.body()
             assertEquals(anchor, body.getJSONObject("metadata").getString("user_id"))

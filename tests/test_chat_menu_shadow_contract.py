@@ -20,7 +20,7 @@ class ChatMenuShadowContract(unittest.TestCase):
         self.assertIn("0.15f + 0.85f * motion.fraction.value", self.host)
         self.assertIn("TransformOrigin(1f, 0f)", self.host)
         self.assertNotIn("alpha =", self.host)
-        self.assertNotIn(".etaMenuClipReveal(", self.host)
+        self.assertNotIn(".daiyuMenuClipReveal(", self.host)
 
     def test_shadows_are_non_measuring_siblings_outside_body_alpha_and_reveal(self):
         self.assertIn("Box(modifier.width(IntrinsicSize.Max), propagateMinConstraints = true)", self.surface)
@@ -29,9 +29,9 @@ class ChatMenuShadowContract(unittest.TestCase):
         self.assertNotIn(".dropShadow(", self.surface)
         self.assertEqual(2, self.shadows.count(".dropShadow(shape) {"))
         self.assertLess(self.shadows.index(".graphicsLayer {"), self.shadows.index(".dropShadow(shape) {"))
-        self.assertNotIn(".etaMenuClipReveal", self.shadows)
-        self.assertLess(self.surface.index(".graphicsLayer {"), self.surface.index(".etaMenuClipReveal("))
-        self.assertLess(self.surface.index(".etaMenuClipReveal("), self.surface.index(".clip(shape).then(blur)"))
+        self.assertNotIn(".daiyuMenuClipReveal", self.shadows)
+        self.assertLess(self.surface.index(".graphicsLayer {"), self.surface.index(".daiyuMenuClipReveal("))
+        self.assertLess(self.surface.index(".daiyuMenuClipReveal("), self.surface.index(".clip(shape).then(blur)"))
         self.assertNotIn("ModulateAlpha", self.source)
 
     def test_shadow_caches_one_outline_and_reveals_only_in_the_graphics_layer(self):

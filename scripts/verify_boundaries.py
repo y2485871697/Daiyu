@@ -8,15 +8,10 @@ for path in DOMAIN.rglob("*.kt"):
         if line.startswith("import "):
             assert not line.startswith(("import android.", "import androidx.", "import app.daiyu.android.MainActivity")), path
 
-# A byte-identical legal provenance copy may name the original host without
-# making it a runtime dependency. Keep this exception to that one reviewed file.
-LEGAL_PROVENANCE = ROOT / "app/src/main/assets/licenses/virtual-display-owner/NOTICE.md"
-if LEGAL_PROVENANCE.exists():
-    assert LEGAL_PROVENANCE.read_bytes() == (ROOT / "docs/third-party/virtual-display-owner/NOTICE.md").read_bytes()
-for folder in ("app/src", "core-domain/src"):
-    for path in (ROOT / folder).rglob("*"):
-        if path.is_file() and path != LEGAL_PROVENANCE:
-            assert b"io.github.mangi.eta" not in path.read_bytes(), path
+# Identity checks cover source, resources, documentation and bundled source archives.
+import runpy
+runpy.run_path(str(ROOT / "scripts/verify_project_identity.py"))["verify_tree"](ROOT)
+assert (ROOT / "app/src/main/assets/licenses/virtual-display-owner/NOTICE.md").read_bytes() == (ROOT / "docs/third-party/virtual-display-owner/NOTICE.md").read_bytes()
 manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 expected_permissions = {

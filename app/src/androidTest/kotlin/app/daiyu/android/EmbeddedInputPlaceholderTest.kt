@@ -24,13 +24,13 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
-import app.daiyu.android.ui.components.EtaFormTextField
+import app.daiyu.android.ui.components.DaiyuFormTextField
 import app.daiyu.android.ui.components.subagent.ConversationAgentField
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewField
 import app.daiyu.android.ui.screens.settings.SettingsTextField
 
 class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
-    private enum class Kind { REGULAR, COMPACT, EMBEDDED, MULTILINE, ETA, SUBAGENT, ASSISTANT }
+    private enum class Kind { REGULAR, COMPACT, EMBEDDED, MULTILINE, DAIYU, SUBAGENT, ASSISTANT }
     private var value by mutableStateOf("")
     private val label = "输入框标题"
     private fun tag(kind: Kind) = if (kind == Kind.SUBAGENT) "subagent-field:$label" else "placeholder-field"
@@ -48,7 +48,7 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
                         applyInterfaceScale = false) {
                         Column(Modifier.requiredWidth(280.dp).safeDrawingPadding()) {
                             when (kind) {
-                                Kind.ETA -> EtaFormTextField(value, { value = it }, label, singleLine = true,
+                                Kind.DAIYU -> DaiyuFormTextField(value, { value = it }, label, singleLine = true,
                                     enabled = enabled, modifier = Modifier.testTag(tag(kind)))
                                 Kind.SUBAGENT -> ConversationAgentField(label, value, { value = it }, enabled = enabled)
                                 Kind.ASSISTANT -> AssistantPreviewField(value, { value = it }, label, enabled = enabled,
@@ -117,7 +117,7 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
     }
 
     fun testExternalTitlesAndNotchedLabelsRemainVisibleAfterTyping() {
-        for (kind in listOf(Kind.REGULAR, Kind.ETA, Kind.SUBAGENT, Kind.ASSISTANT)) {
+        for (kind in listOf(Kind.REGULAR, Kind.DAIYU, Kind.SUBAGENT, Kind.ASSISTANT)) {
             show(kind)
             ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
             field(kind).performTextReplacement("entered")

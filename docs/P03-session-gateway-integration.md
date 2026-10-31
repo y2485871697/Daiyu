@@ -17,11 +17,11 @@ wire 增量原记录的参考来源位于 `docs/reference-preserved`，来源清
 
 不采用旧随机 session、产品 User-Agent 或 OAuth 客户端伪装。`SessionGatewayContext` 只持有明确的 `ConversationId`，`project` 固定 null；不查看 runId、history、全局选择、SessionCapabilities.sessionId，不伪造 global/project/opencode 路由。
 
-Anthropic 的 `eta-anthropic-session-v1\0` 和 `eta-session-` 是兼容协议常量，不是 UI 品牌：
+Anthropic 的 `daiyu-anthropic-session-v1\0` 和 `daiyu-session-` 是兼容协议常量，不是 UI 品牌：
 
 ```
-metadata.user_id = "eta-session-" + lowercaseHex(
-    SHA256(UTF8("eta-anthropic-session-v1" + NUL + conversationId.value))
+metadata.user_id = "daiyu-session-" + lowercaseHex(
+    SHA256(UTF8("daiyu-anthropic-session-v1" + NUL + conversationId.value))
 )
 ```
 

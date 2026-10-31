@@ -23,12 +23,4 @@
 
 ## T02 Skill
 
-用户已确认兼容功能移植保留，但原源commit/path/实际片段/许可独立待核。旧SkillCompatibilityChecker读取metadata/正文静态检测Apple、MiniS CLI、iOS沙箱关键词，不执行脚本。此功能存在不证明整套SkillRuntime/Parser/Installer来自OpenMinis；旧文件筛查含Eta继承/修改项，应分开处理。
-
-11号已交旧checker及测试候选定位线索，实际保留片段与独立上游来源证据仍待补齐，不能借T01的固定commit、GPL或NOTICE自动覆盖Skill。
-
-定位交接`/workspace/daiyu-coordination/task-11/source-gap-for-19.md`指旧冻结`f001fb82eb9941e5673970c656f5c4d5370fbf7f`，本地引入记录`885e4f4502a1a03a5e82e4c3074a3ee7c0e83edc`；旧候选路径`/workspace/daiyu-origin-audit/full-detail-f001fb82/sources/browser/fork/app/src/main/kotlin/io/github/mangi/eta/agent/skill/SkillCompatibilityChecker.kt`，测试候选为同树src/test下SkillCompatibilityCheckerTest.kt。这是本地来源定位，不是OpenMinis原源匹配，也不是测试已执行证据。本基线未证明生产安装/读取/run快照已接通。
-
-## 本地证据
-
-`/workspace/daiyu-origin-audit/frozen-preserve-f001fb82/browser/snapshot-manifest.json`及同树third_party/openminis-browser/{NOTICE.md,LICENSE,PORT_STATUS.md}；`full-detail-f001fb82/browser-files.tsv`与sources/browser/fork下SkillCompatibilityChecker。只读抽样，不是全模块作者认证；缺项保留待核，不删除第三方或冒称自研。
+用户已确认 SkillCompatibilityChecker 及其保留测试为 fork 后原创，不归属于 OpenMinis。保留算法与生产接线；外部 Skill 和实际第三方依赖各按其许可。见 `docs/skills-compatibility-source.md`。

@@ -1,6 +1,6 @@
 # Independent Daiyu PTY helper
 
-`daiyu_pty.c` is a new GPL-3.0-or-later implementation, not the old Eta PTY wrapper.
+`daiyu_pty.c` is a new GPL-3.0-or-later implementation, not the historical maintainer-owned code PTY wrapper.
 It uses libc/POSIX/Linux APIs and no bundled third-party code. Keep PRoot's own
 source/license obligations separate; this helper can exec the authorized PRoot
 launcher but does not reimplement, download or install PRoot.

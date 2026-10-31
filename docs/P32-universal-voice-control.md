@@ -18,7 +18,7 @@
 
 经授权参考的原文件：
 
-- `build/agent-input/fork/app/src/main/kotlin/io/github/mangi/eta/agent/voice/VoiceEntryPolicy.kt`：模式可用性、单一模式入口与历史选择。
+- `build/agent-input/fork/app/src/main/kotlin/[historical-package-omitted]/agent/voice/VoiceEntryPolicy.kt`：模式可用性、单一模式入口与历史选择。
 - 同目录 `VoiceModeController.kt`：UNIVERSAL 顺序交互与功能独立配置的意图。**未迁移**其中 `lastAgentId` / `isStreaming` 推断 owner、无限循环和延时后重开麦克风的实现。
 
 核实过的当前接线依据：

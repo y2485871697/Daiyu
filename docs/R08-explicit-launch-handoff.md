@@ -2,7 +2,7 @@
 
 ## 范围与来源
 
-本增量针对任务指定基线 `57064e27`，沿用已接入的真实计划编辑器、Controller 受理/审批、唯一中央目录和额外 cleanup；不重新接 MainActivity/ChatController，不复制旧 Eta，不改 owner 的保护算法。
+本增量针对任务指定基线 `57064e27`，沿用已接入的真实计划编辑器、Controller 受理/审批、唯一中央目录和额外 cleanup；不重新接 MainActivity/ChatController，不复制历史自有源码，不改 owner 的保护算法。
 
 核实来源：
 

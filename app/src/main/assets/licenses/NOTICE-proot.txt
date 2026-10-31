@@ -1,10 +1,10 @@
 # Bundled PRoot native runtime
 
 This independent application retains these third-party native components from the
-user-provided backend adaptation kit (wrapper repository baseline
+maintainer-owned build-wrapper input (historical wrapper baseline
 `2a7e7ab92b98da5a3711611017021441e7a8053c`, not an upstream PRoot commit).
 The original copyright statements are preserved in the accompanying license and
-source files. No Eta PTY binary is used; this application's PTY remains independently built.
+source files. No external host PTY binary is used; this application's PTY remains independently built.
 
 - PRoot v5.1.107.92: GPL-2.0-or-later.
 - talloc 2.4.3: LGPL-3.0-or-later, statically linked.
@@ -21,7 +21,7 @@ before copying, then checked the destination bytes. The four native payloads are
 paired arm64-v8a and x86_64 `libproot_exec.so`/`libproot_loader.so` files.
 
 The original corresponding source archives are packaged in the APK at
-`assets/native-sources/{proot,talloc,shmem,eta-native-build}.tgz`.
+`assets/native-sources/{proot,talloc,shmem,daiyu-native-build}.tgz`.
 The build archive retains `scripts/build-terminal-native.sh`, its two patches,
 native build README, and version catalog; its included historical PTY source
 serves source provenance only and is not compiled or installed as this app's PTY.
@@ -49,3 +49,5 @@ The existing `useLegacyPackaging=true` provides the native extraction configurat
 actual merged Manifest, APK inclusion, device extraction, loader execution,
 page-size compatibility and supported-device Linux startup remain to be tested.
 No rootfs archive is bundled, downloaded or installed by this source-only change.
+
+The native build wrapper and host integration are the maintainer's original post-fork work. This does not change PRoot, talloc or libandroid-shmem authorship or licensing. The renamed build-source archive is recorded with its new exact digest; unchanged third-party source archives retain their original digests.

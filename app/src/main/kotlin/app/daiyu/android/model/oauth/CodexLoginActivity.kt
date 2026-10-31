@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-/** Original Eta's embedded login + loopback callback, with a one-shot strict PKCE transaction. */
+/** Embedded login and loopback callback with a one-shot strict PKCE transaction. */
 class CodexLoginActivity : ComponentActivity() {
     private val verifier = CodexOAuthProtocol.nonce(64)
     private val state = CodexOAuthProtocol.nonce()

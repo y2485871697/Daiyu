@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Adapted from k2-fsa/sherpa-ncnn v2.1.15; explicit close added by Eta.
+// Adapted from k2-fsa/sherpa-ncnn v2.1.15; explicit close added by the maintainer.
 package com.k2fsa.sherpa.ncnn
 
 import android.content.res.AssetManager

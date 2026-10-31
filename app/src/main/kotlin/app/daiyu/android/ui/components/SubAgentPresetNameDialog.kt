@@ -27,7 +27,7 @@ internal fun SubAgentPresetNameDialog(
     WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
         app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
         Column(Modifier.fillMaxWidth()) {
-            EtaFormTextField(value = name, onValueChange = { onNameChange(it.take(80)) },
+            DaiyuFormTextField(value = name, onValueChange = { onNameChange(it.take(80)) },
                 hint = fieldHint, singleLine = true)
             Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {

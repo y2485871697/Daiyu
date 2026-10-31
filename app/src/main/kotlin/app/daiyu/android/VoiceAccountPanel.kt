@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.voice.providers.DoubaoVoiceIdentity
+
 import app.daiyu.android.ui.navigation.PageBackStack
 import android.net.Uri
 import android.os.Looper
@@ -228,7 +230,7 @@ internal fun VoiceAccountPanel(
         .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }
     val creationSlotId = manualSlotId.trim().ifBlank { slotId }
     val importSlots = importCandidates.filter { it.canImport }.sortedBy { it.name }
-        .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+|etaClone[a-fA-F0-9]{32}")) }
+        .filter { DoubaoVoiceIdentity.isPersonal(it.id) }
     fun navigate(target: String) {
         if (!current() || busy) return
         clearPageFeedback()
@@ -429,7 +431,7 @@ internal fun VoiceAccountPanel(
                         SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
                         AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
                     }
-                    SettingsRow("导入声音", showChevron = true, onClick = if (!enabled || !existingId.matches(Regex("(?:S_|etaClone)[A-Za-z0-9_-]+"))) null else ({
+                    SettingsRow("导入声音", showChevron = true, onClick = if (!enabled || !DoubaoVoiceIdentity.isPersonal(existingId.trim())) null else ({
                         val id = existingId; val n = name
                         ask("用当前语音账户查询已有音色 $id；不上传、不制作") {
                             val origin = feedback.visit

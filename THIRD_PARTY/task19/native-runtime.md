@@ -2,7 +2,7 @@
 
 基线ae6e834。子任务3295c6c4已只读核验；当前tracked与app构建声明中无已绑定PRoot/talloc/shmem/native库/rootfs，仅wrapper JAR。该范围不是已安装APK扫描，未来候选不继承本结论。
 
-保留PRoot等第三方主体，独立替换Eta终端封装；来源不明先保留原件待核，不整体重写。根AGPL或RikkaHub NOTICE不代替原生组件许可。
+保留PRoot等第三方主体，独立替换历史终端封装；来源不明先保留原件待核，不整体重写。根AGPL或RikkaHub NOTICE不代替原生组件许可。
 
 ## 上游参照，不是选定制品版本
 

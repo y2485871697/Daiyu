@@ -334,5 +334,5 @@
       "missing_keys": []
     }
   ],
-  "status": "staged upstream, not part of Gradle; original package; no Eta implementation"
+  "status": "pinned upstream snapshot; six selected Kotlin sources are staged into the app build; original packages retained"
 }

@@ -63,7 +63,7 @@ import app.daiyu.android.ui.components.DaiyuDialog as Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.skills.SkillConflict
 import app.daiyu.android.skills.SkillManagement
-import app.daiyu.android.ui.components.EtaDropdownMenu
+import app.daiyu.android.ui.components.DaiyuDropdownMenu
 import app.daiyu.android.ui.components.subagent.ConversationAgentButton
 import app.daiyu.android.ui.components.subagent.ConversationAgentHandle
 import app.daiyu.android.ui.components.subagent.ConversationAgentSheet
@@ -440,7 +440,7 @@ private fun SkillProductRow(entry: SkillManagement.Entry, enabled: Boolean,
             IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp).testTag("skill-menu:${entry.id}")) {
                 DaiyuIcon(DaiyuIcons.More, "更多操作", tint = colors.onSurfaceVariantSummary, size = 22.dp)
             }
-            EtaDropdownMenu(expanded, onDismissRequest = { expanded = false }, alignEnd = true, minWidth = 200.dp,
+            DaiyuDropdownMenu(expanded, onDismissRequest = { expanded = false }, alignEnd = true, minWidth = 200.dp,
                 modifier = Modifier.testTag("skill-actions:${entry.id}").semantics { paneTitle = "技能操作" }) {
                 SkillMenuAction("查看描述", DaiyuIcons.Info) { expanded = false; onDetails() }
                 if (!entry.builtin) SkillMenuAction("删除", DaiyuIcons.Delete, enabled = enabled,

@@ -38,19 +38,19 @@ class VoiceSettingsParityTest {
         assertNotEquals(builtIn.speechPickerId, builtIn.copy(model = "tts-1-hd").speechPickerId)
     }
 
-    @Test fun personalSlotsSortUnusedFirstAndKeepFriendlyLabelsAndQuotaOnce() {
+    @Test fun personalSlotsKeepUsedBeforeUnusedAndFriendlyLabelsAndQuotaOnce() {
         val used = PersonalVoices.Voice("S_used", "A made voice", "account", status = 2,
             models = setOf(4), remaining = 3)
         val unused = PersonalVoices.Voice("S_unused", "S_unused", "account", catalogState = "Unknown", remaining = 2)
-        val other = used.copy(id = "etaClone123", name = "Postpaid")
-        assertEquals(listOf(unused, used), personalVoiceSlots(listOf(used, other, unused), true, false))
+        val other = used.copy(id = "Daiyu" + "a".repeat(32), name = "Postpaid")
+        assertEquals(listOf(used, unused), personalVoiceSlots(listOf(used, other, unused), true, false))
         assertEquals(emptyList<PersonalVoices.Voice>(), personalVoiceSlots(listOf(used, unused), true, true))
         assertEquals(listOf(used, other), personalVoiceSlots(listOf(unused, other, used), false, false))
         assertEquals("音色名额 1", personalVoiceSlotTitle(unused, 0))
         assertEquals(used.name, personalVoiceSlotTitle(used, 1))
         assertEquals("未使用名额 · 剩余 2 次", voiceSlotSummary(unused))
         assertTrue(voiceSlotSummary(used).contains("剩余 3 次"))
-        assertTrue(voiceSlotSummary(used).contains("再次制作可能覆盖已有声音"))
+        assertTrue(voiceSlotSummary(used).contains("再次制作消耗本名额次数并覆盖已有声音"))
         assertTrue(voiceSlotSummary(used.copy(remaining = -1)).contains("次数待查询"))
     }
 
@@ -60,7 +60,7 @@ class VoiceSettingsParityTest {
         assertEquals("已到期", voiceStatus(voice.copy(catalogState = "Expired")))
         assertEquals("已回收", voiceStatus(voice.copy(catalogState = "Reclaimed")))
         assertEquals("训练中", voiceStatus(voice.copy(status = 1)))
-        assertEquals("已激活", voiceStatus(voice.copy(catalogState = "Active")))
+        assertEquals("已激活，无法再次制作", voiceStatus(voice.copy(catalogState = "Active")))
         assertEquals("制作次数已用完", voiceStatus(voice.copy(remaining = 0)))
         assertFalse(voice.copy(uncertain = true).canTrain)
         assertFalse(voice.copy(status = 1).canTrain)
@@ -74,7 +74,7 @@ class VoiceSettingsParityTest {
         }
         assertEquals("训练成功", voiceStatus(voice.copy(status = -1, catalogState = "Success")))
         assertEquals("训练失败", voiceStatus(voice.copy(status = 3, error = "service failure")))
-        assertEquals("已激活", voiceStatus(voice.copy(status = 4, error = "query failed")))
+        assertEquals("已激活，无法再次制作", voiceStatus(voice.copy(status = 4, error = "query failed")))
         assertEquals("状态查询失败，请重试", voiceStatus(voice.copy(status = -1, error = "query failed")))
         assertTrue(voiceStatus(voice.copy(uncertain = true)).contains("提交结果未知"))
     }

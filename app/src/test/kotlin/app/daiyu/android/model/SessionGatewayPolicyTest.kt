@@ -119,9 +119,9 @@ class SessionGatewayPolicyTest {
         val request = JSONObject().put("messages", JSONArray().put("unchanged"))
         SessionGateway.applyAnthropic(request, context())
         val expected = MessageDigest.getInstance("SHA-256")
-            .digest("eta-anthropic-session-v1\u0000real-conversation".toByteArray(Charsets.UTF_8))
+            .digest("daiyu-anthropic-session-v1\u0000real-conversation".toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
-        assertEquals("eta-session-$expected", request.getJSONObject("metadata").getString("user_id"))
+        assertEquals("daiyu-session-$expected", request.getJSONObject("metadata").getString("user_id"))
         val original = request.toString()
         SessionGateway.applyAnthropic(request, context())
         assertEquals(original, request.toString())

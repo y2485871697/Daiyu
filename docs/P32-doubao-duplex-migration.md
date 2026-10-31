@@ -1,11 +1,13 @@
 # P32：豆包双工迁入（独立集成边界）
 
+当前归属：用户明确确认本节语音业务实现为其 fork 后原创，保留代码与既有行为；历史输入只定位版本，不据以推定上游作者或要求重写。实际第三方网络库、引擎、JNI 主体及模型各按其真实来源与许可保留。以下阶段记录中的原创待核措辞不再适用于本项。
+
 ## 来源与范围
 
 依据本工作树 `build/agent-input/SOURCE.json` 所声明的源版本
 `f001fb82eb9941e5673970c656f5c4d5370fbf7f`，实际阅读了以下冻结源，而非根据协议名称重写 OpenAI 兼容层：
 
-- `fork/app/src/main/kotlin/io/github/mangi/eta/agent/voice/DoubaoDuplexProtocol.kt`
+- `fork/app/src/main/kotlin/[historical-package-omitted]/agent/voice/DoubaoDuplexProtocol.kt`
   （清单 SHA-256 `b42833d994df797a926bb4e9013e2aed3e9baef5f3b76e59b5a35995660dafa4`）
 - 同目录 `DoubaoDuplexSession.kt`
   （`244e72dc51897d9fe5ed814a77ea68363a7ba9f3b6d00e2f1fdd9eaa3a784ed8`）

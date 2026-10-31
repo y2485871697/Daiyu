@@ -20,7 +20,7 @@ class DuplexRequest internal constructor(val url: String, val headers: Map<Strin
     override fun toString() = "DuplexRequest($url, headers=redacted)"
 }
 
-/** Migrated from the frozen DoubaoDuplexProtocol, not an OpenAI compatibility layer. */
+/** Dedicated Doubao duplex wire protocol, not an OpenAI compatibility layer. */
 object DoubaoDuplexProtocol {
     const val ENDPOINT = "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
     const val DEFAULT_VOICE = "zh_female_xiaohe_jupiter_bigtts"

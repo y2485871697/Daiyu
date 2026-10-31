@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.voice.providers.DoubaoVoiceIdentity
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -164,7 +166,7 @@ internal fun VoiceToneDialog(title: String, initial: String, choices: List<Pair<
     onSelect: (String) -> Unit, onDismiss: () -> Unit) {
     val catalog = choices.distinctBy { it.first }
     fun group(id: String): String = when {
-        id.startsWith("mimo-local-") || id.startsWith("S_") || id.startsWith("etaClone") -> "个人声音"
+        id.startsWith("mimo-local-") || DoubaoVoiceIdentity.isPersonal(id) -> "个人声音"
         "female" in id -> "女声"
         "male" in id -> "男声"
         else -> ""

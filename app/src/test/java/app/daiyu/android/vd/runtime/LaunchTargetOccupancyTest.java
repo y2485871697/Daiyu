@@ -11,7 +11,7 @@ import org.junit.Test;
 public class LaunchTargetOccupancyTest {
     private static final String TARGET = "com.example.target";
     /** Host-package fixture adapted from the source's real-device root #249 / #242 evidence. */
-    private static final String ETA = "app.daiyu.android";
+    private static final String DAIYU = "app.daiyu.android";
     private static LaunchTargetOccupancy.Root root(int id, String base, String baseActivity,
             String top, String real, boolean fieldsKnown, int activityCount,
             boolean childIdsKnown, int[] childIds, boolean childNamesKnown, String[] childNames) {
@@ -230,48 +230,48 @@ public class LaunchTargetOccupancyTest {
         // Mirrors real-device root #249: base/baseActivity/topActivity/realActivity are all the
         // root's own package and the self-marker child slot repeats that same package, so the root
         // is not the target and a launch of another package must not be refused here.
-        assertFalse(decide(root(249, ETA, ETA, ETA, ETA, true, 1, true,
-                new int[]{249}, true, new String[]{ETA})).rejects());
+        assertFalse(decide(root(249, DAIYU, DAIYU, DAIYU, DAIYU, true, 1, true,
+                new int[]{249}, true, new String[]{DAIYU})).rejects());
         // Mirrors a root like #242 whose readable identity fields are a subset: the echo must still
         // match every non-empty identity field.
-        assertFalse(decide(root(242, ETA, null, ETA, null, true, 2, true,
-                new int[]{242}, true, new String[]{ETA})).rejects());
+        assertFalse(decide(root(242, DAIYU, null, DAIYU, null, true, 2, true,
+                new int[]{242}, true, new String[]{DAIYU})).rejects());
     }
     @Test public void selfMarkerNameEchoesAnyReadableIdentity() {
-        // Task #39: Eta's task also hosts the system photo picker. The self-marker repeats one of
+        // Task #39: the application task also hosts the system photo picker. The self-marker repeats one of
         // those packages, not every one. Neither package is the launch target, so this must not block
         // opening another app. A name that matches none of the readable fields still fails closed.
         assertFalse(decide(root(39, "com.android.providers.media.module",
-                "com.android.providers.media.module", ETA, ETA, true, 2, true,
-                new int[]{39}, true, new String[]{ETA})).rejects());
+                "com.android.providers.media.module", DAIYU, DAIYU, true, 2, true,
+                new int[]{39}, true, new String[]{DAIYU})).rejects());
         assertEquals(LaunchTargetOccupancy.UNKNOWN,
-                decide(root(242, ETA, ETA, "com.other.app", ETA, true, 1, true,
+                decide(root(242, DAIYU, DAIYU, "com.other.app", DAIYU, true, 1, true,
                         new int[]{242}, true, new String[]{"com.unreported.app"})).code);
         // A self-marker name on an identity-free root has no readable identity to echo.
         assertEquals(LaunchTargetOccupancy.UNKNOWN,
                 decide(root(242, null, null, null, null, true, 0, true,
-                        new int[]{242}, true, new String[]{ETA})).code);
+                        new int[]{242}, true, new String[]{DAIYU})).code);
     }
     @Test public void selfMarkerNameEqualToTargetStillRefuses() {
         assertEquals(LaunchTargetOccupancy.ACTIVE,
-                decide(root(249, ETA, ETA, ETA, ETA, true, 1, true,
+                decide(root(249, DAIYU, DAIYU, DAIYU, DAIYU, true, 1, true,
                         new int[]{249}, true, new String[]{TARGET})).code);
     }
     @Test public void minusOneMarkerNameIsNeverAnEcho() {
         // The -1 non-task marker never names a task, so any name on it is a contradiction, even when
         // the name matches the root's own identity.
         assertEquals(LaunchTargetOccupancy.UNKNOWN,
-                decide(root(249, ETA, ETA, ETA, ETA, true, 1, true,
-                        new int[]{-1}, true, new String[]{ETA})).code);
+                decide(root(249, DAIYU, DAIYU, DAIYU, DAIYU, true, 1, true,
+                        new int[]{-1}, true, new String[]{DAIYU})).code);
     }
     @Test public void selfMarkerEchoDoesNotClearAnUnnamedForeignChild() {
         // The echo only explains the root's own marker; an unnamed foreign child still fails closed.
         assertEquals(LaunchTargetOccupancy.UNKNOWN,
-                decide(root(249, ETA, ETA, ETA, ETA, true, 1, true,
-                        new int[]{249, 250}, true, new String[]{ETA, null})).code);
+                decide(root(249, DAIYU, DAIYU, DAIYU, DAIYU, true, 1, true,
+                        new int[]{249, 250}, true, new String[]{DAIYU, null})).code);
         // A readable, identified non-target foreign child alongside the echo is still clear.
-        assertFalse(decide(root(249, ETA, ETA, ETA, ETA, true, 1, true,
-                new int[]{249, 250}, true, new String[]{ETA, "com.other.app"})).rejects());
+        assertFalse(decide(root(249, DAIYU, DAIYU, DAIYU, DAIYU, true, 1, true,
+                new int[]{249, 250}, true, new String[]{DAIYU, "com.other.app"})).rejects());
     }
 
     // ---- Reuse of this owner's own live task (virtual-display switch-back) ----

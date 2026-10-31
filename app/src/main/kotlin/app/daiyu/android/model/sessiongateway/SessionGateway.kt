@@ -57,6 +57,6 @@ object SessionGateway {
             (parsed.path == "/backend-api/codex" || parsed.path.startsWith("/backend-api/codex/"))
     }.getOrDefault(false)
 
-    private const val ANTHROPIC_DOMAIN = "eta-anthropic-session-v1\u0000"
-    private const val ANTHROPIC_PREFIX = "eta-session-"
+    private const val ANTHROPIC_DOMAIN = "daiyu-anthropic-session-v1\u0000"
+    private const val ANTHROPIC_PREFIX = "daiyu-session-"
 }

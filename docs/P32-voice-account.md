@@ -1,8 +1,10 @@
 # P32 B — 豆包账户音色管理叶子
 
+当前归属：用户明确确认本节语音业务实现为其 fork 后原创，保留代码与既有行为；历史输入只定位版本，不据以推定上游作者或要求重写。实际第三方网络库、引擎、JNI 主体及模型各按其真实来源与许可保留。以下阶段记录中的原创待核措辞不再适用于本项。
+
 ## 来源、范围与已实现行为
 
-迁移来源均为冻结 `build/agent-input/fork/app/src/main/kotlin/io/github/mangi/eta/agent/voice/doubao/`：
+迁移来源均为冻结 `build/agent-input/fork/app/src/main/kotlin/[historical-package-omitted]/agent/voice/doubao/`：
 `PersonalVoices.kt`、`DoubaoVoiceCatalog.kt`、`VoiceProjectCatalog.kt`、`VoiceCatalogPreferences.kt`、`VoiceCatalogSecretStore.kt`、`PersonalVoicePreview.kt`，并参考对应冻结测试（VoiceManagement、PersonalVoiceSlot、VoiceProjectCatalog、VoiceCatalogSigningTransport、VoiceCatalogSecretStore、PersonalVoicePreview）。未获取新网页资料或声称供应商在线验证。
 
 新增仅限 `voice/account/**`、独立 `VoiceAccountPanel.kt`、专属测试和本文档。未修改 ControllerVoiceRuntime、VoiceSettingsPanel、Main、播放器、providers、network 或 gate。不是占位：已有音色查询导入、AK/SK 项目查询、购买槽位批量导入、单次训练、手动状态查询、首次使用接受、本机移除、额度/模型/状态展示均有实现。所有网络行为从显式操作的二次确认进入；加载/重组/保存/选音色/样本选择器返回不联网。

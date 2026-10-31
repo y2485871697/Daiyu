@@ -20,10 +20,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-internal val EtaInputCornerRadius = 14.dp
+internal val DaiyuInputCornerRadius = 14.dp
 
 @Composable
-internal fun etaInputContainerColor(): Color {
+internal fun daiyuInputContainerColor(): Color {
     val colors = MiuixTheme.colorScheme
     return colors.surfaceContainerHigh
 }
@@ -31,7 +31,7 @@ internal fun etaInputContainerColor(): Color {
 /** Rounded, softly filled form field. Floating labels remain on the top outline. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun EtaFormTextField(
+internal fun DaiyuFormTextField(
     value: String,
     onValueChange: (String) -> Unit,
     hint: String,
@@ -44,7 +44,7 @@ internal fun EtaFormTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
 ) {
     val colors = MiuixTheme.colorScheme
-    val container = etaInputContainerColor()
+    val container = daiyuInputContainerColor()
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
             OutlinedTextField(
@@ -58,7 +58,7 @@ internal fun EtaFormTextField(
                 keyboardOptions = keyboardOptions,
                 modifier = modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp)
                     .semantics { contentDescription = hint },
-                shape = RoundedCornerShape(EtaInputCornerRadius),
+                shape = RoundedCornerShape(DaiyuInputCornerRadius),
                 textStyle = MiuixTheme.textStyles.body1,
                 label = { Text(hint) },
                 colors = OutlinedTextFieldDefaults.colors(

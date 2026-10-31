@@ -1,7 +1,6 @@
 {
-  "source_repository": "https://github.com/y2485871697/Eta",
   "source_revision": "3196270e361c82cc1f399218d914ec49de0d83cc",
-  "authorization": "Maintainer explicitly requested reuse of the original sponsor entry and payment QR images. No additional license grant is inferred.",
+  "authorization": "The maintainer confirms these sponsor entries and payment QR images are original post-fork assets. Historical revision and hashes identify storage inputs, not third-party authorship.",
   "transformation": "None. Exact original bytes; no crop, resizing, recoloring or re-encoding.",
   "files": [
     {
@@ -16,5 +15,7 @@
       "bytes": 129657,
       "sha256": "9597129b69f475b157149995f5ed4e13b24f69a47d58ee848378c60fa12c5095"
     }
-  ]
+  ],
+  "source_owner": "project-maintainer",
+  "authorship": "The maintainer explicitly confirms ownership of these original sponsor assets; the recorded revision identifies a historical storage snapshot, not a third-party origin."
 }

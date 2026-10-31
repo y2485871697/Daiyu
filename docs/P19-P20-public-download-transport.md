@@ -5,7 +5,7 @@
 本轮接线任务给定基线为 `fc6227387af60cab44def691bb059a2e7fd6cb21`，已预置 `7cfe138` 下载 leaf；没有重新搬运 leaf。提交及验证由父代理统一执行，本实现代理未创建提交、未运行验证。
 
 - 既有 `GenerationPublicNetworkHttp.kt` 复用已安装的 OkHttp **4.12.0**，没有新增依赖、权限或 trust store；原 Resources/Session 的 paired binding、DNS 固定与 cancellation abort 保留不变。
-- 本轮生产修改仅 `ChatController.kt` 的两处接缝，另补 `ControllerGenerationSessionTest.kt`、`ControllerGenerationIntegrationTest.kt` 和本文。没有改 `MainActivity.kt`、总清单、CI、依赖、旧 Eta、模型 schema、DB、付费审批或下载 owner 规则。
+- 本轮生产修改仅 `ChatController.kt` 的两处接缝，另补 `ControllerGenerationSessionTest.kt`、`ControllerGenerationIntegrationTest.kt` 和本文。没有改 `MainActivity.kt`、总清单、CI、依赖、历史自有源码、模型 schema、DB、付费审批或下载 owner 规则。
 - 所有新增 URL/key fixture 都是合成值；没有访问凭据、真实外网或付费服务。没有把模型 POST 替换成 GET 下载。
 
 ## 已补的实际生产接线（两处必须同时存在）

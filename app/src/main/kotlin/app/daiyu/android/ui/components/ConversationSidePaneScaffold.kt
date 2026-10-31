@@ -200,7 +200,7 @@ internal fun ConversationSidePaneScaffold(
         initialValue = if (visible) DrawerValue.Open else DrawerValue.Closed,
     )
     remember(drawerState) {
-        drawerState.applyEtaDrawerMotion()
+        drawerState.applyDaiyuDrawerMotion()
         true
     }
     val drawerScope = rememberCoroutineScope()
@@ -1297,7 +1297,7 @@ private object DrawerMotionSetters {
     }
 }
 
-private fun DrawerState.applyEtaDrawerMotion() {
+private fun DrawerState.applyDaiyuDrawerMotion() {
     DrawerMotionSetters.apply(this)
 }
 

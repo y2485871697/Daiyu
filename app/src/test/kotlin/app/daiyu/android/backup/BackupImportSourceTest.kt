@@ -20,8 +20,6 @@ class BackupImportSourceTest {
         for ((format, kind) in listOf(
             "daiyu-neutral-complete" to BackupImportSource.Kind.COMPLETE,
             "daiyu-neutral-text" to BackupImportSource.Kind.TEXT,
-            "eta-backup" to BackupImportSource.Kind.LEGACY,
-            "eta-conversation" to BackupImportSource.Kind.LEGACY,
         )) {
             val bytes = """{"ignored":{"nested":[true,null,2,"字😀"]},"format":"$format"}""".toByteArray()
             val source = prepare(bytes)
@@ -50,13 +48,8 @@ class BackupImportSourceTest {
         } finally { assertTrue(source.delete()) }
     }
 
-    @Test fun zipIsOnlyRoutedToLegacyImporterNotApplied() {
-        val bytes = byteArrayOf(0x50, 0x4b, 0x03, 0x04, 0, 0)
-        val source = prepare(bytes)
-        try {
-            assertEquals(BackupImportSource.Kind.LEGACY, source.kind)
-            assertArrayEquals(bytes, source.open().use { it.readBytes() })
-        } finally { assertTrue(source.delete()) }
+    @Test fun unsupportedZipIsRejectedWithoutCompatibilityFallback() {
+        rejected(byteArrayOf(0x50, 0x4b, 0x03, 0x04, 0, 0))
     }
 
     @Test fun unknownMissingDuplicateOrWrongTypedFormatIsRejectedAndCleaned() {

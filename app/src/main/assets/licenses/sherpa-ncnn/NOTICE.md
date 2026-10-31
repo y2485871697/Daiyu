@@ -11,7 +11,7 @@
 - Kotlin JNI binding: k2-fsa/sherpa-ncnn tag `v2.1.15`, upstream path
   `android/SherpaNcnn/app/src/main/java/com/k2fsa/sherpa/ncnn/SherpaNcnn.kt`.
   Apache-2.0; full text in `LICENSE`. Original JNI package/config member names remain.
-  Frozen Eta adaptation added explicit deterministic close/null native handle checks;
+  The maintainer-owned JNI adaptation adds deterministic close/null native handle checks;
   this restoration trims formatting/comments without changing the JNI ABI.
 - Native runtime: official release
   https://github.com/k2-fsa/sherpa-ncnn/releases/download/v2.1.15/sherpa-ncnn-v2.1.15-android.tar.bz2

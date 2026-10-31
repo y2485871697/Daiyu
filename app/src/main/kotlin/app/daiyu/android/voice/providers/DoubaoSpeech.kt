@@ -8,7 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 
-// Migrated/adapted from old f001fb82 tts/DoubaoSpeech.kt and CloudSpeechSynthesizer decoding.
+// Dedicated Doubao speech requests and response decoding.
 // This is the dedicated Doubao protocol, NOT an OpenAI /audio/speech compatibility shim.
 object DoubaoSpeech {
     const val BASE_URL = "https://openspeech.bytedance.com"
@@ -41,7 +41,9 @@ object DoubaoSpeech {
 
     fun request(config: SpeechProviderConfig, text: String, speaker: String, personal: DoubaoPersonalVoice? = null): VoiceHttpRequest {
         speechCheck(config.engine == SpeechEngine.DOUBAO && config.apiKey.isNotBlank()) { "请配置豆包语音 API Key" }
-        val isPersonal = speaker.startsWith("etaClone") || speaker.startsWith("S_")
+        val isPersonal = DoubaoVoiceIdentity.isPersonal(speaker)
+        speechCheck(DoubaoVoiceIdentity.isSupportedSpeaker(speaker)) { "音色 ID 格式不受支持" }
+        speechCheck(personal == null || (isPersonal && personal.id == speaker)) { "个人音色身份不匹配" }
         val create = usesCreate(config.model)
         speechCheck(!isPersonal || !create) { "个人音色需要选择 seed-tts 在线合成模型" }
         val auth = mutableListOf("Accept" to "application/json", "X-Api-Key" to config.apiKey, "X-Api-Request-Id" to requestId())
@@ -161,7 +163,7 @@ object DoubaoSpeech {
 
 /** Pure retained selection semantics from old doubao/PersonalVoices; no catalog or key storage. */
 class DoubaoPersonalVoice(val id: String, val account: String, val status: Int, val models: Set<Int>, val accepted: Boolean) {
-    fun availableFor(apiKey: String): Boolean = accepted && (status == 2 || status == 4) &&
+    fun availableFor(apiKey: String): Boolean = DoubaoVoiceIdentity.isPersonal(id) && accepted && (status == 2 || status == 4) &&
         models.any { it == 4 || it == 5 } && account == accountFingerprint(apiKey)
     companion object {
         fun accountFingerprint(key: String): String = MessageDigest.getInstance("SHA-256")

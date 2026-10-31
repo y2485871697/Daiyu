@@ -6,7 +6,7 @@ import java.util.UUID
 
 internal const val GUI_OBSERVATION_TTL_MILLIS = 120_000L
 
-/** Independent host implementation; no imported Eta implementation or persistent grants. */
+/** Independent host implementation; no imported external host implementation or persistent grants. */
 internal data class GuiOwner(val sessionId: String, val runId: String) {
     init { require(sessionId.isNotBlank() && runId.isNotBlank()) }
 }

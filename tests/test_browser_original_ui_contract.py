@@ -1,4 +1,4 @@
-"""Pinned original UI contracts, independent of a locally installed Eta checkout."""
+"""Pinned OpenMinis-derived UI contracts, independent of an external checkout."""
 import hashlib
 import json
 from pathlib import Path
@@ -258,8 +258,6 @@ def imports_contract(source):
     imports = set(re.findall(r'(?m)^import (.*)$', source))
     normalized = set()
     for name in imports:
-        name = name.replace('io.github.mangi.eta.agent.browser.ported', 'app.daiyu.android.browser.ported')
-        name = name.replace('io.github.mangi.eta.R', 'app.daiyu.android.R')
         name = name.replace('app.daiyu.android.ui.haptics.material.', 'androidx.compose.material3.')
         name = name.replace('app.daiyu.android.ui.haptics.clickable', 'androidx.compose.foundation.clickable')
         name = name.replace('app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog', 'androidx.compose.material3.AlertDialog')
@@ -285,7 +283,10 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
         cls.baseline = json.loads(BASELINE.read_text())
 
     def test_pinned_original_file_set(self):
-        self.assertEqual('3196270e361c82cc1f399218d914ec49de0d83cc', self.baseline['revision'])
+        self.assertEqual('3196270e361c82cc1f399218d914ec49de0d83cc', self.baseline['local_snapshot_revision'])
+        self.assertEqual('OpenMinis/OpenMinis', self.baseline['upstream_repository'])
+        self.assertEqual('4ef29002e88db1e20e462ec2ff46916e8a7dcb45', self.baseline['upstream_revision'])
+        self.assertEqual('local-adaptation-baseline', self.baseline['snapshot_kind'])
         self.assertEqual(set(self.baseline['files']), {p.relative_to(PORT).as_posix() for p in PORT.rglob('*.kt')})
 
     def test_original_rendered_copy_controls_and_layout_arguments(self):

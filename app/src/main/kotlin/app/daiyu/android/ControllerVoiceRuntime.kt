@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.voice.providers.DoubaoVoiceIdentity
+
 import android.content.Context
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.storage.ModelSettingsStore
@@ -80,7 +82,7 @@ internal class FrozenVoiceSpeech(
     val previewAccount: VoiceConfiguration? = null,
 ) {
     val isPersonal: Boolean get() = configuration.voice.startsWith(MimoPersonalVoices.PREFIX) ||
-        (configuration.engine == "DOUBAO" && (configuration.voice.startsWith("S_") || configuration.voice.startsWith("etaClone")))
+        (configuration.engine == "DOUBAO" && DoubaoVoiceIdentity.isPersonal(configuration.voice))
     fun withUpload(value: PersonalCascadeUpload, limitMs: Long): FrozenVoiceSpeech {
         check(previewAccount == null)
         return FrozenVoiceSpeech(configuration, reference, profile, doubaoPersonal, doubaoResolver, value, limitMs)
@@ -260,13 +262,13 @@ internal class ControllerVoiceRuntime(
                 value.provider.isNotBlank() && value.voice.isNotBlank()) { "voice_not_configured" }
             value.speech()
         }
-        val resolver = if (value.engine == "DOUBAO" && (value.voice.startsWith("S_") || value.voice.startsWith("etaClone")))
+        val resolver = if (value.engine == "DOUBAO" && DoubaoVoiceIdentity.isPersonal(value.voice))
             doubaoPersonalResolver?.let { lookup -> { lookup(value) } } else null
         return FrozenVoiceSpeech(value, profile = profile, doubaoPersonal = resolver?.invoke(), doubaoResolver = resolver)
     }
     fun prepareDuplex(value: VoiceConfiguration): app.daiyu.android.voice.duplex.DoubaoDuplexConfig {
         check(current(value))
-        val personal = value.duplexVoice.startsWith("S_") || value.duplexVoice.startsWith("etaClone")
+        val personal = DoubaoVoiceIdentity.isPersonal(value.duplexVoice)
         val voice = if (personal) {
             val lookup = value.copy(engine = "DOUBAO", endpoint = "https://openspeech.bytedance.com",
                 key = value.duplexKey, provider = value.duplexProvider, model = "seed-tts-2.0", voice = value.duplexVoice,

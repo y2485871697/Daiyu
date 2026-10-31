@@ -195,7 +195,7 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertIn("tween(durationMillis = 150)", motion)
         layer = self.text("ui/screens/chat/conversation/ChatMenuLayer.kt")
         for fragment in ["rememberPopupMotion(menu.expanded())", "0.15f + 0.85f * motion.fraction.value",
-                         "TransformOrigin(1f, 0f)", ".etaMenuClipReveal(", "if ((expanded || mounted) && layer != null)",
+                         "TransformOrigin(1f, 0f)", ".daiyuMenuClipReveal(", "if ((expanded || mounted) && layer != null)",
                          "delay(PopupExitRetentionMillis)", "PointerEventPass.Initial"]:
             self.assertIn(fragment, layer)
         self.assertIn("if (!menu.expanded()) event.changes.forEach { it.consume() }", layer)
@@ -208,7 +208,7 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertIn("layer.active?.takeIf { it !== menu }?.onDismiss?.invoke()", layer)
         self.assertIn("clipWhenFullyRevealed = false", layer)
         self.assertIn("else Modifier.clearAndSetSemantics {}", layer)
-        self.assertIn("rememberPopupMotion(expanded)", self.text("ui/components/EtaDropdownMenu.kt"))
+        self.assertIn("rememberPopupMotion(expanded)", self.text("ui/components/DaiyuDropdownMenu.kt"))
 
     def test_more_button_is_transparent_but_keeps_selection_semantics(self):
         text = self.text("ui/screens/chat/conversation/ChatTopBar.kt")

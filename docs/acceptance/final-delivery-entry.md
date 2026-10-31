@@ -110,7 +110,7 @@ gh api "repos/y2485871697/Daiyu/actions/runs/$CHECK_RUN/attempts/$CHECK_ATTEMPT/
 
 最终入口在完成既有 artifact、成员摘要、SHA256SUMS 和签名原文核对后，调用 `verify_license_bundle.verify_tree(repo_root)` 和 `verify_apk(repo_root, stream, records)`。主 APK 使用既有安全 regular-file 打开规则，并在**同一打开的流**上重新计算 manifest 中的 SHA-256，再回到流首进行 ZIP 检查；不会改查 test APK、固定 assets 合成 ZIP 或另一条未绑定摘要的路径。源码树或 APK 门禁失败统一返回脱敏 `apk_license_bundle_mismatch`、exit 2，不返回可审阅成功。
 
-除现有许可/NOTICE、图片字节与清单之外，`verify_tree` 直接复用 `THIRD_PARTY/proot/artifacts.json` 中四份 `native-sources/{proot,talloc,shmem,eta-native-build}.tgz` 的既有长度/SHA-256。四个记录必须完整且无重复，仓内归档必须匹配；`verify_apk` 复用原有资产入口检查，要求对应 `assets/native-sources/*.tgz` 各有**唯一** ZIP entry、长度和 SHA-256 匹配。维护模式也不能重算或覆盖该 proot 清单。归档不解包、不执行，不增加第二份归档摘要清单。
+除现有许可/NOTICE、图片字节与清单之外，`verify_tree` 直接复用 `THIRD_PARTY/proot/artifacts.json` 中四份 `native-sources/{proot,talloc,shmem,daiyu-native-build}.tgz` 的既有长度/SHA-256。四个记录必须完整且无重复，仓内归档必须匹配；`verify_apk` 复用原有资产入口检查，要求对应 `assets/native-sources/*.tgz` 各有**唯一** ZIP entry、长度和 SHA-256 匹配。维护模式也不能重算或覆盖该 proot 清单。归档不解包、不执行，不增加第二份归档摘要清单。
 
 这是实际提交审阅的主 APK 的有限字节门禁，不是 resolved runtime 依赖闭包、许可兼容性、完整对应源码或可信编译来源证明；不改变来源、作者、授权事实，也不补造缺失许可原文。CI 代码已接入不等于已有真实 APK 运行证据。新增负测仍是本地合成 ZIP 和受控仓内输入，不能拿其成功宣称真实 APK 已核。
 

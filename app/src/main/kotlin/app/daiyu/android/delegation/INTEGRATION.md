@@ -1,6 +1,6 @@
 # C1 — preserved sub-agent configuration UI
 
-Sources are the read-only `.eta-reference/kotlin/` and `.eta-reference/res/` snapshot.
+Sources are the read-only `[historical-source-snapshot]/kotlin/` and `[historical-source-snapshot]/res/` snapshot.
 No MainActivity or ChatController changes are included. Material3 scaffolds, Material icons,
 strings, dimensions, dialog surfaces and interactions follow the original sub-agent UI.
 The existing no-ripple helper, TouchHaptics and horizontalCutoutPadding are reused.
@@ -31,7 +31,7 @@ or alternate model is selected by the UI. Keep this source stable and update its
 
 ## Migrated files
 
-All old paths below are relative to `.eta-reference/kotlin/`; targets are relative to
+All old paths below are relative to `[historical-source-snapshot]/kotlin/`; targets are relative to
 `app/src/main/kotlin/app/daiyu/android/`.
 
 | Old | New |
@@ -49,7 +49,7 @@ All old paths below are relative to `.eta-reference/kotlin/`; targets are relati
 | ui/components/SubAgentParallelLimitRow.kt | ui/components/SubAgentParallelLimitRow.kt |
 | ui/components/SubAgentGptSpeedButton.kt | ui/components/SubAgentGptSpeedButton.kt |
 | ui/components/ThinkingSpeedAnimation.kt (used functions only) | ui/components/SubAgentThinkingSpeedAnimation.kt |
-| ui/components/EtaFormTextField.kt | ui/components/EtaFormTextField.kt |
+| ui/components/DaiyuFormTextField.kt | ui/components/DaiyuFormTextField.kt |
 | ui/components/AgentChatInputBar.kt (ThinkingEffortPickerDialog + discrete-slider helper only) | ui/components/subagent/ThinkingEffortPicker.kt (SubAgent-prefixed functions) |
 | ui/TtsModelPickerDialog.kt (model chooser only) | ui/components/subagent/SubAgentModelPicker.kt |
 | ui/model/AgentModelPickerUiState.kt (model picker projection only) | ui/components/subagent/SubAgentModelPicker.kt (read-only DTO projection) |

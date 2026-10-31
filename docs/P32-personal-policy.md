@@ -16,7 +16,7 @@ remains in place until the parent supplies all the integration requirements belo
 
 Inspected local evidence:
 
-- `build/agent-input/fork/app/src/main/kotlin/io/github/mangi/eta/agent/voice/tts/SpeechPlaybackSettings.kt`,
+- `build/agent-input/fork/app/src/main/kotlin/[historical-package-omitted]/agent/voice/tts/SpeechPlaybackSettings.kt`,
   lines 5–31: shared resources, distinct selection keys and distinct history files for READ_ALOUD and
   CONVERSATION; `mode == "cloud"`, provider/model preserved, voice trimmed at snapshot.
 - `ControllerVoiceRuntime.kt`: immutable configuration revision, `referenceOwner()` hashing provider +

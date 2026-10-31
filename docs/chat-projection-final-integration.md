@@ -200,6 +200,6 @@ SQLite same-owner/later-segment search case and adjusted `SettingsChromeActivity
 to assert actual switch changes. They cover exact supplemental identity, same-id later
 segments, stable prepend keys, missing target no-fallback, runtime/output truth table,
 assistant name/id/avatar input, preference reload, and no historical completion marks.
-No build, test execution, network, manifest/CI or old-Eta changes were performed by this
+No build, test execution, network, manifest/CI or old-历史自有源码 changes were performed by this
 implementation subtask. Parent must compile and run selected tests after Main/P35
 integration; source inspection is not runtime verification.

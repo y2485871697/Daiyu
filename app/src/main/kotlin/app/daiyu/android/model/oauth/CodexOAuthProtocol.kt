@@ -1,4 +1,4 @@
-// Adapted from the original Eta Codex OAuth protocol; see docs/来源清单.md.
+// Codex OAuth protocol, PKCE and callback validation; see docs/来源清单.md.
 package app.daiyu.android.model.oauth
 
 import org.json.JSONObject

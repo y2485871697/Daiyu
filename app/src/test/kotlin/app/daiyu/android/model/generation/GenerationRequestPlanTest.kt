@@ -16,7 +16,7 @@ class GenerationRequestPlanTest {
     }
 
     @Test fun missingHelperOptionsNeverDisappearSilently() {
-        for (parameter in listOf("seed", "size", "quality", "aspect_ratio", "duration", "n", "count", "concurrency", "extra_body", "eta_image_config")) {
+        for (parameter in listOf("seed", "size", "quality", "aspect_ratio", "duration", "n", "count", "concurrency", "extra_body", "internal_image_config")) {
             assertFailure(GenerationFailure.UNSUPPORTED_PARAMETER, generationRequest(parameters = mapOf(parameter to "1")))
         }
     }

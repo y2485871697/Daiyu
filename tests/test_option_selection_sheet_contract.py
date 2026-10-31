@@ -100,7 +100,7 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
         model = source('ui/screens/chat/conversation/ChatModelPicker.kt')
         self.assertIn('ChatSelectionSheet(height = 500.dp', model)
         skills = source('ui/screens/settings/SkillManagementScreen.kt')
-        self.assertIn('EtaDropdownMenu(expanded', skills)
+        self.assertIn('DaiyuDropdownMenu(expanded', skills)
         linux = source('ui/screens/settings/LinuxSettingsScreen.kt')
         self.assertIn('DaiyuConfirmDialog(', linux)
         menu = source('ui/screens/chat/conversation/ChatMenuLayer.kt')

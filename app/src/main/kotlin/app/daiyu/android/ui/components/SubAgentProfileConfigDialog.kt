@@ -157,7 +157,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
             SubAgentConfigurationWindow(title = if (session.expectedProfile == null) "添加子代理" else "子代理配置", onDismiss = userDismiss) {
                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll(rememberScrollState())) {
                     if (LocalConversationAgentStyle.current) ConversationAgentField("名称", session.name, { if (usable) session.name = it.take(80) }, usable)
-                    else EtaFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
+                    else DaiyuFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 30.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("启用", Modifier.weight(1f), fontSize = 14.sp, lineHeight = 22.sp, color = conversationAgentColors().text)
                         if (LocalConversationAgentStyle.current) ConversationAgentSwitch(draft.enabled, usable) { active -> interact { session.edit { it.copy(enabled = active) } } }
@@ -177,7 +177,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     SubAgentSettingRow("思考深度", thinkingLabel, Icons.Rounded.AutoAwesome, "草稿思考深度", usable && canThink, onClick = { interact { thinkingPicker = true } })
                     if (LocalConversationAgentStyle.current) ConversationAgentField("并行上限（0 为不限）", session.parallelValue,
                         { if (usable) session.editParallel(it) }, usable && boundConfig != null, KeyboardOptions(keyboardType = KeyboardType.Number))
-                    else EtaFormTextField(session.parallelValue, { if (usable) session.editParallel(it) }, hint = "并行上限（0 为不限）", singleLine = true,
+                    else DaiyuFormTextField(session.parallelValue, { if (usable) session.editParallel(it) }, hint = "并行上限（0 为不限）", singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = usable && boundConfig != null, modifier = Modifier.fillMaxWidth())
                     if (!session.parallelIsValid()) Text("请输入 0 或正整数", color = MaterialTheme.colorScheme.error)
                     Text("本配置内相同提供商/API 模型共用此上限；仅确认时保存，调低不会取消正在执行的任务。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))

@@ -1,6 +1,6 @@
 # F22/F23 integration API
 
-This is a repair of the frozen Skills/Memory source snapshot recorded in `docs/refactor-input/skills-fix/manifest.json` (source commit `f88273d9b89e95c36f216bc0a147b09493ca67f9`). Task 11 recovered only the eight Skills host/test files listed in task11 coordination seed.json; Memory files were not migrated by this task. The copies under `docs/refactor-input/skills-fix/` are retained as repair inputs. Formal source placement does not wire the feature into the runtime. No Controller, database, Android manifest, build, UI, old Eta signatures, repository skill or host-assistant memory is changed. The manifest records the original frozen input hashes, not the repaired output hashes.
+This is a repair of the frozen Skills/Memory source snapshot recorded in `docs/refactor-input/skills-fix/manifest.json` (source commit `f88273d9b89e95c36f216bc0a147b09493ca67f9`). Task 11 recovered only the eight Skills host/test files listed in task11 coordination seed.json; Memory files were not migrated by this task. The copies under `docs/refactor-input/skills-fix/` are retained as repair inputs. Formal source placement does not wire the feature into the runtime. No Controller, database, Android manifest, build, UI, historical maintainer-owned code signatures, repository skill or host-assistant memory is changed. The manifest records the original frozen input hashes, not the repaired output hashes.
 
 ## Registries
 

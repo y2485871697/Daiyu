@@ -17,7 +17,6 @@ internal fun BackupScreen(
     onExportComplete: () -> Unit,
     onImportCompact: () -> Unit,
     onImportComplete: () -> Unit,
-    onOpenLegacyLibrary: () -> Unit,
     restorePreviewText: String,
     onPreviewRestore: () -> Unit,
     onRestoreConfiguration: () -> Unit,

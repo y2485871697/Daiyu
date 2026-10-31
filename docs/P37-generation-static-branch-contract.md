@@ -6,7 +6,7 @@
 
 因此按任务的“缺安全契约先交精确方案”分支交付：本次不开放含生成输出前缀的成功分支，不新建 generation attempt，不放宽 fence，不复制 receipt 冒充新注册输出。实现静态分支仍需下述目的端契约及配套验证，不能标为完成。
 
-核查另外发现一个与本任务直接相关的静默丢失入口：`ContextService.branchInternal` 原先只检查 `generation_outputs`，已经通过完整 backup 恢复的只读生成原件不在该表，分支会复制文本却遗漏只读资产。本次仅补此入口的失败关闭，并补真实 SQLite/PNG/backup 回归源码。未改唯一清单、更新说明、数据库版本、时间戳、Main UI、生成网络或旧 Eta。
+核查另外发现一个与本任务直接相关的静默丢失入口：`ContextService.branchInternal` 原先只检查 `generation_outputs`，已经通过完整 backup 恢复的只读生成原件不在该表，分支会复制文本却遗漏只读资产。本次仅补此入口的失败关闭，并补真实 SQLite/PNG/backup 回归源码。未改唯一清单、更新说明、数据库版本、时间戳、Main UI、生成网络或历史自有源码。
 
 ## 已核实证据
 

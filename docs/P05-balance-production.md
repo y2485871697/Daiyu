@@ -8,7 +8,7 @@
 
 ## 实际读取的冻结来源
 
-本轮已能读取普通路径 `docs/reference-preserved/provenance.json`，以及下表中的全部源码、Fetcher/Coordinator/Indicator Kotlin 测试和 Python 样式合同；未读 `.agent/` 或旧 Eta 活树。provenance 各项均声明冻结提交 `f001fb82eb9941e5673970c656f5c4d5370fbf7f`。下列 blob 标识来自该清单，父代理已提供逐 blob 核验背景；本工具不能执行 hash，**未独立重新计算 blob/SHA256**。
+本轮已能读取普通路径 `docs/reference-preserved/provenance.json`，以及下表中的全部源码、Fetcher/Coordinator/Indicator Kotlin 测试和 Python 样式合同；未读 `.agent/` 或历史自有源码 活树。provenance 各项均声明冻结提交 `f001fb82eb9941e5673970c656f5c4d5370fbf7f`。下列 blob 标识来自该清单，父代理已提供逐 blob 核验背景；本工具不能执行 hash，**未独立重新计算 blob/SHA256**。
 
 路径均相对 `docs/reference-preserved/`：
 

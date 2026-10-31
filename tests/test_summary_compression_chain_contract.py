@@ -46,7 +46,7 @@ class SummaryCompressionChainContract(unittest.TestCase):
 
     def test_old_child_backups_preserve_reported_null_while_new_backups_keep_presence(self):
         codec = (APP / "backup/BackupChildTaskCodec.kt").read_text()
-        self.assertIn('put("version", 5)', codec)
+        self.assertIn('put("version", 6)', codec)
         self.assertIn('if (version < 5L) put("has_usage", 1)', codec)
         self.assertIn('val hasUsage = number(row, "has_usage")', codec)
         self.assertIn('WHERE u.has_usage=1', (APP / "storage/ConversationUsageStore.kt").read_text())

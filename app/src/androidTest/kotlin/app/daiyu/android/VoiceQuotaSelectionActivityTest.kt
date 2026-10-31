@@ -32,6 +32,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private var creationRemoteIds = listOf("S_available")
     private var creationRemaining = 3
     private var creationRemoteState = "Unknown"
+    private var creationRemoteName = ""
     private lateinit var index: File
     private lateinit var beforeIndex: String
     private lateinit var beforePreferences: Map<String, *>
@@ -118,7 +119,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                 val ids = if (state == creationRemoteState) creationRemoteIds else emptyList()
                 JSONObject().put("Result", JSONObject().put("TotalCount", ids.size)
                     .put("Statuses", JSONArray().apply { ids.forEach {
-                        put(JSONObject().put("SpeakerID", it).put("State", state)
+                        put(JSONObject().put("SpeakerID", it).put("State", state).put("Alias", creationRemoteName.ifBlank { it })
                             .put("AvailableTrainingTimes", creationRemaining))
                     } }))
             } else {
@@ -172,6 +173,9 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         reveal("settings-row:选择音色名额", "制作声音").performClick()
         awaitUniqueTag("voice-create-slot-picker")
         awaitNodeWindowFocus(node("voice-create-slot-picker"))
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText("正在查询云端音色名额…").fetchSemanticsNodes().isEmpty()
+        }
     }
     private fun awaitPickerClosed() {
         ui.waitUntil(5_000) {
@@ -303,12 +307,12 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         awaitPickerClosed()
         reveal("settings-row:下一步：选择录音", "制作声音").performClick()
         awaitUniqueTag("voice-training-sample")
-        assertNoSideEffects(expectedRequests = 4)
+        assertNoSideEffects(expectedRequests = 8)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitUniqueTag("voice-create-name-card")
         reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
         node("voice-create-manual-card").assertDoesNotExist()
-        assertNoSideEffects(expectedRequests = 4)
+        assertNoSideEffects(expectedRequests = 8)
     }
 
     private fun awaitCreationRejected(message: String) {
@@ -332,7 +336,6 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     }
 
     fun testSelectedSlotRemovedFromCloudIsNotTrustedFromLocalCache() {
-        creationRemoteIds = emptyList()
         mount(available = true, verifySlot = true)
         enterDraftName("stale selection")
         openPicker()
@@ -340,9 +343,10 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitPickerClosed()
         awaitPickerClosed()
+        creationRemoteIds = emptyList()
         awaitCreationRejected("没有该名额 ID")
         reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
-        assertNoSideEffects(expectedRequests = 4)
+        assertNoSideEffects(expectedRequests = 8)
     }
 
     fun testCloudExhaustionRejectsWithoutTreatingSlotAsMissing() {
@@ -364,6 +368,41 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("voice-training-sample").assertDoesNotExist()
         ui.onAllNodesWithText("没有该名额 ID").assertCountEquals(0)
         assertNoSideEffects(expectedRequests = 1)
+    }
+
+    fun testCloudCloneAppearsWithoutImportAndRefreshDoesNotSaveOrTrain() {
+        creationRemoteState = "Success"
+        creationRemoteName = "以前复刻的声音"
+        mount(available = false, verifySlot = true)
+        enterDraftName("keep draft")
+        openPicker()
+        node("voice-create-slot:S_available").assertTextContains("以前复刻的声音", substring = true)
+            .assertTextContains("训练成功", substring = true).assertHasClickAction()
+        assertNoSideEffects(expectedRequests = 4)
+        node("voice-create-slot:S_available").performClick()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitPickerClosed()
+        reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
+        reveal("settings-field:声音名称", "制作声音").assertTextContains("keep draft")
+        creationRemoteIds = emptyList()
+        openPicker()
+        node("voice-create-slot:S_available").assertDoesNotExist()
+        ui.onNodeWithText("云端暂无可用音色名额。").assertExists()
+        assertNoSideEffects(expectedRequests = 8)
+    }
+
+    fun testCreationReopenFailureClearsOldRemoteCandidates() {
+        creationRemoteState = "Success"
+        mount(available = false, verifySlot = true)
+        openPicker()
+        node("voice-create-slot:S_available").assertExists()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitPickerClosed()
+        creationQueryFails = true
+        openPicker()
+        node("voice-create-slot:S_available").assertDoesNotExist()
+        ui.onNodeWithText("音色名额查询失败", substring = true).assertExists()
+        assertNoSideEffects(expectedRequests = 5)
     }
 
     fun testEmptyQuotasNavigateToSyncWithoutReadingOrSavingAndPreserveDraft() {
@@ -403,6 +442,9 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         card.assertTextContains("剩余 3 次", substring = true)
         card.assertTextContains("再次制作消耗本名额次数并覆盖已有声音", substring = true)
         card.performClick()
+        card.assertIsSelected()
+        node("voice-create-slot-picker").assertExists()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitPickerClosed()
         reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
         reveal("settings-row:下一步：选择录音", "制作声音").assertHasClickAction()

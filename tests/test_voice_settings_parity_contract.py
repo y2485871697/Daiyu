@@ -153,7 +153,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
 
     def test_doubao_slot_and_recording_details_match_existing_flows_without_new_requests(self):
         leaf = source('VoiceAccountPanel.kt')
-        self.assertIn('personalVoiceSlots(voices, creating = true, postpaid = false)', leaf)
+        self.assertIn('personalVoiceSlots(creationCandidates ?: voices, creating = true, postpaid = false)', leaf)
         self.assertIn('val importSlots = importCandidates.filter { it.canImport }', leaf)
         self.assertIn('personalVoiceSlotTitle(voice, index)', leaf)
         self.assertIn('voiceSlotSummary(voice)', leaf)

@@ -143,6 +143,7 @@ internal fun VoiceAccountPanel(
     var pickerResult by remember { mutableIntStateOf(0) }
     var slotPicker by remember(frozenConfiguration.revision) { mutableStateOf(false) }
     var importSlotPicker by remember(frozenConfiguration.revision) { mutableStateOf(false) }
+    var creationCandidates by remember(frozenConfiguration.revision) { mutableStateOf<List<PersonalVoices.Voice>?>(null) }
     var importCandidates by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<PersonalVoices.Voice>()) }
     var projects by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<VoiceProjectCatalog.Project>()) }
     fun current() = latestCurrent(frozenConfiguration) && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
@@ -226,7 +227,7 @@ internal fun VoiceAccountPanel(
     var projectPicker by remember { mutableStateOf(false) }
     var voiceMenu by remember { mutableStateOf<PersonalVoices.Voice?>(null) }
     var accountKey by remember(frozenConfiguration.revision) { mutableStateOf(frozenConfiguration.key) }
-    val creationSlots = personalVoiceSlots(voices, creating = true, postpaid = false)
+    val creationSlots = personalVoiceSlots(creationCandidates ?: voices, creating = true, postpaid = false)
         .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }
     val creationSlotId = manualSlotId.trim().ifBlank { slotId }
     val importSlots = importCandidates.filter { it.canImport }.sortedBy { it.name }
@@ -259,6 +260,7 @@ internal fun VoiceAccountPanel(
     fun beginFlow(target: String) {
         if (!current() || busy) return
         name = ""; existingId = ""; slotId = ""; manualSlotId = ""; postpaid = false; sampleUri = null
+        creationCandidates = null
         manualId = false; advancedCreation = false; agreed = false; step = 0
         samplePicker.invalidate(); pickerPending = false
         navigate(target)
@@ -479,9 +481,25 @@ internal fun VoiceAccountPanel(
                         ?.let { personalVoiceSlotTitle(it.value, it.index) + " · " + it.value.id } ?: slotId.takeIf { it.isNotBlank() },
                         showChevron = true, onClick = if (!enabled) null else ({
                             if (current() && !busy) {
-                                if (resources.voices.state.value.any { it.account == account?.fingerprint &&
-                                    it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }) slotPicker = true
-                                else navigate("SYNC")
+                                if (ak.isNotBlank() && sk.isNotBlank() && project.isNotBlank()) {
+                                    creationCandidates = emptyList(); slotPicker = true
+                                    val a = ak; val s = sk; val p = project
+                                    execute("音色名额查询失败，请重新打开后重试。") { report ->
+                                        val origin = feedback.visit
+                                        val fetched = resources.voices.listTrainingSlots(speech!!, a, s, p)
+                                        currentCoroutineContext().ensureActive()
+                                        check(current() && page == "CREATE" && step == 0 && slotPicker &&
+                                            feedback.visit == origin && !postpaid && manualSlotId.isBlank() &&
+                                            ak == a && sk == s && project == p)
+                                        creationCandidates = fetched
+                                        report(if (fetched.isEmpty()) "云端暂无可用音色名额。" else "请选择音色名额。")
+                                    }
+                                } else {
+                                    creationCandidates = null
+                                    if (resources.voices.state.value.any { it.account == account?.fingerprint &&
+                                        it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }) slotPicker = true
+                                    else navigate("SYNC")
+                                }
                             }
                         }))
                 } }
@@ -585,14 +603,18 @@ internal fun VoiceAccountPanel(
         if (addMenu) VoiceAddSheet(
             onSelect = { beginFlow(it) }, onDismiss = { addMenu = false }, isEnabled = { !busy && current() })
         if (slotPicker && page == "CREATE" && step == 0) OptionSelectionSheet(
-            "选择音色名额", onDismiss = { slotPicker = false }, modifier = Modifier.testTag("voice-create-slot-picker"), itemSpacing = 8.dp) {
+            "选择音色名额", onDismiss = { slotPicker = false; operation?.cancel() }, modifier = Modifier.testTag("voice-create-slot-picker"), itemSpacing = 8.dp) {
+            when {
+                busy -> SettingsNote("正在查询云端音色名额…")
+                creationSlots.isEmpty() -> SettingsNote(notice.ifBlank { "云端暂无可用音色名额。" })
+            }
             creationSlots.forEachIndexed { index, voice ->
                 OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + voiceSlotSummary(voice),
                     selected = !postpaid && slotId == voice.id,
                     enabled = enabled && voice.canTrain, cardStyle = true,
                     modifier = Modifier.testTag("voice-create-slot:${voice.id}")) {
                     if (enabled && !busy && current() && page == "CREATE" && step == 0 &&
-                        resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
+                        creationSlots.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
                         slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null
                     }
                 }

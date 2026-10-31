@@ -145,12 +145,19 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         }
     }
     suspend fun findTrainingSlot(config: SpeechProviderConfig, id: String, ak: String, sk: String, project: String): Voice? {
-        val account = VoiceAccountIdentity.from(config)
         val valid = trainingIdentity(id)
-        val slot = DoubaoVoiceCatalog(transport).list(ak, sk, project).firstOrNull { it.id == valid } ?: return null
-        currentCoroutineContext().ensureActive()
-        return (find(valid, config) ?: Voice(valid, slot.name, account.fingerprint))
-            .copy(catalogState = slot.state, remaining = slot.remaining)
+        return listTrainingSlots(config, ak, sk, project).firstOrNull { it.id == valid }
+    }
+    suspend fun listTrainingSlots(config: SpeechProviderConfig, ak: String, sk: String, project: String): List<Voice> {
+        val account = VoiceAccountIdentity.from(config)
+        return DoubaoVoiceCatalog(transport).list(ak, sk, project).map { slot ->
+            currentCoroutineContext().ensureActive()
+            val local = find(slot.id, config)
+            val voice = local ?: Voice(slot.id, slot.name, account.fingerprint)
+            voice.copy(name = if (voice.name == voice.id && !voice.nameSyncPending) slot.name else voice.name,
+                catalogState = slot.state,
+                remaining = slot.remaining.takeIf { it >= 0 } ?: voice.remaining)
+        }
     }
     suspend fun importPurchased(config: SpeechProviderConfig, ak: String, sk: String, project: String): Int {
         val account = VoiceAccountIdentity.from(config)

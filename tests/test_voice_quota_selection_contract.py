@@ -26,27 +26,34 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertNotIn('voice-create-slots-card', self.first)
         self.assertIn('OptionSelectionSheet(', self.panel)
         self.assertIn('OptionSelectionItem(', self.sheet)
-        self.assertIn('onDismiss = { slotPicker = false }', self.panel)
+        self.assertIn('onDismiss = { slotPicker = false; operation?.cancel() }', self.panel)
         self.assertIn('personalVoiceSlotTitle(voice, index)', self.sheet)
         self.assertIn('voiceSlotSummary(voice)', self.sheet)
         self.assertIn('personalVoiceSlotTitle(it.value, it.index)', self.row)
 
-    def test_only_empty_quota_goes_to_sync_without_fetching_or_saving(self):
+    def test_creation_refreshes_cloud_without_importing_and_keeps_unconfigured_fallback(self):
         self.assertIn('if (current() && !busy)', self.row)
         self.assertIn('if (resources.voices.state.value.any { it.account == account?.fingerprint &&', self.row)
         self.assertIn('else navigate("SYNC")', self.row)
         self.assertNotIn('&& it.canTrain', self.row)
-        self.assertIn('personalVoiceSlots(voices, creating = true, postpaid = false)', self.panel)
+        self.assertIn('personalVoiceSlots(creationCandidates ?: voices, creating = true, postpaid = false)', self.panel)
         self.assertIn('.filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }', self.panel)
         self.assertIn('val voices = allVoices.filter { it.account == account?.fingerprint }', self.panel)
+        for required in ('creationCandidates = emptyList(); slotPicker = true',
+                         'resources.voices.listTrainingSlots(speech!!, a, s, p)',
+                         'currentCoroutineContext().ensureActive()',
+                         'current() && page == "CREATE" && step == 0 && slotPicker',
+                         'ak == a && sk == s && project == p', 'creationCandidates = fetched'):
+            self.assertIn(required, self.row)
+
         for text in (self.row, self.sheet, block(self.panel, 'fun navigate(target: String)')):
-            for effect in ('execute(', 'ask(', 'importPurchased(', '.save(', 'refreshProjects(', '.create(', '.load('):
+            for effect in ('ask(', 'importPurchased(', 'importExisting(', '.save(', 'refreshProjects(', '.create(', '.load('):
                 self.assertNotIn(effect, text)
 
     def test_selection_rechecks_owner_state_and_only_updates_the_creation_draft(self):
         for required in ('selected = !postpaid && slotId == voice.id', 'enabled = enabled && voice.canTrain',
                          'if (enabled && !busy && current() && page == "CREATE" && step == 0 &&',
-                         'resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }',
+                         'creationSlots.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }',
                          'slotId = voice.id; manualSlotId = ""; postpaid = false; manualId = false; confirmation = null'):
             self.assertIn(required, self.sheet)
         self.assertIn('var slotPicker by remember(frozenConfiguration.revision)', self.panel)
@@ -63,8 +70,7 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertIn('compareBy<PersonalVoices.Voice> { it.unused }', slots)
         self.assertIn('已激活，无法再次制作', self.panel)
         final = block(self.panel, 'if (page == "CREATE" && step == 2)')
-        self.assertIn('slot != null && voices.any { it.id == slot && !it.unused }', final)
-        self.assertIn('将消耗此名额的剩余复刻次数并覆盖已有声音，不占用新名额。', final)
+        self.assertIn('voiceSlotSummary(voice)', self.sheet)
         self.assertIn('resources.voices.create(speech!!, sample, n, slot, confirmed = true)', final)
         self.assertIn('再次制作消耗本名额次数并覆盖已有声音', self.panel)
 
@@ -130,6 +136,19 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertLess(final.index('require(result.canImport)'), final.index('save(result)'))
         self.assertNotIn('voice_clone', final)
         self.assertNotIn('切换为“全部”或“未复刻”', self.imported)
+
+    def test_training_discovery_is_read_only_and_next_reuses_the_same_mapping(self):
+        store = (SRC / 'voice/account/PersonalVoices.kt').read_text()
+        discovery = block(store, 'suspend fun listTrainingSlots(')
+        self.assertIn('DoubaoVoiceCatalog(transport).list(ak, sk, project)', discovery)
+        self.assertIn('currentCoroutineContext().ensureActive()', discovery)
+        self.assertIn('find(slot.id, config)', discovery)
+        self.assertIn('catalogState = slot.state', discovery)
+        self.assertIn('remaining = slot.remaining.takeIf { it >= 0 } ?: voice.remaining', discovery)
+        for effect in ('save(', 'persist(', 'begin(', 'voice_clone', 'request(', 'importPurchased('):
+            self.assertNotIn(effect, discovery)
+        single = block(store, 'suspend fun findTrainingSlot(')
+        self.assertIn('listTrainingSlots(config, ak, sk, project).firstOrNull { it.id == valid }', single)
 
     def test_quota_cards_opt_in_without_changing_other_choice_defaults(self):
         item = (SRC / 'ui/components/OptionSelectionSheet.kt').read_text()

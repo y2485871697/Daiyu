@@ -92,7 +92,7 @@ internal class ConversationSubAgentEditor(
         val current = repository.previewSnapshot(owner)
         var number = current.profiles.size + 1
         while (current.profiles.any { it.name == "子代理 $number" }) number++
-        return SubAgentProfile(UUID.randomUUID().toString(), "子代理 $number")
+        return SubAgentProfile(UUID.randomUUID().toString(), "子代理 $number", parallelLimit = 1)
     }
     fun changeProfileModel(profile: SubAgentProfile, selection: ModelFeatureSelection): SubAgentProfile {
         require(selection.providerId.isNotBlank() && selection.modelId.isNotBlank()) { "A model selection is required" }
@@ -100,7 +100,7 @@ internal class ConversationSubAgentEditor(
             enabled = true, tier = null, reasoning = null, imageResolution = null, reasoningByModel = emptyMap(), gptSpeedByModel = emptyMap())
         return repository.modelDefaults(blank)?.restore(blank) ?: blank
     }
-    fun rememberedParallelLimit(profile: SubAgentProfile): Int? = repository.modelDefaults(profile)?.parallelLimit
+    fun rememberedParallelLimit(profile: SubAgentProfile): Int? = profile.parallelLimit
     suspend fun commitProfileDraft(draft: SubAgentProfile, expectedProfile: SubAgentProfile?, expectedApplicationToken: String?,
         parallelLimitChange: SubAgentParallelLimitChange?, canCommit: () -> Boolean = { true }): ConversationSubAgentPreferences.WriteResult {
         if (!enabled || !canCommit()) return ConversationSubAgentPreferences.WriteResult.Rejected
@@ -121,9 +121,9 @@ internal class ConversationSubAgentEditor(
                 val current = old.profiles.singleOrNull { it.id == draft.id }
                 if (expectedProfile == null) { if (current != null || old.profiles.any { it.name == draft.name }) throw LostOwner() }
                 else if (expectedProfile.id != draft.id || current != expectedProfile) throw LostOwner()
-                if (parallelLimitChange != null && old.parallelLimit(parallelLimitChange.model) != parallelLimitChange.expected) throw LostOwner()
-                old.copy(profiles = if (expectedProfile == null) old.profiles + draft else old.profiles.map { if (it.id == draft.id) draft else it },
-                    parallelLimits = parallelLimitChange?.let { old.parallelLimits + (it.model to it.value) } ?: old.parallelLimits)
+                if (parallelLimitChange != null && old.parallelLimit(draft.id, parallelLimitChange.model) != parallelLimitChange.expected) throw LostOwner()
+                val confirmed = draft.copy(parallelLimit = parallelLimitChange?.value ?: draft.parallelLimit ?: old.parallelLimit(draft.id, binding))
+                old.copy(profiles = if (expectedProfile == null) old.profiles + confirmed else old.profiles.map { if (it.id == draft.id) confirmed else it })
             }.also { result -> if (result is ConversationSubAgentPreferences.WriteResult.Saved) {
                 resolvedBindings[SubAgentProfile.modelReasoningKey(draft.providerId, draft.modelId)] = binding
                 storedState = SubAgentEditorState.Loaded(result.config)
@@ -159,14 +159,18 @@ internal class ConversationSubAgentEditor(
         if (old.profiles.none { it.id == id }) throw LostOwner(); old.copy(profiles = old.profiles.filterNot { profile -> profile.id == id })
     }
     fun setEnabled(value: Boolean) = update { it.copy(enabled = value) }
-    fun saveParallelLimit(id: String, providerId: String, modelId: String, apiModel: String, limit: Int): ConversationSubAgentPreferences.WriteResult {
-        if (limit < 0 || providerId.isBlank() || apiModel.isBlank()) return ConversationSubAgentPreferences.WriteResult.Rejected
+    fun saveParallelLimit(expectedProfile: SubAgentProfile, apiModel: String, limit: Int,
+        expectedApplicationToken: String?, expectedLimit: Int): ConversationSubAgentPreferences.WriteResult {
+        val id = expectedProfile.id; val providerId = expectedProfile.providerId; val modelId = expectedProfile.modelId
+        if (limit < 0 || expectedLimit < 0 || providerId.isBlank() || apiModel.isBlank()) return ConversationSubAgentPreferences.WriteResult.Rejected
         val binding = SubAgentParallelModel(providerId, apiModel)
         return confirmedUpdate(id, binding) { old ->
-            val profile = old.profiles.singleOrNull { it.id == id && it.providerId == providerId && it.modelId == modelId } ?: throw LostOwner()
+            val profile = old.profiles.singleOrNull { it.id == id } ?: throw LostOwner()
+            if (profile != expectedProfile || old.presetApplicationToken != expectedApplicationToken ||
+                old.parallelLimit(id, binding) != expectedLimit) throw LostOwner()
             val known = resolvedBindings[SubAgentProfile.modelReasoningKey(providerId, modelId)] ?: repository.modelDefaults(profile)?.apiModel?.let { SubAgentParallelModel(providerId, it) }
             if (known != null && known != binding) throw LostOwner()
-            old.copy(parallelLimits = old.parallelLimits + (binding to limit))
+            old.copy(profiles = old.profiles.map { if (it.id == id) it.copy(parallelLimit = limit) else it })
         }.also { result -> if (result is ConversationSubAgentPreferences.WriteResult.Saved) resolvedBindings[SubAgentProfile.modelReasoningKey(providerId, modelId)] = binding }
     }
     suspend fun cycleGptSpeed(id: String, providerId: String, modelId: String, expected: SubAgentProfile? = null): ConversationSubAgentPreferences.WriteResult {
@@ -195,10 +199,14 @@ internal class ConversationSubAgentEditor(
         val old = config.profiles.singleOrNull { it.id == id } ?: throw LostOwner()
         if (expected != null && old != expected) throw LostOwner()
         if (old.providerId == selection.providerId && old.modelId == selection.modelId) config else {
-            val restored = changeProfileModel(old, selection); val memory = repository.modelDefaults(restored)
-            val model = memory?.apiModel?.let { SubAgentParallelModel(restored.providerId, it) }; val limit = memory?.parallelLimit
-            config.copy(profiles = config.profiles.map { if (it.id == id) restored else it },
-                parallelLimits = if (model != null && limit != null) config.parallelLimits + (model to limit) else config.parallelLimits)
+            val previousBinding = resolvedBindings[SubAgentProfile.modelReasoningKey(old.providerId, old.modelId)]
+                ?: modelSource?.providers?.value?.singleOrNull { it.id == old.providerId }?.models
+                    ?.singleOrNull { it.id == old.modelId }?.modelId?.takeIf { it.isNotBlank() }
+                    ?.let { SubAgentParallelModel(old.providerId, it) }
+                ?: repository.modelDefaults(old)?.apiModel?.let { SubAgentParallelModel(old.providerId, it) }
+            val limit = old.parallelLimit ?: previousBinding?.let { config.parallelLimit(old.id, it) } ?: 1
+            val restored = changeProfileModel(old, selection).copy(parallelLimit = limit)
+            config.copy(profiles = config.profiles.map { if (it.id == id) restored else it })
         }
     }
 }

@@ -27,7 +27,11 @@ internal fun SubAgentParallelLimitRow(profile: SubAgentProfile, config: SubAgent
     key(editor, profile.id, profile.providerId, profile.modelId, profile.role, config?.providerId, config?.model, usable) {
         var open by remember { mutableStateOf(false) }
         var value by remember { mutableStateOf("") }
-        val limit = if (config != null && ownerConfig != null && config.providerId.isNotBlank() && config.model.isNotBlank()) ownerConfig.parallelLimit(SubAgentParallelModel(config.providerId, config.model)) else null
+        var openedProfile by remember { mutableStateOf(profile) }
+        var openedToken by remember { mutableStateOf<String?>(null) }
+        var openedLimit by remember { mutableStateOf(1) }
+        var error by remember { mutableStateOf<String?>(null) }
+        val limit = if (config != null && ownerConfig != null && config.providerId.isNotBlank() && config.model.isNotBlank()) ownerConfig.parallelLimit(profile.id, SubAgentParallelModel(config.providerId, config.model)) else null
         SubAgentSettingRow("并行上限", when {
             state is SubAgentEditorState.Error -> "配置读取失败"
             ownerConfig == null -> "正在读取配置"
@@ -36,7 +40,11 @@ internal fun SubAgentParallelLimitRow(profile: SubAgentProfile, config: SubAgent
             limit != null -> limit.toString()
             else -> "模型不可用"
         }, Icons.Rounded.CallSplit, "设置${profile.name}并行上限", enabled = usable, onClick = {
-            if (currentUsable && config != null && limit != null) { value = limit.toString(); open = true }
+            if (currentUsable && config != null && limit != null && ownerConfig != null) {
+                openedProfile = ownerConfig.profiles.singleOrNull { it.id == profile.id } ?: return@SubAgentSettingRow
+                openedToken = ownerConfig.presetApplicationToken; openedLimit = limit
+                value = limit.toString(); error = null; open = true
+            }
         })
         if (state is SubAgentEditorState.Error) {
             Text("子代理配置错误：${state.reason}")
@@ -52,10 +60,14 @@ internal fun SubAgentParallelLimitRow(profile: SubAgentProfile, config: SubAgent
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
                     )
-                    Text("本配置内相同提供商/API 模型共用此上限；0 表示不限。调低不会取消正在执行的任务。")
+                    error?.let { Text(it) }
                 } }, dismissButton = { TextButton(onClick = { open = false }) { Text("取消") } },
                 confirmButton = { TextButton(enabled = usable && number != null, onClick = {
-                    if (currentUsable && number != null && editor?.saveParallelLimit(profile.id, profile.providerId, profile.modelId, config.model, number) is ConversationSubAgentPreferences.WriteResult.Saved) open = false
+                    if (currentUsable && number != null) {
+                        if (editor?.saveParallelLimit(openedProfile, config.model, number, openedToken, openedLimit)
+                            is ConversationSubAgentPreferences.WriteResult.Saved) open = false
+                        else error = "配置已变更，请重新打开"
+                    }
                 }) { Text("保存") } })
         }
     }

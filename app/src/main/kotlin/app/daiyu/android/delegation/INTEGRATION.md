@@ -23,8 +23,9 @@ the persisted config's `enabled` field and editor writes, not those legacy param
 
 `SubAgentModelSource` is read-only: a StateFlow of provider DTOs and a flattened models list.
 The caller projects its existing provider/model registry to `SubAgentProvider`/`SubAgentModel`;
-never pass credentials. IDs are selection IDs; modelId is the actual API model used by
-parallel-limit pools. Supply enabled states, display names, explicit GPT speed/media capability,
+never pass credentials. IDs are selection IDs; modelId is the actual API request model.
+Parallel limits and runtime pools are independent per owner and profile ID, including across model changes; 0 adds no limit.
+The old provider/API-model limits are read only as initial values for profiles saved before per-profile limits. Supply enabled states, display names, explicit GPT speed/media capability,
 reasoning capability/default values and verified Grok-image status. Preserve provider/model
 ordering and omit providers that cannot be selected (e.g. missing credential). No lookup fallback
 or alternate model is selected by the UI. Keep this source stable and update its StateFlow.

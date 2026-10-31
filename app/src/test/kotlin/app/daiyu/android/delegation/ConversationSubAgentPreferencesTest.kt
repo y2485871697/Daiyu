@@ -7,6 +7,134 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ConversationSubAgentPreferencesTest {
+    @Test fun profileParallelLimitJsonRoundTripsLegacyUnlimitedAndRejectsMalformedValues() {
+        val profile = SubAgentProfile("p", "Worker")
+        for (limit in listOf(null, 0, 1, Int.MAX_VALUE)) {
+            val saved = profile.copy(parallelLimit = limit)
+            assertEquals(saved, SubAgentProfile.fromJson(org.json.JSONObject(saved.toJson().toString())))
+        }
+        val legacy = profile.toJson().also { it.remove("parallel_limit") }
+        assertNull(SubAgentProfile.fromJson(legacy).parallelLimit)
+        assertThrows(IllegalArgumentException::class.java) { profile.copy(parallelLimit = -1) }
+        for (invalid in listOf<Any>(-1, "2", true, 1.5, 2147483648L)) {
+            assertThrows(IllegalArgumentException::class.java) { SubAgentProfile.fromJson(profile.toJson().put("parallel_limit", invalid)) }
+        }
+    }
+
+    @Test fun sameModelProfilesSaveOnlyTheirOwnLimitAndSurviveReopen() {
+        val disk = MemoryPreferences(); val repository = ConversationSubAgentPreferences(disk)
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val model = SubAgentParallelModel("provider", "api")
+        val first = SubAgentProfile("first", "First", providerId = "provider", modelId = "selection", parallelLimit = 1)
+        val second = first.copy(id = "second", name = "Second", parallelLimit = 0)
+        repository.update(owner) { it.copy(profiles = listOf(first, second), parallelLimits = mapOf(model to 7)) }
+        val editor = ConversationSubAgentEditor(owner, repository, { null }) { true }
+        assertTrue(editor.saveParallelLimit(first, model.apiModel, 3, null, 1) is ConversationSubAgentPreferences.WriteResult.Saved)
+        val stored = ConversationSubAgentPreferences(disk.reopen()).snapshot(owner)
+        assertEquals(listOf(3, 0), stored.profiles.map { it.parallelLimit })
+        assertEquals(3, stored.parallelLimit(first.id, model))
+        assertEquals(0, stored.parallelLimit(second.id, model))
+        assertEquals(mapOf(model to 7), stored.parallelLimits)
+        assertNull(repository.modelDefaults(first)?.parallelLimit)
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.saveParallelLimit(first, model.apiModel, 5, null, 1))
+        assertEquals(3, repository.snapshot(owner).profiles.first().parallelLimit)
+        val before = disk.all.toMap()
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.saveParallelLimit(first.copy(parallelLimit = 3), model.apiModel, -1, null, 3))
+        assertEquals(before, disk.all)
+    }
+
+    @Test fun legacySharedLimitsAreReadUntilEachProfileIsExplicitlySaved() {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val model = SubAgentParallelModel("provider", "api")
+        val first = SubAgentProfile("first", "First", providerId = "provider", modelId = "selection")
+        val second = first.copy(id = "second", name = "Second")
+        val legacy = ConversationSubAgentConfig(listOf(first, second), legacyParallelLimits = mapOf(model.legacyKey() to 4))
+        assertEquals(4, legacy.parallelLimit(first.id, model))
+        assertEquals(4, legacy.parallelLimit(second.id, model))
+        assertEquals(6, legacy.copy(parallelLimits = mapOf(model to 6)).parallelLimit(first.id, model))
+        repository.update(owner) { legacy }
+        val editor = ConversationSubAgentEditor(owner, repository, { null }) { true }
+        editor.saveParallelLimit(first, model.apiModel, 0, null, 4)
+        val current = repository.snapshot(owner)
+        assertEquals(0, current.parallelLimit(first.id, model))
+        assertEquals(4, current.parallelLimit(second.id, model))
+        assertEquals(legacy.legacyParallelLimits, current.legacyParallelLimits)
+    }
+
+    @Test fun confirmingOneProfileDoesNotConflictWithAnotherProfilesLimitEdit() = runBlocking {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val model = SubAgentModel("selection", "api")
+        val provider = SubAgentProvider("provider", "Provider", listOf(model))
+        val first = SubAgentProfile("first", "First", "review", providerId = provider.id, modelId = model.id, parallelLimit = 1)
+        val second = first.copy(id = "second", name = "Second", parallelLimit = 2)
+        repository.update(owner) { it.copy(profiles = listOf(first, second)) }
+        val editor = ConversationSubAgentEditor(owner, repository, { provider }) { true }
+        editor.saveParallelLimit(second, model.modelId, 5, null, 2)
+        assertTrue(editor.commitProfileDraft(first.copy(parallelLimit = 0), first, null,
+            app.daiyu.android.ui.components.SubAgentParallelLimitChange(SubAgentParallelModel(provider.id, model.modelId), 0, 1))
+            is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(listOf(0, 5), repository.snapshot(owner).profiles.map { it.parallelLimit })
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.commitProfileDraft(first.copy(parallelLimit = 3), first, null, null))
+    }
+
+    @Test fun limitDialogRejectsReappliedPresetEvenWithIdenticalProfileData() {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val preset = repository.addPreset("Preset")
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val profile = SubAgentProfile("profile", "Worker", providerId = "provider", modelId = "selection", parallelLimit = 2)
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(profile)) }
+        repository.applyPreset(owner, preset.id)
+        val editor = ConversationSubAgentEditor(owner, repository, { null }) { true }
+        val openedToken = repository.snapshot(owner).presetApplicationToken
+        repository.applyPreset(owner, preset.id)
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.saveParallelLimit(profile, "api", 3, openedToken, 2))
+        assertEquals(2, repository.snapshot(owner).profiles.single().parallelLimit)
+    }
+
+    @Test fun legacyProfileKeepsItsEffectiveLimitWhenCardSwitchesModelBeforeAnyConfirmation() {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val firstModel = SubAgentModel("selection", "api")
+        val nextModel = SubAgentModel("next", "other-api")
+        val provider = SubAgentProvider("provider", "Provider", listOf(firstModel, nextModel))
+        val source = object : SubAgentModelSource {
+            override val providers = kotlinx.coroutines.flow.MutableStateFlow(listOf(provider))
+        }
+        val profile = SubAgentProfile("profile", "Worker", "review", providerId = provider.id, modelId = firstModel.id)
+        repository.update(owner) { it.copy(profiles = listOf(profile),
+            parallelLimits = mapOf(SubAgentParallelModel(provider.id, firstModel.modelId) to 7,
+                SubAgentParallelModel(provider.id, nextModel.modelId) to 3)) }
+        val editor = ConversationSubAgentEditor(owner, repository, source) { true }
+        assertTrue(editor.saveModel(profile.id, ModelFeatureSelection(true, provider.id, nextModel.id), profile)
+            is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(7, repository.snapshot(owner).profiles.single().parallelLimit)
+    }
+
+    @Test fun modelChangesKeepOwnLimitAndNewProfilesDoNotInheritModelLimits() = runBlocking {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val owner = SubAgentConfigKey.Conversation("owner")
+        val firstModel = SubAgentModel("selection", "api")
+        val nextModel = SubAgentModel("next", "other-api")
+        val provider = SubAgentProvider("provider", "Provider", listOf(firstModel, nextModel))
+        val first = SubAgentProfile("first", "First", "review", providerId = provider.id, modelId = firstModel.id, parallelLimit = 0)
+        repository.update(owner) { it.copy(profiles = listOf(first), parallelLimits = mapOf(SubAgentParallelModel(provider.id, nextModel.modelId) to 7)) }
+        val editor = ConversationSubAgentEditor(owner, repository, { provider }) { true }
+        val selection = ModelFeatureSelection(true, provider.id, nextModel.id)
+        assertTrue(editor.saveModel(first.id, selection, first) is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(0, repository.snapshot(owner).profiles.single().parallelLimit)
+        val draft = editor.changeProfileModel(editor.newProfileDraft(), selection)
+        assertEquals(1, draft.parallelLimit)
+        assertTrue(editor.commitProfileDraft(draft, null, null, null) is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(listOf(0, 1), repository.snapshot(owner).profiles.map { it.parallelLimit })
+    }
+
+
     @Test fun modelDeletionClearsIdleOwnersAndCardsWithoutWaitingForBusyConversation() {
         val disk = MemoryPreferences(); val repository = ConversationSubAgentPreferences(disk)
         val a = SubAgentConfigKey.Conversation("busy")
@@ -81,16 +209,16 @@ class ConversationSubAgentPreferencesTest {
         val presetOwner = SubAgentConfigKey.Preset(preset.id)
         val model = SubAgentParallelModel("provider", "api-model")
         val profile = SubAgentProfile("profile", "执行", providerId = "provider", modelId = "selection",
-            reasoningByModel = mapOf(SubAgentProfile.modelReasoningKey("provider", "selection") to ReasoningEffort.HIGH))
-        repository.update(presetOwner) { it.copy(profiles = listOf(profile), parallelLimits = mapOf(model to 3)) }
+            reasoningByModel = mapOf(SubAgentProfile.modelReasoningKey("provider", "selection") to ReasoningEffort.HIGH), parallelLimit = 3)
+        repository.update(presetOwner) { it.copy(profiles = listOf(profile)) }
         val a = SubAgentConfigKey.Conversation("a")
         val b = SubAgentConfigKey.Conversation("b")
         assertTrue(repository.applyPreset(a, preset.id) is ConversationSubAgentPreferences.WriteResult.Saved)
         assertTrue(repository.applyPreset(b, preset.id) is ConversationSubAgentPreferences.WriteResult.Saved)
         assertNotEquals(repository.snapshot(a).presetApplicationToken, repository.snapshot(b).presetApplicationToken)
-        repository.update(a) { it.copy(profiles = listOf(profile.copy(name = "会话修改")), parallelLimits = mapOf(model to 7)) }
+        repository.update(a) { it.copy(profiles = listOf(profile.copy(name = "会话修改", parallelLimit = 7))) }
         assertEquals("执行", repository.snapshot(presetOwner).profiles.single().name)
-        assertEquals(3, repository.snapshot(b).parallelLimit(model))
+        assertEquals(3, repository.snapshot(b).parallelLimit(profile.id, model))
         repository.update(presetOwner) { it.copy(profiles = emptyList(), enabled = false) }
         assertEquals("会话修改", repository.snapshot(a).profiles.single().name)
         assertEquals(listOf(profile), repository.snapshot(b).profiles)
@@ -127,8 +255,8 @@ class ConversationSubAgentPreferencesTest {
         val profile = SubAgentProfile("worker", "Worker", providerId = "provider", modelId = "local-model",
             enabled = false, tier = SubAgentTaskTier.COMPLEX, reasoning = ReasoningEffort.HIGH,
             reasoningByModel = mapOf(key to ReasoningEffort.HIGH),
-            gptSpeedByModel = mapOf(key to app.daiyu.android.model.GptSpeedMode.FAST))
-        val image = SubAgentProfile("image", "Image", role = "image_generation", providerId = "media", modelId = "image-model", imageResolution = "high")
+            gptSpeedByModel = mapOf(key to app.daiyu.android.model.GptSpeedMode.FAST), parallelLimit = 0)
+        val image = SubAgentProfile("image", "Image", role = "image_generation", providerId = "media", modelId = "image-model", imageResolution = "high", parallelLimit = 2)
         val preset = repository.addPreset("Preset")
         val presetOwner = SubAgentConfigKey.Preset(preset.id)
         repository.update(presetOwner) { it.copy(profiles = listOf(profile, image), enabled = false,
@@ -139,10 +267,11 @@ class ConversationSubAgentPreferencesTest {
         repository.update(source) { it.copy(enabled = true, profiles = emptyList(), parallelLimits = mapOf(pool to 4)) }
         assertTrue(repository.importOwner(target, archive))
         assertEquals(captured, repository.snapshot(target))
-        assertNotEquals(captured.poolKey(source, pool), captured.poolKey(target, pool))
+        assertNotEquals(captured.poolKey(source, profile.id), captured.poolKey(target, profile.id))
         repository.update(target) { it.copy(profiles = listOf(profile.copy(name = "Branch worker"))) }
         assertTrue(repository.snapshot(source).profiles.isEmpty())
-        assertEquals(4, repository.snapshot(source).parallelLimit(pool))
+        assertEquals(0, repository.snapshot(target).parallelLimit(profile.id, pool))
+        assertEquals(2, captured.profiles.single { it.id == image.id }.parallelLimit)
         val targetConfig = repository.snapshot(target)
         assertFalse(repository.importOwner(target, archive))
         assertEquals(targetConfig, repository.snapshot(target))
@@ -206,8 +335,8 @@ class ConversationSubAgentPreferencesTest {
         val repository = ConversationSubAgentPreferences(disk)
         val preset = repository.addPreset("group")
         val owner = SubAgentConfigKey.Preset(preset.id)
-        val first = SubAgentProfile("first", "First", providerId = "provider", modelId = "selection")
-        val neighbor = first.copy(id = "neighbor", name = "Neighbor")
+        val first = SubAgentProfile("first", "First", providerId = "provider", modelId = "selection", parallelLimit = 2)
+        val neighbor = first.copy(id = "neighbor", name = "Neighbor", parallelLimit = 4)
         val pool = SubAgentParallelModel("provider", "api-model")
         repository.updateConfirmedProfile(owner, first.id, pool) {
             it.copy(profiles = listOf(first, neighbor), parallelLimits = mapOf(pool to 4))
@@ -222,7 +351,7 @@ class ConversationSubAgentPreferencesTest {
         val reopened = ConversationSubAgentPreferences(disk.reopen())
         assertEquals(listOf(neighbor), reopened.snapshot(owner).profiles)
         assertTrue(reopened.presetExists(preset.id))
-        assertEquals(4, reopened.snapshot(owner).parallelLimit(pool))
+        assertEquals(4, reopened.snapshot(owner).parallelLimit(neighbor.id, pool))
         assertEquals(defaults, reopened.modelDefaults(first))
         assertEquals(copy, reopened.snapshot(conversation))
     }

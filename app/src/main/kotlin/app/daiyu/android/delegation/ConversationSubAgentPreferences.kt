@@ -36,6 +36,8 @@ internal data class ConversationSubAgentConfig(
         profiles = profiles.map { it.copy(reasoningByModel = it.reasoningByModel.toMap(), gptSpeedByModel = it.gptSpeedByModel.toMap()) }.toList(),
         parallelLimits = parallelLimits.toMap(), legacyParallelLimits = legacyParallelLimits.toMap())
     fun parallelLimit(model: SubAgentParallelModel): Int = parallelLimits[model] ?: legacyParallelLimits[model.legacyKey()] ?: 1
+    fun parallelLimit(profileId: String, model: SubAgentParallelModel): Int =
+        profiles.singleOrNull { it.id == profileId }?.parallelLimit ?: parallelLimit(model)
     fun validate() {
         require(profiles.map { it.id }.distinct().size == profiles.size) { "Duplicate profile IDs" }
         profiles.forEach { profile ->
@@ -52,27 +54,28 @@ internal data class ConversationSubAgentConfig(
         require(parallelLimits.values.all { it >= 0 })
         require(legacyParallelLimits.all { (key, limit) -> key.matches(Regex("agent_model_parallel_[0-9a-f]{64}")) && limit >= 0 })
     }
-    fun parallelLimitForPool(owner: SubAgentConfigKey.Conversation, key: String): Int? {
-        val prefix = "subagent:v1:c:" + Base64.getUrlEncoder().withoutPadding()
+    fun parallelLimitForPool(owner: SubAgentConfigKey.Conversation, key: String,
+        resolveApiModel: (SubAgentProfile) -> String? = { null }): Int? {
+        val prefix = "subagent:v2:c:" + Base64.getUrlEncoder().withoutPadding()
             .encodeToString(owner.value.toByteArray(Charsets.UTF_8)) + ":"
         if (!key.startsWith(prefix)) return null
-        val parts = key.removePrefix(prefix).split(':')
-        if (parts.size != 2) return null
         return runCatching {
-            val provider = String(Base64.getUrlDecoder().decode(parts[0]), Charsets.UTF_8)
-            val model = String(Base64.getUrlDecoder().decode(parts[1]), Charsets.UTF_8)
-            val identity = SubAgentParallelModel(provider, model)
-            if (poolKey(owner, identity) == key) parallelLimit(identity) else null
+            val profileId = String(Base64.getUrlDecoder().decode(key.removePrefix(prefix)), Charsets.UTF_8)
+            if (poolKey(owner, profileId) != key) return null
+            val profile = profiles.singleOrNull { it.id == profileId } ?: return null
+            profile.parallelLimit ?: resolveApiModel(profile)?.let { parallelLimit(SubAgentParallelModel(profile.providerId, it)) }
+                ?: if (parallelLimits.isEmpty() && legacyParallelLimits.isEmpty()) 1 else null
         }.getOrNull()
     }
-    fun poolKey(owner: SubAgentConfigKey, model: SubAgentParallelModel): String =
-        "subagent:v1:" + when (owner) {
+    fun poolKey(owner: SubAgentConfigKey, profileId: String): String {
+        require(profileId.isNotBlank())
+        return "subagent:v2:" + when (owner) {
             is SubAgentConfigKey.Conversation -> "c:"
             is SubAgentConfigKey.Draft -> "d:"
             is SubAgentConfigKey.Preset -> error("Presets cannot own runtime pools")
         } + Base64.getUrlEncoder().withoutPadding().encodeToString(owner.value.toByteArray(Charsets.UTF_8)) + ":" +
-            Base64.getUrlEncoder().withoutPadding().encodeToString(model.providerId.toByteArray(Charsets.UTF_8)) + ":" +
-            Base64.getUrlEncoder().withoutPadding().encodeToString(model.apiModel.toByteArray(Charsets.UTF_8))
+            Base64.getUrlEncoder().withoutPadding().encodeToString(profileId.toByteArray(Charsets.UTF_8))
+    }
 }
 
 /** Instances using the same preferences share a lock, durability fence, and per-owner versions. */
@@ -379,7 +382,7 @@ internal class ConversationSubAgentPreferences(
             val previous = entries[identity]
             require(binding == null || binding.providerId == profile.providerId) { "Profile/provider binding mismatch" }
             val resolved = binding ?: previous?.apiModel?.let { SubAgentParallelModel(profile.providerId, it) }
-            val remembered = SubAgentModelDefaults.confirmed(profile, previous, resolved, resolved?.let(next::parallelLimit))
+            val remembered = SubAgentModelDefaults.confirmed(profile, previous, resolved, null)
             changes[SubAgentModelDefaults.KEY] = SubAgentModelDefaults.encode(entries + (identity to remembered))
         }
         if (!canCommit() || (owner !is SubAgentConfigKey.Preset && !canEdit(owner)) ||

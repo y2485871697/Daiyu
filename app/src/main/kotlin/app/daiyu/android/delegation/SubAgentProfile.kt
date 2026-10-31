@@ -15,9 +15,11 @@ internal data class SubAgentProfile(
     val imageResolution: String? = null,
     val reasoningByModel: Map<String, ReasoningEffort> = emptyMap(),
     val gptSpeedByModel: Map<String, GptSpeedMode> = emptyMap(),
+    val parallelLimit: Int? = null,
 ) {
     init {
         require(id.isNotBlank() && name.isNotBlank() && name.length <= 80)
+        require(parallelLimit == null || parallelLimit >= 0)
         require(role in setOf("implementation", "review", "image_generation", "video_generation"))
     }
     val supportsTaskTier: Boolean get() = role == "implementation"
@@ -45,6 +47,7 @@ internal data class SubAgentProfile(
         .put("provider", providerId).put("model", modelId).put("tier", tier?.takeIf { supportsTaskTier }?.wireValue.orEmpty())
         .put("reasoning", reasoning?.wireValue.orEmpty())
         .put("image_resolution", imageResolution.orEmpty())
+        .put("parallel_limit", parallelLimit ?: JSONObject.NULL)
         .put("reasoning_memory", org.json.JSONArray().also { array ->
             reasoningByModel.forEach { (key, effort) ->
                 val parts = key.split("\u0000", limit = 2)
@@ -64,7 +67,13 @@ internal data class SubAgentProfile(
             j.getString("role"), j.optBoolean("enabled", true), j.optString("provider"), j.optString("model"),
             SubAgentTaskTier.fromWireValue(j.optString("tier")), ReasoningEffort.fromWireValue(j.optString("reasoning")),
             j.optString("image_resolution").takeIf { it in ImageResolutionTier.values },
-            reasoningMemory(j), gptSpeedMemory(j)).normalizedTaskTier()
+            reasoningMemory(j), gptSpeedMemory(j), parallelLimit(j)).normalizedTaskTier()
+        private fun parallelLimit(j: JSONObject): Int? {
+            if (!j.has("parallel_limit") || j.isNull("parallel_limit")) return null
+            val value = j.opt("parallel_limit")
+            require(value is Int && value >= 0) { "Invalid profile parallel limit" }
+            return value
+        }
         fun modelReasoningKey(providerId: String, modelId: String): String = providerId + "\u0000" + modelId
         private fun gptSpeedMemory(j: JSONObject): Map<String, GptSpeedMode> {
             val array = j.optJSONArray("gpt_speed_memory") ?: return emptyMap()

@@ -9,7 +9,7 @@ class SubAgentHotUpdatePolicyTest {
     @Test fun everyNonDestructiveEditIsCompatible() {
         val profile = original.profiles.single()
         val pool = SubAgentParallelModel("provider", "old")
-        listOf(original.copy(enabled = false), original.copy(appliedPresetId = "preset", appliedPresetName = "name", presetApplicationToken = "token"),
+        listOf(original.copy(profiles = listOf(profile.copy(parallelLimit = 2))), original.copy(enabled = false), original.copy(appliedPresetId = "preset", appliedPresetName = "name", presetApplicationToken = "token"),
             original.copy(parallelLimits = mapOf(pool to 2)), original.copy(legacyParallelLimits = mapOf(pool.legacyKey() to 2)),
             original.copy(profiles = listOf(profile.copy(name = "Renamed", enabled = false, modelId = "new", imageResolution = "high"))))
             .forEach { assertTrue(it.toString(), original.acceptsModelHotUpdate(it)) }

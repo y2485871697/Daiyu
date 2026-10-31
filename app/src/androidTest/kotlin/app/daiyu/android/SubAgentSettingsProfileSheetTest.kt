@@ -268,11 +268,14 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         awaitNodeWindowFocus(nameField("Existing worker"))
         nameField("Existing worker").performTextReplacement("Saved edit")
         formSwitch().scrollToVisible().assertIsOn().performClick().assertIsOff()
+        ui.onNodeWithTag("subagent-field:并行上限（0 为不限）").scrollToVisible().performTextReplacement("3")
+        ui.onAllNodesWithText("本配置内相同提供商/API 模型共用此上限").assertCountEquals(0)
+        assertEquals(added, repository.snapshot(owner).profiles.single { it.id == added.id })
         confirm().assertIsEnabled().performClick()
         ui.waitUntil(5_000) { repository.snapshot(owner).profiles.any { it.name == "Saved edit" } }
         val edited = repository.snapshot(owner).profiles.single { it.id == "existing" }
         assertFalse(edited.enabled)
-        assertEquals(before.profiles.single().copy(name = "Saved edit", enabled = false), edited)
+        assertEquals(before.profiles.single().copy(name = "Saved edit", enabled = false, parallelLimit = 3), edited)
         assertEquals(added, repository.snapshot(owner).profiles.single { it.id == added.id })
         assertEquals(listOf(owner.value), repository.presets().map { it.id })
         assertEquals(0, fixture.opens.get())

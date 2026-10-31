@@ -1834,9 +1834,9 @@ class ChatController internal constructor(private val application:Application,
             runCatching { childConfigurationWorker.execute {
                 val supervisor = synchronized(this) { if (closed) null else childSupervisor } ?: return@execute
                 val current = runCatching { childPreferences.snapshot(owner) }.getOrNull()
-                supervisor.reconcile(owner.value) { pool -> current?.parallelLimitForPool(owner, pool) }
+                supervisor.reconcile(owner.value) { pool -> current?.let { childPoolLimit(it, owner, pool) } }
                 val batches = synchronized(this) { childModelBatches.entries.filter { it.value == owner.value }.map { it.key } }
-                batches.forEach { batch -> batch.configurationChanged { pool -> current?.parallelLimitForPool(owner, pool) } }
+                batches.forEach { batch -> batch.configurationChanged { pool -> current?.let { childPoolLimit(it, owner, pool) } } }
             } }
         }
     }
@@ -1858,6 +1858,10 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
+    private fun childPoolLimit(config: ConversationSubAgentConfig, owner: SubAgentConfigKey.Conversation, pool: String): Int? =
+        config.parallelLimitForPool(owner, pool) { profile ->
+            readSavedChildProviderModel(profile.providerId, profile.modelId).model
+        }
     private fun freezeSavedChildModels(key: SubAgentConfigKey.Conversation, hotUpdates: Boolean = true,
         profileId: String? = null, runModel: (ProviderSnapshot) -> ModelPort): FrozenSubAgentModels {
         val ownerState = childPreferences.ownerState(key)
@@ -2019,7 +2023,7 @@ class ChatController internal constructor(private val application:Application,
                 expectedWorkspaceBinding = database.workspaceBinding(conversation))
             val supervisor = checkNotNull(childSupervisor)
             val currentConfiguration = childPreferences.snapshot(key)
-            supervisor.reconcile(conversation.value) { pool -> currentConfiguration.parallelLimitForPool(key, pool) }
+            supervisor.reconcile(conversation.value) { pool -> childPoolLimit(currentConfiguration, key, pool) }
             return ChildTaskCommandHost.run(initial, command, supervisor, models, database, runtime,
                 cancelled = { preparationCancelled(token) }, onChanged = ::backgroundTasksChanged,
                 retain = { tasks -> synchronized(this) {
@@ -4074,7 +4078,7 @@ class ChatController internal constructor(private val application:Application,
                     val supervisor = checkNotNull(childSupervisor)
                     val ownerKey = SubAgentConfigKey.Conversation(conversationId.value)
                     val currentConfiguration = childPreferences.snapshot(ownerKey)
-                    supervisor.reconcile(conversationId.value) { pool -> currentConfiguration.parallelLimitForPool(ownerKey, pool) }
+                    supervisor.reconcile(conversationId.value) { pool -> childPoolLimit(currentConfiguration, ownerKey, pool) }
                     synchronized(this) {
                         check(!closed)
                         val binding=supervisor.bind(owner,grants,authorization,admittedModels,::backgroundTasksChanged)

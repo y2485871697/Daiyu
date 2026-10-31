@@ -62,7 +62,7 @@ class ChildModelBatchTest {
         } finally { release.countDown(); batch.close(); executor.shutdownNow() }
     }
 
-    @Test fun sameApiModelProfilesShareLimitAndZeroAddsNoLimit() {
+    @Test fun explicitlySharedPoolSerializesAndZeroAddsNoLimit() {
         for (limit in listOf(1, 2, 0)) {
             val active = AtomicInteger(); val peak = AtomicInteger(); val ids = java.util.Collections.synchronizedSet(mutableSetOf<RunId>())
             val child = port { history, sink ->
@@ -81,7 +81,7 @@ class ChildModelBatchTest {
         }
     }
 
-    @Test fun differentModelPoolsCanOverlapAtLimitOne() {
+    @Test fun independentProfilePoolsCanOverlapAtLimitOne() {
         val both = CountDownLatch(2)
         val child = port { _, sink -> both.countDown(); check(both.await(3, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("t", "answer")) }
         val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("a", 1) { child },

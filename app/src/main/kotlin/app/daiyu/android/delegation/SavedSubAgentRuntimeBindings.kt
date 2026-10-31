@@ -66,7 +66,7 @@ internal class SavedSubAgentRuntimeBindings(
         val definitions = selected.associate { binding ->
             val model = SubAgentParallelModel(binding.profile.providerId, binding.child.model)
             val display = ChildTaskDisplay(binding.profile.name, binding.child.model, binding.modelName)
-            val original = ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model), display,
+            val original = ChildModelDefinition(frozen.poolKey(owner, binding.profile.id), frozen.parallelLimit(binding.profile.id, model), display,
                 latest = null, selection = binding.child, valid = { profileCurrent(binding.profile.id) },
                 admissionAllowed = { !modelDeleted(binding.profile) }) { runModel(binding.child) }
             val lastSelection = java.util.concurrent.atomic.AtomicReference(binding.profile to original)

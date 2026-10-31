@@ -98,8 +98,7 @@ class SavedSubAgentRuntimeBindingsTest {
             profile.copy(id = "added", name = "Added", providerId = "unavailable", modelId = "missing")))
         original.current().create(); original.create()
         assertEquals(listOf(changed.modelId, child.modelId), captured.map { it.model })
-        latest = config.copy(profiles = listOf(profile.copy(modelId = changed.id)),
-            parallelLimits = mapOf(SubAgentParallelModel(provider.id, child.modelId) to 0))
+        latest = config.copy(profiles = listOf(profile.copy(modelId = changed.id, parallelLimit = 0)))
         original.current().create()
         assertEquals(changed.modelId, captured.last().model)
         latest = config.copy(profiles = listOf(profile.copy(role = "implementation")))
@@ -132,8 +131,8 @@ class SavedSubAgentRuntimeBindingsTest {
             dispatched.getValue(profile.id).create(); original.current().create()
             assertEquals(captured[captured.size - 2].model, captured.last().model)
         }
-        latest = config.copy(profiles = listOf(profile.copy(name = "Renamed", modelId = changed.id), extra),
-            parallelLimits = mapOf(SubAgentParallelModel(provider.id, changed.modelId) to 2), appliedPresetId = "preset")
+        latest = config.copy(profiles = listOf(profile.copy(name = "Renamed", modelId = changed.id, parallelLimit = 2), extra),
+            appliedPresetId = "preset")
         assertEquals("Renamed", prepared.forNewRequests().getValue(profile.id).display?.agentName)
         assertEquals(2, original.current().parallelLimit)
         latest = config.copy(enabled = false)
@@ -259,16 +258,22 @@ class SavedSubAgentRuntimeBindingsTest {
         assertEquals(0, opens)
     }
 
-    @Test fun profilesShareProviderApiPoolButDifferentConversationsDoNot() {
-        val second = profile.copy(id = "second")
-        val pool = SubAgentParallelModel(provider.id, child.modelId)
-        val configured = config.copy(profiles = listOf(profile, second), parallelLimits = mapOf(pool to 0))
+    @Test fun profilesUsingSameProviderApiHaveIndependentLimitsAndConversationScopedPools() {
+        val firstProfile = profile.copy(parallelLimit = 1)
+        val second = profile.copy(id = "second", parallelLimit = 0)
+        val configured = config.copy(profiles = listOf(firstProfile, second))
         val bindings = SavedSubAgentRuntimeBindings()
         val first = bindings.freeze(owner, configured, listOf(provider), { _, _ -> saved })
         val other = bindings.freeze(SubAgentConfigKey.Conversation("other"), configured, listOf(provider), { _, _ -> saved })
-        assertEquals(first.getValue(profile.id).poolKey, first.getValue(second.id).poolKey)
+        assertNotEquals(first.getValue(profile.id).poolKey, first.getValue(second.id).poolKey)
         assertNotEquals(first.getValue(profile.id).poolKey, other.getValue(profile.id).poolKey)
+        assertEquals(1, first.getValue(profile.id).parallelLimit)
         assertEquals(0, first.getValue(second.id).parallelLimit)
+        val changed = bindings.freeze(owner, configured.copy(profiles = listOf(firstProfile.copy(parallelLimit = 4), second)),
+            listOf(provider), { _, _ -> saved })
+        assertEquals(first.getValue(profile.id).poolKey, changed.getValue(profile.id).poolKey)
+        assertEquals(4, changed.getValue(profile.id).parallelLimit)
+        assertEquals(0, changed.getValue(second.id).parallelLimit)
     }
 
     private fun capture(selected: SubAgentProfile, settings: ModelSettings, model: SubAgentModel = child): ProviderSnapshot {

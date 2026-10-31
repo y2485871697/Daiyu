@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import app.daiyu.android.ui.haptics.miuix.TextButton as MiuixTextButton
 
-/** One opening owns one editor, application, expected profile and parallel-pool snapshot. */
+/** One opening owns one editor, application, expected profile and its parallel-limit snapshot. */
 internal class SubAgentProfileDraftSession private constructor(
     val editor: ConversationSubAgentEditor,
     val expectedProfile: SubAgentProfile?,
@@ -71,18 +71,20 @@ internal class SubAgentProfileDraftSession private constructor(
         val next = config?.takeIf { it.providerId.isNotBlank() && it.model.isNotBlank() }?.let { SubAgentParallelModel(it.providerId, it.model) } ?: return
         if (next != parallelModel) {
             parallelModel = next
-            val originalBinding = expectedProfile != null && !bindingChanged && draft.providerId == expectedProfile.providerId && draft.modelId == expectedProfile.modelId
-            val restored = if (!originalBinding) editor.rememberedParallelLimit(draft) else null
-            parallelEdited = restored != null
-            parallelValue = (restored ?: openedConfig.parallelLimit(next)).toString()
+            val limit = draft.parallelLimit ?: if (bindingChanged) 1 else openedConfig.parallelLimit(draft.id, next)
+            parallelValue = limit.toString()
+            draft = draft.copy(parallelLimit = limit)
         }
     }
-    fun editParallel(value: String) { parallelValue = value; parallelEdited = true }
+    fun editParallel(value: String) {
+        parallelValue = value; parallelEdited = true
+        value.trim().toIntOrNull()?.takeIf { it >= 0 }?.let { draft = draft.copy(parallelLimit = it) }
+    }
     fun parallelChange(): SubAgentParallelLimitChange? {
         if (!parallelEdited) return null
         val model = parallelModel ?: return null
         val number = parallelValue.trim().toIntOrNull()?.takeIf { it >= 0 } ?: return null
-        return SubAgentParallelLimitChange(model, number, openedConfig.parallelLimit(model))
+        return SubAgentParallelLimitChange(model, number, openedConfig.parallelLimit(draft.id, model))
     }
     fun parallelBoundTo(config: SubAgentModelConfig?): Boolean = config == null || parallelModel == SubAgentParallelModel(config.providerId, config.model)
     fun parallelIsValid(): Boolean = !parallelEdited || (parallelModel != null && parallelValue.trim().toIntOrNull()?.let { it >= 0 } == true)
@@ -180,7 +182,6 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     else DaiyuFormTextField(session.parallelValue, { if (usable) session.editParallel(it) }, hint = "并行上限（0 为不限）", singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = usable && boundConfig != null, modifier = Modifier.fillMaxWidth())
                     if (!session.parallelIsValid()) Text("请输入 0 或正整数", color = MaterialTheme.colorScheme.error)
-                    Text("本配置内相同提供商/API 模型共用此上限；仅确认时保存，调低不会取消正在执行的任务。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
                     if (draft.role == "image_generation") SubAgentSettingRow("默认分辨率", draft.imageResolution?.let(ImageResolutionTier::label) ?: "跟随接口",
                         Icons.Rounded.Image, "草稿分辨率", usable && boundConfig != null, onClick = { interact { choices = "resolution" } })
                     session.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }

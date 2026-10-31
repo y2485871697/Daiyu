@@ -189,8 +189,11 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('old.gptSpeedForModel(fallback = model.defaultGptSpeed).next()', editor)
         commit = editor.split('suspend fun commitProfileDraft(', 1)[1].split('fun removeProfileDraft(', 1)[0]
         self.assertNotIn('confirmedDraft', commit)
-        self.assertIn('old.profiles + draft', commit)
-        self.assertIn('if (it.id == draft.id) draft else it', commit)
+        self.assertIn('val confirmed = draft.copy(parallelLimit =', commit)
+        self.assertIn('old.profiles + confirmed', commit)
+        self.assertIn('if (it.id == draft.id) confirmed else it', commit)
+        confirmed = commit.split('val confirmed = draft.copy(', 1)[1].split(')\n', 1)[0]
+        self.assertNotIn('gptSpeedByModel =', confirmed)
         defaults = (SRC / 'delegation/SubAgentModelDefaults.kt').read_text()
         self.assertIn('gptSpeedByModel = if (gptSpeedInherited) emptyMap() else mapOf(key to gptSpeed)', defaults)
         self.assertIn('!in profile.gptSpeedByModel', defaults)

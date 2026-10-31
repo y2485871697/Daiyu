@@ -35,13 +35,38 @@ class ConversationSubAgentHotConfigurationTest {
         assertEquals(lifetime, repository.profileLifetime(owner, profile.id)); assertEquals(listOf(profile), repository.snapshot(owner).profiles)
         observer.close()
     }
+    @Test fun legacyFallbackResizesExistingProfilePoolWithoutAffectingItsNeighbor() {
+        val model = SubAgentParallelModel("provider", "api")
+        val legacyProfile = profile.copy(providerId = model.providerId, modelId = "selection")
+        val config = ConversationSubAgentConfig(listOf(legacyProfile), parallelLimits = mapOf(model to 2))
+        val key = config.poolKey(owner, profile.id)
+        val pool = app.daiyu.android.domain.delegation.ChildModelPool(4)
+        val neighbor = app.daiyu.android.domain.delegation.ChildModelPool(3)
+        for (limit in listOf(2, 0, 1)) {
+            val current = config.copy(parallelLimits = mapOf(model to limit))
+            val resolved = current.parallelLimitForPool(owner, key) { model.apiModel }
+            assertEquals(limit, resolved)
+            pool.resize(requireNotNull(resolved))
+            assertEquals(if (limit == 0) Int.MAX_VALUE else limit, pool.semaphore.availablePermits())
+            assertEquals(3, neighbor.semaphore.availablePermits())
+        }
+        assertEquals(1, config.copy(parallelLimits = emptyMap()).parallelLimitForPool(owner, key))
+        assertEquals(4, config.copy(profiles = listOf(legacyProfile.copy(parallelLimit = 4)))
+            .parallelLimitForPool(owner, key) { error("explicit values must not read the catalog") })
+    }
+
     @Test fun poolLimitDecodingIsExactAndConversationScoped() {
-        val model = SubAgentParallelModel("provider", "api:model")
-        val configuration = ConversationSubAgentConfig(listOf(profile), parallelLimits = mapOf(model to 2))
-        val key = configuration.poolKey(owner, model)
+        val configuration = ConversationSubAgentConfig(listOf(profile.copy(parallelLimit = 2)))
+        val key = configuration.poolKey(owner, profile.id)
         assertEquals(2, configuration.parallelLimitForPool(owner, key))
         assertNull(configuration.parallelLimitForPool(SubAgentConfigKey.Conversation("other"), key))
         assertNull(configuration.parallelLimitForPool(owner, key + ":extra"))
+        assertNull(configuration.parallelLimitForPool(owner, key + "="))
+        assertNull(configuration.parallelLimitForPool(owner, "subagent:v1:c:old"))
+        assertNull(configuration.copy(profiles = emptyList()).parallelLimitForPool(owner, key))
+        assertEquals(0, configuration.copy(profiles = listOf(profile.copy(parallelLimit = 0))).parallelLimitForPool(owner, key))
+        assertNotEquals(key, configuration.poolKey(owner, "another-profile"))
+        assertNotEquals(key, configuration.poolKey(SubAgentConfigKey.Draft(owner.value), profile.id))
     }
 }
 

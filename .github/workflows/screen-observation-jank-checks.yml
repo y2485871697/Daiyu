@@ -58,16 +58,19 @@ jobs:
           mkdir -p screen-jank-checks
           set -o pipefail
           python3 -B - 2>&1 <<'PY' | tee screen-jank-checks/contracts.log
-          import json, os, unittest
+          import json, os, sys, unittest
           from pathlib import Path
           records = []
+          sys.path.insert(0, 'tests')
           patterns = ('test_chat_menu_scroll_isolation_contract.py', 'test_chat_menu_shadow_contract.py',
                       'test_chat_overflow_icon_colors_contract.py', 'test_chat_outside_tap_contract.py',
-                      'test_dialog_motion_contract.py') if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'menu-scroll' else (
+                      'test_dialog_motion_contract.DialogMotionContractTest.test_production_glass_menu_uses_original_popup_motion_and_exit_retention',
+                      'test_dialog_motion_contract.DialogMotionContractTest.test_more_button_is_transparent_but_keeps_selection_semantics') if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'menu-scroll' else (
                       'test_checkpoint_encoding_hotpath_contract.py', 'test_runtime_checkpoint_reuse_contract.py',
                       'test_large_history_storage_contract.py', 'test_runtime_commit_hotpath_contract.py')
           for pattern in patterns:
-              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              suite = (unittest.TestLoader().discover('tests', pattern=pattern) if pattern.endswith('.py')
+                       else unittest.TestLoader().loadTestsFromName(pattern))
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
               assert result.wasSuccessful() and not result.skipped, pattern

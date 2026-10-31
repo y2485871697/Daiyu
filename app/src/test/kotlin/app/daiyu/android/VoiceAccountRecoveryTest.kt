@@ -44,14 +44,19 @@ class VoiceAccountRecoveryTest {
         assertEquals(original.profiles, original.recoverPersonalAccounts().profiles)
     }
 
-    @Test fun effectiveHeaderIdentityNotModelOrProviderLabelDeterminesAccount() {
-        val headers = ProviderHeaders.parse("{\"x-api-key\":\"fixture-effective\"}")
-        val reading = doubao().copy(customHeaders = headers)
-        val conversation = doubao("fixture-other-placeholder").copy(customHeaders = headers,
+    @Test fun authenticationNotModelProviderLabelOrUnrelatedHeadersDeterminesAccount() {
+        val reading = doubao().copy(customHeaders = ProviderHeaders.parse("{\"x-fixture\":\"first\"}"))
+        val conversation = doubao().copy(customHeaders = ProviderHeaders.parse("{\"x-fixture\":\"second\"}"),
             model = "another-model", provider = "another-label")
         val original = VoiceProfileEnvelope(mapOf(VoiceProfile.READ_ALOUD to reading,
             VoiceProfile.CONVERSATION to conversation))
         assertEquals(reading, original.recoverPersonalAccounts().accounts["DOUBAO"])
+    }
+
+    @Test fun recoveryDoesNotRelaxTheReservedAuthenticationHeaderBoundary() {
+        assertThrows(IllegalArgumentException::class.java) {
+            ProviderHeaders.parse("{\"x-api-key\":\"fixture-override\"}")
+        }
     }
 
     @Test fun mimoKeepsProviderAndCustomHeaderIdentitySeparate() {

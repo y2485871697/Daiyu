@@ -28,7 +28,8 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private lateinit var frozen: VoiceConfiguration
 
     private fun mount(available: Boolean, unavailable: Boolean = false, secondAvailable: Boolean = false,
-        flow: String = "CREATE", ready: Boolean = false, uncertain: Boolean = false, queryStatus: Int? = null) {
+        flow: String = "CREATE", ready: Boolean = false, uncertain: Boolean = false, queryStatus: Int? = null,
+        active: Boolean = false, cloned: Boolean = false) {
         frozen = VoiceConfiguration(engine = "DOUBAO", provider = "quota-fixture",
             endpoint = "https://openspeech.bytedance.com", key = "synthetic-${UUID.randomUUID()}",
             model = "seed-tts-2.0", voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)
@@ -37,14 +38,16 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         roots += root
         index = File(root, "voices.json")
         fun slot(id: String, owner: String, remaining: Int) = JSONObject().put("id", id).put("name", id)
-            .put("account", owner).put("catalogState", if (ready || flow == "IMPORT") "Success" else "Unknown")
-            .put("status", if (ready || flow == "IMPORT") 2 else -1).put("remaining", remaining)
+            .put("account", owner).put("catalogState", if (active) "Active" else if (ready || flow == "IMPORT") "Success" else "Unknown")
+            .put("status", if (active) 4 else if (ready || flow == "IMPORT") 2 else -1).put("remaining", remaining)
             .put("models", if (ready) JSONArray().put(4) else JSONArray())
             .put("demo", if (ready) "https://preview.invalid/demo.mp3" else "").put("uncertain", uncertain)
         index.writeText(JSONArray().apply {
             if (available) put(slot("S_available", account, 3))
             if (unavailable) put(slot("S_exhausted", account, 0))
             if (secondAvailable) put(slot("S_second", account, 3))
+            if (cloned) put(slot("S_cloned", account, 3).put("name", "已复刻声音")
+                .put("status", 2).put("catalogState", "Success"))
             put(slot("S_other_account", "0".repeat(64), 3))
         }.toString())
         beforeIndex = index.readText()
@@ -161,21 +164,66 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         assertNoSideEffects()
     }
 
-    fun testEmptyAndExhaustedQuotasNavigateToSyncWithoutReadingOrSavingAndPreserveDraft() {
-        for (unavailable in listOf(false, true)) {
-            mount(available = false, unavailable = unavailable)
-            enterDraftName("keep draft")
-            reveal("settings-row:选择音色名额", "制作声音").performClick()
-            awaitUniqueTag("page:同步音色名额")
-            node("voice-create-slot-picker").assertDoesNotExist()
-            reveal("settings-row:读取我的名额", "同步音色名额").assertExists()
-            assertNoSideEffects()
-            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-            awaitUniqueTag("page:制作声音")
-            reveal("settings-field:声音名称", "制作声音").assertTextContains("keep draft")
-            reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
-            assertNoSideEffects()
-        }
+    fun testEmptyQuotasNavigateToSyncWithoutReadingOrSavingAndPreserveDraft() {
+        mount(available = false)
+        enterDraftName("keep draft")
+        reveal("settings-row:选择音色名额", "制作声音").performClick()
+        awaitUniqueTag("page:同步音色名额")
+        node("voice-create-slot-picker").assertDoesNotExist()
+        reveal("settings-row:读取我的名额", "同步音色名额").assertExists()
+        assertNoSideEffects()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("page:制作声音")
+        reveal("settings-field:声音名称", "制作声音").assertTextContains("keep draft")
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
+        assertNoSideEffects()
+    }
+
+    fun testOnlyExhaustedCloneStillAppearsButCannotBeSelectedOrSubmitted() {
+        mount(available = false, unavailable = true, ready = true)
+        enterDraftName("keep draft")
+        openPicker()
+        node("voice-create-slot:S_exhausted").assertIsNotEnabled().performTouchInput { click() }
+        node("voice-create-slot-picker").assertExists()
+        node("voice-create-slot:S_exhausted").assertIsNotSelected()
+        node("voice-create-slot:S_other_account").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitPickerClosed()
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
+        assertNoSideEffects()
+    }
+
+    fun testExistingSuccessfulCloneUsesOriginalQuotaWithoutSelectionSideEffects() {
+        mount(available = true, ready = true)
+        enterDraftName("replacement voice")
+        openPicker()
+        val card = node("voice-create-slot:S_available").assertIsEnabled()
+        card.assertTextContains("剩余 3 次", substring = true)
+        card.assertTextContains("再次制作消耗本名额次数并覆盖已有声音", substring = true)
+        card.performClick()
+        awaitPickerClosed()
+        reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasClickAction()
+        reveal("settings-field:声音名称", "制作声音").assertTextContains("replacement voice")
+        assertNoSideEffects()
+    }
+
+    fun testClonedVoiceAppearsBeforeUnusedQuotasAndActivatedVoiceRemainsVisibleButLocked() {
+        mount(available = true, cloned = true)
+        openPicker()
+        val cloned = node("voice-create-slot:S_cloned").assertIsEnabled().fetchSemanticsNode().boundsInRoot
+        val unused = node("voice-create-slot:S_available").assertIsEnabled().fetchSemanticsNode().boundsInRoot
+        assertTrue(cloned.bottom < unused.top)
+        assertNoSideEffects()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitPickerClosed()
+        mount(available = true, ready = true, active = true)
+        openPicker()
+        node("voice-create-slot:S_available").assertIsNotEnabled()
+            .assertTextContains("已激活，无法再次制作", substring = true).performTouchInput { click() }
+        node("voice-create-slot-picker").assertExists()
+        node("voice-create-slot:S_available").assertIsNotSelected()
+        assertNoSideEffects()
     }
 
     fun testImportUsesCardsAndKeepsNameAndExistingIdDraftWithoutNetworkOrSave() {

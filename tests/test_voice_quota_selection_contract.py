@@ -31,10 +31,11 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertIn('voiceSlotSummary(voice)', self.sheet)
         self.assertIn('personalVoiceSlotTitle(it.value, it.index)', self.row)
 
-    def test_no_usable_quota_goes_to_sync_without_fetching_or_saving(self):
+    def test_only_empty_quota_goes_to_sync_without_fetching_or_saving(self):
         self.assertIn('if (current() && !busy)', self.row)
         self.assertIn('if (resources.voices.state.value.any { it.account == account?.fingerprint &&', self.row)
         self.assertIn('else navigate("SYNC")', self.row)
+        self.assertNotIn('&& it.canTrain', self.row)
         self.assertIn('personalVoiceSlots(voices, creating = true, postpaid = false)', self.panel)
         self.assertIn('.filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }', self.panel)
         self.assertIn('val voices = allVoices.filter { it.account == account?.fingerprint }', self.panel)
@@ -54,6 +55,18 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertIn('slotPicker = false; importSlotPicker = false; confirmation = null; operation?.cancel(); preview.stop()', self.panel)
         self.assertIn('if (target == "SYNC" || target == "ACCOUNT") parentPage = page', self.panel)
         self.assertIn('page = parentPage', block(self.panel, 'fun back()'))
+
+    def test_existing_clones_remain_in_list_and_warn_about_original_quota_overwrite(self):
+        slots = self.panel.split('internal fun personalVoiceSlots(', 1)[1].split('internal fun personalVoiceSlotTitle(', 1)[0]
+        self.assertIn('if (creating) !postpaid && it.id.startsWith("S_") else !it.unused', slots)
+        self.assertNotIn('it.canTrain', slots)
+        self.assertIn('compareBy<PersonalVoices.Voice> { it.unused }', slots)
+        self.assertIn('已激活，无法再次制作', self.panel)
+        final = block(self.panel, 'if (page == "CREATE" && step == 2)')
+        self.assertIn('slot != null && voices.any { it.id == slot && !it.unused }', final)
+        self.assertIn('将消耗此名额的剩余复刻次数并覆盖已有声音，不占用新名额。', final)
+        self.assertIn('resources.voices.create(speech!!, sample, n, slot, confirmed = true)', final)
+        self.assertIn('再次制作消耗本名额次数并覆盖已有声音', self.panel)
 
     def test_sync_still_requires_explicit_read_and_save_actions(self):
         sync = block(self.panel, 'if (page == "SYNC")')

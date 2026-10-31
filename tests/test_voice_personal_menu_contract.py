@@ -112,7 +112,7 @@ class VoicePersonalMenuContractTest(unittest.TestCase):
             self.assertNotIn(old, menu)
         status = panel.split('internal fun voiceStatus(', 1)[1].split('internal fun voiceSlotSummary', 1)[0]
         for token in ('voice.status == 1', '"训练中"', 'voice.status == 2', '"训练成功"',
-                      'voice.status == 3', '"训练失败"', '"已激活"', '"状态查询失败，请重试"'):
+                      'voice.status == 3', '"训练失败"', '"已激活，无法再次制作"', '"状态查询失败，请重试"'):
             self.assertIn(token, status)
         self.assertNotIn('voice.status == 3 || voice.error.isNotBlank()', status)
         self.assertNotIn('voice.accepted', status)

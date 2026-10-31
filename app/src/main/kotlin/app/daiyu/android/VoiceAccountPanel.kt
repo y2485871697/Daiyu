@@ -358,7 +358,7 @@ internal fun VoiceAccountPanel(
                         ask("查询项目 $p 的槽位；已制作槽位将用当前语音 Key 校验，不制作、不合成",
                             "名额读取失败，请手动重试；若持续失败，请检查网络或本机存储。") { report ->
                             val count = resources.voices.importPurchased(speech!!, a, s, p)
-                            report(if (count == 0) "本项目未找到名额；请核对项目与语音 API Key。" else "已同步 $count 个名额；未使用的名额在制作声音时选择。")
+                            report(if (count == 0) "本项目未找到名额；请核对项目与语音 API Key。" else "已同步 $count 个名额；未使用和已复刻的音色均可在制作声音时选择。")
                         }
                     }))
                 } }
@@ -443,7 +443,7 @@ internal fun VoiceAccountPanel(
                         showChevron = true, onClick = if (!enabled) null else ({
                             if (current() && !busy) {
                                 if (resources.voices.state.value.any { it.account == account?.fingerprint &&
-                                    it.id.matches(Regex("S_[A-Za-z0-9_-]+")) && it.canTrain }) slotPicker = true
+                                    it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }) slotPicker = true
                                 else navigate("SYNC")
                             }
                         }))
@@ -491,7 +491,7 @@ internal fun VoiceAccountPanel(
                 item { SettingsCard(Modifier.testTag("voice-create-submit-card")) {
                     SettingsRow("确认上传并制作", tag = "voice-training-submit", showChevron = true, onClick = if (!enabled || !agreed || sampleUri == null) null else ({
                         val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else slotId
-                        ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。结果未知时只查询原音色，不重复提交。${if (slot == null) "\n\n须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。" else ""}", "制作结果未确认，请在原音色菜单查询状态，不要重复提交。") { report ->
+                        ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。${if (slot != null && voices.any { it.id == slot && !it.unused }) "将消耗此名额的剩余复刻次数并覆盖已有声音，不占用新名额。" else ""}结果未知时只查询原音色，不重复提交。${if (slot == null) "\n\n须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。" else ""}", "制作结果未确认，请在原音色菜单查询状态，不要重复提交。") { report ->
                             val origin = feedback.visit
                             val sample = try { PersonalVoices.readSample(context, uri) }
                             catch (cancelled: CancellationException) { throw cancelled }
@@ -596,7 +596,7 @@ internal fun voiceStatus(voice: PersonalVoices.Voice): String = when {
     voice.catalogState == "Reclaimed" -> "已回收"
     voice.status == 1 || voice.catalogState == "Training" -> "训练中"
     voice.status == 3 -> "训练失败"
-    voice.status == 4 || voice.catalogState == "Active" -> "已激活"
+    voice.status == 4 || voice.catalogState == "Active" -> "已激活，无法再次制作"
     voice.status == 2 || voice.catalogState == "Success" -> "训练成功"
     voice.remaining == 0 -> "制作次数已用完"
     voice.unused -> "未使用名额"
@@ -607,11 +607,11 @@ internal fun voiceStatus(voice: PersonalVoices.Voice): String = when {
 
 internal fun voiceSlotSummary(voice: PersonalVoices.Voice): String =
     voiceStatus(voice) + (if (voice.remaining >= 0) " · 剩余 ${voice.remaining} 次" else " · 次数待查询") +
-        if (voice.showInMyVoices && voice.canTrain) " · 再次制作可能覆盖已有声音" else ""
+        if (voice.showInMyVoices && voice.canTrain) " · 再次制作消耗本名额次数并覆盖已有声音" else ""
 
 internal fun personalVoiceSlots(voices: List<PersonalVoices.Voice>, creating: Boolean, postpaid: Boolean): List<PersonalVoices.Voice> =
     voices.filter { if (creating) !postpaid && it.id.startsWith("S_") else !it.unused }
-        .sortedWith(compareBy<PersonalVoices.Voice> { !it.unused }.thenBy { it.name })
+        .sortedWith(compareBy<PersonalVoices.Voice> { it.unused }.thenBy { it.name })
 
 internal fun personalVoiceSlotTitle(voice: PersonalVoices.Voice, index: Int): String =
     if (voice.name == voice.id) "音色名额 ${index + 1}" else voice.name

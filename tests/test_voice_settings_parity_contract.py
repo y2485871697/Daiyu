@@ -157,7 +157,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('personalVoiceSlots(voices, creating = false, postpaid = postpaid)', leaf)
         self.assertIn('personalVoiceSlotTitle(voice, index)', leaf)
         self.assertIn('voiceSlotSummary(voice)', leaf)
-        self.assertIn('.sortedWith(compareBy<PersonalVoices.Voice> { !it.unused }.thenBy { it.name })', leaf)
+        self.assertIn('.sortedWith(compareBy<PersonalVoices.Voice> { it.unused }.thenBy { it.name })', leaf)
         self.assertIn('if (voice.name == voice.id) "音色名额 ${index + 1}" else voice.name', leaf)
         self.assertIn('OpenableColumns.DISPLAY_NAME', leaf)
         self.assertIn('LaunchedEffect(sampleUri, lifecycleState, frozenConfiguration.revision)', leaf)

@@ -41,6 +41,21 @@ class MarkdownRevealTest {
         }
     }
 
+    @Test fun blockedBodyKeepsThePrecedingTextVisibleAndResetsTheDrainClock() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, true, false)
+        val target = state.update(listOf(part("note", "note"), part("x".repeat(500), "answer")), 0, false, true)!!
+        state.advance(target, 1_000_000_000L, 4)
+        assertEquals(4, state.advance(target, 1_250_000_000L, 4))
+        assertEquals(4, state.visible(target))
+        assertEquals(0, target.limit("answer", state.visible(target)))
+        state.pause(target)
+        assertEquals(4, state.advance(target, 9_000_000_000L))
+        val partial = state.advance(target, 9_050_000_000L)
+        assertTrue(partial in 5 until target.total)
+        assertEquals(target.total, state.advance(target, 9_250_000_000L))
+    }
+
     @Test fun existingMessagesAndRemountsAreVisibleImmediately() {
         for (streaming in listOf(false, true)) {
             val state = MarkdownTypingState(listOf(source("existing")))

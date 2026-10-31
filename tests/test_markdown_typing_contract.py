@@ -30,12 +30,14 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)", self.chat)
-        self.assertIn("val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance, enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready)", self.chat)
-        self.assertIn("withFrameNanos { motion.advance(current, it) { currentAdvance() } }", self.typing)
+        self.assertIn("val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance,", self.chat)
+        self.assertIn("enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready,", self.chat)
+        self.assertIn("blockedSources = blockedSources)", self.chat)
+        self.assertIn("withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }", self.typing)
         for source in [self.typing, self.reveal]:
             for forbidden in ["MarkdownParser.parse", "MarkdownText.render(", "substring(0,", "Thread.sleep", "delay("]:
                 self.assertNotIn(forbidden, source)
-        self.assertIn("while (shown < current.total)", self.typing)
+        self.assertIn("while (shown < end)", self.typing)
 
     def test_mount_baseline_and_part_identity_are_not_text_guesses(self):
         for token in ["remember(identity, resetEpoch) { sources.toList() }", "MarkdownTypingSource(it.itemId, it.text)",

@@ -60,6 +60,7 @@ internal fun rememberMarkdownReveal(
     onVisibleAdvance: () -> Unit = {},
     enabled: Boolean = true,
     reasoningReady: (app.daiyu.android.domain.ReportedReasoning) -> Boolean = { true },
+    blockedSources: Set<String> = emptySet(),
 ): MarkdownReveal {
     val prefix = turn.content.takeWhile { it !is MessageContentUi.Reasoning || reasoningReady(it.reported) }
     val sources = remember(prefix, turn.finalText, turn.content.isEmpty(), enabled) {
@@ -75,7 +76,8 @@ internal fun rememberMarkdownReveal(
         }
     }
     return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming,
-        turn.status != RunStatus.RUNNING && prefix.size == turn.content.size, resetEpoch, onVisibleAdvance, enabled)
+        turn.status != RunStatus.RUNNING && prefix.size == turn.content.size, resetEpoch, onVisibleAdvance, enabled,
+        blockedSources = blockedSources)
 }
 
 @Composable
@@ -88,6 +90,7 @@ internal fun rememberMarkdownReveal(
     onVisibleAdvance: () -> Unit = {},
     enabled: Boolean = true,
     allowBaselinePrefix: Boolean = true,
+    blockedSources: Set<String> = emptySet(),
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
@@ -112,15 +115,21 @@ internal fun rememberMarkdownReveal(
     val target = remember(motion, parts, baselineLength, streaming, terminal) {
         motion.update(parts, baselineLength, streaming, terminal)
     }
-    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, enabled) {
-        if (!enabled) return@produceState
+    val advanceLimit = remember(target, blockedSources) {
+        target?.parts?.takeWhile { it.source.id !in blockedSources }?.sumOf { it.length.toLong() }
+            ?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: 0
+    }
+    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, enabled, advanceLimit) {
         val current = target ?: return@produceState
-        var shown = current.start
+        var shown = motion.visible(current)
         value = MarkdownTypingFrame(current, shown)
-        while (shown < current.total) {
-            shown = withFrameNanos { motion.advance(current, it) { currentAdvance() } }
+        if (!enabled) { motion.pause(current); return@produceState }
+        val end = maxOf(shown, minOf(current.total, advanceLimit))
+        while (shown < end) {
+            shown = withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }
             value = MarkdownTypingFrame(current, shown)
         }
+        if (end < current.total) motion.pause(current)
     }
     val exact = projection?.sources == sources.map { it.text } && baselineLength != null && target != null &&
         target.parts == parts && target.parts.map { it.source } == sources

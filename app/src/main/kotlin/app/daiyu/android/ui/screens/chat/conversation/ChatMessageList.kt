@@ -486,7 +486,6 @@ internal fun AssistantTurn(
     }
     val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)
     val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)
-    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance, enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready)
     val contentReady = projection?.sources == sources
     val generationComplete = turn.status != RunStatus.RUNNING && contentReady
     val displayedTurn = remember(turn, projection) {
@@ -499,13 +498,26 @@ internal fun AssistantTurn(
             })
         }
     }
+    val ordered = rememberAssistantWorkflowContent(displayedTurn)
+    var answerReleased by rememberSaveable(turn.listKey) {
+        mutableStateOf(ordered.work == null && reasoningReady && ordered.body.isNotEmpty())
+    }
+    val canReleaseWithoutWorkflow = ordered.work == null && reasoningReady
+    val bodyVisible = answerReleased || canReleaseWithoutWorkflow
+    val blockedSources = remember(ordered.body, bodyVisible) {
+        if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
+    }
+    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance,
+        enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready,
+        blockedSources = blockedSources)
+    SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { mutableStateOf(false) }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
     val initialBodyPending = sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody
     SideEffect { if (hasDisplayBody) hasProjectedBody = true }
     SideEffect { onContentReady(contentReady) }
     SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }
-    val revealSettled = reveal.settled && reasoningReady
+    val revealSettled = reveal.settled && reasoningReady && (bodyVisible || ordered.body.isEmpty())
     SideEffect { onRevealSettled(revealSettled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
     if (turn.hasVisibleResponse()) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -519,7 +531,7 @@ internal fun AssistantTurn(
             Text(identity?.name ?: "助手", color = conversationColors().text,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
-        AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete,
+        AssistantTextContent(displayedTurn, ordered, bodyVisible, { answerReleased = true }, actions, projection, reveal, generationComplete,
             revealResetEpoch, onVisibleAdvance, handoff, imageLoader, dedicatedTool, toolContent)
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
@@ -539,8 +551,7 @@ internal fun AssistantTurn(
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff, imageLoader: MessageImageLoader?, dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit) {
-    val ordered = rememberAssistantWorkflowContent(turn)
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantWorkflowContent, bodyVisible: Boolean, onAnswerReleased: () -> Unit, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff, imageLoader: MessageImageLoader?, dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit) {
     val work = ordered.work
     val workReasoning = remember(ordered.steps) { ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported } }
     val reasoningReady = turn.reasoningStopped || handoff.ready(workReasoning)
@@ -549,9 +560,6 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
         WorkflowEntrances(if (reasoningReady) ordered.body.mapIndexed { index, item -> item.workflowKey(index) } else emptyList())
     }
     val observedLive = remember(turn.listKey) { turn.status == RunStatus.RUNNING }
-    var answerReleased by rememberSaveable(turn.listKey) {
-        mutableStateOf(work == null && reasoningReady && ordered.body.isNotEmpty())
-    }
     val textBody = rememberAssistantTextBody(ordered.plainNarration, projection, reveal, generationComplete)
     val answerPending = ordered.body.isNotEmpty()
     val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)
@@ -561,11 +569,9 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
         generationComplete = turn.status != RunStatus.RUNNING, stopped = turn.reasoningStopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = notifyVisibleAdvance, handoff = handoff,
         entrances = entrances, answerPending = answerPending,
-        onAnswerReleased = { if (reasoningReady && answerPending) answerReleased = true },
+        onAnswerReleased = { if (reasoningReady && answerPending) onAnswerReleased() },
         dedicatedTool = dedicatedTool, toolContent = toolContent, textBody = textBody) }
-    val canReleaseWithoutWorkflow = work == null && reasoningReady
-    SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
-    if (ordered.body.isNotEmpty() && (answerReleased || canReleaseWithoutWorkflow)) {
+    if (ordered.body.isNotEmpty() && bodyVisible) {
         MessageContent(ordered.body, actions, imageLoader, markdown = true,
             imageOffset = ordered.steps.count { it is MessageContentUi.Image },
             entryBody = { key, body -> WorkflowEntry(key, bodyEntrances, observedLive,

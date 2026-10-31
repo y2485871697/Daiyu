@@ -11,7 +11,7 @@ class TypewriterHapticsContract(unittest.TestCase):
         typing = (CHAT / "MarkdownTyping.kt").read_text()
         motion = (CHAT / "MarkdownReveal.kt").read_text().split("fun advance(", 1)[1]
         self.assertIn("rememberUpdatedState(onVisibleAdvance)", typing)
-        self.assertIn("motion.advance(current, it) { currentAdvance() }", typing)
+        self.assertIn("motion.advance(current, it, end) { currentAdvance() }", typing)
         self.assertIn("if (target !== expected) return expected.start", motion)
         self.assertIn("if (shown > previous) onAdvance()", motion)
         self.assertLess(motion.index("if (target !== expected)"), motion.index("onAdvance()"))

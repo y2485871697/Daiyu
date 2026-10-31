@@ -32,12 +32,12 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         for token in ['val contentReady = projection?.sources == sources',
                       'turn.status != RunStatus.RUNNING && contentReady',
                       'content.copy(text = projection.sources.getOrNull(textIndex++) ?: "")',
-                      'AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete']:
+                      'AssistantTextContent(displayedTurn, ordered, bodyVisible, { answerReleased = true }, actions, projection, reveal, generationComplete']:
             self.assertIn(token, chat)
+        self.assertIn('val ordered = rememberAssistantWorkflowContent(displayedTurn)', chat)
         assistant = chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
         for token in [
-            'val ordered = rememberAssistantWorkflowContent(turn)',
             'val textBody = rememberAssistantTextBody(ordered.plainNarration, projection, reveal, generationComplete)',
             'work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey,',
             'MessageContent(ordered.body, actions, imageLoader, markdown = true',

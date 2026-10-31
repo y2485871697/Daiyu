@@ -56,7 +56,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         source = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertNotIn('ReportedReasoningCard(', source)
         self.assertEqual(1, source.count('WorkProcessCard('))
-        self.assertIn('val ordered = rememberAssistantWorkflowContent(turn)', source)
+        self.assertIn('val ordered = rememberAssistantWorkflowContent(displayedTurn)', source)
         self.assertIn('val ordered = remember(turn) { turn.workflowContent() }', (CHAT / 'AssistantWorkflowContent.kt').read_text())
         self.assertIn('MessageContent(steps,', source)
         self.assertIn('ReasoningStepRow(ownerKey, reported, connector,', source)
@@ -135,8 +135,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         host = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertIn('reasoningReady = { stopped || handoff.ready(it) }', host)
         self.assertIn('onHandoffReady = { if (it) handoff.complete(reported) }', host)
-        self.assertIn('onAnswerReleased = { if (reasoningReady && answerPending) answerReleased = true }', host)
-        self.assertIn('ordered.body.isNotEmpty() && (answerReleased || canReleaseWithoutWorkflow)', host)
+        self.assertIn('onAnswerReleased = { if (reasoningReady && answerPending) onAnswerReleased() }', host)
+        self.assertIn('ordered.body.isNotEmpty() && bodyVisible', host)
 
     def test_single_thought_host_and_entrances_keep_order_and_do_not_replay(self):
         ordered = (CHAT / 'AssistantWorkflowContent.kt').read_text()

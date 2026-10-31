@@ -191,19 +191,30 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         return next
     }
 
-    fun advance(expected: MarkdownTypingTarget, frameNanos: Long, onAdvance: () -> Unit = {}): Int {
+    fun visible(expected: MarkdownTypingTarget): Int =
+        if (target === expected) position.toInt().coerceIn(0, expected.total) else expected.start
+
+    fun pause(expected: MarkdownTypingTarget) {
+        if (target !== expected) return
+        lastFrame = 0L
+        drainStart = 0L
+        drainPosition = position
+    }
+
+    fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int = expected.total, onAdvance: () -> Unit = {}): Int {
         if (target !== expected) return expected.start
         val previous = position.toInt()
+        val end = maxOf(previous, limit.coerceIn(0, expected.total))
         if (lastFrame == 0L) lastFrame = frameNanos
         val elapsed = ((frameNanos - lastFrame).coerceAtLeast(0L) / 1_000_000_000.0).coerceAtMost(0.05)
         lastFrame = frameNanos
         if (expected.streaming) {
-            position = (position + maxOf(70.0, (expected.total - position) * 7.0) * elapsed)
-                .coerceAtMost(expected.total.toDouble())
+            position = (position + maxOf(70.0, (end - position) * 7.0) * elapsed)
+                .coerceAtMost(end.toDouble())
         } else {
             if (drainStart == 0L) { drainStart = frameNanos; drainPosition = position }
             val fraction = ((frameNanos - drainStart).coerceAtLeast(0L) / 250_000_000.0).coerceAtMost(1.0)
-            position = drainPosition + (expected.total - drainPosition) * fraction
+            position = drainPosition + (end - drainPosition) * fraction
         }
         if (position >= expected.total && expected.terminal) closed = true
         val shown = position.toInt().coerceIn(0, expected.total)

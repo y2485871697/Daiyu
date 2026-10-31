@@ -15,6 +15,17 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('visibility = reveal.visibility(partId)', ui)
         self.assertIn('else ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)', ui)
 
+    def test_hidden_answer_and_typewriter_share_the_same_release_gate(self):
+        chat = (BASE / 'ChatMessageList.kt').read_text()
+        typing = (BASE / 'MarkdownTyping.kt').read_text()
+        for token in ('val bodyVisible = answerReleased || canReleaseWithoutWorkflow',
+                      'if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>()',
+                      'blockedSources = blockedSources', 'ordered.body.isNotEmpty() && bodyVisible'):
+            self.assertIn(token, chat)
+        for token in ('takeWhile { it.source.id !in blockedSources }', 'target, enabled, advanceLimit',
+                      'var shown = motion.visible(current)', 'if (end < current.total) motion.pause(current)'):
+            self.assertIn(token, typing)
+
     def test_container_passes_state_without_subscribing_to_the_frame(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         blocks = ui.split('private fun MarkdownBlocks(', 1)[1].split('private fun MarkdownBlockBody(', 1)[0]

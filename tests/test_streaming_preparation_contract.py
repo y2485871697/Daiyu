@@ -16,7 +16,7 @@ class StreamingPreparationContract(unittest.TestCase):
         self.assertNotIn("remember(projection, sources)", source)
         self.assertIn("MarkdownTypingSource(id, parsed.sources[index])", source)
         self.assertIn("target.parts.map { it.source } == sources", source)
-        self.assertEqual(1, source.count("withFrameNanos { motion.advance(current, it) { currentAdvance() } }"))
+        self.assertEqual(1, source.count("withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }"))
 
     def test_committed_fallback_does_not_invalidate_its_own_composition(self):
         source = (CHAT / "MessageMarkdown.kt").read_text()

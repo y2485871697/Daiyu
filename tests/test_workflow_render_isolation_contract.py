@@ -14,12 +14,12 @@ class WorkflowRenderIsolationContract(unittest.TestCase):
         self.assertNotIn('ChatTurnUi.Assistant', signature)
         self.assertNotIn('MarkdownProjection', signature)
         self.assertNotIn('MarkdownReveal', signature)
-        for token in ('val ordered = rememberAssistantWorkflowContent(turn)',
+        for token in ('val ordered = rememberAssistantWorkflowContent(displayedTurn)',
                       'val textBody = rememberAssistantTextBody(',
                       'val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)',
                       'val notifyVisibleAdvance = remember { { currentVisibleAdvance.value() } }',
                       'work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey,',
-                      'onAnswerReleased = { if (reasoningReady && answerPending) answerReleased = true }'):
+                      'onAnswerReleased = { if (reasoningReady && answerPending) onAnswerReleased() }'):
             self.assertIn(token, source)
         renderer = source.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',

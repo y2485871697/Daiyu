@@ -37,6 +37,61 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             SemanticsProperties.StateDescription, if (expanded) "已展开" else "已折叠"))
     }
 
+    fun testLegacyTerminalAnswerStartsTypingOnlyAfterWorkflowDisposal() = verifyAnswerAdmission(mixed = false, terminal = true)
+    fun testMixedTerminalAnswerStartsTypingOnlyAfterWorkflowDisposal() = verifyAnswerAdmission(mixed = true, terminal = true)
+    fun testLiveAnswerStartsTypingOnlyAfterWorkflowDisposal() = verifyAnswerAdmission(mixed = true, terminal = false)
+
+    private fun verifyAnswerAdmission(mixed: Boolean, terminal: Boolean) {
+        prepare()
+        val answer = "ANSWER " + "visible text ".repeat(18)
+        runBlocking {
+            projectMarkdown(listOf(answer))
+            projectMarkdown(listOf(answer), parser = streamingMarkdownParser)
+        }
+        var ready by mutableStateOf(false)
+        var done by mutableStateOf(false)
+        val advances = java.util.concurrent.atomic.AtomicInteger()
+        val settled = java.util.concurrent.atomic.AtomicBoolean()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val source = message(listOf(tool("t1")) + if (ready) listOf(MessageBlock.Text("body", answer)) else emptyList(), emptyList())
+                    .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
+                val turn = mapped(source).let { if (mixed) it else it.copy(content = emptyList()) }
+                AssistantTurn(turn.copy(isStreaming = !done), ChatScreenActions(),
+                    onVisibleAdvance = { advances.incrementAndGet() }, onRevealSettled = { settled.set(it) })
+            } } }
+            ui.mainClock.advanceTimeBy(400)
+            ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
+            mainThread { ready = true; done = terminal }
+            val textMatcher = hasTestTag("message-content-text:0") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)
+            var firstVisible: String? = null
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                val bodies = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+                val currentText = bodies.firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }
+                if (ui.onAllNodesWithTag("tool-step:t1").fetchSemanticsNodes().isNotEmpty()) {
+                    assertTrue("No answer text may overlap the closing workflow", currentText.isNullOrEmpty())
+                    assertEquals("No body feedback during workflow exit", 0, advances.get())
+                    assertFalse("Hidden body is not fully revealed", settled.get())
+                } else if (!currentText.isNullOrEmpty()) firstVisible = currentText
+                firstVisible != null
+            }
+            assertTrue("First body frame is partial: ${firstVisible?.length}", firstVisible!!.length in 1 until answer.length)
+            assertTrue(answer.startsWith(firstVisible!!))
+            assertTrue(advances.get() > 0)
+            mainThread { done = true }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(32)
+                ui.onAllNodesWithText(answer, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() && settled.get()
+            }
+            ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(400)
+            ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testFinalAnswerAppendsLeaveTheOpenedWorkflowIdleButUpdateTextLeaves() {
         prepare()
         val owner = WorkStepOwnerUi("c", "r", "a")

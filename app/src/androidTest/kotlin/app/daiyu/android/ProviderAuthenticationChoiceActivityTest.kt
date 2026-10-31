@@ -30,7 +30,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
             } }
             ui.waitForIdle()
             val tags = listOf("provider-add", "provider-add-anthropic", "provider-add-speech")
-            val titles = listOf("新增 OpenAI-compatible", "新增 Anthropic", "新增豆包语音")
+            val titles = listOf("新增 OpenAi", "新增 Anthropic", "新增豆包语音")
             val summaries = listOf("支持 ChatGPT、DeepSeek、Kimi、GLM、Qwen 等", "支持 Anthropic Claude 官方或兼容 API",
                 "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。")
             var iconLeft: Float? = null
@@ -41,7 +41,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
                 reveal(tag, "模型提供商").scrollToVisible()
                 val icon = ui.onNodeWithTag("$tag-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                 val title = ui.onNodeWithText(titles[index], useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-                val summary = ui.onNodeWithText(summaries[index], useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                ui.onNodeWithText(summaries[index], useUnmergedTree = true).assertDoesNotExist()
                 if (index == 0) {
                     iconLeft = icon.left; iconWidth = icon.width; iconHeight = icon.height; textLeft = title.left
                 }
@@ -49,7 +49,6 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
                 assertEquals("icon width dark=$dark font=$fontScale", checkNotNull(iconWidth), icon.width, 1f)
                 assertEquals("icon height dark=$dark font=$fontScale", checkNotNull(iconHeight), icon.height, 1f)
                 assertEquals("title start dark=$dark font=$fontScale", checkNotNull(textLeft), title.left, 1f)
-                assertEquals(title.left, summary.left, 1f)
                 assertEquals(icon.width, icon.height, 1f)
                 val density = activity.resources.displayMetrics.density
                 assertEquals("24dp icon width", 24f * density, icon.width, 1f)
@@ -75,6 +74,9 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         val before = fixture.controller.providers.snapshot()
         reveal("provider-add", "模型提供商").performClick()
         node("page:认证方式").assertExists()
+        ui.onNodeWithText("OAuth 通过服务商网页登录；API Key 使用您手动配置的密钥。", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithText("OpenAI 官方接口或兼容的第三方站点", useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithText("使用 OpenAI Codex 登录", useUnmergedTree = true).assertIsDisplayed()
         node("provider-auth-oauth").assertHasClickAction()
         reveal("provider-auth-api-key", "认证方式").performClick()
         awaitUniqueTag("page:添加提供商")
@@ -217,6 +219,8 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         reveal("settings-field:Base URL", "添加提供商").assertTextContains("https://openspeech.bytedance.com")
         node("provider-endpoint-select").assertDoesNotExist()
         reveal("settings-field:API Key", "添加提供商").performTextReplacement("synthetic-doubao-key")
+        ui.onNodeWithText("测试会合成“你好”，可能产生语音服务用量；不会播放或录音。", useUnmergedTree = true).assertDoesNotExist()
+        reveal("model-connection-test", "添加提供商").assertIsEnabled().assertHasClickAction()
         assertEquals(before, fixture.controller.providers.snapshot())
         reveal("model-save", "添加提供商").performClick()
         awaitUniqueTag("page:豆包语音")

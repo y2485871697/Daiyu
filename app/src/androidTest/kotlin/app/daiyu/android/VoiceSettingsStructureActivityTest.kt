@@ -247,6 +247,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
         enter(); reveal("voice-recognition-method", "语音设置").performClick()
         node("voice-asr-method:system").assertIsSelected()
+        ui.onNodeWithText("无需账户。上一页下载语音包后，即可离线识别。").assertDoesNotExist()
         node("voice-asr-method:doubao").assertIsNotSelected()
         for (tag in listOf("voice-asr-method:system", "voice-asr-method:doubao")) {
             node(tag).assertHeightIsAtLeast(48.dp)
@@ -258,6 +259,8 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(local.center.y, cloud.center.y, 1f)
         node("voice-asr-method:doubao").performClick()
         ui.waitUntil { fixture.controller.voiceRuntime.configuration.value?.dictation == "DOUBAO" }
+        ui.waitForIdle()
+        ui.onNodeWithText("已保存").assertDoesNotExist()
         node("voice-asr-method:doubao").assertIsSelected()
         node("voice-asr-method:system").assertIsNotSelected()
         node("voice-asr-account-card").assertExists()
@@ -266,6 +269,9 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
         node("voice-asr-method:system").performClick()
         ui.waitUntil { fixture.controller.voiceRuntime.configuration.value?.dictation == "SYSTEM" }
+        ui.waitForIdle()
+        ui.onNodeWithText("已保存").assertDoesNotExist()
+        ui.onNodeWithText("无需账户。上一页下载语音包后，即可离线识别。").assertDoesNotExist()
         node("voice-asr-method:system").assertIsSelected()
         node("voice-asr-account-card").assertDoesNotExist()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()

@@ -124,7 +124,7 @@ internal fun VoiceSettingsPanel(
                 runtime.save(next, target)
                 preferences.rememberCloud(target, next)
                 if (speechOnly) preferences.setCloudEnabled(target, next.engine != "SYSTEM")
-                if (alive.get()) { onSaved(); notice = "已保存" }
+                if (alive.get()) { onSaved(); notice = "" }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { if (alive.get()) {
                 notice = "未保存，请检查模型、接口地址、音色和密钥。"
@@ -333,7 +333,7 @@ internal fun VoiceSettingsPanel(
                                 SettingsRow("打开豆包控制台", tag = "voice-asr-console", showChevron = true,
                                     onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
                             } }
-                        } else item { SettingsNote("无需账户。上一页下载语音包后，即可离线识别。") }
+                        }
                     } else if (child == "MIMO") {
                         item { VoiceSettingsCard {
                             SettingsRow("MiMo 提供商", summary = mimoConnection()?.let { modelSource.providerName(it.provider) } ?: "请选择提供商",

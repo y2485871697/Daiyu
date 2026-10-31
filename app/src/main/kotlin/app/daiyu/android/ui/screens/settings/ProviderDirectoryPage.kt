@@ -53,7 +53,7 @@ internal data class ProviderCardSummary(val endpoint: String, val protocol: Prov
     fun description(enabled: Boolean): String = listOfNotNull(
         endpoint.takeIf { it.isNotBlank() },
         listOfNotNull(if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint)) "豆包语音" else when (protocol) {
-            ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS -> "Custom OpenAI-compatible"
+            ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS -> "OpenAi"
             ProviderProtocol.MESSAGES -> "Anthropic"
             else -> null
         }, modelCount?.let { "$it 个模型" }, "禁用".takeUnless { enabled }).joinToString(" · ").takeIf { it.isNotEmpty() },
@@ -93,17 +93,17 @@ internal fun ProviderDirectoryPage(
             item("provider-create") {
                 SettingsSectionTitle("新增提供商")
                 SettingsCard {
-                    SettingsRow("新增 OpenAI-compatible", summary = "支持 ChatGPT、DeepSeek、Kimi、GLM、Qwen 等",
+                    SettingsRow("新增 OpenAi",
                         tag = "provider-add", leading = { DaiyuIcon(DaiyuIcons.Model, null, Modifier.testTag("provider-add-icon")) },
                         showChevron = true, onClick = if (enabled && selectedSlots == null) onAddOpenAi else null)
-                    SettingsRow("新增 Anthropic", summary = "支持 Anthropic Claude 官方或兼容 API",
+                    SettingsRow("新增 Anthropic",
                         tag = "provider-add-anthropic", leading = {
                             Box(Modifier.size(24.dp).testTag("provider-add-anthropic-icon"), contentAlignment = Alignment.Center) {
                                 Text("AI")
                             }
                         },
                         showChevron = true, onClick = if (enabled && selectedSlots == null) onAddAnthropic else null)
-                    SettingsRow("新增豆包语音", summary = "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。",
+                    SettingsRow("新增豆包语音",
                         tag = "provider-add-speech", leading = { DaiyuIcon(DaiyuIcons.Voice, null, Modifier.testTag("provider-add-speech-icon")) },
                         showChevron = true, onClick = if (enabled && selectedSlots == null) onAddSpeech else null)
                 }
@@ -204,7 +204,6 @@ internal fun ProviderAuthenticationPage(enabled: Boolean, notice: String?, onBac
                     leading = { DaiyuIcon(DaiyuIcons.Model, null) },
                     trailing = { DaiyuIcon(DaiyuIcons.ChevronRight, null) }, onClick = if (enabled) onOAuth else null)
             }
-            SettingsNote("OAuth 通过服务商网页登录；API Key 使用您手动配置的密钥。")
         }
     }
 }

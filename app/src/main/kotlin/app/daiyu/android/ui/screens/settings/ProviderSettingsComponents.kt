@@ -65,13 +65,8 @@ internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolea
     val modes = listOf("Chat Completions API", "Responses API")
     val tags = listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses")
     val index = protocols.indexOf(draft.protocol)
-    ProviderChoiceRow("Endpoint 模式", modes.getOrNull(index) ?: "请选择", "provider-endpoint-select", enabled, modes,
-        tags, index,
-        summary = when (draft.protocol) {
-            ProviderProtocol.RESPONSES -> "使用 Responses API、typed items 与语义化流式事件"
-            ProviderProtocol.CHAT_COMPLETIONS -> "使用 Chat Completions API"
-            else -> "请选择请求接口"
-        }) { choice -> onChange(draft.selectProtocol(protocols[choice])) }
+    ProviderChoiceRow("上游格式", modes.getOrNull(index) ?: "请选择", "provider-endpoint-select", enabled, modes,
+        tags, index) { choice -> onChange(draft.selectProtocol(protocols[choice])) }
 
 }
 

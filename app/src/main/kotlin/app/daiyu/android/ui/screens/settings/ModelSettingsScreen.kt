@@ -167,7 +167,6 @@ internal fun ModelSettingsScreen(
                     }
                 }
                 if (testConnection != null) {
-                    if (speechOnly) SettingsNote("测试会合成“你好”，可能产生语音服务用量；不会播放或录音。")
                     if (providerName != null) {
                         ProviderActionButton(text = if (connection.running) "正在测试连接" else "测试连接",
                             enabled = enabled && !connection.running, onClick = connection.start,

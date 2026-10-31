@@ -222,13 +222,10 @@ fun AssistantEditScreen(
                 }
                 AssistantPreviewField(memoryDraft, {
                     if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
-                }, stringResource(R.string.assistant_memory_content), enabled = !saving, singleLine = false,
+                }, "", enabled = !saving, singleLine = false,
                     minHeight = 90.dp, maxHeight = 180.dp, bottomSpacing = 0.dp,
                     fieldModifier = Modifier.testTag("assistant-edit-memory").isolateEditorScroll(scrollIsolation),
                     placeholder = stringResource(R.string.assistant_memory_placeholder))
-                Text(stringResource(if (memoryEnabled) R.string.assistant_enabled else R.string.assistant_disabled),
-                    color = colors.muted, fontSize = (11f * s).sp, lineHeight = (17f * s).sp,
-                    modifier = Modifier.padding(start = 2.dp * s, end = 2.dp * s, top = 7.dp * s))
             }
         }
         Box(Modifier.fillMaxWidth().heightIn(min = 15.dp * s).padding(horizontal = 2.dp * s)

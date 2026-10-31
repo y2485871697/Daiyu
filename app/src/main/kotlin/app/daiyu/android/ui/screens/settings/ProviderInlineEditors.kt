@@ -118,7 +118,7 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
             else draft.copy(customBody = result ?: draft.customBody, bodyFieldsValid = error == null, bodyFieldRows = value, bodyFieldsError = error))
     }
     SettingsRow(if (rows.isEmpty()) "未设置" else "已设置 ${rows.size} 项",
-        summary = if (headers) "可覆盖 User-Agent；认证与传输请求头由系统管理。" else "值使用 JSON 格式，字符串请加双引号；不是请求头。",
+        summary = if (headers) "可覆盖 User-Agent；认证与传输请求头由系统管理。" else "值使用 JSON 格式，字符串请加双引号。",
         tag = if (headers) "model-custom-headers" else "model-body-fields",
         onClick = if (enabled) ({ expanded = !expanded }) else null,
         trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.settingsDisclosureRotation(expanded, expandedDegrees = 180f)) })

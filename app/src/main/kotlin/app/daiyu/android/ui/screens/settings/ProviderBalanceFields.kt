@@ -47,12 +47,7 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
         if (options.enabled) {
             ProviderChoiceRow("预设模板", names.getOrElse(presets.indexOf(options.preset)) { "自定义" },
                 "provider-balance-preset", enabled, names, presets.map { "provider-balance-preset:$it" },
-                presets.indexOf(options.preset), summary = when (options.preset) {
-                    BalanceOption.PRESET_NEW_API -> "请求 /api/user/self，并用 data.quota / 500000 换算额度"
-                    BalanceOption.PRESET_SUB2API -> "填入 /usage 和 remaining，可以再改"
-                    BalanceOption.PRESET_DEEPSEEK -> "填入 /user/balance 和 balance_infos[0].total_balance，可以再改"
-                    else -> "自行填写接口路径和 JSON 结果键"
-                }) { change(BalanceOption.applyPreset(presets[it], options)) }
+                presets.indexOf(options.preset)) { change(BalanceOption.applyPreset(presets[it], options)) }
             if (options.preset == BalanceOption.PRESET_NEW_API) {
                 SettingsTextField("访问令牌", options.accessToken, { change(options.copy(accessToken = it)) },
                     password = true, enabled = enabled, compact = true, tag = "provider-balance-token")

@@ -63,6 +63,11 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
     private fun preset(id: String) {
         reveal("provider-balance-preset", title).performClick()
         node("provider-balance-preset:$id").performClick(); ui.waitForIdle()
+        for (description in listOf("自行填写接口路径和 JSON 结果键",
+            "请求 /api/user/self，并用 data.quota / 500000 换算额度", "填入 /usage 和 remaining，可以再改",
+            "填入 /user/balance 和 balance_infos[0].total_balance，可以再改")) {
+            ui.onNodeWithText(description, useUnmergedTree = true).assertDoesNotExist()
+        }
     }
     private fun start() { reveal("provider-balance-test", title).assertIsEnabled().performClick(); ui.waitForIdle() }
     private fun deliver(request: Request, result: BalanceResult = success) {

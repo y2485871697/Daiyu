@@ -146,7 +146,7 @@ class ProviderVisualContractTest(unittest.TestCase):
             self.assertIn(fragment, actions)
         directory = (ANDROID / 'ProviderAuthenticationChoiceActivityTest.kt').read_text()
         for fragment in ('listOf(false, true)', 'listOf(.9f, 1.3f)', 'key(dark, fontScale)',
-                         'useUnmergedTree = true', 'icon.left', 'title.left', 'summary.left',
+                         'useUnmergedTree = true', 'icon.left', 'title.left',
                          'row.center.y, icon.center.y', 'checkNotNull(iconWidth), icon.width',
                          'checkNotNull(iconHeight), icon.height', 'node("provider-add-speech").assertHasClickAction()',
                          'testAnthropicAddUsesInlineNameAndKeepsProviderDisabled'):

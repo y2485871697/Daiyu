@@ -1,0 +1,123 @@
+name: 代鱼模型弹窗检查
+run-name: 代鱼模型弹窗检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 检查目标完整提交SHA
+        type: string
+        required: true
+      check_id:
+        description: 本次定向检查标识
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-model-picker-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  workflow:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      SKIP_JDK_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 核对检查源码
+        run: |
+          test -n "$EXPECTED_SHA"
+          python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            27
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 模型弹窗定向契约
+        shell: bash
+        run: |
+          mkdir -p model-picker-checks
+          set -o pipefail
+          python3 -B - 2>&1 <<'PY' | tee model-picker-checks/contracts.log
+          import json, unittest
+          from pathlib import Path
+          records = []
+          for pattern in ('test_model_switch_feedback_contract.py', 'test_selection_stays_open_contract.py',
+                          'test_model_picker_caption_contract.py', 'test_model_selection_switch_state_contract.py',
+                          'test_voice_settings_parity_contract.py'):
+              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              assert suite.countTestCases() > 0, pattern
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              assert result.wasSuccessful() and not result.skipped, pattern
+              records.append(dict(pattern=pattern, tests=result.testsRun, skipped=0))
+          Path('model-picker-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
+          PY
+          python3 scripts/verify_boundaries.py
+      - name: 准备既有离线语音依赖（不打包）
+        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+      - name: 模型弹窗定向单测及Compose源码编译（不打包）
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --parallel --build-cache --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=model-picker-checks/task-graph.json \
+            :app:compileDebugKotlin :app:testDebugUnitTest \
+            --tests 'app.daiyu.android.VoiceSettingsParityTest' \
+            --tests 'app.daiyu.android.title.TitleModelDefaultsTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.context.ContextManagementPresentationTest' \
+            --tests 'app.daiyu.android.ui.components.subagent.SubAgentModelPickerProjectorTest' \
+            :app:compileDebugAndroidTestKotlin 2>&1 | tee model-picker-checks/gradle.log
+      - name: 核对定向报告及零安装包
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root = Path.cwd()
+          expected = {'VoiceSettingsParityTest', 'TitleModelDefaultsTest',
+                      'ContextManagementPresentationTest', 'SubAgentModelPickerProjectorTest'}
+          suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
+          names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
+          assert names == expected, (names, expected)
+          assert all(int(s.attrib['tests']) > 0 for s in suites)
+          assert all(int(s.attrib.get(k, 0)) == 0 for s in suites for k in ('failures', 'errors', 'skipped'))
+          graph = json.loads(Path('model-picker-checks/task-graph.json').read_text())
+          log = Path('model-picker-checks/gradle.log').read_text()
+          for task in (':app:compileDebugKotlin', ':app:compileDebugAndroidTestKotlin'):
+              assert task in graph, task
+              match = re.search(r'^> Task ' + re.escape(task) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
+              assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
+          packages = [str(p) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
+          assert not packages, packages
+          record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+                        attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
+                        classes=sorted(names), contracts=json.loads(Path('model-picker-checks/contracts.json').read_text()),
+                        apk_built=False, instrumentation_run=False)
+          Path('model-picker-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(record, ensure_ascii=False))
+          PY
+      - name: 上传检查证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 模型弹窗定向检查
+          path: |
+            model-picker-checks/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/host-pty/
+          if-no-files-found: error

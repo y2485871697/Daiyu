@@ -85,6 +85,31 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
                      ".performTouchInput { click(center) }"):
             self.assertIn(part, method)
 
+    def test_voice_selection_uses_switching_without_reloading_or_dimming(self):
+        text = (SRC / "VoiceSettingsDialogs.kt").read_text().split("internal fun VoiceModelDialog(", 1)[1].split("internal val SettingsSpeechModelChoice.speechPickerId", 1)[0]
+        self.assertIn("loading = choices == null, enabled = choices != null && displayed.isNotEmpty()", text)
+        self.assertIn("switching = selecting", text)
+        self.assertIn("if (alive.get() && !selecting && current())", text)
+        pending = text.index("selecting = true")
+        self.assertLess(pending, text.index('error = ""', pending))
+        self.assertLess(pending, text.index("source.withSpeechModel(choice)"))
+        self.assertIn("finally { selecting = false }", text)
+        self.assertIn("if (alive.get() && current()) onSave(next)", text)
+        self.assertIn("LaunchedEffect(source, fixedEngine)", text)
+        self.assertNotIn("choices == null ||", text)
+        self.assertIn("模型列表读取失败，请重新打开。", text)
+        self.assertIn("模型连接已变化或不可读取，请重新选择。", text)
+        self.assertIn("throw cancelled", text)
+
+    def test_voice_regression_blocks_real_read_lease_without_invalidating_ticket(self):
+        text = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/VoiceModelDialogSelectionTest.kt").read_text()
+        for part in ("fixture.settings.modelCatalog.readConfiguration", "release.await(30, TimeUnit.SECONDS)",
+                     "assertIsNotEnabled().performTouchInput", "captureScreenNode", "assertEquals(0, changed)",
+                     'copy(revision = "saved-${saved.size}")', "assertSame(sheetRoot", "holder.join(5_000)",
+                     "testFirstDirectoryReadStillShowsLoading", "testStaleConnectionStillShowsFailureWithoutSaving"):
+            self.assertIn(part, text)
+        self.assertNotIn("configurationChange", text)
+
     def test_all_switch_success_notices_are_silent_but_failures_and_data_gate_stay(self):
         text = (SRC / "ChatController.kt").read_text()
         self.assertNotIn('"模型已切换"', text)

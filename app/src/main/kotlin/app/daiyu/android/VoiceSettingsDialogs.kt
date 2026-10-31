@@ -56,7 +56,7 @@ internal fun VoiceChoiceDialog(title: String, options: List<Pair<String, String>
 internal fun VoiceModelDialog(initial: VoiceConfiguration, source: SettingsModelSource,
     isCurrent: () -> Boolean, fixedEngine: String? = null, onSave: (VoiceConfiguration) -> Unit, onDismiss: () -> Unit) {
     var choices by remember { mutableStateOf<List<SettingsSpeechModelChoice>?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    var selecting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val current by rememberUpdatedState(isCurrent)
@@ -87,14 +87,16 @@ internal fun VoiceModelDialog(initial: VoiceConfiguration, source: SettingsModel
     val state = ChatModelPickerState(
         current = selected?.speechPickerId.orEmpty(), providerId = providerId, providers = providers,
         models = providers.singleOrNull { it.id == providerId }?.models.orEmpty(),
-        loading = choices == null || loading, enabled = choices != null && !loading && displayed.isNotEmpty(),
+        loading = choices == null, enabled = choices != null && displayed.isNotEmpty(),
+        switching = selecting,
         message = error.takeIf { it.isNotBlank() }
             ?: if (choices != null && displayed.isEmpty()) "暂无可选朗读模型，请先在供应商中添加语音模型。" else null,
     )
     fun select(provider: String, model: String) {
         val choice = displayed.singleOrNull { it.connection.provider.slotId == provider && it.speechPickerId == model } ?: return
-        if (alive.get() && !loading && current()) {
-            loading = true
+        if (alive.get() && !selecting && current()) {
+            selecting = true
+            error = ""
             scope.launch {
                 try {
                     val next = withContext(Dispatchers.IO) { source.withSpeechModel(choice) { settings ->
@@ -111,7 +113,7 @@ internal fun VoiceModelDialog(initial: VoiceConfiguration, source: SettingsModel
                     if (alive.get() && current()) onSave(next)
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { if (alive.get()) error = "模型连接已变化或不可读取，请重新选择。" }
-                finally { loading = false }
+                finally { selecting = false }
             }
         }
     }

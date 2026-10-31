@@ -59,6 +59,20 @@ class SelectionStaysOpenContractTest(unittest.TestCase):
         self.assertIn("voiceMenu = null", account)
         self.assertNotIn("confirmation = null; slotPicker = false", account)
         self.assertNotIn("existingId = voice.id; confirmation = null; importSlotPicker = false", account)
+    def test_title_and_conversation_compression_models_retain_picker_after_selection(self):
+        title = (SRC / "title/TitleModelSettingsScreen.kt").read_text().split('if (picker) SettingsModelPicker("标题模型"', 1)[1]
+        selected, dismiss = title.split("onDismiss =", 1)
+        self.assertNotIn("picker = false", selected)
+        self.assertIn("ownerCurrent() && !busy", selected)
+        self.assertIn("owner.prepareSelectProfile", selected)
+        self.assertIn("picker = false", dismiss)
+        context = (SRC / "ui/screens/chat/context/ContextManagementPanel.kt").read_text().split('SettingsModelPicker("压缩模型"', 1)[1]
+        selected, dismiss = context.split("onDismiss =", 1)
+        self.assertNotIn("presentation.choosingModel = false", selected)
+        self.assertIn("presentation.retain", selected)
+        self.assertIn("if (!isCurrent() || adapter == null) return@select", selected)
+        self.assertIn("presentation.choosingModel = false", dismiss)
+
     def test_settings_values_do_not_reset_on_value_changes(self):
         provider = (SRC / "ui/screens/settings/ProviderSettingsComponents.kt").read_text()
         self.assertIn("remember(tag) { mutableStateOf(false) }", provider)

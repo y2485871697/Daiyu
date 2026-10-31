@@ -60,7 +60,6 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
     if (picker) SettingsModelPicker("标题模型", source, selectedKey,
         onSelect = { choice ->
             if (ownerCurrent() && !busy) {
-                picker = false
                 val binding = TitleModelBinding(UUID.randomUUID().toString(), UUID.randomUUID().toString())
                 enqueue(owner.prepareSelectProfile(
                     profile = { source.withModel(choice) { TitleModelProfile(binding, it.copy(batteryEnabled = false, deviceStatusEnabled = false, requestOptions = app.daiyu.android.model.ProviderRequestOptions())) } },

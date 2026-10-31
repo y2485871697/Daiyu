@@ -65,15 +65,58 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         override fun previousArchivePage() { error("no archive entry") }
     }
     private fun show(actions: Actions, presentation: ContextManagementPresentation = ContextManagementPresentation()) {
+        val source = SettingsModelSource(fixture.application, fixture.controller.providers)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ContextManagementRoute(actions,
-                    SettingsModelSource(fixture.application, fixture.controller.providers), onClose = { routeCloses++ },
+                    source, onClose = { routeCloses++ },
                     presentation = presentation)
             }
         } }
         awaitUniqueTag("context-management")
     }
+    fun testRepeatedCompressionModelSelectionKeepsPickerAndOnlyChangesDraft() {
+        val catalog = fixture.settings.modelCatalogSnapshot()
+        assertEquals(app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED,
+            fixture.settings.modelCatalog.compareAndAppend(catalog.providerIdentity, catalog.revision,
+                listOf(app.daiyu.android.model.catalog.SavedCatalogModel("picker-audit-b", "picker-audit-b",
+                    app.daiyu.android.model.catalog.CatalogModelParameters()))) { false })
+        val source = SettingsModelSource(fixture.application, fixture.controller.providers)
+        val choices = source.choices(setOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.MESSAGES))
+        val presentation = ContextManagementPresentation()
+        val actions = Actions()
+        val before = fixture.settings.load()
+        show(actions, presentation)
+        node("compression-dialog-custom").performClick()
+        node("compression-dialog-model").performClick()
+        ui.waitUntil(timeoutMillis = 5000) {
+            ui.onAllNodes(hasTestTag("chat-model-picker") and SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "模型目录读取完成")).fetchSemanticsNodes().size == 1
+        }
+        val sheet = node("chat-selection-sheet").fetchSemanticsNode().root
+        val provider = choices.first().provider.slotId
+        node("chat-model-provider:$provider").performClick()
+        for (choice in choices.take(2)) {
+            val id = choice.selection.record.id
+            ui.onNode(hasTestTag("chat-model-option:$id") or hasTestTag("chat-model-option:$provider:$id")).performClick()
+            assertTrue(presentation.choosingModel)
+            assertEquals(choice.key, presentation.draft?.modelKey)
+            assertEquals(id, CatalogSummaryBindings.decode(checkNotNull(presentation.binding)).apiModel)
+            assertSame(sheet, node("chat-selection-sheet").fetchSemanticsNode().root)
+            node("chat-model-option:$id").assertIsSelected()
+            ui.onNodeWithText("正在读取模型目录…").assertDoesNotExist()
+            assertNull(actions.selection)
+        }
+        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("context-management")
+        assertFalse(presentation.choosingModel)
+        assertEquals(before, fixture.settings.load())
+        assertFalse(actions.events.contains("submit"))
+        assertEquals(0, routeCloses)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCompactRouteShowsNoDiagnosticEntryAndDoesNotStartRequest() {
         val actions = Actions(); show(actions)
         node("compression-dialog-custom").assertIsOff()

@@ -80,7 +80,6 @@ internal fun ContextManagementRoute(
                         choice.selection.providerIdentity, choice.selection.expectedRevision,
                         choice.selection.record.settings.localIdentity, choice.selection.record.id, choice.protocol)))
                 presentation.notice = null
-                presentation.choosingModel = false
             }, onDismiss = { if (isCurrent()) presentation.choosingModel = false })
     } else {
         CompressionConversationDialog(draft, onChange = change@ {

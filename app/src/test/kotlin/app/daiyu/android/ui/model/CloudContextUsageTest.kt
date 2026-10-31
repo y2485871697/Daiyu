@@ -48,6 +48,40 @@ class CloudContextUsageTest {
         assertEquals("4,1K/272K", CloudContextUsageUi(4_100, 272_000).tokensLabel(Locale.GERMANY))
         assertEquals("—/272K", CloudContextUsageUi(-1, 272_000).tokensLabel(Locale.US))
     }
+    @Test fun millionWindowsAndActualsChooseTheirUnitsIndependently() {
+        assertEquals("89K/1M", CloudContextUsageUi(89_000, 1_000_000).tokensLabel(Locale.US))
+        assertEquals("1M/1M", CloudContextUsageUi(1_000_000, 1_000_000).tokensLabel(Locale.US))
+        assertEquals("1.5M/2M", CloudContextUsageUi(1_500_000, 2_000_000).tokensLabel(Locale.US))
+        assertEquals("1M/272K", CloudContextUsageUi(1_000_000, 272_000).tokensLabel(Locale.US))
+        assertEquals("999K/1M", CloudContextUsageUi(999_000, 1_000_000).tokensLabel(Locale.US))
+    }
+    @Test fun millionFormattingKeepsLocalizedOneDecimalAndNoTrailingZero() {
+        assertEquals("1,5M/2M", CloudContextUsageUi(1_500_000, 2_000_000).tokensLabel(Locale.GERMANY))
+        assertEquals("1.2M/1.6M", CloudContextUsageUi(1_234_567, 1_560_000).tokensLabel(Locale.US))
+        assertEquals("1M/1M", CloudContextUsageUi(1_000_001, 1_000_000).tokensLabel(Locale.US))
+        assertEquals("2.1M/2.1M", CloudContextUsageUi(Int.MAX_VALUE.toLong() / 1_000,
+            Int.MAX_VALUE.toLong() / 1_000).tokensLabel(Locale.US))
+    }
+    @Test fun unknownNegativeAndZeroValuesRetainTheirMeaningAlongsideM() {
+        assertEquals("—/1M", CloudContextUsageUi(null, 1_000_000).tokensLabel(Locale.US))
+        assertEquals("—/1M", CloudContextUsageUi(-1, 1_000_000).tokensLabel(Locale.US))
+        assertEquals("0/1M", CloudContextUsageUi(0, 1_000_000).tokensLabel(Locale.US))
+        assertEquals("1M/—", CloudContextUsageUi(1_000_000).tokensLabel(Locale.US))
+        assertEquals("1M/—", CloudContextUsageUi(1_000_000, 0).tokensLabel(Locale.US))
+        assertEquals("1M/—", CloudContextUsageUi(1_000_000, -1).tokensLabel(Locale.US))
+    }
+    @Test fun compactMillionsDoNotChangePercentageOrRawTokenValues() {
+        val value = CloudContextUsageUi(89_000, 1_000_000)
+        assertEquals("89K/1M", value.tokensLabel(Locale.US))
+        assertEquals(89_000L, value.inputTokens)
+        assertEquals(1_000_000L, value.windowTokens)
+        assertEquals(0.089f, value.fraction!!, 0.000001f)
+        assertEquals("8.9% 上下文", value.label(Locale.US))
+        val overflow = CloudContextUsageUi(1_500_000, 1_000_000)
+        assertEquals("1.5M/1M", overflow.tokensLabel(Locale.US))
+        assertEquals(1f, overflow.fraction!!, 0f)
+        assertEquals("150.0% 上下文", overflow.label(Locale.US))
+    }
     @Test fun arcClampsButTheOneDecimalLabelRetainsOverflow() {
         val value = CloudContextUsageUi(120_000, 100_000)
         assertEquals(1f, value.fraction!!, 0f)

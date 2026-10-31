@@ -44,7 +44,10 @@ internal data class CloudContextUsageUi(val inputTokens: Long? = null, val windo
             val format = NumberFormat.getNumberInstance(locale).apply {
                 maximumFractionDigits = 1; isGroupingUsed = false
             }
-            return "${format.format(tokens / 1_000.0)}K"
+            val millions = tokens >= 1_000_000
+            val divisor = if (millions) 1_000_000.0 else 1_000.0
+            val unit = if (millions) "M" else "K"
+            return "${format.format(tokens / divisor)}$unit"
         }
         return "${compact(inputTokens)}/${compact(windowTokens?.takeIf { it > 0 })}"
     }

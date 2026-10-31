@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
 import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.components.etaInputContainerColor
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -191,7 +192,7 @@ private fun QuestionCardContent(
             Icon(DaiyuIcons.Interactive, null, Modifier.size(14.dp), tint = colors.accent)
             Text("$headingStatus · ${value.question.title}",
                 Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
-                color = colors.accent, style = questionTextStyle(10, 1.5f, FontWeight.Medium),
+                color = colors.accent, style = questionTextStyle(13, 1.5f, FontWeight.Medium),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp).settingsDisclosureRotation(expanded, expandedDegrees = 180f),
                 tint = colors.muted)
@@ -199,7 +200,7 @@ private fun QuestionCardContent(
         SettingsExpandableContent(expanded) {
             QuestionDivider(colors.line)
             Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 12.dp)) {
-                Text(value.question.question, color = colors.text, style = questionTextStyle(11, 1.7f))
+                Text(value.question.question, color = colors.text, style = questionTextStyle(16, 1.6f))
                 Spacer(Modifier.height(10.dp))
                 when {
                     confirmedAnswer != null -> {
@@ -212,27 +213,27 @@ private fun QuestionCardContent(
                             is QuestionAnswer.Delegate -> "你看着办"
                         }
                         Text("已选择：$label", color = colors.text,
-                            style = questionTextStyle(11, 1.8f, FontWeight.Medium))
+                            style = questionTextStyle(15, 1.6f, FontWeight.Medium))
                         val description = if (confirmedAnswer is QuestionAnswer.Delegate)
                             "仅把当前问题交给代鱼决定，不扩大操作权限。" else option?.description.orEmpty()
                         if (description.isNotEmpty()) {
                             Spacer(Modifier.height(5.dp))
-                            Text(description, color = colors.muted, style = questionTextStyle(10, 1.7f))
+                            Text(description, color = colors.muted, style = questionTextStyle(14, 1.6f))
                         }
                         confirmedAnswer.note?.takeIf { it.isNotEmpty() }?.let { note ->
                             Spacer(Modifier.height(12.dp))
                             QuestionDivider(colors.line)
                             Spacer(Modifier.height(9.dp))
                             Text("补充说明（可选）", color = colors.muted,
-                                style = questionTextStyle(9, 1.8f, FontWeight.Medium))
+                                style = questionTextStyle(14, 1.6f, FontWeight.Medium))
                             Spacer(Modifier.height(4.dp))
-                            Text(note, color = colors.text, style = questionTextStyle(10, 1.8f))
+                            Text(note, color = colors.text, style = questionTextStyle(15, 1.6f))
                         }
                     }
                     value.interrupted -> {
                         // No fabricated expiry reason: the domain currently exposes interruption only.
                         Text("提问已中断，当前不可作答", color = colors.muted,
-                            style = questionTextStyle(10, 1.8f))
+                            style = questionTextStyle(15, 1.6f))
                     }
                     else -> {
                         Column(Modifier.fillMaxWidth().selectableGroup().alpha(if (editable) 1f else .5f),
@@ -254,7 +255,7 @@ private fun QuestionCardContent(
                                     { session.select(QuestionAnswer.Other("")) }, Modifier.testTag("question-option:$index"))
                                 if (selection is QuestionAnswer.Other) {
                                     QuestionInput(otherText, "填写你的选择", editable, { session.editOther(it) },
-                                        Modifier.padding(start = 29.dp, end = 7.dp, bottom = 5.dp)
+                                        Modifier.padding(top = 4.dp, bottom = 5.dp)
                                             .testTag("question-other"), fadeDisabled = false)
                                 }
                                 index++
@@ -272,7 +273,7 @@ private fun QuestionCardContent(
                         }
                         Spacer(Modifier.height(10.dp))
                         val submitShape = RoundedCornerShape(11.dp)
-                        Box(Modifier.testTag("question-submit").fillMaxWidth().heightIn(min = 36.dp)
+                        Box(Modifier.testTag("question-submit").fillMaxWidth().heightIn(min = 44.dp)
                             .alpha(if (submitEnabled) 1f else .4f).clip(submitShape)
                             .background(if (submitEnabled) colors.accent else colors.soft)
                             .border(1.dp, if (submitEnabled) colors.accent else colors.line, submitShape)
@@ -282,7 +283,7 @@ private fun QuestionCardContent(
                             contentAlignment = Alignment.Center) {
                             Text(if (session.busy) "正在提交…" else "提交回答",
                                 color = if (submitEnabled) colors.onAccent else colors.muted,
-                                style = questionTextStyle(10, 1.5f, FontWeight.Medium))
+                                style = questionTextStyle(14, 1.5f, FontWeight.Medium))
                         }
                     }
                 }
@@ -291,7 +292,7 @@ private fun QuestionCardContent(
                     (isError || draft.reply == Reply.UNCONFIRMED || draft.reply == Reply.STOPPED)) {
                     Spacer(Modifier.height(8.dp))
                     Text(status, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                        color = if (isError) colors.error else colors.muted, style = questionTextStyle(10, 1.7f))
+                        color = if (isError) colors.error else colors.muted, style = questionTextStyle(14, 1.6f))
                 }
             }
         }
@@ -314,34 +315,34 @@ private fun QuestionOptionRow(
     val shape = RoundedCornerShape(12.dp)
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    Row(modifier.fillMaxWidth().heightIn(min = 40.dp).clip(shape)
+    Row(modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape)
         .background(if (selected) colors.soft else Color.Transparent)
         .then(if (focused) Modifier.border(1.dp, selectionAccent, shape) else Modifier)
         .selectable(selected = selected, enabled = enabled, role = Role.RadioButton,
             interactionSource = interaction, indication = null, onClick = onClick)
         .padding(horizontal = 7.dp, vertical = 9.dp), verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        Box(Modifier.padding(top = 2.dp).size(13.dp)
+        Box(Modifier.padding(top = 3.dp).size(18.dp)
             .border(1.3.dp, if (selected) selectionAccent else colors.muted, CircleShape),
             contentAlignment = Alignment.Center) {
-            if (selected) Box(Modifier.size(6.dp).background(selectionAccent, CircleShape))
+            if (selected) Box(Modifier.size(8.dp).background(selectionAccent, CircleShape))
         }
         Column(Modifier.weight(1f)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(label, Modifier.align(Alignment.CenterVertically), color = colors.text,
-                    style = questionTextStyle(10, 1.6f, FontWeight.Medium))
+                    style = questionTextStyle(15, 1.6f, FontWeight.Medium))
                 if (recommended) {
                     val badgeShape = RoundedCornerShape(5.dp)
                     Box(Modifier.align(Alignment.CenterVertically).clip(badgeShape)
                         .background(colors.soft).border(1.dp, colors.line, badgeShape)
                         .padding(horizontal = 6.dp, vertical = 2.dp)) {
-                        Text("推荐", color = colors.accent, style = questionTextStyle(7, 1.6f))
+                        Text("推荐", color = colors.accent, style = questionTextStyle(11, 1.5f))
                     }
                 }
             }
             if (description.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
-                Text(description, color = colors.muted, style = questionTextStyle(9, 1.65f))
+                Text(description, color = colors.muted, style = questionTextStyle(14, 1.6f))
             }
         }
     }
@@ -357,20 +358,23 @@ private fun QuestionInput(
     fadeDisabled: Boolean = true,
 ) {
     val colors = questionCardColors()
-    val shape = RoundedCornerShape(11.dp)
+    val shape = RoundedCornerShape(14.dp)
+    val container = etaInputContainerColor()
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     BasicTextField(value = value, onValueChange = { onValueChange(questionTextLimit(it)) }, enabled = enabled,
         interactionSource = interaction,
-        modifier = modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
-            .alpha(if (fadeDisabled && !enabled) .5f else 1f).clip(shape).background(colors.soft)
-            .border(1.dp, if (focused) colors.accent else colors.line, shape)
-            .padding(horizontal = 11.dp, vertical = 10.dp),
-        textStyle = questionTextStyle(10, 1.6f).copy(color = colors.text),
+        minLines = 1,
+        maxLines = 6,
+        modifier = modifier.managedInput().fillMaxWidth()
+            .alpha(if (fadeDisabled && !enabled) .5f else 1f).clip(shape).background(container)
+            .border(1.dp, if (focused) colors.accent.copy(alpha = .45f) else colors.line, shape),
+        textStyle = questionTextStyle(15, 1.6f).copy(color = colors.text),
         cursorBrush = imeCursorBrush(colors.text),
         decorationBox = { inner ->
-            Box {
-                if (value.isEmpty()) Text(hint, color = colors.muted, style = questionTextStyle(10, 1.6f))
+            Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 12.dp),
+                contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) Text(hint, color = colors.muted, style = questionTextStyle(15, 1.6f))
                 inner()
             }
         })

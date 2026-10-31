@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
 
-/** User commands never execute: backend rejection checks and injected Process faults. */
+/** Controlled test commands, backend rejection checks and injected Process faults. */
 @Suppress("DEPRECATION")
 class TerminalRegistryTest:InstrumentationTestCase() {
     private class FakeProcess(private val output:InputStream=ByteArrayInputStream("actual-output".toByteArray()),private val waiting:CountDownLatch?=null):Process() {
@@ -53,6 +53,48 @@ class TerminalRegistryTest:InstrumentationTestCase() {
     }
     private fun open(registry:TerminalRegistry,id:String="open")=registry.execute("terminal_open",JSONObject().put("request_id",id)).getString("session_id")
     private fun command(session:String,id:String="exec",mode:String="async")=JSONObject().put("request_id",id).put("session_id",session).put("command","printf test").put("mode",mode)
+    fun testRealBackendAllowsConsecutiveCommandsAfterWorkspaceWrite() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val registry=TerminalRegistry(isolatedContext(root))
+        registry.configure(UUID.randomUUID().toString(),TerminalConfiguration(workingDirectory=root))
+        try {
+            val session=open(registry)
+            val first=registry.execute("terminal_exec",command(session,"write","sync")
+                .put("command","printf configured > git-config"))
+            assertTrue(first.toString(),first.getBoolean("ok"))
+            assertEquals("configured",File(root,"git-config").readText())
+            val second=registry.execute("terminal_exec",command(session,"read","sync")
+                .put("command","cat git-config"))
+            assertTrue(second.toString(),second.getBoolean("ok"))
+            assertEquals("configured",second.getString("stdout"))
+            val third=registry.execute("terminal_exec",command(session,"remove","sync")
+                .put("command","rm git-config"))
+            assertTrue(third.toString(),third.getBoolean("ok"))
+            val fourth=registry.execute("terminal_exec",command(session,"after-remove","sync"))
+            assertTrue(fourth.toString(),fourth.getBoolean("ok"))
+            assertEquals("test",fourth.getString("stdout"))
+        } finally { registry.close(); root.deleteRecursively() }
+    }
+
+    fun testRealBackendRejectsReplacedWorkingDirectoryBeforeDispatch() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val workspace=File(root,"workspace").apply { mkdirs() }
+        val registry=TerminalRegistry(isolatedContext(root))
+        registry.configure(UUID.randomUUID().toString(),TerminalConfiguration(workingDirectory=workspace))
+        try {
+            val session=open(registry)
+            val retained=File(root,"retained-workspace")
+            assertTrue(workspace.renameTo(retained))
+            assertTrue(workspace.mkdir())
+            val result=registry.execute("terminal_exec",command(session,"replaced","sync")
+                .put("command","printf forbidden > marker"))
+            assertEquals("backend_path_changed_not_executed",result.getString("error"))
+            assertEquals("not_executed",result.getString("execution"))
+            assertFalse(File(workspace,"marker").exists())
+            assertFalse(File(retained,"marker").exists())
+        } finally { registry.close(); root.deleteRecursively() }
+    }
+
     fun testIndependentHistoryReaderReadsOriginalRegistryMetadataWithoutUsingItsLiveHandle() {
         val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
         val owner=UUID.randomUUID().toString()

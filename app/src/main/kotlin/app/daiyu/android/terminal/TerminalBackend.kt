@@ -99,7 +99,7 @@ internal data class SelectedBackend(val name: String, val uid: Int, val root: Bo
 }
 internal sealed interface BackendPathIdentity {
     data class FileSystem(val path: String, val realPath: String, val key: String?,
-        val created: java.nio.file.attribute.FileTime) : BackendPathIdentity
+        val created: java.nio.file.attribute.FileTime?) : BackendPathIdentity
     data class ChrootTransport(val path: String, val identity: String) : BackendPathIdentity
 }
 
@@ -141,9 +141,17 @@ internal object BackendSelection {
                 val real = file.toPath().toRealPath()
                 stage = "attributes"
                 val attr = java.nio.file.Files.readAttributes(real, java.nio.file.attribute.BasicFileAttributes::class.java)
-                BackendPathIdentity.FileSystem(file.absolutePath, real.toString(), attr.fileKey()?.toString(), attr.creationTime())
+                fileSystemIdentity(file, real, attr)
             }
         } catch (failure: Exception) { throw pathFailure(roles[file.path] ?: "path", stage, failure) }
+    }
+
+    internal fun fileSystemIdentity(file: File, real: java.nio.file.Path,
+        attributes: java.nio.file.attribute.BasicFileAttributes): BackendPathIdentity.FileSystem {
+        val key = attributes.fileKey()?.toString()
+        // Android may report lastModifiedTime as creationTime. With an inode key, writes are not replacement.
+        return BackendPathIdentity.FileSystem(file.absolutePath, real.toString(), key,
+            if (key == null) attributes.creationTime() else null)
     }
 
     internal fun requireRootExecutable(path: String) {

@@ -126,8 +126,85 @@ class BackendPathIdentityTest {
         assertEquals(workspace.toPath().toRealPath().toString(), identity.realPath)
         val attributes = Files.readAttributes(workspace.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
         assertEquals(attributes.fileKey()?.toString(), identity.key)
-        assertEquals(attributes.creationTime(), identity.created)
+        assertEquals(if (identity.key == null) attributes.creationTime() else null, identity.created)
         assertEquals(snapshot, BackendSelection.pathIdentities(files, chroot = true) { "trusted" })
+    }
+
+    @Test fun keyedIdentityIgnoresAndroidCreationTimeFallbackAfterWorkspaceWrites() {
+        val workspace = temporary.newFolder("writable-workspace")
+        val real = workspace.toPath().toRealPath()
+        fun snapshot(): BackendPathIdentity.FileSystem {
+            val attributes = Files.readAttributes(real, java.nio.file.attribute.BasicFileAttributes::class.java)
+            val androidAttributes = object : java.nio.file.attribute.BasicFileAttributes by attributes {
+                override fun creationTime() = attributes.lastModifiedTime()
+                override fun fileKey(): Any = attributes.fileKey() ?: "stable-workspace-key"
+            }
+            return BackendSelection.fileSystemIdentity(workspace, real, androidAttributes)
+        }
+        val first = snapshot()
+        val before = Files.getLastModifiedTime(real)
+        File(workspace, "git-config").writeText("configured")
+        val changed = java.nio.file.attribute.FileTime.fromMillis(before.toMillis() + 60_000L)
+        Files.setLastModifiedTime(real, changed)
+        assertNotEquals(before, Files.getLastModifiedTime(real))
+        assertEquals(first, snapshot())
+        assertTrue(File(workspace, "git-config").delete())
+        Files.setLastModifiedTime(real, java.nio.file.attribute.FileTime.fromMillis(changed.toMillis() + 60_000L))
+        assertEquals(first, snapshot())
+    }
+
+    @Test fun keyedIdentityIgnoresFallbackTimeWhenExistingFileIsWritten() {
+        val launcher = temporary.newFile("writable-launcher")
+        val real = launcher.toPath().toRealPath()
+        val attributes = Files.readAttributes(real, java.nio.file.attribute.BasicFileAttributes::class.java)
+        fun identity(time: Long, key: Any = "same-inode") = BackendSelection.fileSystemIdentity(launcher, real,
+            object : java.nio.file.attribute.BasicFileAttributes by attributes {
+                override fun creationTime() = java.nio.file.attribute.FileTime.fromMillis(time)
+                override fun fileKey(): Any = key
+            })
+        val first = identity(1)
+        launcher.writeText("new content")
+        assertEquals(first, identity(2))
+        assertNotEquals(first, identity(2, "different-inode"))
+    }
+
+    @Test fun unkeyedIdentityRetainsCreationTimeFallback() {
+        val file = temporary.newFile("unkeyed")
+        val real = file.toPath().toRealPath()
+        val attributes = Files.readAttributes(real, java.nio.file.attribute.BasicFileAttributes::class.java)
+        fun identity(time: Long) = BackendSelection.fileSystemIdentity(file, real,
+            object : java.nio.file.attribute.BasicFileAttributes by attributes {
+                override fun creationTime() = java.nio.file.attribute.FileTime.fromMillis(time)
+                override fun fileKey(): Any? = null
+            })
+        assertEquals(identity(1), identity(1))
+        assertNotEquals(identity(1), identity(2))
+    }
+
+    @Test fun ordinaryDirectoryReplacementStillChangesSnapshot() {
+        val workspace = temporary.newFolder("original-workspace")
+        val first = BackendSelection.pathIdentities(listOf(workspace), chroot = false)
+        val retained = File(temporary.root, "retained-workspace")
+        Files.move(workspace.toPath(), retained.toPath())
+        assertTrue(workspace.mkdir())
+        val identity = first.single() as BackendPathIdentity.FileSystem
+        val replaced = Files.readAttributes(workspace.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
+        if (identity.key == null && replaced.fileKey() == null) {
+            val created = java.nio.file.attribute.FileTime.fromMillis(requireNotNull(identity.created).toMillis() + 86_400_000L)
+            Files.getFileAttributeView(workspace.toPath(), java.nio.file.attribute.BasicFileAttributeView::class.java)
+                .setTimes(null, null, created)
+            assertEquals(created, Files.readAttributes(workspace.toPath(),
+                java.nio.file.attribute.BasicFileAttributes::class.java).creationTime())
+        }
+        assertNotEquals(first, BackendSelection.pathIdentities(listOf(workspace), chroot = false))
+    }
+
+    @Test fun canonicalTargetStillParticipatesInKeyedIdentity() {
+        val workspace = temporary.newFolder("target-one")
+        val other = temporary.newFolder("target-two")
+        val attributes = Files.readAttributes(workspace.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
+        assertNotEquals(BackendSelection.fileSystemIdentity(workspace, workspace.toPath().toRealPath(), attributes),
+            BackendSelection.fileSystemIdentity(workspace, other.toPath().toRealPath(), attributes))
     }
 
     @Test fun ordinaryPathReplacementStillChangesSnapshot() {
@@ -138,7 +215,7 @@ class BackendPathIdentityTest {
         val originalIdentity = first.single() as BackendPathIdentity.FileSystem
         val replaced = Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
         if (originalIdentity.key == null && replaced.fileKey() == null) {
-            val replacementCreated = java.nio.file.attribute.FileTime.fromMillis(originalIdentity.created.toMillis() + 86_400_000L)
+            val replacementCreated = java.nio.file.attribute.FileTime.fromMillis(requireNotNull(originalIdentity.created).toMillis() + 86_400_000L)
             Files.getFileAttributeView(file.toPath(), java.nio.file.attribute.BasicFileAttributeView::class.java)
                 .setTimes(null, null, replacementCreated)
             assertEquals(replacementCreated,

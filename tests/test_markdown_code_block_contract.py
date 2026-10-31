@@ -57,6 +57,15 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         header = self.code.split('testTag("markdown-code-header")', 1)[1].split("CodeAction(", 1)[0]
         self.assertIn('BasicText(block.language.ifBlank { "text" }', header)
 
+    def test_language_label_uses_readable_size_without_changing_body_or_actions(self):
+        header = self.code.split('testTag("markdown-code-header")', 1)[1].split("CodeAction(", 1)[0]
+        self.assertIn('TextStyle(fontSize = 14.sp, lineHeight = 20.sp, color = colors.muted)', header)
+        self.assertIn('Modifier.weight(1f).padding(end = 4.dp)', header)
+        self.assertIn('maxLines = 1', header)
+        self.assertIn('fontSize = 14.sp, lineHeight = 22.sp, textAlign = TextAlign.Left', self.code)
+        self.assertIn('modifier.size(36.dp)', self.code)
+        self.assertIn('Icon(icon, description, Modifier.size(16.dp)', self.code)
+
     def test_copy_uses_full_code_not_revealed_text(self):
         self.assertIn('clipboard.setText(AnnotatedString(block.text))', self.code)
         self.assertNotIn('clipboard.setText(AnnotatedString(text))', self.code)

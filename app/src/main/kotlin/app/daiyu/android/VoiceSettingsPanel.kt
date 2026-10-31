@@ -367,8 +367,11 @@ internal fun VoiceSettingsPanel(
                                     }
                                 }
                             })
-                        }; SettingsTextField("试听文字", sampleText, { sampleText = it.take(300) }, multiline = true)
-                        SettingsNote("支持 MP3 / WAV，参考录音不超过 7.5 MB。") }
+                        } }
+                        item { VoiceSettingsCard(Modifier.testTag("voice-mimo-preview-card")) {
+                            SettingsTextField("试听文字", sampleText, { sampleText = it.take(300) }, multiline = true)
+                        } }
+                        item { SettingsNote("支持 MP3 / WAV，参考录音不超过 7.5 MB。") }
                         items(voices.size, key = { voices[it].id }) { index ->
                             val voice = voices[index]
                             VoiceSettingsCard {

@@ -176,6 +176,18 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('action != "REMOVE" || !voice.uncertain', leaf)
         self.assertIn('仅移除本机记录，不删除云端音色或任务', leaf)
 
+    def test_mimo_preview_editor_has_its_own_shared_card_and_keeps_text_pipeline(self):
+        panel = source('VoiceSettingsPanel.kt')
+        mimo = panel.split('} else if (child == "MIMO") {', 1)[1].split('} else when (section)', 1)[0]
+        editor = mimo.split('item { VoiceSettingsCard(Modifier.testTag("voice-mimo-preview-card")) {', 1)[1].split('} }', 1)[0]
+        self.assertIn('SettingsTextField("试听文字", sampleText, { sampleText = it.take(300) }, multiline = true)', editor)
+        self.assertEqual(1, mimo.count('SettingsTextField("试听文字"'))
+        self.assertIn('var sampleText by remember { mutableStateOf("你好，这是我的声音。") }', panel)
+        self.assertIn('!busy && preview != null && sampleText.isNotBlank()', mimo)
+        self.assertIn('::current, installPreviewRevoke, sampleText, configuration = preview?.configuration', mimo)
+        self.assertNotIn('.background(', editor)
+        self.assertNotIn('runtime.', editor)
+
     def test_reference_voice_save_uses_theme_pill_without_changing_import_boundary(self):
         panel = source('VoiceSettingsPanel.kt')
         button = panel.split('TextButton("保存参考声音"', 1)[1].split('SettingsTextField("试听文字"', 1)[0]

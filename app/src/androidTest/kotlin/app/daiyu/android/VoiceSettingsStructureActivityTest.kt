@@ -12,6 +12,7 @@ import okio.Buffer
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import kotlinx.coroutines.runBlocking
 import app.daiyu.android.model.catalog.CatalogCommitResult
@@ -157,6 +158,55 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         node("voice-account-open").assertExists()
         assertEquals(0, fixture.opens.get())
     }
+    fun testMimoPreviewEditorHasVisibleContainerAndKeepsMultilineDraftOnReturn() {
+        systemProfiles(); enter()
+        val outer = node("voice-recognition-input-card").fetchSemanticsNode().boundsInRoot
+        val reading = fixture.controller.voiceRuntime.configuration.value
+        val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
+        val accounts = fixture.controller.voiceRuntime.accountConfigurations.value
+        section("我的声音"); node("voice-mimo-open").performClick()
+        val card = reveal("voice-mimo-preview-card", "MiMo 语音").fetchSemanticsNode().boundsInRoot
+        assertEquals(outer.left, card.left, 1f)
+        assertEquals(outer.right, card.right, 1f)
+        val container = node("settings-field:试听文字-container").assertIsDisplayed()
+            .assert(hasAnyAncestor(hasTestTag("voice-mimo-preview-card"))).fetchSemanticsNode().boundsInRoot
+        assertTrue(container.left > card.left && container.right < card.right)
+        val cardPixels = node("voice-mimo-preview-card").captureToImage().toPixelMap()
+        val inputPixels = node("settings-field:试听文字-container").captureToImage().toPixelMap()
+        val marginY = ((container.top - card.top) / 2).toInt().coerceIn(0, cardPixels.height - 1)
+        val cardFill = cardPixels[cardPixels.width / 2, marginY]
+        val inputFill = inputPixels[inputPixels.width / 2, inputPixels.height * 3 / 4]
+        assertTrue("Input fill remains distinguishable from its card",
+            kotlin.math.abs(cardFill.red - inputFill.red) + kotlin.math.abs(cardFill.green - inputFill.green) +
+                kotlin.math.abs(cardFill.blue - inputFill.blue) > .02f)
+        val editor = node("settings-field:试听文字").assertIsDisplayed()
+            .assert(hasAnyAncestor(hasTestTag("settings-field:试听文字-container")))
+            .assertTextContains("你好，这是我的声音。")
+        val text = "第一行试听\n第二行试听"
+        awaitNodeWindowFocus(editor)
+        editor.performTouchInput { click() }
+        editor.performTextReplacement(text)
+        awaitImeFrame(editor, visible = true)
+        dismissIme(); awaitImeFrame(editor, visible = false)
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("voice-mimo-open")
+        node("voice-mimo-open").performClick()
+        val draft = reveal("settings-field:试听文字", "MiMo 语音").assertTextEquals(text)
+        awaitNodeWindowFocus(draft)
+        draft.performTouchInput { click() }
+        draft.performTextReplacement("声".repeat(320))
+        val reopened = node("settings-field:试听文字").assertTextEquals("声".repeat(300))
+        awaitImeFrame(reopened, visible = true)
+        dismissIme(); awaitImeFrame(reopened, visible = false)
+        reopened.performTextReplacement("")
+        node("settings-field:试听文字-container").assertIsDisplayed()
+        node("settings-field:试听文字").assertTextEquals("")
+        assertEquals(reading, fixture.controller.voiceRuntime.configuration.value)
+        assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
+        assertEquals(accounts, fixture.controller.voiceRuntime.accountConfigurations.value)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testRecognitionHomeOmitsExtraOfflineEntryAndKeepsAlignedCards() {
         systemProfiles(); enter()
         node("offline-speech-enable").assertDoesNotExist()

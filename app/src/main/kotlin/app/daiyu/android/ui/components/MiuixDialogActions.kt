@@ -46,6 +46,7 @@ fun MiuixDialogActions(
     confirmEnabled: Boolean = true,
     destructive: Boolean = false,
     deletionAppearance: Boolean = false,
+    preserveEnabledColors: Boolean = false,
 ) {
     val view = LocalView.current
     val cancelClick = {
@@ -62,6 +63,17 @@ fun MiuixDialogActions(
         }
         confirmEnabled
     }
+    val cancelColors = ButtonDefaults.textButtonColors()
+    val confirmColors = if (deletionAppearance) {
+        deletionButtonColors()
+    } else if (destructive) {
+        ButtonDefaults.textButtonColorsPrimary(
+            color = MiuixTheme.colorScheme.error,
+            textColor = MiuixTheme.colorScheme.onError,
+        )
+    } else {
+        ButtonDefaults.textButtonColorsPrimary()
+    }
     Row(
         modifier = modifier.fillMaxWidth().height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -70,6 +82,9 @@ fun MiuixDialogActions(
             text = cancelText ?: stringResource(R.string.action_cancel),
             onClick = { cancelClick() },
             enabled = cancelEnabled,
+            colors = if (preserveEnabledColors) cancelColors.copy(
+                disabledColor = cancelColors.color, disabledTextColor = cancelColors.textColor,
+            ) else cancelColors,
             modifier = Modifier.testTag("dialog-cancel").weight(1f).fillMaxHeight().semantics {
                 semanticsClick { cancelClick() }
             },
@@ -81,16 +96,9 @@ fun MiuixDialogActions(
             modifier = Modifier.testTag("dialog-confirm").weight(1f).fillMaxHeight().semantics {
                 semanticsClick { confirmClick() }
             },
-            colors = if (deletionAppearance) {
-                deletionButtonColors()
-            } else if (destructive) {
-                ButtonDefaults.textButtonColorsPrimary(
-                    color = MiuixTheme.colorScheme.error,
-                    textColor = MiuixTheme.colorScheme.onError,
-                )
-            } else {
-                ButtonDefaults.textButtonColorsPrimary()
-            },
+            colors = if (preserveEnabledColors) confirmColors.copy(
+                disabledColor = confirmColors.color, disabledTextColor = confirmColors.textColor,
+            ) else confirmColors,
         )
     }
 }

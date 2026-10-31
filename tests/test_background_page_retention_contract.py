@@ -73,7 +73,7 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
         self.assertIn('editorStale = true', reload)
         self.assertIn('canSave = !editorStale', local)
         self.assertIn('!currentEnabled || editorStale || request != null', local)
-        self.assertIn('confirmEnabled = enabled && canSave', source('CatalogModelEditorDialog.kt'))
+        self.assertIn('confirmEnabled = interactive && canSave', source('CatalogModelEditorDialog.kt'))
 
     def test_explicit_exit_still_discards_the_edit_visit(self):
         local = source('LocalCatalogModelsScreen.kt')

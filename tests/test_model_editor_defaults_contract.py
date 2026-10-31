@@ -16,8 +16,8 @@ class ModelEditorDefaultsContractTest(unittest.TestCase):
         self.assertNotIn("支持推理", switches)
         self.assertNotIn("copy(reasoning =", switches)
         self.assertEqual(2, switches.count("SettingsSwitchRow("))
-        self.assertIn('SettingsSwitchRow("支持视觉", value.vision, enabled)', switches)
-        self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, enabled)', switches)
+        self.assertIn('SettingsSwitchRow("支持视觉", value.vision, interactive)', switches)
+        self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, interactive)', switches)
         self.assertIn('val nativeSearch: Boolean = false', (MAIN / "model/catalog/CatalogModelEdit.kt").read_text())
         row = (MAIN / "ui/screens/settings/SettingsUiComponents.kt").read_text().split("internal fun SettingsRow(", 1)[1]
         self.assertIn("verticalAlignment = Alignment.CenterVertically", row.split("internal fun SettingsSwitchRow", 1)[0])

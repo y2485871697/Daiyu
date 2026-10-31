@@ -5239,7 +5239,7 @@ class ChatController internal constructor(private val application:Application,
         }, work = {
             result = change()
             when (result) {
-                app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED -> "本地模型已更新"
+                app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED -> null
                 app.daiyu.android.model.catalog.CatalogLocalEditResult.STALE -> "目录已变化，请重新选择模型"
                 app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED -> "本地模型修改已取消"
                 app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED -> throw java.io.IOException("local_catalog_edit_failed")

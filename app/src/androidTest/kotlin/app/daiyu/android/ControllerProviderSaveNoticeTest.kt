@@ -31,6 +31,40 @@ class ControllerProviderSaveNoticeTest : InstrumentationTestCase() {
         } finally { fixture.close() }
     }
 
+    fun testLocalModelEditCommitsSilentlyAndStaleEditKeepsItsReason() {
+        val fixture = RunControlFixture(instrumentation.targetContext)
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            val editor = fixture.controller.providers.activeEditor()
+            val snapshot = fixture.settings.modelCatalogSnapshot()
+            val original = snapshot.models.first()
+            val ticket = app.daiyu.android.model.catalog.CatalogModelSelection(
+                snapshot.providerIdentity, snapshot.revision, original)
+            val value = app.daiyu.android.model.catalog.CatalogModelEdit.from(original).copy(displayName = "Quiet local model")
+            fun update(): app.daiyu.android.model.catalog.CatalogLocalEditResult {
+                val completed = CountDownLatch(1)
+                val result = AtomicReference<app.daiyu.android.model.catalog.CatalogLocalEditResult>()
+                controlMain {
+                    fixture.controller.updateProviderCatalogModel(editor, ticket, value, { false }) {
+                        result.set(it); completed.countDown()
+                    }
+                    assertTrue(fixture.controller.dataBusy)
+                }
+                assertTrue(completed.await(10, TimeUnit.SECONDS))
+                controlMain { assertFalse(fixture.controller.dataBusy) }
+                return result.get()
+            }
+            assertEquals(app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED, update())
+            controlMain { assertNull(fixture.controller.consumeDataNotice()) }
+            val saved = fixture.settings.localModelCatalogSnapshot()!!
+            assertEquals(value.applyTo(original), saved.models.single { it.id == original.id })
+            assertEquals(app.daiyu.android.model.catalog.CatalogLocalEditResult.STALE, update())
+            controlMain { assertEquals("目录已变化，请重新选择模型", fixture.controller.consumeDataNotice()) }
+            assertEquals(saved, fixture.settings.localModelCatalogSnapshot())
+            assertEquals(0, fixture.opens.get())
+        } finally { fixture.close() }
+    }
+
     private fun save(revoked: Boolean) {
         val fixture = RunControlFixture(instrumentation.targetContext)
         try {

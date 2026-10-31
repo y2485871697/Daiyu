@@ -108,6 +108,7 @@ internal fun <T> LocalCatalogModelsScreen(
     var adding by remember { mutableStateOf<Any?>(null) }
     var addingBase by remember { mutableStateOf<SavedModelCatalogSnapshot<T>?>(null) }
     var editorStale by remember { mutableStateOf(false) }
+    var savingEditor by remember { mutableStateOf(false) }
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var deleting by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
     var selectedIds by selectionState
@@ -116,11 +117,11 @@ internal fun <T> LocalCatalogModelsScreen(
     fun cancel() {
         selectionLease.revoke()
         request?.set(true); request = null; snapshot = null; loaded = false; editing = null; deleting = null; adding = null
-        selectedIds = null; deletingSelected = null
+        selectedIds = null; deletingSelected = null; savingEditor = false
     }
     fun pause() {
         selectionLease.revoke()
-        request?.set(true); request = null; deleting = null
+        request?.set(true); request = null; deleting = null; savingEditor = false
         deletingSelected = null
         // New identities fence pre-pause callbacks without unmounting the form or its input.
         editing = editing?.copy()
@@ -207,11 +208,11 @@ internal fun <T> LocalCatalogModelsScreen(
         if (!current() || !currentEnabled || editorStale || request != null || (selection != null && !matches(selection))) return
         if (runCatching { value.validate() }.isFailure) return
         if (selection == null && base.models.any { it.id == value.id }) { notice = "Model ID 已存在"; return }
-        val token = AtomicBoolean(false); request = token
+        val token = AtomicBoolean(false); request = token; savingEditor = true
         val cancelled = { token.get() || !visit.get() }
         val complete: (CatalogLocalEditResult) -> Unit = { result ->
             if (current() && request === token && !token.get()) {
-                request = null
+                request = null; savingEditor = false
                 if (result == CatalogLocalEditResult.APPLIED) {
                     editing = null; adding = null; notice = "模型已保存"; reload()
                 } else notice = "模型未保存，请刷新后重新打开。"
@@ -244,12 +245,12 @@ internal fun <T> LocalCatalogModelsScreen(
     val editorEnabled = enabled && resumed && request == null
     val addVisit = adding
     if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", "自定义模型"), isNew = true,
-        enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice,
+        enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice, saving = savingEditor,
         onSave = { if (adding === addVisit) saveForm(it, null) }, onDismiss = { if (request == null && adding === addVisit) adding = null })
     editing?.let { selection ->
         val form = actions.form
         if (form != null) CatalogModelEditorDialog(form(selection.record), isNew = false,
-            enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice,
+            enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice, saving = savingEditor,
             canDelete = !editorStale,
             onDelete = { if (editing === selection && current() && currentEnabled && request == null && matches(selection)) { editing = null; deleting = selection } },
             onSave = { if (editing === selection) saveForm(it, selection) },

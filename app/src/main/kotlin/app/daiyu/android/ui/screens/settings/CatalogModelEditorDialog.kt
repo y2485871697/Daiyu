@@ -42,7 +42,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean, enabled: Boolean,
     onSave: (CatalogModelEdit) -> Unit, onDismiss: () -> Unit,
     canSave: Boolean = true, canDelete: Boolean = false, onDelete: () -> Unit = {}, errorText: String? = null,
+    saving: Boolean = false,
 ) {
+    val interactive = enabled && !saving
     var value by remember(initial) { mutableStateOf(initial) }
     var contextInput by remember(initial) { mutableStateOf(ModelContextWindowInput.fromTokens(initial.contextWindow)) }
     val editedValue = contextInput.tokenText()?.let { value.copy(contextWindow = it) }
@@ -51,7 +53,7 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
     val colors = MiuixTheme.colorScheme.copy(primary = accent.primary, onPrimary = accent.onPrimary)
     MiuixTheme(colors = colors) {
         WithoutPressRipple {
-            PreviewDialog(onDismiss = { if (enabled) onDismiss() }, bottomSheet = true) {
+            PreviewDialog(onDismiss = { if (interactive) onDismiss() }, bottomSheet = true) {
                 Column(Modifier.align(Alignment.BottomCenter).padding(12.dp).widthIn(max = 560.dp).fillMaxWidth()
                     .heightIn(max = (maxHeight - 24.dp).coerceAtLeast(0.dp))
                     .testTag("catalog-model-dialog")
@@ -61,13 +63,13 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                         modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
                     Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())
                         .testTag("catalog-model-editor")) {
-                        CatalogModelField("展示名称", value.displayName, enabled,
+                        CatalogModelField("展示名称", value.displayName, interactive,
                             onValueChange = { value = value.copy(displayName = it) })
                         Spacer(Modifier.height(12.dp))
-                        CatalogModelField("Model ID", value.id, enabled && isNew, keyboardType = KeyboardType.Ascii,
+                        CatalogModelField("Model ID", value.id, interactive && isNew, keyboardType = KeyboardType.Ascii,
                             onValueChange = { value = value.copy(id = it) })
                         Spacer(Modifier.height(12.dp))
-                        CatalogModelField("上下文窗口", contextInput.text, enabled,
+                        CatalogModelField("上下文窗口", contextInput.text, interactive,
                             keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done,
                             trailingIcon = {
                                 Text(contextInput.unit.name, fontWeight = FontWeight.Medium,
@@ -76,7 +78,7 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                                         .semantics {
                                             contentDescription = "切换上下文窗口单位"
                                             stateDescription = contextInput.unit.name
-                                        }.clickable(enabled = enabled, role = Role.Button) {
+                                        }.clickable(enabled = interactive, role = Role.Button) {
                                             contextInput = contextInput.switchUnit()
                                         }.wrapContentSize(Alignment.Center))
                             },
@@ -86,12 +88,12 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                         Column(Modifier.fillMaxWidth().testTag("catalog-model-capabilities")
                             .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
-                            SettingsSwitchRow("支持视觉", value.vision, enabled) { value = value.copy(vision = it) }
-                            SettingsSwitchRow("原生搜索", value.nativeSearch, enabled) { value = value.copy(nativeSearch = it) }
+                            SettingsSwitchRow("支持视觉", value.vision, interactive) { value = value.copy(vision = it) }
+                            SettingsSwitchRow("原生搜索", value.nativeSearch, interactive) { value = value.copy(nativeSearch = it) }
                         }
                         if (!isNew) {
                             Spacer(Modifier.height(12.dp))
-                            TextButton("删除模型", enabled = enabled && canDelete,
+                            TextButton("删除模型", enabled = interactive && canDelete,
                                 modifier = Modifier.fillMaxWidth().testTag("local-model-delete:${initial.id}"),
                                 colors = deletionButtonColors(),
                                 onClick = onDelete)
@@ -101,10 +103,11 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                         errorText?.let { CatalogModelNote(it) }
                     }
                     MiuixDialogActions("保存", onCancel = onDismiss, onConfirm = {
-                        if (enabled && canSave && formValid) onSave(editedValue)
+                        if (interactive && canSave && formValid) onSave(editedValue)
                     },
                         modifier = Modifier.padding(top = 16.dp).testTag("catalog-model-actions"),
-                        confirmEnabled = enabled && canSave && formValid, cancelEnabled = enabled)
+                        confirmEnabled = interactive && canSave && formValid, cancelEnabled = interactive,
+                        preserveEnabledColors = saving)
                 }
             }
         }

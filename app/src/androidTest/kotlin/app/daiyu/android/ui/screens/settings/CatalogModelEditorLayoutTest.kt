@@ -33,17 +33,21 @@ import java.io.File
 class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
     private var visible by mutableStateOf(false)
     private var enabled by mutableStateOf(true)
+    private var saving by mutableStateOf(false)
+    private var errorText by mutableStateOf<String?>(null)
     private var saved: CatalogModelEdit? = null
     private var saves = 0
     private var dismissals = 0
     private var deletions = 0
 
     private fun show(dark: Boolean = false, scale: Float = 1f, fontScale: Float = 1f,
-        canDelete: Boolean = true, isNew: Boolean = false,
+        canDelete: Boolean = true, isNew: Boolean = false, holdSave: Boolean = false,
         initial: CatalogModelEdit = CatalogModelEdit("layout-model", "布局模型", "8192")) {
         mainThread {
             visible = false
             enabled = true
+            saving = false
+            errorText = null
             activity.setContent {
                 val platform = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
@@ -59,8 +63,8 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
                         }
                         if (visible) CatalogModelEditorDialog(
                             initial,
-                            isNew = isNew, enabled = enabled, canDelete = canDelete,
-                            onSave = { saved = it; saves++ }, onDelete = { deletions++ },
+                            isNew = isNew, enabled = enabled, canDelete = canDelete, saving = saving, errorText = errorText,
+                            onSave = { saved = it; saves++; if (holdSave) saving = true }, onDelete = { deletions++ },
                             onDismiss = { dismissals++; visible = false })
                     }
                 }
@@ -250,6 +254,51 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
             node("dialog-cancel").performClick()
         }
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPendingSaveKeepsActionColorsAndBlocksInputUntilRetryOrClose() {
+        for (dark in listOf(false, true)) {
+            show(dark = dark, holdSave = true)
+            open()
+            awaitDialogEnter(node("catalog-model-editor"))
+            val tags = listOf("dialog-cancel", "dialog-confirm")
+            fun pixels(tag: String) = (if (android.os.Build.VERSION.SDK_INT < 28) captureScreenNode(node(tag))
+                else node(tag).captureToImage()).toPixelMap()
+            val before = tags.associateWith(::pixels)
+            val beforeSaves = saves
+            val beforeDismissals = dismissals
+            node("dialog-confirm").performClick()
+            ui.waitForIdle()
+            assertEquals(beforeSaves + 1, saves)
+            for (tag in tags) {
+                node(tag).assertIsNotEnabled()
+                val actual = pixels(tag)
+                val expected = before.getValue(tag)
+                assertEquals(expected.width, actual.width)
+                assertEquals(expected.height, actual.height)
+                for (y in 0 until actual.height) for (x in 0 until actual.width) {
+                    val a = actual[x, y]; val e = expected[x, y]
+                    assertEquals("$tag red at $x,$y", e.red, a.red, .025f)
+                    assertEquals("$tag green at $x,$y", e.green, a.green, .025f)
+                    assertEquals("$tag blue at $x,$y", e.blue, a.blue, .025f)
+                }
+                node(tag).performTouchInput { click(center) }
+                node(tag).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { action ->
+                    assertFalse(action())
+                }
+            }
+            node("settings-field:展示名称").assertIsNotEnabled().assertEditableText("布局模型")
+            assertEquals(beforeSaves + 1, saves)
+            assertEquals(beforeDismissals, dismissals)
+            node("catalog-model-dialog").assertExists()
+            mainThread { saving = false; errorText = "模型未保存，请重试" }
+            ui.onNodeWithText("模型未保存，请重试").assertExists()
+            node("settings-field:展示名称").assertIsEnabled().assertEditableText("布局模型")
+            node("dialog-confirm").assertIsEnabled().performClick()
+            assertEquals(beforeSaves + 2, saves)
+            mainThread { visible = false; saving = false }
+            node("catalog-model-dialog").assertDoesNotExist()
+        }
     }
 
     fun testFullWidthDeleteAndFooterRetainValidationAndDisabledGuards() {

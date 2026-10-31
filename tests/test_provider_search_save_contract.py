@@ -26,7 +26,7 @@ class ProviderSearchSaveContractTest(unittest.TestCase):
         self.assertNotIn('Provider 托管网页搜索', provider)
         self.assertNotIn('openAiWebSearchEnabled', provider)
         editor = (UI / 'CatalogModelEditorDialog.kt').read_text()
-        self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, enabled)', editor)
+        self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, interactive)', editor)
         form = (MAIN / 'model/catalog/CatalogModelEdit.kt').read_text()
         self.assertIn('record.settings.requestOptions.copy(openAiWebSearchEnabled = nativeSearch)', form)
         parameters = (MAIN / 'model/catalog/CatalogModelParameters.kt').read_text()

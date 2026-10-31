@@ -75,7 +75,7 @@ object MessageHistoryCodec {
     private fun validateSegment(segment: MessageHistorySegment) {
         MessageHistory.validateSegment(segment)
         require(segment.blocks.size <= 10_000 && segment.protocolItems.size <= 10_000)
-        fun field(value: String) { require(value.toByteArray(Charsets.UTF_8).size <= 4 * 1024 * 1024) }
+        fun field(value: String) { app.daiyu.android.context.Utf8Payload.byteCount(value, 4L * 1024 * 1024) }
         segment.blocks.forEach { block -> when (block) {
             is MessageBlock.Text -> field(block.text)
             is MessageBlock.Image -> Unit // Immutable metadata was validated by core-domain.

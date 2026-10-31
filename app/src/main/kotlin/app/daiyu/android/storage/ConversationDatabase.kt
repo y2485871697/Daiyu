@@ -350,7 +350,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.delete("conversations","id=?",arrayOf(id.value))
     } }
     internal fun storedMessage(db: SQLiteDatabase, conversation: ConversationId, messageId: String,
-        verifyVideoWitness: Boolean = true): Message {
+        verifyVideoWitness: Boolean = true, decodeReuse: CommitMessageDecodeReuse? = null): Message {
         val metadata = db.rawQuery("SELECT run_id,role,status FROM messages WHERE id=? AND conversation_id=?",
             arrayOf(messageId, conversation.value)).use { c ->
             check(c.moveToFirst()) { "消息不存在" }; Triple(c.getString(0), c.getString(1), c.getString(2))
@@ -359,15 +359,26 @@ class ConversationDatabase internal constructor(context: Context, private val af
             check(it.moveToFirst()); if (it.isNull(0)) null else it.getLong(0)
         }
         fun text(column: String) = SQLiteText.read(db, "messages", column, "id", messageId)
-        return Message(MessageId(messageId), conversation, RunId(metadata.first), metadata.second,
-            decode(JSONArray(requireNotNull(text("blocks")))), RunStatus.valueOf(metadata.third), text("error"),
-            jsonStrings(JSONArray(requireNotNull(text("protocol")))),
-            MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn)))), createdAt = createdAt).also {
-                MessageHistoryCodec.validate(it)
-                MessageImages.validate(it)
-                if (verifyVideoWitness) SQLiteMessageVideoStore.readVerified(db, it)
-                else SQLiteMessageVideoStore.read(db, it)
-            }
+        // Read all original columns at EVERY validation point, even on a reuse hit.
+        // In particular, checkpoint/message SQL triggers can change a row between reads.
+        val columns = StoredMessageColumns(messageId, conversation.value, metadata.first, metadata.second,
+            metadata.third, createdAt, requireNotNull(text("blocks")), text("error"),
+            requireNotNull(text("protocol")), requireNotNull(text(historyColumn)))
+        fun decodeColumns() = Message(MessageId(messageId), conversation, RunId(columns.runId), columns.role,
+            decode(JSONArray(columns.blocks)), RunStatus.valueOf(columns.status), columns.error,
+            jsonStrings(JSONArray(columns.protocol)), MessageHistoryCodec.decode(JSONArray(columns.history)),
+            createdAt = columns.createdAt)
+        fun validateRead(message: Message) {
+            MessageHistoryCodec.validate(message)
+            MessageImages.validate(message)
+            if (verifyVideoWitness) SQLiteMessageVideoStore.readVerified(db, message)
+            else SQLiteMessageVideoStore.read(db, message)
+        }
+        return if (decodeReuse == null) decodeColumns().also(::validateRead)
+        else {
+            check(db.inTransaction() && verifyVideoWitness)
+            decodeReuse.read(columns, ::decodeColumns, ::validateRead)
+        }
     }
     internal fun videoInputs(messages: List<Message>): List<app.daiyu.android.model.videos.MessageVideoInput> {
         val db = readableDatabase
@@ -382,10 +393,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
             return result
         } finally { db.endTransaction() }
     }
-    private fun validateRunHistory(db: SQLiteDatabase, id: ConversationId, run: RunId) {
+    private fun validateRunHistory(db: SQLiteDatabase, id: ConversationId, run: RunId,
+        decodeReuse: CommitMessageDecodeReuse? = null) {
         val ids = db.rawQuery("SELECT id FROM messages WHERE conversation_id=? AND run_id=? ORDER BY seq",
             arrayOf(id.value,run.value)).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
-        MessageHistory.validate(ids.map { storedMessage(db,id,it) })
+        MessageHistory.validate(ids.map { storedMessage(db, id, it, decodeReuse = decodeReuse) })
     }
     /** Preserve the independent composer for child receipts and historical-message revisions. */
     fun send(user:Message,assistant:Message,newConversation:Boolean=false,
@@ -497,11 +509,12 @@ class ConversationDatabase internal constructor(context: Context, private val af
             validateRunHistory(db,message.conversationId,message.runId)
         } } catch(e:Exception) {throw PersistenceException(e)}
     }
-    internal fun runtimeMessage(db: SQLiteDatabase, expected: Message): Message {
+    internal fun runtimeMessage(db: SQLiteDatabase, expected: Message,
+        decodeReuse: CommitMessageDecodeReuse? = null): Message {
         check(db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(expected.conversationId.value)).use { it.moveToFirst() }) {
             "所属会话已不存在"
         }
-        return storedMessage(db, expected.conversationId, expected.id.value).also {
+        return storedMessage(db, expected.conversationId, expected.id.value, decodeReuse = decodeReuse).also {
             require(it.runId == expected.runId && it.role == Message.ASSISTANT_ROLE)
         }
     }
@@ -514,14 +527,15 @@ class ConversationDatabase internal constructor(context: Context, private val af
         check(db.insertOrThrow("messages", null, values(supplement)) != -1L)
         SQLiteMessageVideoStore.insert(db, supplement, emptyList())
     }
-    internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message) {
-        check(storedMessage(db, message.conversationId, message.id.value).createdAt == message.createdAt) {
+    internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message,
+        decodeReuse: CommitMessageDecodeReuse? = null) {
+        check(storedMessage(db, message.conversationId, message.id.value, decodeReuse = decodeReuse).createdAt == message.createdAt) {
             "消息创建时间不可更改"
         }
         check(db.update("messages", values(message), "id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'",
             arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }
         SQLiteMessageVideoStore.readVerified(db, message)
-        validateRunHistory(db, message.conversationId, message.runId)
+        validateRunHistory(db, message.conversationId, message.runId, decodeReuse)
     }
     fun exportBackup():String = exportBackup(null)
     fun exportConversationBackup(conversationId:ConversationId):String = exportBackup(conversationId)

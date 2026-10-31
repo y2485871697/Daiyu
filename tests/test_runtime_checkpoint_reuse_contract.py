@@ -11,7 +11,7 @@ STORE = (APP / "storage/SQLiteRuntimeStore.kt").read_text()
 
 class RuntimeCheckpointReuseContract(unittest.TestCase):
     def test_payload_proof_and_fallback_are_in_the_original_write_transaction(self):
-        commit = STORE.split("val encoded = RunCheckpointCodec.encode(checkpoint)", 1)[1].split(
+        commit = STORE.split("private fun commit(input: RunCheckpoint", 1)[1].split(
             "if (contextChanged) contextUsageRevision++", 1)[0]
         self.assertLess(commit.index("transactions.run { db ->"), commit.index("CAST(payload AS BLOB)=CAST(? AS BLOB)"))
         self.assertIn("arrayOf(checkpointReuse.expectedPayload(m.id.value), m.id.value)", commit)
@@ -24,7 +24,7 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
             self.assertIn(field, commit)
 
     def test_atomic_writes_and_cas_still_precede_cache_publication(self):
-        commit = STORE.split("val encoded = RunCheckpointCodec.encode(checkpoint)", 1)[1].split(
+        commit = STORE.split("private fun commit(input: RunCheckpoint", 1)[1].split(
             "if (contextChanged) contextUsageRevision++", 1)[0]
         publish = commit.index("checkpointReuse.committed(checkpoint, processOwner, encoded)")
         for call in ["database.insertRuntimeSupplement", "database.writeRuntimeMessage", "ConversationUsageStore.record",
@@ -32,8 +32,8 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
             self.assertLess(commit.index(call), publish)
         self.assertIn("message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?", commit)
         self.assertIn("prior.first.revision.toString()", commit)
-        self.assertIn("} catch (failure: Throwable) {\n            checkpointReuse.clear()\n            throw failure", commit)
-        self.assertRegex(commit, r"publishRunArchive\(db, checkpoint\)\s*}\s*checkpointReuse.committed")
+        self.assertIn("} catch (failure: Throwable) {\n            checkpointReuse.clear()\n            checkpointJsonWriter.clear()\n            throw failure", commit)
+        self.assertRegex(commit, r"publishRunArchive\(db, checkpoint\)(?:\s*}){2}\s*checkpointReuse.committed")
         close = STORE.split("@Synchronized override fun close()", 1)[1].split("companion object", 1)[0]
         self.assertLess(close.index("checkpointReuse.clear()"), close.index("lock.release()"))
 
@@ -63,7 +63,7 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
         commit = STORE.split("private fun commit(input: RunCheckpoint", 1)[1].split(
             "if (contextChanged) contextUsageRevision++", 1)[0]
         self.assertLess(commit.index("val checkpoint = CheckpointPreservation.freeze(input)"),
-                        commit.index("RunCheckpointCodec.encode(checkpoint)"))
+                        commit.index("RunCheckpointCodec.encode(checkpoint, checkpointJsonWriter)"))
         self.assertIn("checkpointReuse.committed(checkpoint, processOwner, encoded)", commit)
         facts = (APP / "context/CheckpointPreservation.kt").read_text()
         for token in ["usageRequests = value.usageRequests.toList()", "usage = value.usage.toList()",

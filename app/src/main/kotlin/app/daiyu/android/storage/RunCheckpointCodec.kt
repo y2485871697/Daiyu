@@ -15,7 +15,9 @@ internal object RunCheckpointCodec {
     internal fun checkEncodedSize(bytes: Int, running: Boolean) {
         require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)
     }
-    fun encode(value: RunCheckpoint): String {
+    // An optional lease-owned writer reuses only quoted strings, never this tree or
+    // validation. Archive normalization and the final UTF-8 limit apply on every call.
+    fun encode(value: RunCheckpoint, writer: CheckpointJsonWriter? = null): String {
         validate(value)
         check(MAX_BYTES.toLong() <= ArchiveCodec.MAX_ARCHIVE_BYTES)
         fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)
@@ -67,7 +69,7 @@ internal object RunCheckpointCodec {
                 .put("cached_tokens", record.snapshot.cachedTokens ?: JSONObject.NULL)
                 .apply { if (version >= 8) put("cache_creation_tokens", record.snapshot.cacheCreationTokens ?: JSONObject.NULL) }) } })
             .put("pending", value.pending?.let { JSONObject().put("call_id", it.callId.value) }
-                ?: JSONObject.NULL).toString().also {
+                ?: JSONObject.NULL).let { root -> writer?.write(root) ?: root.toString() }.also {
                 checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)
             }
     }

@@ -27,6 +27,26 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         self.assertIn('messages(listOf(row)).getJSONObject(0)', projection)
         self.assertNotIn('messages(rows)', projection)
 
+    def test_optional_quote_writer_only_replaces_the_final_tree_serialization(self):
+        codec = (APP / 'storage/RunCheckpointCodec.kt').read_text()
+        writer = (APP / 'storage/CheckpointJsonWriter.kt').read_text()
+        encode = codec.split('    fun encode(value: RunCheckpoint, writer: CheckpointJsonWriter? = null): String {', 1)[1].split('    internal data class Decoded', 1)[0]
+        self.assertLess(encode.index('validate(value)'), encode.index('writer?.write(root)'))
+        self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)', encode)
+        self.assertIn('.let { root -> writer?.write(root) ?: root.toString() }.also {', encode)
+        self.assertIn('checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)', encode)
+        self.assertIn('require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)', codec)
+        self.assertIn('LinkedHashMap<String, String>', writer)
+        self.assertIn('JSONObject.quote(source)', writer)
+        self.assertIn('JSONObject.numberToString(value)', writer)
+        self.assertIn('value === JSONObject.NULL', writer)
+        self.assertIn('source.length.toLong() + fragment.length.toLong()', writer)
+        self.assertIn('if (cost > maxRetainedChars.toLong()) return fragment', writer)
+        self.assertIn('quoted.size >= maxEntries || retainedChars + cost > maxRetainedChars.toLong()', writer)
+        self.assertIn('source.length >= minCacheChars', writer)
+        self.assertIn('fun clear()', writer)
+        self.assertIn('quoted.clear()', writer)
+
     def test_text_reader_reuses_the_first_chunk_and_keeps_strict_decoder(self):
         reader = (APP / 'storage/SQLiteText.kt').read_text()
         self.assertIn('SELECT length(CAST($column AS BLOB)),substr(CAST($column AS BLOB),1,65536)', reader)

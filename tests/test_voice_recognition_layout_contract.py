@@ -95,9 +95,23 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         self.assertIn('"ASR" -> "识别方式"', self.panel)
         self.assertIn('if (child == null) Column(', self.panel)
         self.assertNotIn('voice-section-select', self.asr)
-        self.assertIn('SettingsRadioRow("本机识别"', self.asr)
-        self.assertIn('SettingsRadioRow("豆包识别"', self.asr)
-        self.assertIn('SettingsCard(Modifier.testTag("voice-asr-method-card"))', self.asr)
+        self.assertIn('SettingsSegmentedTabs(', self.asr)
+        self.assertIn('labels = listOf("本机识别", "豆包识别")', self.asr)
+        self.assertIn('selectedIndex = if (draft.dictation == "DOUBAO") 1 else 0', self.asr)
+        self.assertIn('enabled = !busy', self.asr)
+        self.assertIn('testTag("voice-asr-method-card")', self.asr)
+        self.assertNotIn('SettingsRadioRow(', self.asr)
+        self.assertNotIn('SettingsCard(Modifier.testTag("voice-asr-method-card"))', self.asr)
+
+    def test_asr_segments_keep_guarded_saved_method_without_saving_other_draft_fields(self):
+        choice = self.asr.split('SettingsSegmentedTabs(', 1)[1].split('if (draft.dictation == "DOUBAO") {', 1)[0]
+        self.assertIn('if (current() && !busy)', choice)
+        self.assertIn('val method = if (index == 0) "SYSTEM" else "DOUBAO"', choice)
+        self.assertIn('changeDraft(draft.copy(dictation = method))', choice)
+        self.assertIn('save((saved ?: VoiceConfiguration()).copy(dictation = method))', choice)
+        self.assertNotIn('save(draft', choice)
+        self.assertIn('"voice-asr-method:system" else "voice-asr-method:doubao"', choice)
+        self.assertNotIn('识别音频会发送到豆包', self.asr)
 
     def test_connection_key_save_advanced_and_console_share_one_card(self):
         group = body(self.asr, 'SettingsCard(Modifier.testTag("voice-asr-account-card"))')

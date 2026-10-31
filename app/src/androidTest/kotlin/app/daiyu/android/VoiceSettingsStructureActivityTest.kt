@@ -147,7 +147,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     fun testRecognitionAndMimoReturnToTheirOwnHomes() {
         systemProfiles(); enter()
         reveal("voice-recognition-method", "语音设置").performClick()
-        node("settings-radio:本机识别").assertExists()
+        node("voice-asr-method:system").assertExists()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
         node("voice-section-select").assertTextContains("语音识别")
         section("我的声音")
@@ -224,7 +224,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         reveal("voice-recognition-method", "语音设置")
             .assert(hasAnyAncestor(hasTestTag("voice-recognition-method-card"))).performClick()
         node("voice-section-select").assertDoesNotExist()
-        node("settings-radio:本机识别").assertExists()
+        node("voice-asr-method:system").assertExists()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -238,6 +238,40 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(cloud.left, download.left, 1f)
         assertEquals(cloud.right, download.right, 1f)
         assertTrue(download.left >= pack.left && download.right <= pack.right)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRecognitionSegmentsPersistSelectionAndKeepOtherProfiles() {
+        systemProfiles()
+        val reading = checkNotNull(fixture.controller.voiceRuntime.configuration.value)
+        val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
+        enter(); reveal("voice-recognition-method", "语音设置").performClick()
+        node("voice-asr-method:system").assertIsSelected()
+        node("voice-asr-method:doubao").assertIsNotSelected()
+        for (tag in listOf("voice-asr-method:system", "voice-asr-method:doubao")) {
+            node(tag).assertHeightIsAtLeast(48.dp)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Tab))
+        }
+        val local = node("voice-asr-method:system").fetchSemanticsNode().boundsInRoot
+        val cloud = node("voice-asr-method:doubao").fetchSemanticsNode().boundsInRoot
+        assertEquals(local.width, cloud.width, 1f)
+        assertEquals(local.center.y, cloud.center.y, 1f)
+        node("voice-asr-method:doubao").performClick()
+        ui.waitUntil { fixture.controller.voiceRuntime.configuration.value?.dictation == "DOUBAO" }
+        node("voice-asr-method:doubao").assertIsSelected()
+        node("voice-asr-method:system").assertIsNotSelected()
+        node("voice-asr-account-card").assertExists()
+        ui.onAllNodesWithText("识别音频会发送到豆包", substring = true).assertCountEquals(0)
+        assertEquals(reading.asrKey, fixture.controller.voiceRuntime.configuration.value?.asrKey)
+        assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
+        node("voice-asr-method:system").performClick()
+        ui.waitUntil { fixture.controller.voiceRuntime.configuration.value?.dictation == "SYSTEM" }
+        node("voice-asr-method:system").assertIsSelected()
+        node("voice-asr-account-card").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
+        reveal("voice-recognition-method", "语音设置").performClick()
+        node("voice-asr-method:system").assertIsSelected()
+        assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
         assertEquals(0, fixture.opens.get())
     }
 

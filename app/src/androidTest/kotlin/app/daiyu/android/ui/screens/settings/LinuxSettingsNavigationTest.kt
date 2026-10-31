@@ -79,7 +79,11 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
         show()
         node("linux-files:rootfs").performClick().assertIsSelected()
         node("linux-files:workspace").assertIsNotSelected()
-        ui.onNodeWithTag("linux-files-indicator:rootfs", useUnmergedTree = true).assertExists()
+        for (location in LinuxFileLocation.entries) {
+            ui.onNodeWithTag("linux-files-indicator:${location.name.lowercase()}", useUnmergedTree = true).assertDoesNotExist()
+            node("linux-files:${location.name.lowercase()}")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
+        }
         node("linux-files:shared").performClick().assertIsSelected()
     }
 

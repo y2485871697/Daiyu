@@ -303,26 +303,23 @@ internal fun VoiceSettingsPanel(
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("page:语音设置"),
                     contentPadding = PaddingValues(bottom = 24.dp)) {
                     if (child == "ASR") {
-                        item { SettingsCard(Modifier.testTag("voice-asr-method-card")) {
-                            Row(Modifier.fillMaxWidth()) {
-                                Box(Modifier.weight(1f)) { SettingsRadioRow("本机识别", draft.dictation != "DOUBAO", !busy) {
-                                    if (current() && !busy) {
-                                        changeDraft(draft.copy(dictation = "SYSTEM"))
-                                        save((saved ?: VoiceConfiguration()).copy(dictation = "SYSTEM"))
-                                    }
-                                } }
-                                Box(Modifier.weight(1f)) { SettingsRadioRow("豆包识别", draft.dictation == "DOUBAO", !busy) {
-                                    if (current() && !busy) {
-                                        changeDraft(draft.copy(dictation = "DOUBAO"))
-                                        save((saved ?: VoiceConfiguration()).copy(dictation = "DOUBAO"))
-                                    }
-                                } }
-                            }
-                        } }
+                        item { SettingsSegmentedTabs(
+                            labels = listOf("本机识别", "豆包识别"),
+                            selectedIndex = if (draft.dictation == "DOUBAO") 1 else 0,
+                            enabled = !busy,
+                            modifier = Modifier.padding(vertical = 8.dp).testTag("voice-asr-method-card"),
+                            tabTag = { if (it == 0) "voice-asr-method:system" else "voice-asr-method:doubao" },
+                            onSelect = { index ->
+                                if (current() && !busy) {
+                                    val method = if (index == 0) "SYSTEM" else "DOUBAO"
+                                    changeDraft(draft.copy(dictation = method))
+                                    save((saved ?: VoiceConfiguration()).copy(dictation = method))
+                                }
+                            },
+                        ) }
                         if (draft.dictation == "DOUBAO") {
                             item { SettingsCard(Modifier.testTag("voice-asr-account-card")) {
                                 SettingsSectionTitle("连接豆包账户")
-                                SettingsNote("识别音频会发送到豆包；与朗读、实时对话分别配置。")
                                 SettingsTextField("ASR API Key", draft.asrKey, { if (!busy) changeDraft(draft.copy(asrKey = it)) },
                                     password = true, enabled = !busy, compact = true)
                                 TextButton("保存连接设置", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)

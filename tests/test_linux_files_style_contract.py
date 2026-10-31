@@ -39,7 +39,8 @@ class LinuxFilesStyleContract(unittest.TestCase):
 
     def test_navigation_colors_use_theme_pairs_instead_of_sampled_reference_colors(self):
         nav = read('LinuxSettingsNavigation.kt')
-        bottom, files = nav.split('internal fun LinuxFileLocationTabs', 1)
+        bottom = nav.split('internal fun LinuxFileLocationTabs', 1)[0]
+        files = read('SettingsSegmentedTabs.kt')
         self.assertIn('val tint = if (active) colors.onPrimary else colors.onPrimaryContainer', bottom)
         self.assertIn('color = if (active) colors.primary else colors.onPrimaryContainer', bottom)
         self.assertIn('tint = tint', bottom)
@@ -51,7 +52,6 @@ class LinuxFilesStyleContract(unittest.TestCase):
             self.assertNotIn('conversationAgentColors', source)
         self.assertIn('val tint = (if (active) colors.onPrimary else colors.onPrimaryContainer)', files)
         self.assertIn('.copy(alpha = if (enabled) 1f else .45f)', files)
-        self.assertIn('tint = tint', files)
         self.assertIn('color = tint', files)
         self.assertIn('BorderStroke(1.dp, colors.outline)', files)
         self.assertIn('.background(colors.outline)', files)
@@ -67,11 +67,22 @@ class LinuxFilesStyleContract(unittest.TestCase):
 
     def test_file_source_segmented_control_preserves_disabled_and_tab_semantics(self):
         nav = read('LinuxSettingsNavigation.kt').split('internal fun LinuxFileLocationTabs', 1)[1].split('internal fun linuxBrowsableRootfs')[0]
+        shared = read('SettingsSegmentedTabs.kt')
+        for token in ['SettingsSegmentedTabs(', 'selectedIndex = selected.ordinal',
+                      'enabled = enabled', 'linux-files:${LinuxFileLocation.entries[it].name.lowercase()}',
+                      'onSelect = { onSelect(LinuxFileLocation.entries[it]) }']:
+            self.assertIn(token, nav)
         for token in ['BorderStroke(1.dp', 'RoundedCornerShape(28.dp)', 'enabled = enabled',
                       'role = Role.Tab', 'maxLines = 2, textAlign = TextAlign.Center',
-                      'DaiyuIcons.Check', 'linux-files-indicator:${location.name.lowercase()}']:
-            self.assertIn(token, nav)
-        self.assertNotIn('height = 3.dp', nav)
+                      'selectableGroup()', 'horizontalArrangement = Arrangement.Center',
+                      'heightIn(min = 48.dp)', 'Text(label,']:
+            self.assertIn(token, shared)
+        for source in [nav, shared]:
+            self.assertNotIn('DaiyuIcons.Check', source)
+            self.assertNotIn('linux-files-indicator:', source)
+            self.assertNotIn('height = 3.dp', source)
+        self.assertNotIn('DaiyuIcon(', shared)
+        self.assertNotIn('Spacer(', shared)
 
     def test_topbar_uses_existing_real_actions_not_a_callback_registration_side_channel(self):
         panel = read('PrivateWorkspacePanel.kt')

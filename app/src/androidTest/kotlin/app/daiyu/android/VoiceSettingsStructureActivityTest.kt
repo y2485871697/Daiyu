@@ -13,6 +13,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.Color
+import kotlin.math.abs
 import androidx.compose.ui.semantics.SemanticsProperties
 import kotlinx.coroutines.runBlocking
 import app.daiyu.android.model.catalog.CatalogCommitResult
@@ -241,12 +243,28 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    private fun assertRecognitionSelectedColors(tag: String) {
+        val pixels = node(tag).captureToImage().toPixelMap()
+        fun Color.matches(expected: Color) = abs(red - expected.red) < .035f &&
+            abs(green - expected.green) < .035f && abs(blue - expected.blue) < .035f
+        var backgroundCount = 0
+        var foregroundCount = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val pixel = pixels[x, y]
+            if (pixel.matches(Color(0xff82728f))) backgroundCount++
+            if (pixel.matches(Color.White)) foregroundCount++
+        }
+        assertTrue("Recognition uses the workspace selected background", backgroundCount > pixels.width * pixels.height * .04f)
+        assertTrue("Recognition keeps the workspace white foreground", foregroundCount > 8)
+    }
+
     fun testRecognitionSegmentsPersistSelectionAndKeepOtherProfiles() {
         systemProfiles()
         val reading = checkNotNull(fixture.controller.voiceRuntime.configuration.value)
         val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
         enter(); reveal("voice-recognition-method", "语音设置").performClick()
         node("voice-asr-method:system").assertIsSelected()
+        assertRecognitionSelectedColors("voice-asr-method:system")
         ui.onNodeWithText("无需账户。上一页下载语音包后，即可离线识别。").assertDoesNotExist()
         node("voice-asr-method:doubao").assertIsNotSelected()
         for (tag in listOf("voice-asr-method:system", "voice-asr-method:doubao")) {
@@ -262,6 +280,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         ui.waitForIdle()
         ui.onNodeWithText("已保存").assertDoesNotExist()
         node("voice-asr-method:doubao").assertIsSelected()
+        assertRecognitionSelectedColors("voice-asr-method:doubao")
         node("voice-asr-method:system").assertIsNotSelected()
         node("voice-asr-account-card").assertExists()
         ui.onAllNodesWithText("识别音频会发送到豆包", substring = true).assertCountEquals(0)

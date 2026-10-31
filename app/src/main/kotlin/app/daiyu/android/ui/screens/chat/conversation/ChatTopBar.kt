@@ -47,7 +47,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
-    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false, modelLabel: String = "") {
+    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false, modelLabel: String = "",
+    readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null) {
     var expanded by remember { mutableStateOf(false) }
     val chrome = chatChromeColors()
     Row(modifier.testTag("chat-top-bar").fillMaxWidth().heightIn(min = 64.dp).padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
@@ -75,7 +76,8 @@ internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Mod
                 Modifier.size(40.dp).semantics { selected = expanded },
                 tint = if (expanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null)
             ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
-                interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending)
+                interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending,
+                readAutomaticCompression = readAutomaticCompression)
         }
     }
 }

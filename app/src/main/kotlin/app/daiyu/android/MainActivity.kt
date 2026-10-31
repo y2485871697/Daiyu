@@ -2659,7 +2659,6 @@ class MainActivity : ComponentActivity() {
                                     }
                                     app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                        automaticCompression = automaticCompression, automaticCompressionPending = automaticCompressionPending,
                                         composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
                                             contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
                                             contextTokensText = contextUsageLabels.second,
@@ -2676,6 +2675,10 @@ class MainActivity : ComponentActivity() {
                                             QuestionCleanup(turn.id)
                                         }
                                     }, speechMessageId = speechMessageId,
+                                        readAutomaticCompression = {
+                                            app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
+                                                automaticCompression, automaticCompressionPending)
+                                        },
                                         callUi = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value },
                                         callActions = doubaoCallActions(), dedicatedTool = { step -> DedicatedQuestion(step) },
                                         toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,

@@ -11,6 +11,11 @@ on:
         description: 本次定向检查标识
         type: string
         required: true
+      check_scope:
+        description: 存储热路径或聊天滚动期间菜单重组隔离
+        type: choice
+        options: [storage, menu-scroll]
+        default: storage
 permissions:
   contents: read
 concurrency:
@@ -24,6 +29,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       SKIP_JDK_VERSION_CHECK: 'true'
+      SCREEN_JANK_CHECK_SCOPE: ${{ inputs.check_scope }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -46,17 +52,21 @@ jobs:
           cmdline-tools-version: '16111833'
           packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
           log-accepted-android-sdk-licenses: false
-      - name: 持久化热路径定向契约
+      - name: 所选热路径定向契约
         shell: bash
         run: |
           mkdir -p screen-jank-checks
           set -o pipefail
           python3 -B - 2>&1 <<'PY' | tee screen-jank-checks/contracts.log
-          import json, unittest
+          import json, os, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_checkpoint_encoding_hotpath_contract.py', 'test_runtime_checkpoint_reuse_contract.py',
-                          'test_large_history_storage_contract.py', 'test_runtime_commit_hotpath_contract.py'):
+          patterns = ('test_chat_menu_scroll_isolation_contract.py', 'test_chat_menu_shadow_contract.py',
+                      'test_chat_overflow_icon_colors_contract.py', 'test_chat_outside_tap_contract.py',
+                      'test_dialog_motion_contract.py') if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'menu-scroll' else (
+                      'test_checkpoint_encoding_hotpath_contract.py', 'test_runtime_checkpoint_reuse_contract.py',
+                      'test_large_history_storage_contract.py', 'test_runtime_commit_hotpath_contract.py')
+          for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -66,30 +76,43 @@ jobs:
           PY
           python3 scripts/verify_boundaries.py
       - name: 准备既有离线语音依赖（不打包）
-        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
-      - name: 存储与编码定向单测及源码编译（不打包）
+        run: |
+          ./gradlew --no-daemon --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=screen-jank-checks/prepare-task-graph.json \
+            :app:prepareOfflineSpeechRuntime
+      - name: 所选热路径定向单测及源码编译（不打包）
         shell: bash
         run: |
           set -o pipefail
+          classes=(
+            app.daiyu.android.storage.CommitMessageDecodeReuseTest
+            app.daiyu.android.storage.ConversationMessageDecodeReuseSQLiteTest
+            app.daiyu.android.storage.CheckpointJsonWriterTest
+            app.daiyu.android.storage.RunCheckpointQuotedStringsTest
+            app.daiyu.android.storage.AndroidCheckpointJsonWriterTest
+            app.daiyu.android.storage.AndroidRunCheckpointQuotedStringsTest
+            app.daiyu.android.storage.RuntimeCheckpointReuseTest
+            app.daiyu.android.storage.SQLiteRuntimeSnapshotTest
+            app.daiyu.android.storage.SQLiteTextTest
+            app.daiyu.android.storage.SQLiteTextChunksTest
+            app.daiyu.android.storage.CompressionCheckpointCodecTest
+            app.daiyu.android.storage.TransportCheckpointCodecTest
+            app.daiyu.android.backup.RunCheckpointCodecTest
+            app.daiyu.android.context.ArchiveCheckpointArrayTest
+            app.daiyu.android.context.Utf8PayloadTest
+          )
+          if [[ "$SCREEN_JANK_CHECK_SCOPE" == menu-scroll ]]; then
+            classes=(app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
+          fi
+          filters=()
+          for class in "${classes[@]}"; do
+            filters+=(--tests "$class")
+          done
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=screen-jank-checks/task-graph.json \
-            :app:compileDebugKotlin :app:testDebugUnitTest \
-            --tests 'app.daiyu.android.storage.CommitMessageDecodeReuseTest' \
-            --tests 'app.daiyu.android.storage.ConversationMessageDecodeReuseSQLiteTest' \
-            --tests 'app.daiyu.android.storage.CheckpointJsonWriterTest' \
-            --tests 'app.daiyu.android.storage.RunCheckpointQuotedStringsTest' \
-            --tests 'app.daiyu.android.storage.AndroidCheckpointJsonWriterTest' \
-            --tests 'app.daiyu.android.storage.AndroidRunCheckpointQuotedStringsTest' \
-            --tests 'app.daiyu.android.storage.RuntimeCheckpointReuseTest' \
-            --tests 'app.daiyu.android.storage.SQLiteRuntimeSnapshotTest' \
-            --tests 'app.daiyu.android.storage.SQLiteTextTest' \
-            --tests 'app.daiyu.android.storage.SQLiteTextChunksTest' \
-            --tests 'app.daiyu.android.storage.CompressionCheckpointCodecTest' \
-            --tests 'app.daiyu.android.storage.TransportCheckpointCodecTest' \
-            --tests 'app.daiyu.android.backup.RunCheckpointCodecTest' \
-            --tests 'app.daiyu.android.context.ArchiveCheckpointArrayTest' \
-            --tests 'app.daiyu.android.context.Utf8PayloadTest' \
+            :app:compileDebugKotlin :app:testDebugUnitTest "${filters[@]}" \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee screen-jank-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -103,6 +126,8 @@ jobs:
                       'SQLiteRuntimeSnapshotTest', 'SQLiteTextTest', 'SQLiteTextChunksTest',
                       'CompressionCheckpointCodecTest', 'TransportCheckpointCodecTest',
                       'RunCheckpointCodecTest', 'ArchiveCheckpointArrayTest', 'Utf8PayloadTest'}
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'menu-scroll':
+              expected = {'ChatMenuIsolationCompositionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)
@@ -114,11 +139,16 @@ jobs:
               assert task in graph, task
               match = re.search(r'^> Task ' + re.escape(task) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
               assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
+          for graph_file in ('prepare-task-graph.json', 'task-graph.json'):
+              for task in json.loads(Path('screen-jank-checks', graph_file).read_text()):
+                  name = task.rsplit(':', 1)[-1]
+                  assert not re.match(r'(?i)^(assemble|sign|install|uninstall|connected|managedDevice)', name), task
+                  assert not re.match(r'(?i)^(package|bundle).*(apk|debug|release|androidtest)$', name), task
           packages = [str(p) for p in Path.cwd().rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
           assert not packages, packages
           record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
-                        classes=sorted(names), contracts=json.loads(Path('screen-jank-checks/contracts.json').read_text()),
+                        check_scope=os.environ['SCREEN_JANK_CHECK_SCOPE'], classes=sorted(names), contracts=json.loads(Path('screen-jank-checks/contracts.json').read_text()),
                         apk_built=False, instrumentation_run=False)
           Path('screen-jank-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
           print(json.dumps(record, ensure_ascii=False))

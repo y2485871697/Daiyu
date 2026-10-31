@@ -43,13 +43,18 @@ class ChatOutsideTapContractTest(unittest.TestCase):
         self.assertLess(dismiss.index('hideChatInputIme(focus, keyboard, view)'), dismiss.index('inputDismissInProgress = false'))
         self.assertIn('ChatTopBar(state.title, actions, modifier = dismissInputOnTap', text)
         self.assertIn('modifier = dismissInputOnTap.testTag("chat-status")', text)
-        self.assertIn('ChatMessageList(state.turns, actions, Modifier.fillMaxSize().then(dismissInputOnTap)', text)
+        self.assertIn('val displayedTurns = submissionTurns(state.turns, state.submissionPreview)', text)
+        self.assertIn('ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap)', text)
         composer = text.split('}, composer = { backdrop ->', 1)[1]
-        self.assertIn('onInputFocusChanged = { draftFocused = it }', composer)
+        self.assertIn('onInputFocusChanged = { focused ->', composer)
+        self.assertIn('draftFocused = focused', composer)
+        self.assertIn('if (focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()', composer)
         self.assertIn('isInputDismissInProgress = { inputDismissInProgress }', composer)
         self.assertNotIn('dismissInputOnTap', composer)
         self.assertIn('ChatMenuLayer(modifier.fillMaxSize())', text)
-        self.assertNotIn('boundsInRoot', text)
+        # Call positioning may use bounds; the completed-tap observer must not.
+        self.assertNotIn('boundsInRoot', dismiss)
+        self.assertNotIn('pointerInput', dismiss)
 
     def test_editor_reports_real_focus_without_changing_ime_or_draft_model(self):
         text = (CHAT / 'ChatComposer.kt').read_text()

@@ -92,6 +92,7 @@ internal fun DaiyuChatScreen(
     speechMessageId: String? = null,
     callUi: DoubaoCallUi? = null,
     callActions: DoubaoCallActions = DoubaoCallActions(),
+    readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null,
 ) {
     val motionState = remember(callUi?.sessionKey) { DoubaoCallMotionState() }
     var voiceAnchor by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
@@ -122,7 +123,8 @@ internal fun DaiyuChatScreen(
         ChatTopBar(state.title, actions, modifier = dismissInputOnTap, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
             interactiveModeChangeEnabled = state.interactiveModeChangeEnabled,
-            automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending)
+            automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending,
+            readAutomaticCompression = readAutomaticCompression)
         state.statusText?.let { status ->
             // Operational errors/recovery/preparation are not money and never enter the amount slot.
             top.yukonga.miuix.kmp.basic.Text(status,

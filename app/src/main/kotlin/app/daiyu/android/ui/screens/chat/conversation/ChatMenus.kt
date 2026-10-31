@@ -71,7 +71,8 @@ internal fun chatOverflowIconColor(action: ChatMenuAction, dark: Boolean, accent
 @Composable
 internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
-    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
+    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false,
+    readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null) {
     val groups = listOf(
         listOf(
             MenuEntry("新建会话", ChatPreviewIcons.NewChat, ChatMenuAction.NEW_CHAT),
@@ -93,23 +94,27 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     val dark = MiuixTheme.colorScheme.background.luminance() < .3f
     ChatAnchoredMenu(expanded, onDismiss, Modifier.testTag("chat-overflow-menu"),
         maxHeight = null, offset = androidx.compose.ui.unit.DpOffset(5.dp, 14.dp), screenMargin = 16.dp, outsideClickFeedback = false) {
-        Column(Modifier.padding(1.dp)) {
-            groups.forEachIndexed { index, entries ->
-                if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                    color = if (dark) Color(0x1FC8B5EB) else Color(0x249280B5))
-                Column(Modifier.padding(vertical = 2.dp)) {
-                    entries.forEach { entry ->
-                        val checked = when (entry.action) {
-                            ChatMenuAction.INTERACTIVE_MODE -> interactiveModeEnabled
-                            ChatMenuAction.AUTO_COMPRESS -> automaticCompression
-                            else -> null
+        ChatAutomaticCompressionContent(readAutomaticCompression ?: {
+            ChatAutomaticCompressionState(automaticCompression, automaticCompressionPending)
+        }) { compression ->
+            Column(Modifier.padding(1.dp)) {
+                groups.forEachIndexed { index, entries ->
+                    if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                        color = if (dark) Color(0x1FC8B5EB) else Color(0x249280B5))
+                    Column(Modifier.padding(vertical = 2.dp)) {
+                        entries.forEach { entry ->
+                            val checked = when (entry.action) {
+                                ChatMenuAction.INTERACTIVE_MODE -> interactiveModeEnabled
+                                ChatMenuAction.AUTO_COMPRESS -> compression.enabled
+                                else -> null
+                            }
+                            val enabled = when (entry.action) {
+                                ChatMenuAction.INTERACTIVE_MODE -> interactiveModeChangeEnabled
+                                ChatMenuAction.AUTO_COMPRESS -> compression.enabled != null && !compression.pending
+                                else -> true
+                            }
+                            ChatMenuItem(entry, onDismiss, onAction, checked = checked, enabled = enabled, previewStyle = true)
                         }
-                        val enabled = when (entry.action) {
-                            ChatMenuAction.INTERACTIVE_MODE -> interactiveModeChangeEnabled
-                            ChatMenuAction.AUTO_COMPRESS -> automaticCompression != null && !automaticCompressionPending
-                            else -> true
-                        }
-                        ChatMenuItem(entry, onDismiss, onAction, checked = checked, enabled = enabled, previewStyle = true)
                     }
                 }
             }

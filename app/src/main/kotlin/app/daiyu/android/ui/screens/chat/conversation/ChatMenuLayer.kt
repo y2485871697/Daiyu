@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.key
 import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -86,9 +86,7 @@ private class MenuOverlay(
     val content: @Composable () -> Unit,
 )
 
-private class MenuLayerState {
-    var active by mutableStateOf<MenuOverlay?>(null)
-}
+private typealias MenuLayerState = ChatMenuLayerState<MenuOverlay>
 
 private val LocalMenuLayer = staticCompositionLocalOf<MenuLayerState?> { null }
 internal val LocalChatMenuPlacementDiagnostic = staticCompositionLocalOf<((() -> String) -> Unit)?> { null }
@@ -121,80 +119,89 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
         CompositionLocalProvider(LocalMenuLayer provides state) {
             Box(Modifier.fillMaxSize().captureForTopBar(backdrop)) { content() }
         }
-        var host by remember { mutableStateOf(Rect.Zero) }
-        Box(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))
-            .onGloballyPositioned {
-                if (diagnostic != null) probe.host = it
-                host = it.boundsInRoot()
-            }) {
-            state.active?.let { menu ->
-                key(menu) {
-                    val motion = rememberPopupMotion(menu.expanded())
-                    BackHandler(enabled = menu.expanded(), onBack = menu.onDismiss)
-                    Layout(
-                        modifier = Modifier.fillMaxSize()
-                            .onGloballyPositioned { if (diagnostic != null) probe.layout = it }
-                            .pointerInput(menu) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (!menu.expanded()) event.changes.forEach { it.consume() }
-                                }
+        ChatMenuOverlay(state, backdrop, diagnostic, probe)
+    }
+}
+
+/** Menu mount/exit must not invalidate the captured page's composition. */
+@Composable
+private fun BoxScope.ChatMenuOverlay(
+    state: MenuLayerState,
+    backdrop: LayerBackdrop?,
+    diagnostic: ((() -> String) -> Unit)?,
+    probe: MenuPlacementDiagnostic,
+) {
+    var host by remember { mutableStateOf(Rect.Zero) }
+    Box(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))
+        .onGloballyPositioned {
+            if (diagnostic != null) probe.host = it
+            host = it.boundsInRoot()
+        }) {
+        ChatMenuOverlayContent(state) { menu ->
+            val motion = rememberPopupMotion(menu.expanded())
+            BackHandler(enabled = menu.expanded(), onBack = menu.onDismiss)
+            Layout(
+                modifier = Modifier.fillMaxSize()
+                    .onGloballyPositioned { if (diagnostic != null) probe.layout = it }
+                    .pointerInput(menu) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (!menu.expanded()) event.changes.forEach { it.consume() }
                             }
-                        },
-                        content = {
-                            Box(Modifier.fillMaxSize().conversationClickable(clickFeedback = menu.outsideClickFeedback()) { if (menu.expanded()) menu.onDismiss() })
-                            ChatGlassMenuSurface(backdrop, Modifier
-                                .graphicsLayer {
-                                    val scale = 0.15f + 0.85f * motion.fraction.value
-                                    scaleX = scale
-                                    scaleY = scale
-                                    transformOrigin = TransformOrigin(1f, 0f)
-                                }
-                                .onGloballyPositioned { if (diagnostic != null) probe.surface = it }
-                                .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
-                                else Modifier.clearAndSetSemantics {}), motion = motion) {
-                                CompositionLocalProvider(LocalPopupMotion provides motion) { menu.content() }
-                            }
-                        },
-                    ) { measurables, constraints ->
-                        val width = constraints.maxWidth
-                        val height = constraints.maxHeight
-                        val margin = 9.dp.roundToPx()
-                        val widthMargin = menu.screenMargin.roundToPx()
-                        val maxWidth = (width - widthMargin * 2).coerceAtLeast(1)
-                        val availableHeight = (height - margin * 2).coerceAtLeast(1)
-                        val maxHeight = menu.maxHeight?.roundToPx()?.coerceAtMost(availableHeight) ?: availableHeight
-                        val dismiss = measurables[0].measure(Constraints.fixed(width, height))
-                        val surface = measurables[1].measure(Constraints(
-                            minWidth = minOf(156.dp.roundToPx(), maxWidth),
-                            maxWidth = maxWidth,
-                            maxHeight = maxHeight,
-                        ))
-                        val offsetX = menu.offset.x.roundToPx()
-                        val offsetY = menu.offset.y.roundToPx()
-                        layout(width, height) {
-                            dismiss.place(0, 0)
-                            val usedHost = host
-                            val rootAnchor = menu.anchor()
-                            val anchor = rootAnchor.translate(-usedHost.left, -usedHost.top)
-                            val fitsBelow = anchor.bottom + offsetY + surface.height + margin <= height
-                            val wantedY = if (fitsBelow) anchor.bottom.toInt() + offsetY
-                                else anchor.top.toInt() - offsetY - surface.height
-                            val y = wantedY.coerceIn(margin,
-                                    (height - surface.height - margin).coerceAtLeast(margin))
-                            val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
-                                (width - surface.width - margin).coerceAtLeast(margin))
-                            if (diagnostic != null) {
-                                probe.sequence++
-                                probe.placement = "place#${probe.sequence} hostUsed=$usedHost anchorUsed=$rootAnchor " +
-                                    "localAnchor=$anchor layoutSize=${width}x$height " +
-                                    "surfaceMeasured=${surface.width}x${surface.height} margin=$margin " +
-                                    "fitsBelow=$fitsBelow wantedY=$wantedY placed=$x,$y"
-                            }
-                            surface.place(x, y)
                         }
+                    },
+                content = {
+                    Box(Modifier.fillMaxSize().conversationClickable(clickFeedback = menu.outsideClickFeedback()) { if (menu.expanded()) menu.onDismiss() })
+                    ChatGlassMenuSurface(backdrop, Modifier
+                        .graphicsLayer {
+                            val scale = 0.15f + 0.85f * motion.fraction.value
+                            scaleX = scale
+                            scaleY = scale
+                            transformOrigin = TransformOrigin(1f, 0f)
+                        }
+                        .onGloballyPositioned { if (diagnostic != null) probe.surface = it }
+                        .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
+                        else Modifier.clearAndSetSemantics {}), motion = motion) {
+                        CompositionLocalProvider(LocalPopupMotion provides motion) { menu.content() }
                     }
+                },
+            ) { measurables, constraints ->
+                val width = constraints.maxWidth
+                val height = constraints.maxHeight
+                val margin = 9.dp.roundToPx()
+                val widthMargin = menu.screenMargin.roundToPx()
+                val maxWidth = (width - widthMargin * 2).coerceAtLeast(1)
+                val availableHeight = (height - margin * 2).coerceAtLeast(1)
+                val maxHeight = menu.maxHeight?.roundToPx()?.coerceAtMost(availableHeight) ?: availableHeight
+                val dismiss = measurables[0].measure(Constraints.fixed(width, height))
+                val surface = measurables[1].measure(Constraints(
+                    minWidth = minOf(156.dp.roundToPx(), maxWidth),
+                    maxWidth = maxWidth,
+                    maxHeight = maxHeight,
+                ))
+                val offsetX = menu.offset.x.roundToPx()
+                val offsetY = menu.offset.y.roundToPx()
+                layout(width, height) {
+                    dismiss.place(0, 0)
+                    val usedHost = host
+                    val rootAnchor = menu.anchor()
+                    val anchor = rootAnchor.translate(-usedHost.left, -usedHost.top)
+                    val fitsBelow = anchor.bottom + offsetY + surface.height + margin <= height
+                    val wantedY = if (fitsBelow) anchor.bottom.toInt() + offsetY
+                        else anchor.top.toInt() - offsetY - surface.height
+                    val y = wantedY.coerceIn(margin,
+                        (height - surface.height - margin).coerceAtLeast(margin))
+                    val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
+                        (width - surface.width - margin).coerceAtLeast(margin))
+                    if (diagnostic != null) {
+                        probe.sequence++
+                        probe.placement = "place#${probe.sequence} hostUsed=$usedHost anchorUsed=$rootAnchor " +
+                            "localAnchor=$anchor layoutSize=${width}x$height " +
+                            "surfaceMeasured=${surface.width}x${surface.height} margin=$margin " +
+                            "fitsBelow=$fitsBelow wantedY=$wantedY placed=$x,$y"
+                    }
+                    surface.place(x, y)
                 }
             }
         }

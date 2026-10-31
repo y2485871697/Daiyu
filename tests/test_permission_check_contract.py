@@ -48,14 +48,14 @@ class PermissionCheckContractTest(unittest.TestCase):
         self.assertNotIn("getSharedPreferences", screen)
         self.assertNotIn("putBoolean", screen)
 
-    def test_permission_whitelist_tracks_only_the_three_added_capabilities(self):
+    def test_permission_whitelist_tracks_reads_and_explicit_execution_service(self):
         boundary = (ROOT / "scripts/verify_boundaries.py").read_text()
         for name in ("PACKAGE_USAGE_STATS", "QUERY_ALL_PACKAGES", "POST_NOTIFICATIONS"):
             self.assertIn('"' + name + '": None', boundary)
         manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
         names = {n.get(ANDROID + "name") for n in manifest.findall("uses-permission")}
         self.assertTrue(names.isdisjoint({"android.permission.MANAGE_EXTERNAL_STORAGE",
-            "android.permission.ACCESS_BACKGROUND_LOCATION", "android.permission.FOREGROUND_SERVICE"}))
+            "android.permission.ACCESS_BACKGROUND_LOCATION"}))
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 expected_permissions = {
     "INTERNET": None, "VIBRATE": None, "RECORD_AUDIO": None,
+    "FOREGROUND_SERVICE": None, "FOREGROUND_SERVICE_SPECIAL_USE": None,
     "SYSTEM_ALERT_WINDOW": None,
     "QUERY_ALL_PACKAGES": None, "PACKAGE_USAGE_STATS": None, "POST_NOTIFICATIONS": None,
     "MODIFY_AUDIO_SETTINGS": None, "CHANGE_WIFI_STATE": "28",

@@ -83,7 +83,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         self.assertNotIn('reservePreparation()', text)
         self.assertIn('reservePreparation(conversation?.id, ticket)', text)
         self.assertIn('reservePreparation(owner.id)', text)
-        self.assertIn('UnacceptedToolCleanup(source, conversation)', text)
+        self.assertIn('UnacceptedToolCleanup(source, conversation, token.execution?.takeUnless { token.executionTransferred })', text)
 
     def test_conversation_binding_operation_does_not_replace_running_resources_or_diagnostics(self):
         text = (SRC / 'ChatController.kt').read_text()

@@ -397,6 +397,8 @@ class ChatController internal constructor(private val application:Application,
         var providerConfiguration: ProviderRunConfiguration? = null
         var summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null
         var summaryTransferred = false
+        var execution: app.daiyu.android.execution.UserExecutionLeases.Lease? = null
+        var executionTransferred = false
         var admittedVoiceOwner: Message? = null
         var admittedUserId: String? = null
         val cancellation = ContextPreparationCancellation()
@@ -648,6 +650,7 @@ class ChatController internal constructor(private val application:Application,
             }
             while (browserChildProgress.size > 64) browserChildProgress.remove(browserChildProgress.keys.first())
             browserChildren.removeAll { it.drained }
+            pruneExecutionLeases()
             if (closed) closeStorageWhenIdle() else notifyChanged()
         } }
     }
@@ -1647,20 +1650,65 @@ class ChatController internal constructor(private val application:Application,
         var result:Message?=null
     }
     private var resources:RunResources?=null
+    private val executionLeases = linkedMapOf<RunId, app.daiyu.android.execution.UserExecutionLeases.Lease>()
+    private fun beginExecution(token: Preparation): Boolean {
+        if (token.execution != null) return !preparationCancelled(token)
+        val lease = app.daiyu.android.execution.UserExecutionService.acquire(application) {
+            val admitted = synchronized(this) { token.revoked = true; token.admittedVoiceOwner }
+            token.cancellation.cancel()
+            token.browser?.cancel()
+            token.mcp?.cancel()
+            admitted?.let { owner ->
+                if (!stop(owner)) {
+                    synchronized(this) { browserChildren.filter { it.parent.identity.runId == owner.runId }.toList() }
+                        .forEach { it.close() }
+                    browserChildrenChanged()
+                }
+                synchronized(this) { backgroundRuns[owner.runId] }?.revoke()
+            }
+        } ?: run {
+            synchronized(this) { problem = "后台执行服务启动失败；草稿保留，未发送模型请求"; notifyChanged() }
+            return false
+        }
+        val retained = synchronized(this) {
+            if (preparationCancelled(token)) false else { token.execution = lease; true }
+        }
+        if (!retained) app.daiyu.android.execution.UserExecutionService.release(lease)
+        return retained
+    }
+    private fun retainExecution(token: Preparation, owner: Message) {
+        token.admittedVoiceOwner = owner
+        executionLeases[owner.runId] = checkNotNull(token.execution)
+        token.executionTransferred = true
+    }
+    private fun pruneExecutionLeases() {
+        val entries = executionLeases.entries.iterator()
+        while (entries.hasNext()) {
+            val (run, lease) = entries.next()
+            if (resources?.initial?.runId == run || backgroundRuns[run]?.isReleased() == false ||
+                browserChildren.any { it.parent.identity.runId == run && !it.drained }) continue
+            entries.remove()
+            app.daiyu.android.execution.UserExecutionService.release(lease)
+        }
+    }
     // Tools can exist before database acceptance. An UNKNOWN close must pin those too.
-    private class UnacceptedToolCleanup(val source: ConversationId?, val conversation: ConversationId) {
+    private class UnacceptedToolCleanup(val source: ConversationId?, val conversation: ConversationId,
+        val execution: app.daiyu.android.execution.UserExecutionLeases.Lease?) {
         val observation = ControllerShizukuCleanup()
     }
     private val unacceptedTools=mutableMapOf<RunCatalogTools,UnacceptedToolCleanup>()
-    private fun closeUnacceptedTools(tools:RunCatalogTools, source: ConversationId?, conversation: ConversationId) {
+    private fun closeUnacceptedTools(token: Preparation, tools:RunCatalogTools, source: ConversationId?, conversation: ConversationId) {
         val observation=synchronized(this) {
             if(unacceptedTools.containsKey(tools)) return
-            UnacceptedToolCleanup(source, conversation).also {unacceptedTools[tools]=it}.observation
+            UnacceptedToolCleanup(source, conversation, token.execution?.takeUnless { token.executionTransferred }).also {
+                if (it.execution != null) token.executionTransferred = true
+                unacceptedTools[tools] = it
+            }.observation
         }
         tools.closeWithResult { result -> handler.post {synchronized(this) {
             observation.observe(result)
             if(observation.drained) {
-                unacceptedTools.remove(tools)
+                unacceptedTools.remove(tools)?.execution?.let(app.daiyu.android.execution.UserExecutionService::release)
                 clearCleanupProblem(tools)
                 guiEntry?.takeIf { it.catalog === tools && !it.persistenceUnknown && it.session?.releaseConfirmed == true }
                     ?.let { it.taskSurface.end(); guiEntry = null }
@@ -1936,6 +1984,7 @@ class ChatController internal constructor(private val application:Application,
             reservePreparation(ConversationId(command.source.owner.conversationId))
         }
         try {
+            if (!beginExecution(token)) return ChildTaskCommandReceipt.Rejected("execution_service_unavailable")
             val conversation = ConversationId(command.source.owner.conversationId)
             if (!conversationExists(conversation)) return ChildTaskCommandReceipt.Rejected("child_source_stale")
             val key = SubAgentConfigKey.Conversation(conversation.value)
@@ -1976,6 +2025,7 @@ class ChatController internal constructor(private val application:Application,
                 retain = { tasks -> synchronized(this) {
                     check(!closed && !preparationCancelled(token))
                     backgroundRuns[run] = tasks
+                    retainExecution(token, initial)
                 } })
         } finally { finishPreparation(token); backgroundTasksChanged() }
     }
@@ -1990,6 +2040,7 @@ class ChatController internal constructor(private val application:Application,
         scheduleDeletedModelCleanup()
         handler.post {synchronized(this) {
             pruneBackgroundRuns()
+            pruneExecutionLeases()
             if(closed) closeStorageWhenIdle() else notifyChanged()
         }}
     }
@@ -2639,10 +2690,15 @@ class ChatController internal constructor(private val application:Application,
         releaseWorkspace(token)
         synchronized(this) {
             if (preparation !== token) return
+            releaseExecutionPreparation(token)
             preparation = null
             pendingImage = null
             if (closed) closeStorageWhenIdle() else notifyChanged()
         }
+    }
+    private fun releaseExecutionPreparation(token: Preparation) {
+        if (!token.executionTransferred) token.execution?.let(app.daiyu.android.execution.UserExecutionService::release)
+        token.execution = null
     }
     private fun finishNonTerminalPreparation(token: Preparation) {
         val browser = token.browser
@@ -2672,6 +2728,7 @@ class ChatController internal constructor(private val application:Application,
         releaseWorkspace(token)
         synchronized(this) {
             if (preparation !== token) return
+            releaseExecutionPreparation(token)
             preparation = null
             virtualDisplayEntry?.takeIf { !it.accepted && !token.persistenceUnconfirmed && !it.factoryEntered && it.catalog == null }
                 ?.let { it.taskSurface.end(); virtualDisplayEntry = null }
@@ -3631,7 +3688,7 @@ class ChatController internal constructor(private val application:Application,
             terminalRun == null && virtualDisplay == null && !withChildren))
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
         require(generation == null || (shizukuPreparation == null && browserBinding == null && imageAttempt == null))
-        if(preparationCancelled(token)) return null
+        if(preparationCancelled(token) || !beginExecution(token)) return null
         // All callers, including direct Controller sends, recheck the ORIGINAL location run
         // before draft/history/model preparation or SQLite acceptance. No preference reload here.
         if (gui != null && gui.taskSurface.ready(TaskSurface.FOREGROUND) == null) return null
@@ -4272,7 +4329,7 @@ class ChatController internal constructor(private val application:Application,
             owned to tools
         } catch (_: Exception) {
             auxiliaryPort?.close()
-            if(preparingTools!=null) closeUnacceptedTools(preparingTools, conversation?.id, conversationId)
+            if(preparingTools!=null) closeUnacceptedTools(token, preparingTools, conversation?.id, conversationId)
             else {
                 preparingDevices?.close()
                 preparingChildren?.close()
@@ -4282,7 +4339,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val (owned, tools) = prepared
         if (childPreparation != null && !runCatching { childPreparation.isCurrent() }.getOrDefault(false)) {
-            auxiliaryPort?.close(); closeUnacceptedTools(tools, conversation?.id, conversationId)
+            auxiliaryPort?.close(); closeUnacceptedTools(token, tools, conversation?.id, conversationId)
             problem="子代理配置或提供商已变化；草稿保留，请重新发送";notifyChanged();return null
         }
         if (!runCatching {
@@ -4290,19 +4347,19 @@ class ChatController internal constructor(private val application:Application,
             binding != null && binding.providerSlotId == frozenProvider.editor.slotId &&
                 binding.localModelIdentity == frozenProvider.localModelIdentity && providers.isCurrentConversation(binding, frozenProvider)
         }.getOrDefault(false)) {
-            auxiliaryPort?.close(); closeUnacceptedTools(tools, conversation?.id, conversationId)
+            auxiliaryPort?.close(); closeUnacceptedTools(token, tools, conversation?.id, conversationId)
             problem="提供商选择或配置已变化；草稿保留，请重新发送";notifyChanged();return null
         }
         // Only the in-memory admission gate is under the controller monitor. In particular,
         // beginCommit must never encompass SQLite or provider/model I/O.
         if (terminalPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalPreparation.assistant to terminalPreparation.provider)) {
-            closeUnacceptedTools(tools, conversation?.id, conversationId)
+            closeUnacceptedTools(token, tools, conversation?.id, conversationId)
             return null
         }
         if (terminalJobPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalJobPreparation.assistant to terminalJobPreparation.provider)) {
-            closeUnacceptedTools(tools, conversation?.id, conversationId)
+            closeUnacceptedTools(token, tools, conversation?.id, conversationId)
             return null
         }
         val mayCommit=synchronized(this) {
@@ -4311,7 +4368,7 @@ class ChatController internal constructor(private val application:Application,
                 mcpPreparation?.confirmed==false || browserPreparation?.isCancelled==true || (imageAttempt!=null && !imageAttempt.beginCommit())) false
             else { token.committing=true; true }
         }
-        if (!mayCommit) { auxiliaryPort?.close(); closeUnacceptedTools(tools, conversation?.id, conversationId); return null }
+        if (!mayCommit) { auxiliaryPort?.close(); closeUnacceptedTools(token, tools, conversation?.id, conversationId); return null }
         var databaseSendEntered=false
         val saved=try {
             checkNotNull(token.summaryPreparation).seal()
@@ -4374,7 +4431,7 @@ class ChatController internal constructor(private val application:Application,
             }
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
             auxiliaryPort?.close()
-            closeUnacceptedTools(tools, conversation?.id, conversationId)
+            closeUnacceptedTools(token, tools, conversation?.id, conversationId)
             problem=if(!token.persistenceUnconfirmed) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
                 else "发送保存结果未确认；保留原文和附件，不自动重发"
             notifyChanged();return null
@@ -4419,7 +4476,7 @@ class ChatController internal constructor(private val application:Application,
                 mcpPreparation?.confirmed==false || browserPreparation?.isCancelled==true) false else {
                 if(imageAttempt!=null) { imageProvider=provider; imageProviderConfiguration=frozenProvider }
                 problem=null;active=assistant
-                token.admittedVoiceOwner = assistant // Exact admitted run, not a later current/history guess.
+                retainExecution(token, assistant)
                 runner=owned;runTools=tools;resources=lifetime
                 token.summaryTransferred = true
                 reconnectResources=lifetime
@@ -4438,7 +4495,7 @@ class ChatController internal constructor(private val application:Application,
             pendingTitle.getAndSet(null)?.let(titleCoordinator::revoke)
             // close won AFTER acceptance: receipt still wins, but no provider request is opened.
             auxiliaryPort?.close()
-            closeUnacceptedTools(tools, conversation?.id, conversationId)
+            closeUnacceptedTools(token, tools, conversation?.id, conversationId)
             try {database.save(assistant.copy(status=RunStatus.INTERRUPTED))} catch (_:Exception) { }
         }
         return saved
@@ -4617,6 +4674,7 @@ class ChatController internal constructor(private val application:Application,
         lifetime.writer.shutdown();lifetime.waiter.shutdown()
         if (videoSession?.assistant?.runId == lifetime.initial.runId) videoSession = null
         resources=null;runner=null;runTools=null
+        pruneExecutionLeases()
         if (lifetime.modelBinding?.let(deletedCatalogModels::contains) == true) modelDeletionRevision++
         scheduleDeletedModelCleanup()
         clearCleanupProblem(lifetime.tools)

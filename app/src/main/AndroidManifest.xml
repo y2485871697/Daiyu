@@ -5,6 +5,8 @@
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Explicit single-action approval only; no exact-alarm, DND or media-control privilege. -->
@@ -48,6 +50,11 @@
     <application android:name=".ChatApplication" android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:dataExtractionRules="@xml/data_extraction_rules" android:allowBackup="false" android:fullBackupContent="false" android:label="@string/app_name"
         android:icon="@drawable/task17_launcher_f6f7f9_2491ff" android:roundIcon="@drawable/task17_launcher_f6f7f9_2491ff" android:theme="@style/Theme.Daiyu"
         android:supportsRtl="true">
+        <service android:name=".execution.UserExecutionService" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated AI chat and device-tool execution, including waiting for user input and resource cleanup" />
+        </service>
         <!-- Cross-app notification read special access only. Not posting, not a run/model grant.
              No separate process: uses the application-owned capture store and listener gate. -->
         <service android:name=".platform.CrossAppNotificationListener"

@@ -15,6 +15,7 @@ import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.skills.SkillBundle
 import app.daiyu.android.skills.SkillStore
 import app.daiyu.android.skills.SkillToolRegistry
+import app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState
 import app.daiyu.android.ui.screens.chat.conversation.LocalCatalogChatModelPickerSession
 import kotlinx.coroutines.Job
 import java.io.File
@@ -218,8 +219,14 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     private fun awaitChatPickerLoaded() {
         awaitUniqueTag("chat-model-picker")
         awaitUniqueTag("chat-model-list")
+        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().singleOrNull()?.config?.let {
+            var settled = false
+            mainThread {
+                val state = pickerField.get(activity) as? ChatModelPickerState
+                settled = state != null && !state.loading && !state.switching
+            }
+            settled && ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().singleOrNull()?.config?.let {
                 it.getOrNull(SemanticsProperties.StateDescription) == "模型目录读取完成"
             } == true
         }
@@ -325,6 +332,71 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertChatPickerOffline(calls)
         assertEquals(0, fixture.opens.get())
     }
+    fun testRetainedChatModelReloadKeepsPresentationWhileRevalidating() {
+        seedChatPickerCatalog()
+        val calls = guardChatPickerNetwork()
+        val before = fixture.settings.load()
+        setDraft("复读模型时保留草稿")
+        node("chat-model").performClick(); awaitChatPickerReady()
+        node("chat-model-search").performTextReplacement("second"); dismissIme()
+        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
+        val sessionField = MainActivity::class.java.getDeclaredField("chatModelSession").apply { isAccessible = true }
+        val ownerField = MainActivity::class.java.getDeclaredField("chatModelOwner").apply { isAccessible = true }
+        var previousSession: Any? = null
+        lateinit var stale: () -> Unit
+        mainThread { previousSession = sessionField.get(activity); stale = retainedChatPickerSelection() }
+        // Reproduce the committed binding and pending state passed by the save-success callback.
+        val committedBinding = expectedChatBinding("second")
+        app.daiyu.android.storage.ConversationModelSelections.write(
+            fixture.database.writableDatabase, null, committedBinding)
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        val holder = Thread {
+            try { fixture.settings.modelCatalog.configurationChange {
+                entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+            } } catch (problem: Throwable) { failure.set(problem) }
+        }.apply { start() }
+        try {
+            awaitCatalogEntered(entered)
+            mainThread {
+                val picker = pickerField.get(activity) as ChatModelPickerState
+                pickerField.set(activity, picker.copy(switching = true))
+                MainActivity::class.java.getDeclaredMethod("reloadChatModels", Any::class.java, Boolean::class.javaPrimitiveType)
+                    .apply { isAccessible = true }.invoke(activity, ownerField.get(activity), true)
+                val pending = pickerField.get(activity) as ChatModelPickerState
+                assertFalse(pending.loading); assertTrue(pending.switching); assertFalse(pending.enabled)
+                assertSame(previousSession, sessionField.get(activity))
+                stale()
+            }
+            node("chat-model-picker").assertIsDisplayed()
+            node("chat-model-search").assertEditableText("second")
+            node("chat-model-option:second").assertIsNotEnabled()
+            ui.onNodeWithText("正在读取模型目录…").assertDoesNotExist()
+            ui.onNodeWithText("当前任务结束后可切换模型").assertDoesNotExist()
+            assertEquals(committedBinding, fixture.database.modelBinding(null))
+            release.countDown(); holder.join(5_000)
+            assertFalse("local catalog lease released", holder.isAlive)
+            failure.get()?.let { throw it }
+            ui.waitUntil(5_000) {
+                var ready = false
+                mainThread {
+                    val state = pickerField.get(activity) as ChatModelPickerState
+                    ready = sessionField.get(activity) !== previousSession && !state.switching && !state.loading && state.enabled
+                }
+                ready
+            }
+            awaitChatPickerReady()
+            node("chat-model-option:second").assertIsSelected()
+            node("chat-model-search").assertEditableText("second")
+            closeChatPicker()
+            assertEquals(before, fixture.settings.load())
+            assertChatBinding("second")
+            assertDraft("复读模型时保留草稿")
+            assertChatPickerOffline(calls)
+            assertEquals(0, fixture.opens.get())
+        } finally { release.countDown(); holder.join(10_000) }
+    }
+
     fun testOldPickerSelectionCannotBorrowReopenedPickerOwner() {
         seedChatPickerCatalog()
         val calls = guardChatPickerNetwork()

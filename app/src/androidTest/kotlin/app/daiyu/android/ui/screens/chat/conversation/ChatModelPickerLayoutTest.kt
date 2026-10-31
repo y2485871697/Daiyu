@@ -113,6 +113,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
                 mainThread { updates.value = state.copy(enabled = enabled, switching = true) }
                 awaitVisualIdle()
                 ui.onNodeWithText("当前任务结束后可切换模型").assertDoesNotExist()
+                ui.onNodeWithText("正在读取模型目录…").assertDoesNotExist()
                 for (tag in tags) {
                     node(tag).assertIsNotEnabled().performTouchInput { click(center) }
                     val expected = before.getValue(tag)

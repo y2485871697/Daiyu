@@ -36,6 +36,38 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
         self.assertIn("if (success) { reloadChatModels(owner, retainPresentation = true); refresh() }", method)
         self.assertNotIn("dismissChatModels()", method)
 
+    def test_success_reload_retains_switching_without_loading_or_reenabling_old_tickets(self):
+        text = (SRC / "MainActivity.kt").read_text()
+        reload = text.split("private fun reloadChatModels(", 1)[1].split("private fun selectChatModel(", 1)[0]
+        self.assertIn("val selectionPending = retainPresentation && chatModelPicker?.switching == true", reload)
+        self.assertIn("loading = !selectionPending, enabled = false, switching = selectionPending", reload)
+        self.assertIn('?: ChatModelPickerState("", emptyList(), loading = true, enabled = false)', reload)
+        for guard in ("chatModelOwner !== owner", "cancelled.get()", "chatModelCancelled !== cancelled",
+                      "selected?.id != conversation", "editorGeneration != generation"):
+            self.assertIn(guard, reload)
+        self.assertIn("chatModelSession = session", reload)
+        self.assertIn(".copy(loading = false, enabled = result != null", reload)
+
+    def test_activity_regression_holds_the_real_retained_reload_and_waits_for_fresh_session(self):
+        text = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/IntegrationSettingsActivityTest.kt").read_text()
+        method = text.split("fun testRetainedChatModelReloadKeepsPresentationWhileRevalidating()", 1)[1].split("fun testOldPickerSelection", 1)[0]
+        for fragment in ("fixture.settings.modelCatalog.configurationChange", "release.await(10, TimeUnit.SECONDS)",
+                         'getDeclaredMethod("reloadChatModels", Any::class.java, Boolean::class.javaPrimitiveType)',
+                         "copy(switching = true)", "assertFalse(pending.loading)", "assertTrue(pending.switching)",
+                         "assertFalse(pending.enabled)", "assertSame(previousSession, sessionField.get(activity))",
+                         'ui.onNodeWithText("正在读取模型目录…").assertDoesNotExist()',
+                         'ui.onNodeWithText("当前任务结束后可切换模型").assertDoesNotExist()',
+                         "sessionField.get(activity) !== previousSession", "!state.switching && !state.loading",
+                         'assertChatBinding("second")', 'assertDraft("复读模型时保留草稿")',
+                         "assertChatPickerOffline(calls)", "finally { release.countDown(); holder.join(10_000) }"):
+            self.assertIn(fragment, method)
+        held = method.split("awaitCatalogEntered(entered)", 1)[1].split("release.countDown(); holder.join(5_000)", 1)[0]
+        self.assertIn("assertEquals(committedBinding, fixture.database.modelBinding(null))", held)
+        self.assertNotIn("assertChatBinding(", held)
+        self.assertNotIn("expectedChatBinding(", held)
+        helper = text.split("private fun awaitChatPickerLoaded()", 1)[1].split("private fun closeChatPicker()", 1)[0]
+        self.assertIn("!state.loading && !state.switching", helper)
+
     def test_failure_releases_switching_without_hiding_error_or_reenabling_stale_session(self):
         text = (SRC / "MainActivity.kt").read_text().split("private fun selectChatModel(", 1)[1].split("private fun gatewayCurrent", 1)[0]
         self.assertEqual(2, text.count("copy(enabled = false, switching = false,"))

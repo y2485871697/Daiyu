@@ -7044,7 +7044,9 @@ class MainActivity : ComponentActivity() {
             chatModelProviderChoices = emptyMap()
         }
         chatModelSelectionFailed = false
-        chatModelPicker = chatModelPicker?.takeIf { retainPresentation }?.copy(loading = true, enabled = false, switching = false)
+        val selectionPending = retainPresentation && chatModelPicker?.switching == true
+        chatModelPicker = chatModelPicker?.takeIf { retainPresentation }?.copy(
+            loading = !selectionPending, enabled = false, switching = selectionPending)
             ?: ChatModelPickerState("", emptyList(), loading = true, enabled = false)
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) { runCatching {

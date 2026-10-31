@@ -20,6 +20,11 @@ class ManagedInputContractTest(unittest.TestCase):
                     self.assertRegex(text, r'\bAssistantSearchField\s*\(\s*searchQuery\s*,\s*\{\s*searchQuery\s*=\s*it\s*\}')
                     text = (MAIN / 'ui/screens/assistants/AssistantSearchField.kt').read_text()
                     self.assertRegex(text, r'\bBasicTextField\s*\(')
+                if row['path'].endswith('/conversation/ChatModelPicker.kt'):
+                    self.assertIn('GroupedPickerSearch(query, { query = it }, "搜索模型 / 供应商", "搜索模型或供应商",', text)
+                    self.assertIn('Modifier.testTag("chat-model-search")', text)
+                    text = (MAIN / 'ui/components/GroupedPickerComponents.kt').read_text()
+                    self.assertRegex(text, r'\bBasicTextField\s*\(')
                 self.assertGreaterEqual(text.count('.managedInput()'), row['calls'])
                 self.assertGreaterEqual(text.count('imeCursorBrush(') + text.count('materialImeCursorColor('), row['calls'])
 

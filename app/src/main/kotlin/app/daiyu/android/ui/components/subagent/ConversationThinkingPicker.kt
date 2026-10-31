@@ -39,13 +39,8 @@ import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.ui.haptics.TouchHaptics
 import kotlin.math.roundToInt
 
-@Composable internal fun ConversationThinkingMark(modifier: Modifier = Modifier, tint: Color = conversationAgentColors().accent) {
-    androidx.compose.material3.Icon(app.daiyu.android.ui.icons.ChatPreviewIcons.Thought,
-        contentDescription = null, modifier = modifier, tint = tint)
-}
-
 @Composable internal fun ConversationThinkingPicker(show: Boolean, effort: ReasoningEffort, options: List<ReasoningEffort>,
-    onDismiss: () -> Unit, onEffortChange: (ReasoningEffort) -> Unit, description: String?,
+    onDismiss: () -> Unit, onEffortChange: (ReasoningEffort) -> Unit,
     speedMode: app.daiyu.android.model.GptSpeedMode? = null, onCycleSpeed: (() -> Unit)? = null, speedEnabled: Boolean = true) {
     if (!show) return
     val colors = conversationAgentColors()
@@ -56,27 +51,12 @@ import kotlin.math.roundToInt
         mutableIntStateOf(choices.indexOf(effort))
     }
     val maxHeight = (appWindowSize().height - 50.dp).coerceAtLeast(0.dp)
-    if (subagent) {
-        SubAgentConfigurationWindow("思考深度", onDismiss) {
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-            Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                ConversationThinkingMark(Modifier.size(34.dp))
-                Text(choices.getOrNull(selected)?.displayName ?: effort.displayName, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.testTag("subagent-thinking-value").padding(top = 14.dp))
-            }
-            if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { selected = it }, { index ->
-                if (choices[index] != effort) onEffortChange(choices[index])
-            })
-            if (description != null) Text(description, fontSize = 9.sp, lineHeight = 15.sp, color = colors.muted, modifier = Modifier.padding(top = 15.dp))
-            }
-        }
-        return
-    }
     ConversationAgentTypography {
         ConversationAgentSheet(onDismiss, radius = 28, modifier = Modifier.heightIn(max = maxHeight)) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 22.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("调整思考深度", fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.fillMaxWidth().testTag("chat-thinking-title").padding(bottom = 19.dp),
+                    modifier = Modifier.fillMaxWidth().testTag(if (subagent) "subagent-thinking-title" else "chat-thinking-title").padding(bottom = 19.dp),
                     textAlign = TextAlign.Center, color = colors.text)
                 val speedClick = onCycleSpeed?.takeIf { speedMode != null }
                 Box(Modifier.size(48.dp).testTag("chat-thinking-speed")
@@ -89,10 +69,15 @@ import kotlin.math.roundToInt
                 }
                 Text(choices.getOrNull(selected)?.displayName ?: effort.displayName, fontSize = 22.sp,
                     lineHeight = 30.sp, fontWeight = FontWeight(450), color = colors.text,
-                    modifier = Modifier.testTag("chat-thinking-value").padding(top = 8.dp, bottom = 13.dp))
-                if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { index ->
-                    if (choices[index] != effort) onEffortChange(choices[index])
-                }, {})
+                    modifier = Modifier.testTag(if (subagent) "subagent-thinking-value" else "chat-thinking-value").padding(top = 8.dp, bottom = 13.dp))
+                if (choices.size > 1) {
+                    if (subagent) ConversationDepthSlider(selected, choices.lastIndex, { selected = it }, { index ->
+                        if (choices[index] != effort) onEffortChange(choices[index])
+                    })
+                    else ConversationDepthSlider(selected, choices.lastIndex, { index ->
+                        if (choices[index] != effort) onEffortChange(choices[index])
+                    }, {})
+                }
             }
         }
     }

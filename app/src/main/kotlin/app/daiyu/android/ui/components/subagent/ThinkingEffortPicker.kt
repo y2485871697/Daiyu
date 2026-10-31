@@ -11,7 +11,6 @@ internal fun SubAgentThinkingEffortPickerDialog(
     options: List<ReasoningEffort>,
     onDismiss: () -> Unit,
     onEffortChange: (ReasoningEffort) -> Unit,
-    description: String? = null,
     mainChat: Boolean = false,
     speedMode: app.daiyu.android.model.GptSpeedMode? = null,
     onCycleSpeed: (() -> Unit)? = null,
@@ -19,6 +18,6 @@ internal fun SubAgentThinkingEffortPickerDialog(
 ) {
     if (!show || options.isEmpty()) return
     CompositionLocalProvider(LocalConversationAgentStyle provides !mainChat) {
-        ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description, speedMode, onCycleSpeed, speedEnabled)
+        ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, speedMode, onCycleSpeed, speedEnabled)
     }
 }

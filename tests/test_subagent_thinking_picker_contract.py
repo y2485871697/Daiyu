@@ -13,7 +13,7 @@ class SubAgentThinkingPickerContractTest(unittest.TestCase):
         self.assertIn("mainChat: Boolean = false", text)
         self.assertIn("if (!show || options.isEmpty()) return", text)
         self.assertIn("LocalConversationAgentStyle provides !mainChat", text)
-        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description, speedMode, onCycleSpeed, speedEnabled)", text)
+        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, speedMode, onCycleSpeed, speedEnabled)", text)
         self.assertNotIn("WindowDialog", text)
         self.assertNotIn("SliderDefaults", text)
 
@@ -50,15 +50,32 @@ class SubAgentThinkingPickerContractTest(unittest.TestCase):
                       "        reasoningPreference.set(owner, effort)\n"
                       "        return true", setter)
         shared = (COMPONENTS / "subagent/ConversationThinkingPicker.kt").read_text()
-        subagent, main_chat = shared.split("ConversationAgentTypography {", 1)
+        self.assertIn("if (subagent) ConversationDepthSlider", shared)
+        subagent, main_chat = shared.split("if (subagent) ConversationDepthSlider", 1)[1].split("else ConversationDepthSlider", 1)
         self.assertIn("{ selected = it }, { index ->", subagent)
-        self.assertIn("ConversationDepthSlider(selected, choices.lastIndex, { index ->\n"
-                      "                    if (choices[index] != effort) onEffortChange(choices[index])\n"
-                      "                }, {})", main_chat)
+        self.assertIn("if (choices[index] != effort) onEffortChange(choices[index])", subagent)
+        self.assertIn("if (choices[index] != effort) onEffortChange(choices[index])", main_chat)
         self.assertNotIn("selected = index", main_chat)
         self.assertIn("remember(show, effort, choices)", shared)
         self.assertIn("mutableIntStateOf(choices.indexOf(effort))", shared)
         self.assertIn("setProgress { value ->", shared)
+
+    def test_child_and_chat_share_one_layout_without_explanatory_footer(self):
+        shared = (COMPONENTS / "subagent/ConversationThinkingPicker.kt").read_text()
+        wrapper = (COMPONENTS / "subagent/ThinkingEffortPicker.kt").read_text()
+        self.assertEqual(1, shared.count('ConversationAgentSheet(onDismiss'))
+        self.assertEqual(1, shared.count('Text("调整思考深度"'))
+        self.assertNotIn('SubAgentConfigurationWindow(', shared)
+        self.assertNotIn('Text(description', shared)
+        self.assertNotIn('description:', shared)
+        self.assertNotIn('description:', wrapper)
+        self.assertIn('if (subagent) "subagent-thinking-title" else "chat-thinking-title"', shared)
+        self.assertIn('if (subagent) "subagent-thinking-value" else "chat-thinking-value"', shared)
+        for name in ("SubAgentProfileConfigDialog.kt", "SubAgentProfileRow.kt"):
+            text = (COMPONENTS / name).read_text()
+            picker = text.split("SubAgentThinkingEffortPickerDialog(true,", 1)[1]
+            self.assertNotIn('description =', picker)
+        self.assertNotIn('仅修改当前草稿，确认后保存', (COMPONENTS / "SubAgentProfileConfigDialog.kt").read_text())
 
     def test_draft_and_row_keep_distinct_save_ownership(self):
         draft = (COMPONENTS / "SubAgentProfileConfigDialog.kt").read_text()

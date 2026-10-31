@@ -218,6 +218,6 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             if (currentUsable && next in options) editor?.updateProfile(profile.id) { latest ->
                 if (latest.role == profile.role && latest.providerId == profile.providerId && latest.modelId == profile.modelId) latest.copy(reasoning = next) else latest
             }
-        }, description = "${profile.name} · 仅影响此代理" + if (profile.isMedia) "；档位依据端点显式映射，不代表执行代理式思考或可见思考过程" else "")
+        })
     }
 }

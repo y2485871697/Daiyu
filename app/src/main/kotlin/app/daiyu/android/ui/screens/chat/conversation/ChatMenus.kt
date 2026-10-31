@@ -222,8 +222,8 @@ internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onActio
     if (entries.isEmpty()) return
     val colors = usagePalette()
     val selectionBackground = colors.selectionContainer
-    ChatSelectionSheet("语音功能", onDismiss, subtitle = "选择要使用的语音功能", showCloseButton = false,
-        titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
+    ChatSelectionSheet("语音功能", onDismiss, showCloseButton = false,
+        titleFontSize = 20.sp) {
         Column(Modifier.testTag("chat-voice-mode-menu").fillMaxWidth().verticalScroll(rememberScrollState())) {
             entries.forEach { entry ->
                 val isSelected = entry.action == selected

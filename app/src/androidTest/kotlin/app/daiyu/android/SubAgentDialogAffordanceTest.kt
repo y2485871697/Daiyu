@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.*
@@ -57,6 +58,48 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         }
     }
 
+    fun testThinkingPickerSharesChatGeometryInBothThemes() {
+        val choices = listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL, ReasoningEffort.LOW,
+            ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX)
+        for (dark in listOf(false, true)) {
+            var mainChat by mutableStateOf(true)
+            var changes = 0
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        SubAgentThinkingEffortPickerDialog(true, ReasoningEffort.HIGH, choices,
+                            onDismiss = {}, onEffortChange = { changes++ }, mainChat = mainChat)
+                    }
+                }
+            }
+            fun geometry(child: Boolean): List<androidx.compose.ui.geometry.Rect> {
+                ui.runOnIdle { mainChat = !child }
+                val prefix = if (child) "subagent" else "chat"
+                awaitUniqueTag("$prefix-thinking-title")
+                val title = node("$prefix-thinking-title")
+                awaitDialogEnter(title)
+                awaitNodeWindowFocus(title)
+                title.assertTextEquals("调整思考深度")
+                ui.onNodeWithText("仅修改当前草稿，确认后保存").assertDoesNotExist()
+                ui.onNodeWithTag("chat-thinking-speed").assertHasNoClickAction()
+                return listOf("conversation-agent-sheet", "$prefix-thinking-title", "chat-thinking-speed",
+                    "chat-thinking-speed-icon", "$prefix-thinking-value", "thinking-depth-slider").map {
+                    ui.onNodeWithTag(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                }
+            }
+            val chat = geometry(child = false)
+            val child = geometry(child = true)
+            chat.zip(child).forEachIndexed { index, (expected, actual) ->
+                assertEquals("left $index", expected.left, actual.left, 1f)
+                assertEquals("top $index", expected.top, actual.top, 1f)
+                assertEquals("right $index", expected.right, actual.right, 1f)
+                assertEquals("bottom $index", expected.bottom, actual.bottom, 1f)
+            }
+            ui.runOnIdle { assertEquals(0, changes) }
+        }
+    }
+
     fun testSettingsRowThinkingPickerUsesNewSliderAndKeepsImmediateSave() = rowThinkingSlider(chatStyle = false)
     fun testConversationRowThinkingPickerUsesNewSliderAndKeepsImmediateSave() = rowThinkingSlider(chatStyle = true)
 
@@ -88,6 +131,8 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         awaitUniqueTag("thinking-depth-slider")
         awaitNodeWindowFocus(node("thinking-depth-slider"))
         node("conversation-agent-sheet").assertIsDisplayed()
+        ui.onNodeWithText("调整思考深度").assertIsDisplayed()
+        ui.onNodeWithText("Worker · 仅影响此代理").assertDoesNotExist()
         node("subagent-thinking-value").assertTextEquals("关闭")
         node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(4f)) }
         node("subagent-thinking-value").assertTextEquals("高")
@@ -144,6 +189,8 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
             awaitUniqueTag("thinking-depth-slider")
             awaitNodeWindowFocus(node("thinking-depth-slider"))
             node("thinking-depth-slider").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("调整思考深度").assertIsDisplayed()
+            ui.onNodeWithText("仅修改当前草稿，确认后保存").assertDoesNotExist()
             ui.onNode(hasTestTag("conversation-agent-sheet") and hasAnyDescendant(hasTestTag("thinking-depth-slider")),
                 useUnmergedTree = true).assertIsDisplayed()
             val root = checkNotNull(node("thinking-depth-slider").fetchSemanticsNode().root)

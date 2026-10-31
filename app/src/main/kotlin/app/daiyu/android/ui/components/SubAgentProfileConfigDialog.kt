@@ -234,7 +234,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                 SubAgentThinkingEffortPickerDialog(true, effective, efforts.ifEmpty { listOf(effective) }, { thinkingPicker = false }, { next ->
                     if (session.canCommit(latestEditor, latestEnabled) && next in efforts && session.draft.providerId == binding.providerId && session.draft.modelId == binding.modelId && session.draft.role == binding.role)
                         session.edit { it.copy(reasoning = next) }
-                }, description = "仅修改当前草稿，确认后保存" + if (draft.isMedia) "；档位依据端点显式映射" else "")
+                })
             }
             if (usable) choices?.let { field ->
                 val options: List<Pair<String?, String>> = when (field) {

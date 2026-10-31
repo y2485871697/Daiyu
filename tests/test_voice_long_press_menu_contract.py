@@ -22,7 +22,10 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
         self.assertLess(sheet.index('if (entries.isEmpty()) return'), sheet.index('ChatSelectionSheet('))
         self.assertIn('ChatSelectionSheet("语音功能", onDismiss,', sheet)
         self.assertIn('showCloseButton = false', sheet)
-        self.assertIn('titleFontSize = 20.sp, subtitleFontSize = 14.sp', sheet)
+        self.assertIn('titleFontSize = 20.sp', sheet)
+        self.assertNotIn('subtitle =', sheet)
+        self.assertNotIn('subtitleFontSize =', sheet)
+        self.assertNotIn('选择要使用的语音功能', sheet)
         self.assertIn('Modifier.testTag("chat-voice-mode-menu").fillMaxWidth().verticalScroll(rememberScrollState())', sheet)
         self.assertNotIn('ChatAnchoredMenu(', sheet)
 

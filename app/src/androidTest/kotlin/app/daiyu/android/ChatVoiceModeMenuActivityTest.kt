@@ -73,6 +73,8 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
         ui.mainClock.advanceTimeBy(1_000)
         awaitVisualIdle()
         node("chat-voice-mode-menu").assertIsDisplayed()
+        ui.onNodeWithText("语音功能").assertIsDisplayed()
+        ui.onNodeWithText("选择要使用的语音功能").assertDoesNotExist()
     }
 
     private fun rawBounds(node: SemanticsNode) = Rect(node.positionInRoot,

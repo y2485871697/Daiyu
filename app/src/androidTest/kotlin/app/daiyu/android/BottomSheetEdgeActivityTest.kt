@@ -178,7 +178,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             var changes = 0
             show(dark, scale) { dismiss ->
                 ConversationThinkingPicker(true, ReasoningEffort.MEDIUM,
-                    listOf(ReasoningEffort.OFF, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH), dismiss, { changes++ }, null)
+                    listOf(ReasoningEffort.OFF, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH), dismiss, { changes++ })
             }
             assertFloating("conversation-agent-sheet", "thinking-depth-slider")
             close("conversation-agent-sheet")

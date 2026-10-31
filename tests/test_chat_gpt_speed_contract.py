@@ -113,8 +113,9 @@ class ChatGptSpeedContractTest(unittest.TestCase):
 
     def test_reference_proportions_are_local_and_slider_stays_unchanged(self):
         picker = source('ui/components/subagent/ConversationThinkingPicker.kt')
-        subagent, main = picker.split('ConversationAgentTypography {', 1)
-        self.assertIn('ConversationThinkingMark(Modifier.size(34.dp))', subagent)
+        _, main = picker.split('ConversationAgentTypography {', 1)
+        self.assertNotIn('ConversationThinkingMark(Modifier.size(34.dp))', picker)
+        self.assertEqual(1, picker.count('ConversationAgentSheet(onDismiss'))
         for token in ('fontSize = 20.sp, lineHeight = 28.sp', 'Modifier.size(48.dp)',
                       'modifier = Modifier.size(36.dp).testTag("chat-thinking-speed-icon")',
                       'fontSize = 22.sp', 'lineHeight = 30.sp', 'bottom = 13.dp',

@@ -1,6 +1,9 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
@@ -20,6 +23,7 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.ConversationTokenUsageDialog
+import app.daiyu.android.ui.app.ConversationTokenUsageContent
 import app.daiyu.android.ui.components.UsageAction
 import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.model.ConversationTokenUsageUi
@@ -46,6 +50,43 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
         ui.onNodeWithText("30").assertExists()
         ui.onNodeWithText("▾ 缓存明细").performClick()
         ui.onNodeWithText(cachedLabel).assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCacheHeadingHasCompactGapsWithoutChangingMetricSpacing() {
+        for (parentSpacing in listOf(0.dp, 12.dp)) {
+            var pixelsPerDp = 1f
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val density = LocalDensity.current
+                    pixelsPerDp = density.density
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
+                        UsageGlassDialog("Token 用量", {}, compact = true) {
+                            Column(verticalArrangement = Arrangement.spacedBy(parentSpacing)) {
+                                ConversationTokenUsageContent(ConversationTokenUsageUi(100, 20, 30, 5))
+                            }
+                        }
+                    }
+                }
+            } }
+            awaitUniqueTag("chat-usage-cache-toggle")
+            ui.onNodeWithText("▸ 缓存明细").performClick()
+            ui.mainClock.advanceTimeByFrame()
+            fun bounds(text: String) = ui.onNodeWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            val input = bounds("输入 Token")
+            val output = bounds(activity.getString(R.string.stats_page_output_tokens))
+            val heading = bounds("▾ 缓存明细")
+            val cached = bounds(activity.getString(R.string.stats_page_cached_tokens))
+            val created = bounds(activity.getString(R.string.stats_page_cache_creation_tokens))
+            val rate = bounds(activity.getString(R.string.stats_model_cache_hit_rate))
+            assertEquals(34f, (output.top - input.top) / pixelsPerDp, 1f)
+            assertEquals(34f, (created.top - cached.top) / pixelsPerDp, 1f)
+            assertEquals(34f, (rate.top - created.top) / pixelsPerDp, 1f)
+            assertEquals(9f, (heading.top - output.bottom) / pixelsPerDp, 1f)
+            assertEquals(5f, (cached.top - heading.bottom) / pixelsPerDp, 1f)
+            ui.onNodeWithText("▾ 缓存明细").performClick()
+        }
         assertEquals(0, fixture.opens.get())
     }
 

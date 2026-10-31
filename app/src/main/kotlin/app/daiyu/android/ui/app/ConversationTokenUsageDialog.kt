@@ -48,18 +48,20 @@ internal fun ConversationTokenUsageDialog(
 internal fun ConversationTokenUsageContent(usage: ConversationTokenUsageUi) {
     var cacheExpanded by remember { mutableStateOf(false) }
     fun tokens(value: Long?) = value?.let(::formatTokenCount) ?: "—"
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        UsageMetric("累计用量", tokens(usage.totalTokens), total = true)
-        UsageMetric("输入 Token", tokens(usage.freshInputTokens))
-        UsageMetric(stringResource(R.string.stats_page_output_tokens), tokens(usage.outputTokens))
-    }
-    UsageAction(if (cacheExpanded) "▾ 缓存明细" else "▸ 缓存明细",
-        onClick = { cacheExpanded = !cacheExpanded }, plain = true,
-        modifier = Modifier.fillMaxWidth().padding(top = 10.dp).testTag("chat-usage-cache-toggle"))
-    if (cacheExpanded) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        UsageMetric(stringResource(R.string.stats_page_cached_tokens), tokens(usage.cachedTokens))
-        UsageMetric(stringResource(R.string.stats_page_cache_creation_tokens), tokens(usage.cacheCreationTokens))
-        UsageMetric(stringResource(R.string.stats_model_cache_hit_rate), formatCachePercent(usage.cachePercent))
+    Column {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            UsageMetric("累计用量", tokens(usage.totalTokens), total = true)
+            UsageMetric("输入 Token", tokens(usage.freshInputTokens))
+            UsageMetric(stringResource(R.string.stats_page_output_tokens), tokens(usage.outputTokens))
+        }
+        UsageAction(if (cacheExpanded) "▾ 缓存明细" else "▸ 缓存明细",
+            onClick = { cacheExpanded = !cacheExpanded }, plain = true, compact = true,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp).testTag("chat-usage-cache-toggle"))
+        if (cacheExpanded) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            UsageMetric(stringResource(R.string.stats_page_cached_tokens), tokens(usage.cachedTokens))
+            UsageMetric(stringResource(R.string.stats_page_cache_creation_tokens), tokens(usage.cacheCreationTokens))
+            UsageMetric(stringResource(R.string.stats_model_cache_hit_rate), formatCachePercent(usage.cachePercent))
+        }
     }
 }
 

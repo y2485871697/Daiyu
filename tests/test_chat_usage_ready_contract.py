@@ -78,6 +78,26 @@ class ChatUsageReadyContractTest(unittest.TestCase):
         self.assertIn('pureBlackEnabled = pureBlack', regression)
         self.assertIn('assertEquals(accent, row.color)', regression)
 
+    def test_cache_heading_spacing_is_local_and_regular_rows_keep_twelve_dp(self):
+        content = (SRC / 'ui/app/ConversationTokenUsageDialog.kt').read_text()
+        content = content.split('internal fun ConversationTokenUsageContent(', 1)[1]
+        self.assertIn('    Column {\n        Column(verticalArrangement = Arrangement.spacedBy(12.dp))', content)
+        self.assertEqual(2, content.count('Arrangement.spacedBy(12.dp)'))
+        self.assertIn('plain = true, compact = true', content)
+        self.assertIn('.padding(top = 4.dp)', content)
+        self.assertNotIn('.padding(top = 10.dp)', content)
+        presentation = (SRC / 'ui/components/UsagePresentation.kt').read_text()
+        action = presentation.split('internal fun UsageAction(', 1)[1].split('@Composable', 1)[0]
+        self.assertIn('compact: Boolean = false', action)
+        self.assertIn('if (plain && compact) 28.dp else if (plain) 40.dp else 44.dp', action)
+        self.assertIn('vertical = if (plain && compact) 4.dp else 8.dp', action)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/UsageCompactPresentationTest.kt').read_text()
+        self.assertIn('fun testCacheHeadingHasCompactGapsWithoutChangingMetricSpacing()', regression)
+        self.assertIn('for (parentSpacing in listOf(0.dp, 12.dp))', regression)
+        self.assertIn('(heading.top - output.bottom) / pixelsPerDp', regression)
+        self.assertIn('(cached.top - heading.bottom) / pixelsPerDp', regression)
+        self.assertIn('(created.top - cached.top) / pixelsPerDp', regression)
+
     def test_held_read_regressions_check_absence_before_awaiting_final_dialog(self):
         for name in ('testPendingReadDoesNotMountDialogUntilRealUsageIsReady',
                      'testBackDuringReadRevokesVisitAndLateSuccessOrFailureCannotReplaceNewDialog',

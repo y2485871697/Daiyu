@@ -121,6 +121,7 @@ internal fun UsageAction(
     enabled: Boolean = true,
     primary: Boolean = false,
     plain: Boolean = false,
+    compact: Boolean = false,
 ) {
     val colors = usagePalette()
     val shape = RoundedCornerShape(11.dp)
@@ -129,7 +130,8 @@ internal fun UsageAction(
         .then(if (plain) Modifier else Modifier.border(1.dp, if (primary) colors.primary else colors.line, shape))
         .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() },
             indication = null, onClick = onClick)
-        .heightIn(min = if (plain) 40.dp else 44.dp).padding(horizontal = if (plain) 0.dp else 10.dp, vertical = 8.dp),
+        .heightIn(min = if (plain && compact) 28.dp else if (plain) 40.dp else 44.dp)
+        .padding(horizontal = if (plain) 0.dp else 10.dp, vertical = if (plain && compact) 4.dp else 8.dp),
         contentAlignment = if (plain) Alignment.CenterStart else Alignment.Center) {
         Text(text, fontSize = if (plain) 13.sp else 14.sp, lineHeight = 20.sp,
             color = if (plain) colors.muted else if (primary) colors.onPrimary else colors.onSecondaryContainer)

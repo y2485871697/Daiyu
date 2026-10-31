@@ -127,20 +127,23 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                                     work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }
                                 Text(segment.narration, Modifier.fillMaxWidth().drawBehind {
                                     if (narrationConnector) drawLine(colors.line, Offset(5.dp.toPx(), 0f),
-                                        Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
+                                        Offset(5.dp.toPx(), size.height), 1.dp.toPx())
                                 }.padding(start = if (narrationConnector) 18.dp else 0.dp), color = colors.muted,
                                     style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
                             }
                             segment.reasoning?.let { reported ->
                                 key(ownerKey, "reasoning", reported.itemId) {
                                     reasoningState.SaveableStateProvider(reported.itemId) {
-                                        ReasoningStepRow(ownerKey, reported,
-                                            showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
-                                                .any { it.steps.isNotEmpty() || it.reasoning != null },
-                                            allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped,
-                                            revealResetEpoch = revealResetEpoch,
-                                            onVisibleAdvance = { if (expanded) onVisibleAdvance() },
-                                            onHandoffReady = { if (it) sequence.complete(reported) })
+                                        WorkTimelineEntry(leadingConnector = work.segments.take(segmentIndex)
+                                            .any { it.steps.isNotEmpty() || it.reasoning != null }) {
+                                            ReasoningStepRow(ownerKey, reported,
+                                                showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
+                                                    .any { it.steps.isNotEmpty() || it.reasoning != null },
+                                                allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped,
+                                                revealResetEpoch = revealResetEpoch,
+                                                onVisibleAdvance = { if (expanded) onVisibleAdvance() },
+                                                onHandoffReady = { if (it) sequence.complete(reported) })
+                                        }
                                     }
                                 }
                             }
@@ -149,7 +152,10 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                                 key(ownerKey, step.owner, step.toolCallId) {
                                     val laterStep = index < segment.steps.lastIndex ||
                                         work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
-                                    WorkStepRow(step, showConnector = laterStep, toolContent = toolContent, flowRunning = work.running)
+                                    WorkTimelineEntry(leadingConnector = index > 0 || segment.reasoning != null ||
+                                        work.segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }) {
+                                        WorkStepRow(step, showConnector = laterStep, toolContent = toolContent, flowRunning = work.running)
+                                    }
                                 }
                             }
                         }
@@ -180,9 +186,8 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
         else -> step.activity.label
     }
     Row(Modifier.fillMaxWidth().testTag("tool-step:${step.toolCallId}").drawBehind {
-        // Draw against the measured row, including its expanded body, rather than a fixed-height stub.
         if (showConnector) drawLine(colors.line,
-            Offset(5.dp.toPx(), 27.dp.toPx()), Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
+            Offset(5.dp.toPx(), 27.dp.toPx()), Offset(5.dp.toPx(), size.height), 1.dp.toPx())
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp), contentAlignment = Alignment.TopStart) {
             val ring = running && step.state != WorkStepState.OK && step.state != WorkStepState.FAILED

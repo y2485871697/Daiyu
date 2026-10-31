@@ -51,7 +51,7 @@ internal fun MessageContent(
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit = { _, body -> body() },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column {
         var imageNumber = imageOffset
         var precedingReady = true
         content.forEachIndexed { index, source ->
@@ -63,13 +63,13 @@ internal fun MessageContent(
                     key(block.step.owner, block.step.toolCallId) {
                         // The dedicated interaction keeps one callsite even while the prior thought closes.
                         val dedicated = dedicatedTool(block.step)
-                        if (visible && !dedicated) entryBody(block.workflowKey(index)) {
+                        if (visible && !dedicated) SpacedMessageEntry(index, content, entryBody) {
                             WorkStepRow(block.step, showConnector = content.getOrNull(index + 1).let {
                                 it is MessageContentUi.Tool || it is MessageContentUi.Reasoning
                             }, toolContent = toolContent, flowRunning = flowRunning)
                         }
                     }
-                } else if (visible) entryBody(block.workflowKey(index)) {
+                } else if (visible && (block !is MessageContentUi.Text || block.text.isNotBlank())) SpacedMessageEntry(index, content, entryBody) {
                     when (block) {
                         is MessageContentUi.Text -> if (block.text.isNotBlank())
                             textBody(block, Modifier.testTag("message-content-text:$index"))
@@ -82,6 +82,23 @@ internal fun MessageContent(
             }
             if (visible && block is MessageContentUi.Reasoning) precedingReady = reasoningReady(block.reported)
         }
+    }
+}
+
+@Composable
+private fun SpacedMessageEntry(index: Int, content: List<MessageContentUi>,
+    entryBody: @Composable (String, @Composable () -> Unit) -> Unit, body: @Composable () -> Unit) {
+    val current = content[index]
+    val step = current is MessageContentUi.Tool || current is MessageContentUi.Reasoning
+    val previous = content.getOrNull(index - 1)
+    val next = content.getOrNull(index + 1)
+    entryBody(current.workflowKey(index)) {
+        WorkTimelineEntry(
+            leadingConnector = step && (previous is MessageContentUi.Tool || previous is MessageContentUi.Reasoning),
+            trailingConnector = step && (next is MessageContentUi.Tool || next is MessageContentUi.Reasoning),
+            spacingAfter = if (index < content.lastIndex) 10.dp else 0.dp,
+            content = body,
+        )
     }
 }
 

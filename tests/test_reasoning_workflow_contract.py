@@ -47,10 +47,10 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertEqual(1, content.count('dedicatedTool(block.step)'))
         self.assertIn('key(block.step.owner, block.step.toolCallId)', content)
         self.assertIn('val dedicated = dedicatedTool(block.step)', content)
-        self.assertIn('if (visible && !dedicated) entryBody(block.workflowKey(index)) {', content)
+        self.assertIn('if (visible && !dedicated) SpacedMessageEntry(index, content, entryBody) {', content)
         self.assertEqual(1, content.count('WorkStepRow('))
         self.assertLess(content.index('val dedicated = dedicatedTool(block.step)'),
-                        content.index('if (visible && !dedicated) entryBody'))
+                        content.index('if (visible && !dedicated) SpacedMessageEntry'))
 
     def test_top_card_is_not_duplicated_and_timing_has_exact_owner_gate(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()

@@ -246,7 +246,7 @@ internal fun ReasoningStepRow(
     val colors = conversationColors()
     Row(Modifier.fillMaxWidth().testTag("work-reasoning:${reported.itemId}").drawBehind {
         if (showConnector) drawLine(colors.line, Offset(5.dp.toPx(), 27.dp.toPx()),
-            Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
+            Offset(5.dp.toPx(), size.height), 1.dp.toPx())
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp)) {
             val complete = reported.activeSinceNanos == null

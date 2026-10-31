@@ -12,6 +12,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 import app.daiyu.android.voice.providers.*
 import app.daiyu.android.voice.duplex.DoubaoDuplexProtocol
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
@@ -132,13 +134,15 @@ internal class ControllerVoiceRuntime(
     val accountConfigurations = accountState.asStateFlow()
     /** Envelope readiness only; personal media index loading is independent. */
     internal enum class LoadState { NOT_STARTED, LOADING, LOADED, FAILED, CANCELLED }
+    private val loading = MutableStateFlow(LoadState.NOT_STARTED)
+    val loadingState = loading.asStateFlow()
     @Volatile internal var loadState = LoadState.NOT_STARTED
-        private set
+        private set(value) { field = value; loading.value = value }
     @Volatile internal var loadFailureType: String? = null
         private set
     @Volatile private var failed = false
     @Volatile private var state = VoiceProfileEnvelope(emptyMap())
-    private val lock = Any() // Persistence only. Never invoke listeners/cancel/drain under this lock.
+    private companion object { val lock = Any() } // Shared by runtimes that update the same envelope.
     private val listeners = CopyOnWriteArrayList<(VoiceProfile?) -> Unit>()
     private data class ReferenceRecord(val voice: MimoPersonalVoices.Voice, val digest: String)
     private val references = java.util.concurrent.ConcurrentHashMap<String, ReferenceRecord>()
@@ -178,7 +182,7 @@ internal class ControllerVoiceRuntime(
                     loaded.profiles.values.forEach(::validate)
                     loaded.legacy?.let(::validate)
                     loaded.accounts.forEach { (engine, value) -> require(value.engine == engine); validate(value) }
-                    publish(loaded); failed = false
+                    publish(loaded.recoverPersonalAccounts()); failed = false
                     loadState = LoadState.LOADED
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (problem: Exception) {
@@ -198,7 +202,7 @@ internal class ControllerVoiceRuntime(
         personal.load()
     }
 
-    /** Missing/legacy profiles never inherit another selection. Explicit save also repairs a failed vault. */
+    /** Merge with the readable saved envelope, not an unloaded or failed in-memory snapshot. */
     suspend fun save(value: VoiceConfiguration, profile: VoiceProfile = VoiceProfile.READ_ALOUD,
         consumeLegacy: Boolean = false) = withContext(Dispatchers.IO) {
         validate(value)
@@ -206,13 +210,10 @@ internal class ControllerVoiceRuntime(
         // Fence new work first, then revoke and drain WITHOUT holding the storage/control lock.
         failed = true
         invalidateSpeech(profile)
-        synchronized(lock) {
-            val next = VoiceProfileEnvelope(state.profiles + (profile to value.copy(revision = UUID.randomUUID().toString())),
-                state.legacy.takeUnless { consumeLegacy }, state.accounts)
-            val encoded = next.encode()
-            vault.save(envelope(encoded))
-            check(vault.load().apiKey == encoded) { "voice_save_unconfirmed" }
-            publish(next); failed = false
+        persist("voice_save_unconfirmed") { saved ->
+            if (consumeLegacy) check(saved.legacy == value) { "voice_legacy_configuration_changed" }
+            VoiceProfileEnvelope(saved.profiles + (profile to value.copy(revision = UUID.randomUUID().toString())),
+                saved.legacy.takeUnless { consumeLegacy }, saved.accounts)
         }
     }
     suspend fun saveAccount(value: VoiceConfiguration) = withContext(Dispatchers.IO) {
@@ -221,13 +222,35 @@ internal class ControllerVoiceRuntime(
         envelope(VoiceProfileEnvelope(state.profiles, state.legacy, state.accounts + (value.engine to value)).encode()).validate()
         failed = true
         invalidateSpeech()
-        synchronized(lock) {
-            val next = VoiceProfileEnvelope(state.profiles, state.legacy,
-                state.accounts + (value.engine to value.copy(revision = UUID.randomUUID().toString())))
-            val encoded = next.encode()
-            vault.save(envelope(encoded))
-            check(vault.load().apiKey == encoded) { "voice_account_save_unconfirmed" }
-            publish(next); failed = false
+        persist("voice_account_save_unconfirmed") { saved ->
+            VoiceProfileEnvelope(saved.profiles, saved.legacy,
+                saved.accounts + (value.engine to value.copy(revision = UUID.randomUUID().toString())))
+        }
+    }
+    private suspend fun persist(unconfirmed: String, update: (VoiceProfileEnvelope) -> VoiceProfileEnvelope) {
+        val savingContext = currentCoroutineContext()
+        try {
+            synchronized(lock) {
+                savingContext.ensureActive()
+                val saved = VoiceProfileEnvelope.decode(vault.load().apiKey).recoverPersonalAccounts()
+                val next = update(saved)
+                next.profiles.values.forEach(::validate)
+                next.legacy?.let(::validate)
+                next.accounts.forEach { (engine, value) -> require(value.engine == engine); validate(value) }
+                val encoded = next.encode()
+                savingContext.ensureActive()
+                vault.save(envelope(encoded))
+                check(vault.load().apiKey == encoded) { unconfirmed }
+                publish(next); failed = false
+                loadFailureType = null; loadState = LoadState.LOADED
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            loadState = LoadState.CANCELLED
+            throw cancelled
+        } catch (problem: Exception) {
+            loadFailureType = problem.javaClass.simpleName
+            loadState = LoadState.FAILED
+            throw problem
         }
     }
     fun accountCurrent(value: VoiceConfiguration): Boolean = !failed && state.accounts[value.engine] == value

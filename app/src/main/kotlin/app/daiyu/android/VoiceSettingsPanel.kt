@@ -61,6 +61,7 @@ internal fun VoiceSettingsPanel(
     val saved = key(profile) { runtime.profileConfiguration(profile).collectAsState().value }
     val voices by runtime.personal.state.collectAsState()
     val personalAccounts by runtime.accountConfigurations.collectAsState()
+    val accountLoadState by runtime.loadingState.collectAsState()
     val accountVoices by accounts.voices.state.collectAsState()
     val scope = rememberCoroutineScope()
     val drafts = remember { mutableMapOf<VoiceProfile, VoiceConfiguration>() }
@@ -74,6 +75,7 @@ internal fun VoiceSettingsPanel(
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     var notice by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var accountReadError by remember { mutableStateOf(false) }
     var sampleName by remember { mutableStateOf("") }
     var sampleText by remember { mutableStateOf("你好，这是我的声音。") }
     var accountKeyDraft by remember { mutableStateOf("") }
@@ -170,11 +172,15 @@ internal fun VoiceSettingsPanel(
         saved?.let { draftBases[profile] = it }
         cloud = preferences.cloudEnabled(profile, draft.engine != "SYSTEM")
     }
-    LaunchedEffect(personalAccounts, lifecycleState) {
+    LaunchedEffect(personalAccounts, lifecycleState, child, accountLoadState, busy, accountReadError) {
         val opened = accountPage
         if (opened != null && current()) {
             val updated = personalAccounts[opened.engine]
             if (updated != null && updated != opened && runtime.accountCurrent(updated)) accountPage = updated
+        } else if (opened == null && child == "DOUBAO_VOICES" && !busy && !accountReadError && current()) {
+            personalAccounts["DOUBAO"]?.takeIf(runtime::accountCurrent)?.let {
+                accountPage = it; child = null
+            }
         }
     }
     LaunchedEffect(draft.instructions, realtimeDirty) {
@@ -205,7 +211,8 @@ internal fun VoiceSettingsPanel(
             else if (child != null) leaveChild()
             else leavePage { picker.close(); onBack() }
         }
-        val accountConfiguration = accountPage
+        val accountConfiguration = accountPage ?: personalAccounts["DOUBAO"]
+            ?.takeIf { child == "DOUBAO_VOICES" && !busy && !accountReadError && current() && runtime.accountCurrent(it) }
         if (accountConfiguration != null) {
             key(profile, accountConfiguration.revision) {
                 ProductionVoiceAccountPage(runtime, accounts, profile, accountConfiguration,
@@ -221,9 +228,27 @@ internal fun VoiceSettingsPanel(
             return@PageBackStack
         }
         if (child == "DOUBAO_VOICES") {
-            VoicePersonalEmptyPage(isCurrent = ::current,
-                onConfigure = { if (current() && !busy && stopAudio()) { child = "DOUBAO_ACCOUNT" } },
-                onBack = ::leaveChild)
+            if (accountLoadState == ControllerVoiceRuntime.LoadState.LOADED && !busy && !accountReadError) {
+                VoicePersonalEmptyPage(isCurrent = ::current,
+                    onConfigure = { if (current() && !busy && stopAudio()) { child = "DOUBAO_ACCOUNT" } },
+                    onBack = ::leaveChild)
+            } else {
+                VoicePersonalAccountStatePage(
+                    if (accountReadError) ControllerVoiceRuntime.LoadState.FAILED
+                    else if (busy) ControllerVoiceRuntime.LoadState.LOADING else accountLoadState,
+                    enabled = current() && !busy,
+                    onRetry = {
+                        if (current() && !busy) {
+                            busy = true; accountReadError = false
+                            scope.launch {
+                                try { runtime.load() }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { if (alive.get()) accountReadError = true }
+                                finally { busy = false }
+                            }
+                        }
+                    }, onBack = ::leaveChild)
+            }
             return@PageBackStack
         }
         if (child == "DOUBAO_ACCOUNT") {

@@ -148,7 +148,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('active.set(false); preview.close(); onAccountSaved(updated)', saved)
         panel = source('VoiceSettingsPanel.kt')
         self.assertIn('accountPage == accountConfiguration && runtime.accountCurrent(updated)', panel)
-        self.assertIn('LaunchedEffect(personalAccounts, lifecycleState)', panel)
+        self.assertIn('LaunchedEffect(personalAccounts, lifecycleState, child, accountLoadState, busy, accountReadError)', panel)
         self.assertIn('updated != opened && runtime.accountCurrent(updated)) accountPage = updated', panel)
 
     def test_doubao_slot_and_recording_details_match_existing_flows_without_new_requests(self):

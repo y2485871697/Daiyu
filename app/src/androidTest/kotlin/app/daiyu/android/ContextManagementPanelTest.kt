@@ -75,6 +75,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         } }
         awaitUniqueTag("context-management")
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testRepeatedCompressionModelSelectionKeepsPickerAndOnlyChangesDraft() {
         val catalog = fixture.settings.modelCatalogSnapshot()
         assertEquals(app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED,
@@ -95,7 +96,9 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         }
         val sheet = node("chat-selection-sheet").fetchSemanticsNode().root
         val provider = choices.first().provider.slotId
-        node("chat-model-provider:$provider").performClick()
+        node("chat-model-search").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetText) {
+            assertTrue(it(androidx.compose.ui.text.AnnotatedString(choices.first().providerName)))
+        }
         for (choice in choices.take(2)) {
             val id = choice.selection.record.id
             ui.onNode(hasTestTag("chat-model-option:$id") or hasTestTag("chat-model-option:$provider:$id")).performClick()

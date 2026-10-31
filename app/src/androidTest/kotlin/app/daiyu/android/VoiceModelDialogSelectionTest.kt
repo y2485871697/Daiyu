@@ -28,8 +28,8 @@ class VoiceModelDialogSelectionTest : WiredActivityTestCase() {
             listOf(SavedCatalogModel("tts-1-hd", "tts-1-hd", CatalogModelParameters()))) { false })
         return SettingsModelSource(fixture.application, fixture.controller.providers)
     }
-    private fun show(source: SettingsModelSource) {
-        val configuration = mutableStateOf(VoiceConfiguration())
+    private fun show(source: SettingsModelSource, initial: VoiceConfiguration = VoiceConfiguration()) {
+        val configuration = mutableStateOf(initial)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 VoiceModelDialog(configuration.value, source, { true }, onSave = {
@@ -75,6 +75,7 @@ class VoiceModelDialogSelectionTest : WiredActivityTestCase() {
         ui.onNodeWithText("正在读取模型目录…").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testSelectionRetainsPixelsAndSearchWhileRealConnectionValidationWaits() {
         val source = seed()
         val choices = source.speechChoices()
@@ -83,12 +84,15 @@ class VoiceModelDialogSelectionTest : WiredActivityTestCase() {
         val firstTag = "chat-model-option:${first.speechPickerId}"
         val secondTag = "chat-model-option:${second.speechPickerId}"
         val beforeCatalog = fixture.settings.localModelCatalogSnapshot()
-        show(source); awaitLoaded()
+        show(source, VoiceConfiguration(provider = first.connection.provider.slotId,
+            model = first.model, modelIdentity = first.identity, endpoint = first.connection.endpoint))
+        awaitLoaded()
+        node(firstTag).assertIsSelected()
         node("chat-model-search").performSemanticsAction(SemanticsActions.SetText) {
             assertTrue(it(AnnotatedString("tts-1")))
         }
         val sheetRoot = node("chat-selection-sheet").fetchSemanticsNode().root
-        val before = captureScreenNode(node(firstTag)).toPixelMap()
+        val before = listOf(firstTag, secondTag).associateWith { captureScreenNode(node(it)).toPixelMap() }
         withReadHeld {
             node(secondTag).performClick()
             node(firstTag).assertIsNotEnabled().performTouchInput { click(center) }
@@ -97,13 +101,16 @@ class VoiceModelDialogSelectionTest : WiredActivityTestCase() {
             ui.onNodeWithText("当前任务结束后可切换模型").assertDoesNotExist()
             node("chat-model-search").assertTextContains("tts-1")
             assertSame(sheetRoot, node("chat-selection-sheet").fetchSemanticsNode().root)
-            val pending = captureScreenNode(node(firstTag)).toPixelMap()
-            assertEquals(before.width, pending.width); assertEquals(before.height, pending.height)
-            var changed = 0
-            for (y in 0 until before.height) for (x in 0 until before.width) {
-                if (before[x, y] != pending[x, y]) changed++
+            for (tag in listOf(firstTag, secondTag)) {
+                val expected = before.getValue(tag)
+                val pending = captureScreenNode(node(tag)).toPixelMap()
+                assertEquals(expected.width, pending.width); assertEquals(expected.height, pending.height)
+                var changed = 0
+                for (y in 0 until expected.height) for (x in 0 until expected.width) {
+                    if (expected[x, y] != pending[x, y]) changed++
+                }
+                assertEquals(0, changed)
             }
-            assertEquals(0, changed)
             assertTrue(saved.isEmpty())
         }
         ui.waitUntil(timeoutMillis = 5000) { saved.size == 1 }

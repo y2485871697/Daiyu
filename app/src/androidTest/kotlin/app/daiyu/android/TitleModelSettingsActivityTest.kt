@@ -21,6 +21,7 @@ class TitleModelSettingsActivityTest : WiredActivityTestCase() {
         }
         return result
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testRepeatedModelSelectionKeepsSheetSearchAndDisabledSwitch() {
         val catalog = fixture.settings.modelCatalogSnapshot()
         assertEquals(app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED,
@@ -50,16 +51,16 @@ class TitleModelSettingsActivityTest : WiredActivityTestCase() {
                     androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "模型目录读取完成")).fetchSemanticsNodes().size == 1
             }
             node("chat-model-search").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetText) {
-                assertTrue(it(androidx.compose.ui.text.AnnotatedString("")))
+                assertTrue(it(androidx.compose.ui.text.AnnotatedString(choices.first().providerName)))
             }
             val sheet = node("chat-selection-sheet").fetchSemanticsNode().root
             val provider = choices.first().provider.slotId
-            node("chat-model-provider:$provider").performClick()
             for (choice in choices.take(2)) {
                 val id = choice.selection.record.id
                 ui.onNode(hasTestTag("chat-model-option:$id") or hasTestTag("chat-model-option:$provider:$id")).performClick()
-                ui.waitUntil(timeoutMillis = 5000) { source.key("title") == choice.key }
+                ui.waitUntil(timeoutMillis = 5000) { source.key("title") == choice.key && stored?.model == choice.selection.record.id }
                 assertSame(sheet, node("chat-selection-sheet").fetchSemanticsNode().root)
+                node("chat-model-search").assertTextContains(choices.first().providerName)
                 ui.onNodeWithText("正在读取模型目录…").assertDoesNotExist()
                 ui.onNodeWithText("当前任务结束后可切换模型").assertDoesNotExist()
                 node("chat-model-option:$id").assertIsSelected()

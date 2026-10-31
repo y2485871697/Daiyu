@@ -3,6 +3,7 @@ package app.daiyu.android
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -16,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.ui.haptics.miuix.IconButton
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -31,6 +35,7 @@ internal fun VoicePersonalScaffold(
     enabled: Boolean,
     onAdd: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
+    emptyMessage: String? = null,
     content: LazyListScope.() -> Unit,
 ) {
     val colors = assistantPreviewPalette()
@@ -44,6 +49,14 @@ internal fun VoicePersonalScaffold(
             content()
             if (onAdd != null) item { Spacer(Modifier.height(80.dp)) }
         }
+        if (emptyMessage != null) Text(
+            text = emptyMessage,
+            modifier = Modifier.align(Alignment.Center).fillMaxWidth()
+                .padding(horizontal = 28.dp, vertical = 12.dp).testTag("voice-account-empty-message"),
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            textAlign = TextAlign.Center,
+        )
         if (onAdd != null) IconButton(onClick = onAdd, enabled = enabled,
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding()
                 .padding(24.dp).testTag("voice-account-add"),

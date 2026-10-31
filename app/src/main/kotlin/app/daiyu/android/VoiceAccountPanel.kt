@@ -297,9 +297,10 @@ internal fun VoiceAccountPanel(
         }
         VoicePersonalScaffold(title, ::back, enabled = !busy && current(),
             onAdd = if (page == "LIST") ({ if (current()) addMenu = true }) else null,
-            onSettings = if (page == "LIST") ({ if (current()) menu = true }) else null) {
+            onSettings = if (page == "LIST") ({ if (current()) menu = true }) else null,
+            emptyMessage = if (page == "LIST" && visibleVoices.isEmpty())
+                "还没有声音。点击 + 制作或导入声音。" else null) {
             if (page == "LIST") {
-                if (visibleVoices.isEmpty()) item { SettingsNote("还没有声音。点击 + 制作或导入声音。") }
                 items(visibleVoices.size, key = { visibleVoices[it].id }) { index ->
                     val voice = visibleVoices[index]
                     VoiceSettingsCard {

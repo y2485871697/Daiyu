@@ -20,6 +20,26 @@ class VoicePersonalMenuContractTest(unittest.TestCase):
         self.assertIn("VoiceChoiceDialog(voice.name,", panel)
         self.assertIn("SettingsRadioRow", (SRC / "VoiceSettingsDialogs.kt").read_text())
 
+    def test_empty_message_is_centered_without_replacing_list_or_feedback(self):
+        panel = (SRC / "VoiceAccountPanel.kt").read_text()
+        scaffold = (SRC / "VoicePersonalScaffold.kt").read_text()
+        self.assertIn('emptyMessage = if (page == "LIST" && visibleVoices.isEmpty())', panel)
+        self.assertIn('"还没有声音。点击 + 制作或导入声音。" else null', panel)
+        self.assertNotIn('item { SettingsNote("还没有声音。点击 + 制作或导入声音。") }', panel)
+        self.assertIn('emptyMessage: String? = null', scaffold)
+        self.assertIn('if (emptyMessage != null) Text(', scaffold)
+        self.assertIn('text = emptyMessage', scaffold)
+        self.assertIn('Modifier.align(Alignment.Center).fillMaxWidth()', scaffold)
+        self.assertIn('textAlign = TextAlign.Center', scaffold)
+        self.assertIn('color = MiuixTheme.colorScheme.onSurfaceVariantSummary', scaffold)
+        self.assertIn('testTag("voice-account-empty-message")', scaffold)
+        self.assertNotIn('fillParentMaxSize', scaffold)
+        self.assertIn('items(visibleVoices.size, key = { visibleVoices[it].id })', panel)
+        self.assertIn('if (notice.isNotBlank()) item { SettingsNote(notice) }', panel)
+        self.assertIn('previewState.error?.let { value -> item { SettingsNote(value, error = true) } }', panel)
+        self.assertIn('if (!latestCurrent(frozenConfiguration)) item { SettingsNote(', panel)
+        self.assertIn('content()', scaffold)
+
     def test_sheet_reuses_attachment_shell_and_row_geometry(self):
         menu = (SRC / "VoicePersonalMenus.kt").read_text() if (SRC / "VoicePersonalMenus.kt").exists() else ""
         self.assertIn("ChatSelectionSheet(title", menu)

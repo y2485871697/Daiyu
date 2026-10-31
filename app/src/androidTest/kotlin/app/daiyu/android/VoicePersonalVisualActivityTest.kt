@@ -108,6 +108,53 @@ class VoicePersonalVisualActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testEmptyMessageStaysAtPageCenterWithFeedbackAndActionsInBothThemes() {
+        val adds = AtomicInteger()
+        val settings = AtomicInteger()
+        val before = fixture.database.exportBackup()
+        val message = "还没有声音。点击 + 制作或导入声音。"
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
+            val visit = Any()
+            lateinit var showEmpty: MutableState<Boolean>
+            mainThread { activity.setContent {
+                key(visit) {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        val density = LocalDensity.current
+                        CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                            showEmpty = remember { mutableStateOf(true) }
+                            VoicePersonalScaffold("我的声音", onBack = {}, enabled = true,
+                                onAdd = { adds.incrementAndGet() }, onSettings = { settings.incrementAndGet() },
+                                emptyMessage = if (showEmpty.value) message else null) {
+                                if (!showEmpty.value) item {
+                                    app.daiyu.android.ui.screens.settings.SettingsRow("测试声音", tag = "voice-test-record")
+                                }
+                                item { app.daiyu.android.ui.screens.settings.SettingsNote("测试反馈") }
+                            }
+                        }
+                    }
+                }
+            } }
+            val page = node("voice-account").fetchSemanticsNode().boundsInRoot
+            val empty = node("voice-account-empty-message").assertIsDisplayed().assertTextEquals(message)
+                .fetchSemanticsNode().boundsInRoot
+            assertEquals("empty message horizontal center", page.center.x, empty.center.x, 1f)
+            assertEquals("empty message vertical center", page.center.y, empty.center.y, 1f)
+            ui.onNodeWithText("测试反馈").assertIsDisplayed()
+            val beforeAdd = adds.get(); val beforeSettings = settings.get()
+            node("voice-account-add").assertIsDisplayed().performClick()
+            node("voice-account-menu").assertIsDisplayed().performClick()
+            assertEquals(beforeAdd + 1, adds.get())
+            assertEquals(beforeSettings + 1, settings.get())
+            mainThread { showEmpty.value = false }
+            node("voice-account-empty-message").assertDoesNotExist()
+            node("voice-test-record").assertIsDisplayed()
+            ui.onNodeWithText("测试反馈").assertIsDisplayed()
+        }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testAddButtonUsesDonePaletteForDefaultThemesWithoutChangingItsAction() {
         val clicks = AtomicInteger()
         for (dark in listOf(false, true)) {

@@ -286,6 +286,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             .performTextReplacement("synthetic-conversation-asr-key")
         awaitImeFrame(node("settings-field:ASR API Key"), visible = true)
         dismissIme(); awaitImeFrame(node("settings-field:ASR API Key"), visible = false)
+        assertRecognitionSaveMatchesSelectedTab()
         node("voice-save").assertIsEnabled().performClick()
         ui.waitUntil { fixture.controller.voiceRuntime.conversationConfiguration.value?.asrKey == "synthetic-conversation-asr-key" }
         ui.waitForIdle()
@@ -323,6 +324,16 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         val local = node("voice-asr-method:system").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
         val cloud = node("voice-asr-method:doubao").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
         assertEquals(local.width, cloud.width, 1f)
+    }
+
+    private fun assertRecognitionSaveMatchesSelectedTab() {
+        val tab = node("voice-asr-method:doubao").assertIsSelected().captureToImage().toPixelMap()
+        val button = node("voice-save").assertIsEnabled().captureToImage().toPixelMap()
+        val selectedFill = tab[tab.width / 5, tab.height / 2]
+        val buttonFill = button[button.width / 5, button.height / 2]
+        assertEquals(selectedFill.red, buttonFill.red, .025f)
+        assertEquals(selectedFill.green, buttonFill.green, .025f)
+        assertEquals(selectedFill.blue, buttonFill.blue, .025f)
     }
 
     private fun assertRecognitionSelectedColors(tag: String) {
@@ -450,6 +461,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         val keyBounds = ui.onNodeWithTag("settings-field:ASR API Key-container", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
         assertTrue(save.top >= keyBounds.bottom - 1f)
+        assertRecognitionSaveMatchesSelectedTab()
         node("voice-save").performClick()
         ui.waitUntil(timeoutMillis = 5000) {
             fixture.controller.voiceRuntime.configuration.value?.asrKey == "synthetic-asr-key"

@@ -45,6 +45,20 @@ class VoiceSettingsPaletteContractTest(unittest.TestCase):
         self.assertIn('selected -> SolidColor(selectedBackground)', options)
         self.assertNotIn('cardStyle -> colors.bubble', options)
 
+    def test_recognition_save_reuses_selected_tab_fill_without_changing_foregrounds(self):
+        panel = (SRC / 'VoiceSettingsPanel.kt').read_text()
+        asr = panel.split('if (child == "ASR") {', 1)[1].split('} else if (child == "MIMO")', 1)[0]
+        self.assertIn('LinuxSettingsTheme { SettingsSegmentedTabs(', asr)
+        save = asr.split('TextButton("保存连接设置"', 1)[1].split('SettingsRow("高级：更换识别服务"', 1)[0]
+        self.assertIn('ButtonDefaults.textButtonColorsPrimary(color = DaiyuPalette.switchTrack)', save)
+        for override in ('textColor =', 'disabledColor =', 'disabledTextColor =', 'Color('):
+            self.assertNotIn(override, save)
+        local_theme = (SRC / 'ui/screens/settings/LinuxSettingsTheme.kt').read_text()
+        self.assertIn('val primary = DaiyuPalette.switchTrack', local_theme)
+        self.assertIn('MiuixTheme.colorScheme.copy(primary = primary', local_theme)
+        tabs = (SRC / 'ui/screens/settings/SettingsSegmentedTabs.kt').read_text()
+        self.assertIn('.background(if (active) colors.primary else colors.primaryContainer)', tabs)
+
     def test_visual_regression_compares_real_shared_components_and_themes(self):
         visual = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceSettingsPaletteActivityTest.kt').read_text()
         for marker in ('SettingsScaffoldPage(', 'VoicePersonalScaffold(', 'VoicePersonalEmptyPage(',

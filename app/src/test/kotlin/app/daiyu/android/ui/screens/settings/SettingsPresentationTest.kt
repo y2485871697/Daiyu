@@ -10,7 +10,6 @@ class SettingsPresentationTest {
     @Test
     fun retainedSettingsKeepInventoryAndSixVisibleGroups() {
         val entries = SettingsCatalog.entries
-        // Current inventory includes independent generation/vision, P05 and platform tools.
         assertEquals(36, entries.size)
         assertTrue(entries.none { it.id in setOf("permission_check", "accessibility_keep", "default_reasoning") })
         assertTrue(entries.map { it.id }.containsAll(setOf("platform_tools", "accessibility", "voice", "donate")))

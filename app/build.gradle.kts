@@ -6,7 +6,7 @@ plugins {
 abstract class StageBrowserCore:Sync() {
     @get:OutputDirectory abstract val outputDirectory:DirectoryProperty
 }
-// The only new build input is the pinned sherpa-ncnn JNI runtime (no model weights).
+// Prepares the pinned sherpa-ncnn JNI runtime (no model weights).
 abstract class PrepareOfflineSpeechRuntime:Exec() {
     @get:OutputDirectory abstract val outputDirectory:DirectoryProperty
 }
@@ -148,7 +148,7 @@ kotlin { jvmToolchain(27) }
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation(project(":core-domain"))
-    // P32: bounded RFC6455 decoding + one-shot HTTPS; licenses/API26 evidence in docs/P32-voice-network.md.
+    // Bounded RFC6455 decoding + one-shot HTTPS; licenses/API26 evidence in docs/P32-voice-network.md.
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Java-WebSocket TRACE includes wire data. Never install a logging backend for this stack.
@@ -180,7 +180,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.9.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.google.jimfs:jimfs:1.3.0")
-    // The migrated owner tests use Android Intent/Binder at SDK 36; host tests only.
+    // Owner tests use Android Intent/Binder at SDK 36; host tests only.
     testImplementation("org.robolectric:robolectric:4.16.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("org.json:json:20260522")
@@ -234,7 +234,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
         systemProperty("daiyu.pty.helper",hostPty.get().asFile.absolutePath)
     } else {
         // These contracts exercise Unix host paths / POSIX 0600, not Windows equivalents.
-        // They remain mandatory in the Linux lane; never weaken the production checks.
+        // They remain mandatory in the Linux lane.
         exclude("**/PtyRunSessionHostTest.class", "**/LinuxEnvironmentStoreTest.class")
         filter {
             listOf(

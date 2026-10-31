@@ -40,8 +40,7 @@ class GenerationRequestPlan private constructor(
         internal const val MAX_BATCH = 32
 
         /**
-         * Intentionally small whitelist sourced from the retained client request shapes. Missing
-         * ImageRequestParameters/Grok/NovelAI/Ark helpers are NOT recreated. All optional parameters
+         * Small whitelist sourced from the retained client request shapes. All optional parameters
          * (seed, size, quality, duration, count/n, concurrency, extra JSON etc.) are rejected. Batch
          * count is represented only by separate parent-assigned item identities, with n=1 per image.
          */

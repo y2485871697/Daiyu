@@ -53,7 +53,7 @@ class ControllerVideoSendingTest {
         context.deleteDatabase("conversations.db")
         root = Files.createTempDirectory("controller-video").toFile()
         db = ConversationDatabase(context)
-        // Test harness schema until the parent folds this into its single versioned migration.
+        // Install the fixture schema explicitly; production migration is not exercised here.
         ControllerVideoManifestWitness.installSchema(db.writableDatabase)
         preferences = context.getSharedPreferences("controller-video-${UUID.randomUUID()}", 0)
         journal = ControllerVideoJournal(preferences)
@@ -609,8 +609,7 @@ class ControllerVideoSendingTest {
         }
         val definitions = listOf(ToolDefinition("fixture_tool", "fixture", "{\"type\":\"object\",\"properties\":{}}"))
         val imagePlan = ControllerMessageImages(db, MessageImageAssetStore(File(root, "other-images"))).freeze(rows, provider)
-        // A later actual freeze retires earlier plan identities, so open/approve each session
-        // in order instead of pre-opening four stale sessions and then trying to send them.
+        // Open and approve each session before the next freeze retires its plan identity.
         val opens = listOf<() -> ModelSession>({ port.open(rows) }, { port.open(rows, setOf(ReadOnlyTool.BATTERY)) },
             { port.open(rows, definitions) }, { port.open(rows, definitions, imagePlan) })
         opens.forEach { open ->

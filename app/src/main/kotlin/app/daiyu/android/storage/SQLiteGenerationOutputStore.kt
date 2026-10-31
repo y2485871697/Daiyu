@@ -47,8 +47,8 @@ sealed interface GenerationOutputRecovery {
 }
 
 /**
- * Additive P19/P20 leaf module. The supplied DB MUST be the account's application DB containing
- * the real messages and generation_attempts; accountScope must be stable across restarts.
+ * The supplied DB MUST be the account's application DB containing the real messages and
+ * generation_attempts; accountScope must be stable across restarts.
  * No helper/version ownership, network, attempt mutation, asset deletion or Tool.result writes.
  *
  * Asset verification releases ALL file/fence locks before final registration admission.

@@ -21,8 +21,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * Process-retained P05 host port. Construction, collection, editing and saving are strictly local.
- * Frozen 30s polling is explicitly started with an owner scope via [start]; construction does not poll.
+ * Process-retained balance runtime. Construction, collection, editing and saving are strictly local.
+ * Start 30s polling explicitly with an owner scope via [start]; construction does not poll.
  * Manual and periodic requests share the same admission/cancellation gate.
  */
 class BalanceRuntime(val store: ProviderBalanceStore, private val query: BalanceQuery = BalanceHttpQuery()) {

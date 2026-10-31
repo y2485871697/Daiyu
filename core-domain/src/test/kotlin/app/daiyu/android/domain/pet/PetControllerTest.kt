@@ -4,7 +4,7 @@ import app.daiyu.android.domain.*
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Retained cancellation/receipt cases plus production transition admission. No Android/transport IO. */
+/** Cancellation, receipt and run-transition admission contracts; no Android or transport I/O. */
 class PetControllerTest {
     private class Scheduler : PetScheduler {
         data class Entry(val delay: Long, val task: () -> Unit, var cancelled: Boolean = false)

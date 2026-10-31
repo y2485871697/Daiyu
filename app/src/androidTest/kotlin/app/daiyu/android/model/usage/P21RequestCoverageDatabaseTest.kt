@@ -13,8 +13,7 @@ import app.daiyu.android.title.ParentTitleUsagePort
 import app.daiyu.android.title.SqliteTitleCommitAdapter
 import java.util.UUID
 
-/** Real helper, lease, Runner, title CAS and reader fixtures. No real network or billing data.
- * Source-only until the parent runs these on Android; do not treat their existence as a pass. */
+/** Real helper, lease, Runner, title CAS and reader fixtures. No real network or billing data. */
 @Suppress("DEPRECATION")
 class P21RequestCoverageDatabaseTest : InstrumentationTestCase() {
     private lateinit var context: Context

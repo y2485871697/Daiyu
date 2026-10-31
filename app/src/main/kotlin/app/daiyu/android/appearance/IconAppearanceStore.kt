@@ -7,7 +7,7 @@ import app.daiyu.android.domain.appearance.IconThemeMode
 import app.daiyu.android.domain.appearance.Task17IconCatalog
 import java.util.WeakHashMap
 
-/** Independent icon-only storage, not a migration of the reference app's whole datastore. */
+/** Stores icon appearance preferences and the current launcher icon resource. */
 class IconAppearanceStore internal constructor(
     private val appearance: SharedPreferences,
     private val launcher: SharedPreferences,

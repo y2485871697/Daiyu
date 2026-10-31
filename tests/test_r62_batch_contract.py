@@ -1,4 +1,4 @@
-"""Source wiring for R60 failures; not Android instrumentation coverage."""
+"""Source-wiring contracts for back gestures, browser layouts and locale resources; not Android instrumentation coverage."""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

@@ -59,7 +59,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Existing host callback pattern: no business work or ActivityResultLauncher lives in this UI. */
+/** Host callbacks for image selection, preview and removal actions. */
 data class ImageAttachmentsActions(
     val onSelect: (ImageAttachmentDraft) -> Unit,
     val onPreview: (ImageAttachmentItemKey) -> Unit,
@@ -75,8 +75,8 @@ data class ImageAttachmentsActions(
 typealias ImageAttachmentPreviewLoader = suspend (ImageAttachment, Int) -> ImageBitmap
 
 /**
- * Standalone P17 composer adjunct; host collects ImageAttachmentsState.state and supplies actions.
- * Does not send, freeze, import, remove files, launch SAF, or touch any other composer's controls.
+ * Displays image attachment status, thumbnails and previews, delegating actions to the host.
+ * The host collects ImageAttachmentsState.state and supplies actions.
  */
 @Composable
 fun ImageAttachments(

@@ -1,8 +1,7 @@
 package app.daiyu.android.terminal
 
 /** Shared production gate for packaged AND manually registered Linux environments.
- * Files/hash/catalog approval cannot establish platform execution support. Android PTY is separate.
- * No runtime download, helper substitution, root fallback or minSdk change is authorized here. */
+ * Files/hash/catalog approval cannot establish platform execution support. Android PTY is separate. */
 internal object LinuxRuntimePlatform {
     fun requireSupported(sdk: Int, is64Bit: Boolean, machine: String, mode: LinuxExecutionMode = LinuxExecutionMode.PROOT): String {
         if (mode == LinuxExecutionMode.CHROOT) {

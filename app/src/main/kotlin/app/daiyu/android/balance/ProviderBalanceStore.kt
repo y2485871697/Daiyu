@@ -25,8 +25,8 @@ class BalanceRefreshTicket internal constructor(
 }
 
 /**
- * P05 encrypted host store with frozen coordinator semantics: keep last successful amount on
- * refresh/failure, timestamp only on success, and compute changes only within one configuration.
+ * Encrypted balance store: keep the last successful amount on refresh/failure, timestamp only
+ * on success, and compute changes only within one configuration.
  * One process-retained instance per namespace; every explicit save/reload/delete fences replies.
  */
 class ProviderBalanceStore(private val persistence: BalancePersistence) {

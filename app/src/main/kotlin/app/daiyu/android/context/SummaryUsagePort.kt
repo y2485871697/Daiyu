@@ -7,7 +7,7 @@ import app.daiyu.android.domain.runtime.RequestUsageCheckpoint
 
 /** Host identities, never reconstructed from the summarizer's synthetic evidence message.
  * The Controller must admit this request/attempt durably under its live parent ownership BEFORE
- * opening a transport. No database or additional ledger is introduced by this port. */
+ * opening a transport. */
 data class ParentSummaryUsage(
     val conversationId: String,
     val parentRunId: String,

@@ -55,9 +55,7 @@ CATALOG = (
     Scenario("BIZ-016", ("AC-063", "AC-064", "AC-065", "AC-068"), (), ()),
 )
 
-# Derived from the numbered division; these are handoff targets, not edits to it.
-# AC-062 responsibility confirmed by 01 (division v1.1). Performance is 20's measurement responsibility,
-# not a claim that 20 owns a production fix.
+# Production owners; performance entries identify measurement responsibility only.
 OWNERS = {
     "AC-002": (16, 3), "AC-003": (16, 2), "AC-009": (2, 4),
     "AC-010": (2,), "AC-011": (7, 6), "AC-014": (3, 16),

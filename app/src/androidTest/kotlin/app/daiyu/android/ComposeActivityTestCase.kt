@@ -758,7 +758,6 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
     // sendText posts its receipt separately from runner/model events. Waiting for active or
     // Session.entered alone does not guarantee Activity consumption + acknowledgement.
     // Null also covers synchronous queue rejection (which intentionally has no callback).
-    // Requires the retained result API introduced in f63a5f9.
     protected fun awaitTextSendResult(activity: MainActivity) {
         val controller = (instrumentation.targetContext.applicationContext as ChatApplication).controller
         ui.waitUntil(timeoutMillis = 5_000) {

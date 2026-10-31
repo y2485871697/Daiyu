@@ -18,9 +18,7 @@ import java.io.File
 import java.util.UUID
 
 /**
- * Real on-disk SQLiteOpenHelper opens, never direct onUpgrade calls. Reconstructed from the
- * current parent helper/store contracts and existing instrumentation fixtures; the original
- * reviewed test was not readable across the isolated worktree boundary.
+ * Real on-disk SQLiteOpenHelper opens, never direct onUpgrade calls.
  *
  * No application database, network, paid generation, UI, or private-asset GC is used. The
  * intentionally weak legacy output table also permits corrupt/adversarial storage classes:

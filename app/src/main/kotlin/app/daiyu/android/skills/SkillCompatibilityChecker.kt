@@ -5,7 +5,6 @@ package app.daiyu.android.skills
  * 只根据 SKILL.md 元数据和正文做静态判断，不执行脚本。
  *
  * Shared static compatibility policy; see docs/skills-compatibility-source.md.
- * The entry overload is adapted from SkillIndexEntry to this domain's SkillHeader.
  */
 object SkillCompatibilityChecker {
     fun evaluate(entry: SkillHeader): SkillCompatibilityResult = evaluate(

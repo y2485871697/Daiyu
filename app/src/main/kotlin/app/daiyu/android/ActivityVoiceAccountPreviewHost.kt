@@ -107,7 +107,7 @@ internal class ActivityVoiceAccountPreviewHost(
         if (!runCatching { admitted(entry.request) }.getOrDefault(false)) stop(entry)
     }
     fun stop() { active?.let { stop(it) } }
-    /** Synchronous exact teardown + retained failure + singleton gate health, not stop() optimism. */
+    /** Synchronous owner-specific teardown, including retained failure and singleton gate health checks. */
     fun stopPreviewStrictly(): Boolean {
         val entry = active
         return try {

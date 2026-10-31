@@ -4,7 +4,7 @@ package app.daiyu.android.vd.runtime;
  * Per-command rendezvous between owner dispatch and its socket response attempt. Only verified
  * release (or explicit never-initialized store closure) authorizes exit. A completed flush,
  * failed flush, disconnect or timed-out waiter only finishes delivery. Either event may arrive
- * first. Legacy release names are retained; the boolean is the dispatcher's terminal proof.
+ * first. The boolean is the dispatcher's terminal proof.
  */
 final class OwnerReleaseCompletion {
     private boolean verifiedReleased;

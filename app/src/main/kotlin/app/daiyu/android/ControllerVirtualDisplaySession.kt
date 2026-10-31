@@ -41,10 +41,9 @@ internal class ControllerVirtualDisplaySession internal constructor(
                                   approvedEffects: Set<WriteEffect>): TaskAuthorization
         /** Stop only this accepted run. No draft restoration, rejection receipt or automatic resend. */
         fun stopAcceptedRun(owner: RunExecutionOwner)
-        /** Pure feedback registration on this exact retained leaf; not dispatch. In the batch
-         * candidate: val ticket = leaf.beginBatch(originalWholeBatch); return BatchCompletion {
-         * results -> leaf.finishBatch(ticket, results) }. Capture that original ticket, not a
-         * reconstructed batch. The seam avoids a direct dependency on the candidate's ticket type.
+        /** Register feedback on this exact retained leaf without dispatching. Capture the ticket from
+         * leaf.beginBatch(originalWholeBatch) and call leaf.finishBatch(ticket, results) on completion;
+         * never reconstruct the batch. BatchCompletion keeps the leaf's ticket type out of this seam.
          */
         fun beginBatch(leaf: R08VirtualDisplayCatalogLeaf, originalWholeBatch: List<ToolInvocation>): BatchCompletion
     }

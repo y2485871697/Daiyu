@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import java.util.WeakHashMap
 
-/** The retained appearance preference file; does not read or migrate another app's data. */
+/** Stores device-local appearance preferences. */
 internal class AppearanceSettingsStore(private val preferences: SharedPreferences) {
     constructor(context: Context) : this(context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE))
 

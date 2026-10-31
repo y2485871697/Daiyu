@@ -63,7 +63,6 @@ class MessageVideoDatabaseTest : InstrumentationTestCase() {
 
     private fun rejects(action: () -> Unit) {
         try { action() } catch (_: Exception) { return }
-        // AssertionFailedError is not caught above: a non-rejection really fails this test.
         fail("Expected fail-closed database rejection")
     }
 

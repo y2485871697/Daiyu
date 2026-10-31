@@ -16,8 +16,8 @@ import app.daiyu.android.domain.appearance.IconSyncResult
 
 /**
  * Call once in the activity's root composition, OUTSIDE the settings route, then pass the returned
- * coordinator to [IconAppearanceEditor]. Reuses the retained PM/store algorithm, including its
- * automatic-vs-explicit distinction; this is lifecycle wiring, not a second icon implementation.
+ * coordinator to [IconAppearanceEditor]. Wires lifecycle updates to the coordinator while preserving
+ * its automatic-vs-explicit distinction.
  *
  * The host supplies its existing-notification refresh port (an explicit empty implementation is
  * appropriate only when there are no active app notifications). Every automatic receipt/read

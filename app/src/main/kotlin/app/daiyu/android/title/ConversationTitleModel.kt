@@ -4,8 +4,6 @@ import app.daiyu.android.domain.*
 
 /** Preserved from authorized full-detail-f001fb82/fork, ConversationTitleModel.kt
  * (source blob 72eee641f436054cb57ecef3c25f79a925f73b4c).
- * Prompt, question bound, normalize and mayApply are retained. Old AgentModelClient/controller
- * dependencies are replaced by ModelFactory + the transaction/owner adapters, NOT a new algorithm.
  * Model selection is frozen by the coordinator; explicit custom profiles retain strict binding. */
 internal object ConversationTitleModel {
     const val INSTRUCTIONS = "为用户的对话生成简短准确的标题，使用用户的语言，最多24个字符。" +

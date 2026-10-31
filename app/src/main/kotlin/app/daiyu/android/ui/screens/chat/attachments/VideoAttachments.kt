@@ -71,14 +71,15 @@ internal data class VideoDraftText(val text: String, val editorGeneration: Long,
 internal typealias VideoDraftHandoff = (VideoDraftRequest, VideoDraftText, (VideoDraftReceipt) -> Boolean) -> Unit
 
 /**
- * Controlled P18 composer adjunct. Pass the ONE long-lived parent-owned VideoChatHost; never create
+ * Controlled video attachment UI. Pass the ONE long-lived parent-owned VideoChatHost; never create
  * a host/journal writer in composition. Mount only for the active chat route (not merely hidden).
  * [viewLifecycleOwner] must be the route view lifecycle (Activity in a Compose-only route, Fragment
  * viewLifecycleOwner in a Fragment). Unless [manageLifecycle] is false, this component owns the
  * lifecycle binding. A parent-managed binding must live outside keyed composer subcompositions.
  *
  * [enabled] is the parent's media-route gate (e.g. no image draft); [parentBusy] gates actions without
- * touching normal text/image send routes. No network, DB, URI persistence, or editor clearing occurs.
+ * touching normal text/image send routes. Media operations are delegated to [host]; the parent
+ * owns consumption of accepted editor revisions.
  */
 @Composable
 internal fun VideoAttachments(

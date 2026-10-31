@@ -10,7 +10,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.Collections
 
-/** Host values only. This is a NEW explicit persistent-PTY API, not TerminalRegistry shell execution. */
+/** Host values only: explicit persistent-PTY API, distinct from TerminalRegistry shell execution. */
 internal sealed interface TerminalPtyLaunch {
     class Android(argv: List<String>, environment: Map<String, String>, cwd: File) : TerminalPtyLaunch {
         val argv: List<String> = Collections.unmodifiableList(argv.toList())
@@ -341,7 +341,9 @@ internal class CatalogTerminalBinding private constructor(
     }
     private fun requestClose(owned: TerminalPtyResource) { try { owned.close() } catch (_: Exception) { /* Retain and retry at worker join. */ } }
 
-    /** No callbacks, polling threads, false Drained, lease release on timeout, or forgotten late opens. */
+    /** Worker-only join after close and completion of active operations and cancellation checks.
+     * Release the launch lease and report drained only after any owned resource confirms termination.
+     * Timeout or failure retains resources and the lease for retry, including late and failed opens. */
     fun awaitTermination(timeoutMillis: Long): Boolean {
         require(timeoutMillis in 1..30000)
         val owned = synchronized(lock) {

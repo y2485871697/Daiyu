@@ -14,7 +14,6 @@ import org.json.JSONTokener
  *
  * This codec does not publish assets or prove their existence. Callers must validate the
  * reference owner against the persisted message identity and use the asset resolver to read.
- * It also does not change a database schema or make the private DB block codec image-aware.
  */
 object MessageImageReferenceCodec {
     private val fields = setOf("version", "conversation", "message", "id", "mime", "bytes", "sha256", "width", "height")

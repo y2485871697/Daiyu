@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Requires the retained TextSendState / acknowledgeTextSend API from f63a5f9. */
+/** Retained text-send receipts, ticket ownership and acknowledgement. */
 @Suppress("DEPRECATION")
 class TextSendTicketTest : InstrumentationTestCase() {
     private class Gate {

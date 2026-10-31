@@ -46,7 +46,7 @@ internal data class GenerationApprovalForm(
     override fun toString() = "GenerationApprovalForm(<redacted>)"
 }
 
-/** Optional adjunct, not a replacement SEND and not mounted by this change.
+/** Optional generation approval UI with parent-owned submission.
  * Parent supplies explicit generation settings and immutable local media, reserves identity, and
  * increments editor.revision on every form/settings/attachment change (even edit-then-revert).
  * Parent must retain confirmationHandoff before composition, including on false/throw from

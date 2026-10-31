@@ -40,7 +40,7 @@ internal class AuxiliaryVisionPreparedRequest internal constructor(val history: 
  * authorization identity (including owner, run, digest and dimensions), never a path or image id.
  * A later failure publishes nothing; the source images/order remain intact. Previously completed
  * observations remain cached, so retrying preparation does not describe those observations twice.
- * There is intentionally no enable/main-model fallback logic, persistence, JSON/path reader or retry.
+ * Auxiliary calls are not retried or replaced by the main model.
  */
 internal class AuxiliaryVisionBridge(
     private val binding: AuxiliaryModelBinding,

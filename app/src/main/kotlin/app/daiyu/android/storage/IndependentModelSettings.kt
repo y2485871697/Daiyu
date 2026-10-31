@@ -10,7 +10,7 @@ import app.daiyu.android.pet.ResolvedPetModel
 import java.util.UUID
 
 /** Separate encrypted credential namespaces, never aliases for the main chat settings.
- * The binding record is committed last. No database schema/backup migration is involved.
+ * The binding record is committed last.
  * Unknown capability stays unknown; only an explicit declaration writes true or false. */
 internal class IndependentModelSettings(context: Context) {
     enum class Slot(val key: String) { PET("pet"), VISION("vision") }

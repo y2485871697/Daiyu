@@ -57,7 +57,8 @@ interface VoiceControlPlayback {
 }
 
 /**
- * Bridge to existing hosts/Controller; no ASR, TTS, gate or chat runtime lives in this package.
+ * Host integration ports for admission, recognition, chat submission, assistant observation and
+ * playback through the existing hosts/Controller.
  * All control calls are short, nonblocking on the control/UI thread (strict release may join
  * existing audio workers, never wait for a control-thread callback). Failure must throw.
  * dispatch MUST enqueue on that same thread, even when called there. Timer callbacks may be

@@ -10,8 +10,8 @@ import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Explicit, local-only Android TTS. Construct and call on the main thread. No automatic reading,
- * microphone access, audio files, downloads, network clients, or provider credentials.
+ * Explicit, local-only Android TTS. Construct and call on the main thread.
+ * Uses the platform TTS engine without provider credentials.
  * The application context (not the Activity) is retained until close.
  */
 class AndroidSpeechPlayer internal constructor(

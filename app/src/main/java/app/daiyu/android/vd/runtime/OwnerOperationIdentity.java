@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Local R08 leaf contract, not an IPC request parser or an authorization decision.
+ * Local operation identity contract, not an IPC request parser or an authorization decision.
  * The trusted host must supply the COMPLETE effective business arguments (including defaults),
  * not a projection of model input. Neither authentication tokens nor transport fields belong here.
  */

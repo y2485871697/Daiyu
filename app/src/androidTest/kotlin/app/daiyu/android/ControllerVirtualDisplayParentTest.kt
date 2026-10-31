@@ -15,8 +15,7 @@ import java.util.concurrent.*
 import java.util.concurrent.atomic.*
 
 /** Real Controller + SQLite acceptance + Runner + unique RunCatalogTools + durable Runtime store.
- * Host and explicit-review policy are fixture-injected: no root, socket, network, or alternate catalog/ledger.
- * These are test sources, not a claim that an emulator/privileged backend was exercised. */
+ * Host and explicit-review policy are fixture-injected: no root, socket, network, or alternate catalog/ledger. */
 @Suppress("DEPRECATION")
 class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {

@@ -152,7 +152,7 @@ class SqliteTitleCommitAdapter(
         const val MAX_TITLE_CHARS = 24
 
         /** Schema-owner hook: call inside the SAME conversations.db migration/bootstrap transaction.
-         * This helper does not open another DB, bump user_version, or edit ConversationDatabase.
+         * This helper does not open another DB or bump user_version.
          * Backfill precedes all title jobs. No runtime auto-install/fallback if the hook is missing. */
         fun installSchema(db: SQLiteDatabase) {
             check(db.inTransaction()) { "标题revision必须由schema所有者在事务中安装" }

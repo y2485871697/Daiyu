@@ -109,16 +109,11 @@ internal fun BrowserSettingsSheet(
         mutableStateOf(if (customHeightFromPool > 0) customHeightFromPool.toString() else "")
     }
     val isCustomViewportActive = customWidthFromPool > 0 && customHeightFromPool > 0
-    // Bug 1: decouple radio selection from pool state. The radio reflects what the
-    // user picked *in the sheet*; Apply (or a preset tap) is what writes to the
-    // pool. Without this, tapping Custom with empty width/height fields was a
-    // no-op visually because isCustomViewportActive stayed false.
     var viewportMode by remember(isCustomViewportActive) {
         mutableStateOf(if (isCustomViewportActive) ViewportMode.CUSTOM else ViewportMode.DEFAULT)
     }
     var showCustomViewportEditor by remember { mutableStateOf(isCustomViewportActive) }
 
-    // Cookie filter (mirrors iOS `.searchable("Filter by domain")`).
     var cookieFilterText by remember { mutableStateOf("") }
 
     ModalBottomSheet(
@@ -137,14 +132,7 @@ internal fun BrowserSettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // [T-android-browser-settings-keyboard-overlap] imePadding
-                // shrinks the sheet's content frame when the keyboard
-                // opens; verticalScroll lets the user (or the focused-
-                // field bring-into-view) scroll the now-shorter content
-                // so the focused TextField isn't behind the keyboard.
-                // Previously the Column was a fixed Column with no
-                // scroll, so Width/Height/idle-timeout fields below the
-                // viewport stayed glued and the keyboard ate them.
+                // IME padding and scrolling let bringIntoViewOnFocus keep fields above the keyboard.
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
@@ -233,7 +221,7 @@ internal fun BrowserSettingsSheet(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
 
-            // ── Web Viewport (mirrors iOS BrowserManagementView.viewportSection) ──
+            // ── Web Viewport ──
             ViewportSection(
                 tabPool = tabPool,
                 selectedProfile = selectedProfile,
@@ -319,10 +307,6 @@ internal fun BrowserSettingsSheet(
                     onValueChange = { new -> idleTimeoutText = new.filter { it.isDigit() }.take(3) },
                     label = { Text(stringResource(R.string.om_browser_settings_minutes_label)) },
                     singleLine = true,
-                    // [T-android-browser-settings-keyboard-overlap] this
-                    // field sits near the bottom of the sheet — without
-                    // scroll-into-view it sits behind the soft keyboard
-                    // every time the user taps it.
                     modifier = Modifier.managedInput().weight(1f).bringIntoViewOnFocus(),
                     textStyle = MaterialTheme.typography.bodyMedium,
                     colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
@@ -455,16 +439,10 @@ internal fun BrowserSettingsSheet(
     }
 }
 
-/** Local UI state for the viewport radios — separate from the pool's
- *  customViewportWidth/Height because the radio reflects the user's *intent*
- *  (which option is highlighted), and the pool reflects the *committed*
- *  override. Tapping Custom flips the radio immediately even if no width/
- *  height has been entered yet. */
+/** Radio selection tracks user intent independently of the pool's committed viewport override,
+ * including selecting Custom before dimensions are entered. */
 private enum class ViewportMode { DEFAULT, CUSTOM }
 
-/** UA list subtitle: full UA string in monospace, or "Not set" when the
- *  Custom slot is empty. Mirrors the iOS sheet which shows the full UA below
- *  each radio so the user can verify exactly what's being sent. */
 private fun displayUA(profile: UserAgentProfile, customUA: String, notSetPlaceholder: String): String =
     when (profile) {
         UserAgentProfile.CUSTOM -> customUA.ifBlank { notSetPlaceholder }
@@ -473,10 +451,7 @@ private fun displayUA(profile: UserAgentProfile, customUA: String, notSetPlaceho
 
 // ── Viewport ──────────────────────────────────────────────────────────────
 
-/** Min / max permitted viewport dimensions. Wider than typical phone screens
- *  but bounded so the user can't accidentally enter `99999` and DOS the
- *  WebView's layout pass. Mirrors a similar implicit clamp on iOS where the
- *  user types into a 72pt-wide field. */
+/** Bound viewport dimensions to prevent excessive WebView layout work. */
 private const val VIEWPORT_MIN = 320
 private const val VIEWPORT_MAX = 2560
 
@@ -571,9 +546,6 @@ private fun ViewportSection(
                 onValueChange = onWidthChange,
                 label = { Text("Width") },
                 singleLine = true,
-                // [T-android-browser-settings-keyboard-overlap] focus →
-                // scroll-into-view so the soft keyboard doesn't cover
-                // the Custom viewport editor.
                 modifier = Modifier.managedInput().width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -587,8 +559,6 @@ private fun ViewportSection(
                 onValueChange = onHeightChange,
                 label = { Text("Height") },
                 singleLine = true,
-                // [T-android-browser-settings-keyboard-overlap] focus →
-                // scroll-into-view; mirrors the Width field.
                 modifier = Modifier.managedInput().width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -598,7 +568,6 @@ private fun ViewportSection(
             MinisTextButton(onClick = onApply) { Text(stringResource(R.string.om_browser_settings_apply)) }
         }
 
-        // UA mismatch banner — same 768px breakpoint as iOS.
         val warning = uaMismatchWarning(selectedProfile, widthText)
         if (warning != null) {
             Spacer(Modifier.height(8.dp))

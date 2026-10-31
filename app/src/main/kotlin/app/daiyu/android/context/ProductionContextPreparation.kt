@@ -5,7 +5,7 @@ import android.os.Looper
 
 /** Wiring only: constructing this on the UI thread never opens preferences, keystore or network.
  * The parent calls freeze/prepare on its reserved preparation worker, then retains its existing
- * revision/owner/send transaction checks. No duplicate compression or deadline implementation. */
+ * revision/owner/send transaction checks. */
 internal object ProductionContextPreparation {
     fun create(context: Context, service: ContextService): ContextPreparationCoordinator {
         val app = context.applicationContext ?: context

@@ -8,8 +8,8 @@ import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.RunStatus
 
 /**
- * Adapter for the EXISTING ChatController.observe/unobserve notifications. No timers, model calls,
- * database scans or synthetic stream. Mount seeds the current snapshot without replaying history.
+ * Adapts ChatController.observe/unobserve notifications to haptic run events.
+ * Mount seeds the current snapshot without replaying history.
  * Controller currently publishes Text/Tool/Image only: live reasoning must be forwarded separately
  * from the real model event path through the captured Run capability (see INTEGRATION.md).
  * Own alongside HapticsHostBinding; close BEFORE closing that host binding.

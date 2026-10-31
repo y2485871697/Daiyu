@@ -67,8 +67,7 @@ private val BalancePresets = listOf(BalanceOption.PRESET_CUSTOM, BalanceOption.P
 private val BalancePresetNames = listOf("自定义", "New API", "Sub2API", "DeepSeek")
 
 /**
- * Independent P05 destination. No activity/controller/model-settings dependency, no implicit HTTP.
- * Frozen option fields/preset resolution/password visibility and explicit test interaction are retained.
+ * Balance configuration editor with an explicit balance query action.
  * Draft credentials use remember, NEVER rememberSaveable or a saved-state bundle.
  */
 @Composable
@@ -207,7 +206,6 @@ fun BalanceSettingsScreen(runtime: BalanceRuntime, onBack: () -> Unit, modifier:
 
 private fun emptyBalanceDraft() = BalanceConfiguration("", "", "", "", "CNY", BalanceOption())
 
-/** Preserved expansion, enabled switch, preset ordering and fixed New API vs editable fill templates. */
 @Composable
 internal fun ProviderBalanceOptionFields(option: BalanceOption, onChange: (BalanceOption) -> Unit, enabled: Boolean) {
     var expanded by remember { mutableStateOf(option.enabled) }

@@ -1,4 +1,4 @@
-"""Keep the R45 device-failure repairs wired without replacing device acceptance."""
+"""Source-wiring contracts for draft routing, input, lifecycle and settings UI; not device acceptance."""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +62,7 @@ class R46BatchContract(unittest.TestCase):
         self.assertIn('assertEquals(geometry, actionsBefore.top, after.top, 1f)', footer)
 
     def test_touch_bounds_are_distinct_from_compact_fill(self):
-        # R63: the approved provider design now paints its complete, scalable target.
+        # Touch targets cover the painted fill, meet the 48dp minimum, grow with font size and never overlap.
         text = (TEST / 'ProviderSettingsLayoutActivityTest.kt').read_text()
         for token in ['.assertHeightIsAtLeast(48.dp)',
                       'touch.height >= kotlin.math.round(48f * density)',

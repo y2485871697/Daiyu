@@ -29,7 +29,7 @@ class ContextCapacityExceededException(val estimatedTokens: Long, val budgetToke
 /** Real entry points: displayHistory and prepareSend share the authoritative messages table. */
 class ContextService(private val store: ConversationDatabase, private val blobs: PrivateBlobs,
     private val transactions: DatabaseTransactions = DatabaseTransactions { store.writableDatabase },
-    /** Adapt the retained/audited CompressionBoundary policy here; no storage/model coupling required. */
+    /** Adapt the CompressionBoundary policy here without coupling storage and model. */
     private val compressionBoundary: (List<Message>, Int) -> Int = ::compressiblePrefix) {
     constructor(context: Context) : this(ConversationDatabase(context), PrivateBlobs(context))
     constructor(context: Context, store: ConversationDatabase) : this(store, PrivateBlobs(context))
@@ -497,7 +497,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         val cutoff = original.indexOf(selected) + 1
         require(isHistoryClosedPrefix(original, cutoff)) { "修订截点分离历史所有者与补充消息；未修改原文" }
         // Editing a supplement requires dropping the owner's subsequent assistant segments,
-        // not merely replacing text. 05 cannot safely reconstruct that provider turn.
+        // not merely replacing text. This path cannot safely reconstruct that provider turn.
         require(original.take(cutoff).none { owner -> owner.historySegments.any { segment ->
             segment.role == Message.USER_ROLE && owner.conversationId == selected.conversationId &&
                 owner.runId == selected.runId && segment.messageId == selected.id

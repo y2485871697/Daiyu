@@ -6,8 +6,8 @@ import android.os.Looper
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Independent, device-local interaction preference. Reading never writes or migrates another setting.
- * The owner supplies the preferences file; there is deliberately no global Context or execution mode.
+ * Device-local interaction preference backed by an owner-supplied preferences file.
+ * Reading is side-effect free.
  */
 internal class InteractiveModePreference(private val preferences: SharedPreferences?) {
     val enabled: Boolean get() = read(preferences)
@@ -23,7 +23,6 @@ internal class InteractiveModePreference(private val preferences: SharedPreferen
      */
     fun snapshot(): Snapshot = Snapshot(enabled)
 
-    /** A value, not a live view of SharedPreferences. */
     data class Snapshot(val enabled: Boolean)
 
     /** Immediate current value, then relevant changes, always delivered on the main thread. */
@@ -49,7 +48,7 @@ internal class InteractiveModePreference(private val preferences: SharedPreferen
     companion object {
         const val PREF_KEY = "interactive_mode"
 
-        /** Retained implementation semantics: missing, unavailable or unreadable means off. */
+        /** Missing, unavailable or unreadable preferences mean off. */
         fun read(preferences: SharedPreferences?): Boolean =
             runCatching { preferences?.getBoolean(PREF_KEY, false) ?: false }.getOrDefault(false)
     }

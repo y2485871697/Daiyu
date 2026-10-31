@@ -142,7 +142,7 @@ class LinuxPtyStartupCleanup private constructor(
  * without invoking external code. Neither waiting nor lease release holds the state lock.
  * A false wait or exception leaves the lease owned and the attempt retryable. In particular,
  * a throwing close propagates its failure, never records success, and may be retried (Lease
- * close is idempotent). Internal visibility/AutoCloseable allow testing that failure boundary.
+ * close is idempotent).
  */
 internal class LinuxLeaseUntilExit(
     private val lease: AutoCloseable,

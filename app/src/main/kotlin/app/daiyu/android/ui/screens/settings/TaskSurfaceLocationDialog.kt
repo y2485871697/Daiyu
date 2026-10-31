@@ -16,8 +16,8 @@ import app.daiyu.android.tasksurface.TaskSurfaceRunDecision
 
 /** Optional parent-owned location dialog. Merely composing it never asks/allocates anything:
  * the parent must explicitly obtain the exact one-shot question from adapter.askFromUser.
- * Not an ask_user renderer and not an R08 whole-plan approval. This host is not yet mounted
- * by MainActivity; the parent must retain the SAME decision on the original run. */
+ * Not an ask_user renderer or whole-plan approval.
+ * The parent must retain the SAME decision on the original run. */
 @Composable
 internal fun TaskSurfaceLocationDialog(
     adapter: TaskSurfaceRouteAdapter,

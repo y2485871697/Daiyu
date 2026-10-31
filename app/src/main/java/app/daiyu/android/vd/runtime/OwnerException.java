@@ -5,7 +5,6 @@ package app.daiyu.android.vd.runtime;
  *
  * <p>{@link #code} is a stable, machine-readable token from {@link OwnerProtocol}.
  * The IPC layer turns a thrown exception into an {@code ok=false} response line.
- * Operations never return a successful response to hide a failure.
  */
 public class OwnerException extends Exception {
     public final String code;

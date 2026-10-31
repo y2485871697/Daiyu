@@ -18,7 +18,7 @@ import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 
 /** Real worker + revision-retained profiles + resolver + Responses parser + same-helper SQLite.
- * All HTTPS is in memory. Source fixtures only; no test execution is claimed. */
+ * All HTTPS is in memory. */
 @Suppress("DEPRECATION")
 class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
     private lateinit var context: Context

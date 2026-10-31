@@ -11,7 +11,7 @@ import java.nio.file.Files
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
-/** Real adapter/Android lifecycle wiring. Not a JVM substitute and not executed by this change. */
+/** Real adapter and Android lifecycle wiring through CatalogBrowserBinding. */
 @Suppress("DEPRECATION")
 class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
     private fun <T> main(block: () -> T): T {
@@ -71,7 +71,7 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
                 grant, setOf("list_tabs"))
             val token = preparation.confirm(preparation.preview)
             assertFalse(java.io.File(freshFiles, "browser-runs").exists())
-            // On instrumentation's worker, not main. This is the production helper parent must use.
+            // On instrumentation's worker, not main.
             val root = app.daiyu.android.ControllerBrowserPreparation.preparePrivateRootOnWorker(context)
             assertEquals(freshFiles.toPath().toRealPath().resolve("browser-runs"), root)
             val opened = main { CatalogBrowserBinding.open(context, root,

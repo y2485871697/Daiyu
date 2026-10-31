@@ -29,8 +29,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real controller admission, worker, SQLite and runner; only the model transport is synthetic.
- * These are test SOURCES, not an assertion that instrumentation has been executed. */
+/** Real controller admission, worker, SQLite and runner; only the model transport is synthetic. */
 @Suppress("DEPRECATION")
 class ControllerMessageActionsTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {

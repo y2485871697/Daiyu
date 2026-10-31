@@ -283,7 +283,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
         awaitPreparing()
         val oldActivity = activity
         activity = recreateActivity(oldActivity)
-        // f63a5f9: replacement adopts the same retained ticket, not a fresh editable draft.
+        // The replacement adopts the same retained ticket, not a fresh editable draft.
         node("chat-draft").assertIsNotEnabled()
         node("chat-send").assertDoesNotExist()
         node("text-send-cancel").assertIsEnabled()
@@ -327,7 +327,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
     // Like ComposeActivityTestCase.retainedClick, retain the host capability rather than
     // Compose's attachment-dependent ClickableNode wrapper. Both host and pending are captured
     // now, not looked up when invoked after the next send. The real button must use this same
-    // host method; see P09_UI_REGRESSION_SEAM.md for the required parent-owned extraction.
+    // host method; see P09_UI_REGRESSION_SEAM.md.
     private fun retainedCancel(host: MainActivity, pending: Any): () -> Unit {
         val cancel = MainActivity::class.java.declaredMethods.single {
             it.name == "cancelPendingTextSend" && it.parameterCount == 1 &&

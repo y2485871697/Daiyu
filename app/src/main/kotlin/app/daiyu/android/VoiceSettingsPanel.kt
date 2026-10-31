@@ -67,7 +67,6 @@ internal fun VoiceSettingsPanel(
     var draft by remember { mutableStateOf(saved ?: VoiceConfiguration()) }
     var cloud by remember { mutableStateOf(preferences.cloudEnabled(profile, draft.engine != "SYSTEM")) }
     val draftBases = remember { mutableMapOf<VoiceProfile, VoiceConfiguration>() }
-    var conversationAsrDirty by remember { mutableStateOf(false) }
     var realtimeDirty by remember { mutableStateOf(false) }
     var realtimeCatalog by remember { mutableStateOf(realtimeSpeechVoices) }
     var realtimeRefreshing by remember { mutableStateOf(false) }
@@ -141,7 +140,6 @@ internal fun VoiceSettingsPanel(
         if (!current() || busy || !stopAudio()) return
         invalidatePicker()
         val pending = when {
-            profile == VoiceProfile.CONVERSATION && conversationAsrDirty -> recognitionConfiguration().copy(asrKey = draft.asrKey.trim())
             profile == VoiceProfile.READ_ALOUD && realtimeDirty -> realtimeConfiguration()
             else -> null
         }
@@ -151,7 +149,7 @@ internal fun VoiceSettingsPanel(
         scope.launch {
             try {
                 runtime.save(pending, target)
-                conversationAsrDirty = false; realtimeDirty = false
+                realtimeDirty = false
                 if (current()) after()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { notice = "设置未保存，请重试后返回。" }
@@ -177,17 +175,6 @@ internal fun VoiceSettingsPanel(
         if (opened != null && current()) {
             val updated = personalAccounts[opened.engine]
             if (updated != null && updated != opened && runtime.accountCurrent(updated)) accountPage = updated
-        }
-    }
-    LaunchedEffect(profile, draft.asrKey, draft.asrResource, conversationAsrDirty) {
-        if (profile == VoiceProfile.CONVERSATION && conversationAsrDirty && !busy) {
-            kotlinx.coroutines.delay(300)
-            if (current() && !busy) {
-                val pending = recognitionConfiguration().copy(asrKey = draft.asrKey.trim())
-                save(pending, onSaved = {
-                    if (draft.asrKey.trim() == pending.asrKey && draft.asrResource == pending.asrResource) conversationAsrDirty = false
-                })
-            }
         }
     }
     LaunchedEffect(draft.instructions, realtimeDirty) {
@@ -400,19 +387,11 @@ internal fun VoiceSettingsPanel(
                         "READ_ALOUD", "CONVERSATION" -> {
                             if (section == "CONVERSATION") item { VoiceSettingsCard {
                                 SettingsSwitchRow("启用语音对话", conversationEnabled, busy = busy) { switchFeature("conversation", it) { conversationEnabled = it } }
-                                SettingsSwitchRow("豆包语音识别", draft.dictation == "DOUBAO", busy = busy) {
-                                    if (current() && stopAudio()) {
-                                        val method = if (it) "DOUBAO" else "SYSTEM"
-                                        changeDraft(draft.copy(dictation = method))
-                                        save((saved ?: VoiceConfiguration()).copy(dictation = method))
-                                    }
-                                }
-                                if (draft.dictation == "DOUBAO") {
-                                    SettingsTextField("ASR API Key", draft.asrKey, { if (!busy) { changeDraft(draft.copy(asrKey = it)); conversationAsrDirty = true } }, password = true, enabled = !busy)
-                                    SettingsRow("识别服务", summary = draft.asrResource.ifBlank { "请选择" }, showChevron = true, onClick = if (busy) null else ({ dialog = "ASR_RESOURCE" }))
-                                }
                             } }
                             if (section == "CONVERSATION" && draft.dictation != "DOUBAO") item { OfflineSpeechPackCard(context, ::current, conversationStyle = true) }
+                            if (section == "CONVERSATION") item { SettingsCard(Modifier.testTag("voice-recognition-method-card")) { SettingsRow("识别方式", tag = "voice-recognition-method",
+                                summary = if (saved?.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
+                                showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
                             item { VoiceSettingsCard {
                                 SettingsSwitchRow("云端朗读", cloud, busy = busy, tag = "voice-cloud-enable", summary = "关闭时使用系统语音。") { enabled ->
                                     if (current() && !busy && stopAudio()) {
@@ -554,9 +533,6 @@ internal fun VoiceSettingsPanel(
                     }
                 }
             }
-            "ASR_RESOURCE" -> VoiceChoiceDialog("识别资源", DoubaoAsrProtocol.resources.map { it to it }, draft.asrResource,
-                onSelect = { if (current() && !busy) { changeDraft(draft.copy(asrResource = it)); save((saved ?: VoiceConfiguration()).copy(asrResource = it)) } },
-                onDismiss = { dialog = null }, isEnabled = { !busy }, retainOnSelect = true)
             "DUPLEX_VOICE" -> VoiceToneDialog("选择音色", draft.duplexVoice,
                 realtimeCatalog.map { it.id to it.name } + accountVoices.filter {
                     it.tts && it.accepted && runCatching { it.account == app.daiyu.android.voice.account.VoiceAccountIdentity

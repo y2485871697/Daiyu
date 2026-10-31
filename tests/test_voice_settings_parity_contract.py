@@ -74,7 +74,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         panel = source('VoiceSettingsPanel.kt')
         self.assertIn('"VOICE" -> VoiceToneDialog(', panel)
         self.assertIn('"DUPLEX_VOICE" -> VoiceToneDialog(', panel)
-        advanced = panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"ASR_RESOURCE"', 1)[0]
+        advanced = panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"DUPLEX_VOICE"', 1)[0]
         self.assertIn('showCloseButton = false', advanced)
         editor = text.split('internal fun VoiceTextDialog(', 1)[1].split('\n@Composable', 1)[0]
         self.assertIn('MiuixDialogActions("保存", onCancel = onDismiss', editor)

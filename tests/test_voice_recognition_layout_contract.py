@@ -156,7 +156,7 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
     def test_advanced_opens_shared_bottom_sheet_with_all_four_original_services(self):
         self.assertIn('if (current()) dialog = "ASR_ADVANCED"', self.asr)
         self.assertNotIn('asrAdvanced', self.panel)
-        sheet = self.panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"ASR_RESOURCE" ->', 1)[0]
+        sheet = self.panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"DUPLEX_VOICE" ->', 1)[0]
         self.assertIn('onDismiss = { dialog = null }', sheet)
         self.assertIn('subtitle = "仅在控制台开通了不同服务时更改。"', sheet)
         self.assertIn('.verticalScroll(rememberScrollState()).testTag("voice-asr-service-sheet")', sheet)
@@ -170,7 +170,7 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         self.assertNotIn('WindowDialog(', sheet)
 
     def test_connection_keeps_explicit_save_and_advanced_does_not_send_draft_key(self):
-        advanced = self.panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"ASR_RESOURCE" ->', 1)[0]
+        advanced = self.panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"DUPLEX_VOICE" ->', 1)[0]
         self.assertIn('save((saved ?: VoiceConfiguration()).copy(asrResource = resource))', advanced)
         self.assertIn('changeDraft(draft.copy(asrResource = resource))', advanced)
         self.assertIn('https://console.volcengine.com/speech/app', self.asr)

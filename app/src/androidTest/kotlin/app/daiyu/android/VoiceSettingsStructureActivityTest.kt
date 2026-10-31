@@ -135,7 +135,8 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         node("settings-field:TTS API key").assertDoesNotExist()
         section("语音对话")
         node("settings-switch:启用语音对话").assertExists()
-        node("settings-switch:豆包语音识别").assertExists()
+        node("settings-switch:豆包语音识别").assertDoesNotExist()
+        reveal("voice-recognition-method", "语音设置").assertExists()
         reveal("voice-preview", "语音设置").assertExists()
         section("豆包实时通话")
         node("settings-switch:启用豆包实时通话").assertExists()
@@ -240,6 +241,74 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(cloud.left, download.left, 1f)
         assertEquals(cloud.right, download.right, 1f)
         assertTrue(download.left >= pack.left && download.right <= pack.right)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testConversationRecognitionEntryKeepsConfigurationAndReturnsToConversation() {
+        systemProfiles()
+        runBlocking {
+            fixture.controller.voiceRuntime.save(VoiceConfiguration(asrKey = "synthetic-reading-asr-key",
+                instructions = "reading instructions"), VoiceProfile.READ_ALOUD)
+            fixture.controller.voiceRuntime.save(VoiceConfiguration(asrKey = "synthetic-conversation-original-key",
+                asrResource = app.daiyu.android.voice.providers.DoubaoAsrProtocol.resources[1],
+                instructions = "conversation instructions"), VoiceProfile.CONVERSATION)
+        }
+        val reading = checkNotNull(fixture.controller.voiceRuntime.configuration.value)
+        val originalConversation = checkNotNull(fixture.controller.voiceRuntime.conversationConfiguration.value)
+        val accounts = fixture.controller.voiceRuntime.accountConfigurations.value
+        enter()
+        val referenceBounds = reveal("voice-recognition-method-card", "语音设置").fetchSemanticsNode().boundsInRoot
+        section("语音对话")
+        node("settings-switch:启用语音对话").assertExists()
+        node("settings-switch:豆包语音识别").assertDoesNotExist()
+        node("settings-field:ASR API Key").assertDoesNotExist()
+        node("settings-row:识别服务").assertDoesNotExist()
+        val method = reveal("voice-recognition-method", "语音设置")
+            .assert(hasAnyAncestor(hasTestTag("voice-recognition-method-card")))
+            .assertTextContains("本机识别 · 无需账户")
+        val methodBounds = node("voice-recognition-method-card").fetchSemanticsNode().boundsInRoot
+        assertEquals(referenceBounds.left, methodBounds.left, 1f)
+        assertEquals(referenceBounds.right, methodBounds.right, 1f)
+        assertEquals(referenceBounds.height, methodBounds.height, 1f)
+        method.performClick()
+        node("voice-section-select").assertDoesNotExist()
+        node("voice-asr-method:system").assertIsSelected()
+        assertRecognitionSelectedColors("voice-asr-method:system")
+        node("voice-asr-method:doubao").performClick()
+        ui.waitUntil { fixture.controller.voiceRuntime.conversationConfiguration.value?.dictation == "DOUBAO" }
+        ui.waitForIdle()
+        node("voice-asr-method:doubao").assertIsSelected()
+        assertRecognitionSelectedColors("voice-asr-method:doubao")
+        val cloudConversation = checkNotNull(fixture.controller.voiceRuntime.conversationConfiguration.value)
+        assertEquals(originalConversation.copy(dictation = "DOUBAO", revision = cloudConversation.revision), cloudConversation)
+        node("settings-field:ASR API Key").assert(hasAnyAncestor(hasTestTag("voice-asr-account-card")))
+            .performTextReplacement("synthetic-conversation-asr-key")
+        awaitImeFrame(node("settings-field:ASR API Key"), visible = true)
+        dismissIme(); awaitImeFrame(node("settings-field:ASR API Key"), visible = false)
+        node("voice-save").assertIsEnabled().performClick()
+        ui.waitUntil { fixture.controller.voiceRuntime.conversationConfiguration.value?.asrKey == "synthetic-conversation-asr-key" }
+        ui.waitForIdle()
+        assertEquals(reading, fixture.controller.voiceRuntime.configuration.value)
+        val savedConversation = checkNotNull(fixture.controller.voiceRuntime.conversationConfiguration.value)
+        assertEquals(cloudConversation.copy(asrKey = "synthetic-conversation-asr-key", revision = savedConversation.revision), savedConversation)
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
+        node("voice-section-select").assertTextContains("语音对话")
+        reveal("voice-recognition-method", "语音设置").assertTextContains("豆包识别 · 需要联网").performClick()
+        node("voice-asr-method:doubao").assertIsSelected()
+        node("settings-field:ASR API Key").assertTextContains("synthetic-conversation-asr-key")
+        node("voice-asr-method:system").performClick()
+        ui.waitUntil { fixture.controller.voiceRuntime.conversationConfiguration.value?.dictation == "SYSTEM" }
+        ui.waitForIdle()
+        node("voice-asr-account-card").assertDoesNotExist()
+        val localConversation = checkNotNull(fixture.controller.voiceRuntime.conversationConfiguration.value)
+        assertEquals(savedConversation.copy(dictation = "SYSTEM", revision = localConversation.revision), localConversation)
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
+        node("voice-section-select").assertTextContains("语音对话")
+        reveal("voice-recognition-method", "语音设置").assertTextContains("本机识别 · 无需账户").performClick()
+        node("voice-asr-method:system").assertIsSelected()
+        assertEquals("synthetic-conversation-asr-key", fixture.controller.voiceRuntime.conversationConfiguration.value?.asrKey)
+        assertEquals(reading, fixture.controller.voiceRuntime.configuration.value)
+        assertEquals(accounts, fixture.controller.voiceRuntime.accountConfigurations.value)
         assertEquals(0, fixture.opens.get())
     }
 

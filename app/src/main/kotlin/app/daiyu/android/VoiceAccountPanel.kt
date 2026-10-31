@@ -85,7 +85,7 @@ private data class AccountConfirmation(
 /**
  * Independently mounted leaf. frozenConfiguration MUST be a saved runtime snapshot (not a draft).
  * Selection is only a callback; the parent decides whether/how to save a new configuration.
- * No network on render/load/select/picker return. Project queries follow explicit taps; slot queries and training require confirmation;
+ * No network on render/load/select/picker return. Cloud catalog queries follow explicit taps; training requires confirmation;
  * demo playback only follows an explicit preview action.
  */
 @Composable
@@ -139,6 +139,7 @@ internal fun VoiceAccountPanel(
     var pickerResult by remember { mutableIntStateOf(0) }
     var slotPicker by remember(frozenConfiguration.revision) { mutableStateOf(false) }
     var importSlotPicker by remember(frozenConfiguration.revision) { mutableStateOf(false) }
+    var importCandidates by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<PersonalVoices.Voice>()) }
     var projects by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<VoiceProjectCatalog.Project>()) }
     fun current() = latestCurrent(frozenConfiguration) && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     val enabled = loaded && !busy && account != null && current() && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
@@ -223,7 +224,7 @@ internal fun VoiceAccountPanel(
     var accountKey by remember(frozenConfiguration.revision) { mutableStateOf(frozenConfiguration.key) }
     val creationSlots = personalVoiceSlots(voices, creating = true, postpaid = false)
         .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }
-    val importSlots = personalVoiceSlots(voices, creating = false, postpaid = postpaid)
+    val importSlots = importCandidates.filter { it.canImport }.sortedBy { it.name }
         .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+|etaClone[a-fA-F0-9]{32}")) }
     fun navigate(target: String) {
         if (!current() || busy) return
@@ -388,13 +389,23 @@ internal fun VoiceAccountPanel(
             if (page == "IMPORT") item {
                 VoiceSettingsCard {
                     AccountField("备注名称（可空）", name, busy) { name = it.take(80); confirmation = null }
-                    SettingsRow("选择我的音色名额", summary = importSlots.withIndex().firstOrNull { it.value.id == existingId }
+                    SettingsRow("选取我的名额", summary = importSlots.withIndex().firstOrNull { it.value.id == existingId }
                         ?.let { personalVoiceSlotTitle(it.value, it.index) + " · " + it.value.id } ?: existingId.takeIf { it.isNotBlank() },
                         showChevron = true, onClick = if (!enabled) null else ({
                             if (current() && !busy) {
-                                if (resources.voices.state.value.any { it.account == account?.fingerprint && !it.unused &&
-                                    it.id.matches(Regex("S_[A-Za-z0-9_-]+|etaClone[a-fA-F0-9]{32}")) }) importSlotPicker = true
-                                else navigate("SYNC")
+                                importCandidates = emptyList(); importSlotPicker = true
+                                if (ak.isNotBlank() && sk.isNotBlank() && project.isNotBlank()) {
+                                    val a = ak; val s = sk; val p = project
+                                    execute("已复刻名额查询失败，请检查账户与项目后重试。") { report ->
+                                        val origin = feedback.visit
+                                        val fetched = resources.voices.listImportable(speech!!, a, s, p)
+                                        currentCoroutineContext().ensureActive()
+                                        check(current() && page == "IMPORT" && importSlotPicker && feedback.visit == origin &&
+                                            ak == a && sk == s && project == p)
+                                        importCandidates = fetched
+                                        report(if (fetched.isEmpty()) "云端暂无可导入的已复刻声音。" else "请选择已复刻的声音。")
+                                    }
+                                }
                             }
                         }))
                     SettingsRow("备用方式：从控制台复制 ID", onClick = if (busy) null else ({ manualId = !manualId }), trailing = {
@@ -403,7 +414,7 @@ internal fun VoiceAccountPanel(
                             tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
                     })
                     SettingsExpandableContent(manualId) {
-                        SettingsNote("在豆包控制台进入声音复刻音色列表，将“已复刻”切换为“全部”或“未复刻”，复制 S_ 开头的音色 ID。API Key 与音色须属于同一项目。")
+                        SettingsNote("在豆包控制台进入声音复刻的“已复刻”列表，复制已复刻成功的音色 ID。API Key 与音色须属于同一项目。")
                         SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
                         AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
                     }
@@ -535,14 +546,22 @@ internal fun VoiceAccountPanel(
             }
         }
         if (importSlotPicker && page == "IMPORT") OptionSelectionSheet(
-            "选择我的音色名额", onDismiss = { importSlotPicker = false },
+            "选取我的名额", onDismiss = { importSlotPicker = false; operation?.cancel() },
             modifier = Modifier.testTag("voice-import-slot-picker"), itemSpacing = 8.dp) {
+            when {
+                busy -> SettingsNote("正在查询云端已复刻声音…")
+                ak.isBlank() || sk.isBlank() || project.isBlank() -> {
+                    SettingsNote("请先保存同步账户信息，以查询云端已复刻的名额。")
+                    SettingsRow("同步音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
+                }
+                importSlots.isEmpty() -> SettingsNote(notice.ifBlank { "云端暂无可导入的已复刻声音。" })
+            }
             importSlots.forEachIndexed { index, voice ->
-                OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + voiceSlotSummary(voice),
+                OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + (if (voice.status == 4) "已激活" else "复刻成功"),
                     selected = existingId == voice.id, enabled = enabled, cardStyle = true,
                     modifier = Modifier.testTag("voice-import-slot:${voice.id}")) {
                     if (enabled && !busy && current() && page == "IMPORT" &&
-                        resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && !it.unused }) {
+                        importCandidates.any { it.account == account?.fingerprint && it.id == voice.id && it.canImport }) {
                         existingId = voice.id; confirmation = null; importSlotPicker = false
                     }
                 }

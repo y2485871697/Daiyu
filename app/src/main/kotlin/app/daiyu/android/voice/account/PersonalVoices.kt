@@ -37,6 +37,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         val showInMyVoices get() = !unused
         val ready get() = status == 2 || status == 4
         val tts get() = ready && models.any { it == 4 || it == 5 } && !uncertain
+        val canImport get() = tts && catalogState in setOf("Success", "Active") && error.isBlank()
         fun providerVoice() = DoubaoPersonalVoice(id, account, if (uncertain) -1 else status, models.toSet(), accepted)
     }
     class Sample private constructor(internal val bytes: ByteArray, val format: String) {
@@ -119,8 +120,22 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             val voice = previous?.copy(name = name.trim().ifBlank { previous.name })
                 ?: Voice(valid, name.trim().ifBlank { valid }, account.fingerprint)
             val result = updated(voice, request("get_voice", account.key, identity(voice)))
+            currentCoroutineContext().ensureActive()
+            require(result.canImport) { "此音色尚未复刻成功或不可用，未导入；请在云端确认后重试。" }
             save(result); return result
         } finally { finish(account.fingerprint, valid) }
+    }
+    suspend fun listImportable(config: SpeechProviderConfig, ak: String, sk: String, project: String): List<Voice> {
+        val account = VoiceAccountIdentity.from(config)
+        val slots = DoubaoVoiceCatalog(transport).list(ak, sk, project)
+        return slots.filter { it.state in setOf("Success", "Active") }.mapNotNull { slot ->
+            currentCoroutineContext().ensureActive()
+            val candidate = Voice(slot.id, slot.name, account.fingerprint,
+                catalogState = slot.state, remaining = slot.remaining)
+            val verified = updated(candidate, request("get_voice", account.key, identity(candidate)))
+            currentCoroutineContext().ensureActive()
+            verified.takeIf { it.canImport }
+        }
     }
     suspend fun importPurchased(config: SpeechProviderConfig, ak: String, sk: String, project: String): Int {
         val account = VoiceAccountIdentity.from(config)

@@ -1,4 +1,4 @@
-"""Creation/import card choosers and explicit-sync-only side-effect contracts."""
+"""Creation cards and explicit, read-only cloud import selection contracts."""
 from pathlib import Path
 import unittest
 from test_voice_creation_cards_contract import block
@@ -78,31 +78,57 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertNotIn('.save(', read)
         self.assertLess(save.index('refreshProjects(a, s, preferred)'), save.index('resources.preferences.save('))
         self.assertNotIn('importPurchased(', save)
-        self.assertIn('选择我的音色名额', self.imported)
-        self.assertIn('personalVoiceSlots(voices, creating = false, postpaid = postpaid)', self.panel)
+        self.assertIn('选取我的名额', self.imported)
+        self.assertIn('val importSlots = importCandidates.filter { it.canImport }', self.panel)
 
-    def test_import_uses_local_card_sheet_and_empty_only_navigates_to_sync(self):
-        entry = self.imported.split('SettingsRow("选择我的音色名额"', 1)[-1].split('SettingsRow("备用方式', 1)[0]
+    def test_import_queries_cloud_on_each_explicit_open_and_only_selects_verified_clones(self):
+        entry = self.imported.split('SettingsRow("选取我的名额"', 1)[-1].split('SettingsRow("备用方式', 1)[0]
         self.assertIn('importSlots.withIndex()', entry)
         self.assertIn('if (current() && !busy)', entry)
-        self.assertIn('it.account == account?.fingerprint && !it.unused', entry)
-        self.assertIn('importSlotPicker = true', entry)
-        self.assertIn('else navigate("SYNC")', entry)
+        self.assertIn('importCandidates = emptyList(); importSlotPicker = true', entry)
+        self.assertIn('ak.isNotBlank() && sk.isNotBlank() && project.isNotBlank()', entry)
+        self.assertEqual(1, entry.count('resources.voices.listImportable(speech!!, a, s, p)'))
+        self.assertIn('currentCoroutineContext().ensureActive()', entry)
+        self.assertIn('current() && page == "IMPORT" && importSlotPicker && feedback.visit == origin', entry)
+        self.assertIn('ak == a && sk == s && project == p', entry)
+        self.assertIn('importCandidates = fetched', entry)
+        self.assertNotIn('resources.voices.state.value', entry)
         self.assertNotIn('SettingsRadioRow(', self.imported)
-        self.assertNotIn('查找我的音色名额', self.imported)
+        self.assertNotIn('选择我的音色名额', self.imported)
         for text in (entry, self.import_sheet):
-            for effect in ('execute(', 'ask(', 'importExisting(', 'importPurchased(', '.save(', 'refreshProjects(', '.create(', '.load('):
+            for effect in ('importExisting(', 'importPurchased(', '.save(', 'refreshProjects(', '.create(', '.load('):
                 self.assertNotIn(effect, text)
         self.assertIn('selected = existingId == voice.id', self.import_sheet)
         self.assertIn('enabled = enabled, cardStyle = true', self.import_sheet)
         self.assertIn('page == "IMPORT"', self.import_sheet)
-        self.assertIn('it.account == account?.fingerprint && it.id == voice.id && !it.unused', self.import_sheet)
+        self.assertIn('importCandidates.any { it.account == account?.fingerprint && it.id == voice.id && it.canImport }', self.import_sheet)
         self.assertIn('existingId = voice.id; confirmation = null; importSlotPicker = false', self.import_sheet)
         self.assertNotIn('canTrain', self.import_sheet)
         self.assertNotIn('name =', self.import_sheet)
+        self.assertNotIn('voiceSlotSummary(', self.import_sheet)
         for marker in ('fun navigate(target:', 'fun back()'):
             self.assertIn('importSlotPicker = false', block(self.panel, marker))
         self.assertIn('var importSlotPicker by remember(frozenConfiguration.revision)', self.panel)
+        self.assertIn('onDismiss = { importSlotPicker = false; operation?.cancel() }', self.panel)
+        self.assertIn('云端暂无可导入的已复刻声音。', self.panel)
+        self.assertIn('正在查询云端已复刻声音…', self.panel)
+
+    def test_import_backend_is_read_only_and_final_import_rechecks_success(self):
+        store = (SRC / 'voice/account/PersonalVoices.kt').read_text()
+        self.assertIn('suspend fun listImportable(', store)
+        query = block(store, 'suspend fun listImportable(')
+        self.assertIn('DoubaoVoiceCatalog(transport).list(ak, sk, project)', query)
+        self.assertIn('it.state in setOf("Success", "Active")', query)
+        self.assertIn('val candidate = Voice(slot.id, slot.name, account.fingerprint', query)
+        self.assertIn('request("get_voice", account.key, identity(candidate))', query)
+        self.assertIn('verified.takeIf { it.canImport }', query)
+        for effect in ('save(', 'persist(', 'begin(', 'voice_clone', 'state.value'):
+            self.assertNotIn(effect, query)
+        final = block(store, 'suspend fun importExisting(')
+        self.assertLess(final.index('request("get_voice"'), final.index('require(result.canImport)'))
+        self.assertLess(final.index('require(result.canImport)'), final.index('save(result)'))
+        self.assertNotIn('voice_clone', final)
+        self.assertNotIn('切换为“全部”或“未复刻”', self.imported)
 
     def test_quota_cards_opt_in_without_changing_other_choice_defaults(self):
         item = (SRC / 'ui/components/OptionSelectionSheet.kt').read_text()

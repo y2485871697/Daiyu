@@ -154,7 +154,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
     def test_doubao_slot_and_recording_details_match_existing_flows_without_new_requests(self):
         leaf = source('VoiceAccountPanel.kt')
         self.assertIn('personalVoiceSlots(voices, creating = true, postpaid = false)', leaf)
-        self.assertIn('personalVoiceSlots(voices, creating = false, postpaid = postpaid)', leaf)
+        self.assertIn('val importSlots = importCandidates.filter { it.canImport }', leaf)
         self.assertIn('personalVoiceSlotTitle(voice, index)', leaf)
         self.assertIn('voiceSlotSummary(voice)', leaf)
         self.assertIn('.sortedWith(compareBy<PersonalVoices.Voice> { it.unused }.thenBy { it.name })', leaf)
@@ -169,7 +169,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('showCloseButton = false', project)
         self.assertIn('item.name.takeIf { it != item.displayName }', project)
         self.assertNotIn('TextButton("关闭"', project)
-        self.assertIn('S_ 开头的音色 ID', leaf)
+        self.assertIn('复制已复刻成功的音色 ID', leaf)
         self.assertIn('resources.voices.importPurchased(speech!!, a, s, p)', leaf)
         self.assertIn('resources.voices.create(speech!!, sample, n, slot, confirmed = true)', leaf)
         self.assertIn('resources.voices.importExisting(speech!!, id, n)', leaf)

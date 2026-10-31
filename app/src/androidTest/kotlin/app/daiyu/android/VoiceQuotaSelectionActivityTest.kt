@@ -14,6 +14,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import org.json.JSONArray
 import org.json.JSONObject
+import okio.Buffer
 
 /** Local quota fixtures; transport and playback require explicit per-test opt-in. */
 class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
@@ -21,6 +22,8 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private val plays = AtomicInteger()
     private val stops = AtomicInteger()
     private val roots = mutableListOf<File>()
+    private val importAccountCleanup = mutableListOf<() -> Unit>()
+    private var importQueryFails = false
     private lateinit var index: File
     private lateinit var beforeIndex: String
     private lateinit var beforePreferences: Map<String, *>
@@ -51,14 +54,48 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
             put(slot("S_other_account", "0".repeat(64), 3))
         }.toString())
         beforeIndex = index.readText()
-        val transport = AccountHttpTransport { _, _ ->
+        val transport = AccountHttpTransport { request, _ ->
             requests.incrementAndGet()
-            check(queryStatus != null) { "No implicit request" }
-            AccountResponse(200, JSONObject().put("code", 0).put("status", queryStatus)
-                .put("speaker_status", JSONArray()).toString().toByteArray())
+            val result = if (flow == "IMPORT") {
+                val body = JSONObject(Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+                check(!body.has("audio")) { "Import must not upload" }
+                if (request.url.host == "open.volcengineapi.com") {
+                    check(!importQueryFails) { "Synthetic import query failure" }
+                    val state = body.getString("State")
+                    val ids = when (state) {
+                        "Unknown" -> listOf("S_unused")
+                        "Training" -> listOf("S_training")
+                        "Success" -> buildList {
+                            if (available) add("S_available")
+                            if (unavailable) add("S_exhausted")
+                            if (secondAvailable) add("S_second")
+                        }
+                        else -> emptyList()
+                    }
+                    JSONObject().put("Result", JSONObject().put("TotalCount", ids.size)
+                        .put("Statuses", JSONArray().apply { ids.forEach {
+                            put(JSONObject().put("SpeakerID", it).put("State", state).put("Alias", it)
+                                .put("AvailableTrainingTimes", if (it == "S_exhausted") 0 else 3))
+                        } }))
+                } else {
+                    check(request.url.encodedPath.endsWith("/get_voice")) { "Import must not train" }
+                    JSONObject().put("code", 0).put("status", 2)
+                        .put("available_training_times", if (body.getString("speaker_id") == "S_exhausted") 0 else 3)
+                        .put("speaker_status", JSONArray().put(JSONObject().put("model_type", 4)))
+                }
+            } else {
+                check(queryStatus != null) { "No implicit request" }
+                JSONObject().put("code", 0).put("status", queryStatus).put("speaker_status", JSONArray())
+            }
+            AccountResponse(200, result.toString().toByteArray())
         }
         resources = VoiceAccountResources(PersonalVoices(index, transport),
             VoiceCatalogPreferences(VoiceCatalogSecretStore(instrumentation.targetContext)), transport)
+        if (flow == "IMPORT") {
+            val preferences = resources.preferences
+            preferences.save(account, "synthetic-import-ak", "synthetic-import-sk", "default")
+            importAccountCleanup += { preferences.clear(account) }
+        }
         beforePreferences = instrumentation.targetContext
             .getSharedPreferences("voice_account_control_secret_v1", 0).all.toMap()
         val visit = Any()
@@ -78,7 +115,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
             node("voice-account-add").performClick()
             node("voice-personal-action:$flow").performClick()
             val title = if (flow == "IMPORT") "导入声音" else "制作声音"
-            val row = if (flow == "IMPORT") "选择我的音色名额" else "选择音色名额"
+            val row = if (flow == "IMPORT") "选取我的名额" else "选择音色名额"
             awaitUniqueTag("page:$title")
             ui.waitUntil(5_000) {
                 ui.onAllNodes(hasTestTag("settings-row:$row") and hasClickAction())
@@ -104,11 +141,11 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
             ui.onAllNodesWithTag("voice-create-slot-picker").fetchSemanticsNodes().isEmpty()
         }
     }
-    private fun assertNoSideEffects() {
+    private fun assertNoSideEffects(expectedRequests: Int = 0) {
         assertEquals(beforeIndex, index.readText())
         assertEquals(beforePreferences, instrumentation.targetContext
             .getSharedPreferences("voice_account_control_secret_v1", 0).all)
-        assertEquals(0, requests.get())
+        assertEquals(expectedRequests, requests.get())
         assertEquals(0, plays.get())
         assertEquals(0, fixture.opens.get())
     }
@@ -226,47 +263,70 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         assertNoSideEffects()
     }
 
-    fun testImportUsesCardsAndKeepsNameAndExistingIdDraftWithoutNetworkOrSave() {
+    fun testImportUsesFreshCloudCardsAndKeepsNameAndExistingIdDraftWithoutSave() {
         mount(available = true, unavailable = true, secondAvailable = true, flow = "IMPORT")
         reveal("settings-field:备注名称（可空）", "导入声音").performTextReplacement("import draft")
         awaitImeFrame(node("settings-field:备注名称（可空）"), visible = true)
         dismissIme()
         awaitImeFrame(node("settings-field:备注名称（可空）"), visible = false)
-        reveal("settings-row:选择我的音色名额", "导入声音").performClick()
+        reveal("settings-row:选取我的名额", "导入声音").performClick()
         awaitUniqueTag("voice-import-slot-picker")
         awaitNodeWindowFocus(node("voice-import-slot-picker"))
         node("voice-import-slot-picker").assert(hasAnyAncestor(hasTestTag("chat-selection-sheet")))
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot:S_second").fetchSemanticsNodes().size == 1 }
         node("voice-import-slot:S_other_account").assertDoesNotExist()
+        node("voice-import-slot:S_unused").assertDoesNotExist()
+        node("voice-import-slot:S_training").assertDoesNotExist()
         node("voice-import-slot:S_exhausted").assertIsEnabled()
         node("voice-import-slot:S_second").assertHeightIsAtLeast(48.dp).performClick()
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot-picker").fetchSemanticsNodes().isEmpty() }
-        reveal("settings-row:选择我的音色名额", "导入声音").assertTextContains("S_second", substring = true).performClick()
+        reveal("settings-row:选取我的名额", "导入声音").assertTextContains("S_second", substring = true).performClick()
         awaitUniqueTag("voice-import-slot-picker")
         awaitNodeWindowFocus(node("voice-import-slot-picker"))
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot:S_second").fetchSemanticsNodes().size == 1 }
         node("voice-import-slot:S_second").assertIsSelected()
         node("preview-dialog-viewport").performTouchInput { click(Offset(2f, 2f)) }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot-picker").fetchSemanticsNodes().isEmpty() }
         reveal("settings-field:备注名称（可空）", "导入声音").assertTextContains("import draft")
         reveal("settings-row:备用方式：从控制台复制 ID", "导入声音").performClick()
         reveal("settings-field:已有音色 ID", "导入声音").assertTextContains("S_second")
-        assertNoSideEffects()
+        assertNoSideEffects(expectedRequests = 14)
     }
 
-    fun testImportEmptyOrOnlyForeignQuotasNavigateToSyncAndReturnToDraft() {
+    fun testImportEmptyCloudKeepsTheSameSheetAndDoesNotReuseLocalRecords() {
         mount(available = false, flow = "IMPORT")
-        reveal("settings-field:备注名称（可空）", "导入声音").performTextReplacement("keep import")
-        awaitImeFrame(node("settings-field:备注名称（可空）"), visible = true)
-        dismissIme()
-        awaitImeFrame(node("settings-field:备注名称（可空）"), visible = false)
-        reveal("settings-row:选择我的音色名额", "导入声音").performClick()
-        awaitUniqueTag("page:同步音色名额")
-        node("voice-import-slot-picker").assertDoesNotExist()
-        reveal("settings-row:读取我的名额", "同步音色名额").assertExists()
-        assertNoSideEffects()
+        reveal("settings-row:选取我的名额", "导入声音").performClick()
+        awaitUniqueTag("voice-import-slot-picker")
+        awaitNodeWindowFocus(node("voice-import-slot-picker"))
+        val empty = hasText("云端暂无可导入的已复刻声音。") and
+            hasAnyAncestor(hasTestTag("voice-import-slot-picker"))
+        ui.waitUntil(5_000) { ui.onAllNodes(empty).fetchSemanticsNodes().size == 1 }
+        ui.onNode(empty).assertIsDisplayed()
+        node("voice-import-slot:S_other_account").assertDoesNotExist()
+        node("voice-import-slot:S_unused").assertDoesNotExist()
+        node("voice-import-slot:S_training").assertDoesNotExist()
+        assertNoSideEffects(expectedRequests = 4)
+    }
+
+    fun testImportFailedReopenClearsPreviouslyVerifiedCards() {
+        mount(available = true, flow = "IMPORT")
+        reveal("settings-row:选取我的名额", "导入声音").performClick()
+        awaitUniqueTag("voice-import-slot-picker")
+        awaitNodeWindowFocus(node("voice-import-slot-picker"))
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot:S_available").fetchSemanticsNodes().size == 1 }
+        node("voice-import-slot:S_available").assertIsEnabled()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitUniqueTag("page:导入声音")
-        reveal("settings-field:备注名称（可空）", "导入声音").assertTextContains("keep import")
-        assertNoSideEffects()
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot-picker").fetchSemanticsNodes().isEmpty() }
+        importQueryFails = true
+        reveal("settings-row:选取我的名额", "导入声音").performClick()
+        awaitUniqueTag("voice-import-slot-picker")
+        awaitNodeWindowFocus(node("voice-import-slot-picker"))
+        val error = hasText("已复刻名额查询失败", substring = true) and
+            hasAnyAncestor(hasTestTag("voice-import-slot-picker"))
+        ui.waitUntil(5_000) { ui.onAllNodes(error).fetchSemanticsNodes().size == 1 }
+        ui.onNode(error).assertIsDisplayed()
+        node("voice-import-slot:S_available").assertDoesNotExist()
+        assertNoSideEffects(expectedRequests = 6)
     }
 
     fun testRecordHasIconActionsTwoMenuChoicesAndQueryUpdatesSummary() {
@@ -330,6 +390,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
 
     override fun cleanupAfterLegacy() {
         try {
+            importAccountCleanup.forEach { it() }
             roots.forEach { it.deleteRecursively() }
         } finally { super.cleanupAfterLegacy() }
     }

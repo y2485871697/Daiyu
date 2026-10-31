@@ -208,10 +208,10 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertTrue("Bullet must have actual painted pixels", ink.isNotEmpty())
             val left = ink.minOf { it.first }; val right = ink.maxOf { it.first }
             val top = ink.minOf { it.second }; val bottom = ink.maxOf { it.second }
-            val expectedInkDiameter = minOf(rect.width, rect.height) * .6f
+            val expectedInkDiameter = minOf(rect.width, rect.height) * .56f
             val inkDiameter = (right - left + 1).toFloat()
-            assertEquals("Visible bullet width must be 40 percent smaller", expectedInkDiameter, inkDiameter, 2f)
-            assertEquals("Visible bullet height must be 40 percent smaller", expectedInkDiameter, (bottom - top + 1).toFloat(), 2f)
+            assertEquals("Visible bullet width must be 56 percent of the placeholder", expectedInkDiameter, inkDiameter, 2f)
+            assertEquals("Visible bullet height must be 56 percent of the placeholder", expectedInkDiameter, (bottom - top + 1).toFloat(), 2f)
             paintedDiameters += inkDiameter
             assertEquals("Visible bullet must be round", (right - left).toFloat(), (bottom - top).toFloat(), 1f)
             assertEquals("Painted ink must be horizontally centered", (pixels.width - 1) / 2f, (left + right) / 2f, 1f)

@@ -56,7 +56,8 @@ jobs:
           from pathlib import Path
           records = []
           for pattern in ('test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',
-                          'test_workflow_render_isolation_contract.py', 'test_reasoning_stream_cost_contract.py'):
+                          'test_workflow_render_isolation_contract.py', 'test_reasoning_stream_cost_contract.py',
+                          'test_tool_card_html_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -82,6 +83,7 @@ jobs:
             --tests 'app.daiyu.android.ui.screens.chat.conversation.WorkflowConnectorsTest' \
             --tests 'app.daiyu.android.ui.screens.chat.conversation.ReasoningHandoffTest' \
             --tests 'app.daiyu.android.ui.screens.chat.conversation.MarkdownAdmissionCompositionTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ToolHeaderTextTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee workflow-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -92,7 +94,7 @@ jobs:
           root = Path.cwd()
           expected = {'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest', 'AssistantWorkflowContentTest',
                       'AssistantWorkflowCompositionTest', 'WorkflowConnectorsTest', 'ReasoningHandoffTest',
-                      'MarkdownAdmissionCompositionTest'}
+                      'MarkdownAdmissionCompositionTest', 'ToolHeaderTextTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

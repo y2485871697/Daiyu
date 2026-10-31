@@ -20,7 +20,7 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         mainThread { draft = draft.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES) }
         render()
         control("provider-cache-retention").assertExists()
-        ui.onNodeWithText("提示缓存").assertIsDisplayed()
+        ui.onNodeWithText("自定义请求体").assertIsDisplayed()
         ui.onNodeWithText("1小时").assertExists()
         node("model-body-fields").assertDoesNotExist()
         control("provider-cache-retention").performClick()
@@ -33,7 +33,7 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         node("provider-cache-retention:5m").performClick()
         render()
         control("provider-cache-retention").assertExists()
-        ui.onNodeWithText("提示缓存").assertIsDisplayed()
+        ui.onNodeWithText("自定义请求体").assertIsDisplayed()
         ui.onNodeWithText("5分钟").assertExists()
         control("model-save").performClick()
         assertEquals(app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES, saved?.promptCacheRetention)
@@ -58,7 +58,7 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         render()
         node("model-body-fields").assertDoesNotExist()
         node("provider-cache-retention").assertDoesNotExist()
-        ui.onNodeWithText("提示缓存").assertDoesNotExist()
+        ui.onNodeWithText("自定义请求体").assertDoesNotExist()
         control("model-custom-headers").assertExists()
         control("model-save").performClick()
         assertNotNull(saved)
@@ -67,14 +67,14 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
             customBody = "", bodyFieldsValid = true, bodyFieldsError = null) }
         render()
         control("provider-cache-retention").assertExists()
-        ui.onNodeWithText("提示缓存").assertIsDisplayed()
+        ui.onNodeWithText("自定义请求体").assertIsDisplayed()
         mainThread { activity.setContent { MiuixTheme {
             ModelSettingsScreen(draft, { draft = it }, { saved = it }, {}, {}, showCatalog = false, speechOnly = true)
         } } }
         awaitModelEditor()
         node("model-custom-headers").assertDoesNotExist()
         node("provider-cache-retention").assertDoesNotExist()
-        ui.onNodeWithText("提示缓存").assertDoesNotExist()
+        ui.onNodeWithText("自定义请求体").assertDoesNotExist()
         node("model-body-fields").assertDoesNotExist()
         node("provider-session-gateway").assertDoesNotExist()
         assertEquals(before, fixture.settings.load())

@@ -213,7 +213,7 @@ internal fun ModelSettingsScreen(
             SettingsCard { ProviderHeadersEditor(draft, enabled, changeDraft) }
         }
         if (!speechOnly && draft.protocol == ProviderProtocol.MESSAGES) item(key = "provider_cache_retention") {
-            SettingsSectionTitle("提示缓存")
+            SettingsSectionTitle("自定义请求体")
             SettingsCard { DaiyuPromptCacheFields(draft, enabled, changeDraft) }
         }
         if (providerName != null) {

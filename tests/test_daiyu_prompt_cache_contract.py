@@ -17,8 +17,8 @@ class DaiyuPromptCacheContractTest(unittest.TestCase):
   cache=s.split('item(key = "provider_cache_retention") {',1)[1].split('if (providerName != null)',1)[0]
   self.assertIn('SettingsSectionTitle("自定义请求头")',header)
   self.assertNotIn('DaiyuPromptCacheFields(',header)
-  self.assertIn('SettingsSectionTitle("提示缓存")',cache)
-  self.assertLess(cache.index('SettingsSectionTitle("提示缓存")'),cache.index('SettingsCard { DaiyuPromptCacheFields('))
+  self.assertIn('SettingsSectionTitle("自定义请求体")',cache)
+  self.assertLess(cache.index('SettingsSectionTitle("自定义请求体")'),cache.index('SettingsCard { DaiyuPromptCacheFields('))
   self.assertNotIn('ProviderHeadersEditor(',cache)
  def test_choice_row_has_three_exact_labels_and_no_description(self):
   s=(U/'DaiyuPromptCacheFields.kt').read_text()

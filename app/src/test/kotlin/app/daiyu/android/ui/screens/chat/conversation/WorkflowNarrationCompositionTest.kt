@@ -71,9 +71,9 @@ class WorkflowNarrationCompositionTest {
         try {
             composition.setContent {
                 val sources = steps.value.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
-                narration = rememberWorkflowNarration(steps.value, plainText, sources, running.value,
+                WorkflowNarrationContent(steps.value, plainText, sources, running.value,
                     paused.value, expanded.value, stopped = false, revealResetEpoch = epoch.value,
-                    reasoningReady = { admitted.value }, onVisibleAdvance = { advances++ })
+                    reasoningReady = { admitted.value }, onVisibleAdvance = { advances++ }) { narration = it }
             }
             until { narration?.reveal?.settled == true }
             val text = "字".repeat(500)
@@ -151,9 +151,9 @@ class WorkflowNarrationCompositionTest {
             composition.setContent {
                 CompositionLocalProvider(LocalMarkdownParser provides parser) {
                     val steps = listOf(MessageContentUi.Text("n", text.value))
-                    narration = rememberWorkflowNarration(steps, false, listOf(MarkdownTypingSource("n", text.value)),
+                    WorkflowNarrationContent(steps, false, listOf(MarkdownTypingSource("n", text.value)),
                         running.value, paused = false, expanded = true, stopped = false, revealResetEpoch = 0L,
-                        reasoningReady = { true }, onVisibleAdvance = { advances++ })
+                        reasoningReady = { true }, onVisibleAdvance = { advances++ }) { narration = it }
                 }
             }
             until { narration?.reveal?.settled == true }

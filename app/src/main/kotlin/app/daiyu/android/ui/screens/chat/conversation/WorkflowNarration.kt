@@ -26,7 +26,7 @@ internal fun workflowBlockedTextSources(steps: List<MessageContentUi>, reasoning
 
 /** Confirmed narration owns its budget separately from the final answer. */
 @Composable
-internal fun rememberWorkflowNarration(
+internal fun WorkflowNarrationContent(
     steps: List<MessageContentUi>,
     plainText: Boolean,
     sources: List<MarkdownTypingSource>,
@@ -37,9 +37,9 @@ internal fun rememberWorkflowNarration(
     revealResetEpoch: Long,
     reasoningReady: (ReportedReasoning) -> Boolean,
     onVisibleAdvance: () -> Unit,
-): WorkflowNarration {
+    content: @Composable (WorkflowNarration) -> Unit,
+) {
     val parser = if (plainText) plainWorkflowNarrationParser else LocalMarkdownParser.current
-    var result: WorkflowNarration? = null
     CompositionLocalProvider(LocalMarkdownParser provides parser) {
         val texts = remember(sources) { sources.map { it.text } }
         val projection = rememberMarkdownProjection(texts, streaming = running)
@@ -50,7 +50,6 @@ internal fun rememberWorkflowNarration(
                 terminal = !running && projection?.sources == texts, resetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
                 enabled = expanded && !stopped && !paused, allowBaselinePrefix = false, blockedSources = blocked)
         }
-        result = remember(projection, reveal) { WorkflowNarration(projection, reveal) }
+        content(remember(projection, reveal) { WorkflowNarration(projection, reveal) })
     }
-    return checkNotNull(result)
 }

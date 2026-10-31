@@ -620,24 +620,25 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                 settledPhase = textPhase
             }
         }, content = { expanded ->
-            val narration = rememberWorkflowNarration(steps, plainText, textSources,
+            WorkflowNarrationContent(steps, plainText, textSources,
                 running = work.running, paused = work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING,
                 expanded = expanded, stopped = stopped, revealResetEpoch = revealResetEpoch,
-                reasoningReady = { stopped || handoff.ready(it) }, onVisibleAdvance = onVisibleAdvance)
-            SideEffect { if (narration.reveal.settled) settledPhase = textPhase }
-            val textBody = rememberAssistantTextBody(plainNarration, narration.projection, narration.reveal, generationComplete)
-            MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
-                workflowTimeline = true,
-                toolContent = toolContent, flowRunning = work.running,
-                reasoningReady = { stopped || handoff.ready(it) },
-                reasoningBody = { reported, connector ->
-                    ReasoningStepRow(ownerKey, reported, connector,
-                        allowLiveTiming = live, generationComplete = generationComplete, stopped = stopped,
-                        revealResetEpoch = revealResetEpoch, onVisibleAdvance = { if (expanded) onVisibleAdvance() },
-                        onHandoffReady = { if (it) handoff.complete(reported) })
-                }, entryBody = { key, body ->
-                    WorkflowEntry(key, entrances, animate = expanded && work.running,
-                        stopped = stopped, content = body)
-                }, textBody = textBody)
+                reasoningReady = { stopped || handoff.ready(it) }, onVisibleAdvance = onVisibleAdvance) { narration ->
+                SideEffect { if (narration.reveal.settled) settledPhase = textPhase }
+                val textBody = rememberAssistantTextBody(plainNarration, narration.projection, narration.reveal, generationComplete)
+                MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
+                    workflowTimeline = true,
+                    toolContent = toolContent, flowRunning = work.running,
+                    reasoningReady = { stopped || handoff.ready(it) },
+                    reasoningBody = { reported, connector ->
+                        ReasoningStepRow(ownerKey, reported, connector,
+                            allowLiveTiming = live, generationComplete = generationComplete, stopped = stopped,
+                            revealResetEpoch = revealResetEpoch, onVisibleAdvance = { if (expanded) onVisibleAdvance() },
+                            onHandoffReady = { if (it) handoff.complete(reported) })
+                    }, entryBody = { key, body ->
+                        WorkflowEntry(key, entrances, animate = expanded && work.running,
+                            stopped = stopped, content = body)
+                    }, textBody = textBody)
+            }
         }, toolContent = toolContent)
 }

@@ -59,7 +59,7 @@ class MarkdownTypingContract(unittest.TestCase):
                       'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)'):
             self.assertIn(token, text_body)
         self.assertEqual(1, assistant.count('textBody = textBody'))
-        self.assertIn('rememberWorkflowNarration(steps, plainText, textSources,', self.chat)
+        self.assertIn('WorkflowNarrationContent(steps, plainText, textSources,', self.chat)
         self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", self.ui)
         content = (BASE / "MessageContent.kt").read_text()
         self.assertIn('key(block.workflowKey(index))', content)

@@ -4,8 +4,7 @@ import app.daiyu.android.context.ContextService
 import app.daiyu.android.domain.*
 import app.daiyu.android.media.ImageAttachmentOwner
 import app.daiyu.android.media.ImageAttachmentStore
-import app.daiyu.android.media.ImageDimensions
-import app.daiyu.android.media.ImageInspector
+import app.daiyu.android.media.AndroidImageInspector
 import app.daiyu.android.media.MessageImageAssetStore
 import app.daiyu.android.media.MessageImageOwner as AssetOwner
 import app.daiyu.android.media.MessageImageReference as AssetReference
@@ -14,6 +13,7 @@ import app.daiyu.android.storage.MessageActionStore
 import app.daiyu.android.storage.MessageActionTarget
 import java.io.File
 import java.nio.file.Files
+import java.util.Base64
 import java.util.UUID
 import org.junit.After
 import org.junit.Assert.*
@@ -24,7 +24,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/** Real SQLite selection authorization; synthetic image inspector, no network or controller. */
+/** Real SQLite selection authorization with a decodable PNG fixture; no network or controller. */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28])
 class EditingImageSelectionStoreTest {
@@ -35,7 +35,9 @@ class EditingImageSelectionStoreTest {
     private lateinit var store: MessageActionStore
     private lateinit var user: Message
     private lateinit var target: MessageActionTarget
-    private val bytes = byteArrayOf(1, 2, 3)
+    private val bytes = Base64.getDecoder().decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAC56t6BAAAAC0lEQVR4nGNgwAkAABsAAco8Sg0AAAAASUVORK5CYII=",
+    )
     private val refs get() = user.blocks.filterIsInstance<MessageBlock.Image>().map { it.reference }
 
     @Before fun setUp() {
@@ -43,7 +45,7 @@ class EditingImageSelectionStoreTest {
         context.deleteDatabase("conversations.db")
         root = Files.createTempDirectory("editing-image-selection").toFile()
         db = ConversationDatabase(context)
-        drafts = ImageAttachmentStore(File(root, "drafts"), ImageInspector { ImageDimensions("image/png", 2, 3) })
+        drafts = ImageAttachmentStore(File(root, "drafts"), AndroidImageInspector())
         assets = MessageImageAssetStore(File(root, "images"))
         val conversation = db.create("default")
         val id = MessageId(UUID.randomUUID().toString())

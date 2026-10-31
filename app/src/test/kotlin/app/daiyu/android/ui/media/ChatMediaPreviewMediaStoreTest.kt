@@ -84,8 +84,10 @@ class ChatMediaPreviewMediaStoreTest {
             saveChatMediaPreviewOriginal(RuntimeEnvironment.getApplication(), item(source))
             throw AssertionError("Cancellation must propagate")
         } catch (actual: CancellationException) {
-            org.junit.Assert.assertSame(cancellation, actual)
-            assertTrue(actual.suppressed.any { it is IOException })
+            // Coroutine stacktrace recovery may copy the exception across withContext.
+            val original = if (actual === cancellation) actual else actual.cause
+            org.junit.Assert.assertSame(cancellation, original)
+            assertTrue(cancellation.suppressed.any { it is IOException })
         }
         assertTrue(provider.deleted)
     }

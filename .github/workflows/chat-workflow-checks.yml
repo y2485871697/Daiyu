@@ -12,9 +12,9 @@ on:
         type: string
         required: true
       check_scope:
-        description: 工作流程、环境圆点或发送状态的定向检查范围
+        description: 工作流程、环境圆点、发送状态或表格样式的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send]
+        options: [workflow, environment-dots, composer-send, markdown-table]
         default: workflow
 permissions:
   contents: read
@@ -33,11 +33,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.expected_sha }}
           persist-credentials: false
       - name: 核对检查源码
         run: |
           test -n "$EXPECTED_SHA"
-          python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
@@ -69,6 +70,9 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'composer-send':
               patterns = ('test_composer_surface_color_contract.py', 'test_chat_submission_preview_contract.py',
                           'test_compression_send_gate_contract.py', 'test_delegation_batch_and_send_contract.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'markdown-table':
+              patterns = ('test_markdown_table_style_contract.py', 'test_markdown_entry_contract.py',
+                          'test_markdown_body_visibility_contract.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
@@ -79,7 +83,7 @@ jobs:
           PY
           python3 scripts/verify_boundaries.py
       - name: 准备既有离线语音依赖（不打包）
-        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+        run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
       - name: 工作流程定向单测及Compose源码编译（不打包）
         shell: bash
         run: |
@@ -94,6 +98,10 @@ jobs:
           if [[ "$WORKFLOW_CHECK_SCOPE" == composer-send ]]; then
             classes=(ComposerPhaseProjectionTest ForegroundComposerStateTest ChatSubmissionPreviewTest ChatProjectionTest)
             filters+=(--tests app.daiyu.android.ui.actions.ComposerTextActionTest)
+          fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == markdown-table ]]; then
+            classes=(MarkdownTableGridTest)
+            filters+=(--tests app.daiyu.android.MarkdownTableWidthTest)
           fi
           for class in "${classes[@]}"; do
             filters+=(--tests "app.daiyu.android.ui.screens.chat.conversation.$class")
@@ -118,6 +126,8 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'composer-send':
               expected = {'ComposerPhaseProjectionTest', 'ForegroundComposerStateTest', 'ChatSubmissionPreviewTest',
                           'ChatProjectionTest', 'ComposerTextActionTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'markdown-table':
+              expected = {'MarkdownTableGridTest', 'MarkdownTableWidthTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)
@@ -131,7 +141,7 @@ jobs:
               assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
           packages = [str(p) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
           assert not packages, packages
-          record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+          record = dict(source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
                         check_scope=os.environ['WORKFLOW_CHECK_SCOPE'], classes=sorted(names), contracts=json.loads(Path('workflow-checks/contracts.json').read_text()),
                         apk_built=False, instrumentation_run=False)

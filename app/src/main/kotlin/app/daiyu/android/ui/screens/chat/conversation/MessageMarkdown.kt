@@ -309,8 +309,8 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
     val cellLengths = remember(table) { (listOf(table.header) + table.rows).map { row ->
         row.map { markdownInlineLength(it).coerceAtLeast(1) }
     } }
-    val gridColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.28f)
-    val gridWidth = 1.dp
+    val gridColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val gridWidth = 0.5.dp
     val tableShape = RoundedCornerShape(8.dp)
     val gridStroke = with(LocalDensity.current) { markdownTableGridStrokePx(gridWidth.toPx()) }
     val gridInset = with(LocalDensity.current) { gridStroke.toDp() }

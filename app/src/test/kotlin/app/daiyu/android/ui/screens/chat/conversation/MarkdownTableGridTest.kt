@@ -4,9 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownTableGridTest {
-    @Test fun oneDpUsesTheSameWholePixelCeilingAsTheFixedBorder() {
+    @Test fun strokeUsesTheSameWholePixelCeilingAsTheFixedBorder() {
         for ((density, pixels) in listOf(1f to 1, 1.25f to 2, 1.5f to 2, 2f to 2, 2.625f to 3, 3.5f to 4)) {
             assertEquals(pixels, markdownTableGridStrokePx(density))
+        }
+    }
+
+    @Test fun halfDpGridKeepsAtLeastOnePhysicalPixelAcrossDensities() {
+        for ((density, pixels) in listOf(1f to 1, 1.25f to 1, 1.5f to 1, 2f to 1, 2.625f to 2, 3.5f to 2)) {
+            assertEquals(pixels, markdownTableGridStrokePx(0.5f * density))
         }
     }
 

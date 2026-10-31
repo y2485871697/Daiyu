@@ -12,13 +12,13 @@ class MarkdownTableStyleContract(unittest.TestCase):
         cls.table = (ROOT / (BASE + "MessageMarkdown.kt")).read_text().split(
             "private fun MarkdownTable(", 1)[1].split("private fun headingSize", 1)[0]
 
-    def test_grid_has_theme_content_contrast_and_one_dp_strokes(self):
-        self.assertIn("val gridColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.28f)", self.table)
-        self.assertIn("val gridWidth = 1.dp", self.table)
+    def test_grid_has_soft_theme_content_contrast_and_half_dp_strokes(self):
+        self.assertIn("val gridColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.12f)", self.table)
+        self.assertIn("val gridWidth = 0.5.dp", self.table)
         self.assertIn("markdownTableGridStrokePx(gridWidth.toPx())", self.table)
         self.assertIn("gridStroke.toDp()", self.table)
         self.assertNotIn("outline.copy(alpha = 0.35f)", self.table)
-        self.assertNotIn("0.5.dp", self.table)
+        self.assertNotIn("val gridWidth = 1.dp", self.table)
 
     def test_same_rounded_frame_clips_before_horizontal_scroll(self):
         self.assertIn("val tableShape = RoundedCornerShape(8.dp)", self.table)
@@ -59,7 +59,8 @@ class MarkdownTableStyleContract(unittest.TestCase):
                       "AppearanceThemeMode.DARK", "AppearanceThemeMode.LIGHT", "LayoutDirection.Rtl", "captureToImage()",
                       "rounded corner", "horizontal separator", "vertical separator", "actually scrolled", "assertEquals(before",
                       "testSinglePaintAndEqualPixelWidthsSurviveDensityRtlScrollAndAppend", "intersection", "frame joint",
-                      "vertical physical width", "horizontal physical width", "middle scroll", "appended"]:
+                      "vertical physical width", "horizontal physical width", "middle scroll", "appended",
+                      "ceil(0.5f * density)", "foreground.copy(alpha = .12f).compositeOver(base)"]:
             self.assertIn(token, test)
 
 

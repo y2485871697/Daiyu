@@ -76,7 +76,7 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
                 val label = "density=$density dark=$isDark layout=$layout"
                 val frame = ui.onNodeWithTag("markdown-table", useUnmergedTree = true)
                 // LocalDensity scales columns, not the physical window: reveal the first boundary.
-                val stroke = ceil(density).toInt()
+                val stroke = ceil(0.5f * density).toInt()
                 val viewportWidth = frame.fetchSemanticsNode().boundsInRoot.width - 2 * stroke
                 val revealBoundary = (120f * density - viewportWidth / 2f).coerceAtLeast(0f)
                 if (revealBoundary > 0f) {
@@ -109,7 +109,7 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
         val pixels = frame.captureToImage().toPixelMap()
         val row = ui.onNodeWithText("end-A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val header = ui.onNodeWithText("A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val stroke = ceil(density).toInt()
+        val stroke = ceil(0.5f * density).toInt()
         val top = (row.top - bounds.top).roundToInt() - (7f * density).roundToInt()
         val boundary = if (layout == LayoutDirection.Ltr) header.right - bounds.left + (10f * density).roundToInt()
             else header.left - bounds.left - (10f * density).roundToInt()
@@ -118,12 +118,12 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
         assertTrue("$label grid sample must be wholly inside viewport: center=$center clearY=$clearY capture=${pixels.width}x${pixels.height}",
             center - stroke * 2 >= stroke && center + stroke * 2 < pixels.width - stroke &&
                 clearY in 0 until pixels.height)
-        val vertical = (center - stroke * 2..center + stroke * 2).filter { difference(pixels[it, clearY], base) > .08f }
+        val vertical = (center - stroke * 2..center + stroke * 2).filter { difference(pixels[it, clearY], base) > .04f }
         val clearX = stroke + (4f * density).roundToInt()
-        val horizontal = (top - stroke..top + stroke * 2).filter { difference(pixels[clearX, it], base) > .08f }
+        val horizontal = (top - stroke..top + stroke * 2).filter { difference(pixels[clearX, it], base) > .04f }
         assertEquals("$label vertical physical width", stroke, vertical.size)
         assertEquals("$label horizontal physical width", stroke, horizontal.size)
-        val expected = foreground.copy(alpha = .28f).compositeOver(base)
+        val expected = foreground.copy(alpha = .12f).compositeOver(base)
         for (x in vertical) for (y in horizontal) {
             assertTrue("$label intersection ($x,$y) painted more than once", difference(pixels[x, y], expected) < .02f)
         }
@@ -174,10 +174,10 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
             val cellPadding = (10f * density).roundToInt()
             val column = if (layout == LayoutDirection.Ltr) headerCell.right - before.left + cellPadding
                 else headerCell.left - before.left - cellPadding
-            val band = ceil(density).toInt().coerceAtLeast(1)
-            assertTrue("$label horizontal separator", peakDifference(pixels, pixels.width / 4, horizontal, band, background) > .12f)
+            val band = ceil(0.5f * density).toInt().coerceAtLeast(1)
+            assertTrue("$label horizontal separator", peakDifference(pixels, pixels.width / 4, horizontal, band, background) > .04f)
             assertTrue("$label vertical separator",
-                verticalStrokeDifference(pixels, column, (3f * density).roundToInt(), density, header) > .12f)
+                verticalStrokeDifference(pixels, column, (3f * density).roundToInt(), band.toFloat(), header) > .04f)
             if (wide) {
                 val axis = frame.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
                 assertTrue("$label must overflow", axis.maxValue() > 0f)
@@ -203,11 +203,11 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
             inset to h - 1 - inset, w - 1 - inset to h - 1 - inset)) {
             assertTrue("$label rounded corner ($x,$y)", difference(pixels[x, y], background) < .035f)
         }
-        val band = ceil(density).toInt().coerceAtLeast(1)
-        assertTrue("$label top border", peakDifference(pixels, w / 4, 0, band, header) > .12f)
-        assertTrue("$label bottom border", peakDifference(pixels, w / 4, h - 1, band, background) > .12f)
-        assertTrue("$label left border", peakDifference(pixels, 0, h / 2, band, background) > .12f)
-        assertTrue("$label right border", peakDifference(pixels, w - 1, h / 2, band, background) > .12f)
+        val band = ceil(0.5f * density).toInt().coerceAtLeast(1)
+        assertTrue("$label top border", peakDifference(pixels, w / 4, 0, band, header) > .04f)
+        assertTrue("$label bottom border", peakDifference(pixels, w / 4, h - 1, band, background) > .04f)
+        assertTrue("$label left border", peakDifference(pixels, 0, h / 2, band, background) > .04f)
+        assertTrue("$label right border", peakDifference(pixels, w - 1, h / 2, band, background) > .04f)
     }
 
     // Integrate the centered stroke's physical footprint, including antialiased half-pixels.

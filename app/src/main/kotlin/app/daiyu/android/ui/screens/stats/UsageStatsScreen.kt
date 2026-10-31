@@ -296,11 +296,6 @@ private fun ModelUsagePane(
                         formatCacheHitRate(tokens.cached, tokens.input) else "0")
             }
         }
-        if (stats.unattributedUsageRequests > 0 || stats.accountingFailure) Text(
-            "仅含已知模型及日期的请求；${stats.unattributedUsageRequests} 笔历史用量未归属。" +
-                (if (stats.accountingFailure) "用量保存曾失败，请查看错误日志。" else ""),
-            style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp), color = usagePalette().muted,
-            modifier = Modifier.testTag("usage-model-coverage"))
         if (filtered.providers.isEmpty()) {
             if (startBound.isSet || endBound.isSet) Text(
                 text = stringResource(R.string.stats_model_filter_empty),
@@ -786,9 +781,9 @@ private fun HeatmapCell(
 ) {
     val colors = usagePalette()
     val color = when {
-        unknown -> colors.bubble
+        unknown -> colors.heatmapEmpty
         alpha < 0f -> colors.bubble.copy(alpha = 0.3f)
-        alpha == 0f -> colors.bubble
+        alpha == 0f -> colors.heatmapEmpty
         else -> colors.accent.copy(alpha = alpha)
     }
     Box(
@@ -856,14 +851,6 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
             stringResource(R.string.stats_page_cached_tokens), scoped(currentTokens?.cached, tokens.cached))
         StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Add,
             stringResource(R.string.stats_page_cache_creation_tokens), scoped(currentTokens?.creation, tokens.creation))
-        if (stats.unknownConversationDates > 0 || stats.unattributedUsageRequests > 0 || stats.accountingFailure) {
-            Text(buildString {
-                if (stats.unknownConversationDates > 0) append("${stats.unknownConversationDates} 个旧会话缺少创建日期；热力图仅含已知日期。")
-                if (stats.unattributedUsageRequests > 0) append("${stats.unattributedUsageRequests} 笔历史用量缺少模型或日期，已计入总览，不参与模型和日期筛选。")
-                if (stats.accountingFailure) append("本次进程曾发生用量保存失败，请查看错误日志。")
-            }, style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp), color = usagePalette().muted,
-                modifier = Modifier.testTag("usage-accounting-coverage"))
-        }
         StatCard(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             icon = Icons.Rounded.RocketLaunch,

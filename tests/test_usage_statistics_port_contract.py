@@ -95,7 +95,9 @@ class UsageStatisticsPortContractTest(unittest.TestCase):
         ui=read('ui/RetainedConversationData.kt').split('fun stats()',1)[1].split('fun folders',1)[0]
         self.assertIn('UsageStatisticsStore.snapshot',ui)
         self.assertIn('currentAccountingTokens',read('data/repository/UsageStatsSnapshot.kt'))
-        self.assertIn('usage-model-coverage',read('ui/screens/stats/UsageStatsScreen.kt'))
+        screen = read('ui/screens/stats/UsageStatsScreen.kt')
+        self.assertNotIn('usage-model-coverage', screen)
+        self.assertNotIn('usage-accounting-coverage', screen)
     def test_statistics_missing_tokens_display_zero_without_changing_shared_semantics(self):
         source = read('ui/screens/stats/UsageStatsScreen.kt')
         self.assertIn('private fun formatStatsTokens(value: Long?): String = formatTokenCount(value ?: 0L)', source)

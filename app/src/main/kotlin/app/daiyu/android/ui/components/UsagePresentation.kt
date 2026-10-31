@@ -45,6 +45,7 @@ internal data class UsagePalette(val dark: Boolean) {
     val toolbar = Color(if (dark) 0xffb2a9c7 else 0xff716a82)
     val line = Color(if (dark) 0xff393540 else 0xffe6e1e8)
     val bubble = Color(if (dark) 0xff28262f else 0xfff1eff3)
+    val heatmapEmpty = Color(if (dark) 0xff45414c else 0xffe0dde5)
     val background = Color(if (dark) 0xff101218 else 0xffffffff)
     val sheet = listOf(Color(if (dark) 0xf22e283b else 0xf0ffffff), Color(if (dark) 0xf21b1825 else 0xf0f8f4ff))
     val edge = Color(if (dark) 0x26dccdff else 0xedffffff)

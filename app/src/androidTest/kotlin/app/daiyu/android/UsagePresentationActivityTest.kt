@@ -18,6 +18,7 @@ import app.daiyu.android.data.repository.ModelUsageModelUi
 import app.daiyu.android.data.repository.ModelUsageProviderUi
 import app.daiyu.android.data.repository.ModelUsageSnapshot
 import app.daiyu.android.data.repository.RecordedUsageStats
+import app.daiyu.android.data.repository.UsageTokenMetrics
 import app.daiyu.android.data.repository.UsageStatsSnapshot
 import app.daiyu.android.domain.ModelEvent
 import app.daiyu.android.domain.runtime.RequestCheckpoint
@@ -217,8 +218,52 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testHistoricalCoverageFootersAreAbsentAndKnownTotalsStayUnchanged() {
+        val tokens = UsageTokenMetrics(1_000, 200, 100, 0, 1_200)
+        val model = ModelUsageModelUi("known", "Known model", 300, 100, 2, 2)
+        val stats = empty().copy(tokenAccountingAvailable = true,
+            lifetimeAccountingTokens = tokens,
+            unknownConversationDates = 5, unattributedUsageRequests = 42, accountingFailure = true,
+            modelUsage = ModelUsageSnapshot(listOf(ModelUsageProviderUi("provider", "Provider", listOf(model)))))
+        for (dark in listOf(false, true)) {
+            show(dark = dark) { stats }
+            assertMetric(R.string.stats_page_token_total, "1.2K")
+            assertMetric(R.string.stats_page_launch_count, "0")
+            node("usage-accounting-coverage").assertDoesNotExist()
+            ui.onNodeWithText("个旧会话缺少创建日期", substring = true).assertDoesNotExist()
+            selectTab(R.string.stats_tab_models)
+            usagePage().scrollToDescendant(hasTestTag("usage-model-total"))
+            ui.onNode(hasText("400") and hasAnyAncestor(hasTestTag("usage-model-total")),
+                useUnmergedTree = true).assertIsDisplayed()
+            node("usage-model-coverage").assertDoesNotExist()
+            ui.onNodeWithText("仅含已知模型及日期的请求", substring = true).assertDoesNotExist()
+            assertEquals(5, stats.unknownConversationDates)
+            assertEquals(42, stats.unattributedUsageRequests)
+            assertTrue(stats.accountingFailure)
+            assertEquals(tokens, stats.overviewTokens)
+            assertEquals(400L, stats.modelTokens(stats.modelUsage).total)
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     private fun heatmapCell(date: LocalDate) =
         ui.onNodeWithTag("usage-heatmap-cell:$date", useUnmergedTree = true)
+
+    private fun assertHeatmapCellContrastsWithCard(date: LocalDate) {
+        val grid = node("usage-heatmap-grid")
+        val gridBounds = grid.fetchSemanticsNode().boundsInRoot
+        val cell = heatmapCell(date).fetchSemanticsNode()
+        val bounds = cell.boundsInRoot
+        val pixels = grid.captureToImage().toPixelMap()
+        val x = (bounds.center.x - gridBounds.left).toInt()
+        val y = (bounds.center.y - gridBounds.top).toInt()
+        val gapX = (bounds.left - gridBounds.left - cell.layoutInfo.density.density).toInt()
+        val actual = pixels[x, y]
+        val backing = pixels[gapX, y]
+        val contrast = maxOf(kotlin.math.abs(actual.red - backing.red),
+            kotlin.math.abs(actual.green - backing.green), kotlin.math.abs(actual.blue - backing.blue))
+        assertTrue("Empty heatmap cells must remain visible against the actual card", contrast >= .07f)
+    }
 
     fun testUnavailableHeatmapKeepsSquareGridInsteadOfRowsOfDashesAcrossThemesAndScales() {
         val today = LocalDate.now()
@@ -244,8 +289,9 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
                 previousBottom?.let { assertEquals(2f, (bounds.top - it) / density, .6f) }
                 previousBottom = bounds.bottom
             }
+            assertHeatmapCellContrastsWithCard(today)
             val pixels = heatmapCell(today).captureToImage().toPixelMap()
-            val expected = UsagePalette(dark).bubble
+            val expected = UsagePalette(dark).heatmapEmpty
             // A real filled cell, not a text dash on a transparent background.
             for (y in listOf(pixels.height / 3, pixels.height / 2, pixels.height * 2 / 3)) {
                 val actual = pixels[pixels.width / 2, y]
@@ -272,8 +318,9 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
                 pixels[pixels.width / 2, pixels.height / 2].toArgb()
             }
             assertEquals("Zero and the four heat levels must stay distinct", 5, colors.toSet().size)
-            assertEquals(UsagePalette(dark).bubble.toArgb(), colors.first())
+            assertEquals(UsagePalette(dark).heatmapEmpty.toArgb(), colors.first())
             assertEquals(UsagePalette(dark).accent.toArgb(), colors.last())
+            assertHeatmapCellContrastsWithCard(today.minusDays(8))
             val grid = node("usage-heatmap-grid")
             val gridBounds = grid.fetchSemanticsNode().boundsInRoot
             val pixels = grid.captureToImage().toPixelMap()

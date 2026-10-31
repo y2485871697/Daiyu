@@ -16,7 +16,7 @@ class UsageHeatmapContractTest(unittest.TestCase):
         cls.device_tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/UsagePresentationActivityTest.kt').read_text()
 
     def test_unknown_is_a_real_square_not_a_transparent_dash(self):
-        self.assertIn('unknown -> colors.bubble', self.cell)
+        self.assertIn('unknown -> colors.heatmapEmpty', self.cell)
         self.assertNotIn('Text(', self.cell)
         self.assertNotIn('Color.Transparent', self.cell)
         self.assertIn('.size(sizeDp.dp)', self.cell)
@@ -43,9 +43,38 @@ class UsageHeatmapContractTest(unittest.TestCase):
         self.assertIn('unknown = !available && !isFuture', self.chart)
         self.assertIn('heatmapAlpha(count, q1, q2, q3, isFuture)', self.chart)
         self.assertIn('alpha < 0f -> colors.bubble.copy(alpha = 0.3f)', self.cell)
-        self.assertIn('alpha == 0f -> colors.bubble', self.cell)
+        self.assertIn('alpha == 0f -> colors.heatmapEmpty', self.cell)
         self.assertIn('else -> colors.accent.copy(alpha = alpha)', self.cell)
         self.assertNotIn('available = true', self.chart)
+
+    def test_empty_shade_is_local_to_heatmap_and_not_the_card_background(self):
+        palette = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/components/UsagePresentation.kt').read_text()
+        self.assertIn('val heatmapEmpty = Color(if (dark) 0xff45414c else 0xffe0dde5)', palette)
+        self.assertIn('val bubble = Color(if (dark) 0xff28262f else 0xfff1eff3)', palette)
+        self.assertIn('.background(colors.bubble.copy(alpha = .62f))', palette)
+        self.assertIn('alpha < 0f -> colors.bubble.copy(alpha = 0.3f)', self.cell)
+        self.assertEqual(2, self.cell.count('colors.heatmapEmpty'))
+
+    def test_two_historical_coverage_footers_are_removed_without_replacing_data(self):
+        screen = (ROOT / SCREEN).read_text()
+        for removed in ('usage-model-coverage', 'usage-accounting-coverage',
+                        '仅含已知模型及日期的请求', '个旧会话缺少创建日期'):
+            self.assertNotIn(removed, screen)
+        for retained in ('stats.overviewTokens', 'stats.modelTokens(filtered)', 'usage.filtered(',
+                         'filtered.providers.forEach', 'ChatHeatmap(conversationsPerDay = stats.conversationsPerDay, available = stats.heatmapAvailable)'):
+            self.assertIn(retained, screen)
+        self.assertIn('fun testHistoricalCoverageFootersAreAbsentAndKnownTotalsStayUnchanged', self.device_tests)
+        self.assertIn('unknownConversationDates = 5, unattributedUsageRequests = 42, accountingFailure = true', self.device_tests)
+        self.assertIn('assertEquals(tokens, stats.overviewTokens)', self.device_tests)
+        self.assertIn('assertEquals(400L, stats.modelTokens(stats.modelUsage).total)', self.device_tests)
+
+    def test_pixel_regression_compares_cells_with_actual_card_gap(self):
+        for code in ('private fun assertHeatmapCellContrastsWithCard',
+                     'Empty heatmap cells must remain visible against the actual card',
+                     'contrast >= .07f', 'val backing = pixels[gapX, y]',
+                     'assertHeatmapCellContrastsWithCard(today)',
+                     'assertHeatmapCellContrastsWithCard(today.minusDays(8))'):
+            self.assertIn(code, self.device_tests)
 
     def test_device_regressions_cover_unknown_geometry_and_actual_heat_pixels(self):
         for code in ('fun testUnavailableHeatmapKeepsSquareGridInsteadOfRowsOfDashesAcrossThemesAndScales',

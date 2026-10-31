@@ -55,6 +55,34 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testLargeCallGroupPersistsAndReadsEveryIndexBeyondTheRecentTwentyWindow() {
+        val db = fresh(); val runtime = lease(db); val parent = parent(db)
+        val store = runtime.childTasks
+        for (count in listOf(16, 25)) {
+            val call = "large-$count"
+            val group = childTaskCallGroup(parent.conversationId.value, parent.runId.value,
+                parent.assistantMessageId.value, "run_child_models", call)
+            val records = tasks(parent, count).map { it.copy(owner = it.owner.copy(taskGroupId = group)) }
+            store.enqueue(parent, records)
+            val read = (store as SQLiteChildTaskStore).forCall(parent.conversationId.value,
+                parent.runId.value, parent.assistantMessageId.value, "run_child_models", call)
+            assertEquals(records, read)
+            assertEquals((0 until count).toList(), read.map { it.index })
+            assertEquals(count, read.map { it.owner.childRunId }.distinct().size)
+        }
+    }
+    fun testSixteenthInsertionFailureRollsBackTheWholeBatch() {
+        val db = fresh(); val runtime = lease(db); val parent = parent(db)
+        val records = tasks(parent, 16)
+        db.writableDatabase.execSQL("CREATE TRIGGER reject_sixteenth BEFORE INSERT ON child_tasks " +
+            "WHEN NEW.task_index=15 BEGIN SELECT RAISE(ABORT,'reject_sixteenth'); END")
+        rejects { runtime.childTasks.enqueue(parent, records) }
+        assertTrue(runtime.childTasks.list(parent.conversationId.value, 20).isEmpty())
+        db.writableDatabase.execSQL("DROP TRIGGER reject_sixteenth")
+        runtime.childTasks.enqueue(parent, records)
+        assertEquals(16, runtime.childTasks.list(parent.conversationId.value, 20).size)
+    }
+
     fun testSealedBindingCannotAdmitDirectedWorkAndSourceKeepsCapacityUntilDrain() {
         val db = fresh(); val runtime = lease(db); val owner = parent(db)
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val drained = CountDownLatch(1)

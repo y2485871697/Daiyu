@@ -2051,7 +2051,7 @@ class ChatController internal constructor(private val application:Application,
             reservePreparation(conversation.id)
         }
         return try {
-            sendPrepared(token, conversation, text, withChildren=true)
+            sendPrepared(token, conversation, text, withChildren = conversationChildrenEnabled(conversation))
         } finally {finishPreparation(token)}
     }
     @Synchronized internal fun childTasks(conversationId: ConversationId, limit: Int = 20): List<ChildTaskRecord> {
@@ -2374,6 +2374,9 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
+    private fun conversationChildrenEnabled(conversation: Conversation?): Boolean =
+        conversation?.let { childPreferences.snapshot(SubAgentConfigKey.Conversation(it.id.value)).enabled } ?: false
+
     fun send(conversation:Conversation?,text:String):Conversation? {
         if(rejectSynchronousMainSend()) return null
         val token = synchronized(this) {
@@ -2381,7 +2384,7 @@ class ChatController internal constructor(private val application:Application,
             // Legacy synchronous API; UI hosts should use sendText instead.
             reservePreparation(conversation?.id)
         }
-        return try {sendPrepared(token,conversation,text)} finally {finishPreparation(token)}
+        return try {sendPrepared(token,conversation,text,withChildren = conversationChildrenEnabled(conversation))} finally {finishPreparation(token)}
     }
     // Keep source compatibility for worker callers, never turn a legacy UI call into a
     // blocking wait on summary/network I/O. Main must migrate to the owner-aware sendText API.
@@ -2409,7 +2412,7 @@ class ChatController internal constructor(private val application:Application,
         }
         try { executor.execute {
             val saved = try {
-                val withChildren = conversation?.let { childPreferences.snapshot(SubAgentConfigKey.Conversation(it.id.value)).enabled } ?: false
+                val withChildren = conversationChildrenEnabled(conversation)
                 sendPrepared(token,conversation,text,withChildren=withChildren,expectedDraftText=text)
             }
                 catch (_: Exception) { null }
@@ -4845,7 +4848,7 @@ class ChatController internal constructor(private val application:Application,
                         val token = synchronized(this) { if (closed) null else reservePreparation(owner.id) }
                         var saved: Conversation? = null
                         val outcome = if (token == null) RegenerationSendOutcome.NOT_SENT else try {
-                            saved = try { sendPrepared(token, owner, text, actionRevision = revision) }
+                            saved = try { sendPrepared(token, owner, text, withChildren = conversationChildrenEnabled(owner), actionRevision = revision) }
                                 catch (_: Exception) { null }
                             when {
                                 saved != null -> RegenerationSendOutcome.ACCEPTED

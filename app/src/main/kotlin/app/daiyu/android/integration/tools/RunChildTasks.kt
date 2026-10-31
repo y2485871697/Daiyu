@@ -21,7 +21,7 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
                 ArgumentType.ObjectValue(ToolSchema(listOf(
                     ArgumentField("profile_id", ArgumentType.Text(200, minimumLength = 1)),
                     ArgumentField("prompt", ArgumentType.Text(4096, minimumLength = 1))
-                ))), minimumItems = 1, maximumItems = 8)))))
+                ))), minimumItems = 1, maximumItems = null)))))
 
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val tasks = arguments.array("tasks").map {

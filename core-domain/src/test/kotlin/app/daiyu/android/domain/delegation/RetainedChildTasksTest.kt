@@ -185,7 +185,7 @@ class RetainedChildTasksTest {
         try {
             assertTrue(supervisor.submit(binding, parent.context(), listOf(ChildModelTask("p", "ok"), ChildModelTask("missing", "bad"))) is ChildTaskAdmission.Rejected)
             assertTrue(supervisor.submit(binding, parent.context(cancelled = { true }), listOf(ChildModelTask("p", "ok"))) is ChildTaskAdmission.Rejected)
-            assertTrue(supervisor.submit(binding, parent.context(), List(9) { ChildModelTask("p", "ok") }) is ChildTaskAdmission.Rejected)
+            assertTrue(supervisor.submit(binding, parent.context(), emptyList()) is ChildTaskAdmission.Rejected)
             assertEquals(0, journal.enqueues.get()); assertTrue(supervisor.snapshots(binding).isEmpty())
         } finally { drained(supervisor) }
     }

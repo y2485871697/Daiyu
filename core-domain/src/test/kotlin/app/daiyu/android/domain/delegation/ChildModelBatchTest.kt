@@ -95,7 +95,7 @@ class ChildModelBatchTest {
         val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { created.incrementAndGet(); error("not called") })))
         try {
             assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "ok"), ChildModelTask("unknown", "bad"))) is ExecutionReceipt.NotExecuted)
-            assertTrue(batch.execute(context(), List(9) { ChildModelTask("one", "x") }) is ExecutionReceipt.NotExecuted)
+            assertTrue(batch.execute(context(), emptyList()) is ExecutionReceipt.NotExecuted)
             assertTrue(batch.execute(context(), listOf(ChildModelTask("one", " "))) is ExecutionReceipt.NotExecuted)
             assertThrows(IllegalArgumentException::class.java) { batch.execute(context(TaskAuthorization("session", parent.runId.value)), listOf(ChildModelTask("one", "ok"))) }
             assertEquals(0, created.get())

@@ -88,7 +88,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null,
     private val maxRequestsPerBinding: Int = 1024) : AutoCloseable {
     private class Pool(var limit: Int) {
-        val capacity = ChildModelPool(limit, MAX_WORKERS)
+        val capacity = ChildModelPool(limit)
         var bindings = 0
     }
     private class Task(val binding: ChildTaskBinding, val request: ChildTaskRequest,
@@ -113,7 +113,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     // In-flight only, across bindings: a reentrant store must see pending, never join its own I/O.
     private val pendingCommands = mutableMapOf<String, ChildTaskCommandRequest>()
     private val progress = linkedMapOf<ChildRunOwner, String>()
-    private val workers = Executors.newFixedThreadPool(MAX_WORKERS) { action ->
+    private val workers = Executors.newCachedThreadPool() { action ->
         Thread(action, "retained-child-task").apply { isDaemon = true }
     }
     private val observers = mutableListOf<() -> Unit>()
@@ -155,7 +155,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         val callId = context.invocation.id.value
         if (callId.isBlank() || callId.length > 200) return ChildTaskAdmission.Rejected("invalid_child_call_id")
         val inputSnapshot = input.toList()
-        if (inputSnapshot.size !in 1..8 || inputSnapshot.any {
+        if (inputSnapshot.isEmpty() || inputSnapshot.any {
             it.profileId.isBlank() || it.profileId.length > 200 || it.prompt.isBlank() ||
                 it.prompt.length > 4096 || it.prompt.toByteArray(Charsets.UTF_8).size > 16 * 1024
         }) return ChildTaskAdmission.Rejected("invalid_child_tasks")
@@ -756,5 +756,4 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         return digest.digest()
     }
 
-    private companion object { const val MAX_WORKERS = 8 }
 }

@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ToolSchemaTest {
+    @Test fun optionalArrayMaximumLeavesOtherToolsDefaultBoundsIntact() {
+        fun schema(maximum: Int?) = ToolSchema(listOf(ArgumentField("items",
+            ArgumentType.ArrayValue(ArgumentType.Text(), minimumItems = 1, maximumItems = maximum))))
+        val input = List(65) { "\"x\"" }.joinToString(",", "{\"items\":[", "]}")
+        val unbounded = schema(null)
+        assertEquals(65, unbounded.parse(input).array("items").size)
+        assertFalse(unbounded.jsonSchema().contains("maxItems"))
+        assertThrows(IllegalArgumentException::class.java) { schema(64).parse(input) }
+        assertThrows(IllegalArgumentException::class.java) { unbounded.parse("{\"items\":[]}") }
+        assertEquals(64, ArgumentType.ArrayValue(ArgumentType.Text()).maximumItems)
+    }
+
     @Test fun strictEmptySchemaMatchesExistingReadOnlyArgumentContract() {
         val schema = ToolSchema()
         assertEquals("{}", schema.parse(" \r\n { \t } ").canonicalJson())

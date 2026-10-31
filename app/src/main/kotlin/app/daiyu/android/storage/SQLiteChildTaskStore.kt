@@ -12,7 +12,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
     private val transactions = DatabaseTransactions { database.writableDatabase }
 
     override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) {
-        require(tasks.size in 1..8 && tasks.map { it.owner.childRunId }.distinct().size == tasks.size)
+        require(tasks.isNotEmpty() && tasks.map { it.owner.childRunId }.distinct().size == tasks.size)
         val first = tasks.first().owner
         require(tasks.map { it.index } == tasks.indices.toList())
         tasks.forEach { task ->
@@ -151,9 +151,9 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         val group = childTaskCallGroup(conversationId, runId, messageId, toolName, callId)
         return database.readableDatabase.query(TABLE, COLUMNS,
             "conversation_id=? AND parent_run_id=? AND parent_message_id=? AND task_group_id=?",
-            arrayOf(conversationId, runId, messageId, group), null, null, "task_index ASC", "9").use { cursor ->
+            arrayOf(conversationId, runId, messageId, group), null, null, "task_index ASC").use { cursor ->
             val records = buildList { while (cursor.moveToNext()) add(row(cursor)) }
-            records.takeIf { it.size <= 8 && it.map { row -> row.index }.distinct().size == it.size } ?: emptyList()
+            records.takeIf { it.map { row -> row.index } == it.indices.toList() } ?: emptyList()
         }
     }
 

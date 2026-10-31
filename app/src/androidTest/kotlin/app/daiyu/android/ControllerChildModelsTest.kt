@@ -35,6 +35,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val profile = SubAgentProfile("review", "Reviewer", "review", providerId = provider.id, modelId = child.id)
         val preferences = ConversationSubAgentPreferences(app.getSharedPreferences("subagent_configuration", 0))
         val toolName = if (background) "start_child_tasks" else "run_child_models"
+        var expectedDelegation = true
         val controller: ChatController
         lateinit var conversation: Conversation
         init {
@@ -50,13 +51,18 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                         val isChild = config.model == child.modelId
                         if (isChild) { check(definitions.isEmpty()); childSettings += config; childOpened.incrementAndGet() }
-                        else { check(config.model == "parent-api"); parentOpened.incrementAndGet(); check(definitions.any { it.name == toolName }) }
+                        else {
+                            check(config.model == "parent-api"); parentOpened.incrementAndGet()
+                            check(definitions.any { it.name == "run_child_models" } == expectedDelegation)
+                            check(definitions.any { it.name == "start_child_tasks" } == expectedDelegation)
+                        }
                         var rounds = 0
                         return object : ModelSession {
                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                                 if (isChild) {
                                     entered.countDown(); check(release.await(10, TimeUnit.SECONDS)); sink(ModelEvent.Usage(7, 3)); sink(ModelEvent.TextFinal("child", "independent answer"))
-                                } else if (rounds++ == 0) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("child-call"), toolName,
+                                } else if (!expectedDelegation) sink(ModelEvent.TextFinal("parent", "delegation disabled"))
+                                else if (rounds++ == 0) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("child-call"), toolName,
                                     """{"tasks":[{"profile_id":"review","prompt":"review task"}]}""")))
                                 else {
                                     check(outputs.single().callId == ToolCallId("child-call"))
@@ -97,6 +103,82 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         fixtures.add(it); awaitControl("recovery ready") { it.controller.ready }; it.prepare()
     }
     override fun tearDown() { try { fixtures.forEach { it.close() } } finally { super.tearDown() } }
+
+    private fun setCollaboration(f: Fixture, enabled: Boolean) {
+        f.expectedDelegation = enabled
+        check(f.preferences.update(SubAgentConfigKey.Conversation(f.conversation.id.value)) {
+            it.copy(enabled = enabled)
+        } is ConversationSubAgentPreferences.WriteResult.Saved)
+    }
+    private fun finishParent(f: Fixture) {
+        awaitControl("parent completed") { f.controller.active == null && !f.controller.dataBusy }
+        assertNull(f.controller.problem)
+        val parent = f.database.messages(f.conversation.id).last().second
+        assertEquals(Message.ASSISTANT_ROLE, parent.role)
+        assertEquals(RunStatus.COMPLETED, parent.status)
+        assertNull(parent.error)
+        assertEquals(if (f.expectedDelegation) "combined answer" else "delegation disabled",
+            parent.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+    }
+    private fun resend(f: Fixture, editing: Boolean) {
+        val snapshotReady = CountDownLatch(1)
+        val snapshot = java.util.concurrent.atomic.AtomicReference<app.daiyu.android.storage.MessageActionSnapshot>()
+        controlMain { assertTrue(f.controller.loadMessageActionSnapshot(f.conversation.id) { snapshot.set(it); snapshotReady.countDown() }) }
+        assertTrue(snapshotReady.await(10, TimeUnit.SECONDS))
+        val rows = f.database.messages(f.conversation.id).map { it.second }
+        val row = if (editing) rows.first { it.role == Message.USER_ROLE } else rows.last { it.role == Message.ASSISTANT_ROLE }
+        val resultReady = CountDownLatch(1)
+        val result = java.util.concurrent.atomic.AtomicReference<app.daiyu.android.MessageActionResult>()
+        controlMain { assertTrue(f.controller.messageAction(
+            if (editing) app.daiyu.android.MessageAction.SAVE_EDIT else app.daiyu.android.MessageAction.REGENERATE,
+            snapshot.get().targets.getValue(row.id.value), replacementText = if (editing) "edited child task" else null) {
+                result.set(it); resultReady.countDown()
+            }) }
+        assertTrue(resultReady.await(10, TimeUnit.SECONDS))
+        assertEquals(app.daiyu.android.RegenerationSendOutcome.ACCEPTED,
+            (result.get() as app.daiyu.android.MessageActionResult.Regenerated).outcome)
+        finishParent(f)
+        assertEquals(1, f.database.conversations().size)
+        assertEquals(rows.first().id, f.database.messages(f.conversation.id).first().second.id)
+        if (editing) assertEquals("edited child task", f.database.messages(f.conversation.id).first().second.blocks
+            .filterIsInstance<MessageBlock.Text>().single().text)
+    }
+    fun testOrdinarySendUsesSavedCollaborationForAnEmptyExistingConversation() {
+        for (enabled in listOf(true, false)) {
+            val f = fresh(); setCollaboration(f, enabled)
+            assertNotNull(f.controller.send(f.conversation, "ordinary parent")); finishParent(f)
+            assertEquals(if (enabled) 1 else 0, f.childOpened.get())
+            assertEquals(f.conversation.id, f.database.conversations().single().id)
+        }
+    }
+    fun testRegenerateAndEditRereadEnabledConfigurationInsteadOfDroppingDelegation() {
+        for (editing in listOf(false, true)) {
+            val f = fresh(); setCollaboration(f, false)
+            assertNotNull(f.controller.send(f.conversation, "original task")); finishParent(f)
+            assertEquals(0, f.childOpened.get())
+            setCollaboration(f, true); resend(f, editing)
+            assertEquals(1, f.childOpened.get()); assertEquals(2, f.parentOpened.get())
+            val row = f.database.messages(f.conversation.id).last().second
+            val task = f.controller.childTasks(f.conversation.id).single()
+            assertEquals(row.runId.value, task.owner.parentRunId)
+            assertEquals(row.id.value, task.parentMessageId)
+        }
+    }
+    fun testRegenerateAndEditDoNotReenableClosedCollaborationFromHistory() {
+        for (editing in listOf(false, true)) {
+            val f = fresh()
+            assertNotNull(f.controller.send(f.conversation, "original child")); finishParent(f)
+            assertEquals(1, f.childOpened.get())
+            setCollaboration(f, false); resend(f, editing)
+            assertEquals(1, f.childOpened.get()); assertEquals(2, f.parentOpened.get())
+            assertFalse(f.preferences.snapshot(SubAgentConfigKey.Conversation(f.conversation.id.value)).enabled)
+        }
+    }
+    fun testNamedChildEntryRespectsTheConversationOffSwitch() {
+        val f = fresh(); setCollaboration(f, false)
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "disabled child")); finishParent(f)
+        assertEquals(0, f.childOpened.get())
+    }
 
     fun testSessionAwareChildAndParentToolContinuationUseTheDurableParentConversation() {
         val f = fresh(sessionAware = true)

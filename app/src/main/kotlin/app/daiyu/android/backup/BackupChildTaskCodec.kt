@@ -119,7 +119,7 @@ internal object BackupChildTaskCodec {
         }
     }
     private fun record(row: JSONObject): ChildTaskRecord = with(BackupHistoryRows) {
-        val index = number(row, "task_index"); require(index in 0..7)
+        val index = number(row, "task_index"); require(index in 0..Int.MAX_VALUE.toLong())
         ChildTaskRecord(ChildRunOwner(id(row, "conversation_id"), id(row, "parent_run_id"), id(row, "task_group_id"),
             number(row, "generation"), id(row, "task_id"), id(row, "assistant_message_id")), id(row, "parent_message_id"),
             id(row, "parent_owner_id"), index.toInt(), id(row, "profile_id"), text(row, "prompt"), ChildTaskStatus.valueOf(text(row, "status")),

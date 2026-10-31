@@ -16,8 +16,8 @@ sealed interface ArgumentType {
     }
     data object BooleanValue : ArgumentType
     data class ObjectValue(val schema: ToolSchema) : ArgumentType
-    data class ArrayValue(val element: ArgumentType, val minimumItems: Int = 0, val maximumItems: Int = 64, val unique: Boolean = false) : ArgumentType {
-        init { require(minimumItems >= 0 && maximumItems >= minimumItems) }
+    data class ArrayValue(val element: ArgumentType, val minimumItems: Int = 0, val maximumItems: Int? = 64, val unique: Boolean = false) : ArgumentType {
+        init { require(minimumItems >= 0 && (maximumItems == null || maximumItems >= minimumItems)) }
     }
 }
 data class ArgumentField(val name: String, val type: ArgumentType, val required: Boolean = true) {
@@ -86,7 +86,8 @@ private fun validateType(type: ArgumentType, value: Any): Any = when (type) {
         type.schema.validateObject(values)
     }
     is ArgumentType.ArrayValue -> {
-        require(value is List<*> && value.size in type.minimumItems..type.maximumItems)
+        require(value is List<*> && value.size >= type.minimumItems &&
+            (type.maximumItems == null || value.size <= type.maximumItems))
         val normalized = value.map { validateType(type.element, it ?: throw IllegalArgumentException()) }
         require(!type.unique || normalized.map(::canonicalValue).distinct().size == normalized.size)
         Collections.unmodifiableList(normalized)
@@ -100,7 +101,8 @@ private fun typeSchema(type: ArgumentType): String = when (type) {
         (type.minimum?.let { ",\"minimum\":$it" } ?: "") + (type.maximum?.let { ",\"maximum\":$it" } ?: "") + "}"
     ArgumentType.BooleanValue -> "{\"type\":\"boolean\"}"
     is ArgumentType.ObjectValue -> type.schema.jsonSchema()
-    is ArgumentType.ArrayValue -> "{\"type\":\"array\",\"items\":${typeSchema(type.element)},\"minItems\":${type.minimumItems},\"maxItems\":${type.maximumItems},\"uniqueItems\":${type.unique}}"
+    is ArgumentType.ArrayValue -> "{\"type\":\"array\",\"items\":${typeSchema(type.element)},\"minItems\":${type.minimumItems}" +
+        (type.maximumItems?.let { ",\"maxItems\":$it" } ?: "") + ",\"uniqueItems\":${type.unique}}"
 }
 private fun canonicalValue(value: Any): String = when (value) {
     is String -> jsonQuote(value)

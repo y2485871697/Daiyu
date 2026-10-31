@@ -3,7 +3,7 @@ package app.daiyu.android.domain.delegation
 import java.util.concurrent.Semaphore
 
 /** One capacity authority; leases remain attached while their original transport is parked. */
-class ChildModelPool(limit: Int, private val maximum: Int = 64) {
+class ChildModelPool(limit: Int, private val maximum: Int = Int.MAX_VALUE) {
     private class Permits(count: Int) : Semaphore(count, true) {
         fun shrink(count: Int) = reducePermits(count)
     }

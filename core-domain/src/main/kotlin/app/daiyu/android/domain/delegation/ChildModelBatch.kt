@@ -56,7 +56,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private val models = models.toMap()
     private fun limits(models: Map<String, ChildModelDefinition>) = models.values.groupBy { it.poolKey }.mapValues { (_, entries) ->
         require(entries.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
-        ChildModelPool(entries.first().parallelLimit, MAX_TASKS)
+        ChildModelPool(entries.first().parallelLimit)
     }
     private val localPools = limits(this.models).toMutableMap()
     private val limits: MutableMap<String, Semaphore> = localPools.mapValues { it.value.semaphore }.toMutableMap()
@@ -68,7 +68,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         invalid.forEach { it.first.stop() }
     }
     private val runnerDefinitions = mutableMapOf<ChatRunner, ChildModelDefinition>()
-    private val workers = Executors.newFixedThreadPool(MAX_TASKS) { task -> Thread(task, "child-model").apply { isDaemon = true } }
+    private val workers = Executors.newCachedThreadPool() { task -> Thread(task, "child-model").apply { isDaemon = true } }
     private val gate = Any()
     private var owner: RunExecutionOwner? = null
     private var session: SessionCapabilities? = null
@@ -119,12 +119,12 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             catch (_: Exception) { return ExecutionReceipt.NotExecuted("child_model_configuration_unavailable") }
         synchronized(gate) {
             models.values.forEach { selected ->
-                localPools.getOrPut(selected.poolKey) { ChildModelPool(selected.parallelLimit, MAX_TASKS) }
+                localPools.getOrPut(selected.poolKey) { ChildModelPool(selected.parallelLimit) }
                     .also { it.resize(selected.parallelLimit); limits[selected.poolKey] = it.semaphore }
             }
         }
         val snapshot = tasks.toList()
-        if (snapshot.size !in 1..MAX_TASKS || snapshot.any {
+        if (snapshot.isEmpty() || snapshot.any {
             it.profileId !in models || it.prompt.isBlank() || it.prompt.length > 4096 || bytes(it.prompt) > 16 * 1024
         }) return ExecutionReceipt.NotExecuted("invalid_child_tasks")
         val parent: RunExecutionOwner
@@ -241,7 +241,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             lease?.close()
                                             lease = sharedPool?.invoke(selectedModel) ?: synchronized(gate) {
                                                 localPools.getOrPut(selectedModel.poolKey) {
-                                                    ChildModelPool(selectedModel.parallelLimit, MAX_TASKS).also {
+                                                    ChildModelPool(selectedModel.parallelLimit).also {
                                                         limits[selectedModel.poolKey] = it.semaphore
                                                     }
                                                 }.lease()
@@ -476,7 +476,6 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     }
 
     companion object {
-        private const val MAX_TASKS = 8
         private const val MAX_OUTPUT = 64 * 1024
         private fun bytes(text: String) = text.toByteArray(Charsets.UTF_8).size
     }

@@ -34,7 +34,7 @@ data class ChildTaskRecord(
         require(sourceTaskId == null || (sourceTaskId.isNotBlank() && sourceTaskId.length <= 200))
         require(parentMessageId.isNotBlank() && parentMessageId.length <= 200)
         require(parentOwnerId.isNotBlank() && parentOwnerId.length <= 200)
-        require(index in 0..7 && profileId.isNotBlank() && profileId.length <= 200)
+        require(index >= 0 && profileId.isNotBlank() && profileId.length <= 200)
         require(prompt.isNotBlank() && prompt.length <= 4096 && prompt.toByteArray(Charsets.UTF_8).size <= 16 * 1024)
         require(text.toByteArray(Charsets.UTF_8).size <= 64 * 1024)
         require(detail == null || (detail.isNotBlank() && detail.length <= 200))

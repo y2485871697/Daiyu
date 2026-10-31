@@ -332,6 +332,23 @@ class ChildTaskHotConfigurationTest {
             assertEquals(1, a.get()); assertEquals(1, b.get()); assertEquals(2, journal.enqueues.get())
         } finally { close(supervisor) }
     }
+    @Test fun selectedCallbackPauseIsAcknowledgedBeforeTransportOpen() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+        val opens = AtomicInteger(); val captured = AtomicReference<ChildTaskPauseGroup>()
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth,
+            mapOf("p" to ChildModelDefinition("pool", 1) { answer(opens, "done") }))
+        journal.onSelected = { captured.set(supervisor.pauseGroup(binding)) }
+        supervisor.submit(binding, parent.context("selected-pause"), listOf(ChildModelTask("p", "task")))
+        try {
+            await { supervisor.snapshots(binding).single().pauseState == ChildTaskPauseState.PAUSED }
+            assertEquals(0, opens.get())
+            journal.onSelected = {}
+            assertTrue(supervisor.resumeGroup(captured.get()))
+            await { supervisor.snapshots(binding).single().settled }
+            assertEquals(1, opens.get()); assertEquals(1, journal.enqueues.get())
+        } finally { close(supervisor) }
+    }
+
     @Test fun continueChoiceAllowsLaterModelChangeWithoutReadmissionOrAnotherPause() {
         val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
         val oldOpens = AtomicInteger(); val newOpens = AtomicInteger()

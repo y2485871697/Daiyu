@@ -249,6 +249,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 if (lease?.leaveBoundary() == false) { poolWaiting(true); Thread.sleep(25); continue }
                                 poolWaiting(false)
                                 if (!journalStarted) { store?.started(record); journalStarted = true }
+                                check(!cancelled() && beforeDeadline())
+                                if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) {
+                                    if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
+                                    acquired = false; lease = null; permit = null; poolSelection = null
+                                    poolWaiting(false)
+                                    continue
+                                }
+                                if (!selected.sameSelection(definition.current())) continue
                                 return selected
                             }
                         }
@@ -310,7 +318,10 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             if (lease?.leaveBoundary() == false) continue
                                             store?.selected(record, selectedModel.display)
                                             record = record.copy(display = selectedModel.display)
+                                            check(!cancelled() && beforeDeadline())
+                                            if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) continue
                                             if (!selectedModel.sameSelection(definition.current())) continue
+                                            if (lease?.leaveBoundary() == false) continue
                                             break
                                         }
                                         val revoked = context.cancelled()

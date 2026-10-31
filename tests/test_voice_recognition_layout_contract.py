@@ -158,8 +158,9 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         self.assertNotIn('asrAdvanced', self.panel)
         sheet = self.panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"DUPLEX_VOICE" ->', 1)[0]
         self.assertIn('onDismiss = { dialog = null }', sheet)
-        self.assertIn('subtitle = "仅在控制台开通了不同服务时更改。"', sheet)
-        self.assertIn('.verticalScroll(rememberScrollState()).testTag("voice-asr-service-sheet")', sheet)
+        self.assertNotIn('subtitle =', sheet)
+        self.assertNotIn('仅在控制台开通了不同服务时更改。', sheet)
+        self.assertIn('.verticalScroll(rememberScrollState()).selectableGroup().testTag("voice-asr-service-sheet")', sheet)
         self.assertIn('DoubaoAsrProtocol.resources.forEachIndexed', sheet)
         for title in ['识别 2.0 · 按时长', '识别 2.0 · 按并发', '识别 1.0 · 按时长', '识别 1.0 · 按并发']:
             self.assertEqual(1, sheet.count(f'"{title}"'))

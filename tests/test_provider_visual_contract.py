@@ -105,7 +105,9 @@ class ProviderVisualContractTest(unittest.TestCase):
         self.assertIn('ProviderActionButton(text = if (test.running) "正在测试余额查询" else "测试余额查询"', source)
         self.assertIn('enabled = enabled && testBalance != null && valid && !test.running, onClick = test.start', source)
         self.assertIn('testTag("provider-balance-test").padding(horizontal = 12.dp, vertical = 8.dp)', source)
-        self.assertIn('（仅本次测试，未保存）', source)
+        self.assertIn('test.money?.let { money ->', source)
+        self.assertNotIn('余额测试成功', source)
+        self.assertIn('test.status?.let { SettingsNote(it) }', source)
         self.assertIn('request === flag && currentEnabled && currentOwner == owner', source)
 
     def test_delete_keeps_color_cancel_and_owner_guards(self):

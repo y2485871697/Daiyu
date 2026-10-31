@@ -22,7 +22,7 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
     private var pageEnabled by mutableStateOf(true)
     private var mounted by mutableStateOf(true)
     private var tester by mutableStateOf<ProviderBalanceTester?>(null)
-    private lateinit var latestUi: SettingsConnectionTestUi
+    private lateinit var latestUi: ProviderBalanceTestUi
     private lateinit var owner: TestOwner
     private val success = BalanceResult.Available(BalanceMoney("12.34".toBigDecimal(), "CNY"), 1234L)
     private class Request(val draft: ModelSettingsDraftUi, val cancelled: () -> Boolean, val deliver: (BalanceResult) -> Unit)
@@ -78,7 +78,29 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { ui.onAllNodesWithText(expected).fetchSemanticsNodes().size == 1 }
         ui.onNodeWithText(expected).assertExists()
     }
-    private fun noReceipt() { ui.onAllNodesWithText("仅本次测试", substring = true).assertCountEquals(0) }
+    private fun awaitAmount(raw: String) {
+        val expected = formatBalanceDisplay(raw)
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasText(expected) and hasAnyAncestor(hasTestTag("provider-balance-test-result")))
+                .fetchSemanticsNodes().size == 1
+        }
+        reveal("provider-balance-test-result", title).assertIsDisplayed()
+        val container = node("provider-balance-test-result").fetchSemanticsNode().boundsInRoot
+        val amount = node("provider-balance-test-amount").fetchSemanticsNode().boundsInRoot
+        assertEquals(container.center.x, amount.center.x, 1f)
+        ui.onAllNodesWithText("余额测试成功", substring = true).assertCountEquals(0)
+        ui.onAllNodesWithText("仅本次测试", substring = true).assertCountEquals(0)
+    }
+    private fun noReceipt() {
+        node("provider-balance-test-result").assertDoesNotExist()
+        ui.onAllNodesWithText("余额测试成功", substring = true).assertCountEquals(0)
+        ui.onAllNodesWithText("仅本次测试", substring = true).assertCountEquals(0)
+    }
+    private fun assertNoCoordinatorReceipt() {
+        assertNull(latestUi.status)
+        assertNull(latestUi.money)
+    }
 
     fun testFourTemplatesUseProviderCredentialsAndOnlyDisplayTestReceiptsInBothThemes() {
         val saved = fixture.settings.load()
@@ -103,6 +125,7 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
             node("provider-balance-token").assertDoesNotExist()
             node("provider-balance-token-clear").assertDoesNotExist()
             preset("new_api"); edit("provider-balance-token", "independent-token")
+            ui.onAllNodesWithText("从 NewAPI 的个人安全设置获取", substring = true).assertCountEquals(0)
             node("provider-balance-token-clear").assertDoesNotExist()
             reveal("provider-balance-test", title).assertIsNotEnabled()
             mainThread { draft = draft.copy(endpoint = "https://provider.invalid/v1", apiKey = "provider-key") }
@@ -120,9 +143,10 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
             assertTrue(config.customHeaders.isEmpty())
             reveal("provider-balance-test", title).assertIsNotEnabled()
             deliver(fake.last)
-            awaitReceipt("余额测试成功：CNY 12.34（仅本次测试，未保存）")
+            awaitAmount("12.34")
             start(); deliver(fake.last, BalanceResult.Failed(BalanceFailure.AUTHORIZATION))
             awaitReceipt("余额查询未授权；请检查独立密钥（仅本次测试，未保存）")
+            node("provider-balance-test-result").assertDoesNotExist()
             assertSame(before, draft)
             reveal("settings-switch:余额", title).performClick()
             node("provider-balance-test").assertDoesNotExist()
@@ -145,7 +169,7 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
         assertSame(before, fake.last.draft)
         assertEquals("provider-key", checkNotNull(fake.last.draft.providerBalanceConfiguration()).resolvedToken())
         deliver(fake.last)
-        awaitReceipt("余额测试成功：CNY 12.34（仅本次测试，未保存）")
+        awaitAmount("12.34")
         assertEquals(0, fixture.opens.get())
     }
 
@@ -160,6 +184,34 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
         assertTrue(disabled.cancelled()); deliver(disabled); noReceipt()
         node("provider-balance-test").assertDoesNotExist()
         assertEquals(saved, fixture.settings.load()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCenteredAmountHasTwoDecimalsAndClearsBeforeRetryOrUnknownInBothThemes() {
+        val saved = fixture.settings.load()
+        val registry = fixture.controller.providers.snapshot()
+        for (dark in listOf(false, true)) {
+            val fake = Fake(); show(fake, dark, validDraft())
+            val before = draft
+            for (raw in listOf("0", "12", "12.3", "14.123608", "-12.345", "123456789.5")) {
+                start()
+                node("provider-balance-test-result").assertDoesNotExist()
+                val money = BalanceMoney(raw.toBigDecimal(), "USD")
+                deliver(fake.last, BalanceResult.Available(money, 1234L))
+                awaitAmount(raw)
+                assertEquals(raw.toBigDecimal(), money.amount)
+                assertSame(before, draft)
+            }
+            start(); noReceipt()
+            deliver(fake.last, BalanceResult.Unknown)
+            awaitReceipt("余额未知；可手动查询或由宿主轮询刷新（仅本次测试，未保存）")
+            node("provider-balance-test-result").assertDoesNotExist()
+            start(); deliver(fake.last); awaitAmount("12.34")
+            edit("provider-balance-path", "/next-balance")
+            noReceipt()
+        }
+        assertEquals(saved, fixture.settings.load())
+        assertEquals(registry, fixture.controller.providers.snapshot())
+        assertEquals(0, fixture.opens.get())
     }
 
     private fun coordinator(fake: Fake) {
@@ -194,22 +246,22 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
         val fake = Fake(); coordinator(fake)
         val first = startCoordinator(fake)
         mainThread { draft = draft.copy() }; ui.waitForIdle()
-        assertTrue(first.cancelled()); deliver(first); assertNull(latestUi.status)
+        assertTrue(first.cancelled()); deliver(first); assertNoCoordinatorReceipt()
         val second = startCoordinator(fake)
         mainThread { pageEnabled = false }; ui.waitForIdle()
-        assertTrue(second.cancelled()); deliver(second); assertNull(latestUi.status)
+        assertTrue(second.cancelled()); deliver(second); assertNoCoordinatorReceipt()
         val count = fake.requests.size
         mainThread { latestUi.start() }; assertEquals(count, fake.requests.size)
         mainThread { pageEnabled = true }; ui.waitForIdle()
         val third = startCoordinator(fake)
         mainThread { tester = null }; ui.waitForIdle()
-        assertTrue(third.cancelled()); deliver(third); assertNull(latestUi.status)
+        assertTrue(third.cancelled()); deliver(third); assertNoCoordinatorReceipt()
     }
     fun testPauseAndDisposalCannotBorrowResumedOrRemountedVisit() {
         val fake = Fake(); coordinator(fake)
         val paused = startCoordinator(fake)
         mainThread { owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE) }; ui.waitForIdle()
-        assertTrue(paused.cancelled()); deliver(paused); assertNull(latestUi.status)
+        assertTrue(paused.cancelled()); deliver(paused); assertNoCoordinatorReceipt()
         val count = fake.requests.size
         mainThread { latestUi.start() }; assertEquals(count, fake.requests.size)
         mainThread { owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME) }; ui.waitForIdle()
@@ -224,17 +276,17 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
         }
         val before = fake.requests.size
         mainThread { stale.start() }; assertEquals(before, fake.requests.size)
-        deliver(disposed); assertNull(latestUi.status)
-        val expected = "余额测试成功：CNY 12.34（仅本次测试，未保存）"
+        deliver(disposed); assertNoCoordinatorReceipt()
+        val expected = success.money
         val fresh = startCoordinator(fake)
         assertFalse(fresh.cancelled())
         deliver(fresh)
         ui.waitUntil(timeoutMillis = 5_000) {
             var completed = false
-            mainThread { completed = !latestUi.running && latestUi.status == expected }
+            mainThread { completed = !latestUi.running && latestUi.status == null && latestUi.money == expected }
             completed
         }
-        mainThread { assertEquals(expected, latestUi.status) }
+        mainThread { assertEquals(expected, latestUi.money); assertNull(latestUi.status) }
         assertEquals(0, fixture.opens.get())
     }
 }

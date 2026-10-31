@@ -67,6 +67,6 @@ class SettingsCopyCleanupContractTest(unittest.TestCase):
         self.assertNotIn('summary =', selector)
         self.assertIn('change(BalanceOption.applyPreset(presets[it], options))', selector)
         self.assertIn('listOf("自定义", "NewAPI", "Sub2API", "DeepSeek")', page)
-        self.assertIn('从 NewAPI 的个人安全设置获取；留空使用提供商 API Key。', page)
+        self.assertNotIn('从 NewAPI 的个人安全设置获取；留空使用提供商 API Key。', page)
         self.assertIn('summary = "从提供商获取账户余额"', page)
         self.assertIn('enabled = enabled && testBalance != null && valid && !test.running, onClick = test.start', page)

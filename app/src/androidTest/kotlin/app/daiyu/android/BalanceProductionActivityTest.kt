@@ -136,7 +136,8 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         node("provider-balance-key").assertDoesNotExist()
         reveal("provider-balance-test").assertIsEnabled().performClick()
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithText("余额测试成功：CNY 56.78（仅本次测试，未保存）").fetchSemanticsNodes().isNotEmpty()
+            ui.onAllNodes(hasText(formatBalanceDisplay("56.78")) and
+                hasAnyAncestor(hasTestTag("provider-balance-test-result"))).fetchSemanticsNodes().size == 1
         }
         assertEquals(1, draftCalls.get())
         val seen = checkNotNull(draftConfiguration.get())

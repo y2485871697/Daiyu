@@ -1,26 +1,37 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.daiyu.android.balance.BalanceMoney
 import app.daiyu.android.balance.BalanceOption
 import app.daiyu.android.balance.BalanceResult
 import app.daiyu.android.balance.BalanceState
+import app.daiyu.android.balance.formatBalanceDisplay
+import app.daiyu.android.balance.ui.ProviderBalanceAmount
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal typealias ProviderBalanceTester = (ModelSettingsDraftUi, () -> Boolean, (BalanceResult) -> Unit) -> Boolean
+
+internal data class ProviderBalanceTestUi(val running: Boolean, val status: String?,
+    val money: BalanceMoney?, val start: () -> Unit, val cancel: () -> Unit)
 
 /** Provider-bound balance options; test receipts never replace saved configuration. */
 @Composable
 internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     onChange: (ModelSettingsDraftUi) -> Unit, testBalance: ProviderBalanceTester? = null,
-    testUi: SettingsConnectionTestUi? = null) {
+    testUi: ProviderBalanceTestUi? = null) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val visit = remember(lifecycle) { AtomicBoolean(true) }
     DisposableEffect(visit) { onDispose { visit.set(false) } }
@@ -51,7 +62,6 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
             if (options.preset == BalanceOption.PRESET_NEW_API) {
                 SettingsTextField("访问令牌", options.accessToken, { change(options.copy(accessToken = it)) },
                     password = true, enabled = enabled, compact = true, tag = "provider-balance-token")
-                SettingsNote("从 NewAPI 的个人安全设置获取；留空使用提供商 API Key。")
             } else {
                 SettingsTextField("余额 API 路径", options.apiPath, { change(options.copy(apiPath = it)) },
                     enabled = enabled, compact = true, tag = "provider-balance-path")
@@ -62,6 +72,14 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
             ProviderActionButton(text = if (test.running) "正在测试余额查询" else "测试余额查询",
                 enabled = enabled && testBalance != null && valid && !test.running, onClick = test.start,
                 modifier = Modifier.testTag("provider-balance-test").padding(horizontal = 12.dp, vertical = 8.dp))
+            test.money?.let { money ->
+                Box(Modifier.fillMaxWidth().testTag("provider-balance-test-result")
+                    .padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    ProviderBalanceAmount(formatBalanceDisplay(money.amount.toPlainString()),
+                        modifier = Modifier.testTag("provider-balance-test-amount"), iconSize = 16.dp,
+                        textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 28.sp))
+                }
+            }
             test.status?.let { SettingsNote(it) }
         }
     }
@@ -69,7 +87,7 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
 
 @Composable
 internal fun rememberProviderBalanceTest(draft: ModelSettingsDraftUi, enabled: Boolean,
-    tester: ProviderBalanceTester?): SettingsConnectionTestUi {
+    tester: ProviderBalanceTester?): ProviderBalanceTestUi {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
     val currentTester by rememberUpdatedState(tester)
@@ -79,14 +97,15 @@ internal fun rememberProviderBalanceTest(draft: ModelSettingsDraftUi, enabled: B
     val visit = remember(lifecycle) { AtomicBoolean(true) }
     var request by remember { mutableStateOf<AtomicBoolean?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
-    fun cancel() { request?.set(true); request = null; status = null }
+    var money by remember { mutableStateOf<BalanceMoney?>(null) }
+    fun cancel() { request?.set(true); request = null; status = null; money = null }
     DisposableEffect(lifecycle, visit) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) cancel() }
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); cancel(); lifecycle.removeObserver(observer) }
     }
     DisposableEffect(owner, enabled, tester != null) { onDispose { cancel() } }
-    return SettingsConnectionTestUi(request != null, status, start = {
+    return ProviderBalanceTestUi(request != null, status, money, start = {
         val invoke = currentTester
         if (visit.get() && invoke != null && currentEnabled && currentOwner == owner && request == null &&
             lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
@@ -95,17 +114,18 @@ internal fun rememberProviderBalanceTest(draft: ModelSettingsDraftUi, enabled: B
                 status = "请先完善提供商连接与余额查询设置"
             } else {
                 val flag = AtomicBoolean(false)
-                request = flag; status = null
+                request = flag; status = null; money = null
                 val accepted = try {
                     invoke(owner.draft, flag::get) { result ->
                         scope.launch {
                             if (visit.get() && !flag.get() && request === flag && currentEnabled && currentOwner == owner &&
                                 lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                                 flag.set(true); request = null
+                                money = (result as? BalanceResult.Available)?.money
                                 status = when (result) {
-                                    is BalanceResult.Available -> "余额测试成功：${result.money.display()}"
-                                    else -> BalanceState(configured = true, result = result).project().statusText
-                                } + "（仅本次测试，未保存）"
+                                    is BalanceResult.Available -> null
+                                    else -> BalanceState(configured = true, result = result).project().statusText + "（仅本次测试，未保存）"
+                                }
                             }
                         }
                     }

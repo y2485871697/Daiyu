@@ -3,6 +3,10 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import app.daiyu.android.context.ProductionCompressionSettings
 import app.daiyu.android.context.SummaryModelBinding
@@ -11,6 +15,7 @@ import app.daiyu.android.context.SummaryProfileSettings
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.ui.components.CompressionProtocolHelp
 
 /** In-memory draft only; the host supplies one stable binding for the page. */
 internal data class CompressionSettingsDraftUi(
@@ -71,12 +76,13 @@ internal fun CompressionSettingsForm(
     onChooseModel: () -> Unit = {},
     saving: Boolean = false,
 ) {
+    var showHelp by remember { mutableStateOf(false) }
     SettingsScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
         notice?.let { item("compression-notice") { SettingsNote(it, error = error) } }
         item("compression-automatic") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("自动压缩上下文", draft.automatic, enabled,
-                    busy = saving, tag = "settings-switch:自动压缩", summary = "实测达到窗口 80% 时压缩，保留约 16% 最近上下文。") {
+                    busy = saving, tag = "settings-switch:自动压缩") {
                     onSave(draft.copy(automatic = it))
                 }
             }
@@ -88,7 +94,8 @@ internal fun CompressionSettingsForm(
                     listOf("Chat Completions API", "Responses API"),
                     listOf("compression-endpoint:chat-completions", "compression-endpoint:responses"),
                     selectedIndex = -1, onSelect = {})
-                SettingsNote("仅用于摘要。默认 Chat Completions；模型需要时选 Responses。Anthropic / Codex 不受此项影响。")
+                CompressionProtocolHelp(expanded = showHelp, onToggle = { showHelp = !showHelp },
+                    tag = "compression-protocol-help", modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
         item("compression-profile") {

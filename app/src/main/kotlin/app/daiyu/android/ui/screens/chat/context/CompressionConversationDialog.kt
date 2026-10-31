@@ -20,8 +20,8 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +35,7 @@ import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.context.ContextManagementOperation
 import app.daiyu.android.ui.components.UsageBody as Text
 import app.daiyu.android.ui.components.UsageGlassDialog
+import app.daiyu.android.ui.components.CompressionProtocolHelp
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewSwitch
@@ -119,17 +120,8 @@ internal fun CompressionConversationDialog(
                     Modifier.fillMaxWidth().testTag("compression-dialog-refresh"), enabled = operation == null)
             }
             item("help") {
-                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("compression-dialog-help")
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                        showHelp = !showHelp
-                    }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("接口怎么选", Modifier.weight(1f), color = colors.muted, fontSize = 12.sp)
-                    Icon(if (showHelp) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight, null,
-                        Modifier.size(18.dp), tint = colors.muted)
-                }
-                if (showHelp) Text("仅用于摘要。默认 Chat Completions；模型需要时选 Responses。Anthropic / Codex 不受此项影响。",
-                    Modifier.testTag("compression-dialog-help-text").padding(bottom = 4.dp),
-                    color = colors.muted, fontSize = 12.sp)
+                CompressionProtocolHelp(expanded = showHelp, onToggle = { showHelp = !showHelp },
+                    tag = "compression-dialog-help")
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

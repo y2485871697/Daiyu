@@ -40,8 +40,11 @@ class ChatVoiceFeedbackContractTest(unittest.TestCase):
         self.assertLess(owner, preflight)
         for downstream in ('requestDictation()', 'stopCascadeVoice()', 'remoteVoice.startDuplex', 'voiceConversationDialogOwner ='):
             self.assertLess(preflight, action.index(downstream))
-        self.assertIn('if (voiceEntryMode != ChatMenuAction.VOICE_DOUBAO || !remoteVoice.duplexActive)', action)
-        self.assertIn('doubaoCallPresentation.expand(shownCall.sessionKey)', action)
+        close = action.index('CallEntryAction.HANG_UP -> { closeDoubaoCall(shownCall!!.sessionKey); return@voice }')
+        self.assertLess(close, action.index('VoiceSettingsPreferences(applicationContext).enabled(feature)'))
+        self.assertLess(close, preflight)
+        self.assertIn('CallEntryAction.IGNORE_CLOSING -> return@voice', action)
+        self.assertNotIn('doubaoCallPresentation.expand(', action)
         self.assertNotIn('if (remoteVoice.duplexActive) remoteVoice.invalidate()', action)
 
     def test_missing_offline_pack_stays_in_chat(self):

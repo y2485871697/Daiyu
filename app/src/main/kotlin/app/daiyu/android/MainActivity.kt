@@ -3187,7 +3187,17 @@ class MainActivity : ComponentActivity() {
         },
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },
+        onVoiceLongPress = { admitVoiceModePicker() && currentChat() },
         onVoice = voice@{
+            // A retained call picture wins over mode/settings/preflight, even after remote termination.
+            if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
+                selected?.id?.value != renderedConversation) return@voice
+            val shownCall = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value }
+            when (callEntryAction(shownCall != null, shownCall?.presentation == DoubaoCallPresentation.CLOSING)) {
+                CallEntryAction.HANG_UP -> { closeDoubaoCall(shownCall!!.sessionKey); return@voice }
+                CallEntryAction.IGNORE_CLOSING -> return@voice
+                CallEntryAction.START -> Unit
+            }
             val feature = when (voiceEntryMode) {
                 ChatMenuAction.VOICE_INPUT -> "input"
                 ChatMenuAction.VOICE_DOUBAO -> "realtime"
@@ -3195,23 +3205,15 @@ class MainActivity : ComponentActivity() {
             }
             if (!VoiceSettingsPreferences(applicationContext).enabled(feature)) return@voice
             if (!currentChat()) return@voice
-            if (voiceEntryMode != ChatMenuAction.VOICE_DOUBAO || !remoteVoice.duplexActive) {
-                chatVoiceConfigurationProblem(voiceEntryMode)?.let { voiceConfigurationToast(it); return@voice }
-            }
+            chatVoiceConfigurationProblem(voiceEntryMode)?.let { voiceConfigurationToast(it); return@voice }
             when (voiceEntryMode) {
                 ChatMenuAction.VOICE_INPUT -> requestDictation()
                 ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) {
-                    val shownCall = doubaoCallPresentation.state
-                    if (shownCall?.presentation == DoubaoCallPresentation.CLOSING) return@voice
-                    if (shownCall != null && shownCall.conversationKey == selected?.id?.value) {
-                        doubaoCallPresentation.expand(shownCall.sessionKey)
-                    } else {
-                        stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
-                        speechHost.stop(speechHost.owner)
-                        remoteVoice.startDuplex(conversationId = selected?.id?.value) {
-                            activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-                                selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
-                        }
+                    stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                    speechHost.stop(speechHost.owner)
+                    remoteVoice.startDuplex(conversationId = selected?.id?.value) {
+                        activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                            selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
                     }
                 }
                 else -> if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
@@ -3399,8 +3401,11 @@ class MainActivity : ComponentActivity() {
                 VoiceSettingsPreferences(applicationContext).enabled(when (action) {
                     ChatMenuAction.VOICE_INPUT -> "input"; ChatMenuAction.VOICE_DOUBAO -> "realtime"; else -> "conversation"
                 })) {
-                if (voiceEntryPreferences.edit().putString("mode", action.name).commit()) voiceEntryMode = action
-                else toast("语音入口保存失败")
+                // A previously opened picker must not switch modes after a call has appeared.
+                if (admitVoiceModePicker()) {
+                    if (voiceEntryPreferences.edit().putString("mode", action.name).commit()) voiceEntryMode = action
+                    else toast("语音入口保存失败")
+                }
             }
             ChatMenuAction.NEW_CHAT -> if (currentChat()) createNewConversation()
             ChatMenuAction.RENAME -> selected?.let { conversation ->
@@ -3434,6 +3439,19 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun admitVoiceModePicker(): Boolean {
+        val admitted = voiceModePickerAdmitted(doubaoCallPresentation.state != null, remoteVoice.duplexActive)
+        if (!admitted) voiceConfigurationToast("请先挂断")
+        return admitted
+    }
+
+    private fun closeDoubaoCall(key: Long) {
+        // Freeze the departing UI BEFORE stop can synchronously publish cancellation/empty text.
+        if (doubaoCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
+            try { remoteVoice.stopDuplex(key) } catch (_: Exception) { voiceConfigurationToast("语音资源释放未确认") }
+        }
+    }
+
     private fun doubaoCallActions(): DoubaoCallActions {
         val shown = doubaoCallPresentation.state ?: return DoubaoCallActions()
         val key = shown.sessionKey
@@ -3444,11 +3462,7 @@ class MainActivity : ComponentActivity() {
         return DoubaoCallActions(
             onExpand = { if (current()) doubaoCallPresentation.expand(key) },
             onMinimize = { if (current()) doubaoCallPresentation.minimize(key) },
-            onHangUp = {
-                if (current() && doubaoCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
-                    try { remoteVoice.stopDuplex(key) } catch (_: Exception) { voiceConfigurationToast("语音资源释放未确认") }
-                }
-            },
+            onHangUp = { if (current()) closeDoubaoCall(key) },
             onToggleMute = {
                 if (current() && !remoteVoice.setDuplexMuted(key, !remoteVoice.duplexSnapshot.value.let { it?.muted ?: shown.muted }))
                     voiceConfigurationToast("麦克风状态未改变")
@@ -3608,8 +3622,11 @@ class MainActivity : ComponentActivity() {
             })
         }
         val remoteStatus by remoteVoice.status.collectAsStateWithLifecycle()
-        if (!engineeringUi && !remoteVoice.duplexActive) app.daiyu.android.ui.components.DictationStatusNotice(
-            app.daiyu.android.voice.ComposerDictationState(target = remoteVoice.dictationTarget, status = remoteStatus), false)
+        val remoteCallSnapshot by remoteVoice.duplexSnapshot.collectAsStateWithLifecycle()
+        // Realtime status belongs to the call panel, NOT dictation Toasts (including terminal states).
+        val dictationNoticeStatus = remoteDictationNoticeStatus(remoteStatus, remoteCallSnapshot != null)
+        if (!engineeringUi) app.daiyu.android.ui.components.DictationStatusNotice(
+            app.daiyu.android.voice.ComposerDictationState(target = remoteVoice.dictationTarget, status = dictationNoticeStatus), false)
         if (remoteStatus.isNotEmpty() && engineeringUi) {
             top.yukonga.miuix.kmp.basic.Text(remoteStatus,
                 modifier = Modifier.testTag("remote-voice-status").semantics { liveRegion = LiveRegionMode.Polite })

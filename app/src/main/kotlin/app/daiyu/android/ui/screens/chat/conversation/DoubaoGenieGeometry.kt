@@ -5,7 +5,85 @@ import kotlin.math.max
 /** Pure pixel geometry. No Android Matrix dependency, so the exact renderer math is JVM-testable. */
 internal object DoubaoGenieGeometry {
     const val STRIP_COUNT = 64
-    const val DURATION_MILLIS = 740
+    const val DURATION_MILLIS = 420
+
+    // Exact preview symbols (viewBox 0 0 24 24), parsed by the native renderer.
+    const val COLLAPSE_PATH = "m7 10 5 5 5-5M7 5h10"
+    const val EXPAND_PATH = "M14 4h6v6m-6 0 6-6M10 20H4v-6m0 6 6-6"
+
+    const val ORB_DIAMETER = 66f
+    const val HALO_INSET = 7f
+    const val MINI_DIAMETER = 37f
+    const val MINI_WAVE_SCALE = .65f
+    enum class OrbMode { CONNECTING, LISTENING, RESPONDING, MUTED, RECONNECTING, ENDED, ERROR }
+    data class OrbStyle(val background: Long, val bars: Long, val halo: Long, val icon: Long,
+                        val glow: Boolean, val showWave: Boolean, val spinner: Boolean, val still: Boolean)
+
+    fun orbStyle(mode: OrbMode, compact: Boolean): OrbStyle {
+        val muted = mode == OrbMode.MUTED
+        val ended = mode == OrbMode.ENDED || mode == OrbMode.ERROR
+        val connecting = mode == OrbMode.CONNECTING || mode == OrbMode.RECONNECTING
+        return OrbStyle(
+            background = when {
+                compact -> 0xFFEEE5F9
+                muted -> 0xFFEEE9F2
+                ended -> 0xFFEFEAF4
+                mode == OrbMode.RESPONDING -> 0xFFE9DDF9
+                mode == OrbMode.RECONNECTING -> 0xFFEFE8F5
+                else -> 0xFFEEE6FB
+            },
+            bars = if (compact) 0xFFA58CC5 else if (mode == OrbMode.RESPONDING) 0xFF9471BD else 0xFFA18AC7,
+            halo = if (muted) 0xFFF5F1F8 else if (ended) 0xFFF6F2F9 else 0xFFF6F2FC,
+            icon = if (compact) 0xFF9F87BA else if (muted) 0xFFB1A4BD else 0xFFAD9CBA,
+            glow = !compact && !muted && !ended,
+            showWave = !muted && !ended && (compact || !connecting),
+            spinner = !compact && connecting,
+            still = muted || ended,
+        )
+    }
+
+    private val barHeights = floatArrayOf(12f, 21f, 29f, 20f, 11f)
+    private val barOffsetsMillis = floatArrayOf(0f, 500f, 900f, 300f, 700f)
+
+    // CSS ease-in-out = cubic-bezier(.42,0,.58,1), not a sine approximation.
+    private fun cssEase(fraction: Float): Float {
+        val x = fraction.coerceIn(0f, 1f)
+        var low = 0f
+        var high = 1f
+        repeat(16) {
+            val t = (low + high) / 2f
+            val q = 1f - t
+            val at = 3f * q * q * t * .42f + 3f * q * t * t * .58f + t * t * t
+            if (at < x) low = t else high = t
+        }
+        val t = (low + high) / 2f
+        return t * t * (3f - 2f * t)
+    }
+
+    private fun pulse(elapsedMillis: Float, periodMillis: Float): Float {
+        val phase = ((elapsedMillis % periodMillis) + periodMillis) % periodMillis / periodMillis
+        return cssEase(if (phase <= .5f) phase * 2f else (1f - phase) * 2f)
+    }
+
+    data class OrbFrame(
+        val barHeights: List<Float>,
+        val haloScale: Float,
+        val haloAlpha: Float,
+        val spinnerDegrees: Float,
+    )
+
+    fun orbFrame(elapsedMillis: Float, responding: Boolean = false, compact: Boolean = false,
+                 connecting: Boolean = false, still: Boolean = false): OrbFrame {
+        val period = if (compact && connecting) 2300f else if (responding) 750f else 1450f
+        val bars = barHeights.mapIndexed { i, height ->
+            val offset = if (compact && connecting) 0f else barOffsetsMillis[i]
+            height * (.55f + .45f * pulse(elapsedMillis + offset, period)) *
+                (if (compact) MINI_WAVE_SCALE else 1f)
+        }
+        val breath = if (still) 0f else pulse(elapsedMillis, 3000f)
+        return OrbFrame(bars, 1f + .055f * breath, if (still) .6f else .45f + .35f * breath,
+            ((elapsedMillis % 1500f) / 1500f) * 360f)
+    }
 
     data class Bounds(val left: Float, val top: Float, val width: Float, val height: Float)
     data class Point(val x: Float, val y: Float)

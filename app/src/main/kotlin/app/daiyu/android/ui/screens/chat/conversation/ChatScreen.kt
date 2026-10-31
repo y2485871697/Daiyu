@@ -53,7 +53,7 @@ data class ChatScreenActions(
     val onPrimaryLongPress: () -> Unit = {},
     val onAttach: () -> Unit = {},
     val onVoice: () -> Unit = {},
-    val onVoiceLongPress: () -> Unit = {},
+    val onVoiceLongPress: () -> Boolean = { true },
     val onModelClick: () -> Unit = {},
     val onReasoningClick: () -> Unit = {},
     val onAssistantClick: () -> Unit = {},
@@ -93,6 +93,7 @@ internal fun DaiyuChatScreen(
     callUi: DoubaoCallUi? = null,
     callActions: DoubaoCallActions = DoubaoCallActions(),
 ) {
+    val motionState = remember(callUi?.sessionKey) { DoubaoCallMotionState() }
     var voiceAnchor by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
     var composerBounds by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
     var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -140,7 +141,7 @@ internal fun DaiyuChatScreen(
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
                 modifier = Modifier.onGloballyPositioned { composerBounds = it.boundsInRoot() },
-                onVoiceAnchorBounds = { voiceAnchor = it }, callUi = callUi,
+                onVoiceAnchorBounds = { voiceAnchor = it }, callUi = callUi, callMotion = motionState,
                 onInputFocusChanged = { focused ->
                     draftFocused = focused
                     if (focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()
@@ -151,7 +152,8 @@ internal fun DaiyuChatScreen(
     if (callUi != null && voiceAnchor.width > 0f) {
         DoubaoCallOverlay(callUi, callActions,
             anchorBounds = voiceAnchor.translate(-overlayOrigin),
-            composerTop = composerBounds.takeIf { it.height > 0f }?.top?.minus(overlayOrigin.y))
+            composerTop = composerBounds.takeIf { it.height > 0f }?.top?.minus(overlayOrigin.y),
+            motion = motionState)
     }
     }
 }

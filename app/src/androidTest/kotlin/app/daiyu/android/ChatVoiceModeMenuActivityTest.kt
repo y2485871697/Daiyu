@@ -33,6 +33,9 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
 import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
 import app.daiyu.android.ui.screens.chat.conversation.ComposerUi
+import app.daiyu.android.ui.screens.chat.conversation.DoubaoCallUi
+import app.daiyu.android.ui.screens.chat.conversation.DoubaoCallPresentation
+import app.daiyu.android.ui.screens.chat.conversation.DoubaoCallVisualState
 import kotlin.math.abs
 
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
@@ -40,8 +43,9 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
     private val modes = listOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO)
     private var state by mutableStateOf(ComposerUi())
     private val events = mutableListOf<String>()
+    private var callUi by mutableStateOf<DoubaoCallUi?>(null)
 
-    private fun show(dark: Boolean = false) {
+    private fun show(dark: Boolean = false, longPressAdmission: (() -> Boolean)? = null) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
@@ -50,9 +54,9 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
                             ChatComposer(state, ChatScreenActions(
                                 onVoice = { events += "voice:${state.voiceMode.name}" },
-                                onVoiceLongPress = { events += "long" },
+                                onVoiceLongPress = longPressAdmission ?: { events += "long"; true },
                                 onMenuAction = { events += it.name; state = state.copy(voiceMode = it) },
-                            ))
+                            ), callUi = callUi)
                         }
                     }
                 }
@@ -90,6 +94,39 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
     private fun assertClosed() {
         ui.waitUntil(5_000) {
             ui.onAllNodesWithTag("chat-voice-mode-menu").fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    fun testFalseActivityAdmissionDoesNotOpenPickerWhenComposerHasNoCallUiYet() {
+        // The activity can already own a call while a stale composer still has callUi == null.
+        show(longPressAdmission = { events += "blocked"; false })
+        update(modes.toSet())
+        awaitHostWindowFocus(activity)
+        node("chat-voice").assertIsEnabled().performTouchInput { longClick() }
+        assertClosed()
+        node("chat-selection-sheet").assertDoesNotExist()
+        ui.runOnIdle { assertEquals(listOf("blocked"), events.toList()) }
+    }
+
+    fun testTerminalAndClosingLongPressStillReachesAdmissionWithoutOpeningPicker() {
+        show(longPressAdmission = { events += "blocked"; false })
+        // Call controls must remain reachable even when starting a new voice mode is unavailable.
+        update(emptySet(), enabled = false)
+        for ((presentation, visualState) in listOf(
+            DoubaoCallPresentation.EXPANDED to DoubaoCallVisualState.ERROR,
+            DoubaoCallPresentation.MINI to DoubaoCallVisualState.ENDED,
+            DoubaoCallPresentation.CLOSING to DoubaoCallVisualState.ENDED,
+        )) {
+            ui.runOnIdle {
+                events.clear()
+                callUi = DoubaoCallUi(sessionKey = 9, conversationKey = null,
+                    presentation = presentation, visualState = visualState, startedAtMillis = 0)
+            }
+            awaitHostWindowFocus(activity)
+            node("chat-voice").assertIsEnabled().performTouchInput { longClick() }
+            assertClosed()
+            node("chat-selection-sheet").assertDoesNotExist()
+            ui.runOnIdle { assertEquals(listOf("blocked"), events.toList()) }
         }
     }
 

@@ -32,6 +32,13 @@ class MarkdownStreamOptimizationContract(unittest.TestCase):
         self.assertIn("parts.getOrPut(id)", budget)
         self.assertIn("progress.target === current", budget)
 
+    def test_accepted_mount_baseline_survives_incoming_snapshot_preparation(self):
+        typing = (BASE / "MarkdownTyping.kt").read_text()
+        self.assertIn("remember(identity, resetEpoch, allowBaselinePrefix) { MarkdownBaselineBudget() }", typing)
+        self.assertIn("else if (baselineBudget.length == null) rememberMarkdownProjection", typing)
+        self.assertIn("val baselineLength = baselineBudget.length ?: preparedBaselineLength", typing)
+        self.assertIn("SideEffect { if (baselineBudget.length == null) baselineBudget.length = baselineLength }", typing)
+
     def test_complete_layout_is_cached_but_semantics_never_return_hidden_text(self):
         code = (BASE / "MarkdownCodeReveal.kt").read_text()
         for token in ["rememberTextMeasurer(cacheSize = 1)", "remember(block.text) { AnnotatedString(block.text) }",

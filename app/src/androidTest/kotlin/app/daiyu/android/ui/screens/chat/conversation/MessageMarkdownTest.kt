@@ -1508,7 +1508,10 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             val nextProjection = prepare(next, projected)
             mainThread { source = next; projected = nextProjection }
             assertSame("Accepted targets must keep the existing leaf budget", budget, currentBudget)
-            assertSame("Completed paragraph shaping survives network appends", shapedParagraph, layout(paragraph).multiParagraph)
+            assertEquals("Accepted appends cannot clear the visible mount baseline", prefix.let {
+                markdownBlocksDisplayText(MarkdownParser.parse(it + "Tail")).length
+            }, currentBudget?.value)
+            assertSame("Completed paragraph shaping survives network append $index", shapedParagraph, layout(paragraph).multiParagraph)
             assertSame("Completed cell shaping survives network appends", shapedCell, layout(cell).multiParagraph)
         }
         assertTrue(opened.isEmpty())

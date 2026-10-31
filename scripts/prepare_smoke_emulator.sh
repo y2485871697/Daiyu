@@ -3,6 +3,11 @@ set -euo pipefail
 api=$1
 mkdir -p smoke
 rm -f smoke/prelaunch-ready.txt
+# The API37 userdata image needs about 10 GB; smoke never uses the hosted .NET SDK.
+if test "${RUNNER_ENVIRONMENT:-}" = github-hosted; then
+  sudo rm -rf /usr/share/dotnet
+fi
+df -h "$ANDROID_AVD_HOME" | tee smoke/host-disk.txt
 "$ANDROID_HOME/emulator/emulator" -version > smoke/emulator-version.txt 2>&1
 cat smoke/emulator-version.txt
 cp "$ANDROID_HOME/emulator/source.properties" smoke/emulator-package.txt

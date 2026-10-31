@@ -332,6 +332,39 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
         }
     }
 
+    fun testVoicePressScalesDrawingWithoutChangingIndicatorLayout() {
+        show()
+        update(modes.toSet())
+        awaitHostWindowFocus(activity)
+        val indicator = ui.onNodeWithTag("chat-voice-indicator", useUnmergedTree = true)
+        val idle = indicator.fetchSemanticsNode()
+        val idleSize = idle.size
+        val idleWidth = idle.boundsInRoot.width
+        val hitBounds = node("chat-voice").fetchSemanticsNode().boundsInRoot
+        ui.mainClock.autoAdvance = false
+        try {
+            node("chat-voice").performTouchInput { down(center) }
+            var widest = idleWidth
+            repeat(8) {
+                ui.mainClock.advanceTimeBy(16)
+                val frame = indicator.fetchSemanticsNode()
+                assertEquals("Animation must not resize the indicator layout", idleSize, frame.size)
+                assertEquals(hitBounds, node("chat-voice").fetchSemanticsNode().boundsInRoot)
+                widest = maxOf(widest, frame.boundsInRoot.width)
+            }
+            assertTrue("The drawing still visibly enlarges", widest > idleWidth)
+            node("chat-voice").performTouchInput { cancel() }
+            ui.mainClock.advanceTimeBy(1_200)
+            val restored = indicator.fetchSemanticsNode()
+            assertEquals(idleSize, restored.size)
+            assertTrue(abs(restored.boundsInRoot.width - idleWidth) <= 1f)
+            ui.runOnIdle { assertTrue(events.isEmpty()) }
+            node("chat-voice-mode-menu").assertDoesNotExist()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
     fun testQuickVoiceClickStillEnlargesBeforeReturningToIdle() {
         show()
         update(modes.toSet())

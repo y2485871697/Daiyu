@@ -101,10 +101,10 @@ internal fun ContainedMorphLoadingIndicator(
             .clip(CircleShape)
             .background(containerColor),
     ) {
-        val progress = morphProgress.value
-        val from = IndicatorShapes[currentShape]
-        val to = IndicatorShapes[(currentShape + 1) % IndicatorShapes.size]
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val progress = morphProgress.value
+            val from = IndicatorShapes[currentShape]
+            val to = IndicatorShapes[(currentShape + 1) % IndicatorShapes.size]
             val radii = FloatArray(from.size) { index ->
                 idleBlendedRadius(from[index], to[index], progress, activityBlend.value)
             }

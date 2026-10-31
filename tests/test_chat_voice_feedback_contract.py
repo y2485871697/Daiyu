@@ -66,6 +66,28 @@ class ChatVoiceFeedbackContractTest(unittest.TestCase):
                          'tapFeedback = true', 'delay(180)', 'tapFeedback = false', 'tapSequence++; onClick()'):
             self.assertIn(fragment, self.button)
 
+    def test_voice_size_animation_reads_state_only_in_the_graphics_layer(self):
+        self.assertIn('val diameter = animateDpAsState(', self.button)
+        self.assertNotIn('val diameter by animateDpAsState(', self.button)
+        layer = self.button.split('.graphicsLayer {', 1)[1].split('}', 1)[0]
+        self.assertIn('diameter.value / 20.dp', layer)
+        self.assertIn('scaleX = scale', layer)
+        self.assertIn('scaleY = scale', layer)
+        self.assertIn('indicatorSize = 20.dp', self.button)
+        self.assertNotIn('indicatorSize = diameter', self.button)
+        self.assertIn('onClick = { tapSequence++; onClick() }', self.button)
+
+    def test_morph_frame_state_is_read_in_draw_not_composition(self):
+        indicator = (CHAT / 'ContainedMorphLoadingIndicator.kt').read_text()
+        before_draw, draw = indicator.split('Canvas(modifier = Modifier.fillMaxSize()) {', 1)
+        self.assertNotIn('morphProgress.value', before_draw)
+        self.assertNotIn('val from = IndicatorShapes[currentShape]', before_draw)
+        for fragment in ('val progress = morphProgress.value',
+                         'val from = IndicatorShapes[currentShape]',
+                         'val to = IndicatorShapes[(currentShape + 1) % IndicatorShapes.size]',
+                         'activityBlend.value', 'globalRotation.value'):
+            self.assertIn(fragment, draw)
+
     def test_device_sources_cover_real_entry_side_effects_and_press_release_cancel(self):
         entries = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatVoiceEntryFeedbackActivityTest.kt').read_text()
         for fragment in ('retainedControls(activity).onVoice()', 'voiceConversationDialogOwner',
@@ -77,6 +99,8 @@ class ChatVoiceFeedbackContractTest(unittest.TestCase):
         for fragment in ('testVoicePressEnlargesAndReleaseRestoresWithoutMovingHitTarget',
                          'testCancelledVoicePressRestoresWithoutClickOrMenu',
                          'testQuickVoiceClickStillEnlargesBeforeReturningToIdle',
+                         'testVoicePressScalesDrawingWithoutChangingIndicatorLayout',
+                         'Animation must not resize the indicator layout',
                          'chat-voice-indicator', 'down(center)', 'cancel()',
                          'ui.mainClock.autoAdvance = false', 'ui.mainClock.advanceTimeByFrame()',
                          'node("chat-voice").assertIsNotEnabled()', 'pressedWidth > idleWidth',

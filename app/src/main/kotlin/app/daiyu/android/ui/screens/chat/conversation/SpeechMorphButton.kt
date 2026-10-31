@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -49,7 +50,7 @@ internal fun SpeechMorphButton(
         tapFeedback = false
     }
     val showPressFeedback = enabled && (pressed || tapFeedback)
-    val diameter by animateDpAsState(
+    val diameter = animateDpAsState(
         if (listening || showPressFeedback) 32.dp else 20.dp,
         spring(dampingRatio = 0.65f),
         label = "speechDiameter",
@@ -73,8 +74,12 @@ internal fun SpeechMorphButton(
         contentAlignment = Alignment.Center,
     ) {
         ContainedMorphLoadingIndicator(
-            modifier = Modifier.testTag("chat-voice-indicator"),
-            indicatorSize = diameter,
+            modifier = Modifier.testTag("chat-voice-indicator").graphicsLayer {
+                val scale = diameter.value / 20.dp
+                scaleX = scale
+                scaleY = scale
+            },
+            indicatorSize = 20.dp,
             animate = generating || listening || showPressFeedback,
         )
     }

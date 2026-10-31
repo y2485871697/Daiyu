@@ -528,7 +528,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         f.probe.beforeFactory = { f.db.draft(conversation.id, "new draft") }
         val rejected = submit(f, conversation, owner, 4, parts, expectedDraft = "old draft")
         assertTrue(rejected is ImageSendResult.Rejected)
-        assertEquals("编辑草稿已变化；保留当前草稿，未发起请求", (rejected as ImageSendResult.Rejected).reason)
+        assertEquals("编辑草稿已变化", (rejected as ImageSendResult.Rejected).reason)
         assertEquals("new draft", f.db.conversations().single().draft)
         assertTrue(f.db.messages(conversation.id).isEmpty()); assertEquals(0, f.probe.opens.get())
         assertEquals(listOf(image), f.controller.imageAttachments.store.list(owner))

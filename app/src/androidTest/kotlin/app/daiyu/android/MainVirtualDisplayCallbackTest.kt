@@ -376,7 +376,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         node("vd-cancel").performClick()
         awaitControl("UNKNOWN retains the exact run, session and lease") {
             fixture.controller.virtualDisplayEntry() === entry && entry.revoked &&
-                fixture.controller.problem?.startsWith("副屏清理结果 UNKNOWN") == true
+                fixture.controller.problem?.startsWith("副屏清理结果未确认") == true
         }
         assertEquals(0, gate.availablePermits())
         assertNotNull(entry.session)
@@ -682,7 +682,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
                 app.daiyu.android.integration.tools.RunCatalogTools::class.java, String::class.java)
             synchronized(fixture.controller) {
                 method.apply { isAccessible = true }.invoke(fixture.controller, checkNotNull(entry.catalog),
-                    "运行清理结果 UNKNOWN；原资源保留，不自动重连或重发，请核实设备状态")
+                    "运行清理结果未确认")
             }
         }
         observeDrain()

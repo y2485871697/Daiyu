@@ -32,7 +32,7 @@ class DictationStatusNoticeTest : WiredActivityTestCase() {
             ComposerDictationState(target, status = "正在准备听写…"),
             ComposerDictationState(target, listening = true, status = "正在听写"),
             ComposerDictationState(status = "听写失败；草稿未更改，请手动重试"),
-            ComposerDictationState(status = "音频释放失败，已阻止继续使用语音；请重启应用"),
+            ComposerDictationState(status = "音频释放失败，请重启应用"),
             ComposerDictationState(),
         )) {
             ui.runOnIdle { state.value = next }

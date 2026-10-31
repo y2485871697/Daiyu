@@ -164,7 +164,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         val f=fresh();val c=f.db.create("default");f.db.draft(c.id,"keep draft");f.db.draft("keep composer")
         f.app.getSharedPreferences("model-settings",0).edit().putBoolean("credential-rebind-required",true).commit()
         assertNull(f.controller.send(c,"keep draft"))
-        assertTrue(f.controller.problem?.contains("未发起网络请求")==true)
+        assertTrue(f.controller.problem?.contains("已保存密钥不可用")==true)
         assertTrue(f.app.getSharedPreferences("model-settings",0).edit()
             .remove("credential-rebind-required").commit())
         // A real transaction failure must roll back clearing the conversation draft.
@@ -179,7 +179,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         assertTrue(s.entered.await(5,TimeUnit.SECONDS));s.release.countDown();awaitState(f) {f.controller.active==null}
         f.db.draft(c.id,"history read failure");f.db.writableDatabase.execSQL("UPDATE messages SET blocks='not-json'")
         assertNull(f.controller.send(c,"history read failure"))
-        assertEquals("原视频来源无法确认；草稿保留，未启动模型请求",f.controller.problem)
+        assertEquals("原视频来源无法确认",f.controller.problem)
         assertEquals("history read failure",f.db.conversations().single().draft);assertEquals(1,f.calls.get())
     }
     fun testStartupGateWaitsForRealRecoveryAndNeverReplaysInterruptedRun() {

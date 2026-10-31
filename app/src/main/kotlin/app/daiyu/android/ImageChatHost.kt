@@ -237,8 +237,8 @@ internal class ImageChatHost private constructor(controller: ChatController) {
                 val route = request?.third
                 if (attempt.cancelled || target.abandoned || closed || !visible || !stillCurrent() || provider == null || route?.actual?.imageInputSupported != true) {
                     finish(target, attempt, ImageSendResult.Rejected(target.owner, revision,
-                        if (attempt.cancelled) "图片准备已取消；未进入提交，草稿保留"
-                        else "实际图片路由未配置、能力未确认或编辑器已变化；草稿保留，未提交"))
+                        if (attempt.cancelled) "图片准备已取消"
+                        else "图片配置或能力未确认，或编辑器已变化"))
                     return@withContext
                 }
                 attempt.handle = controller.sendImages(conversation, target.owner, revision, frozen.parts,
@@ -246,7 +246,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
                     finish(target, attempt, it)
                 }
                 if (attempt.handle == null) finish(target, attempt,
-                    ImageSendResult.Rejected(target.owner, revision, "当前无法排队发送；草稿保留"))
+                    ImageSendResult.Rejected(target.owner, revision, "当前无法排队发送"))
             }
         }
     }
@@ -286,7 +286,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     fun cancelPreparation(expected: Session, attempt: Attempt): Boolean? {
         if (closed || !visible || session !== expected || expected.attempt !== attempt || expected.uncertain) return null
         return attempt.cancel().also { won ->
-            notice(if (won) "已请求取消准备；等待原发送结果" else "已进入提交；等待真实发送结果，未撤销")
+            notice(if (won) "已请求取消准备" else "已进入提交")
             changed()
         }
     }
@@ -343,7 +343,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         } else {
             persist()
             if (!closed && target === session && !target.abandoned) {
-                notice(if (result is ImageSendResult.Rejected && exact) result.reason else "发送结果待核实；保留草稿，禁止重发")
+                notice(if (result is ImageSendResult.Rejected && exact) result.reason else "发送结果未确认")
             }
         }
         outstanding--

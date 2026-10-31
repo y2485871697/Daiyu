@@ -149,7 +149,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
             "保留的历史有未确认工具结果；请先核实结果"
         }
         require(history.all { SQLiteMessageVideoStore.readVerified(db, it).isEmpty() }) {
-            "原视频重新提交需要新的上传批准；原消息保留"
+            "重新提交原视频需要新的上传批准"
         }
         context.validateActionArchives(db, target.conversationId)
         val edited = selected.copy(blocks = blocks, protocolItems = emptyList(),
@@ -158,14 +158,14 @@ internal class MessageActionStore(private val database: ConversationDatabase,
     }
 
     private fun appendEditImages(user: Message, added: List<app.daiyu.android.media.ImageAttachment>): Message {
-        val source = requireNotNull(draftImages) { "编辑图片存储不可用；原消息保留" }
+        val source = requireNotNull(draftImages) { "编辑图片存储不可用" }
         val draftOwner = added.first().owner
         require(draftOwner.conversationId == user.conversationId.value && added.all { it.owner == draftOwner })
         val original = user.blocks.filterIsInstance<MessageBlock.Image>().map { it.reference }
         val limits = app.daiyu.android.media.ImageAttachmentLimits()
         require(original.size + added.size <= limits.maxImages) { "每条消息最多8张图片" }
         require(original.sumOf { it.bytes.toLong() } + added.sumOf { it.bytes.toLong() } <= limits.maxDraftBytes) {
-            "图片总大小超过限制；原消息保留"
+            "图片总大小超过限制"
         }
         val frozen = source.freeze(draftOwner, added, imageInputSupported = true, isCancelled = cancelled)
         // Publish a new immutable batch, never append into or overwrite the historical owner.
@@ -237,7 +237,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         val blocks = if (owner.historySegments.isEmpty()) owner.blocks else
             owner.historySegments.filter { it.role == Message.ASSISTANT_ROLE }.flatMap { it.blocks }
         require(blocks.filterIsInstance<MessageBlock.Tool>().count { it.invocation.id == call } == 1) { "工具步骤所有者不匹配" }
-        throw IllegalArgumentException("此步骤没有安全重试契约；UNKNOWN 或外部副作用不会自动重放，请核实结果后新建请求")
+        throw IllegalArgumentException("此步骤不支持重试，请核实结果后新建请求")
     }
 
     private fun authorize(db: SQLiteDatabase, target: MessageActionTarget): List<Message> {

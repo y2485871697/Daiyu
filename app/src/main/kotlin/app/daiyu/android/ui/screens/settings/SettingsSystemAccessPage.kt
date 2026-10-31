@@ -91,7 +91,7 @@ internal fun SettingsSystemAccessPage(
                                         context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                                             Uri.fromParts("package", context.packageName, null)))
                                     } catch (_: Exception) {
-                                        Toast.makeText(context, "系统悬浮窗设置不可用；未修改权限", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "系统悬浮窗设置不可用", Toast.LENGTH_LONG).show()
                                     }
                                 }
                             })

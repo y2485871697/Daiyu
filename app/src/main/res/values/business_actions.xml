@@ -32,12 +32,12 @@
     <string name="business_task_resume">Continue</string>
     <string name="business_task_retract_pause">Withdraw pause request</string>
     <string name="business_task_pause_pending">Waiting for a safe pause</string>
-    <string name="business_task_pause_requested">Pause requested; a safe boundary must confirm it. See the record for current status.</string>
-    <string name="business_task_pause_confirmed">Pause was confirmed. See the record for current status.</string>
+    <string name="business_task_pause_requested">Pause requested; waiting for confirmation.</string>
+    <string name="business_task_pause_confirmed">Pause confirmed.</string>
     <string name="business_task_paused">Paused</string>
-    <string name="business_task_pause_retracted">Pause request withdrawn; the same task can keep running.</string>
-    <string name="business_task_resumed">The same task may continue; no new request was dispatched.</string>
-    <string name="business_task_control_stale">This task is no longer controllable. Its current status has been requested.</string>
+    <string name="business_task_pause_retracted">Pause request retracted.</string>
+    <string name="business_task_resumed">Task allowed to continue.</string>
+    <string name="business_task_control_stale">This task is no longer controllable.</string>
     <string name="business_task_control_failed">Could not confirm the operation. Refresh to check the current status.</string>
     <string name="business_task_stop_requested">Stop requested. This is not a pause and does not allow continuing later.</string>
 </resources>

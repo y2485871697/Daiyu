@@ -33,12 +33,27 @@ class TaskSurfacePolicyTest {
                         assertNull(ready(result).selfTarget)
                     } else {
                         assertEquals("TASK_SURFACE_BACKGROUND_UNSUPPORTED", code(result))
-                        assertTrue((result as TaskSurfaceDecision.NotExecuted).message.contains("请不要清理应用"))
+                        assertEquals("后台执行不可用", (result as TaskSurfaceDecision.NotExecuted).message)
                     }
                     TaskSurfacePreference.ASK -> assertSame(TaskSurfaceDecision.AskRequired, result)
                 }
             }
         }
+    }
+
+    @Test fun refusalMessagesDescribeOnlyTheSpecificCause() {
+        fun message(decision: TaskSurfaceDecision) = (decision as TaskSurfaceDecision.NotExecuted).message
+        val ended = run(TaskSurfacePreference.FOREGROUND)
+        ended.end()
+        assertEquals("任务已结束", message(ended.decision(external, true)))
+        val unavailable = TaskSurfaceRunDecision(Any(), TaskSurfaceSettings.Unavailable, own)
+        assertEquals("执行位置设置不可用", message(unavailable.decision(own, true)))
+        assertEquals("缺少目标应用", message(run(TaskSurfacePreference.FOREGROUND).decision("", true)))
+        val cancelled = run(TaskSurfacePreference.ASK)
+        val question = checkNotNull(cancelled.askFromUser(external))
+        assertTrue(cancelled.answerFromUser(question, null))
+        assertEquals("已取消执行位置选择", message(cancelled.decision(external, true)))
+        assertEquals("后台执行不可用", message(run(TaskSurfacePreference.BACKGROUND).decision(external, false)))
     }
 
     @Test fun cancellationIsStickyThroughSelfExceptionLaterOrdinaryRequestsAndPreferenceChanges() {

@@ -115,7 +115,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
     }
     private fun export(f:Fixture,name:String="complete.json"):File {
         val output=File(f.directory,name)
-        assertTrue(task(f) {f.controller.exportUserBackup(Uri.fromFile(output),true)}.startsWith("完整中立备份已导出"))
+        assertTrue(task(f) {f.controller.exportUserBackup(Uri.fromFile(output),true)}.startsWith("中立备份已导出"))
         assertTrue(output.isFile);return output
     }
     private fun config(file:File)=JSONObject(JSONObject(file.readText()).getString("payload")).getJSONObject("config")
@@ -180,7 +180,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         val f=fresh()
         main {field(f,"active",Message(MessageId("gate"),ConversationId("gate"),RunId("gate"),"assistant",emptyList(),RunStatus.RUNNING))}
         try {rejects(f);assertFalse(f.controller.dataBusy)} finally {main {field(f,"active",null)}}
-        main {field(f,"problem","会话恢复失败，原数据已保留")}
+        main {field(f,"problem","会话恢复失败")}
         try {rejects(f);assertFalse(f.controller.dataBusy)} finally {main {field(f,"problem",null)}}
         val entered=CountDownLatch(1);val release=CountDownLatch(1)
         main {f.controller.dataTask {entered.countDown();check(release.await(10,TimeUnit.SECONDS));"fixture task finished"}}
@@ -238,7 +238,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         assertTrue(f.db.bindModel(null,null,binding))
         assertNull(f.controller.send(null,"must not use the previous key"))
         main {
-            assertTrue(f.controller.problem?.contains("未发起网络请求")==true)
+            assertTrue(f.controller.problem?.contains("已保存密钥不可用")==true)
             restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
         }
         assertEquals(metadata,f.backup.importedConfiguration().toString())
@@ -263,7 +263,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         val f=fresh();settings(f);f.backup.setNonSecretConfiguration(mapOf("model" to "imported"))
         val before=HashMap(f.preferences.all)
         val gates=listOf("ready" to false,"active" to Message(MessageId("restore-gate"),ConversationId("restore-gate"),RunId("restore-gate"),"assistant",emptyList(),RunStatus.RUNNING),
-            "dataBusy" to true,"problem" to "会话恢复失败，原数据已保留")
+            "dataBusy" to true,"problem" to "会话恢复失败")
         main {
             for((name,value) in gates) {
                 val preview=f.controller.previewImportedConfiguration()

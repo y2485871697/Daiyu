@@ -32,12 +32,12 @@
     <string name="business_task_resume">繼續</string>
     <string name="business_task_retract_pause">撤回暫停請求</string>
     <string name="business_task_pause_pending">等待安全暫停</string>
-    <string name="business_task_pause_requested">已請求暫停，須等待安全點確認；即時狀態見紀錄。</string>
-    <string name="business_task_pause_confirmed">暫停已獲確認；即時狀態見紀錄。</string>
+    <string name="business_task_pause_requested">已請求暫停，等待確認</string>
+    <string name="business_task_pause_confirmed">暫停已確認</string>
     <string name="business_task_paused">已暫停</string>
-    <string name="business_task_pause_retracted">已撤回暫停請求，同一任務可繼續執行。</string>
-    <string name="business_task_resumed">已允許同一任務繼續，未重新派發請求。</string>
-    <string name="business_task_control_stale">此任務已不可控制，已請求重新讀取目前狀態。</string>
+    <string name="business_task_pause_retracted">已撤回暫停請求</string>
+    <string name="business_task_resumed">已允許任務繼續</string>
+    <string name="business_task_control_stale">此任務已不可控制</string>
     <string name="business_task_control_failed">無法確認操作結果，請重新整理查看目前狀態。</string>
     <string name="business_task_stop_requested">已請求停止。這不是暫停，之後不能繼續。</string>
 </resources>

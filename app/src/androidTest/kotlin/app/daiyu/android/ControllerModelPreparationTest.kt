@@ -105,7 +105,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals("retained composer draft", f.db.draft())
         assertNull(f.controller.active)
         assertEquals(2, factories.get()); assertEquals(0, opens.get())
-        assertTrue(f.controller.problem!!.contains("草稿保留"))
+        assertTrue(f.controller.problem!!.contains("模型初始化失败"))
         assertFalse(f.controller.problem!!.contains("synthetic-secret"))
         reject = false
         assertNotNull(f.controller.send(conversation, "accepted"))

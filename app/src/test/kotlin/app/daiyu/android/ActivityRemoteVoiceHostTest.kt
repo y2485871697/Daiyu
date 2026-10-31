@@ -16,8 +16,7 @@ class ActivityRemoteVoiceHostTest {
         }
         assertEquals(1, calls)
         assertEquals(original, draft)
-        assertTrue(status.contains("未填入草稿"))
-        assertTrue(status.contains("原草稿已保留"))
+        assertEquals("听写草稿保存失败", status)
         assertFalse(status.contains("已填入"))
     }
 
@@ -38,7 +37,7 @@ class ActivityRemoteVoiceHostTest {
         var calls = 0
         val status = ActivityRemoteVoiceHost.finalDraftStatus("recognized text", { false }) { calls++ }
         assertEquals(0, calls)
-        assertTrue(status.contains("原草稿已保留"))
+        assertEquals("听写草稿保存失败", status)
         assertFalse(status.contains("已填入"))
     }
 
@@ -46,7 +45,7 @@ class ActivityRemoteVoiceHostTest {
         var calls = 0
         val status = ActivityRemoteVoiceHost.finalDraftStatus("  \n", { true }) { calls++ }
         assertEquals(0, calls)
-        assertTrue(status.contains("已有草稿已保留"))
+        assertEquals("未识别到有效内容", status)
         assertFalse(status.contains("已填入"))
     }
 

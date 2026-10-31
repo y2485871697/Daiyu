@@ -114,7 +114,7 @@ internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit)
                     .conversationClickable {
                         runCatching { clipboard.setText(AnnotatedString(document.text)) }
                             .onSuccess { copied = true }
-                            .onFailure { android.widget.Toast.makeText(context, "复制失败，可长按选择文本", android.widget.Toast.LENGTH_SHORT).show() }
+                            .onFailure { android.widget.Toast.makeText(context, "复制失败", android.widget.Toast.LENGTH_SHORT).show() }
                     }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(DaiyuIcons.Copy, null, Modifier.size(16.dp), tint = buttonText)

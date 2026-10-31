@@ -95,7 +95,7 @@ class OpenAttachmentActivity : ComponentActivity() {
             } catch (cancelled: android.os.OperationCanceledException) {
                 throw CancellationException("attachment_cancelled").apply { initCause(cancelled) }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { notice("附件接收失败；原草稿保留，请重新打开文件") }
+            catch (_: Exception) { notice("附件接收失败，请重新打开文件") }
             finally {
                 if (!handedOff) withContext(NonCancellable + Dispatchers.IO) { documents.forEach(store::remove) }
                 finish()

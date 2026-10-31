@@ -54,7 +54,7 @@ internal class ActivityRemoteVoiceHost(
                 } else invalidate()
             } catch (_: Exception) {
                 try { invalidate() } catch (_: Exception) { /* The shared gate retains failed release. */ }
-                mutable.value = "语音资源释放未确认，新的音频操作已阻止"
+                mutable.value = "语音资源释放未确认"
             }
             return
         }
@@ -88,7 +88,7 @@ internal class ActivityRemoteVoiceHost(
             observation = scope.launch {
                 next.state.collect { value ->
                     if (epoch == token && duplex === next) mutable.value = when (value.phase) {
-                        DuplexPhase.UNKNOWN -> "双工结果未知，已停止；不会自动重连"
+                        DuplexPhase.UNKNOWN -> "双工结果未确认"
                         DuplexPhase.FAILED -> "双工失败，已停止；检查独立配置后手动重试"
                         else -> "双工 ${value.phase}\n${value.transcript}\n${value.reply}"
                     }
@@ -182,7 +182,7 @@ internal class ActivityRemoteVoiceHost(
         }
         fun fail() {
             if (ended) return
-            complete(); mutable.value = "豆包听写失败或超时，已有草稿已保留；不会自动重试"
+            complete(); mutable.value = "豆包听写失败或超时"
         }
         fun complete() {
             if (ended) return
@@ -225,14 +225,14 @@ internal class ActivityRemoteVoiceHost(
     internal companion object {
         /** Unit callback contract: the editor must throw if it cannot confirm the draft commit. */
         fun finalDraftStatus(text: String, isCurrent: () -> Boolean, commit: () -> Unit): String {
-            if (text.isBlank()) return "未识别到有效内容，已有草稿已保留"
+            if (text.isBlank()) return "未识别到有效内容"
             return try {
                 check(isCurrent()) { "dictation_editor_changed" }
                 commit()
                 ""
             } catch (_: Exception) {
                 // Never retry or overwrite the editor to compensate for an unconfirmed commit.
-                "听写未填入草稿，原草稿已保留；请手动重试"
+                "听写草稿保存失败"
             }
         }
     }

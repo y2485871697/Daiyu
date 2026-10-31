@@ -66,7 +66,7 @@ internal class OfflineComposerHost(
         if (!permission()) {
             val pending = PermissionRequest(target, attemptSerial)
             pendingPermission = pending
-            mutable.value = State(status = "离线听写需要麦克风权限；授权后请再次点击，不会自动开始")
+            mutable.value = State(status = "离线听写需要麦克风权限")
             try { requestPermission() } catch (_: Exception) {
                 if (pendingPermission === pending) {
                     pendingPermission = null
@@ -107,7 +107,7 @@ internal class OfflineComposerHost(
                 if (!accepts(target, serial)) return
                 if (text.isBlank()) {
                     invalidate()
-                    mutable.value = State(status = "未识别到更多文本；已有草稿已保留")
+                    mutable.value = State(status = "未识别到更多文本")
                     return
                 }
                 val next = draft.accept(currentText(), text)
@@ -122,12 +122,12 @@ internal class OfflineComposerHost(
             override fun cancelled() {
                 if (!owns(target, serial)) return
                 invalidate()
-                mutable.value = State(status = "离线听写已停止；已识别文字已保留")
+                mutable.value = State(status = "离线听写已停止")
             }
             override fun failed() {
                 if (!owns(target, serial)) return
                 invalidate()
-                mutable.value = State(status = "离线识别或音频释放失败；已有草稿已保留。若音频不可用，请重启应用")
+                mutable.value = State(status = "离线识别或音频释放失败")
             }
         }
         try {
@@ -146,7 +146,7 @@ internal class OfflineComposerHost(
         pendingPermission = null
         if (closed || pending.serial != attemptSerial || !current(pending.target) || !enabled()) return
         mutable.value = State(status = if (granted) "麦克风权限已授予，请再次点击离线语音"
-            else "麦克风权限被拒绝；草稿未更改")
+            else "麦克风权限被拒绝")
     }
 
     fun invalidate() {
@@ -156,7 +156,7 @@ internal class OfflineComposerHost(
         attempt = null
         mutable.value = State()
         try { old?.close() } catch (_: Throwable) {
-            mutable.value = State(status = "音频释放未获确认，已阻止继续使用语音；请重启应用")
+            mutable.value = State(status = "音频释放未获确认，请重启应用")
         }
     }
     override fun close() { if (!closed) { closed = true; invalidate() } }

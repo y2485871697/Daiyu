@@ -102,7 +102,7 @@ fun AssistantEditScreen(
             memorySaved = memoryEditor.saved
             memoryRevision = memoryEditor.revision.orEmpty()
         }.onFailure {
-            android.widget.Toast.makeText(context, "记忆读取失败，已输入草稿保留；请重新打开后合并", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(context, "记忆读取失败，请重新打开", android.widget.Toast.LENGTH_LONG).show()
         }
     }
     // The launcher survives recomposition; a result still belongs to the page that launched it.
@@ -133,7 +133,7 @@ fun AssistantEditScreen(
             result.getOrNull()?.memory?.let { memoryRevision = it.revision; memorySaved = it.content }
             saving = false
             if (result.isSuccess) { onSaved(assistantId); session.close(); onBack() }
-            else android.widget.Toast.makeText(context, result.exceptionOrNull()?.message ?: "保存失败，草稿已保留", android.widget.Toast.LENGTH_LONG).show()
+            else android.widget.Toast.makeText(context, result.exceptionOrNull()?.message ?: "保存失败", android.widget.Toast.LENGTH_LONG).show()
         }
     }
     val colors = assistantPreviewPalette()
@@ -248,7 +248,7 @@ fun AssistantEditScreen(
                         avatarFileName = it.avatarFileName
                         onSaved(assistantId)
                     }.onFailure {
-                        android.widget.Toast.makeText(context, it.message ?: "保存失败，草稿已保留", android.widget.Toast.LENGTH_LONG).show()
+                        android.widget.Toast.makeText(context, it.message ?: "保存失败", android.widget.Toast.LENGTH_LONG).show()
                     }
                 } finally {
                     if (cropped !== bitmap) cropped.recycle()

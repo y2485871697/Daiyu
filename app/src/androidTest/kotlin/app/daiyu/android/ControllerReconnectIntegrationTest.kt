@@ -306,7 +306,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         assertEquals(0, factories.get())
         assertTrue(f.db.conversations().isEmpty())
         assertEquals("pending", f.db.draft())
-        assertTrue(f.controller.problem!!.contains("错误重连配置"))
+        assertTrue(f.controller.problem!!.contains("重连配置无效或保存未确认"))
     }
 
     fun testRealRunnerPauseResumeUpdatesOneDividerAndKeepsItsActualErrorThroughPersistence() {

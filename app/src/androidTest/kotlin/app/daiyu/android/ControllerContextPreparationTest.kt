@@ -264,7 +264,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         }
         owner=seed(f,32);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
-        assertEquals("会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求", f.controller.problem)
+        assertEquals("会话或编辑内容已变化", f.controller.problem)
         assertEquals(64,ContextService(f.app,f.db).displayHistory(owner.id).size)
         assertEquals("pending",f.db.conversations().single().draft)
     }
@@ -341,7 +341,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
         assertEquals(1,requests.get());assertEquals(0,factories.get())
-        assertEquals("上下文或摘要准备失败；草稿保留，未启动聊天模型请求",f.controller.problem)
+        assertEquals("上下文或摘要准备失败",f.controller.problem)
         assertEquals(before,ContextService(f.app,f.db).prepareSend(owner.id))
         assertEquals("pending",f.db.conversations().single().draft)
         assertEquals(12,ContextService(f.app,f.db).displayHistory(owner.id).size)
@@ -366,7 +366,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
         assertEquals(1,requests.get());assertEquals(0,opens.get())
         // This assertion includes the companion production wording fix integrated by the parent.
-        assertEquals("会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求",f.controller.problem)
+        assertEquals("会话或编辑内容已变化",f.controller.problem)
         assertEquals("newer draft",f.db.conversations().single().draft)
         assertEquals(12,ContextService(f.app,f.db).displayHistory(owner.id).size)
     }
@@ -418,7 +418,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         assertTrue(result.get() is ChatController.TextSendResult.Rejected)
         assertEquals(before,service.prepareSend(owner.id));assertEquals(0,factories.get())
         assertEquals("pending",f.db.conversations().single().draft)
-        assertEquals("上下文准备已取消；草稿保留，未启动聊天模型请求",f.controller.problem)
+        assertEquals("上下文准备已取消",f.controller.problem)
     }
 
     fun testCancelTextSendAfterCommitGateKeepsAcceptedReceipt() {

@@ -67,7 +67,7 @@ internal class TaskSurfaceRunDecision(
             TaskSurface.FOREGROUND -> TaskSurfaceDecision.Ready(TaskSurface.FOREGROUND)
             TaskSurface.BACKGROUND -> if (backgroundSupported) TaskSurfaceDecision.Ready(TaskSurface.BACKGROUND)
                 else TaskSurfaceDecision.NotExecuted("TASK_SURFACE_BACKGROUND_UNSUPPORTED",
-                    "后台执行不可用，本次未执行。请不要清理应用；不会切换到前台执行。")
+                    "后台执行不可用")
             null -> if (question == null) TaskSurfaceDecision.AskRequired else TaskSurfaceDecision.AskPending
         }
     }
@@ -91,5 +91,11 @@ internal class TaskSurfaceRunDecision(
 
     @Synchronized private fun selfTargetCurrent(): Boolean = !ended && preference != null
 
-    private fun notExecuted(code: String) = TaskSurfaceDecision.NotExecuted(code, "本次未执行；未申请前台或后台执行资源。")
+    private fun notExecuted(code: String) = TaskSurfaceDecision.NotExecuted(code, when (code) {
+        "TASK_SURFACE_RUN_ENDED" -> "任务已结束"
+        "TASK_SURFACE_SETTINGS_UNAVAILABLE" -> "执行位置设置不可用"
+        "TASK_SURFACE_TARGET_REQUIRED" -> "缺少目标应用"
+        "TASK_SURFACE_ASK_CANCELLED" -> "已取消执行位置选择"
+        else -> "任务执行位置不可用"
+    })
 }

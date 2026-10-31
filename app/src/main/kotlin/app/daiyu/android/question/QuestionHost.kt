@@ -35,7 +35,7 @@ class QuestionHost(private val registry: QuestionRegistry) {
 
     companion object {
         private const val WRITE_FAILED = "答案保存失败，请重试；尚未提交答案"
-        private const val REFRESH_FAILED = "答案已提交，但消息刷新失败；请稍后查看提问状态"
+        private const val REFRESH_FAILED = "答案已提交，但消息刷新失败"
         private const val STATE_FAILED = "提问状态刷新失败，请稍后重试"
     }
 

@@ -70,8 +70,8 @@ class AuxiliaryModelDefaultsContract(unittest.TestCase):
         self.assertNotIn('会话标题已保存', controller)
         self.assertIn('TitleOutcome.SAVED -> null', controller)
         self.assertIn('TitleOutcome.SAVED) titleRevision++', controller)
-        self.assertIn('标题或用量保存未确认', controller)
-        self.assertIn('独立标题配置不可用；聊天已保存', controller)
+        self.assertIn('标题或用量保存结果未确认', controller)
+        self.assertIn('独立标题配置不可用', controller)
         activity = (MAIN / 'MainActivity.kt').read_text()
         self.assertIn('controller.consumeTitleNotice()?.let { toast(it) }', activity)
 

@@ -6,8 +6,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-class StaleAssistantProfileException : IllegalStateException("助手已被其他操作修改或删除，草稿已保留；请重新打开并合并。")
-class ClosedAssistantEditorException : IllegalStateException("助手编辑页面已失效，草稿未提交")
+class StaleAssistantProfileException : IllegalStateException("助手已被其他操作修改或删除")
+class ClosedAssistantEditorException : IllegalStateException("助手编辑页面已失效")
 
 /** One mounted page's authority, not a global active-assistant reference.
  * Call operations from the page's Main scope: Mutex admission then IO preserves click order.

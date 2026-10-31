@@ -339,7 +339,7 @@ class QuestionTest : InstrumentationTestCase() {
                     assertTrue(dialog.isShowing); assertFalse(dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled)
                     assertEquals(1, store.answerAttempts)
                     val messages = all.filterIsInstance<TextView>().map { it.text.toString() }
-                    assertTrue(messages.contains("答案已提交，但消息刷新失败；请稍后查看提问状态"))
+                    assertTrue(messages.contains("答案已提交，但消息刷新失败"))
                     assertFalse(messages.any { it.contains("private-") })
                 }
                 // Exercise the posted barrier refresh too: exceptions must not escape Android main.

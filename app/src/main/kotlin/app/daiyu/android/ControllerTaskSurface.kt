@@ -40,9 +40,9 @@ internal class ControllerTaskSurface(
 
     fun decision(): TaskSurfaceDecision {
         if (ended || !admission()) return TaskSurfaceDecision.NotExecuted("LOCATION_OWNER_REVOKED", "原任务位置访问已撤销")
-        if (unsupportedPlan) return TaskSurfaceDecision.NotExecuted("VD_SELF_TARGET_UNSUPPORTED", "此完整副屏计划包含自身目标，没有等价后端；整份未执行")
+        if (unsupportedPlan) return TaskSurfaceDecision.NotExecuted("VD_SELF_TARGET_UNSUPPORTED", "副屏任务不支持操作应用自身")
         return adapter?.decision(request)
-            ?: TaskSurfaceDecision.NotExecuted("LOCATION_NOT_PREPARED", "任务位置尚未冻结；未执行")
+            ?: TaskSurfaceDecision.NotExecuted("LOCATION_NOT_PREPARED", "任务执行位置尚未确定")
     }
 
     fun ready(surface: TaskSurface): TaskSurfaceDecision.Ready? =

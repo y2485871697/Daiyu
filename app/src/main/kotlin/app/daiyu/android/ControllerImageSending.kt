@@ -236,7 +236,7 @@ internal class ControllerImageAttempt(
     fun draftChanged(): ImageSendResult {
         // Called only for our own exception before database.send was invoked.
         commitAttempted = false
-        return rejected("编辑草稿已变化；保留当前草稿，未发起请求")
+        return rejected("编辑草稿已变化")
     }
 
     fun rejected(reason: String): ImageSendResult {

@@ -211,7 +211,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         when(name) {
             "active"->setField("active",Message(MessageId("active-gate"),ConversationId("active-gate"),RunId("active-gate"),"assistant",emptyList(),RunStatus.RUNNING))
             "busy"->setField("dataBusy",true)
-            "recovery"->setField("problem","会话恢复失败，原数据已保留")
+            "recovery"->setField("problem","会话恢复失败")
             "not-ready"->setField("ready",false)
             null->{setField("active",null);setField("dataBusy",false);setField("problem",null);setField("ready",true)}
         }

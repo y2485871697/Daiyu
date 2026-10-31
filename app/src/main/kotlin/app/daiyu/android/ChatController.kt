@@ -217,8 +217,8 @@ class ChatController internal constructor(private val application:Application,
                 if (result == app.daiyu.android.title.TitleOutcome.SAVED) titleRevision++
                 titleNotice = when (result) {
                     app.daiyu.android.title.TitleOutcome.SAVED -> null
-                    null -> "标题或用量保存未确认；聊天结果不受影响，未自动重试"
-                    else -> "标题未保存（${result.name}）；聊天结果不受影响"
+                    null -> "标题或用量保存结果未确认"
+                    else -> "标题未保存（${result.name}）"
                 }
                 if (closed) closeStorageWhenIdle() else notifyChanged()
             } }
@@ -943,7 +943,7 @@ class ChatController internal constructor(private val application:Application,
         } catch (_: Exception) {
             synchronized(this) { generationPreparation = null }
             finishPreparation(reserved)
-            problem = "独立生成配置不可用或已变化；请先保存生成设置。草稿保留，未生成。"
+            problem = "生成配置不可用或已变化，请重新保存"
             notifyChanged(); null
         }
     }
@@ -1026,7 +1026,7 @@ class ChatController internal constructor(private val application:Application,
                 sendPrepared(reserved, entry.conversation, current.text,
                     expectedDraftText = current.text, generation = entry)
             } catch (_: Exception) {
-                problem = "生成配置或发送准备已变化；草稿保留，未自动重试"
+                problem = "生成配置或发送准备已变化"
             } finally {
                 if (session.persistenceReceipt == null) session.recordPersistence(entry.identity,
                     if (reserved.persistenceUnconfirmed) GenerationPersistenceReceipt.Unknown
@@ -1097,11 +1097,11 @@ class ChatController internal constructor(private val application:Application,
             if (closed) closeStorageWhenIdle() else notifyChanged()
         } else if (session.closeResult is GenerationToolsCloseResult.Unknown ||
             session.persistenceReceipt === GenerationPersistenceReceipt.Unknown) {
-            problem = "生成保存或清理结果 UNKNOWN；原资源和草稿保留，禁止自动重试"
+            problem = "生成保存或清理结果未确认"
             notifyChanged()
         } else if (session.closeResult == GenerationToolsCloseResult.Drained &&
             session.persistenceReceipt is GenerationPersistenceReceipt.Accepted) {
-            problem = "消息已保存，但原编辑器收据尚未匹配；保留草稿和运行槽，不自动重发"
+            problem = "消息已保存，原编辑器确认未匹配"
             notifyChanged()
         }
         // Accepted without a matching editor remains retained; reopening history is not a receipt.
@@ -1329,7 +1329,7 @@ class ChatController internal constructor(private val application:Application,
         active: java.util.concurrent.atomic.AtomicBoolean,
         resolver: android.content.ContentResolver = application.contentResolver) {
         require(uri.scheme == "content")
-        dataTask(failureNotice = "原件保存未确认；目标可能不完整，未自动重试", work = {
+        dataTask(failureNotice = "原件保存未确认", work = {
             openCardMediaOnWorker(binding, assetKey, active).use { original ->
                 original.requireActive()
                 resolver.openOutputStream(uri, "wt")?.use { destination ->
@@ -1480,7 +1480,7 @@ class ChatController internal constructor(private val application:Application,
         visitActive: java.util.concurrent.atomic.AtomicBoolean,
         resolver: android.content.ContentResolver = application.contentResolver) {
         require(uri.scheme == "content") { "请选择文档目标" }
-        dataTask(failureNotice = "静态原件保存未确认；目标可能不完整，未重试", work = {
+        dataTask(failureNotice = "静态原件保存未确认", work = {
             fun authorize() {
                 check(visitActive.get()) { "原会话访问已失效" }
                 synchronized(this) { check(!closed && output.destination.conversationId !in generationConversationPublicationSeals) }
@@ -1496,7 +1496,7 @@ class ChatController internal constructor(private val application:Application,
                 }
                 destination.flush()
             } ?: throw java.io.IOException("无法打开目标")
-            "静态生成原件已保存；仅本地历史文件，未恢复执行授权"
+            "静态生成原件已保存"
         })
     }
 
@@ -1514,7 +1514,7 @@ class ChatController internal constructor(private val application:Application,
         require(uri.scheme == "content") { "请选择文档目标" }
         browserDownloads.assertOwned(conversation.value, reference)
         assertUiOwner()
-        dataTask(failureNotice = "浏览器原件保存失败；目标可能不完整，未自动重试", work = {
+        dataTask(failureNotice = "浏览器原件保存失败", work = {
             check(conversationExists(conversation)) { "原会话已不存在" }
             reference.saveOriginal(openDestination = {
                 resolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("无法打开目标")
@@ -1532,12 +1532,12 @@ class ChatController internal constructor(private val application:Application,
      */
     internal fun saveHistoricalGenerationOriginal(history: app.daiyu.android.backup.HistoricalGenerationOutput,
         uri: Uri, resolver: android.content.ContentResolver = application.contentResolver) {
-        dataTask(failureNotice = "历史原件保存失败；目标可能不完整，未重发请求", work = {
+        dataTask(failureNotice = "历史原件保存失败", work = {
             synchronized(this) { check(history.conversationId !in generationConversationPublicationSeals) }
             val bytes = neutralBackup.historicalGenerationOriginal(history)
             resolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
                 ?: throw java.io.IOException("无法打开目标")
-            "历史生成原件已保存；仅历史文件，未恢复生成授权或重发请求"
+            "历史生成原件已保存"
         })
     }
 
@@ -1667,7 +1667,7 @@ class ChatController internal constructor(private val application:Application,
                 synchronized(this) { backgroundRuns[owner.runId] }?.revoke()
             }
         } ?: run {
-            synchronized(this) { problem = "后台执行服务启动失败；草稿保留，未发送模型请求"; notifyChanged() }
+            synchronized(this) { problem = "后台执行服务启动失败"; notifyChanged() }
             return false
         }
         val retained = synchronized(this) {
@@ -1717,14 +1717,14 @@ class ChatController internal constructor(private val application:Application,
                     virtualDisplayEntry = null
                 }
             }
-            else reportCleanupProblem(tools, "运行准备清理结果 UNKNOWN；原资源保留，不自动重连或重发")
+            else reportCleanupProblem(tools, "运行准备资源清理结果未确认")
             if(closed) closeStorageWhenIdle() else notifyChanged()
         }}}
         if (synchronized(this) { virtualDisplayEntry?.catalog === tools }) executor.execute {
             val result = tools.observeVirtualDisplayCloseOnWorker(parentDrained = true)
             if (result is RunCatalogCloseResult.Unknown) handler.post { synchronized(this) {
                 if (unacceptedTools.containsKey(tools)) {
-                    reportCleanupProblem(tools, "副屏清理结果 UNKNOWN；保留原身份、会话和 lease，不自动重试")
+                    reportCleanupProblem(tools, "副屏清理结果未确认")
                     notifyChanged()
                 }
             } }
@@ -2212,7 +2212,7 @@ class ChatController internal constructor(private val application:Application,
         } catch (_:Exception) {true}
         if (!failed) {
             runCatching { recoverDeletedModelBindings() }.onFailure {
-                problem = "已删除模型的绑定清理未完成；原会话和未知状态的配置保留"
+                problem = "已删除模型的绑定清理未完成"
             }
             try {
                 preferences.getString("selected", null)?.let { selected ->
@@ -2228,7 +2228,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {
             if(!closed) {
                 recoveryFailed=failed
-                if(failed) problem="会话恢复失败，原数据已保留"
+                if(failed) problem="会话恢复失败"
                 ready=true;notifyChanged()
             }
         }
@@ -2396,7 +2396,7 @@ class ChatController internal constructor(private val application:Application,
         if(Looper.myLooper()!=Looper.getMainLooper()) return false
         synchronized(this) {
             if(!idleAvailable()) return true
-            problem="同步发送不能在主线程准备上下文；请使用异步发送入口，草稿保留"
+            problem="主线程不支持同步发送，请使用异步入口"
         }
         notifyChanged()
         return true
@@ -2491,7 +2491,7 @@ class ChatController internal constructor(private val application:Application,
                 if(preview.isCancelled()) null else sendPrepared(token,preview.conversation,preview.messageText,
                     shizukuPreparation=preview,shizukuAuthorization=authorization)
             } catch (_:Exception) {
-                synchronized(this) {problem="Shizuku 运行准备失败；未自动重发";notifyChanged()}
+                synchronized(this) {problem="Shizuku 运行准备失败";notifyChanged()}
                 null
             }
             val installed=synchronized(this) {resources?.initial?.runId==preview.runId}
@@ -2517,7 +2517,7 @@ class ChatController internal constructor(private val application:Application,
                 is app.daiyu.android.shizuku.ShizukuCloseResult.Unknown -> synchronized(this) {
                     // Keep preparation and storage pinned. Stop/close must not reopen this run.
                     if(pendingShizuku===preview) {
-                        problem="Shizuku 清理结果 UNKNOWN；资源保留，不自动重连或重发，请核实设备状态"
+                        problem="Shizuku 清理结果未确认"
                         notifyChanged()
                     }
                 }
@@ -2551,7 +2551,7 @@ class ChatController internal constructor(private val application:Application,
         return try {
             executor.execute {
                 val decision = try { preview.freezeLocationOnWorker() } catch (_: Exception) {
-                    app.daiyu.android.tasksurface.TaskSurfaceDecision.NotExecuted("CLOCK_LOCATION_UNAVAILABLE", "时钟位置准备失败；未执行")
+                    app.daiyu.android.tasksurface.TaskSurfaceDecision.NotExecuted("CLOCK_LOCATION_UNAVAILABLE", "时钟位置准备失败")
                 }
                 handler.post { complete(decision) }
             }
@@ -2583,7 +2583,7 @@ class ChatController internal constructor(private val application:Application,
                 if (preview.cancelled) null else sendPrepared(token, preview.conversation, preview.messageText,
                     expectedDraftText = preview.text, platformAction = preview)
             } catch (_: Exception) {
-                synchronized(this) { problem = "系统操作准备失败；草稿保留，未自动重发"; notifyChanged() }
+                synchronized(this) { problem = "系统操作准备失败"; notifyChanged() }
                 null
             }
             finishPlatformAction(preview)
@@ -2606,7 +2606,7 @@ class ChatController internal constructor(private val application:Application,
         else preview.scope?.observeClose { result ->
             if (result == RunCatalogCloseResult.Drained) release()
             else synchronized(this) {
-                problem = "系统操作结果 UNKNOWN；保留原运行，不自动重试，请核实设备状态"
+                problem = "系统操作结果未确认"
                 notifyChanged()
             }
         } ?: release()
@@ -2617,7 +2617,7 @@ class ChatController internal constructor(private val application:Application,
         catch (_: Exception) {
             synchronized(this) {
                 recoveryFailed = true
-                problem = "摘要用量清理未确认；新发送已停用，未自动重发"
+                problem = "摘要用量清理未确认"
                 notifyChanged()
             }
         }
@@ -2635,7 +2635,7 @@ class ChatController internal constructor(private val application:Application,
                 if (android.os.SystemClock.uptimeMillis() < token.cleanupDeadline)
                     handler.postDelayed({ finishPreparation(token) }, 50)
                 else synchronized(this) {
-                    problem = "GUI 清理未确认；保留原会话与草稿，不自动重试"
+                    problem = "GUI 清理未确认"
                     notifyChanged()
                 }
                 return
@@ -2658,7 +2658,7 @@ class ChatController internal constructor(private val application:Application,
             if (start) Thread({
                 val drained = try { job.cleanupOnWorker() } catch (_: Exception) { false }
                 if (drained) releasePreparation(token) else synchronized(this) {
-                    problem = "固定命令 job 清理 UNKNOWN；保留原资源，不自动重发"
+                    problem = "固定命令任务清理结果未确认"
                     notifyChanged()
                 }
             }, "terminal-job-preparation-drain").apply { isDaemon = true; start() }
@@ -2685,7 +2685,7 @@ class ChatController internal constructor(private val application:Application,
                     }
                 } catch (_: Exception) { false }
                 if (drained) releasePreparation(token) else synchronized(this) {
-                    problem = "终端清理 UNKNOWN；保留原 owner 和草稿，不自动重发"
+                    problem = "终端清理结果未确认"
                     notifyChanged()
                 }
             }, "terminal-preparation-drain").apply { isDaemon = true; start() }
@@ -2715,7 +2715,7 @@ class ChatController internal constructor(private val application:Application,
                 RunCatalogCloseResult.Drained -> Unit
                 is RunCatalogCloseResult.Unknown -> {
                     synchronized(this) {
-                        problem = "浏览器准备清理结果 UNKNOWN；保留原资源，不自动重发"
+                        problem = "浏览器准备资源清理结果未确认"
                         notifyChanged()
                     }
                     return
@@ -2725,7 +2725,7 @@ class ChatController internal constructor(private val application:Application,
                     if (android.os.SystemClock.uptimeMillis() < token.cleanupDeadline) {
                         handler.postDelayed({ finishPreparation(token) }, 100)
                     } else synchronized(this) {
-                        problem = "浏览器准备清理尚未确认；保留原资源，不自动重发"
+                        problem = "浏览器准备资源清理结果未确认"
                         notifyChanged()
                     }
                     return
@@ -2931,7 +2931,7 @@ class ChatController internal constructor(private val application:Application,
             val result = tools.observeVirtualDisplayCloseOnWorker(parentDrained = true)
             if (result is RunCatalogCloseResult.Unknown) handler.post { synchronized(this) {
                 if (virtualDisplayEntry === entry) {
-                    reportCleanupProblem(tools, "副屏清理结果 UNKNOWN；保留原身份、会话和 lease，不自动重连或重发")
+                    reportCleanupProblem(tools, "副屏清理结果未确认")
                     notifyChanged()
                 }
             } }
@@ -3200,7 +3200,7 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged()
             return pending
         } catch (_: Exception) {
-            problem = "固定命令 job 准备失败或后端不支持；未启动，草稿保留"
+            problem = "固定命令 job 准备失败或后端不支持"
             finishPreparation(token); notifyChanged(); return null
         }
     }
@@ -3308,7 +3308,7 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged()
             return pending
         } catch (_: Exception) {
-            problem = "终端准备失败或已取消；未启动、未发送，草稿保留"
+            problem = "终端准备失败或已取消"
             finishPreparation(token)
             notifyChanged()
             return null
@@ -3415,7 +3415,7 @@ class ChatController internal constructor(private val application:Application,
             return pending
         } catch (_: Exception) {
             pending?.cancel()
-            problem = "MCP 准备失败或配置已变化；草稿保留，未连接服务器"
+            problem = "MCP 准备失败或配置已变化"
             finishPreparation(token); notifyChanged(); return null
         }
     }
@@ -3494,7 +3494,7 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged()
             return pending
         } catch (failure: Exception) {
-            problem = failure.message ?: "浏览器准备失败；草稿保留"
+            problem = failure.message ?: "浏览器准备失败"
             finishPreparation(token)
             notifyChanged()
             return null
@@ -3609,11 +3609,11 @@ class ChatController internal constructor(private val application:Application,
                 val replay=try {attempt.reserve(database)} catch (_:Exception) {attempt.unknown()}
                 if(replay!=null) replay else {
                     sendPrepared(token,conversation,"",imageAttempt=attempt)
-                    attempt.result ?: attempt.rejected("发送准备被拒绝；草稿保留，未发起请求")
+                    attempt.result ?: attempt.rejected("发送准备被拒绝")
                 }
             } catch (_:Exception) {
-                attempt?.result ?: attempt?.rejected("图片发送失败；草稿保留，未自动重发")
-                    ?: ImageSendResult.Rejected(owner,draftRevision,"图片身份或存储无效；草稿保留")
+                attempt?.result ?: attempt?.rejected("图片发送失败")
+                    ?: ImageSendResult.Rejected(owner,draftRevision,"图片身份或存储无效")
             }
             finishPreparation(token)
             // A receipt belongs to the submitted revision, not whichever editor is visible now.
@@ -3713,7 +3713,7 @@ class ChatController internal constructor(private val application:Application,
                 ).use { check(it.moveToFirst()); it.getString(0) }
         } catch (_:Exception) { return null }
         val workspace = try { freezeWorkspace(token, conversation?.id) } catch (failure: Exception) {
-            problem = "会话工作区不可用（${failure.message}）；草稿保留，未发送请求"
+            problem = "会话工作区不可用（${failure.message}）"
             notifyChanged(); return null
         }
         val assistantContext = token.browserContext ?: try {
@@ -3722,14 +3722,14 @@ class ChatController internal constructor(private val application:Application,
             if(binding==null) throw MissingAssistantBindingException()
             AssistantRunContext.capture(assistantStore,binding,assistantAssets)
         } catch (_:MissingAssistantBindingException) {
-            problem="会话未绑定助手；请显式选择助手，草稿保留";notifyChanged();return null
+            problem="会话未绑定助手，请选择助手";notifyChanged();return null
         } catch (_:AssistantNotFoundException) {
-            problem="会话助手已删除或不存在；请显式重新绑定，草稿保留";notifyChanged();return null
+            problem="会话助手不存在，请重新选择";notifyChanged();return null
         } catch (_:Exception) {
-            problem="助手配置或记忆读取失败；草稿保留，未发起请求";notifyChanged();return null
+            problem="助手配置或记忆读取失败";notifyChanged();return null
         }
         val replyIdentity = try { AssistantReplyIdentity.capture(assistantContext, assistantAssets) } catch (_: Exception) {
-            problem="助手头像读取失败；草稿保留，未发起请求";notifyChanged();return null
+            problem="助手头像读取失败";notifyChanged();return null
         }
         val conversationId=platformAction?.conversationId ?: mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
@@ -3742,7 +3742,7 @@ class ChatController internal constructor(private val application:Application,
             }
         } catch (failure:Exception) {
             problem=if (failure is app.daiyu.android.domain.ModelRequestException) failure.userMessage
-                else "子模型配置不可用、已变更或不支持；草稿保留，未切换到主模型"
+                else "子模型配置不可用、已变更或不支持"
             notifyChanged();return null
         }
         val childModels: Map<String, ChildModelDefinition> = childPreparation ?: emptyMap()
@@ -3752,27 +3752,27 @@ class ChatController internal constructor(private val application:Application,
         val currentChildProfiles: () -> Set<String> = { currentChildModels().keys }
         val interactiveSnapshot = interactiveMode.snapshot()
         val frozenProvider = try { freezePreparationProvider(token, conversation?.id) } catch (_: CredentialUnavailableException) {
-            problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
+            problem="已保存密钥不可用，请在模型设置重新输入";notifyChanged();return null
         } catch (_: Exception) {
-            problem="请配置、启用并选择当前提供商；草稿保留，未发送请求";notifyChanged();return null
+            problem="请先配置并选择可用提供商";notifyChanged();return null
         }
         val config=try {(mcpPreparation?.provider?.asModelSettings() ?: terminalJobPreparation?.provider?.asModelSettings() ?: terminalPreparation?.provider?.asModelSettings() ?: browserPreparation?.provider?.asModelSettings() ?: frozenProvider.settings).also {it.validate()}} catch (_:CredentialUnavailableException) {
-            problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
+            problem="已保存密钥不可用，请在模型设置重新输入";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
         val provider=try {
             val selected=mcpPreparation?.provider ?: terminalJobPreparation?.provider ?: terminalPreparation?.provider ?: browserPreparation?.provider ?: imageAttempt?.provider ?: synchronized(this) {imageProvider.takeIf { imageProviderConfiguration == frozenProvider }}
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
-        } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
+        } catch (_:Exception) {problem="图片模型配置已变化";notifyChanged();return null}
         // One immutable request policy, read once before context/model preparation. Changing
         // the UI/store during streaming, pause/continue or tool rounds affects only the next run.
         val reasoningIntent = try { reasoningPreference.snapshot(conversation?.id?.value) }
-        catch (_: Exception) { problem="思考偏好无效或读取失败；请重新保存，草稿保留";notifyChanged();return null }
+        catch (_: Exception) { problem="思考偏好无效或读取失败，请重新保存";notifyChanged();return null }
         val requestProvider = try { app.daiyu.android.model.ReasoningRequestPolicy.freeze(provider, reasoningIntent) }
         catch (failure: Exception) {
             problem=if (failure is app.daiyu.android.domain.ModelRequestException) failure.userMessage
-                else if (failure is IllegalArgumentException) failure.message ?: "当前模型协议不支持此思考配置；草稿保留"
-                else "推理参数格式无效；Responses 使用 reasoning 对象，Messages 仅支持 enabled/disabled thinking；草稿保留"
+                else if (failure is IllegalArgumentException) failure.message ?: "当前模型协议不支持此思考配置"
+                else "推理参数格式无效"
             notifyChanged();return null
         }
         val frozenReasoning = ReasoningEffort.textPreference(reasoningIntent,
@@ -3783,34 +3783,34 @@ class ChatController internal constructor(private val application:Application,
         val frozenReconnect = try {
             app.daiyu.android.model.reconnect.FrozenReconnectAdapter.freeze(reconnectSettings.snapshot(), requestProvider)
         } catch (_: Exception) {
-            problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
+            problem="重连配置无效或保存未确认，请重新保存"
             notifyChanged(); return null
         }
         val run=platformAction?.runId ?: mcpPreparation?.scope?.runId ?: gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, reasoningIntent) }
-        catch (_: Exception) { problem="会话思考偏好保存未确认；草稿保留，未发起请求";notifyChanged();return null }
+        catch (_: Exception) { problem="会话思考偏好保存未确认";notifyChanged();return null }
         // One acceptance candidate, including its media reconstruction and all run owners.
         // This value must not change during preflight, streaming, or receipt reconciliation.
         val acceptedAt = System.currentTimeMillis()
         var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets,acceptedAt) ?:
             Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
-        } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
+        } catch (_:Exception) {problem="图片冻结失败或模型不支持";notifyChanged();return null}
         if (actionRevision != null) user = actionRevision.user.copy(runId = run)
         val assistant=Message(mcpPreparation?.assistantMessageId ?: gui?.assistantId ?: terminalJobPreparation?.identity?.assistantMessageId ?: virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
         val physicalVideoHistory = try { ControllerVideoHistory(database).capture(conversationId) }
         catch (_: Exception) {
-            problem="原视频来源无法确认；草稿保留，未启动模型请求";notifyChanged();return null
+            problem="原视频来源无法确认";notifyChanged();return null
         }
         if (physicalVideoHistory.inputs.isNotEmpty() && (withChildren || imageAttempt != null ||
                 generation != null || terminalRun != null || terminalJobRun != null || virtualDisplay != null || gui != null ||
                 shizukuPreparation != null || shizukuAuthorization != null ||
                 mcpPreparation != null || browserPreparation != null || browserBinding != null)) {
-            problem="当前专用批准不能与原视频历史混合发送；保留草稿，请使用原视频文本发送入口"
+            problem="此授权不支持混合原视频历史，请使用视频文本入口"
             notifyChanged(); return null
         }
         if ((videoAttempt != null || physicalVideoHistory.inputs.isNotEmpty()) &&
             frozenReasoning != app.daiyu.android.delegation.ReasoningEffort.OFF) {
-            problem="原视频批准当前仅支持关闭思考；请选择关闭，草稿保留，未发起请求"
+            problem="原视频请求需要关闭思考"
             notifyChanged();return null
         }
         var videoPrepared: PreparedControllerVideoSend? = null
@@ -3862,7 +3862,7 @@ class ChatController internal constructor(private val application:Application,
             session to capability
         } catch (_: Exception) {
             token.video?.revoke()
-            problem="原视频目录证据、运行批准或原件校验失败；草稿保留，未启动模型请求";notifyChanged();return null
+            problem="原视频目录证据、授权或原件校验失败";notifyChanged();return null
         } else null
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
@@ -3897,12 +3897,12 @@ class ChatController internal constructor(private val application:Application,
         } catch (failure: Exception) {
             problem = when (failure) {
                 is java.util.concurrent.CancellationException ->
-                    "上下文准备已取消；草稿保留，未启动聊天模型请求"
+                    "上下文准备已取消"
                 is app.daiyu.android.context.ContextCapacityExceededException ->
-                    "上下文超出发送预算；草稿保留，未启动聊天模型请求"
+                    "上下文超出发送预算"
                 is app.daiyu.android.context.SummaryProfileUnavailableException ->
-                    "独立摘要配置不可用（${failure.reason.name}）；请重新保存，草稿保留，未回退聊天模型"
-                else -> "上下文或摘要准备失败；草稿保留，未启动聊天模型请求"
+                    "独立摘要配置不可用（${failure.reason.name}），请重新保存"
+                else -> "上下文或摘要准备失败"
             }
             notifyChanged(); return null
         }
@@ -3912,7 +3912,7 @@ class ChatController internal constructor(private val application:Application,
                 ((actionRevision?.prefix ?: contextService.displayHistory(conversationId)) + preparedContext.messages)
                     .distinctBy { it.id }
         } catch (_: Exception) {
-            problem="图片历史读取失败；草稿保留，未启动模型请求";notifyChanged();return null
+            problem="图片历史读取失败";notifyChanged();return null
         }
         val auxiliaryNeeded = video == null && app.daiyu.android.model.auxiliary.requiresAuxiliaryVision(
             provider, imageHistory + user)
@@ -3924,12 +3924,12 @@ class ChatController internal constructor(private val application:Application,
                 auxiliarySelection.resolve(listOf(independentModels.visionCandidate(it)))
             }
         } catch (_: Exception) {
-            problem="独立辅助视觉配置不可用或图片能力未知；草稿保留，不回退主模型";notifyChanged();return null
+            problem="独立辅助视觉配置不可用或图片能力未知";notifyChanged();return null
         }
         val auxiliaryCurrent = { auxiliaryFrozen == null || independentModels.isCurrent(auxiliaryEpoch) }
         if (imageAttempt != null && (imageAttempt.auxiliaryGeneration != auxiliaryEpoch.takeIf { auxiliaryFrozen != null } ||
                 !auxiliaryCurrent())) {
-            problem="图片路由已变化；草稿保留，请重新发送";notifyChanged();return null
+            problem="图片路由已变化";notifyChanged();return null
         }
         var auxiliaryPort: ControllerAuxiliaryVision? = null
         val acceptedTitle = java.util.concurrent.atomic.AtomicReference<String?>()
@@ -3971,7 +3971,7 @@ class ChatController internal constructor(private val application:Application,
             }
             }
         } catch (_:Exception) {
-            problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
+            problem="图片历史读取、能力检查或模型初始化失败";notifyChanged();return null
         }
         if(preparationCancelled(token)) { auxiliaryPort?.close(); return null }
         // The observer must be OUTSIDE the fully assembled video/image/auxiliary port. It is
@@ -4349,12 +4349,12 @@ class ChatController internal constructor(private val application:Application,
                 preparingChildren?.close()
                 preparingLiveMcp?.close()
             }
-            problem="运行准备失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
+            problem="运行准备失败";notifyChanged();return null
         }
         val (owned, tools) = prepared
         if (childPreparation != null && !runCatching { childPreparation.isCurrent() }.getOrDefault(false)) {
             auxiliaryPort?.close(); closeUnacceptedTools(token, tools, conversation?.id, conversationId)
-            problem="子代理配置或提供商已变化；草稿保留，请重新发送";notifyChanged();return null
+            problem="子代理配置或提供商已变化";notifyChanged();return null
         }
         if (!runCatching {
             val binding = database.modelBinding(conversation?.id)
@@ -4362,7 +4362,7 @@ class ChatController internal constructor(private val application:Application,
                 binding.localModelIdentity == frozenProvider.localModelIdentity && providers.isCurrentConversation(binding, frozenProvider)
         }.getOrDefault(false)) {
             auxiliaryPort?.close(); closeUnacceptedTools(token, tools, conversation?.id, conversationId)
-            problem="提供商选择或配置已变化；草稿保留，请重新发送";notifyChanged();return null
+            problem="提供商选择或配置已变化";notifyChanged();return null
         }
         // Only the in-memory admission gate is under the controller monitor. In particular,
         // beginCommit must never encompass SQLite or provider/model I/O.
@@ -4446,8 +4446,8 @@ class ChatController internal constructor(private val application:Application,
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
             auxiliaryPort?.close()
             closeUnacceptedTools(token, tools, conversation?.id, conversationId)
-            problem=if(!token.persistenceUnconfirmed) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
-                else "发送保存结果未确认；保留原文和附件，不自动重发"
+            problem=if(!token.persistenceUnconfirmed) "会话或编辑内容已变化"
+                else "发送结果未确认"
             notifyChanged();return null
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
@@ -4464,10 +4464,10 @@ class ChatController internal constructor(private val application:Application,
                     val preparedTitle = coordinator.prepare(saved.id, run, requestProvider)
                     pendingTitle.set(preparedTitle.job)
                     if (preparedTitle.outcome == app.daiyu.android.title.TitleOutcome.BINDING_UNAVAILABLE)
-                        synchronized(this) { titleNotice = "独立标题模型失绑定或配置不可用；聊天已保存，未使用主模型" }
+                        synchronized(this) { titleNotice = "独立标题模型绑定或配置无效" }
                     if (synchronized(this) { closed }) pendingTitle.getAndSet(null)?.let(coordinator::revoke)
                 }
-            } catch (_: Exception) { titleNotice = "独立标题配置不可用；聊天已保存" }
+            } catch (_: Exception) { titleNotice = "独立标题配置不可用" }
         }
         imageAttempt?.accepted(saved)
         synchronized(this) { virtualDisplay?.accepted = true; gui?.accepted = true }
@@ -4646,7 +4646,7 @@ class ChatController internal constructor(private val application:Application,
                         }}
                     } else synchronized(this) {
                         lifetime.cleaning=false;lifetime.cleanupFailed=true
-                        problem="提问停止尚未持久确认；请重试停止，原资源保留";notifyChanged()
+                        problem="提问停止尚未持久确认";notifyChanged()
                     }
                 }
             }
@@ -4672,7 +4672,7 @@ class ChatController internal constructor(private val application:Application,
                             lifetime.deviceCleanup.observe(result)
                             if(lifetime.deviceCleanup.drained) cleanupRun(lifetime)
                             else {
-                                reportCleanupProblem(lifetime.tools, "运行清理结果 UNKNOWN；原资源保留，不自动重连或重发，请核实设备状态")
+                                reportCleanupProblem(lifetime.tools, "运行清理结果未确认")
                                 if(!closed) active=(active ?: lifetime.initial).copy(
                                     status=RunStatus.INTERRUPTED,error=problem)
                                 notifyChanged()
@@ -4817,8 +4817,8 @@ class ChatController internal constructor(private val application:Application,
                 return reasoningSaved && childrenSaved
             }
             fun branchUnknown(locator: app.daiyu.android.context.BranchLocator, configurationConfirmed: Boolean) =
-                MessageActionResult.Unknown("分支提交、原件发布或配置保存未确认；仅核实目标，不要再次分支或重放工具" +
-                    if (configurationConfirmed) "" else "；目标思考或子代理配置未确认，请重新保存后再发送",
+                MessageActionResult.Unknown("分支、原件或配置保存结果未确认" +
+                    if (configurationConfirmed) "" else "；思考或子代理配置保存未确认",
                     locator.copy(staticIdentities = locator.staticIdentities.toList())).also { receipt ->
                     synchronized(this) { pendingBranchOutcomes.add(receipt) }
                 }
@@ -4873,18 +4873,18 @@ class ChatController internal constructor(private val application:Application,
                     }
                 }
             } catch (failure: app.daiyu.android.context.BranchRolledBack) {
-                MessageActionResult.Rejected("分支已确认未提交；原会话和原件保留，未重试")
+                MessageActionResult.Rejected("分支尚未创建")
             } catch (failure: app.daiyu.android.context.BranchOutcomeUnknown) {
                 changed = true
                 val configurationConfirmed = try { retainBranchConfiguration(failure.locator.conversationId) }
                     catch (_: Exception) { false }
                 branchUnknown(failure.locator, configurationConfirmed)
             } catch (failure: IllegalArgumentException) {
-                MessageActionResult.Rejected(failure.message ?: "消息身份或安全历史基线不匹配；未重放请求")
+                MessageActionResult.Rejected(failure.message ?: "消息身份或历史版本不匹配")
             } catch (_: Exception) {
                 // Includes commit/endTransaction errors: an exception is NOT proof of absence.
                 changed = true
-                MessageActionResult.Unknown("消息操作未确认；请刷新核实持久历史，未自动重试或重放工具")
+                MessageActionResult.Unknown("消息操作结果未确认，请刷新历史")
             }
             handler.post {
                 val deliver = synchronized(this) {
@@ -4949,7 +4949,7 @@ class ChatController internal constructor(private val application:Application,
         configurationRestorePreview=null
         checkConfigurationRestoreAvailable()
         require(authorized && current===preview) {"恢复预览已失效；请重新预览并确认"}
-        dataTask(failureNotice="配置未恢复；请重新预览并确认",completed=completed,work={
+        dataTask(failureNotice="配置未恢复",completed=completed,work={
             check(neutralBackup.importedConfiguration().toString()==preview.metadata) {"备份配置已变化；请重新预览"}
             providers.withEditor(preview.editor) { store ->
                 check(providers.activeEditor() == preview.editor) { "活动提供商已变化，请重新预览" }
@@ -5298,9 +5298,9 @@ class ChatController internal constructor(private val application:Application,
                         target.writer(Charsets.UTF_8).apply { write(text); flush() }
                     } ?: throw java.io.IOException("无法打开目标")
                 }
-                notice = if (includeLinux) "数据与 Linux 环境已导出；不含外部共享目录，请妥善保管"
-                    else if (complete) "完整中立备份已导出；不含 Linux 环境、凭据或系统授权，请妥善保管"
-                    else "纯文本兼容备份已导出；不含附件、归档与分支元数据"
+                notice = if (includeLinux) "数据与 Linux 环境已导出"
+                    else if (complete) "中立备份已导出"
+                    else "纯文本备份已导出"
             } catch (caught: Throwable) { failure = caught; throw caught }
             finally {
                 owned.asReversed().forEach { resource ->
@@ -5324,7 +5324,7 @@ class ChatController internal constructor(private val application:Application,
                     ?: throw java.io.IOException("无法打开目标")
             }
             val scope = if (targets.distinct().size == 1) "单会话中立备份" else "${targets.distinct().size} 个会话"
-            "${scope}已导出；不含全局草稿、配置、凭据或运行恢复状态，请妥善保管"
+            "${scope}已导出"
         })
     }
     internal fun importUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
@@ -5340,7 +5340,7 @@ class ChatController internal constructor(private val application:Application,
         completed: (Boolean) -> Unit = {}) {
         dataTask(completed = completed, work = {
             kotlinx.coroutines.runBlocking { app.daiyu.android.terminal.LinuxBackupRestore(application).approve(candidate) }
-            "恢复的 Linux 环境已批准；下次启动应用后可在 Linux 设置选择，当前环境未改变"
+            "Linux 环境已批准，重启应用后可选择"
         })
     }
     internal fun importUserBackupAuto(uri: Uri,
@@ -5374,7 +5374,7 @@ class ChatController internal constructor(private val application:Application,
                         }.use { prepared ->
                             val linux = prepared.publish()
                             val result = importUserBackupContent(true, { archive.data.inputStream() }, onStage = { report(it, true) })
-                            notice = result.first + "；Linux 环境已恢复到独立目录，尚未授权执行"
+                            notice = result.first + "；Linux 环境已恢复，待授权"
                             outcome = BackupImportOutcome(source.kind, result.second, linux)
                         }
                     }
@@ -5496,7 +5496,7 @@ class ChatController internal constructor(private val application:Application,
             }
         }
         try {executor.execute {
-            var value:String?=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
+            var value:String?=failureNotice ?: if(importing) "备份格式、校验或身份冲突" else "备份导出失败"
             var success=false
             diagnostics?.record(app.daiyu.android.diagnostics.DiagnosticEvent.DATA_STARTED)
             try {
@@ -5505,20 +5505,20 @@ class ChatController internal constructor(private val application:Application,
                 value=work(report);success=true
             } catch(failure:Exception) {
                 value=if (failure is AssistantInUseException) "任务占用中" else failureNotice ?: when(failure) {
-                    is SecurityException -> "备份文件访问权限不足或已失效；请重新选择文件。原会话保留，导出目标可能不完整"
-                    is java.nio.charset.CharacterCodingException -> "导入失败；备份不是有效UTF-8文本。原会话保留，未执行历史请求"
-                    is java.io.IOException -> if(importing) "导入失败；读取备份或写入附件失败。原会话保留，未执行历史请求"
-                        else "导出失败；读取附件或写入目标失败。目标文件可能不完整，请勿作为有效备份；原会话保留"
+                    is SecurityException -> "备份文件访问权限不足或已失效，请重新选择"
+                    is java.nio.charset.CharacterCodingException -> "备份不是有效 UTF-8 文本"
+                    is java.io.IOException -> if(importing) "备份读取或附件写入失败"
+                        else "附件读取或备份写入失败"
                     else -> when (failure.message) {
                         "linux_backup_root_required" -> "完整 chroot 备份或恢复需要应用 Root 模式及实际 Root 授权；当前数据未覆盖"
                         "linux_backup_environment_not_ready", "linux_environment_not_selected" -> "请先在 Linux 设置选择可用环境，再导出完整环境"
                         "linux_backup_mounted_directory" -> "Linux 目录包含挂载点；为避免打包外部数据，本次备份已停止"
                         "linux_backup_permission_denied" -> "Linux 文件权限不足；本次未生成完整备份，请检查 Root 授权"
-                        "linux_backup_native_failed", "linux_restore_receipt_missing" -> "Linux 文件打包或恢复未完成；原环境保持不变，请勿使用不完整的导出文件"
-                        "linux_restore_abi_mismatch" -> "备份的 Linux 架构与本机不一致；未恢复环境"
+                        "linux_backup_native_failed", "linux_restore_receipt_missing" -> "Linux 文件打包或恢复未完成"
+                        "linux_restore_abi_mismatch" -> "备份的 Linux 架构与本机不一致"
                         "linux_rootfs_in_use", "linux_rootfs_unknown", "linux_environment_in_use", "linux_runner_generation_unknown" -> "Linux 环境仍被任务使用或上次执行尚未确认结束；请结束原任务后再备份"
-                        "backup_archive_checksum" -> "备份内容校验失败；未恢复 Linux 环境"
-                        "备份来源已变化；未自动重试" -> "导出期间源数据发生变化；未自动重试，请重新导出"
+                        "backup_archive_checksum" -> "备份内容校验失败"
+                        "备份来源已变化；未自动重试" -> "源数据已变化，请重新导出"
                         else -> value
                     }
                 }

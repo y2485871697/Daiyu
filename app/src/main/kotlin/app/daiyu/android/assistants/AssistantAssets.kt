@@ -73,7 +73,7 @@ class FileAssistantAssets(context: Context) : AssistantAssets {
     }
     @Synchronized
     override fun saveMemory(id: String, content: String, revision: String): AssistantMemorySnapshot {
-        check(memory(id).revision == revision) { "记忆已被其他操作更新，草稿已保留；请先重新读取并合并。" }
+        check(memory(id).revision == revision) { "记忆已被其他操作更新" }
         val bytes = content.toByteArray(Charsets.UTF_8)
         require(bytes.size <= AssistantAssets.MAX_MEMORY_BYTES) { "记忆文件不能超过 1 MiB UTF-8 字节" }
         val file = memoryFile(id)

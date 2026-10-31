@@ -76,8 +76,8 @@ internal fun rememberSettingsReleaseCheck(
                             ReleaseCheckFailure.RATE_LIMITED -> "GitHub 限流，请稍后重试"
                             ReleaseCheckFailure.HTTP -> "发布服务拒绝了本次检查"
                             ReleaseCheckFailure.NETWORK -> "无法连接发布服务，请检查网络后重试"
-                            ReleaseCheckFailure.INVALID_RESPONSE -> "发布信息格式无效，未判定版本状态"
-                            ReleaseCheckFailure.TOO_LARGE -> "发布信息超过读取上限，未判定版本状态"
+                            ReleaseCheckFailure.INVALID_RESPONSE -> "发布信息格式无效"
+                            ReleaseCheckFailure.TOO_LARGE -> "发布信息超过读取上限"
                         })
                     }
                 }

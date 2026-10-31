@@ -167,7 +167,7 @@ class MainActivity : ComponentActivity() {
         val owner = platformPermissionOwner; platformPermissionOwner = null
         if (platformPageCurrent(owner)) {
             platformSettingsRevision++
-            toast("系统授权结果已更新；工具选择和私密出站同意未更改")
+            toast("系统授权结果已更新")
         }
     }
     private val platformSafPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -175,7 +175,7 @@ class MainActivity : ComponentActivity() {
         if (request != null && platformPageCurrent(request.first) && result.resultCode == RESULT_OK) {
             val accepted = result.data?.let { platformSaf.accept(it, request.second) } == true
             platformSettingsRevision++
-            toast(if (accepted) "精确持久只读授权已保存；未开启工具，未发送URI或数据" else "未确认精确持久只读授权；文件访问仍拒绝")
+            toast(if (accepted) "文件只读授权已保存" else "文件只读授权未确认")
         }
     }
     private fun requestPlatformPermission(tool: app.daiyu.android.platform.PlatformReadTool, permission: String) {
@@ -492,7 +492,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun stopCascadeVoice() {
-        try { cascadeVoice.close() } catch (_: Exception) { toast("级联音频释放未确认，后续音频已阻止") }
+        try { cascadeVoice.close() } catch (_: Exception) { toast("级联音频释放未确认") }
     }
     private fun invalidatePreparedSpeech() {
         voiceRequestEpoch++
@@ -504,7 +504,7 @@ class MainActivity : ComponentActivity() {
         accountPreviewRevoke?.invoke()
         if (!universalOwnMutation) revokeUniversalVoice()
         invalidatePreparedSpeech()
-        try { remoteVoice.invalidate() } catch (_: Exception) { toast("语音资源释放未确认，新的音频操作已阻止") }
+        try { remoteVoice.invalidate() } catch (_: Exception) { toast("语音资源释放未确认") }
     }
     private fun requestConfiguredSpeech(expectedOwner: String?, id: String, text: String) {
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
@@ -533,7 +533,7 @@ class MainActivity : ComponentActivity() {
         if (config.engine != "MIMO" || reference == null) { toast("参考录音已删除或账户已更换，请重新选择"); return }
         if (current()) lifecycleScope.launch {
             try { play(voiceRuntime.authorizeReference(frozen)) }
-            catch (_: Exception) { if (current()) toast("参考录音或配置已失效；未发送") }
+            catch (_: Exception) { if (current()) toast("参考录音或配置已失效") }
         }
     }
     private var voiceForeground = false
@@ -542,7 +542,7 @@ class MainActivity : ComponentActivity() {
         // A permission sheet may pause/invalidate its editor token. Report only the app-level
         // permission outcome in that case; never resurrect that token or start a recognizer.
         if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击语音开始听写"
-            else "麦克风权限被拒绝；草稿未更改")
+            else "麦克风权限被拒绝")
     }
     private val dictationHost: ComposerDictationHost by lazy {
         ComposerDictationHost(applicationContext, audioGate,
@@ -564,7 +564,7 @@ class MainActivity : ComponentActivity() {
         val original = offlineMicrophonePermissionOwner
         offlineMicrophonePermissionOwner = null
         original?.permissionResult(granted)
-        if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击离线语音" else "麦克风权限被拒绝；草稿未更改")
+        if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击离线语音" else "麦克风权限被拒绝")
     }
     private val offlineHost: app.daiyu.android.voice.offline.OfflineComposerHost by lazy {
         app.daiyu.android.voice.offline.OfflineComposerHost(applicationContext,
@@ -945,7 +945,7 @@ class MainActivity : ComponentActivity() {
         try { chatReferencePicker.launch(app.daiyu.android.platform.PlatformSettingsAccess.pickerIntent(tree)) }
         catch (_: Exception) {
             if (chatReferencePick === request) chatReferencePick = null
-            toast("无法打开文件选择器；原草稿保留")
+            toast("无法打开文件选择器")
         }
     }
     private fun settleChatReference() {
@@ -977,7 +977,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (chatReferencePick !== request || !request.live || !generationResumed() || !voiceForeground ||
                     !chatReferenceAvailable() || !chatReferenceMatches(request)) return@launch
-                if (description == null) { toast("文件只读授权未保存，请重新选择；原草稿保留"); return@launch }
+                if (description == null) { toast("文件只读授权未保存，请重新选择"); return@launch }
                 val reference = "${if (request.tree) "目录" else "文件"}引用（未读取）：$raw"
                 val instructions = if (request.tree) "用 list_files 按需列举，勿自动读取全部文件。"
                     else "用 file_metadata 查看元数据；用 read_text_file 按行或 query 检索，按 next_offset_bytes 续读；勿每轮展开全文。不支持的文档格式应明确说明。"
@@ -991,7 +991,7 @@ class MainActivity : ComponentActivity() {
                     updateDraft(next)
                     if (draft == next) {
                         selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false)
-                    } else toast("引用未加入；原草稿保留")
+                    } else toast("引用未加入")
                 }
             } finally {
                 if (chatReferencePick === request) {
@@ -1429,8 +1429,8 @@ class MainActivity : ComponentActivity() {
                             generationForm.copy(references = listOf(input), mask = null)
                         else generationForm.copy(mask = input)
                         generationFormRevision++
-                        if (replacedMask) toast("原图已更新；旧 mask 已移除，请重新选择同尺寸 mask 并完整预览")
-                    }, onFailure = { toast("原图或 mask 无效、过大或不可读取；未发送请求，表单保留") })
+                        if (replacedMask) toast("原图已更新，请重新选择同尺寸 mask")
+                    }, onFailure = { toast("原图或 mask 无效、过大或不可读取") })
                 }
             })
     }
@@ -1469,7 +1469,7 @@ class MainActivity : ComponentActivity() {
         generationFormRevision++
         val frozen = generationInputIdentity() ?: return
         val request = generationInputs.begin(frozen, protocol, target, generationForm.references.singleOrNull())
-            ?: return toast("此协议不支持该输入，或已有选择尚未结束；未发送请求")
+            ?: return toast("协议不支持此输入，或文件选择尚未结束")
         try { generationInputPicker.launch(if (protocol == app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART) "image/png" else "image/*") }
         catch (_: Exception) { generationInputs.launchFailed(request); toast("无法打开图片选择器；表单保留") }
     }
@@ -2051,7 +2051,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun activityUsable() = activityCallbacksAllowed && !isFinishing && !isDestroyed
-    private fun requireActivityUsable() { check(activityUsable()) { "页面已关闭；未执行操作" } }
+    private fun requireActivityUsable() { check(activityUsable()) { "页面已关闭" } }
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -2434,7 +2434,7 @@ class MainActivity : ComponentActivity() {
                             onCopy = { uri ->
                                 if (platformPageCurrent(owner)) {
                                     getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("SAF URI", uri.toString()))
-                                    toast("仅复制精确URI；尚未发送给模型")
+                                    toast("已复制 URI")
                                 }
                             }, onRevoke = { uri ->
                                 if (platformPageCurrent(owner)) { platformSaf.revoke(uri); platformSettingsRevision++ }
@@ -2956,7 +2956,7 @@ class MainActivity : ComponentActivity() {
                             if (allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))) try {
                                 if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()
                                 else toast("任务占用中")
-                            } catch (_: Exception) { toast("思考偏好保存未确认；请重新保存") }
+                            } catch (_: Exception) { toast("思考偏好保存未确认") }
                         }
                     })
             }
@@ -3041,10 +3041,10 @@ class MainActivity : ComponentActivity() {
                         }
                         when (outcome.outcome) {
                             RegenerationSendOutcome.ACCEPTED -> Unit
-                            RegenerationSendOutcome.NOT_SENT -> toast(controller.problem ?: "本次未发送；原消息、摘要及草稿保留")
+                            RegenerationSendOutcome.NOT_SENT -> toast(controller.problem ?: "发送未受理")
                             RegenerationSendOutcome.UNKNOWN -> {
                                 refreshMessageActionHistory()
-                                toast("重新生成保存结果未确认；请核实历史，不会自动重发")
+                                toast("重新生成结果未确认")
                             }
                         }
                     }
@@ -3104,7 +3104,7 @@ class MainActivity : ComponentActivity() {
                 editorGeneration == renderedEditorGeneration) {
                 val owner = ContextManagementOwner(conversation.id, renderedContextEntryEpoch)
                 val adapter = controller.openContextManagement(owner)
-                if (adapter == null) toast("上下文页面未打开；当前正在准备、运行或执行任务，请稍后再试")
+                if (adapter == null) toast("当前有任务正在准备或运行，请稍后再试")
                 else {
                     retainedPage = "context-management"
                     contextManagementPage = ContextManagementPage(conversation.id, renderedEditorGeneration)
@@ -3345,7 +3345,7 @@ class MainActivity : ComponentActivity() {
                     ChatMenuAction.VOICE_INPUT -> "input"; ChatMenuAction.VOICE_DOUBAO -> "realtime"; else -> "conversation"
                 })) {
                 if (voiceEntryPreferences.edit().putString("mode", action.name).commit()) voiceEntryMode = action
-                else toast("语音入口未保存；保持原选择")
+                else toast("语音入口保存失败")
             }
             ChatMenuAction.NEW_CHAT -> if (currentChat()) createNewConversation()
             ChatMenuAction.RENAME -> selected?.let { conversation ->
@@ -3604,7 +3604,7 @@ class MainActivity : ComponentActivity() {
                     when (val result = app.daiyu.android.gui.GuiSystemSettings.openFromUser(this@MainActivity)) {
                         is app.daiyu.android.gui.GuiResult.Value -> Unit
                         is app.daiyu.android.gui.GuiResult.Rejected -> toast("无法打开系统无障碍设置：${result.code}")
-                        is app.daiyu.android.gui.GuiResult.Unknown -> toast("系统设置结果未知，不会自动重试：${result.code}")
+                        is app.daiyu.android.gui.GuiResult.Unknown -> toast("系统设置结果未确认：${result.code}")
                     }
                 } })
             guiEditor?.let { entry ->
@@ -3818,7 +3818,7 @@ class MainActivity : ComponentActivity() {
                                         if (terminalEditor === editor) {
                                             editor.choosing = false
                                             if (failure == null && result?.ok == true) editor.linux = choice.reference
-                                            else toast("Linux 选择未确认；未准备或启动终端")
+                                            else toast("Linux 环境选择未确认")
                                         }
                                     }
                                 }
@@ -3859,7 +3859,7 @@ class MainActivity : ComponentActivity() {
                 if (terminalEditorCurrent(editor) && editor.command == command && editor.linux == linux && editor.jobMode == mode) {
                     editor.jobPreparation = prepared
                     retained = prepared != null
-                    if (!retained) toast(controller.problem ?: "job 准备未受理；未启动")
+                    if (!retained) toast(controller.problem ?: "job 准备未受理")
                     else sendTerminalJob(editor, checkNotNull(prepared))
                 }
             } finally {
@@ -3876,7 +3876,7 @@ class MainActivity : ComponentActivity() {
             if (terminalEditor === editor) terminalEditor = null
             completeTextSend(submitted, result)
         }
-        if (!queued) { pendingTextSend = null; cancelTerminalEditor(); toast("job 发送未受理；不自动重发") }
+        if (!queued) { pendingTextSend = null; cancelTerminalEditor(); toast("job 发送未受理") }
         publishChat()
     }
 
@@ -4052,7 +4052,7 @@ class MainActivity : ComponentActivity() {
                 if (terminalEditorCurrent(editor) && editor.command == command && editor.linux == linux) {
                     editor.preparation = prepared
                     retained = prepared != null
-                    if (!retained) toast(controller.problem ?: "终端准备未受理；草稿保留")
+                    if (!retained) toast(controller.problem ?: "终端准备未受理")
                     else sendTerminal(editor, checkNotNull(prepared))
                 }
             } finally {
@@ -4074,7 +4074,7 @@ class MainActivity : ComponentActivity() {
             if (terminalEditor === editor) terminalEditor = null
             completeTextSend(submitted, result)
         }
-        if (!queued) { pendingTextSend = null; cancelTerminalEditor(); toast("终端发送未受理；草稿保留，不自动重发") }
+        if (!queued) { pendingTextSend = null; cancelTerminalEditor(); toast("终端发送未受理") }
         publishChat()
     }
 
@@ -4117,7 +4117,7 @@ class MainActivity : ComponentActivity() {
                         maxPolls = entry?.settings?.maxPolls?.toString() ?: "4")
                     generationFormRevision = revision
                     retained = entry != null
-                    if (!retained) toast(controller.problem ?: "生成入口未受理；草稿保留")
+                    if (!retained) toast(controller.problem ?: "生成入口未受理")
                 }
             } finally {
                 if (!retained) entry?.let(controller::abandonGeneration)
@@ -4162,8 +4162,8 @@ class MainActivity : ComponentActivity() {
                     if (activityUsable() && voiceForeground && controller.pendingBranchOutcome() === receipt) {
                         if (!controller.inspectBranch(locator) { verified ->
                             if (activityUsable() && voiceForeground && unknownBranchOutcome === receipt) toast(if (verified)
-                                "目标会话及静态原件已核实；未重试" else "目标尚不能完整核实；保留UNKNOWN，不要重试")
-                        }) toast("请等待当前数据操作完成；UNKNOWN仍保留，未重试")
+                                "目标会话及原件已核实" else "目标会话或原件尚未核实")
+                        }) toast("请等待当前数据操作完成")
                     }
                 }) { androidx.compose.material3.Text("只读核实") } },
                 dismissButton = { app.daiyu.android.ui.haptics.material.TextButton(modifier = Modifier.testTag("branch-unknown-dismiss"),
@@ -4209,7 +4209,7 @@ class MainActivity : ComponentActivity() {
                                 generationApproval = null
                                 if (!accepted) controller.abandonGeneration(entry)
                                 if (accepted) publishChat()
-                                else toast("本次生成未受理；草稿保留，请等待清理后重新预览")
+                                else toast("生成未受理，请重新预览")
                                 accepted
                             },
                             onCancelled = ::cancelGenerationEditor)
@@ -4335,7 +4335,7 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION") private fun pickBrowserDownloadOriginal(listing: BrowserDownloadListing,
         reference: app.daiyu.android.browser.download.BrowserCompletedDownload) {
-        check(pendingBackupRequest == null && pendingBrowserDownload == null) { "文件选择尚未返回；请先完成或取消选择" }
+        check(pendingBackupRequest == null && pendingBrowserDownload == null) { "请先完成或取消文件选择" }
         check(browserDownloadVisitCurrent(listing.visit) && browserDownloadOutputs === listing) {
             "原会话已变化；请重新打开下载原件"
         }
@@ -4355,7 +4355,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun assertBrowserSaveOwner(selection: BrowserSaveSelection) {
-        check(browserDownloadVisitCurrent(selection.visit)) { "原会话已变化；本次保存已失效" }
+        check(browserDownloadVisitCurrent(selection.visit)) { "会话已变化，请重新选择保存位置" }
     }
 
     // Shared with browser originals: never recycle a code or restore an original's authority.
@@ -4400,7 +4400,7 @@ class MainActivity : ComponentActivity() {
         if (!controller.loadGenerationOutputs(conversation.id) { outputs ->
             if (activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
                 !sidebarVisible && selected?.id == conversation.id && editorGeneration == generation) {
-                if (outputs == null) toast("活动生成资产读取失败或授权已撤销；未重试生成")
+                if (outputs == null) toast("活动生成资产读取失败或授权已撤销")
                 generationOutputs = outputs ?: emptyList()
             }
         }) {
@@ -4412,14 +4412,14 @@ class MainActivity : ComponentActivity() {
             if (activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
                 !sidebarVisible && selected?.id == conversation.id && editorGeneration == generation) {
                 historicalGenerationOutputs = outputs
-                if (outputs == null) toast("历史原件校验失败；未恢复授权或重发请求")
+                if (outputs == null) toast("历史原件校验失败")
             }
         }) toast("历史原件暂不可读；请等待当前数据操作完成")
         if (!controller.loadStaticGenerationOutputs(conversation.id) { outputs ->
             if (visit.get() && activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
                 !sidebarVisible && selected?.id == conversation.id && editorGeneration == generation) {
                 staticGenerationOutputs = outputs
-                if (outputs == null) toast("静态原件校验失败；未重试生成或分支")
+                if (outputs == null) toast("静态原件校验失败")
             }
         }) toast("静态原件暂不可读；请等待当前数据操作完成")
     }
@@ -4447,7 +4447,7 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION") private fun pickHistoricalGenerationOriginal(
         history: app.daiyu.android.backup.HistoricalGenerationOutput) {
-        check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
+        check(pendingBackupRequest == null) { "请先完成或取消文件选择" }
         check(selected?.id?.value == history.conversationId && activityUsable()) { "原会话已变化；请重新打开历史" }
         val extension = when (history.mimeType) {
             "image/png" -> "png"; "image/jpeg" -> "jpg"; "image/webp" -> "webp"
@@ -4514,7 +4514,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try { withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { surface.freezeOnWorker() } }
             catch (_: Exception) {
-                if (taskLocationCurrent(visit)) toast("任务位置读取失败；未执行，草稿保留")
+                if (taskLocationCurrent(visit)) toast("任务位置读取失败")
                 cancelTaskLocation(visit)
                 return@launch
             }
@@ -4538,7 +4538,7 @@ class MainActivity : ComponentActivity() {
                 val expected = if (visit.owner is ControllerVirtualDisplayEntry) TaskSurface.BACKGROUND else TaskSurface.FOREGROUND
                 if (decision.surface != expected ||
                     (visit.owner is ControllerVirtualDisplayEntry && decision.selfTarget != null)) {
-                    toast("此完整计划在所选位置没有等价后端；未执行，不会回退到另一位置")
+                    toast("所选执行位置不支持此任务")
                     cancelTaskLocation(visit)
                     return
                 }
@@ -4562,7 +4562,7 @@ class MainActivity : ComponentActivity() {
             }
             TaskSurfaceDecision.AskPending -> Unit // Keep the existing question, never create another entry.
             is TaskSurfaceDecision.NotExecuted -> {
-                toast("未执行：${decision.message}")
+                toast(decision.message)
                 cancelTaskLocation(visit)
             }
         }
@@ -4591,10 +4591,10 @@ class MainActivity : ComponentActivity() {
                     text != draft || shizukuWritesBlocked || pendingTextSend != null || imageHost.hasAttachments ||
                     videoHost.state.items.isNotEmpty() || videoSending) return@InputPrompt
                 val parsed = try { app.daiyu.android.gui.GuiUserActionRequest.parse(raw) }
-                catch (_: Exception) { toast("GUI 参数无效；未打开授权、未执行动作"); return@InputPrompt }
+                catch (_: Exception) { toast("GUI 参数无效"); return@InputPrompt }
                 cancelBrowserEditor(); cancelShizukuEditor(); dictationHost.invalidate()
                 val entry = controller.prepareGuiSend(selected, editor, text, parsed.operation, parsed.text, parsed.targetPackage)
-                if (entry == null) { toast("GUI 不可用或仍待释放；草稿保留"); return@InputPrompt }
+                if (entry == null) { toast("GUI 服务不可用或资源正在释放"); return@InputPrompt }
                 guiEditor = entry // Retain before location routing, screen lease or overlay attachment.
                 startTaskLocation(entry, entry.taskSurface, current = { guiOwnerCurrent(entry) && !entry.submitted },
                     proceed = { attachPreparedGui(entry) }, cancel = {
@@ -4606,13 +4606,13 @@ class MainActivity : ComponentActivity() {
 
     private fun attachPreparedGui(entry: ControllerGuiEntry) {
         if (!guiOwnerCurrent(entry) || !controller.openPreparedGui(entry)) {
-            cancelGuiEditor(entry); toast("GUI 未执行：服务不可用或位置已撤销；草稿保留")
+            cancelGuiEditor(entry); toast("GUI 服务不可用或执行位置已失效")
             return
         }
         val result = try { checkNotNull(entry.session).prepareExactActionWithProductDefaults(entry.operation, entry.input,
                     ownerCurrent = { guiOwnerCurrent(entry) },
                     onNotExecuted = { code ->
-                        if (guiEditor === entry) { cancelGuiEditor(entry); toast("GUI 未执行：$code"); publishChat() }
+                        if (guiEditor === entry) { cancelGuiEditor(entry); toast("GUI：$code"); publishChat() }
                     }, onRevoked = {
                         if (entry.submitted && guiEditor === entry) cancelGuiEditor(entry)
                         else controller.cancelGui(entry)
@@ -4627,7 +4627,7 @@ class MainActivity : ComponentActivity() {
                                     completeTextSend(pending, receipt)
                                 }.also { accepted -> if (!accepted) {
                                     pendingTextSend = null
-                                    toast("GUI 任务未受理；草稿保留，不自动重试")
+                                    toast("GUI 任务未受理")
                                 } }
                             } catch (_: Exception) { pendingTextSend = null; false }
                         }
@@ -4635,7 +4635,7 @@ class MainActivity : ComponentActivity() {
         if (result !is app.daiyu.android.gui.GuiResult.Value) {
             cancelGuiEditor(entry)
             toast(if (result is app.daiyu.android.gui.GuiResult.Unknown)
-                "GUI 结果未确认；保留原记录，不自动重试" else "GUI 未执行：当前目标不可用；草稿保留")
+                "GUI 操作结果未确认" else "GUI 目标不可用")
         }
         publishChat()
     }
@@ -4682,7 +4682,7 @@ class MainActivity : ComponentActivity() {
             original.text, frozen.writes, frozen.reads)
         virtualDisplayPlanVisit = null
         val entry = virtualDisplayEditor
-        if (entry == null) toast("副屏计划未受理；保留草稿，不自动重发")
+        if (entry == null) toast("副屏计划未受理")
         else startTaskLocation(entry, entry.taskSurface, current = { virtualDisplayOwnerCurrent(entry) },
             proceed = { publishChat() }, cancel = {
                 if (virtualDisplayEditor === entry) cancelVirtualDisplayEditor(entry) else controller.cancelVirtualDisplay(entry)
@@ -4940,7 +4940,7 @@ class MainActivity : ComponentActivity() {
             if (!controller.sendVirtualDisplay(entry, pending.ticket) { result -> completeTextSend(pending, result) }) {
                 pendingTextSend = null
                 cancelVirtualDisplayEditor(entry)
-                toast("副屏运行未受理；保留草稿")
+                toast("副屏运行未受理")
             }
             publishChat()
         }
@@ -4998,9 +4998,9 @@ class MainActivity : ComponentActivity() {
                 completeTextSend(submitted, result)
             }) {
                 pendingTextSend = null; cancelMcpEditor()
-                toast("MCP 发送未受理；草稿保留")
+                toast("MCP 发送未受理")
             } else if (mcpApproval === pending && mcpVisit === visit) { mcpApproval = null; mcpVisit = null }
-        } else { cancelMcpEditor(); toast("MCP 批准或草稿已过期；未发送") }
+        } else { cancelMcpEditor(); toast("MCP 批准或草稿已过期") }
     }
 
     private fun openMcpApproval() {
@@ -5024,7 +5024,7 @@ class MainActivity : ComponentActivity() {
                         require(it.keys().asSequence().toSet() == setOf("server", "tool", "arguments"))
                         require(it.get("server") is String && it.get("tool") is String && it.get("arguments") is org.json.JSONObject)
                     }
-                } catch (_: Exception) { cancelMcpEditor(); toast("MCP JSON 无效；未发送"); return@InputPrompt }
+                } catch (_: Exception) { cancelMcpEditor(); toast("MCP JSON 无效"); return@InputPrompt }
                 if (conversation == null) controller.database.draft(original) else controller.database.draft(conversation.id, original)
                 val request = Any(); mcpRequest = request; mcpPreparing = true
                 lifecycleScope.launch {
@@ -5039,7 +5039,7 @@ class MainActivity : ComponentActivity() {
                             owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) && draft == original) {
                             mcpApproval = prepared; retained = prepared != null
                             prepared?.let { approveMcp(it, visit) }
-                            if (prepared == null) toast(controller.problem ?: "MCP 准备失败；草稿保留")
+                            if (prepared == null) toast(controller.problem ?: "MCP 准备失败")
                         }
                     } finally {
                         if (!retained) prepared?.let(controller::rejectMcp)
@@ -5093,7 +5093,7 @@ class MainActivity : ComponentActivity() {
                         BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
                 if (matches) {
                     val pending = prepared
-                    if (pending == null) toast(controller.problem ?: "浏览器准备未受理；草稿保留")
+                    if (pending == null) toast(controller.problem ?: "浏览器准备未受理")
                     else {
                         browserApproval = pending
                         val owner = ChatController.TextSendOwner(snapshot.owner.conversationId,
@@ -5107,7 +5107,7 @@ class MainActivity : ComponentActivity() {
                         if (!retained) {
                             pendingTextSend = null
                             if (browserApproval === pending) browserApproval = null
-                            toast("浏览器任务未受理；草稿保留，不自动重试")
+                            toast("浏览器任务未受理")
                         }
                     }
                 }
@@ -5300,7 +5300,7 @@ class MainActivity : ComponentActivity() {
                     refreshHistoryPending = true
                     return@launch
                 }
-                if (rows == null) { streamingHistoryRefresh.invalidate(); toast("历史读取失败；原数据保留"); return@launch }
+                if (rows == null) { streamingHistoryRefresh.invalidate(); toast("历史读取失败"); return@launch }
                 if (reloadTail) refreshHistoryTailConversation = null
                 val currentOwner = loadedHistoryOwner(id)
                 val refreshed = rows.map { entry ->
@@ -5363,7 +5363,7 @@ class MainActivity : ComponentActivity() {
         // Any intervening stream/final refresh, earlier-window expansion or scroll publication
         // invalidates this snapshot. Never replace a newer loaded range with an older IO result.
         if (chatState.contentRevision != content) { loadAcceptedHistory(conversation); return }
-        if (rows == null) { toast("消息已保存；历史加载失败"); return }
+        if (rows == null) { toast("消息已保存，但历史加载失败"); return }
         val active = controller.active?.takeIf { it.conversationId == conversation.id }
         val owner = loadedHistoryOwner(conversation.id)
         shown = rows.map {
@@ -5424,7 +5424,7 @@ class MainActivity : ComponentActivity() {
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) {
-                if (current()) toast("无法读取任务记录，未执行操作")
+                if (current()) toast("任务记录读取失败")
                 return@launch
             }
             if (!current()) return@launch
@@ -5433,7 +5433,7 @@ class MainActivity : ComponentActivity() {
                 catch (_: Exception) { emptyList() }
             val task = target?.let { app.daiyu.android.ui.screens.conversation.controllableChildTask(it, live) }
             if (target == null || task == null) {
-                toast("任务已结束或已变化，未执行操作")
+                toast("任务已结束或状态已变化")
                 return@launch
             }
             try {
@@ -5456,7 +5456,7 @@ class MainActivity : ComponentActivity() {
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) {
-                if (current()) toast("操作回执未确认，请查看任务状态；未自动重试")
+                if (current()) toast("操作结果未确认，请查看任务状态")
             }
         }
     }
@@ -6061,7 +6061,7 @@ class MainActivity : ComponentActivity() {
                     if (snapshot == null) {
                         if (!paneReadFailureReported) {
                             paneReadFailureReported = true
-                            toast("会话列表读取失败；原数据保留")
+                            toast("会话列表读取失败")
                         }
                         continue
                     }
@@ -6117,7 +6117,7 @@ class MainActivity : ComponentActivity() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (paneSelectionRequest === request && activityUsable()) toast("操作或保存失败；原数据保留")
+                if (paneSelectionRequest === request && activityUsable()) toast("操作或保存失败")
             } finally {
                 if (paneSelectionRequest === request) {
                     paneSelectionRequest = null
@@ -6209,7 +6209,7 @@ class MainActivity : ComponentActivity() {
             } else returnToChat()
         } catch (_: Exception) {
             // A failed reader must not trap Back or turn a refresh error into an Activity crash.
-            toast("读取失败；原数据保留")
+            toast("读取失败")
         }
     }
     private fun browseFolders() {
@@ -6245,7 +6245,7 @@ class MainActivity : ComponentActivity() {
     private fun toast(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
     private fun guard(action: () -> Unit) {
         try { requireActivityUsable(); check(!controller.dataBusy); action() }
-        catch (_: Exception) { toast("操作或保存失败；原数据保留") }
+        catch (_: Exception) { toast("操作或保存失败") }
     }
     private fun updateDraft(value: String) {
         if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked) return
@@ -6393,7 +6393,7 @@ class MainActivity : ComponentActivity() {
         if (!queued && pendingTextSend === pending) {
             cascadeVoice.rejected(pending.ticket)
             pendingTextSend = null
-            toast("本次发送未受理；草稿保留")
+            toast(if (unknown) "发送结果未确认" else "本次发送未受理")
         }
         publishChat()
         if (queued) jumpToBottom()
@@ -6451,22 +6451,22 @@ class MainActivity : ComponentActivity() {
                 controlOwner = controller.active?.takeIf { it.conversationId == saved.id && it.status == RunStatus.RUNNING }
                 draft = ""; selectionStart = 0; selectionEnd = 0
                 try { cascadeVoice.accepted(pending.ticket, result.assistant) }
-                catch (_: Exception) { stopCascadeVoice(); toast("级联未启动，聊天发送不受影响") }
+                catch (_: Exception) { stopCascadeVoice(); toast("语音级联启动失败") }
                 val savedSelection = runCatching {
                     controller.preferences.edit().putString("selected", saved.id.value).commit()
                 }.getOrDefault(false)
                 publishChat()
                 loadAcceptedHistory(saved)
-                if (!savedSelection) toast("消息已保存；最后选中会话未保存")
+                if (!savedSelection) toast("消息已保存，但会话选择未保存")
             }
             is ChatController.TextSendResult.Rejected -> {
                 cascadeVoice.rejected(pending.ticket)
-                toast(controller.problem ?: "本次发送未受理；草稿保留")
+                toast(controller.problem ?: "本次发送未受理")
                 publishChat()
             }
             is ChatController.TextSendResult.Unknown -> {
                 cascadeVoice.rejected(pending.ticket)
-                toast("发送保存结果未确认；草稿保留，不会自动重发")
+                toast("发送结果未确认")
                 publishChat()
             }
         }
@@ -6494,8 +6494,8 @@ class MainActivity : ComponentActivity() {
         }
         when (result) {
             is SupplementAdmission.Accepted -> toast("追加内容已保存，将在当前任务的安全边界继续")
-            is SupplementAdmission.Rejected -> toast("未接受追加，草稿已保留")
-            is SupplementAdmission.Unconfirmed -> toast("追加结果未确认，草稿已保留；不会自动重试")
+            is SupplementAdmission.Rejected -> toast("追加未受理")
+            is SupplementAdmission.Unconfirmed -> toast("追加结果未确认")
         }
     }
     private fun supplementMediaBlocked() = imageHost.hasAttachments || imageHost.busy ||
@@ -6504,11 +6504,11 @@ class MainActivity : ComponentActivity() {
         if (compressionSendBlocked(owner.conversationId)) return
         if (text != draft) return
         if (supplementMediaBlocked()) {
-            toast("当前任务暂不支持追加图片或原视频；文字与附件已保留，请任务结束后发送")
+            toast("当前任务不支持追加图片或原视频")
             return
         }
         if (!controller.canSupplement(owner)) {
-            toast("当前任务暂不能追加；草稿已保留")
+            toast("当前任务暂不能追加")
             return
         }
         val ticket = supplementDraft.begin(MessageId(java.util.UUID.randomUUID().toString()), supplementEditor()) ?: return
@@ -6518,10 +6518,10 @@ class MainActivity : ComponentActivity() {
                 if (activityUsable()) refresh()
             }
             if (queued && controller.runState(owner)?.phase == ExecutionPhase.WAITING_USER)
-                toast("追加已排队，等待当前提问处理；草稿在受理确认前保留")
+                toast("追加已排队，等待当前提问处理")
             if (queued) window.decorView.postDelayed({
                 if (activityUsable() && supplementDraft.pending === ticket && supplementDraft.receipt == null)
-                    toast("尚未收到追加确认，请先检查会话，草稿保留；不会自动重试")
+                    toast("追加结果未确认，请查看会话")
             }, 15_000L)
         } catch (_: Exception) {
             supplementDraft.receive(SupplementAdmission.Unconfirmed(ticket.messageId))
@@ -6683,7 +6683,7 @@ class MainActivity : ComponentActivity() {
             updateDraft(next)
             accepted = draft == next
             if (accepted) { selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false) }
-            else toast("附件未加入；原草稿保留，请重新打开")
+            else toast("附件未加入")
         } finally {
             if (!accepted) lifecycleScope.launch(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { batch.documents.forEach(store::remove) }
         }
@@ -7017,7 +7017,7 @@ class MainActivity : ComponentActivity() {
             } }
             automaticCompressionPending = false
             automaticCompression = result.getOrNull()
-            if (result.isFailure && activityUsable()) toast("自动压缩未确认；请在摘要配置中核对，不会自动发起压缩")
+            if (result.isFailure && activityUsable()) toast("自动压缩设置未确认，请检查摘要配置")
         }
     }
 
@@ -7278,13 +7278,13 @@ class MainActivity : ComponentActivity() {
     private fun checkBackupAvailable() {
         requireActivityUsable()
         check(controller.ready && controller.active == null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true) {
-            "会话尚未就绪、运行中、备份任务进行中或恢复失败；未打开备份，请稍后重新选择文件"
+            "会话未就绪、恢复失败或有任务正在进行"
         }
     }
     private fun backupGuard(action: () -> Unit) {
         try { checkBackupAvailable(); action() }
         catch (failure: Exception) { toast(if (failure is IllegalStateException || failure is IllegalArgumentException)
-            failure.message ?: "备份操作失败；原数据保留" else "备份操作失败；原数据保留，请重新选择文件") }
+            failure.message ?: "备份操作失败" else "备份操作失败，请重新选择文件") }
     }
     private fun openedBackupUri(open: Intent): Uri {
         val uri = open.data
@@ -7339,7 +7339,7 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION") private fun pickConversationExports(ids: List<String>) {
         checkBackupAvailable()
         check(!controller.hasLiveChildTasks()) { "子任务运行中，暂不能导出" }
-        check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
+        check(pendingBackupRequest == null) { "请先完成或取消文件选择" }
         val targets = ids.toList()
         targets.forEach { retainedConversation(it) }
         conversationExport.begin(targets); pendingBackupRequest = 105; exportPickerPending = true
@@ -7419,7 +7419,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Suppress("DEPRECATION") private fun pickBackup(exporting: Boolean, complete: Boolean, includeLinux: Boolean = false) {
-        checkBackupAvailable(); check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
+        checkBackupAvailable(); check(pendingBackupRequest == null) { "请先完成或取消文件选择" }
         val owner = if (exporting) backupExportPageOwner.also {
             check(backupExportPageCurrent(it) && generationResumed()) { "备份页面已变化；请重新选择导出" }
         } else null
@@ -7451,13 +7451,13 @@ class MainActivity : ComponentActivity() {
             backupGuard {
                 assertBrowserSaveOwner(browserSelection)
                 val uri = data?.data
-                require(uri?.scheme == "content") { "未返回文档目标；未保存原件" }
+                require(uri?.scheme == "content") { "未选择保存位置" }
                 // Capture the original visit, not the current UI owner or a replacement
                 // token. The callback above consumed the request before any worker starts.
                 val visit = browserSelection.visit
                 controller.saveBrowserDownload(visit.conversation, browserSelection.reference,
                     checkNotNull(uri), assertUiOwner = {
-                        check(visit.active.get()) { "原会话已变化；本次保存已失效" }
+                        check(visit.active.get()) { "会话已变化，请重新选择保存位置" }
                     })
             }
             return
@@ -7471,7 +7471,7 @@ class MainActivity : ComponentActivity() {
                 val uri = data?.data
                 require(mediaSelection.active.get() && generationMediaVisit === mediaSelection.active &&
                     activityUsable() && retainedPage == "chat" && !sidebarVisible && uri?.scheme == "content" &&
-                    selected?.id?.value == mediaSelection.binding.conversationId) { "原件选择已失效；未保存或重试" }
+                    selected?.id?.value == mediaSelection.binding.conversationId) { "原件选择已失效" }
                 controller.saveGenerationMediaOriginal(mediaSelection.binding, mediaSelection.assetKey,
                     checkNotNull(uri), mediaSelection.active)
             }
@@ -7489,7 +7489,7 @@ class MainActivity : ComponentActivity() {
                 require(staticSelection.active.get() && staticGenerationVisit === staticSelection.active &&
                     activityUsable() && retainedPage == "chat" && !sidebarVisible && uri?.scheme == "content" &&
                     selected?.id?.value == staticSelection.output.destination.conversationId) {
-                    "静态原件选择已失效；未保存或重试"
+                    "静态原件选择已失效"
                 }
                 controller.saveStaticGenerationOriginal(staticSelection.output, checkNotNull(uri), staticSelection.active)
             }
@@ -7529,10 +7529,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: run { toast("文件选择未返回URI；原数据保留，请重新选择"); return }
+        val uri = data?.data ?: run { toast("未选择文件，请重新选择"); return }
         val complete = requestCode == 103 || requestCode == 104
         backupGuard {
-            require(uri.scheme == "content") { "文件选择未返回content URI；原数据保留，请重新选择" }
+            require(uri.scheme == "content") { "文件地址无效，请重新选择" }
             if (requestCode == 101 || requestCode == 103) {
                 check(backupExportPageCurrent(exportOwner)) { "备份页面已变化；本次导出已失效，请重新选择" }
                 controller.exportUserBackup(uri, complete, includeLinux = includeLinux)

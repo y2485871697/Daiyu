@@ -91,7 +91,7 @@ internal class ActivityCascadeVoiceHost(
         val token = epoch
         expiry = scope.launch {
             delay(offer.limits.validForMs)
-            if (epoch == token) { close(); mutable.value = "个人级联授权已过期，未重试" }
+            if (epoch == token) { close(); mutable.value = "个人级联授权已过期" }
         }
         mutable.value = "有限个人级联已明确授权：仅下一次手动发送受理的回答；最多 8 次上传 / 1600 字符 / 120 秒音频预约，5 分钟有效，可能逐次收费。"
     }
@@ -110,10 +110,10 @@ internal class ActivityCascadeVoiceHost(
                 currentBinding = { runtime.personalBinding(frozen) },
                 // Callbacks run under grant lock: ONLY volatile immutable state, no host lock/I/O/re-entry.
                 ownerIsCurrent = { candidate -> personalSession === session && session.admitted && session.answer == candidate })
-        } catch (_: Exception) { close(); mutable.value = "个人级联额度或绑定已失效，未上传" }
+        } catch (_: Exception) { close(); mutable.value = "个人级联额度或绑定已失效" }
     }
     fun rejected(sendTicket: Any) {
-        if (ticket === sendTicket) { close(); mutable.value = "级联发送未确认，未启动朗读；不会自动重试" }
+        if (ticket === sendTicket) { close(); mutable.value = "级联发送结果未确认" }
     }
     fun accepted(sendTicket: Any, assistant: Message?) {
         if (ticket !== sendTicket) return
@@ -134,7 +134,7 @@ internal class ActivityCascadeVoiceHost(
             if (session == null) { close(); return }
             session.answer = answer; session.admitted = true
             if (session.grant?.bindAnswer(sendTicket, answer) != true) {
-                close(); mutable.value = "个人级联未绑定原始发送，未上传"; return
+                close(); mutable.value = "个人级联未绑定原始发送"; return
             }
             frozen = frozen.withUpload(PersonalCascadeUpload { requestId, text ->
                 check(epoch == token && personalSession === session && admission() && session.admitted)
@@ -179,7 +179,7 @@ internal class ActivityCascadeVoiceHost(
                 RunStatus.COMPLETED -> if (!completed) { completed = true; received = snapshot; output.done(identity, snapshot) }
                 else -> { close(); mutable.value = "聊天运行已停止或失败，级联朗读已取消" }
             }
-        } catch (_: Exception) { close(); mutable.value = "级联朗读失败，未回退或重试" }
+        } catch (_: Exception) { close(); mutable.value = "级联朗读失败" }
     }
     private fun remoteOutput(identity: VoiceOwner, frozen: FrozenVoiceSpeech): SpeechOutput {
         val outputScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

@@ -87,16 +87,16 @@ internal class ComposerDictationHost(
                     session = null
                     if (permissionInFlight != target) active = null
                     failure(when (state.detail) {
-                        "recognizer_permission_denied" -> "未获得麦克风权限；授权后需再次点击语音"
+                        "recognizer_permission_denied" -> "未获得麦克风权限"
                         "recognizer_unavailable" -> "系统语音识别服务不可用"
-                        "empty_recognition" -> "没有识别到最终文本；已有草稿已保留"
-                        "recognizer_release_failed" -> "音频释放失败，已阻止继续使用语音；请重启应用"
-                        else -> "听写失败；已有草稿已保留，请手动重试"
+                        "empty_recognition" -> "未识别到最终文本"
+                        "recognizer_release_failed" -> "音频释放失败，请重启应用"
+                        else -> "听写失败，请重试"
                     })
                 }
                 VoicePhase.CANCELLED -> {
                     active = null; session = null
-                    mutableState.value = ComposerDictationState(status = "听写已停止；已识别文字已保留")
+                    mutableState.value = ComposerDictationState(status = "听写已停止")
                 }
                 else -> Unit
             }
@@ -126,7 +126,7 @@ internal class ComposerDictationHost(
         if (!current(target)) return
         invalidate()
         mutableState.value = ComposerDictationState(status = if (granted)
-            "麦克风权限已授予，请再次点击语音开始听写" else "麦克风权限被拒绝；草稿未更改")
+            "麦克风权限已授予，请再次点击语音开始听写" else "麦克风权限被拒绝")
     }
 
     fun invalidate() {
@@ -135,7 +135,7 @@ internal class ComposerDictationHost(
         mutableState.value = ComposerDictationState()
         try { old?.close() } catch (_: Exception) {
             // The underlying gate is poisoned. Do not replace it or treat this catch as release.
-            failure("音频释放失败，已阻止继续使用语音；请重启应用")
+            failure("音频释放失败，请重启应用")
         }
     }
 

@@ -746,7 +746,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         fun payload(text: String) = org.json.JSONObject(org.json.JSONObject(text).getString("payload"))
         try {
             awaitControl("target ready") { target.controller.ready }
-            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("完整中立备份已导出"))
+            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("中立备份已导出"))
             val text = file.readText()
             val data = payload(text)
             assertEquals(2, data.getJSONObject("generation_history").getJSONArray("outputs").length())
@@ -813,7 +813,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             assertNull(field(target.controller, "generationResources"))
             assertTrue((field(target.controller, "generationOutputReaders") as Map<*, *>).isEmpty())
             assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("此完整备份已导入过"))
-            assertTrue(dataOperation(target.controller) { target.controller.exportUserBackup(Uri.fromFile(saved), true) }.startsWith("完整中立备份已导出"))
+            assertTrue(dataOperation(target.controller) { target.controller.exportUserBackup(Uri.fromFile(saved), true) }.startsWith("中立备份已导出"))
             val reexported = payload(saved.readText())
             assertEquals(data.getJSONObject("generation_history").toString(), reexported.getJSONObject("generation_history").toString())
             assertEquals(data.getJSONObject("child_task_history").toString(), reexported.getJSONObject("child_task_history").toString())
@@ -881,7 +881,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
                     GenerationProfileSettings(label = "offline destination", kind = GenerationKind.IMAGE,
                         protocol = GenerationProtocol.OPENAI_IMAGES_JSON, endpoint = "https://example.invalid/images/generations",
                         model = "offline", apiKey = "synthetic-memory-only")), 0, false, emptySet()), null)
-            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("完整中立备份已导出"))
+            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("中立备份已导出"))
             assertEquals(8, org.json.JSONObject(file.readText()).getInt("version"))
             assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("已导入"))
             val historicalCopy = branchThroughProduction(target.controller, image.conversation.id)
@@ -974,7 +974,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             assertFalse(holder.isAlive)
             assertNull(failure.get())
             awaitControl("blocked backup completed") { !controller.dataBusy && controller.dataNotice != null }
-            assertTrue(checkNotNull(controller.dataNotice).startsWith("完整中立备份已导出"))
+            assertTrue(checkNotNull(controller.dataNotice).startsWith("中立备份已导出"))
             assertEquals(0, fixture.opens.get())
         } finally { file.delete() }
     }

@@ -31,7 +31,7 @@ class MessageComposerEditContract(unittest.TestCase):
         self.assertIn('text == editor.text && editor.canSubmit', main)
         store = (SRC / 'storage/MessageActionStore.kt').read_text()
         self.assertIn('addAll(selected.blocks.filterNot { it is MessageBlock.Text })', store)
-        self.assertIn('原视频重新提交需要新的上传批准；原消息保留', store)
+        self.assertIn('重新提交原视频需要新的上传批准', store)
 
     def test_message_owned_attachments_are_borrowed_not_imported(self):
         main = (SRC / 'MainActivity.kt').read_text()

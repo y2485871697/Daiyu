@@ -61,7 +61,8 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_timeline_and_compression_async_changes_reproject_exact_aliases(self):
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
-        for requirement in ('val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries)',
+        for requirement in ('val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries ||',
+                            'reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }',
                             'boundariesAfter = workflowBoundaries',
                             'compressionActivitiesByAnchor(visibleCompressions, visibleTimeline)'):
             self.assertIn(requirement, main)
@@ -73,7 +74,12 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
         models = self.read('ChatScreenModels.kt')
         self.assertIn('val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey', models)
         self.assertIn('this is Assistant && key in sourceListKeys', models)
-        self.assertIn('MessageActionBar(turn.actionKey, actions', self.read('ChatMessageList.kt'))
+        listing = self.read('ChatMessageList.kt')
+        self.assertIn('actionTurn: ChatTurnUi.Assistant = turn', listing)
+        self.assertIn('MessageActionBar(actionTurn.actionKey, actions', listing)
+        self.assertIn('showActions && actionTurn.status != RunStatus.RUNNING', listing)
+        self.assertIn('showActions = index == parts.parts.lastIndex, actionTurn = turn',
+                      self.read('ReconnectedAssistantTurn.kt'))
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         self.assertIn('messageCallbacks.onDeleteTurn(firstSourceKey)', main)
         self.assertIn('ChatTurnMapper.sourceMessages(turn, shown.map { it.second })', main)

@@ -185,7 +185,7 @@ class ChildModelExecutionToolsTest {
 
     @Test fun providerFailureAfterExecutingChildToolDoesNotClearUnknownBoundary() {
         val parent = Parent(); val assembly = Assembly(); val requests = AtomicInteger()
-        val model = ModelPort { object : ModelSession {
+        val model = CatalogFixturePort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                 if (requests.incrementAndGet() == 1)
                     sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "fixture", "{}")))

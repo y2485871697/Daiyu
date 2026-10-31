@@ -2,6 +2,13 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import app.daiyu.android.storage.ProviderCatalogRunTarget
+import app.daiyu.android.storage.ProviderEditorSlot
+import app.daiyu.android.ui.screens.chat.context.CompressionDialogDraft
+import app.daiyu.android.ui.screens.chat.context.ContextManagementPresentation
 import app.daiyu.android.context.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.*
@@ -26,12 +33,13 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
     private inner class Actions(private val holdRefresh: Boolean = false, private val accepts: Boolean = true) : ContextManagementControllerAdapter {
         override val state = MutableStateFlow(ContextManagementState(owner,
             snapshot = if (holdRefresh) null else snapshot()))
+        var delayNextRefresh = false
         val events = mutableListOf<String>()
         var selection: ContextManagementSelection? = null
         override fun refresh() {
             events.add("refresh")
             state.value = state.value.copy(snapshot = if (holdRefresh) null else state.value.snapshot,
-                operation = if (holdRefresh) ContextManagementOperation.REFRESH else null,
+                operation = if (holdRefresh || delayNextRefresh) ContextManagementOperation.REFRESH else null,
                 requiresRefresh = false, notice = null)
         }
         override fun selectCompression(selection: ContextManagementSelection): Boolean = error("no legacy selection step")
@@ -56,11 +64,12 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         override fun nextArchivePage() { error("no archive entry") }
         override fun previousArchivePage() { error("no archive entry") }
     }
-    private fun show(actions: Actions) {
+    private fun show(actions: Actions, presentation: ContextManagementPresentation = ContextManagementPresentation()) {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ContextManagementRoute(actions,
-                    SettingsModelSource(fixture.application, fixture.controller.providers), onClose = { routeCloses++ })
+                    SettingsModelSource(fixture.application, fixture.controller.providers), onClose = { routeCloses++ },
+                    presentation = presentation)
             }
         } }
         awaitUniqueTag("context-management")
@@ -128,4 +137,78 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         assertNull(actions.selection)
         assertEquals(0, fixture.opens.get())
     }
+    private fun binding(model: String, protocol: ProviderProtocol): SummaryModelBinding {
+        val identity = java.util.UUID.nameUUIDFromBytes(model.toByteArray()).toString()
+        return CatalogSummaryBindings.encode(ProviderCatalogRunTarget(ProviderEditorSlot("00000000-0000-0000-0000-000000000003", 7),
+            identity, 11, identity, "api-$model", protocol))
+    }
+
+    fun testExplicitRefreshInitializesOnlyFromCompletedFreshSnapshot() {
+        val presentation = ContextManagementPresentation()
+        val actions = Actions()
+        val a = binding("A", ProviderProtocol.RESPONSES)
+        val b = binding("B", ProviderProtocol.CHAT_COMPLETIONS)
+        actions.state.value = actions.state.value.copy(snapshot = snapshot().copy(
+            savedConfiguration = snapshot().configuration!!.copy(summaryModel = a)))
+        show(actions, presentation)
+        awaitVisualIdle()
+        assertEquals(a, presentation.binding)
+        mainThread {
+            actions.delayNextRefresh = true
+            actions.state.value = actions.state.value.copy(requiresRefresh = true)
+        }
+        node("compression-dialog-refresh").scrollToVisible().performClick()
+        awaitVisualIdle()
+        assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
+        assertNull(presentation.draft)
+        assertNull(presentation.binding)
+        mainThread {
+            actions.state.value = actions.state.value.copy(operation = null, requiresRefresh = false,
+                snapshot = snapshot().copy(savedConfiguration = snapshot().configuration!!.copy(summaryModel = b)))
+        }
+        awaitVisualIdle()
+        assertEquals(b, presentation.binding)
+        assertEquals(ProviderProtocol.CHAT_COMPLETIONS, presentation.draft!!.protocol)
+        assertFalse(actions.events.contains("submit"))
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testAdapterReplacementKeepsUnsavedExactTargetAndOnlyRefreshes() {
+        val a = binding("A", ProviderProtocol.RESPONSES)
+        val b = binding("B", ProviderProtocol.CHAT_COMPLETIONS)
+        val presentation = ContextManagementPresentation().apply {
+            retain(CompressionDialogDraft(true, "unsaved A", "local-A", ProviderProtocol.RESPONSES), a)
+        }
+        val old = Actions(accepts = false)
+        val fresh = Actions(accepts = false)
+        fresh.state.value = fresh.state.value.copy(snapshot = snapshot().copy(
+            savedConfiguration = snapshot().configuration!!.copy(summaryModel = b)))
+        var current by mutableStateOf<ContextManagementControllerAdapter?>(old)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val captured = current
+                ContextManagementRoute(captured,
+                    SettingsModelSource(fixture.application, fixture.controller.providers), onClose = { routeCloses++ },
+                    presentation = presentation, isCurrent = { current === captured })
+            }
+        } }
+        awaitUniqueTag("context-management")
+        mainThread { current = null }
+        awaitVisualIdle()
+        node("context-compress").assertIsNotEnabled()
+        node("context-management-paused").assertDoesNotExist()
+        mainThread { current = fresh }
+        awaitVisualIdle()
+        node("compression-dialog-custom").assertIsOn()
+        assertEquals(a, presentation.binding)
+        assertEquals(listOf("refresh"), fresh.events)
+        assertFalse(old.events.contains("submit"))
+        node("context-compress").performClick()
+        awaitVisualIdle()
+        assertEquals(ContextManagementSelection(a, ProviderProtocol.RESPONSES), fresh.selection)
+        assertEquals(listOf("refresh", "submit"), fresh.events)
+        assertEquals(0, fixture.opens.get())
+        assertEquals(0, routeCloses)
+    }
+
 }

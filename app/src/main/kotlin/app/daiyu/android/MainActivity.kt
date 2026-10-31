@@ -1041,16 +1041,21 @@ class MainActivity : ComponentActivity() {
     private class ContextManagementVisit(val owner: ContextManagementOwner,
         val adapter: ContextManagementControllerAdapter)
     private var contextManagementVisit by mutableStateOf<ContextManagementVisit?>(null)
+    private class ContextManagementPage(val conversation: ConversationId, val generation: Long) {
+        val presentation = app.daiyu.android.ui.screens.chat.context.ContextManagementPresentation()
+    }
+    private var contextManagementPage by mutableStateOf<ContextManagementPage?>(null)
     // Entry authority is separate from the shared editor generation and is never restored/saved.
     private var contextManagementEntryEpoch by mutableStateOf(0L)
     // Revoke BEFORE navigation/lifecycle changes, including when no route has been opened yet.
-    private fun revokeContextManagementEntry(closeRoute: Boolean = true): Boolean {
+    private fun revokeContextManagementEntry(closeRoute: Boolean = true, preservePresentation: Boolean = false): Boolean {
         contextManagementEntryEpoch++
         val visit = contextManagementVisit
         contextManagementVisit = null
+        val submitted = visit?.adapter?.state?.value?.compressionAccepted == true
         if (visit != null) controller.invalidateContextManagement(visit.adapter)
-        // Explicit navigation closes the page; lifecycle revocation keeps only a paused shell.
-        if (closeRoute && retainedPage == "context-management") retainedPage = "chat"
+        if (!preservePresentation || submitted) contextManagementPage = null
+        if ((closeRoute || submitted) && retainedPage == "context-management") retainedPage = "chat"
         return visit != null
     }
     private class BrowserResumeTarget(val conversationId: ConversationId?, val owner: WorkStepOwnerUi?) {
@@ -1110,15 +1115,16 @@ class MainActivity : ComponentActivity() {
         else { browserVisualEpoch++; browserVisualVisit = next }
     }
 
-    private fun resumeContextManagementPage(conversation: ConversationId?, generation: Long, epoch: Long) {
-        if (conversation == null || selected?.id != conversation || editorGeneration != generation ||
-            contextManagementEntryEpoch != epoch || contextManagementVisit != null ||
-            !activityUsable() || !voiceForeground || !generationResumed() || sidebarVisible ||
-            retainedPage != "context-management") return
+    private fun resumeContextManagementPage(page: ContextManagementPage?, epoch: Long) {
+        if (page == null || contextManagementPage !== page || selected?.id != page.conversation ||
+            editorGeneration != page.generation || contextManagementEntryEpoch != epoch ||
+            contextManagementVisit != null || !activityUsable() || !voiceForeground ||
+            !generationResumed() || sidebarVisible || retainedPage != "context-management") return
+        val conversation = page.conversation
         val owner = ContextManagementOwner(conversation, epoch)
-        val adapter = controller.openContextManagement(owner)
-        if (adapter == null) toast("上下文页面暂不可用；请等待当前任务结束后再试")
-        else { contextManagementEntryEpoch++; contextManagementVisit = ContextManagementVisit(owner, adapter) }
+        val adapter = controller.openContextManagement(owner) ?: return
+        contextManagementEntryEpoch++
+        contextManagementVisit = ContextManagementVisit(owner, adapter)
     }
 
     private var retainedPageState by mutableStateOf("chat")
@@ -2716,32 +2722,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 if (retainedPage == "context-management") {
+                    val page = contextManagementPage
                     val visit = contextManagementVisit
-                    if (visit != null) key(visit) {
-                        ContextManagementRoute(visit.adapter,
-                            source = remember(visit) {
+                    val epoch = contextManagementEntryEpoch
+                    if (page != null) key(page) {
+                        ContextManagementRoute(visit?.adapter,
+                            source = remember(page) {
                                 app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers)
                             }, onClose = {
-                                if (contextManagementVisit === visit) returnToChat()
-                            })
-                    } else {
-                        val conversation = selected?.id
-                        val generation = editorGeneration
-                        val epoch = contextManagementEntryEpoch
-                        val closePaused: () -> Unit = {
-                            if (retainedPage == "context-management" && contextManagementVisit == null &&
-                                contextManagementEntryEpoch == epoch) returnToChat()
-                        }
-                        app.daiyu.android.ui.components.UsageGlassDialog("压缩会话", onDismiss = closePaused) {
-                            top.yukonga.miuix.kmp.basic.Text("页面已暂停；继续查看会重新读取上下文，压缩操作需重新确认",
-                                modifier = Modifier.testTag("context-management-paused"))
-                            val resume = { resumeContextManagementPage(conversation, generation, epoch) }
-                            app.daiyu.android.ui.components.UsageAction("继续查看", resume,
-                                modifier = Modifier.testTag("context-management-resume").semantics {
-                                    this[RetainedPausedResumeAction] = resume
-                                })
-                            app.daiyu.android.ui.components.UsageAction("返回", closePaused)
-                        }
+                                if (contextManagementPage === page) returnToChat()
+                            }, presentation = page.presentation, isCurrent = {
+                                contextManagementPage === page && contextManagementVisit === visit &&
+                                    contextManagementEntryEpoch == epoch && selected?.id == page.conversation &&
+                                    editorGeneration == page.generation && retainedPage == "context-management" &&
+                                    !sidebarVisible && voiceForeground && generationResumed()
+                            }, onResume = { resumeContextManagementPage(page, epoch) })
                     }
                 }
                 if (retainedPage == "browser") {
@@ -3112,6 +3107,7 @@ class MainActivity : ComponentActivity() {
                 if (adapter == null) toast("上下文页面未打开；当前正在准备、运行或执行任务，请稍后再试")
                 else {
                     retainedPage = "context-management"
+                    contextManagementPage = ContextManagementPage(conversation.id, renderedEditorGeneration)
                     contextManagementVisit = ContextManagementVisit(owner, adapter)
                 }
             }
@@ -5572,6 +5568,9 @@ class MainActivity : ComponentActivity() {
         refreshUnknownBranchOutcome()
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
         contextManagementEntryEpoch++
+        val contextPage = contextManagementPage
+        val contextEpoch = contextManagementEntryEpoch
+        window.decorView.post { resumeContextManagementPage(contextPage, contextEpoch) }
         browserVisualEpoch++
         controller.providerBalances.onResume(lifecycleScope, android.os.SystemClock.uptimeMillis())
         if (retainedPage == "chat") refreshConfirmedModelLabel()
@@ -5641,7 +5640,7 @@ class MainActivity : ComponentActivity() {
             gatewayOwner?.revoke()
             gatewayReloadPending = true; gatewayReplacementAuthorized = false
         }
-        revokeContextManagementEntry(closeRoute = false)
+        revokeContextManagementEntry(closeRoute = false, preservePresentation = true)
         historySearchEpoch++
         val mediaPicker = pendingGenerationMediaOriginal
         val preserveMedia = mediaPicker != null && mediaPicker.pickerHopPending && mediaPicker.active.get() &&
@@ -5726,7 +5725,7 @@ class MainActivity : ComponentActivity() {
         closeBrowserVisualVisit(clearTarget = false)
         if (chatReferencePick?.pickerAway != true) revokeChatReferencePick(preserveShortcut = true)
         revokePlatformActionVisit()
-        revokeContextManagementEntry(closeRoute = false)
+        revokeContextManagementEntry(closeRoute = false, preservePresentation = true)
         suspendMessageActionEditor()
         gatewayOwner?.revoke()
         controller.invalidateVideo(videoUi)
@@ -6534,6 +6533,7 @@ class MainActivity : ComponentActivity() {
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
     private fun refresh() {
         if (!activityUsable()) return
+        resumeContextManagementPage(contextManagementPage, contextManagementEntryEpoch)
         childStopChoice = controller.childStopChoice()
         refreshUnknownBranchOutcome()
         offerDeferredOpenedBackup()

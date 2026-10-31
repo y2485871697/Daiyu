@@ -14,7 +14,7 @@ class SummaryCompressionChainContract(unittest.TestCase):
         self.assertNotIn("context-compression-confirmation", dialog)
         self.assertIn("adapter.submitCompression(selection)", route)
         self.assertNotIn("adapter.requestCompression()", route)
-        self.assertIn("state.compressionAccepted", route)
+        self.assertIn("state?.compressionAccepted == true && isCurrent()", route)
 
     def test_live_manual_request_only_queues_without_cancelling_the_tool_or_stream(self):
         runner = (DOMAIN / "ChatRunner.kt").read_text()

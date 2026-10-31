@@ -111,7 +111,7 @@ class HostBackgroundRetentionContractTest(unittest.TestCase):
         self.assertIn('closeBrowserVisualVisit(clearTarget = false)', pause)
         self.assertIn('closeBrowserVisualVisit(clearTarget = false)', stop)
         for body in (pause, stop):
-            self.assertIn('revokeContextManagementEntry(closeRoute = false)', body)
+            self.assertIn('revokeContextManagementEntry(closeRoute = false, preservePresentation = true)', body)
             self.assertNotIn('retainedPage = "chat"', body)
         resume = main.split('override fun onResume()', 1)[1].split('private fun applyPreferredRefreshRate()', 1)[0]
         self.assertIn('browserVisualEpoch++', resume)
@@ -138,7 +138,7 @@ class HostBackgroundRetentionContractTest(unittest.TestCase):
     def test_context_continue_rechecks_epoch_editor_and_conversation(self):
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         body = main.split('private fun resumeContextManagementPage(', 1)[1].split('private var retainedPageState', 1)[0]
-        for guard in ('selected?.id != conversation', 'editorGeneration != generation',
+        for guard in ('selected?.id != page.conversation', 'editorGeneration != page.generation',
                       'contextManagementEntryEpoch != epoch', 'contextManagementVisit != null',
                       '!generationResumed()', 'retainedPage != "context-management"'):
             self.assertIn(guard, body)

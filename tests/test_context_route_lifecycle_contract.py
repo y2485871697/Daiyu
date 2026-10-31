@@ -35,12 +35,12 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
             self.assertIn(token, body)
 
     def test_revocation_clears_owner_before_callbacks_and_closes_only_its_route(self):
-        body = self.main.split('private fun revokeContextManagementEntry(', 1)[1].split('private var legacyPage', 1)[0]
+        body = self.main.split('private fun revokeContextManagementEntry(', 1)[1].split('private class BrowserResumeTarget', 1)[0]
         self.assertIn('closeRoute: Boolean = true', body)
         empty = body.index('val visit = contextManagementVisit')
         clear = body.index('contextManagementVisit = null')
         invalidate = body.index('if (visit != null) controller.invalidateContextManagement(visit.adapter)')
-        close = body.index('if (closeRoute && retainedPage == "context-management") retainedPage = "chat"')
+        close = body.index('if ((closeRoute || submitted) && retainedPage == "context-management") retainedPage = "chat"')
         self.assertLess(empty, clear)
         self.assertLess(clear, invalidate)
         self.assertLess(invalidate, close)
@@ -57,18 +57,19 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
     def test_context_visit_epoch_does_not_remount_chat_editor(self):
         self.assertIn('ContextManagementOwner(conversation.id, renderedContextEntryEpoch)', self.main)
         self.assertIn('ContextManagementOwner(conversation, epoch)', self.main)
-        revoke = self.main.split('private fun revokeContextManagementEntry(', 1)[1].split('private var legacyPage', 1)[0]
+        revoke = self.main.split('private fun revokeContextManagementEntry(', 1)[1].split('private class BrowserResumeTarget', 1)[0]
         self.assertIn('contextManagementEntryEpoch++', revoke)
         self.assertNotIn('editorGeneration++', revoke)
 
     def test_pause_stop_and_editor_changes_still_revoke_not_restore(self):
         for method, end in [('onPause()', 'override fun onStop()'), ('onStop()', 'override fun onDestroy()')]:
             body = self.main.split('override fun ' + method, 1)[1].split(end, 1)[0]
-            self.assertIn('revokeContextManagementEntry(closeRoute = false)', body)
+            self.assertIn('revokeContextManagementEntry(closeRoute = false, preservePresentation = true)', body)
         resume = self.main.split('override fun onResume()', 1)[1].split('private fun applyPreferredRefreshRate()', 1)[0]
         self.assertIn('contextManagementEntryEpoch++', resume)
         self.assertNotIn('openContextManagement(', resume)
         self.assertNotIn('confirmCompression(', resume)
+        self.assertIn('resumeContextManagementPage(contextPage, contextEpoch)', resume)
         editor = self.main.split('@Volatile private var editorGeneration', 1)[1].split('private var draftRevision', 1)[0]
         self.assertIn('revokeContextManagementEntry()', editor)
 
@@ -76,12 +77,12 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
         tests = self.activity_tests
         self.assertIn('private fun assertChatRoute()', tests)
         self.assertIn('assertEquals("chat", getter.apply { isAccessible = true }.invoke(activity))', tests)
-        self.assertIn('fun testPausedContextContinueCallbackCannotSurviveAnotherPauseOrSelection()', tests)
+        self.assertIn('fun testBackgroundRoundTripsKeepDraftAndOldAdaptersCannotActOrReopen()', tests)
         for name in ('testPauseWithoutStopRevokesOldCompressionConfirmationAndRetainsRoute',
-                     'testStopRevokesUnopenedEntryAndOpenAdapterConsentAndResumeNeedsFreshClick'):
+                     'testStopRevokesOldEntryAndConsentButRestoresConfigurationAutomatically'):
             body = tests.split('fun ' + name + '()', 1)[1].split('\n    fun ', 1)[0]
-            self.assertIn('assertPausedContextRoute()', body)
-            self.assertIn('val next = continueAndAwait()', body)
+            self.assertNotIn('assertPausedContextRoute()', body)
+            self.assertIn('val next = restoredAndAwait()', body)
             self.assertNotIn('backToChat(activity)', body)
             self.assertIn('assertEquals(before, fixture.database.exportBackup())', body)
             self.assertIn('assertEquals(0, fixture.opens.get())', body)

@@ -50,25 +50,20 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         node("context-management").assertDoesNotExist()
         ui.onNodeWithText("上下文页面已失效；请返回原会话重新打开").assertDoesNotExist()
     }
-    private fun assertPausedContextRoute() {
-        mainThread {
-            val getter = MainActivity::class.java.declaredMethods.single { it.name == "getRetainedPage" }
-            assertEquals("context-management", getter.apply { isAccessible = true }.invoke(activity))
-            assertNoVisit()
-        }
-        awaitUniqueTag("context-management-paused")
-        node("context-compression-confirmation").assertDoesNotExist()
-    }
-    private fun continueAndAwait(): ContextManagementControllerAdapter {
-        awaitLocalReaders()
-        node("context-management-resume").performClick()
+    private fun restoredAndAwait(): ContextManagementControllerAdapter {
         awaitUniqueTag("context-management")
+        node("context-management-paused").assertDoesNotExist()
         lateinit var result: ContextManagementControllerAdapter
-        mainThread { result = adapter() }
-        awaitControl("fresh context visit after explicit continue") {
-            result.state.value.operation == null && result.state.value.snapshot != null
+        awaitControl("fresh read-only context visit after resume") {
+            val getter = MainActivity::class.java.declaredMethods.single { it.name == "getContextManagementVisit" }
+            val visit = getter.apply { isAccessible = true }.invoke(activity)
+            if (visit == null) false else {
+                result = adapter()
+                result.state.value.operation == null && result.state.value.snapshot != null
+            }
         }
         assertFalse(result.state.value.confirmingCompression)
+        assertFalse(result.state.value.compressionAccepted)
         return result
     }
     private fun stopped(block: () -> Unit) {
@@ -326,8 +321,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             assertNull(old.state.value.snapshot)
             assertFalse(old.state.value.confirmingCompression)
         })
-        assertPausedContextRoute()
-        val next = continueAndAwait()
+        val next = restoredAndAwait()
         mainThread {
             old.refresh(); old.confirmCompression()
             assertSame(next, adapter())
@@ -337,22 +331,39 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPausedContextContinueCallbackCannotSurviveAnotherPauseOrSelection() {
+    fun testBackgroundRoundTripsKeepDraftAndOldAdaptersCannotActOrReopen() {
         val conversation = seedAndSelect()
         val before = fixture.database.exportBackup()
-        openAndAwait()
-        realPauseResume(activity)
-        assertPausedContextRoute()
-        val oldContinue = node("context-management-resume").fetchSemanticsNode().config[RetainedPausedResumeAction]
-        realPauseResume(activity, atPause = { oldContinue(); assertNoVisit() })
-        assertPausedContextRoute()
-        mainThread { oldContinue(); assertNoVisit() }
-        val next = continueAndAwait()
-        realPauseResume(activity)
-        assertPausedContextRoute()
-        mainThread { activity.select(null); oldContinue(); next.confirmCompression(); assertNoVisit() }
+        var previous = openAndAwait()
+        node("compression-dialog-custom").performClick()
+        node("context-management").performScrollToIndex(2)
+        node("compression-dialog-api:responses").scrollToVisible().performClick()
+        repeat(2) {
+            val old = previous
+            realPauseResume(activity, atPause = {
+                assertNoVisit()
+                old.refresh(); old.confirmCompression()
+                assertFalse(old.submitCompression(null))
+            })
+            previous = restoredAndAwait()
+            assertNotSame(old, previous)
+            node("context-management").performScrollToIndex(0)
+            node("compression-dialog-custom").assertIsOn()
+            node("context-management").performScrollToIndex(2)
+            node("compression-dialog-api:responses").scrollToVisible().assertIsSelected()
+        }
+        val old = previous
+        stopped {
+            assertNoVisit()
+            old.refresh(); assertFalse(old.submitCompression(null))
+        }
+        val next = restoredAndAwait()
+        assertNotSame(old, next)
+        node("context-management").performScrollToIndex(0)
+        node("compression-dialog-custom").assertIsOn()
+        mainThread { activity.select(null); old.confirmCompression(); next.confirmCompression(); assertNoVisit() }
         assertChatRoute()
-        mainThread { activity.select(conversation); oldContinue(); assertNoVisit() }
+        mainThread { activity.select(conversation); old.refresh(); assertNoVisit() }
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }
@@ -467,7 +478,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }
-    fun testStopRevokesUnopenedEntryAndOpenAdapterConsentAndResumeNeedsFreshClick() {
+    fun testStopRevokesOldEntryAndConsentButRestoresConfigurationAutomatically() {
         val conversation = seedAndSelect()
         awaitLocalReaders()
         val before = fixture.database.exportBackup()
@@ -504,15 +515,13 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             assertNull(old.state.value.operation)
             assertNoVisit()
         }
+        val next = restoredAndAwait()
         mainThread {
             old.refresh(); old.requestCompression(); assertFalse(oldSubmit()); oldClick(); backgroundClick()
             assertNull(old.state.value.snapshot)
             assertFalse(old.state.value.confirmingCompression)
-            assertNoVisit()
+            assertSame(next, adapter())
         }
-        assertPausedContextRoute()
-        mainThread { oldClick(); backgroundClick(); assertFalse(oldSubmit()); assertNoVisit() }
-        val next = continueAndAwait()
         assertNotSame(old, next)
         assertEquals(conversation.id, next.state.value.owner.conversationId)
         mainThread {

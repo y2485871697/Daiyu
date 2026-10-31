@@ -15,8 +15,9 @@ internal class ContinuationText(private val prefix: String, private val bound: I
         firstItem?.takeIf { !ended && acceptedOverlap == null && it != itemId }?.let { it to pending }
 
     fun suffix(itemId: String, cumulative: String, final: Boolean = false): String {
+        if (prefix.isEmpty()) return cumulative
         if (firstItem == null && cumulative.isNotEmpty()) firstItem = itemId
-        if (itemId != firstItem || prefix.isEmpty()) return cumulative
+        if (itemId != firstItem) return cumulative
         pending = cumulative
         val tail = prefix.takeLast(bound)
         if (acceptedOverlap == null) {

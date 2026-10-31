@@ -41,4 +41,13 @@ class ContinuationTextTest {
         assertEquals("56789new", text.suffix("rejected", "56789new"))
         assertEquals("new", before.suffix("accepted", "6789new"))
     }
+    @Test fun emptyPrefixNeverCreatesAnAmbiguousPendingItem() {
+        val text = ContinuationText("")
+        assertEquals("prefix", text.suffix("body", "prefix"))
+        assertNull(text.pendingBefore())
+        assertNull(text.pendingBefore("next"))
+        assertEquals("prefixsuffix", text.suffix("body", "prefixsuffix"))
+        assertNull(text.fork().pendingBefore())
+    }
+
 }

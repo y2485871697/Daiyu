@@ -405,7 +405,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     @Test fun explicitClosePublishesTerminalOnlyAfterNativeResourcesAreReleased() {
         val (_, shadow) = preparing()
         var observedReleased = false
-        val observation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        val observation = scope.launch(UnconfinedTestDispatcher(dispatcher.scheduler), start = CoroutineStart.UNDISPATCHED) {
             host.state.collect { state ->
                 if (state.phase == SpeechPhase.STOPPED) observedReleased = shadow.state == ShadowMediaPlayer.State.END
             }

@@ -155,6 +155,76 @@ class DoubaoVoiceAliasesTest {
     private fun missingInstance(request: Request, alias: String = "old") =
         listed(request, JSONArray().put(slot(alias = alias).apply { remove("InstanceNO") }))
 
+    private fun assertMissingInstanceDiagnostic(failure: VoiceCatalogFailure, listMatches: Int, total: Int, packMatches: Int) {
+        val message = failure.safeMessage
+        assertEquals("未取得原音色的实例号，未改名；本机名称已保留。" +
+            "查询结果：批量音色1条；单音色${listMatches}条；资源包${total}条，目标匹配${packMatches}条。" +
+            "上述查询未提供目标的可用实例号。", message)
+        assertTrue(message.contains("未取得原音色的实例号"))
+        assertTrue(message.contains("本机名称已保留"))
+        assertTrue(message.contains("批量音色1条；单音色${listMatches}条；资源包${total}条，目标匹配${packMatches}条"))
+        for (value in listOf("S_owned", "S_other", "S_last", "diag-batch-alias", "diag-list-alias", "diag-pack-alias",
+            "diag-target-alias", "diag-foreign-alias", "diag-foreign-instance", "fixture-ak", "fixture-sk", "project")) {
+            assertFalse("diagnostic must not expose fixture identity or credentials", message.contains(value))
+        }
+    }
+
+    @Test fun missingInstanceDiagnosticReportsEmptyResourceCatalogWithoutMutation() = runBlocking {
+        val actions = mutableListOf<String>()
+        val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; actions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> missingInstance(request, "diag-batch-alias")
+                "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
+                "ResourcePacksStatus" -> packs(JSONArray())
+                else -> error("No alias, training or order calls allowed: $action")
+            }
+        })
+        try {
+            api.rename("fixture-ak", "fixture-sk", "project", "S_owned", "diag-target-alias")
+            fail("expected missing instance failure")
+        } catch (failure: VoiceCatalogFailure) {
+            assertMissingInstanceDiagnostic(failure, 0, 0, 0)
+        }
+        assertEquals(reads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus"), actions)
+    }
+
+    @Test fun missingInstanceDiagnosticCountsAllResourcePagesWithoutLeakingValues() = runBlocking {
+        for (hasExactPack in listOf(false, true)) {
+            val actions = mutableListOf<String>()
+            val pages = mutableListOf<Int>()
+            val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                val action = request.url.queryParameter("Action")!!; actions += action
+                when (action) {
+                    "BatchListMegaTTSTrainStatus" -> missingInstance(request, "diag-batch-alias")
+                    "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray().put(
+                        slot(alias = "diag-list-alias").apply { remove("InstanceNO") })))
+                    "ResourcePacksStatus" -> {
+                        val pageNumber = body(request).getInt("PageNumber"); pages += pageNumber
+                        when (pageNumber) {
+                            1 -> packs(JSONArray().also { rows ->
+                                repeat(100) { rows.put(pack(id = "S_other$it", alias = "diag-foreign-alias", instance = "diag-foreign-instance")) }
+                            }, 101)
+                            2 -> packs(JSONArray().put(if (hasExactPack) {
+                                pack(alias = "diag-pack-alias").apply { remove("InstanceNumber") }
+                            } else pack(id = "S_last", alias = "diag-foreign-alias", instance = "diag-foreign-instance")), 101)
+                            else -> error("Unexpected page $pageNumber")
+                        }
+                    }
+                    else -> error("No alias, training or order calls allowed: $action")
+                }
+            })
+            try {
+                api.rename("fixture-ak", "fixture-sk", "project", "S_owned", "diag-target-alias")
+                fail("expected missing instance failure")
+            } catch (failure: VoiceCatalogFailure) {
+                assertMissingInstanceDiagnostic(failure, 1, 101, if (hasExactPack) 1 else 0)
+            }
+            assertEquals(listOf(1, 2), pages)
+            assertEquals(reads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus", "ResourcePacksStatus"), actions)
+        }
+    }
+
     @Test fun omittedCatalogInstanceFallsBackToScopedResourcePackAndNamesOnlyOriginalId() = runBlocking {
         for (instance in listOf(null, JSONObject.NULL, "", "   ", 42)) {
             val actions = mutableListOf<String>()

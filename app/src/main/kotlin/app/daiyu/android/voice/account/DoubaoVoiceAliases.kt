@@ -17,14 +17,21 @@ internal class DoubaoVoiceAliases(private val transport: AccountHttpTransport) {
         val status = if (resource.instanceNumber.isBlank()) findTrainStatus(ak, sk, project, id, resource.state) else null
         if (status?.opt("Alias") == name) return
         val statusInstance = (status?.opt("InstanceNO") as? String).orEmpty()
-        val pack = if (resource.instanceNumber.isBlank() && statusInstance.isBlank()) findResourcePack(ak, sk, project, id) else null
+        val packLookup = if (resource.instanceNumber.isBlank() && statusInstance.isBlank()) findResourcePack(ak, sk, project, id) else null
+        val pack = packLookup?.pack
         if (pack?.opt("Alias") == name) return
         val instance = when {
             resource.instanceNumber.isNotBlank() -> resource.instanceNumber
             statusInstance.isNotBlank() -> statusInstance
             else -> (pack?.opt("InstanceNumber") as? String).orEmpty()
         }
-        if (instance.isBlank()) throw VoiceCatalogFailure("未取得原音色的实例号，未改名；本机名称已保留，可稍后重试名称同步。")
+        if (instance.isBlank()) {
+            val statusCount = if (status == null) 0 else 1
+            val packCount = if (pack == null) 0 else 1
+            throw VoiceCatalogFailure("未取得原音色的实例号，未改名；本机名称已保留。" +
+                "查询结果：批量音色1条；单音色${statusCount}条；资源包${packLookup?.totalCount ?: 0}条，目标匹配${packCount}条。" +
+                "上述查询未提供目标的可用实例号。")
+        }
         if (pack?.optJSONObject("Details")?.opt("Aliasable") == false) {
             throw VoiceCatalogFailure("此音色资源暂不允许云端改名；本机名称已保留。")
         }
@@ -57,7 +64,9 @@ internal class DoubaoVoiceAliases(private val transport: AccountHttpTransport) {
         }
         return status
     }
-    private suspend fun findResourcePack(ak: String, sk: String, project: String, id: String): JSONObject? {
+    private data class ResourcePackLookup(val pack: JSONObject?, val totalCount: Int)
+
+    private suspend fun findResourcePack(ak: String, sk: String, project: String, id: String): ResourcePackLookup {
         var matched: JSONObject? = null
         var expectedTotal: Int? = null
         for (page in 1..20) {
@@ -101,7 +110,7 @@ internal class DoubaoVoiceAliases(private val transport: AccountHttpTransport) {
             }
             if (offset + rows.length() == total.toInt()) break
         }
-        return matched
+        return ResourcePackLookup(matched, checkNotNull(expectedTotal))
     }
     private suspend fun request(action: String, ak: String, sk: String, body: JSONObject, version: String = "2025-05-20"): JSONObject {
         currentCoroutineContext().ensureActive()

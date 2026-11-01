@@ -350,6 +350,20 @@ class PersonalVoiceNameSyncTest {
         for (statuses in listOf(JSONArray(), JSONArray().put(JSONObject().put("SpeakerID", "S_owned").put("Alias", "old")))) {
             for (packs in listOf(JSONArray(), JSONArray().put(resource().apply { remove("InstanceNumber") }),
                 JSONArray().put(resource().put("TrainID", "S_other")))) {
+                val packMatches = (0 until packs.length()).count { packs.getJSONObject(it).optString("TrainID") == "S_owned" }
+                fun checkDiagnostic(failure: VoiceCatalogFailure) {
+                    val message = failure.safeMessage
+                    assertEquals("未取得原音色的实例号，未改名；本机名称已保留。" +
+                        "查询结果：批量音色1条；单音色${statuses.length()}条；资源包${packs.length()}条，目标匹配${packMatches}条。" +
+                        "上述查询未提供目标的可用实例号。", message)
+                    assertTrue(message.contains("原音色的实例号"))
+                    assertTrue(message.contains("本机名称已保留"))
+                    assertTrue(message.contains("批量音色1条；单音色${statuses.length()}条；资源包${packs.length()}条，目标匹配${packMatches}条"))
+                    assertFalse(message.contains("不存在"))
+                    for (value in listOf("S_owned", "S_other", "old", "我的声音", "fixture-ak", "fixture-sk", "name-fixture-api-key")) {
+                        assertFalse("diagnostic must not expose fixture identity or credentials", message.contains(value))
+                    }
+                }
                 val file = folder.newFile()
                 file.delete()
                 // Synthetic transport fixtures, not captured account HTTP responses.
@@ -373,9 +387,7 @@ class PersonalVoiceNameSyncTest {
                 create(store); store.accept(store.state.value.single())
                 val before = store.state.value.single()
                 try { sync(store); fail("expected original instance failure") } catch (failure: VoiceCatalogFailure) {
-                    assertTrue(failure.safeMessage.contains("原音色的实例号"))
-                    assertTrue(failure.safeMessage.contains("本机名称已保留"))
-                    assertFalse(failure.safeMessage.contains("不存在"))
+                    checkDiagnostic(failure)
                 }
                 assertEquals(before, store.state.value.single())
                 val restarted = PersonalVoices(file, transport)
@@ -388,7 +400,9 @@ class PersonalVoiceNameSyncTest {
                 val metadataReads = nameReads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus")
                 assertEquals(listOf("voice_clone") + metadataReads, actions)
                 actions.clear()
-                try { sync(restarted); fail("expected missing original instance on retry") } catch (_: VoiceCatalogFailure) { }
+                try { sync(restarted); fail("expected missing original instance on retry") } catch (failure: VoiceCatalogFailure) {
+                    checkDiagnostic(failure)
+                }
                 assertEquals(metadataReads, actions)
                 assertEquals(before, restarted.state.value.single())
                 val reloaded = PersonalVoices(file, AccountHttpTransport { _, _ -> error("Local load only") })

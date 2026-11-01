@@ -1439,7 +1439,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     cancelSession(active); active = open(); reopenAfterCompaction = false
                 } else checkpoint()
             }
-            throw IllegalStateException("工具续轮达到12轮上限，已停止追加请求")
+            throw ToolRoundLimitException(options.maxRounds)
         } catch (failure: Exception) {
             if (allowBarrier && failure is PersistenceException) {
                 synchronized(terminalLock) {
@@ -1472,6 +1472,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             val baseError = if (failure is PersistenceException) "保存失败，已显示内容可能未落盘" else
                 if (failure is UnknownToolOutcomeException) "工具结果未知；已停止，禁止重放，请仅使用只读方式核实" +
                     failure.codes.mapNotNull(::toolFailureDiagnostic).distinct().take(4).joinToString("、").let { if (it.isEmpty()) "" else "（原因：$it）" } else
+                if (failure is ToolRoundLimitException) "工具续轮已达到${failure.limit}轮安全上限，已停止追加请求；已执行的工具结果已保留" else
                 if (failure is TransportReconnectDeadlineException) failure.userMessage else
                 if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.userMessage else "请求失败，请检查模型设置或网络"
             // Close only ended, uncertain executions. This is a reported UNKNOWN, not a
@@ -1558,3 +1559,5 @@ private fun cancelSession(session: ModelSession?) {
 
 private class RepetitiveOutputException(val surface: String) : RuntimeException("Repetitive model output")
 private class UnknownToolOutcomeException(val codes: List<String> = emptyList()) : RuntimeException("Unknown tool outcome")
+
+private class ToolRoundLimitException(val limit: Int) : RuntimeException("Tool round limit reached")

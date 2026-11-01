@@ -153,7 +153,7 @@ class RunnerOptions(
     val validateBatch: (List<ToolInvocation>) -> Unit = {},
     val onUsage: (ModelEvent.Usage) -> Unit = {},
     val batchExecutor: BatchToolExecutor? = null,
-    val maxRounds: Int = 12,
+    val maxRounds: Int = 100,
     val receiptBatchExecutor: ReceiptBatchToolExecutor? = null,
     /** Only accepted ReasoningDelta/ReasoningFinal events, after repetition checks.
      * Runs outside the control lock; observer exceptions do not fail the run. */

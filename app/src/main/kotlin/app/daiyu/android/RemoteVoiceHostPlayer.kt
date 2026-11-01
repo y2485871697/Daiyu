@@ -28,6 +28,7 @@ internal class RemoteVoiceHostPlayer(
     private val frozen: FrozenVoiceSpeech,
     transport: VoiceHttpTransport? = null,
     private val diagnostics: DiagnosticLogStore? = null,
+    private val pcmFactory: (AudioAttributes, () -> Unit) -> StreamingPcmPlayer = ::androidStreamingPcmPlayer,
 ) : VoiceHostPlayer {
     private val transport = transport ?: VoiceNetworkAdapters.speechHttp(frozen.configuration.speech().engine, diagnostics)
     private val mutable = MutableStateFlow(SpeechPlaybackState())
@@ -35,6 +36,7 @@ internal class RemoteVoiceHostPlayer(
     private var owner: String? = null
     private var job: Job? = null
     private var deadline: Job? = null
+    private var pcm: StreamingPcmPlayer? = null
     private var player: MediaPlayer? = null
     private var focus: SpeechAudioFocus? = null
     private var releasing = false
@@ -70,6 +72,11 @@ internal class RemoteVoiceHostPlayer(
         }
         val synthesisJob = scope.launch(Dispatchers.Main.immediate) {
             try {
+                if (config.speech().engine == SpeechEngine.DOUBAO && !DoubaoSpeech.usesCreate(config.model) &&
+                    frozen.upload == null && transport is VoiceHttpStreamingTransport) {
+                    streamPcm(owner, requestId, text, transport)
+                    return@launch
+                }
                 var cap = frozen.playbackLimitMs
                 val bytes = withContext(Dispatchers.IO) {
                     check(runtime.current(frozen))
@@ -183,11 +190,83 @@ internal class RemoteVoiceHostPlayer(
         synthesisJob.invokeOnCompletion { cause ->
             if (cause is CancellationException) releaseOnMain(handler) {
                 if (!closed && job === synthesisJob && mutable.value.requestId == requestId &&
-                    mutable.value.phase == SpeechPhase.QUEUED) finish(owner, requestId, false)
+                    mutable.value.phase in setOf(SpeechPhase.QUEUED, SpeechPhase.SPEAKING)) finish(owner, requestId, false)
             }
         }
         return true
     }
+    private suspend fun streamPcm(owner: String, requestId: String, text: String, stream: VoiceHttpStreamingTransport) {
+        val attributes = AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .setUsage(AudioAttributes.USAGE_MEDIA).build()
+        var output: StreamingPcmPlayer? = null
+        var receivedAudio = false
+        try {
+            withContext(Dispatchers.IO) {
+                val account = if (frozen.doubaoResolver != null) frozen.doubaoResolver.invoke() else frozen.doubaoPersonal
+                DoubaoPcmSynthesis(stream).synthesize(frozen.configuration.speech(), text, frozen.configuration.voice, account,
+                    beforeSend = {
+                        check(!closed && runtime.referenceStillCurrent(frozen) && runtime.current(frozen))
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+                    }) { bytes ->
+                    ensureActive()
+                    check(!closed && runtime.current(frozen))
+                    if (!receivedAudio) {
+                        receivedAudio = true
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_STREAM_AUDIO_RECEIVED)
+                        withContext(Dispatchers.Main.immediate) {
+                            check(!closed && mutable.value.requestId == requestId && runtime.current(frozen))
+                            var leasedOutput: StreamingPcmPlayer? = null
+                            val lease = SpeechAudioFocus(context, attributes, handler) {
+                                if (!closed && leasedOutput != null && pcm === leasedOutput) {
+                                    finish(owner, requestId, false, SpeechError.AUDIO_FOCUS_LOST)
+                                }
+                            }
+                            focus = lease
+                            if (!lease.acquire()) {
+                                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_FOCUS_DENIED)
+                                finish(owner, requestId, false, SpeechError.AUDIO_FOCUS_DENIED)
+                                throw CancellationException("speech_focus_denied")
+                            }
+                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_FOCUS_GRANTED)
+                            lateinit var created: StreamingPcmPlayer
+                            created = pcmFactory(attributes) {
+                                handler.post {
+                                    if (!closed && pcm === created && mutable.value.requestId == requestId && runtime.current(frozen)) {
+                                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_STREAM_PLAYBACK_STARTED)
+                                        mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.SPEAKING)
+                                        if (closed || pcm !== created) return@post
+                                        deadline?.cancel()
+                                        deadline = scope.launch(Dispatchers.Main.immediate) {
+                                            delay(frozen.playbackLimitMs)
+                                            if (!closed && pcm === created) finish(owner, requestId, false)
+                                        }
+                                    }
+                                }
+                            }
+                            leasedOutput = created
+                            pcm = created
+                            output = created
+                        }
+                    }
+                    checkNotNull(output).write(bytes)
+                }
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_COMPLETED)
+                checkNotNull(output).drain()
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_STREAM_DRAINED)
+            }
+            ensureActive()
+            if (!closed && pcm === output && mutable.value.requestId == requestId && runtime.current(frozen)) {
+                finish(owner, requestId, true)
+            }
+        } catch (cancelled: CancellationException) {
+            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_CANCELLED)
+            throw cancelled
+        } catch (failure: Exception) {
+            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_FAILED)
+            throw failure
+        }
+    }
+
     private fun finish(owner: String, requestId: String, success: Boolean,
         error: SpeechError = SpeechError.PLAYBACK_FAILED) {
         diagnostics?.recordAsync(if (success) DiagnosticEvent.SPEECH_PLAYER_COMPLETED else DiagnosticEvent.SPEECH_PLAYER_FAILED)
@@ -225,6 +304,7 @@ internal class RemoteVoiceHostPlayer(
         val oldFocus = focus; focus = null
         val oldJob = job; job = null
         val oldDeadline = deadline; deadline = null
+        val oldPcm = pcm; pcm = null
         val p = player; player = null
         val oldFile = file; file = null
         // No control lock is held across cancellation or native reset/release.
@@ -232,13 +312,15 @@ internal class RemoteVoiceHostPlayer(
         try {
             try {
                 oldJob?.cancel(); oldDeadline?.cancel()
-                try { p?.reset() } finally {
-                    try { p?.release() } finally {
-                        check(oldFile == null || !oldFile.exists() || oldFile.delete()) { "voice_temp_delete_failed" }
+                try { oldPcm?.closeStrict() } finally {
+                    try { p?.reset() } finally {
+                        try { p?.release() } finally {
+                            check(oldFile == null || !oldFile.exists() || oldFile.delete()) { "voice_temp_delete_failed" }
+                        }
                     }
                 }
             } finally { oldFocus?.closeStrict() }
-            if (p != null || oldFile != null || oldFocus != null) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_MEDIA_RELEASED)
+            if (oldPcm != null || p != null || oldFile != null || oldFocus != null) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_MEDIA_RELEASED)
         } catch (failure: Throwable) {
             diagnostics?.recordAsync(DiagnosticEvent.SPEECH_MEDIA_RELEASE_FAILED)
             releaseFailure = releaseFailure ?: failure

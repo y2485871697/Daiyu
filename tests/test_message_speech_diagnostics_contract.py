@@ -22,6 +22,18 @@ class MessageSpeechDiagnosticsContractTest(unittest.TestCase):
         self.assertIn("PREPARATION_TIMEOUT_MS = 120_000L", remote)
         self.assertNotIn("recordAsync", (SRC / "ActivityVoiceAccountPreviewHost.kt").read_text())
 
+    def test_streaming_read_aloud_uses_pcm_without_changing_preview_or_ui_design(self):
+        remote = (SRC / "RemoteVoiceHostPlayer.kt").read_text()
+        for token in ("transport is VoiceHttpStreamingTransport", "frozen.upload == null", "DoubaoPcmSynthesis(stream)",
+                      "SPEECH_STREAM_AUDIO_RECEIVED", "SPEECH_STREAM_PLAYBACK_STARTED", "SPEECH_STREAM_DRAINED",
+                      "checkNotNull(output).drain()", "oldPcm?.closeStrict()"):
+            self.assertIn(token, remote)
+        decoder = (SRC / "voice/providers/DoubaoPcmStream.kt").read_text()
+        self.assertIn('put("format", "pcm")', decoder)
+        native = (SRC / "voice/StreamingPcmPlayer.kt").read_text()
+        for token in ("AudioTrack.MODE_STREAM", "AudioTrack.WRITE_NON_BLOCKING", "track.playedFrames >= writtenFrames"):
+            self.assertIn(token, native)
+
     def test_fixed_schema_bounded_async_queue_and_no_caller_thread_fallback(self):
         store = (SRC / "diagnostics/DiagnosticLogStore.kt").read_text()
         self.assertIn("ArrayBlockingQueue(64)", store)

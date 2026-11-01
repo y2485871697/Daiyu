@@ -6,6 +6,14 @@ import app.daiyu.android.voice.providers.SpeechEngine
 import app.daiyu.android.voice.providers.VoiceHttpRequest
 import app.daiyu.android.voice.providers.VoiceHttpResponse
 import app.daiyu.android.voice.providers.VoiceHttpTransport
+import app.daiyu.android.voice.providers.VoiceHttpStreamingTransport
+import app.daiyu.android.voice.providers.VoiceHttpChunk
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
+import java.util.concurrent.atomic.AtomicBoolean
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -26,8 +34,8 @@ import okio.BufferedSink
 internal class OkHttpVoiceTransport(
     private val calls: Call.Factory = client,
     private val diagnostics: DiagnosticLogStore? = null,
-) : VoiceHttpTransport {
-    override suspend fun execute(request: VoiceHttpRequest, maxResponseBytes: Int): VoiceHttpResponse {
+) : VoiceHttpStreamingTransport {
+    private fun newCall(request: VoiceHttpRequest, maxResponseBytes: Int): Call {
         checkNetwork(maxResponseBytes in 1..NetworkLimits.HTTP_BYTES)
         checkedUri(request.url, "https")
         val headers = checkedHeaders(request.headers)
@@ -39,13 +47,17 @@ internal class OkHttpVoiceTransport(
             override fun isOneShot() = true
             override fun writeTo(sink: BufferedSink) { sink.write(payload) }
         }
-        val call = try {
+        return try {
             val builder = Request.Builder().url(request.url).post(body)
             headers.forEach { (key, value) -> builder.header(key, value) }
             // The interface is JSON-only, irrespective of a caller-supplied Content-Type.
             builder.header("Content-Type", "application/json; charset=utf-8")
             calls.newCall(builder.build())
         } catch (_: Exception) { throw networkFailure() }
+    }
+
+    override suspend fun execute(request: VoiceHttpRequest, maxResponseBytes: Int): VoiceHttpResponse {
+        val call = newCall(request, maxResponseBytes)
         return suspendCancellableCoroutine { continuation ->
             continuation.invokeOnCancellation {
                 diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_CANCELLED)
@@ -101,6 +113,62 @@ internal class OkHttpVoiceTransport(
             }
         }
     }
+
+    override fun stream(request: VoiceHttpRequest, maxResponseBytes: Int): Flow<VoiceHttpChunk> = callbackFlow {
+        val call = newCall(request, maxResponseBytes)
+        val finished = AtomicBoolean()
+        try {
+            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_SUBMITTED)
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
+                    finished.set(true)
+                    close(networkFailure())
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        response.use {
+                            if (isClosedForSend) return
+                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_HEADERS)
+                            trySendBlocking(VoiceHttpChunk.Headers(it.code, it.header("Content-Type"))).getOrThrow()
+                            val source = it.body ?: throw networkFailure()
+                            checkNetwork(source.contentLength() <= maxResponseBytes)
+                            source.byteStream().use { input ->
+                                val buffer = ByteArray(8192)
+                                var total = 0
+                                while (!isClosedForSend) {
+                                    val count = input.read(buffer, 0, minOf(buffer.size, maxResponseBytes - total + 1))
+                                    if (count < 0) break
+                                    checkNetwork(total.toLong() + count <= maxResponseBytes)
+                                    if (count == 0) continue
+                                    if (total == 0) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_FIRST_BYTES)
+                                    total += count
+                                    // A two-block channel supplies backpressure; cancellation unblocks this send.
+                                    trySendBlocking(VoiceHttpChunk.Bytes(buffer.copyOf(count))).getOrThrow()
+                                }
+                            }
+                            if (!isClosedForSend) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_BODY_COMPLETED)
+                        }
+                        finished.set(true)
+                        close()
+                    } catch (_: Exception) {
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
+                        finished.set(true)
+                        call.cancel()
+                        close(networkFailure())
+                    }
+                }
+            })
+        } catch (_: Exception) {
+            finished.set(true)
+            call.cancel()
+            close(networkFailure())
+        }
+        awaitClose {
+            if (!finished.get()) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_CANCELLED)
+            call.cancel()
+        }
+    }.buffer(2)
 
     companion object {
         internal val speechClient: OkHttpClient by lazy {

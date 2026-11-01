@@ -10,6 +10,12 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import okhttp3.Call
 import okhttp3.Callback
@@ -176,6 +182,52 @@ class HttpVoiceNetworkTest {
             assertTrue(body.closed)
             assertEquals(1, factory.count)
         } finally { root.deleteRecursively() }
+    }
+
+    @Test fun streamingExactLimitClosesBodyAndCancellationClosesLateResponse() = runBlocking {
+        val factory = CapturingCalls()
+        val task = async { OkHttpVoiceTransport(factory).stream(request, 8).toList() }
+        while (factory.count == 0) yield()
+        val body = TrackedBody(ByteArray(8) { 1 }, -1)
+        withContext(Dispatchers.IO) { factory.last.respond(body) }
+        val chunks = task.await()
+        assertTrue(chunks.first() is app.daiyu.android.voice.providers.VoiceHttpChunk.Headers)
+        assertEquals(8, chunks.filterIsInstance<app.daiyu.android.voice.providers.VoiceHttpChunk.Bytes>().sumOf { it.value.size })
+        assertTrue(body.closed); assertEquals(1, factory.count)
+        val other = CapturingCalls()
+        val cancelled = launch { OkHttpVoiceTransport(other).stream(request, 8).collect {} }
+        while (other.count == 0) yield()
+        cancelled.cancelAndJoin(); assertTrue(other.last.cancelled)
+        val late = TrackedBody(ByteArray(8), -1)
+        withContext(Dispatchers.IO) { other.last.respond(late) }
+        assertTrue(late.closed); assertEquals(0L, late.readBytes)
+    }
+
+    @Test fun streamingBackpressureCancellationUnblocksCallbackAndClosesBody() = runBlocking {
+        val factory = CapturingCalls(); val received = CompletableDeferred<Unit>()
+        val task = launch {
+            OkHttpVoiceTransport(factory).stream(request, 100_000).collect {
+                if (it is app.daiyu.android.voice.providers.VoiceHttpChunk.Bytes) {
+                    received.complete(Unit); kotlinx.coroutines.awaitCancellation()
+                }
+            }
+        }
+        while (factory.count == 0) yield()
+        val body = TrackedBody(ByteArray(100_000), -1)
+        val response = async(Dispatchers.IO) { factory.last.respond(body) }
+        received.await(); task.cancelAndJoin(); response.await()
+        assertTrue(factory.last.cancelled); assertTrue(body.closed)
+        assertTrue(body.readBytes < 100_000); assertEquals(1, factory.count)
+    }
+
+    @Test fun streamingCumulativeLimitFailureIsRedactedAndDoesNotRetry() = runBlocking {
+        val factory = CapturingCalls()
+        val task = async { runCatching { OkHttpVoiceTransport(factory).stream(request, 8).toList() } }
+        while (factory.count == 0) yield()
+        val body = TrackedBody(ByteArray(30), -1)
+        withContext(Dispatchers.IO) { factory.last.respond(body) }
+        assertSafe(task.await().exceptionOrNull()!!)
+        assertTrue(body.closed); assertTrue(factory.last.cancelled); assertEquals(1, factory.count)
     }
 
     private fun assertSafe(error: Throwable) {

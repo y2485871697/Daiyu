@@ -464,4 +464,84 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         } finally { file.delete() }
     }
 
+
+    private class PcmFixture : app.daiyu.android.voice.StreamingPcmPlayer {
+        lateinit var started: () -> Unit
+        val received = CompletableDeferred<Unit>()
+        val allowDrain = CompletableDeferred<Unit>()
+        var closes = 0
+        override suspend fun write(bytes: ByteArray) {
+            assertArrayEquals(byteArrayOf(1, 0, 2, 0), bytes)
+            received.complete(Unit)
+        }
+        override suspend fun drain() { allowDrain.await() }
+        override fun closeStrict() { closes++ }
+    }
+
+    private fun streamingHost(output: PcmFixture, end: CompletableDeferred<Unit>, cancelled: CompletableDeferred<Unit>): RemoteVoiceHostPlayer {
+        val transport = object : app.daiyu.android.voice.providers.VoiceHttpStreamingTransport {
+            override suspend fun execute(request: app.daiyu.android.voice.providers.VoiceHttpRequest, maxResponseBytes: Int): VoiceHttpResponse = error("no fallback")
+            override fun stream(request: app.daiyu.android.voice.providers.VoiceHttpRequest, maxResponseBytes: Int) = kotlinx.coroutines.flow.flow {
+                requests++
+                try {
+                    emit(app.daiyu.android.voice.providers.VoiceHttpChunk.Headers(200, "application/json"))
+                    val data = JSONObject().put("code", 0).put("data", "AQACAA==").toString()
+                    emit(app.daiyu.android.voice.providers.VoiceHttpChunk.Bytes(data.toByteArray()))
+                    end.await()
+                    emit(app.daiyu.android.voice.providers.VoiceHttpChunk.Bytes(JSONObject().put("code", 20000000).toString().toByteArray()))
+                } finally { cancelled.complete(Unit) }
+            }
+        }
+        return RemoteVoiceHostPlayer(context, scope, runtime, FrozenVoiceSpeech(config), transport,
+            pcmFactory = { _, started -> output.apply { this.started = started } }).also { it.bindOwner("owner") }
+    }
+
+    @Test fun pcmStartsBeforeHttpEndsAndCompletesOnlyAfterRealTailDrain() {
+        host.closeStrict()
+        val pcm = PcmFixture(); val end = CompletableDeferred<Unit>(); val cancelled = CompletableDeferred<Unit>()
+        host = streamingHost(pcm, end, cancelled)
+        assertTrue(host.play("owner", "message", "你好"))
+        drainUntil { pcm.received.isCompleted }
+        assertEquals(SpeechPhase.QUEUED, host.state.value.phase)
+        pcm.started(); drainUntil { host.state.value.phase == SpeechPhase.SPEAKING }
+        assertFalse(end.isCompleted); assertTrue(media.isEmpty()); assertEquals(1, requests)
+        end.complete(Unit); drainUntil { cancelled.isCompleted }
+        assertEquals(SpeechPhase.SPEAKING, host.state.value.phase); assertEquals(0, pcm.closes)
+        pcm.allowDrain.complete(Unit); drainUntil { host.state.value.phase == SpeechPhase.COMPLETED }
+        assertEquals(1, pcm.closes)
+    }
+
+    @Test fun pcmDeniedFocusNeverWritesOrReplaysTheRequest() {
+        host.closeStrict(); shadowOf(audio).setNextFocusRequestResponse(AudioManager.AUDIOFOCUS_REQUEST_FAILED)
+        val pcm = PcmFixture(); val cancelled = CompletableDeferred<Unit>()
+        host = streamingHost(pcm, CompletableDeferred(), cancelled)
+        assertTrue(host.play("owner", "message", "你好"))
+        drainUntil { host.state.value.phase == SpeechPhase.ERROR && cancelled.isCompleted }
+        assertEquals(SpeechError.AUDIO_FOCUS_DENIED, host.state.value.error)
+        assertFalse(pcm.received.isCompleted); assertEquals(0, pcm.closes); assertEquals(1, requests)
+    }
+
+    @Test fun pcmFocusLossCancelsStreamingAndReleasesBeforeTerminal() {
+        host.closeStrict()
+        val pcm = PcmFixture(); val cancelled = CompletableDeferred<Unit>()
+        host = streamingHost(pcm, CompletableDeferred(), cancelled)
+        assertTrue(host.play("owner", "message", "你好"))
+        drainUntil { pcm.received.isCompleted }; pcm.started()
+        drainUntil { host.state.value.phase == SpeechPhase.SPEAKING }
+        shadowOf(audio).lastAudioFocusRequest.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS)
+        drainUntil { cancelled.isCompleted && host.state.value.phase == SpeechPhase.ERROR }
+        assertEquals(SpeechError.AUDIO_FOCUS_LOST, host.state.value.error)
+        assertEquals(1, pcm.closes); assertEquals(1, requests)
+    }
+
+    @Test fun pcmCloseDuringDrainFencesLateStartAndClosesExactlyOnce() {
+        host.closeStrict()
+        val pcm = PcmFixture(); val end = CompletableDeferred<Unit>(); val cancelled = CompletableDeferred<Unit>()
+        host = streamingHost(pcm, end, cancelled)
+        assertTrue(host.play("owner", "message", "你好"))
+        drainUntil { pcm.received.isCompleted }; end.complete(Unit); drainUntil { cancelled.isCompleted }
+        host.closeStrict(); pcm.started(); pcm.allowDrain.complete(Unit)
+        dispatcher.scheduler.runCurrent(); shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(SpeechPhase.STOPPED, host.state.value.phase); assertEquals(1, pcm.closes)
+    }
 }

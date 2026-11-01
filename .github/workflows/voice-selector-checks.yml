@@ -11,6 +11,10 @@ on:
         description: 本次定向检查标识
         type: string
         required: true
+      local_removal:
+        description: 仅检查本机音色移除确认弹层
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -24,6 +28,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       SKIP_JDK_VERSION_CHECK: 'true'
+      LOCAL_REMOVAL_CHECK: ${{ inputs.local_removal }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -52,10 +57,10 @@ jobs:
           mkdir -p voice-selector-checks
           set -o pipefail
           python3 -B - 2>&1 <<'PYCONTRACT' | tee voice-selector-checks/contracts.log
-          import json, unittest
+          import json, os, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_picker_empty_state_contract.py', 'test_voice_tone_selection_contract.py', 'test_appearance_blur_sheet_contract.py',
+          patterns = ('test_picker_empty_state_contract.py', 'test_voice_tone_selection_contract.py', 'test_appearance_blur_sheet_contract.py',
                           'test_shared_sheet_spacing_contract.py', 'test_sheet_selection_exit_contract.py',
                           'test_voice_settings_palette_contract.py', 'test_voice_recognition_layout_contract.py',
                           'test_voice_quota_selection_contract.py',
@@ -65,7 +70,11 @@ jobs:
                           'test_selection_sheet_reference_contract.py', 'test_selection_stays_open_contract.py',
                           'test_accent_foreground_contract.py', 'test_assistant_picker_frame_contract.py',
                           'test_conversation_reference_contract.py', 'test_model_bulk_selection_contract.py',
-                          'test_skill_picker_empty_state_contract.py', 'test_pet_error_logging_contract.py'):
+                          'test_skill_picker_empty_state_contract.py', 'test_pet_error_logging_contract.py')
+          if os.environ['LOCAL_REMOVAL_CHECK'] == 'true':
+              patterns = ('test_voice_local_removal_sheet_contract.py', 'test_voice_personal_menu_contract.py',
+                          'test_voice_account_notice_contract.py', 'test_shared_sheet_spacing_contract.py')
+          for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -84,14 +93,19 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          tasks=(:app:compileDebugKotlin :app:compileDebugAndroidTestKotlin)
+          if [ "$LOCAL_REMOVAL_CHECK" = true ]; then
+            tasks+=(:app:testDebugUnitTest --tests app.daiyu.android.voice.account.PersonalVoicesTest --tests app.daiyu.android.VoiceAccountPanelLeafTest)
+          fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=voice-selector-checks/task-graph.json \
-            :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin 2>&1 | tee voice-selector-checks/gradle.log
+            "${tasks[@]}" 2>&1 | tee voice-selector-checks/gradle.log
       - name: 核对编译报告及零安装包
         run: |
           python3 - <<'PYRECORD'
           import json, os, re
+          import xml.etree.ElementTree as ET
           from pathlib import Path
           graph = json.loads(Path('voice-selector-checks/task-graph.json').read_text())
           log = Path('voice-selector-checks/gradle.log').read_text()
@@ -103,10 +117,18 @@ jobs:
               outcomes[task] = match.group(1) or 'EXECUTED'
           packages = [str(p) for p in Path.cwd().rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
           assert not packages, packages
+          unit = []
+          if os.environ['LOCAL_REMOVAL_CHECK'] == 'true':
+              for name in ('app.daiyu.android.voice.account.PersonalVoicesTest', 'app.daiyu.android.VoiceAccountPanelLeafTest'):
+                  path = Path('app/build/test-results/testDebugUnitTest') / ('TEST-' + name + '.xml')
+                  suite = ET.parse(path).getroot()
+                  assert int(suite.attrib['tests']) > 0, name
+                  assert all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), name
+                  unit.append(dict(name=name, tests=int(suite.attrib['tests']), failures=0, errors=0, skipped=0))
           record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), compile_outcomes=outcomes,
                         contracts=json.loads(Path('voice-selector-checks/contracts.json').read_text()),
-                        apk_built=False, instrumentation_run=False)
+                        unit=unit, apk_built=False, instrumentation_run=False)
           Path('voice-selector-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
           print(json.dumps(record, ensure_ascii=False))
           PYRECORD
@@ -117,4 +139,6 @@ jobs:
           name: 音色选择器定向检查
           path: |
             voice-selector-checks/
+            app/build/test-results/testDebugUnitTest/TEST-app.daiyu.android.voice.account.PersonalVoicesTest.xml
+            app/build/test-results/testDebugUnitTest/TEST-app.daiyu.android.VoiceAccountPanelLeafTest.xml
           if-no-files-found: error

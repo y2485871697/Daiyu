@@ -79,7 +79,7 @@ internal class AccountLeafPreviewGuard(port: VoiceAccountPreviewPort) {
 }
 
 private data class AccountConfirmation(
-    val label: String, val failureNotice: String?, val visit: Long,
+    val label: String?, val failureNotice: String?, val visit: Long,
     val action: suspend ((String) -> Unit) -> Unit,
 )
 
@@ -167,7 +167,7 @@ internal fun VoiceAccountPanel(
             } finally { busy = false }
         }
     }
-    fun ask(label: String, failureNotice: String? = null, action: suspend ((String) -> Unit) -> Unit) {
+    fun ask(label: String?, failureNotice: String? = null, action: suspend ((String) -> Unit) -> Unit) {
         if (enabled) confirmation = AccountConfirmation(label, failureNotice, feedback.visit, action)
     }
     DisposableEffect(lifecycle, frozenConfiguration.revision, preview) {
@@ -679,7 +679,7 @@ internal fun VoiceAccountPanel(
                                     else "名称同步失败；请检查已保存的 AK／SK 与项目后重试，不要重新制作。")
                             }
                         }
-                        "REMOVE" -> if (!latestVoice.uncertain) ask("仅移除本机记录，不删除云端音色或任务，不退款、不释放名额") {
+                        "REMOVE" -> if (!latestVoice.uncertain) ask(null) {
                             preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(latestVoice) }
                         }
                     }
@@ -687,8 +687,12 @@ internal fun VoiceAccountPanel(
                 isEnabled = { action -> enabled && (action != "REMOVE" || !voice.uncertain) })
         }
         confirmation?.let { pending ->
-            DaiyuConfirmDialog("确认本次操作", pending.label, "确认", false,
-                onConfirm = { if (confirmation === pending && enabled && feedback.visit == pending.visit) execute(pending.failureNotice, block = pending.action) }, onDismiss = { confirmation = null })
+            val confirm = {
+                if (confirmation === pending && enabled && feedback.visit == pending.visit) execute(pending.failureNotice, block = pending.action)
+            }
+            if (pending.label == null) VoiceLocalRemovalSheet(onConfirm = confirm, onDismiss = { confirmation = null })
+            else DaiyuConfirmDialog("确认本次操作", pending.label, "确认", false,
+                onConfirm = confirm, onDismiss = { confirmation = null })
         }
     }
 }

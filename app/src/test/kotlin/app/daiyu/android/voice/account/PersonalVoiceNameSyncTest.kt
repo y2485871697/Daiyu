@@ -258,6 +258,7 @@ class PersonalVoiceNameSyncTest {
                         .put("Alias", "old").put("State", "Success"))
                     response(JSONObject().put("Result", JSONObject().put("TotalCount", rows.length()).put("Statuses", rows)))
                 }
+                "ListMegaTTSTrainStatus" -> response(JSONObject().put("Result", JSONObject().put("Statuses", JSONArray())))
                 "ResourcePacksStatus" -> response(JSONObject().put("Result", JSONObject().put("TotalCount", 1)
                     .put("Packs", JSONArray().put(resource()))))
                 "AliasResourcePack" -> {
@@ -282,6 +283,7 @@ class PersonalVoiceNameSyncTest {
                         .put("Alias", "old").put("State", "Success"))
                     response(JSONObject().put("Result", JSONObject().put("TotalCount", rows.length()).put("Statuses", rows)))
                 }
+                "ListMegaTTSTrainStatus" -> response(JSONObject().put("Result", JSONObject().put("Statuses", JSONArray())))
                 "ResourcePacksStatus" -> response(JSONObject().put("Result", JSONObject().put("TotalCount", 1)
                     .put("Packs", JSONArray().put(resource("我的声音").apply { remove("InstanceNumber") }))))
                 else -> error("Confirmed cloud name must not update again")
@@ -294,8 +296,105 @@ class PersonalVoiceNameSyncTest {
         assertFalse(restarted.state.value.single().nameSyncPending)
         assertEquals("我的声音", restarted.state.value.single().name)
         assertEquals(1, aliasUpdates)
-        assertEquals(listOf("voice_clone") + nameReads + listOf("ResourcePacksStatus", "AliasResourcePack"), actions)
-        assertEquals(nameReads + "ResourcePacksStatus", retryActions)
+        assertEquals(listOf("voice_clone") + nameReads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertEquals(nameReads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus"), retryActions)
+        assertTrue(restarted.state.value.single().accepted); assertEquals(2, restarted.state.value.single().status)
+        assertEquals("Success", restarted.state.value.single().catalogState)
+    }
+
+    @Test fun listRecoveryLostReceiptIsConfirmedReadOnlyAfterRestartWithoutRetraining() = runBlocking {
+        val file = File(folder.root, "list-lost-receipt.json")
+        val actions = mutableListOf<String>()
+        fun status(alias: String) = response(JSONObject().put("Result", JSONObject().put("Statuses", JSONArray()
+            .put(JSONObject().put("SpeakerID", "S_owned").put("Alias", alias).put("InstanceNO", "list-instance")))))
+        fun batch(request: Request): AccountResponse {
+            val result = JSONObject(listed(request).bytes.toString(Charsets.UTF_8))
+            result.getJSONObject("Result").getJSONArray("Statuses").optJSONObject(0)?.remove("InstanceNO")
+            return response(result)
+        }
+        val store = PersonalVoices(file, AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action") ?: request.url.pathSegments.last(); actions += action
+            when (action) {
+                "voice_clone" -> accepted()
+                "BatchListMegaTTSTrainStatus" -> batch(request)
+                "ListMegaTTSTrainStatus" -> status("old")
+                "AliasResourcePack" -> {
+                    assertEquals("list-instance", body(request).getString("InstanceNumber"))
+                    throw IOException("lost alias receipt")
+                }
+                else -> error("No resource packs or retraining")
+            }
+        })
+        create(store); store.accept(store.state.value.single())
+        try { sync(store); fail("expected lost receipt") } catch (_: IOException) { }
+        assertTrue(store.state.value.single().nameSyncPending)
+        val retryActions = mutableListOf<String>()
+        val restarted = PersonalVoices(file, AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; retryActions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> batch(request)
+                "ListMegaTTSTrainStatus" -> status("我的声音")
+                else -> error("Read-only confirmation must not train or rename")
+            }
+        })
+        restarted.load(); sync(restarted)
+        val voice = restarted.state.value.single()
+        assertFalse(voice.nameSyncPending); assertTrue(voice.accepted); assertFalse(voice.uncertain)
+        assertEquals(2, voice.status); assertEquals("Success", voice.catalogState); assertEquals(7, voice.remaining)
+        assertEquals("我的声音", voice.name)
+        assertEquals(listOf("voice_clone") + nameReads + listOf("ListMegaTTSTrainStatus", "AliasResourcePack"), actions)
+        assertEquals(nameReads + "ListMegaTTSTrainStatus", retryActions)
+    }
+
+    @Test fun allSourcesWithoutOriginalInstanceKeepPendingLocalNameAndAcceptedStatus() = runBlocking {
+        for (statuses in listOf(JSONArray(), JSONArray().put(JSONObject().put("SpeakerID", "S_owned").put("Alias", "old")))) {
+            for (packs in listOf(JSONArray(), JSONArray().put(resource().apply { remove("InstanceNumber") }),
+                JSONArray().put(resource().put("TrainID", "S_other")))) {
+                val file = folder.newFile()
+                file.delete()
+                // Synthetic transport fixtures, not captured account HTTP responses.
+                val actions = mutableListOf<String>()
+                var created = false
+                val transport = AccountHttpTransport { request, _ ->
+                    val action = request.url.queryParameter("Action") ?: request.url.pathSegments.last(); actions += action
+                    when (action) {
+                        "voice_clone" -> { check(!created) { "Never retrain on metadata retry" }; created = true; accepted() }
+                        "BatchListMegaTTSTrainStatus" -> {
+                            val result = JSONObject(listed(request).bytes.toString(Charsets.UTF_8))
+                            result.getJSONObject("Result").getJSONArray("Statuses").optJSONObject(0)?.remove("InstanceNO")
+                            response(result)
+                        }
+                        "ListMegaTTSTrainStatus" -> response(JSONObject().put("Result", JSONObject().put("Statuses", statuses)))
+                        "ResourcePacksStatus" -> response(JSONObject().put("Result", JSONObject().put("TotalCount", packs.length()).put("Packs", packs)))
+                        else -> error("Missing original instance must not rename, query speech or train")
+                    }
+                }
+                val store = PersonalVoices(file, transport)
+                create(store); store.accept(store.state.value.single())
+                val before = store.state.value.single()
+                try { sync(store); fail("expected original instance failure") } catch (failure: VoiceCatalogFailure) {
+                    assertTrue(failure.safeMessage.contains("原音色的实例号"))
+                    assertTrue(failure.safeMessage.contains("本机名称已保留"))
+                    assertFalse(failure.safeMessage.contains("不存在"))
+                }
+                assertEquals(before, store.state.value.single())
+                val restarted = PersonalVoices(file, transport)
+                restarted.load()
+                val voice = restarted.state.value.single()
+                assertEquals(before, voice); assertEquals("S_owned", voice.id)
+                assertTrue(voice.nameSyncPending); assertTrue(voice.accepted); assertFalse(voice.uncertain)
+                assertEquals("我的声音", voice.name); assertEquals(2, voice.status)
+                assertEquals("Success", voice.catalogState); assertEquals(7, voice.remaining)
+                val metadataReads = nameReads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus")
+                assertEquals(listOf("voice_clone") + metadataReads, actions)
+                actions.clear()
+                try { sync(restarted); fail("expected missing original instance on retry") } catch (_: VoiceCatalogFailure) { }
+                assertEquals(metadataReads, actions)
+                assertEquals(before, restarted.state.value.single())
+                val reloaded = PersonalVoices(file, AccountHttpTransport { _, _ -> error("Local load only") })
+                reloaded.load(); assertEquals(before, reloaded.state.value.single())
+            }
+        }
     }
 
 }

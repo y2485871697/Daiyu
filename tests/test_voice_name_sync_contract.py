@@ -15,7 +15,7 @@ class VoiceNameSyncContractTest(unittest.TestCase):
 
     def test_alias_is_separate_and_scoped_to_original_exact_resource(self):
         source = (SRC / "voice/account/DoubaoVoiceAliases.kt").read_text()
-        for token in ('"AliasResourcePack"', 'Version=2025-05-20',
+        for token in ('"AliasResourcePack"', 'version: String = "2025-05-20"', '"Action=$action&Version=$version"',
                       'DoubaoVoiceCatalog(transport).list(ak, sk, project, speakerId = id)',
                       '.put("TrainID", id).put("InstanceNumber", instance).put("Alias", name)',
                       'resource.instanceNumber', 'resource.alias == name', 'listOf(ak, sk)'):
@@ -27,11 +27,30 @@ class VoiceNameSyncContractTest(unittest.TestCase):
         source = (SRC / "voice/account/DoubaoVoiceAliases.kt").read_text()
         for token in ('resource.instanceNumber.isBlank()', 'findResourcePack(ak, sk, project, id)',
                       '"ResourcePacksStatus"', '.put("ResourceIDs", JSONArray().put("volc.megatts.voiceclone"))',
-                      '.put("Types", JSONArray().put("access"))', 'pack.opt("TrainID") != id',
-                      'if (matched != null)', 'pack.opt("InstanceNumber") as? String', 'pack?.opt("Alias") == name'):
+                      '.put("Types", JSONArray().put("access").put("quota").put("prepaid"))', 'pack.opt("TrainID") != id',
+                      'if (matched != null)', 'pack?.opt("InstanceNumber") as? String', 'pack?.opt("Alias") == name'):
             self.assertIn(token, source)
         self.assertLess(source.index('if (resource.alias == name) return'), source.index('resource.instanceNumber.isBlank()'))
         self.assertLess(source.index('if (instance.isBlank())'), source.index('request("AliasResourcePack"'))
+
+    def test_missing_instance_uses_exact_non_paginated_list_before_resource_packs(self):
+        source = (SRC / "voice/account/DoubaoVoiceAliases.kt").read_text()
+        for token in ('findTrainStatus(ak, sk, project, id, resource.state)',
+                      'if (state !in states)', 'setOf("Unknown", "Training", "Success", "Active")',
+                      'request("ListMegaTTSTrainStatus"', 'version = "2025-05-21"',
+                      '.put("State", state).put("SpeakerIDs", JSONArray().put(id))',
+                      'data.opt("Statuses") as? JSONArray', 'if (rows.length() > 1)',
+                      'status.opt("SpeakerID") != id', 'status?.opt("Alias") == name',
+                      'status?.opt("InstanceNO") as? String',
+                      'packType !in setOf("access", "quota", "prepaid")',
+                      '未取得原音色的实例号', '本机名称已保留'):
+            self.assertIn(token, source)
+        rename = source[:source.index('private suspend fun findTrainStatus')]
+        self.assertLess(rename.index('findTrainStatus('), rename.index('findResourcePack('))
+        self.assertIn('resource.instanceNumber.isBlank() && statusInstance.isBlank()', rename)
+        lookup = source[source.index('private suspend fun findTrainStatus'):source.index('private suspend fun findResourcePack')]
+        for forbidden in ('PageNumber', 'PageSize', 'data.opt("TotalCount")', 'AliasResourcePack', 'InstanceNumber'):
+            self.assertNotIn(forbidden, lookup)
 
     def test_panel_uses_saved_account_credentials_and_separates_feedback(self):
         panel = (SRC / "VoiceAccountPanel.kt").read_text()

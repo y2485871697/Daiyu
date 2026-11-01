@@ -64,6 +64,7 @@ class DoubaoVoiceAliasesTest {
                 if (request.url.queryParameter("Action") == "AliasResourcePack") updates++
                 when (request.url.queryParameter("Action")) {
                     "BatchListMegaTTSTrainStatus" -> listed(request, rows)
+                    "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
                     "ResourcePacksStatus" -> response(JSONObject().put("TotalCount", 0).put("Packs", JSONArray()))
                     else -> error("No mutation allowed")
                 }
@@ -164,11 +165,12 @@ class DoubaoVoiceAliasesTest {
                     "BatchListMegaTTSTrainStatus" -> listed(request, JSONArray().put(slot().apply {
                         remove("InstanceNO"); if (instance != null) put("InstanceNO", instance)
                     }))
+                    "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
                     "ResourcePacksStatus" -> {
                         assertEquals("2025-05-20", request.url.queryParameter("Version"))
                         assertEquals("project", json.getString("ProjectName"))
                         assertEquals("[\"volc.megatts.voiceclone\"]", json.getJSONArray("ResourceIDs").toString())
-                        assertEquals("[\"access\"]", json.getJSONArray("Types").toString())
+                        assertEquals("[\"access\",\"quota\",\"prepaid\"]", json.getJSONArray("Types").toString())
                         assertEquals(100, json.getInt("PageSize")); assertEquals(1, json.getInt("PageNumber"))
                         assertFalse(json.has("TrainID")); assertFalse(json.has("audio")); assertNull(request.header("X-Api-Key"))
                         val raw = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
@@ -183,7 +185,7 @@ class DoubaoVoiceAliasesTest {
                     else -> error("No training or synthesis: $action")
                 }
             })
-            rename(api); assertEquals(reads + listOf("ResourcePacksStatus", "AliasResourcePack"), actions)
+            rename(api); assertEquals(reads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus", "AliasResourcePack"), actions)
         }
     }
 
@@ -201,6 +203,7 @@ class DoubaoVoiceAliasesTest {
             val action = request.url.queryParameter("Action")!!; actions += action
             when (action) {
                 "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
                 "ResourcePacksStatus" -> if (body(request).getInt("PageNumber") == 1) {
                     packs(JSONArray().put(pack(instance = "first-page-instance")).also { rows ->
                         repeat(99) { rows.put(pack(id = "S_other$it", instance = "wrong-instance")) }
@@ -214,7 +217,7 @@ class DoubaoVoiceAliasesTest {
             }
         })
         rename(api)
-        assertEquals(reads + listOf("ResourcePacksStatus", "ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertEquals(reads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus", "ResourcePacksStatus", "AliasResourcePack"), actions)
     }
 
     @Test fun fallbackRejectsMissingForeignDuplicateOrUnusableResourceWithoutUpdate() = runBlocking {
@@ -224,7 +227,7 @@ class DoubaoVoiceAliasesTest {
             packs(JSONArray().put(pack(instance = ""))),
             packs(JSONArray().put(pack().put("InstanceNumber", 42))),
             packs(JSONArray().put(pack().put("ResourceID", "volc.service_type.10029"))),
-            packs(JSONArray().put(pack().put("PackType", "prepaid"))),
+            packs(JSONArray().put(pack().put("PackType", "unknown"))),
             packs(JSONArray().put(pack().put("Details", JSONObject().put("Aliasable", false)))),
             packs(JSONArray().put(pack()), 2),
             response(JSONObject().put("TotalCount", "1").put("Packs", JSONArray().put(pack()))),
@@ -239,6 +242,7 @@ class DoubaoVoiceAliasesTest {
             val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
                 when (request.url.queryParameter("Action")) {
                     "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                    "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
                     "ResourcePacksStatus" -> failure
                     else -> { updates++; error("No update allowed") }
                 }
@@ -259,6 +263,7 @@ class DoubaoVoiceAliasesTest {
             val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
                 when (request.url.queryParameter("Action")) {
                     "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                    "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
                     "ResourcePacksStatus" -> {
                         pageCalls++
                         if (pageCalls == 1) packs(JSONArray().put(pack()).also { rows ->
@@ -279,11 +284,141 @@ class DoubaoVoiceAliasesTest {
             val action = request.url.queryParameter("Action")!!; actions += action
             when (action) {
                 "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
                 "ResourcePacksStatus" -> packs(JSONArray().put(pack(alias = "名称", instance = "")))
                 else -> error("Already named resource must not update")
             }
         })
-        rename(api); assertEquals(reads + "ResourcePacksStatus", actions)
+        rename(api); assertEquals(reads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus"), actions)
+    }
+
+    @Test fun exactNonPaginatedListRecoversOriginalInstanceWithoutResourceLookup() = runBlocking {
+        for (state in listOf("Unknown", "Training", "Success", "Active")) {
+            val actions = mutableListOf<String>()
+            val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                val action = request.url.queryParameter("Action")!!; actions += action
+                when (action) {
+                    "BatchListMegaTTSTrainStatus" -> listed(request, JSONArray().put(slot(instance = "").put("State", state)))
+                    "ListMegaTTSTrainStatus" -> {
+                        val json = body(request)
+                        assertEquals("2025-05-21", request.url.queryParameter("Version"))
+                        assertEquals(setOf("ProjectName", "State", "SpeakerIDs"), json.keys().asSequence().toSet())
+                        assertEquals("project", json.getString("ProjectName")); assertEquals(state, json.getString("State"))
+                        assertEquals("[\"S_owned\"]", json.getJSONArray("SpeakerIDs").toString())
+                        val raw = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
+                        assertEquals(Signing.hash(raw), request.header("X-Content-Sha256"))
+                        assertTrue(request.header("Authorization")!!.contains("/cn-beijing/speech_saas_prod/request"))
+                        assertNull(request.header("X-Api-Key"))
+                        // Official List schema has no TotalCount or pagination.
+                        response(JSONObject().put("Statuses", JSONArray().put(slot(instance = " list-instance "))))
+                    }
+                    "AliasResourcePack" -> {
+                        assertEquals(" list-instance ", body(request).getString("InstanceNumber"))
+                        response(pack(alias = "名称", instance = " list-instance "))
+                    }
+                    else -> error("No resource lookup or training allowed")
+                }
+            })
+            rename(api); assertEquals(reads + listOf("ListMegaTTSTrainStatus", "AliasResourcePack"), actions)
+        }
+    }
+
+    @Test fun listRawAliasConfirmsWithoutInstanceOrMutation() = runBlocking {
+        val actions = mutableListOf<String>()
+        val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; actions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()
+                    .put(slot(alias = "名称", instance = "").apply { remove("InstanceNO") })))
+                else -> error("Read-only confirmation must not update")
+            }
+        })
+        rename(api); assertEquals(reads + "ListMegaTTSTrainStatus", actions)
+    }
+
+    @Test fun listRejectsForeignDuplicateMalformedAndHttpErrorsWithoutFallbackOrMutation() = runBlocking {
+        val failures = listOf(
+            response(JSONObject().put("Statuses", JSONArray().put(slot(id = "S_other")))),
+            response(JSONObject().put("Statuses", JSONArray().put(slot()).put(slot()))),
+            response(JSONObject().put("Statuses", JSONArray().put("invalid"))),
+            response(JSONObject().put("Statuses", JSONArray().put(slot().apply { remove("SpeakerID") }))),
+            response(JSONObject().put("Statuses", JSONArray().put(slot(instance = 42)))),
+            response(JSONObject().put("Statuses", JSONArray().put(slot().put("Alias", 42)))),
+            response(JSONObject().put("Statuses", JSONArray().put(slot().put("State", "Invalid")))),
+            response(JSONObject().put("Statuses", JSONObject())), response(JSONObject().put("Statuses", JSONObject.NULL)),
+            response(JSONObject().put("Packs", JSONArray())),
+            AccountResponse(200, "{\"Result\":[]}".toByteArray()),
+            AccountResponse(200, "{}".toByteArray()), AccountResponse(200, "not-json".toByteArray()),
+            AccountResponse(403, "{\"ResponseMetadata\":{\"Error\":{\"Code\":\"AccessDenied\"}}}".toByteArray()),
+        )
+        for (failure in failures) {
+            val actions = mutableListOf<String>()
+            val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                val action = request.url.queryParameter("Action")!!; actions += action
+                when (action) {
+                    "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                    "ListMegaTTSTrainStatus" -> failure
+                    else -> error("Invalid exact List must not fall back or mutate")
+                }
+            })
+            try { rename(api); fail("expected List rejection") } catch (_: VoiceCatalogFailure) { }
+            assertEquals(reads + "ListMegaTTSTrainStatus", actions)
+        }
+    }
+
+    @Test fun invalidObservedStateNeverSendsListOrAliasRequest() = runBlocking {
+        for (state in listOf("Invalid", "", "success", "42")) {
+            val actions = mutableListOf<String>()
+            val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                val action = request.url.queryParameter("Action")!!; actions += action
+                assertEquals("BatchListMegaTTSTrainStatus", action)
+                listed(request, JSONArray().put(slot(instance = "").put("State", state)))
+            })
+            try { rename(api); fail("invalid State must be rejected") } catch (_: VoiceCatalogFailure) { }
+            assertEquals(reads, actions)
+        }
+    }
+
+    @Test fun listCancellationEscapesWithoutFallbackOrMutation() = runBlocking {
+        val actions = mutableListOf<String>()
+        val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; actions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ListMegaTTSTrainStatus" -> throw CancellationException("view left")
+                else -> error("No fallback or update after cancellation")
+            }
+        })
+        try { rename(api); fail("cancellation must escape") } catch (_: CancellationException) { }
+        assertEquals(reads + "ListMegaTTSTrainStatus", actions)
+    }
+
+    @Test fun listWithoutInstanceAllowsEveryRequestedOfficialResourcePackType() = runBlocking {
+        for (type in listOf("access", "quota", "prepaid")) {
+            for (statuses in listOf(JSONArray(), JSONArray().put(slot(instance = "")),
+                JSONArray().put(slot(instance = "   ")), JSONArray().put(slot().apply { remove("InstanceNO") }))) {
+                val actions = mutableListOf<String>()
+                val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                    val action = request.url.queryParameter("Action")!!; actions += action
+                    when (action) {
+                        "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                        "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", statuses))
+                        "ResourcePacksStatus" -> {
+                            assertEquals("[\"access\",\"quota\",\"prepaid\"]", body(request).getJSONArray("Types").toString())
+                            packs(JSONArray().put(pack(instance = "billing-instance").put("PackType", type)))
+                        }
+                        "AliasResourcePack" -> {
+                            assertEquals("billing-instance", body(request).getString("InstanceNumber"))
+                            response(pack(alias = "名称", instance = "billing-instance"))
+                        }
+                        else -> error("No training allowed")
+                    }
+                })
+                rename(api)
+                assertEquals(reads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus", "AliasResourcePack"), actions)
+            }
+        }
     }
 
     @Test fun fallbackCancellationEscapesWithoutAliasMutation() = runBlocking {
@@ -292,11 +427,12 @@ class DoubaoVoiceAliasesTest {
             val action = request.url.queryParameter("Action")!!; actions += action
             when (action) {
                 "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ListMegaTTSTrainStatus" -> response(JSONObject().put("Statuses", JSONArray()))
                 "ResourcePacksStatus" -> throw CancellationException("view left")
                 else -> error("No update after cancellation")
             }
         })
         try { rename(api); fail("cancellation must escape") } catch (_: CancellationException) { }
-        assertEquals(reads + "ResourcePacksStatus", actions)
+        assertEquals(reads + listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus"), actions)
     }
 }

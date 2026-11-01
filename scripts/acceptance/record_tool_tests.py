@@ -16,11 +16,11 @@ import subprocess
 import sys
 
 
-
 SPEECH_PLATFORM_CLASS = "app.daiyu.android.voice.SpeechAudioFileAndroidTest"
 SPEECH_MODULES = (
     "test_chat_voice_feedback_contract", "test_toast_concise_copy_contract",
     "test_message_speech_button_contract", "test_record_tool_tests_scope",
+    "test_speech_platform_discovery",
 )
 
 

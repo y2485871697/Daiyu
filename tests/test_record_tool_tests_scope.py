@@ -24,7 +24,7 @@ class RecordToolTestsScopeTest(unittest.TestCase):
         command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=recorder.SPEECH_PLATFORM_CLASS))
         self.assertEqual(command, ["python3", "-B", "-m", "unittest", *recorder.SPEECH_MODULES, "-v"])
         self.assertEqual(scope, "speech-targeted")
-        self.assertEqual(len(recorder.SPEECH_MODULES), 4)
+        self.assertEqual(len(recorder.SPEECH_MODULES), 5)
 
     def test_other_modes_keep_full_contracts(self):
         for mode in ("", "compile", "candidate", "daily", "release"):

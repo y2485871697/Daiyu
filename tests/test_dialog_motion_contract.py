@@ -202,7 +202,8 @@ class DialogMotionContractTest(unittest.TestCase):
         # Keep the existing single-pass measure/place and page-owned backdrop.
         self.assertIn("val surface = measurables[1].measure", layer)
         self.assertIn("surface.place(x, y)", layer)
-        self.assertIn("captureForTopBar(backdrop)", layer)
+        self.assertIn("ChatMenuCaptureContent(state) { capture ->", layer)
+        self.assertIn("captureForTopBar(if (capture) backdrop else null)", layer)
         self.assertIn("else if (layer == null && expanded)", layer)
         self.assertIn("LaunchedEffect(layer, menu, expanded)", layer)
         self.assertIn("layer.active?.takeIf { it !== menu }?.onDismiss?.invoke()", layer)

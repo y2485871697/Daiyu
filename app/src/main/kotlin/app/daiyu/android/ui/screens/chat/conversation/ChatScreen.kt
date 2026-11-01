@@ -93,6 +93,7 @@ internal fun DaiyuChatScreen(
     callUi: DoubaoCallUi? = null,
     callActions: DoubaoCallActions = DoubaoCallActions(),
     readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null,
+    speechPreparingMessageId: String? = null,
 ) {
     val motionState = remember(callUi?.sessionKey) { DoubaoCallMotionState() }
     var voiceAnchor by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
@@ -138,7 +139,7 @@ internal fun DaiyuChatScreen(
             androidx.compose.runtime.key(state.conversationKey) {
                 ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
-                    speechMessageId = speechMessageId, compressionActivities = state.compressionActivities)
+                    speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities)
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,

@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 
-/** Validated against the prepared media track, never against estimated text speaking speed. */
+/** Explicit automatic personal-voice reservations use the prepared track, not text estimates. */
 internal object RemoteVoicePlaybackBudget {
     fun accepts(durationMs: Long, limitMs: Long): Boolean = durationMs > 0 && limitMs > 0 && durationMs <= limitMs
 }
@@ -24,7 +24,7 @@ internal class RemoteVoiceHostPlayer(
     private val scope: CoroutineScope,
     private val runtime: ControllerVoiceRuntime,
     private val frozen: FrozenVoiceSpeech,
-    private val transport: VoiceHttpTransport = VoiceNetworkAdapters.http(),
+    private val transport: VoiceHttpTransport = VoiceNetworkAdapters.speechHttp(frozen.configuration.speech().engine),
 ) : VoiceHostPlayer {
     private val mutable = MutableStateFlow(SpeechPlaybackState())
     override val state = mutable.asStateFlow()
@@ -32,6 +32,8 @@ internal class RemoteVoiceHostPlayer(
     private var job: Job? = null
     private var deadline: Job? = null
     private var player: MediaPlayer? = null
+    private var focus: SpeechAudioFocus? = null
+    private var releasing = false
     private var file: File? = null
     @Volatile private var closed = false
     private var releaseFailure: Throwable? = null
@@ -39,14 +41,23 @@ internal class RemoteVoiceHostPlayer(
     private val unobserve = runtime.observeInvalidation { profile ->
         if (profile == null || profile == frozen.profile) releaseOnMain(handler) { closeStrict() }
     }
-    override fun bindOwner(owner: String) { check(!closed); this.owner = owner }
+    override fun bindOwner(owner: String) = releaseOnMain(handler) {
+        check(!closed)
+        if (this.owner != null && this.owner != owner) releaseMedia()
+        this.owner = owner
+    }
     override fun play(owner: String, requestId: String, text: String): Boolean {
+        var accepted = false
+        releaseOnMain(handler) { accepted = playOnMain(owner, requestId, text) }
+        return accepted
+    }
+    private fun playOnMain(owner: String, requestId: String, text: String): Boolean {
         if (closed || releaseFailure != null || this.owner != owner || !runtime.current(frozen)) return false
         val config = frozen.configuration
         if (config.voice.startsWith("mimo-local-") && frozen.reference == null) return false
         releaseMedia()
         mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.QUEUED)
-        job = scope.launch {
+        job = scope.launch(Dispatchers.Main.immediate) {
             try {
                 var cap = frozen.playbackLimitMs
                 val bytes = withContext(Dispatchers.IO) {
@@ -70,22 +81,42 @@ internal class RemoteVoiceHostPlayer(
                 }
                 ensureActive()
                 if (closed || mutable.value.requestId != requestId || !runtime.current(frozen)) return@launch
-                // Native prepared track duration is the admission bound. Unknown/long tracks NEVER start.
+                // The original player starts manual read-aloud after native preparation.
                 file = File.createTempFile("voice-", ".audio", context.cacheDir).also { it.writeBytes(bytes) }
                 val next = MediaPlayer()
                 player = next
-                next.setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .setUsage(AudioAttributes.USAGE_MEDIA).build())
+                val attributes = AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .setUsage(AudioAttributes.USAGE_MEDIA).build()
+                next.setAudioAttributes(attributes)
+                next.setVolume(1f, 1f)
                 next.isLooping = false
                 next.setOnPreparedListener { source ->
                     if (closed || player !== source || !runtime.current(frozen)) {
                         if (player === source) finish(owner, requestId, false)
                     } else try {
-                        check(RemoteVoicePlaybackBudget.accepts(source.duration.toLong(), cap)) { "voice_audio_duration_limit" }
+                        // Manual read-aloud starts unknown/long tracks as in the original player.
+                        // Only an explicit automatic personal-voice grant reserves audio duration.
+                        if (frozen.upload != null) check(RemoteVoicePlaybackBudget.accepts(source.duration.toLong(), cap)) {
+                            "voice_audio_duration_limit"
+                        }
+                        val lease = SpeechAudioFocus(context,
+                            attributes, handler) {
+                            if (!closed && player === source) finish(owner, requestId, false, SpeechError.AUDIO_FOCUS_LOST)
+                        }
+                        focus = lease
+                        if (!lease.acquire()) {
+                            finish(owner, requestId, false, SpeechError.AUDIO_FOCUS_DENIED)
+                            return@setOnPreparedListener
+                        }
+                        if (closed || player !== source || !runtime.current(frozen)) {
+                            if (player === source) finish(owner, requestId, false)
+                            return@setOnPreparedListener
+                        }
                         source.start()
                         mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.SPEAKING)
                         // Secondary wall-clock cutoff as well as rejecting over-limit media durations.
-                        deadline = scope.launch {
+                        if (closed || player !== source) return@setOnPreparedListener
+                        deadline = scope.launch(Dispatchers.Main.immediate) {
                             delay(cap)
                             if (!closed && player === source) finish(owner, requestId, false)
                         }
@@ -105,17 +136,20 @@ internal class RemoteVoiceHostPlayer(
         }
         return true
     }
-    private fun finish(owner: String, requestId: String, success: Boolean) {
+    private fun finish(owner: String, requestId: String, success: Boolean,
+        error: SpeechError = SpeechError.PLAYBACK_FAILED) {
         // Fence callbacks before strict release. Release failures propagate to the existing poisoned gate.
         try { releaseMedia() } catch (_: Throwable) { /* Latched; closeStrict MUST report this to the gate. */ }
         mutable.value = if (success && releaseFailure == null) SpeechPlaybackState(owner, requestId, SpeechPhase.COMPLETED)
-            else SpeechPlaybackState(owner, requestId, SpeechPhase.ERROR, SpeechError.PLAYBACK_FAILED)
+            else SpeechPlaybackState(owner, requestId, SpeechPhase.ERROR,
+                if (releaseFailure == null) error else SpeechError.PLAYBACK_FAILED)
     }
     override fun stop(owner: String): Boolean {
         if (this.owner != owner) return false
         closeStrict(); return true
     }
-    override fun closeStrict() {
+    override fun closeStrict() = releaseOnMain(handler) {
+        check(!releasing) { "voice_release_in_progress" }
         if (!closed) {
             closed = true
             unobserve()
@@ -124,20 +158,27 @@ internal class RemoteVoiceHostPlayer(
         releaseFailure?.let { throw it }
     }
     private fun releaseMedia() {
+        check(!releasing) { "voice_release_in_progress" }
+        val oldFocus = focus; focus = null
         val oldJob = job; job = null
         val oldDeadline = deadline; deadline = null
         val p = player; player = null
         val oldFile = file; file = null
         // No control lock is held across cancellation or native reset/release.
-        oldJob?.cancel(); oldDeadline?.cancel()
+        releasing = true
         try {
-            try { p?.reset() } finally {
-                try { p?.release() } finally { check(oldFile == null || !oldFile.exists() || oldFile.delete()) { "voice_temp_delete_failed" } }
-            }
+            try {
+                oldJob?.cancel(); oldDeadline?.cancel()
+                try { p?.reset() } finally {
+                    try { p?.release() } finally {
+                        check(oldFile == null || !oldFile.exists() || oldFile.delete()) { "voice_temp_delete_failed" }
+                    }
+                }
+            } finally { oldFocus?.closeStrict() }
         } catch (failure: Throwable) {
-            releaseFailure = failure
+            releaseFailure = releaseFailure ?: failure
             throw failure
-        }
+        } finally { releasing = false }
     }
     override fun close() = closeStrict()
 }

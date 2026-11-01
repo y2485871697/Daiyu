@@ -85,6 +85,12 @@ internal class OkHttpVoiceTransport(
     }
 
     companion object {
+        internal val speechClient: OkHttpClient by lazy {
+            client.newBuilder().readTimeout(60, TimeUnit.SECONDS).callTimeout(90, TimeUnit.SECONDS).build()
+        }
+        internal val doubaoSpeechClient: OkHttpClient by lazy {
+            speechClient.newBuilder().readTimeout(180, TimeUnit.SECONDS).callTimeout(210, TimeUnit.SECONDS).build()
+        }
         // Shared immutable connection pool only; every public factory returns a new adapter.
         internal val client: OkHttpClient by lazy {
             OkHttpClient.Builder()

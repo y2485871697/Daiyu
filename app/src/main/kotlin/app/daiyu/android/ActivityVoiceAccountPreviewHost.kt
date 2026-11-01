@@ -12,6 +12,7 @@ import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.SpeechPlaybackState
 import app.daiyu.android.voice.VoiceOwner
 import app.daiyu.android.voice.account.AccountPreviewRequest
+import app.daiyu.android.voice.account.PersonalVoicePreview
 import app.daiyu.android.voice.account.VoiceAccountIdentity
 import app.daiyu.android.voice.account.VoiceAccountPreviewPort
 import app.daiyu.android.voice.network.OkHttpVoiceTransport
@@ -36,21 +37,21 @@ import okhttp3.Response
  * One saved configuration/page incarnation per instance. All public methods and callbacks are MAIN
  * confined; scope must use Main. Construction, admission changes and page entry never create a player.
  * Production uses ONLY ActivityVoiceAudio.gate; gate injection is an isolated JVM test seam.
- * The factory must return a fresh, ungated VoiceHostPlayer with synchronous, strict close/drain.
+ * The factory must return a fresh, ungated AccountPreviewPlayer with synchronous, strict close/drain.
  */
 internal class ActivityVoiceAccountPreviewHost(
     private val scope: CoroutineScope,
     private val configuration: SpeechProviderConfig,
     private val admission: (AccountPreviewRequest) -> Boolean,
     private val gate: AudioOwnerGate = ActivityVoiceAudio.gate,
-    private val factory: (AccountPreviewRequest) -> VoiceHostPlayer,
+    private val factory: (AccountPreviewRequest) -> AccountPreviewPlayer,
 ) : VoiceAccountPreviewPort, AutoCloseable {
     private class Entry(val request: AccountPreviewRequest, val listener: VoiceAccountPreviewPort.Listener, val serial: Long) {
         val audioOwner = VoiceOwner("account-preview", UUID.randomUUID().toString())
         val playerOwner = UUID.randomUUID().toString()
         val requestId = UUID.randomUUID().toString()
         lateinit var lease: AudioOwnerGate.Lease
-        var player: VoiceHostPlayer? = null
+        var player: AccountPreviewPlayer? = null
         var observation: Job? = null
         var tail: Job? = null
         var started = false
@@ -124,7 +125,7 @@ internal class ActivityVoiceAccountPreviewHost(
         try { gate.cancel(entry.audioOwner) }
         catch (_: Exception) { notifyTerminal(entry, failed = true) } // Gate remains poisoned, never bare release.
     }
-    private fun accept(entry: Entry, source: VoiceHostPlayer, value: SpeechPlaybackState) {
+    private fun accept(entry: Entry, source: AccountPreviewPlayer, value: SpeechPlaybackState) {
         if (active !== entry || entry.terminal || entry.player !== source || !gate.current(entry.lease) ||
             value.owner != entry.playerOwner || value.requestId != entry.requestId) return
         if (!runCatching { admitted(entry.request) }.getOrDefault(false)) { stop(entry); return }
@@ -134,9 +135,10 @@ internal class ActivityVoiceAccountPreviewHost(
                 entry.listener.started() // Actual player's SPEAKING, never Boolean/bytes/QUEUED evidence.
             }
             SpeechPhase.COMPLETED -> if (entry.tail == null) {
-                // MediaPlayer completion is software evidence. Keep ownership across the bounded tail.
+                // Keep the player and gate until the observed output tail has drained.
+                val tailMs = source.completionTailMs
                 entry.tail = scope.launch {
-                    delay(COMPLETION_TAIL_MS)
+                    delay(tailMs)
                     if (active === entry) finish(entry, failed = false)
                 }
             }
@@ -193,6 +195,10 @@ internal class ActivityVoiceAccountPreviewHost(
     }
 }
 
+internal interface AccountPreviewPlayer : VoiceHostPlayer {
+    val completionTailMs: Long
+}
+
 /** Existing RemoteVoiceHostPlayer architecture, specialized for the fourth personal-voice argument.
  * No gate here. IO only synthesizes bytes; MediaPlayer/file lifecycle and state are main-confined.
  * Strict close waits for BOTH the synthesis worker and the existing HTTP adapter's actual callback.
@@ -203,7 +209,7 @@ internal class AccountPreviewSpeechPlayer(
     private val request: AccountPreviewRequest,
     private val admission: () -> Boolean,
     private val calls: AccountPreviewCalls = AccountPreviewCalls(),
-) : VoiceHostPlayer {
+) : AccountPreviewPlayer {
     private val mutable = MutableStateFlow(SpeechPlaybackState())
     override val state = mutable.asStateFlow()
     private var owner: String? = null
@@ -214,6 +220,8 @@ internal class AccountPreviewSpeechPlayer(
     private var fenced = false
     private var releaseConfirmed = false
     private var used = false
+    override var completionTailMs = ActivityVoiceAccountPreviewHost.COMPLETION_TAIL_MS
+        private set
     override fun bindOwner(owner: String) { check(!fenced && this.owner == null); this.owner = owner }
     override fun play(owner: String, requestId: String, text: String): Boolean {
         if (fenced || used || this.owner != owner || !admission() || text != ActivityVoiceAccountPreviewHost.PREVIEW_TEXT) return false
@@ -263,7 +271,13 @@ internal class AccountPreviewSpeechPlayer(
             } catch (_: Exception) { fail(owner, requestId) }
         }
         next.setOnCompletionListener { source ->
-            if (!fenced && player === source) mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.COMPLETED)
+            if (!fenced && player === source) {
+                completionTailMs = PersonalVoicePreview.drainDelayMs(
+                    runCatching { source.duration }.getOrDefault(-1),
+                    runCatching { source.currentPosition }.getOrDefault(-1),
+                )
+                mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.COMPLETED)
+            }
         }
         next.setOnErrorListener { source, _, _ ->
             if (!fenced && player === source) fail(owner, requestId)

@@ -240,6 +240,8 @@ class VoiceHostTest {
         assertTrue(errors.all { it != null })
         assertEquals(SpeechError.entries.size, errors.distinct().size)
         SpeechPhase.entries.forEach { phase ->
+            assertEquals(phase in setOf(SpeechPhase.INITIALIZING, SpeechPhase.QUEUED),
+                voiceHostIsPreparing(SpeechPlaybackState(phase = phase)))
             assertEquals(phase in setOf(SpeechPhase.INITIALIZING, SpeechPhase.QUEUED, SpeechPhase.SPEAKING),
                 voiceHostIsActive(SpeechPlaybackState(phase = phase)))
         }

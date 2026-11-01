@@ -18,7 +18,7 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
     def test_single_host_flow_projects_only_current_active_message(self):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertEqual(1, main.count('val messageSpeech by speechHost.state.collectAsStateWithLifecycle()'))
-        for part in ('messageSpeech.requestId.takeIf', 'messageSpeech.owner == speechHost.owner && voiceHostIsActive(messageSpeech)',
+        for part in ('messageSpeech.requestId.takeIf', 'messageSpeech.owner == speechHost.owner && messageSpeech.phase == SpeechPhase.SPEAKING',
                      'speechMessageId = speechMessageId'):
             self.assertIn(part, main)
 
@@ -32,6 +32,17 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         self.assertIn('showCopyAction = hasTextActions, speaking = speaking', messages)
         self.assertNotIn('speechMessageId == turn.ownerMessageId', messages)
         self.assertIn('speechMessageId == turn.listKey', messages)
+
+    def test_preparing_is_separate_from_playing_but_remains_stoppable(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        for part in ('voiceHostIsPreparing(messageSpeech)', 'speechPreparingMessageId = speechPreparingMessageId'):
+            self.assertIn(part, main)
+        for name in ('ChatScreen.kt', 'ChatMessageList.kt'):
+            self.assertIn('speechPreparingMessageId: String? = null', (CHAT / name).read_text())
+        self.assertIn('preparing = preparing', (CHAT / 'ReconnectedAssistantTurn.kt').read_text())
+        icon = (CHAT / 'MessageSpeechIcon.kt').read_text()
+        self.assertLess(icon.index('if (preparing)'), icon.index('val transition = rememberInfiniteTransition'))
+        self.assertIn('message-speech-preparing', icon)
 
     def test_same_button_switches_stop_before_start_only_gates(self):
         main = (SRC / 'MainActivity.kt').read_text()
@@ -52,7 +63,7 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         self.assertTrue((CHAT / 'MessageSpeechIcon.kt').is_file())
         icon = (CHAT / 'MessageSpeechIcon.kt').read_text()
         self.assertIn('if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) })', bar)
-        self.assertIn('MessageSpeechIcon(speaking, Modifier.size(13.dp))', bar)
+        self.assertIn('MessageSpeechIcon(speaking, Modifier.size(13.dp), preparing)', bar)
         self.assertLess(icon.index('if (!speaking)'), icon.index('val transition = rememberInfiniteTransition'))
         for part in ('DaiyuIcons.Speak, "朗读"', 'contentDescription = "停止朗读"', 'drawPath(body, tint, style = stroke)',
                      'drawPath(inner, tint, alpha =', 'drawPath(outer, tint, alpha =', 'tween(800, easing = LinearEasing)'):

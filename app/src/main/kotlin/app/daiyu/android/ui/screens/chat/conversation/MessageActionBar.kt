@@ -36,6 +36,7 @@ internal fun MessageActionBar(
     showRegenerateAction: Boolean = true,
     endAligned: Boolean = false,
     speaking: Boolean = false,
+    preparing: Boolean = false,
 ) {
     val colors = conversationColors()
     var copied by remember(id) { mutableStateOf(false) }
@@ -63,7 +64,7 @@ internal fun MessageActionBar(
             Icon(DaiyuIcons.Edit, "编辑", Modifier.size(13.dp), tint = colors.muted)
         }
         if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }) {
-            MessageSpeechIcon(speaking, Modifier.size(13.dp))
+            MessageSpeechIcon(speaking, Modifier.size(13.dp), preparing)
         }
         TooltipBox(text = "分支", enabled = branchEnabled) {
             ConversationIconButton(onClick = { actions.onBranch(id) }, enabled = branchEnabled) {

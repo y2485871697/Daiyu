@@ -1,8 +1,14 @@
-name: 代鱼实时通话面板检查
-run-name: 代鱼实时通话面板检查 ${{ inputs.check_id }}
+name: 代鱼通话与朗读检查
+run-name: 代鱼通话与朗读检查 ${{ inputs.check_scope }} ${{ inputs.check_id }}
 on:
   workflow_dispatch:
     inputs:
+      check_scope:
+        description: 仅运行本次受影响的通话、消息朗读或试听检查
+        type: choice
+        options: [duplex, speech]
+        default: duplex
+        required: true
       expected_sha:
         description: 检查目标完整提交SHA
         type: string
@@ -24,6 +30,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       CHECK_ID: ${{ inputs.check_id }}
+      CHECK_SCOPE: ${{ inputs.check_scope }}
       SKIP_JDK_VERSION_CHECK: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -47,16 +54,17 @@ jobs:
           cmdline-tools-version: '16111833'
           packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
           log-accepted-android-sdk-licenses: false
-      - name: 实时通话面板定向契约
+      - name: 受影响语音路径定向契约
         shell: bash
         run: |
           mkdir -p duplex-call-checks
           set -o pipefail
           python3 -B - 2>&1 <<'PY' | tee duplex-call-checks/contracts.log
-          import json, unittest
+          import json, os, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_doubao_call_sheet_contract.py', 'test_chat_voice_feedback_contract.py', 'test_call_entry_corrections_contract.py', 'test_voice_long_press_menu_contract.py'):
+          patterns = ('test_chat_voice_feedback_contract.py', 'test_toast_concise_copy_contract.py', 'test_message_speech_button_contract.py') if os.environ['CHECK_SCOPE'] == 'speech' else ('test_doubao_call_sheet_contract.py', 'test_chat_voice_feedback_contract.py', 'test_call_entry_corrections_contract.py', 'test_voice_long_press_menu_contract.py')
+          for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -67,7 +75,7 @@ jobs:
           python3 scripts/verify_boundaries.py
       - name: 准备既有离线语音依赖（不打包）
         run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
-      - name: 实时通话布局、默认路由与发送预算定向检查（不打包）
+      - name: 通话或朗读增量检查（不打包）
         shell: bash
         run: |
           set -o pipefail
@@ -78,16 +86,17 @@ jobs:
           for name in ('task-graph.json', 'record.json'):
               Path('duplex-call-checks', name).unlink(missing_ok=True)
           PYRESET
+          if [[ "$CHECK_SCOPE" == speech ]]; then
+            classes=(app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.RemoteVoicePlaybackBudgetTest app.daiyu.android.VoiceHostTest app.daiyu.android.VoiceHostGateTest app.daiyu.android.voice.network.HttpVoiceNetworkTest app.daiyu.android.ActivityVoiceAccountPreviewHostTest app.daiyu.android.AccountPreviewSpeechPlayerTailTest app.daiyu.android.voice.account.PersonalVoicePreviewTest)
+          else
+            classes=(app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
+          fi
+          filters=()
+          for class in "${classes[@]}"; do filters+=(--tests "$class"); done
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=duplex-call-checks/task-graph.json \
-            :app:compileDebugKotlin :app:testDebugUnitTest \
-            --tests 'app.daiyu.android.DoubaoCallPresentationOwnerTest' \
-            --tests 'app.daiyu.android.DuplexCallSnapshotTest' \
-            --tests 'app.daiyu.android.voice.duplex.DuplexRouteLeaseTest' \
-            --tests 'app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest' \
-            --tests 'app.daiyu.android.voice.network.SocketVoiceNetworkTest' \
-            --tests 'app.daiyu.android.voice.network.WebSocketBoundsTest' \
+            :app:compileDebugKotlin :app:testDebugUnitTest "${filters[@]}" \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee duplex-call-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -102,6 +111,8 @@ jobs:
                       'app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest',
                       'app.daiyu.android.voice.network.SocketVoiceNetworkTest',
                       'app.daiyu.android.voice.network.WebSocketBoundsTest'}
+          if os.environ['CHECK_SCOPE'] == 'speech':
+              required = {'app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest', 'app.daiyu.android.RemoteVoicePlaybackBudgetTest', 'app.daiyu.android.VoiceHostTest', 'app.daiyu.android.VoiceHostGateTest', 'app.daiyu.android.voice.network.HttpVoiceNetworkTest', 'app.daiyu.android.ActivityVoiceAccountPreviewHostTest', 'app.daiyu.android.AccountPreviewSpeechPlayerTailTest', 'app.daiyu.android.voice.account.PersonalVoicePreviewTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert required == set(names) and len(names) == len(set(names)), (names, required)
@@ -125,7 +136,7 @@ jobs:
           assert not packages, packages
           record = dict(check_id=os.environ['CHECK_ID'], source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
-                        scope='duplex-call-targeted', classes=sorted(names), contracts=json.loads(Path('duplex-call-checks/contracts.json').read_text()),
+                        scope=os.environ['CHECK_SCOPE'] + '-targeted', classes=sorted(names), contracts=json.loads(Path('duplex-call-checks/contracts.json').read_text()),
                         compile_outcomes='production-and-androidtest-verified-from-task-log',
                         apk_built=False, instrumentation_run=False)
           Path('duplex-call-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')

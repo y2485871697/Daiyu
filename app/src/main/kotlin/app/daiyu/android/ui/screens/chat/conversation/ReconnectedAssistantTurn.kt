@@ -24,10 +24,11 @@ internal fun ReconnectedAssistantTurn(
     onRevealSettled: (Boolean) -> Unit = {},
     onContentDisplayed: (Boolean) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
+    preparing: Boolean = false,
 ) {
     if (parts.parts.isEmpty()) {
         AssistantTurn(turn, actions, imageLoader, dedicatedTool, toolContent, speaking, revealResetEpoch,
-            onVisibleAdvance, onRevealSettled, onContentDisplayed, onContentReady = onContentReady)
+            onVisibleAdvance, onRevealSettled, onContentDisplayed, onContentReady = onContentReady, preparing = preparing)
         return
     }
     val ready = remember(turn.listKey) { mutableStateMapOf<String, ReconnectPart>() }
@@ -47,7 +48,7 @@ internal fun ReconnectedAssistantTurn(
                 onContentDisplayed = { if (it) displayed[part.turn.listKey] = part else displayed.remove(part.turn.listKey) },
                 onContentReady = { if (it) ready[part.turn.listKey] = part else ready.remove(part.turn.listKey) },
                 showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex, actionTurn = turn,
-                workflowContent = part.workflow)
+                workflowContent = part.workflow, preparing = preparing)
             part.after.forEach { entry -> key(entry.id) { ChatTimelineDivider(entry) } }
         } }
     }

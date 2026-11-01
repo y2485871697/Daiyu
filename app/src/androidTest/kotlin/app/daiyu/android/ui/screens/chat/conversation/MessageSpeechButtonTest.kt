@@ -23,6 +23,7 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
     override val scaleFactor = 1f
 }) {
     private var speaking by mutableStateOf(false)
+    private var preparing by mutableStateOf(false)
     private var activeMessage by mutableStateOf<String?>(null)
     private val clicks = mutableListOf<String>()
     private val animationContext = java.util.concurrent.atomic.AtomicReference("not-started")
@@ -38,8 +39,8 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
                     Box(Modifier.width(320.dp).statusBarsPadding()) {
                         MessageActionBar("answer", ChatScreenActions(onSpeak = {
                             clicks += it
-                            speaking = !speaking
-                        }), speaking = speaking)
+                            if (preparing) preparing = false else speaking = !speaking
+                        }), speaking = speaking, preparing = preparing)
                     }
                 }
             }
@@ -62,6 +63,17 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
         ui.onNodeWithContentDescription("朗读").assertExists()
         ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true).assertDoesNotExist()
         assertEquals(listOf("answer", "answer"), clicks)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPreparationUsesLoadingInsteadOfWaveAndTheSameButtonCanStop() {
+        preparing = true
+        mountBar()
+        ui.onNodeWithTag("message-speech-preparing", useUnmergedTree = true).assertExists()
+        ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithContentDescription("停止朗读").performClick()
+        ui.onNodeWithContentDescription("朗读").assertExists()
+        assertEquals(listOf("answer"), clicks)
         assertEquals(0, fixture.opens.get())
     }
 

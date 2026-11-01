@@ -5,6 +5,7 @@ import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.SpeechPlaybackState
 import app.daiyu.android.voice.VoiceOwner
 import app.daiyu.android.voice.account.AccountPreviewRequest
+import app.daiyu.android.voice.account.PersonalVoicePreview
 import app.daiyu.android.voice.account.VoiceAccountPreviewPort
 import app.daiyu.android.voice.providers.DoubaoPersonalVoice
 import app.daiyu.android.voice.providers.SpeechEngine
@@ -36,10 +37,11 @@ class ActivityVoiceAccountPreviewHostTest {
         override fun stopped() { stops++ }
         override fun failed() { failures++ }
     }
-    private class Player(val log: MutableList<String> = mutableListOf()) : VoiceHostPlayer {
+    private class Player(val log: MutableList<String> = mutableListOf()) : AccountPreviewPlayer {
         override val state = MutableStateFlow(SpeechPlaybackState())
         var owner = ""
         var id = ""
+        override var completionTailMs = ActivityVoiceAccountPreviewHost.COMPLETION_TAIL_MS
         var closes = 0
         var failClose = false
         var failBind = false
@@ -204,6 +206,40 @@ class ActivityVoiceAccountPreviewHostTest {
         val next = gate.acquire(VoiceOwner("microphone", "new")) { }
         assertTrue(gate.current(next)); gate.release(next)
         host.close()
+    }
+
+    @Test fun earlyCompletionKeepsPlayerAndGateUntilObservedTailDrains() = runTest {
+        val f = Fixture(backgroundScope, config()); val listener = Listener()
+        f.host.play(request(), listener)
+        val p = f.players.single()
+        p.emit(SpeechPhase.SPEAKING); runCurrent()
+        p.completionTailMs = PersonalVoicePreview.drainDelayMs(8000, 7324)
+        p.emit(SpeechPhase.COMPLETED); runCurrent()
+        assertEquals(826L, p.completionTailMs)
+        advanceTimeBy(150); runCurrent()
+        assertEquals(0, p.closes); assertEquals(0, listener.stops)
+        advanceTimeBy(675); runCurrent()
+        assertEquals(0, p.closes); assertEquals(0, listener.stops)
+        advanceTimeBy(1); runCurrent()
+        assertEquals(1, p.closes); assertEquals(1, listener.stops)
+        assertTrue(f.gate.releaseHealthy())
+    }
+
+    @Test fun explicitStopAndOwnerPreemptionCancelObservedTailWithoutTouchingNewOwner() = runTest {
+        for (preempt in listOf(false, true)) {
+            val f = Fixture(backgroundScope, config()); val listener = Listener()
+            val lease = f.host.play(request(), listener)
+            val p = f.players.single()
+            p.completionTailMs = PersonalVoicePreview.drainDelayMs(Int.MAX_VALUE, 0)
+            p.emit(SpeechPhase.COMPLETED); runCurrent()
+            advanceTimeBy(150); runCurrent()
+            val next = if (preempt) f.gate.acquire(VoiceOwner("duplex", "next")) { } else null
+            if (!preempt) lease.stop()
+            assertEquals(1, p.closes)
+            advanceTimeBy(2150); runCurrent()
+            assertEquals(1, p.closes); assertEquals(1, listener.stops)
+            if (next != null) { assertTrue(f.gate.current(next)); f.gate.cancel(next.owner) }
+        }
     }
 
     @Test fun preemptionDuringTailCancelsDelayAndStrictlyClosesBeforeNewAudio() = runTest {

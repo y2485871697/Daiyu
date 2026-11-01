@@ -2633,7 +2633,10 @@ class MainActivity : ComponentActivity() {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
                             val messageSpeech by speechHost.state.collectAsStateWithLifecycle()
                             val speechMessageId = messageSpeech.requestId.takeIf {
-                                messageSpeech.owner == speechHost.owner && voiceHostIsActive(messageSpeech)
+                                messageSpeech.owner == speechHost.owner && messageSpeech.phase == SpeechPhase.SPEAKING
+                            }
+                            val speechPreparingMessageId = messageSpeech.requestId.takeIf {
+                                messageSpeech.owner == speechHost.owner && voiceHostIsPreparing(messageSpeech)
                             }
                             LaunchedEffect(messageSpeechAttempt, messageSpeech) {
                                 val event = messageSpeechAttempt to messageSpeech
@@ -2674,7 +2677,7 @@ class MainActivity : ComponentActivity() {
                                         if (turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
                                         }
-                                    }, speechMessageId = speechMessageId,
+                                    }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
                                         readAutomaticCompression = {
                                             app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
                                                 automaticCompression, automaticCompressionPending)
@@ -7946,6 +7949,10 @@ internal fun voiceHostIsActive(state: SpeechPlaybackState) = state.phase in setO
     SpeechPhase.INITIALIZING, SpeechPhase.QUEUED, SpeechPhase.SPEAKING,
 )
 
+internal fun voiceHostIsPreparing(state: SpeechPlaybackState) = state.phase in setOf(
+    SpeechPhase.INITIALIZING, SpeechPhase.QUEUED,
+)
+
 internal fun voiceHostStatusResource(state: SpeechPlaybackState): Int? = when (state.phase) {
     SpeechPhase.INITIALIZING -> R.string.voice_host_initializing
     SpeechPhase.QUEUED -> R.string.voice_host_queued
@@ -7961,6 +7968,8 @@ internal fun voiceHostStatusResource(state: SpeechPlaybackState): Int? = when (s
         SpeechError.EMPTY_TEXT -> R.string.voice_host_empty_text
         SpeechError.TEXT_TOO_LONG -> R.string.voice_host_text_too_long
         SpeechError.STOP_FAILED -> R.string.voice_host_stop_failed
+        SpeechError.AUDIO_FOCUS_DENIED -> R.string.voice_host_audio_focus_denied
+        SpeechError.AUDIO_FOCUS_LOST -> R.string.voice_host_audio_focus_lost
         SpeechError.PLAYBACK_FAILED, null -> R.string.voice_host_playback_failed
     }
     SpeechPhase.IDLE, SpeechPhase.READY, SpeechPhase.CLOSED -> null

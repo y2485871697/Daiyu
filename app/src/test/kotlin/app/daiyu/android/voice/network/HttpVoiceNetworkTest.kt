@@ -46,6 +46,26 @@ class HttpVoiceNetworkTest {
         assertTrue(client.networkInterceptors.isEmpty())
     }
 
+    @Test fun speechFactoriesPreserveOriginalTimeoutsWithoutWeakeningTransportPolicy() {
+        val standard = OkHttpVoiceTransport.speechClient
+        val doubao = OkHttpVoiceTransport.doubaoSpeechClient
+        assertEquals(60_000, standard.readTimeoutMillis)
+        assertEquals(90_000, standard.callTimeoutMillis)
+        assertEquals(180_000, doubao.readTimeoutMillis)
+        assertEquals(210_000, doubao.callTimeoutMillis)
+        assertEquals(30_000, OkHttpVoiceTransport.client.readTimeoutMillis)
+        assertEquals(60_000, OkHttpVoiceTransport.client.callTimeoutMillis)
+        for (client in listOf(standard, doubao)) {
+            assertFalse(client.followRedirects)
+            assertFalse(client.followSslRedirects)
+            assertFalse(client.retryOnConnectionFailure)
+            assertEquals(okhttp3.CookieJar.NO_COOKIES, client.cookieJar)
+            assertNull(client.cache)
+        }
+        assertNotSame(VoiceNetworkAdapters.speechHttp(app.daiyu.android.voice.providers.SpeechEngine.DOUBAO),
+            VoiceNetworkAdapters.speechHttp(app.daiyu.android.voice.providers.SpeechEngine.DOUBAO))
+    }
+
     @Test fun postIsUtf8JsonAndOneShotEvenFor503RetryAfterZero() = runBlocking {
         val factory = CapturingCalls()
         val task = async(start = CoroutineStart.UNDISPATCHED) { OkHttpVoiceTransport(factory).execute(request, 16) }

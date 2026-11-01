@@ -92,6 +92,7 @@ internal fun ChatMessageList(
     compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null,
     speechMessageId: String? = null,
     compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
+    speechPreparingMessageId: String? = null,
 ) {
     val reconnectPartsByKey = remember(turns, timeline) {
         val reconnects = timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
@@ -391,6 +392,7 @@ internal fun ChatMessageList(
                             ReconnectedAssistantTurn(turn, reconnectPartsByKey.getValue(turn.listKey), actions, imageLoader,
                                 dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id,
+                                preparing = speechPreparingMessageId == turn.listKey || speechPreparingMessageId == turn.actionKey || speechPreparingMessageId == turn.id,
                                 revealResetEpoch = revealResetEpoch,
                                 onVisibleAdvance = {
                                     val layout = listState.layoutInfo
@@ -406,9 +408,10 @@ internal fun ChatMessageList(
                                 },
                                 onRevealSettled = { settled ->
                                     if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
-                                }) { ready ->
-                                if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
-                            }
+                                },
+                                onContentReady = { ready ->
+                                    if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
+                                })
                             turnExtras(turn)
                         }
                     }
@@ -487,6 +490,7 @@ internal fun AssistantTurn(
     actionTurn: ChatTurnUi.Assistant = turn,
     onContentReady: (Boolean) -> Unit = {},
     workflowContent: AssistantWorkflowContent? = null,
+    preparing: Boolean = false,
 ) = key(turn.listKey) {
     val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)
     val bodySources = remember(ordered.body) {
@@ -549,7 +553,7 @@ internal fun AssistantTurn(
                 it is MessageContentUi.Text && it.text.isNotBlank()
             }
             MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,
-                allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking)
+                allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking, preparing = preparing)
         }
     }
 }

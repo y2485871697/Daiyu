@@ -28,7 +28,7 @@ class ModelNameAlignmentContract(unittest.TestCase):
 
     def test_picker_moves_name_and_id_together_not_icon_indicator_or_touch_row(self):
         picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')
-        self.assertIn('Column(Modifier.weight(1f).modelNameOpticalAlignment()) {\n                                        Text(model.displayName', picker)
+        self.assertRegex(picker, r'Column\(Modifier\.weight\(1f\)\.modelNameOpticalAlignment\(\)\) \{\s*Text\(model\.displayName')
         self.assertEqual(1, picker.count('modelNameOpticalAlignment()'))
         for preserved in ('heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 12.dp)',
                           'fontSize = 16.sp, lineHeight = 24.sp', 'Modifier.padding(top = 3.dp)',

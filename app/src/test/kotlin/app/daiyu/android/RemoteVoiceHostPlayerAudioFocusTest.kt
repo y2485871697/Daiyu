@@ -59,8 +59,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     @After fun teardown() {
         runCatching { host.closeStrict() }
         scope.cancel()
-        ShadowMediaPlayer.setCreateListener(null)
-        ShadowMediaPlayer.setMediaInfoProvider(null)
+        ShadowMediaPlayer.resetStaticState()
         Dispatchers.resetMain()
     }
 

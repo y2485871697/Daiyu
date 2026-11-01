@@ -21,8 +21,7 @@ import org.robolectric.shadows.ShadowMediaPlayer
 @Config(application = Application::class, sdk = [34])
 class AccountPreviewSpeechPlayerTailTest {
     @After fun clearMediaFixtures() {
-        ShadowMediaPlayer.setCreateListener(null)
-        ShadowMediaPlayer.setMediaInfoProvider(null)
+        ShadowMediaPlayer.resetStaticState()
     }
 
     @Test fun actualCompletionPublishesObservedTailBeforeHostCanRelease() = runTest {

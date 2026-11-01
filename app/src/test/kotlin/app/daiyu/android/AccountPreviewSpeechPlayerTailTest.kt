@@ -2,6 +2,8 @@ package app.daiyu.android
 
 import android.app.Application
 import android.media.MediaPlayer
+import app.daiyu.android.voice.SpeechAudioFile
+import app.daiyu.android.voice.SpeechAudioFixtures
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.account.AccountPreviewRequest
 import app.daiyu.android.voice.providers.DoubaoPersonalVoice
@@ -39,7 +41,9 @@ class AccountPreviewSpeechPlayerTailTest {
             // Exercise native callbacks without issuing a real demo download.
             AccountPreviewSpeechPlayer::class.java.getDeclaredMethod("prepare", String::class.java,
                 String::class.java, ByteArray::class.java).apply { isAccessible = true }
-                .invoke(host, "owner", "preview", byteArrayOf(73, 68, 51))
+                .invoke(host, "owner", "preview", SpeechAudioFixtures.wave())
+            val file = host.javaClass.getDeclaredField("file").apply { isAccessible = true }.get(host) as java.io.File
+            assertArrayEquals(SpeechAudioFile.normalize(SpeechAudioFixtures.wave()), file.readBytes())
             val (player, shadow) = media.single()
             shadow.invokePreparedListener()
             assertTrue(player.isPlaying)
@@ -51,6 +55,7 @@ class AccountPreviewSpeechPlayerTailTest {
             assertEquals(ShadowMediaPlayer.State.PLAYBACK_COMPLETED, shadow.state)
             host.closeStrict()
             assertEquals(ShadowMediaPlayer.State.END, shadow.state)
+            assertFalse(file.exists())
             // Late completion after strict close cannot change the last observed tail.
             shadow.setCurrentPosition(0)
             shadow.invokeCompletionListener()

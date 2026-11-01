@@ -82,7 +82,8 @@ internal class RemoteVoiceHostPlayer(
                 ensureActive()
                 if (closed || mutable.value.requestId != requestId || !runtime.current(frozen)) return@launch
                 // The original player starts manual read-aloud after native preparation.
-                file = File.createTempFile("voice-", ".audio", context.cacheDir).also { it.writeBytes(bytes) }
+                file = File.createTempFile("voice-", ".audio", context.cacheDir)
+                checkNotNull(file).writeBytes(SpeechAudioFile.normalize(bytes))
                 val next = MediaPlayer()
                 player = next
                 val attributes = AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -94,6 +95,7 @@ internal class RemoteVoiceHostPlayer(
                     if (closed || player !== source || !runtime.current(frozen)) {
                         if (player === source) finish(owner, requestId, false)
                     } else try {
+                        deadline?.cancel(); deadline = null
                         // Manual read-aloud starts unknown/long tracks as in the original player.
                         // Only an explicit automatic personal-voice grant reserves audio duration.
                         if (frozen.upload != null) check(RemoteVoicePlaybackBudget.accepts(source.duration.toLong(), cap)) {
@@ -128,6 +130,12 @@ internal class RemoteVoiceHostPlayer(
                     true
                 }
                 next.setDataSource(checkNotNull(file).absolutePath)
+                deadline = scope.launch(Dispatchers.Main.immediate) {
+                    delay(PREPARATION_TIMEOUT_MS)
+                    if (!closed && player === next && mutable.value.phase == SpeechPhase.QUEUED) {
+                        finish(owner, requestId, false, SpeechError.PREPARATION_TIMEOUT)
+                    }
+                }
                 next.prepareAsync()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
@@ -181,4 +189,5 @@ internal class RemoteVoiceHostPlayer(
         } finally { releasing = false }
     }
     override fun close() = closeStrict()
+    companion object { internal const val PREPARATION_TIMEOUT_MS = 120_000L }
 }

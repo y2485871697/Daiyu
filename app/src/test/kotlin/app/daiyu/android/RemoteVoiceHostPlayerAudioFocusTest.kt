@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import android.media.AudioManager
 import android.media.MediaPlayer
+import app.daiyu.android.voice.SpeechAudioFixtures
+import app.daiyu.android.voice.SpeechAudioFile
 import app.daiyu.android.voice.SpeechError
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.providers.VoiceHttpResponse
@@ -34,6 +36,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     private lateinit var config: VoiceConfiguration
     private val media = mutableListOf<Pair<MediaPlayer, ShadowMediaPlayer>>()
     private var requests = 0
+    private var synthesizedAudio = byteArrayOf(73, 68, 51, 4, 0, 0, 0, 0, 0, 0, 0)
 
     @Before fun setup() {
         Dispatchers.setMain(dispatcher)
@@ -53,7 +56,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     private fun newHost(frozen: FrozenVoiceSpeech = FrozenVoiceSpeech(config)): RemoteVoiceHostPlayer =
         RemoteVoiceHostPlayer(context, scope, runtime, frozen, VoiceHttpTransport { _, _ ->
             requests++
-            VoiceHttpResponse(200, "audio/mpeg", byteArrayOf(73, 68, 51, 4, 0, 0, 0, 0, 0, 0, 0))
+            VoiceHttpResponse(200, "audio/mpeg", synthesizedAudio)
         }).also { it.bindOwner("owner") }
 
     @After fun teardown() {
@@ -203,4 +206,46 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         assertTrue(runCatching { host.closeStrict() }.isFailure)
         assertTrue(runCatching { host.closeStrict() }.isFailure)
     }
+
+    @Test fun nativePreparationCannotKeepMessageLoadingForever() {
+        val (_, shadow) = preparing()
+        dispatcher.scheduler.runCurrent()
+        dispatcher.scheduler.advanceTimeBy(RemoteVoiceHostPlayer.PREPARATION_TIMEOUT_MS - 1)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(SpeechPhase.QUEUED, host.state.value.phase)
+        dispatcher.scheduler.advanceTimeBy(1)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(SpeechPhase.ERROR, host.state.value.phase)
+        assertEquals(SpeechError.PREPARATION_TIMEOUT, host.state.value.error)
+        assertEquals(ShadowMediaPlayer.State.END, shadow.state)
+        shadow.invokePreparedListener()
+        assertNull(shadowOf(audio).lastAudioFocusRequest)
+        assertEquals(SpeechPhase.ERROR, host.state.value.phase)
+        assertEquals(1, requests)
+    }
+
+    @Test fun preparedCancelsItsOwnPreparationDeadline() {
+        val (_, shadow) = preparing()
+        dispatcher.scheduler.runCurrent()
+        dispatcher.scheduler.advanceTimeBy(RemoteVoiceHostPlayer.PREPARATION_TIMEOUT_MS - 1)
+        dispatcher.scheduler.runCurrent()
+        shadow.invokePreparedListener()
+        dispatcher.scheduler.runCurrent()
+        dispatcher.scheduler.advanceTimeBy(1)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)
+    }
+
+    @Test fun synthesizedStreamedWaveIsFinalizedAtTheActualPlaybackBoundary() {
+        synthesizedAudio = SpeechAudioFixtures.wave()
+        val (_, shadow) = preparing()
+        val file = host.javaClass.getDeclaredField("file").apply { isAccessible = true }.get(host) as java.io.File
+        assertArrayEquals(SpeechAudioFile.normalize(synthesizedAudio), file.readBytes())
+        assertEquals(163532L, SpeechAudioFixtures.read(file.readBytes(), 74))
+        shadow.invokePreparedListener()
+        assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)
+        host.closeStrict()
+        assertFalse(file.exists())
+    }
+
 }

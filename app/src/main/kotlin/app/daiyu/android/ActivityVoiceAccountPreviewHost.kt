@@ -7,6 +7,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import app.daiyu.android.voice.ActivityVoiceAudio
 import app.daiyu.android.voice.AudioOwnerGate
+import app.daiyu.android.voice.SpeechAudioFile
 import app.daiyu.android.voice.SpeechError
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.SpeechPlaybackState
@@ -257,7 +258,7 @@ internal class AccountPreviewSpeechPlayer(
     private fun prepare(owner: String, requestId: String, bytes: ByteArray) {
         check(!fenced && admission())
         file = File.createTempFile("account-preview-", ".audio", context.cacheDir)
-        checkNotNull(file).writeBytes(bytes)
+        checkNotNull(file).writeBytes(SpeechAudioFile.normalize(bytes))
         val next = MediaPlayer()
         player = next
         next.setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)

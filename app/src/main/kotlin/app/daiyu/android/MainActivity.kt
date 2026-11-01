@@ -59,6 +59,8 @@ import app.daiyu.android.voice.DictationDraftTarget
 import app.daiyu.android.voice.SpeechError
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.SpeechPlaybackState
+import app.daiyu.android.diagnostics.DiagnosticEvent
+import app.daiyu.android.diagnostics.DiagnosticLogStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -403,12 +405,12 @@ class MainActivity : ComponentActivity() {
     private var voiceConversationDialogOwner by mutableStateOf<ChatController.TextSendOwner?>(null)
     private var voiceRequestEpoch = 0L
     private val speechHost by lazy {
-        VoiceHost(lifecycleScope, audioGate) {
+        VoiceHost(lifecycleScope, audioGate, controller.diagnostics) {
             val frozen = checkNotNull(preparedSpeech) { "voice_not_prepared" }
             check(voiceRuntime.current(frozen.configuration)) { "voice_configuration_changed" }
             preparedSpeech = null
             if (frozen.configuration.engine == "SYSTEM") AndroidVoiceHostPlayer(AndroidSpeechPlayer(applicationContext))
-            else RemoteVoiceHostPlayer(applicationContext, lifecycleScope, voiceRuntime, frozen)
+            else RemoteVoiceHostPlayer(applicationContext, lifecycleScope, voiceRuntime, frozen, diagnostics = controller.diagnostics)
         }
     }
     private fun voiceEditorCurrent(target: DictationDraftTarget) =
@@ -516,16 +518,27 @@ class MainActivity : ComponentActivity() {
     private fun requestConfiguredSpeech(expectedOwner: String?, id: String, text: String) {
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
             speechHost.owner != expectedOwner || voiceHostText(chatState.turns, id) != text) return
+        controller.diagnostics?.recordAsync(DiagnosticEvent.SPEECH_REQUEST_ACCEPTED)
         invalidateConfiguredVoice()
         val epoch = voiceRequestEpoch
         val frozen = try { voiceRuntime.prepareSpeech() } catch (_: Exception) {
+            controller.diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CONFIGURATION_FAILED)
             toast("语音未配置或凭据不可用，请打开语音设置"); return
         }
+        controller.diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CONFIGURATION_READY)
+        controller.diagnostics?.recordAsync(when (frozen.configuration.engine) {
+            "SYSTEM" -> DiagnosticEvent.SPEECH_ENGINE_SYSTEM
+            "DOUBAO" -> DiagnosticEvent.SPEECH_ENGINE_DOUBAO
+            else -> DiagnosticEvent.SPEECH_ENGINE_OTHER
+        })
         fun current() = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
             speechHost.owner == expectedOwner && epoch == voiceRequestEpoch &&
             voiceRuntime.current(frozen.configuration) && voiceHostText(chatState.turns, id) == text
         fun play(value: FrozenVoiceSpeech) {
-            if (!current()) return
+            if (!current()) {
+                controller.diagnostics?.recordAsync(DiagnosticEvent.SPEECH_REQUEST_STALE)
+                return
+            }
             preparedSpeech = value
             messageSpeechAttempt++
             try { speechHost.speak(expectedOwner, id, text) } finally { preparedSpeech = null }
@@ -2639,6 +2652,13 @@ class MainActivity : ComponentActivity() {
                                 messageSpeech.owner == speechHost.owner && voiceHostIsPreparing(messageSpeech)
                             }
                             LaunchedEffect(messageSpeechAttempt, messageSpeech) {
+                                if (messageSpeech.requestId != null && messageSpeech.owner == speechHost.owner) {
+                                    controller.diagnostics?.recordAsync(when {
+                                        voiceHostIsPreparing(messageSpeech) -> DiagnosticEvent.SPEECH_UI_PREPARING
+                                        messageSpeech.phase == SpeechPhase.SPEAKING -> DiagnosticEvent.SPEECH_UI_PLAYING
+                                        else -> DiagnosticEvent.SPEECH_UI_TERMINAL
+                                    })
+                                }
                                 val event = messageSpeechAttempt to messageSpeech
                                 if (messageSpeech == speechHost.state.value && messageSpeech.owner == speechHost.owner &&
                                     messageSpeech.phase in setOf(SpeechPhase.UNAVAILABLE, SpeechPhase.ERROR) &&
@@ -7790,6 +7810,7 @@ internal class AndroidVoiceHostPlayer(private val player: AndroidSpeechPlayer) :
 internal class VoiceHost(
     private val scope: CoroutineScope,
     private val gate: AudioOwnerGate = AudioOwnerGate(),
+    private val diagnostics: DiagnosticLogStore? = null,
     private val factory: () -> VoiceHostPlayer,
 ) : AutoCloseable {
     // UI capability is not the engine identity. Each click gets fresh audio and player tokens.
@@ -7847,6 +7868,7 @@ internal class VoiceHost(
             mutableState.value = SpeechPlaybackState(owner, id, SpeechPhase.ERROR, SpeechError.EMPTY_TEXT)
             return false
         }
+        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HOST_REQUESTED)
         val request = Request(owner, id, conversation)
         try {
             // Previous TTS OR dictation must finish strict teardown before factory/play can run.
@@ -7860,6 +7882,13 @@ internal class VoiceHost(
             player.bindOwner(request.playerOwner)
             request.observation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 player.state.collect { accept(request, player, it) }
+            }
+            request.observation?.invokeOnCompletion { cause ->
+                diagnostics?.recordAsync(when (cause) {
+                    is kotlinx.coroutines.CancellationException -> DiagnosticEvent.SPEECH_OBSERVER_CANCELLED
+                    null -> DiagnosticEvent.SPEECH_OBSERVER_ENDED
+                    else -> DiagnosticEvent.SPEECH_OBSERVER_FAILED
+                })
             }
             val accepted = player.play(request.playerOwner, request.requestId, text)
             accept(request, player, player.state.value)
@@ -7909,8 +7938,12 @@ internal class VoiceHost(
     }
     private fun finish(request: Request, state: SpeechPlaybackState) {
         try {
-            if (gate.releaseAfter(request.lease) { teardown(request, stopped = false) }) mutableState.value = state
+            if (gate.releaseAfter(request.lease) { teardown(request, stopped = false) }) {
+                mutableState.value = state
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HOST_RELEASED)
+            }
         } catch (_: Exception) {
+            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HOST_RELEASE_FAILED)
             mutableState.value = state.copy(phase = SpeechPhase.ERROR, error = SpeechError.STOP_FAILED)
         }
     }
@@ -7918,6 +7951,11 @@ internal class VoiceHost(
         if (closed || active !== request || request.player !== source || !gate.current(request.lease) ||
             owner != request.uiOwner || value.owner != request.playerOwner || value.requestId != request.requestId) return
         val display = value.copy(owner = request.uiOwner, requestId = request.messageId)
+        if (mutableState.value != display) diagnostics?.recordAsync(when (value.phase) {
+            SpeechPhase.INITIALIZING, SpeechPhase.QUEUED -> DiagnosticEvent.SPEECH_HOST_QUEUED
+            SpeechPhase.SPEAKING -> DiagnosticEvent.SPEECH_HOST_SPEAKING
+            else -> DiagnosticEvent.SPEECH_HOST_TERMINAL
+        })
         when (value.phase) {
             SpeechPhase.COMPLETED, SpeechPhase.ERROR, SpeechPhase.UNAVAILABLE, SpeechPhase.STOPPED, SpeechPhase.CLOSED -> finish(request, display)
             else -> mutableState.value = display

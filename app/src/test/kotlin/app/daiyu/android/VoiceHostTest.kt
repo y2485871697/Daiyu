@@ -13,6 +13,10 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi
 import app.daiyu.android.voice.SpeechError
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.SpeechPlaybackState
+import app.daiyu.android.diagnostics.DiagnosticLogStore
+import java.nio.file.Files
+import java.util.concurrent.Executor
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -246,4 +250,31 @@ class VoiceHostTest {
                 voiceHostIsActive(SpeechPlaybackState(phase = phase)))
         }
     }
+    @Test fun hostDiagnosticsObserveStateTransferAndStrictReleaseWithoutIdentityData() = runTest {
+        val directory = Files.createTempDirectory("host-diagnostics").toFile()
+        try {
+            val file = java.io.File(directory, "state.json")
+            val store = DiagnosticLogStore(file, executor = Executor { it.run() })
+            store.setEnabled(true)
+            val player = FakePlayer()
+            val host = VoiceHost(backgroundScope, diagnostics = store) { player }
+            host.enter("private-conversation-canary")
+            host.setForeground(true)
+            assertTrue(host.speak(host.owner, "private-message-canary", "private-text-canary"))
+            player.emit(SpeechPhase.SPEAKING)
+            runCurrent()
+            player.emit(SpeechPhase.COMPLETED)
+            runCurrent()
+            assertEquals(SpeechPhase.COMPLETED, host.state.value.phase)
+            assertEquals(1, player.closeCount)
+            val json = file.readText()
+            val rows = JSONObject(json).getJSONArray("events")
+            val stages = (0 until rows.length()).map { rows.getJSONObject(it).getString("event") }
+            assertTrue(stages.toString(), stages.containsAll(listOf("SPEECH_HOST_REQUESTED", "SPEECH_HOST_QUEUED",
+                "SPEECH_HOST_SPEAKING", "SPEECH_HOST_TERMINAL", "SPEECH_OBSERVER_CANCELLED", "SPEECH_HOST_RELEASED")))
+            assertFalse(json.contains("private-"))
+            host.close()
+        } finally { directory.deleteRecursively() }
+    }
+
 }

@@ -1,6 +1,10 @@
 package app.daiyu.android.voice.network
 
 import app.daiyu.android.voice.providers.VoiceHttpRequest
+import app.daiyu.android.diagnostics.DiagnosticLogStore
+import java.nio.file.Files
+import java.util.concurrent.Executor
+import org.json.JSONObject
 import java.io.IOException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -146,6 +150,32 @@ class HttpVoiceNetworkTest {
         val hostile = VoiceHttpRequest(request.url, mapOf("Host" to "private-host"), "{}")
         assertSafe(runCatching { transport.execute(hostile, 8) }.exceptionOrNull()!!)
         assertEquals(0, factory.count)
+    }
+
+    @Test fun speechDiagnosticsSeparateSubmissionHeadersBodyAndReturnWithoutWireData() = runBlocking {
+        val root = Files.createTempDirectory("speech-http-diagnostic").toFile()
+        try {
+            val file = java.io.File(root, "state.json")
+            val diagnostics = DiagnosticLogStore(file, executor = Executor { it.run() })
+            diagnostics.setEnabled(true)
+            val factory = CapturingCalls()
+            val task = async(start = CoroutineStart.UNDISPATCHED) {
+                OkHttpVoiceTransport(factory, diagnostics).execute(request, 128)
+            }
+            val body = TrackedBody("private-audio-canary".toByteArray(), declaredLength = -1)
+            factory.last.respond(body)
+            assertArrayEquals("private-audio-canary".toByteArray(), task.await().bytes)
+            val json = file.readText()
+            val rows = JSONObject(json).getJSONArray("events")
+            assertEquals(listOf("SPEECH_CALL_SUBMITTED", "SPEECH_RESPONSE_HEADERS", "SPEECH_RESPONSE_FIRST_BYTES",
+                "SPEECH_RESPONSE_BODY_COMPLETED"),
+                (0 until rows.length()).map { rows.getJSONObject(it).getString("event") })
+            for (privateValue in listOf("private-key", "private-text", "private-query", "private-audio-canary", "example.invalid")) {
+                assertFalse(privateValue, json.contains(privateValue))
+            }
+            assertTrue(body.closed)
+            assertEquals(1, factory.count)
+        } finally { root.deleteRecursively() }
     }
 
     private fun assertSafe(error: Throwable) {

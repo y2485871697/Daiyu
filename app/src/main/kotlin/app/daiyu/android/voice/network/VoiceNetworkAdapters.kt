@@ -1,5 +1,6 @@
 package app.daiyu.android.voice.network
 
+import app.daiyu.android.diagnostics.DiagnosticLogStore
 import app.daiyu.android.voice.duplex.DuplexTransport
 import app.daiyu.android.voice.providers.SpeechEngine
 import app.daiyu.android.voice.providers.VoiceHttpTransport
@@ -12,8 +13,10 @@ import java.nio.charset.CodingErrorAction
 /** Network only: no credentials, provider choice, permission, playback, or shared audio gate. */
 object VoiceNetworkAdapters {
     fun http(): VoiceHttpTransport = OkHttpVoiceTransport()
-    fun speechHttp(engine: SpeechEngine): VoiceHttpTransport = OkHttpVoiceTransport(
+    fun speechHttp(engine: SpeechEngine): VoiceHttpTransport = speechHttp(engine, null)
+    internal fun speechHttp(engine: SpeechEngine, diagnostics: DiagnosticLogStore?): VoiceHttpTransport = OkHttpVoiceTransport(
         if (engine == SpeechEngine.DOUBAO) OkHttpVoiceTransport.doubaoSpeechClient else OkHttpVoiceTransport.speechClient,
+        diagnostics,
     )
     internal fun speechTimeoutMillis(engine: SpeechEngine): Long = if (engine == SpeechEngine.DOUBAO) 210_000L else 90_000L
     fun asr(): VoiceSocketTransport = AsrNetworkTransport()

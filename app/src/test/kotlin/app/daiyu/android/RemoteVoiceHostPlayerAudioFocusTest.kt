@@ -4,6 +4,10 @@ import android.app.Application
 import android.content.Context
 import android.media.AudioManager
 import android.media.MediaPlayer
+import app.daiyu.android.diagnostics.DiagnosticLogStore
+import java.io.File
+import java.util.concurrent.Executor
+import org.json.JSONObject
 import app.daiyu.android.voice.SpeechAudioFixtures
 import app.daiyu.android.voice.SpeechAudioFile
 import app.daiyu.android.voice.AudioOwnerGate
@@ -63,7 +67,8 @@ class RemoteVoiceHostPlayerAudioFocusTest {
             VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio)
         },
         playerScope: CoroutineScope = scope,
-    ): RemoteVoiceHostPlayer = RemoteVoiceHostPlayer(context, playerScope, runtime, frozen, transport)
+        diagnostics: DiagnosticLogStore? = null,
+    ): RemoteVoiceHostPlayer = RemoteVoiceHostPlayer(context, playerScope, runtime, frozen, transport, diagnostics)
         .also { it.bindOwner("owner") }
 
     private fun drainUntil(condition: () -> Boolean) {
@@ -416,6 +421,47 @@ class RemoteVoiceHostPlayerAudioFocusTest {
             assertEquals(SpeechPhase.STOPPED, host.state.value.phase)
             assertTrue(observedReleased)
         } finally { observation.cancel() }
+    }
+
+    @Test fun diagnosticStagesCoverHttpNativePlaybackAndReleaseWithoutPrivatePayload() {
+        val file = File.createTempFile("speech-diagnostic-", ".json", context.cacheDir).apply { delete() }
+        try {
+            val store = DiagnosticLogStore(file, executor = Executor { it.run() })
+            store.setEnabled(true)
+            host.closeStrict()
+            host = newHost(diagnostics = store)
+            val (_, shadow) = preparing()
+            shadow.invokePreparedListener()
+            shadow.invokeCompletionListener()
+            assertEquals(SpeechPhase.COMPLETED, host.state.value.phase)
+            val json = file.readText()
+            val rows = JSONObject(json).getJSONArray("events")
+            val stages = (0 until rows.length()).map { rows.getJSONObject(it).getString("event") }
+            val expected = listOf("SPEECH_PLAYER_QUEUED", "SPEECH_HTTP_STARTED", "SPEECH_HTTP_COMPLETED",
+                "SPEECH_AUDIO_DECODED", "SPEECH_AUDIO_STORED", "SPEECH_NATIVE_PREPARING",
+                "SPEECH_NATIVE_PREPARED", "SPEECH_FOCUS_GRANTED", "SPEECH_NATIVE_STARTED",
+                "SPEECH_PLAYER_COMPLETED", "SPEECH_MEDIA_RELEASED")
+            assertEquals(expected, stages)
+            for (privateValue in listOf("你好", "fixture-only", "openspeech", "owner", "message")) {
+                assertFalse(privateValue, json.contains(privateValue))
+            }
+            assertEquals(1, requests)
+        } finally { file.delete() }
+    }
+    @Test fun diagnosticQueueFailureDoesNotChangePlaybackOrRepeatTransport() {
+        val file = File.createTempFile("speech-diagnostic-", ".json", context.cacheDir).apply { delete() }
+        try {
+            val store = DiagnosticLogStore(file, executor = Executor { throw java.util.concurrent.RejectedExecutionException() })
+            store.setEnabled(true)
+            host.closeStrict()
+            host = newHost(diagnostics = store)
+            val (_, shadow) = preparing()
+            shadow.invokePreparedListener()
+            shadow.invokeCompletionListener()
+            assertEquals(SpeechPhase.COMPLETED, host.state.value.phase)
+            assertEquals(1, requests)
+            assertEquals(0, store.state.value.count)
+        } finally { file.delete() }
     }
 
 }

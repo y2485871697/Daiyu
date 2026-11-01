@@ -140,4 +140,164 @@ class DiagnosticLogStoreTest {
         assertFalse(reopened.unavailable); assertTrue(reopened.enabled)
         assertEquals(store.state.value, reopened)
     }
+    @Test fun asyncSpeechIsQueuedWithoutIoAndPreservesOccurrenceTimesAndOrder() = fixture { file, _ ->
+        val pending = mutableListOf<Runnable>()
+        var time = 10L
+        val store = DiagnosticLogStore(file, clock = { time }, executor = java.util.concurrent.Executor { pending += it })
+        store.setEnabled(true)
+        val before = file.readBytes()
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+        time = 25L
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_COMPLETED)
+        assertArrayEquals(before, file.readBytes())
+        assertEquals(2, pending.size)
+        time = 99L
+        pending.forEach { it.run() }
+        val rows = JSONObject(file.readText()).getJSONArray("events")
+        assertEquals("SPEECH_HTTP_STARTED", rows.getJSONObject(0).getString("event"))
+        assertEquals(10L, rows.getJSONObject(0).getLong("time_ms"))
+        assertEquals("SPEECH_HTTP_COMPLETED", rows.getJSONObject(1).getString("event"))
+        assertEquals(25L, rows.getJSONObject(1).getLong("time_ms"))
+        assertEquals(2, DiagnosticLogStore(file).load().count)
+    }
+    @Test fun asyncSpeechRespectsDisabledStateAndDoesNotCreateAFile() = fixture { file, _ ->
+        val pending = mutableListOf<Runnable>()
+        val store = DiagnosticLogStore(file, executor = java.util.concurrent.Executor { pending += it })
+        store.recordAsync(DiagnosticEvent.SPEECH_REQUEST_ACCEPTED)
+        pending.forEach { it.run() }
+        assertFalse(file.exists())
+        assertEquals(0, store.load().count)
+    }
+    @Test fun clearInvalidatesAlreadyQueuedSpeechEvents() = fixture { file, _ ->
+        val pending = mutableListOf<Runnable>()
+        val store = DiagnosticLogStore(file, executor = java.util.concurrent.Executor { pending += it })
+        store.setEnabled(true)
+        store.recordAsync(DiagnosticEvent.SPEECH_PLAYER_QUEUED)
+        store.clear()
+        pending.forEach { it.run() }
+        assertEquals(DiagnosticLogState(true, true, 0), DiagnosticLogStore(file).load())
+    }
+    @Test fun disableAndReenableDoNotReplayAnOldQueuedStage() = fixture { file, _ ->
+        val pending = mutableListOf<Runnable>()
+        val store = DiagnosticLogStore(file, executor = java.util.concurrent.Executor { pending += it })
+        store.setEnabled(true)
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+        store.setEnabled(false)
+        store.setEnabled(true)
+        store.recordAsync(DiagnosticEvent.SPEECH_REQUEST_ACCEPTED)
+        pending.forEach { it.run() }
+        val rows = JSONObject(file.readText()).getJSONArray("events")
+        assertEquals(1, rows.length())
+        assertEquals("SPEECH_REQUEST_ACCEPTED", rows.getJSONObject(0).getString("event"))
+    }
+    @Test fun rejectedAsyncSubmissionIsNonfatalAndMarksTheNextAcceptedEvent() = fixture { file, _ ->
+        var reject = true
+        val pending = mutableListOf<Runnable>()
+        val store = DiagnosticLogStore(file, executor = java.util.concurrent.Executor {
+            if (reject) throw java.util.concurrent.RejectedExecutionException("private-rejection-canary")
+            pending += it
+        })
+        store.setEnabled(true)
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+        reject = false
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_COMPLETED)
+        pending.single().run()
+        val rows = JSONObject(file.readText()).getJSONArray("events")
+        assertEquals(2, rows.length())
+        assertEquals("DIAGNOSTIC_EVENTS_DROPPED", rows.getJSONObject(0).getString("event"))
+        assertEquals("SPEECH_HTTP_COMPLETED", rows.getJSONObject(1).getString("event"))
+        assertFalse(file.readText().contains("private-rejection-canary"))
+    }
+    @Test fun asyncWriteFailureDoesNotEscapeOrReplaceDurableHistory() = fixture { file, store ->
+        store.setEnabled(true)
+        store.record(DiagnosticEvent.RUN_COMPLETED)
+        val before = file.readBytes()
+        val failing = DiagnosticLogStore(file, write = { _, _ -> error("private-canary") },
+            executor = java.util.concurrent.Executor { it.run() })
+        failing.recordAsync(DiagnosticEvent.SPEECH_PLAYER_QUEUED)
+        assertTrue(failing.state.value.unavailable)
+        assertArrayEquals(before, file.readBytes())
+    }
+    @Test fun speechEventsKeepTheExistingFixedMetadataSchemaAndOldHistory() = fixture { file, store ->
+        store.setEnabled(true)
+        store.record(DiagnosticEvent.DATA_COMPLETED)
+        val reopened = DiagnosticLogStore(file, executor = java.util.concurrent.Executor { it.run() })
+        reopened.recordAsync(DiagnosticEvent.SPEECH_NATIVE_STARTED)
+        val json = JSONObject(file.readText())
+        assertEquals(setOf("version", "enabled", "events"), json.keys().asSequence().toSet())
+        assertEquals(1, json.getInt("version"))
+        val rows = json.getJSONArray("events")
+        assertEquals("DATA_COMPLETED", rows.getJSONObject(0).getString("event"))
+        assertEquals("SPEECH_NATIVE_STARTED", rows.getJSONObject(1).getString("event"))
+        for (index in 0 until rows.length()) {
+            assertEquals(setOf("time_ms", "event"), rows.getJSONObject(index).keys().asSequence().toSet())
+        }
+        assertEquals(2, DiagnosticLogStore(file).load().count)
+    }
+
+    @Test fun productionAsyncWriterRunsOffCallerThreadWithoutBlockingTheCaller() = fixture { file, _ ->
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val writerThread = AtomicReference<Thread?>()
+        var initializing = true
+        val store = DiagnosticLogStore(file, write = { target, bytes ->
+            if (!initializing) {
+                writerThread.set(Thread.currentThread())
+                started.countDown()
+                assertTrue(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            target.parentFile.mkdirs()
+            target.writeBytes(bytes)
+            if (!initializing) finished.countDown()
+        })
+        store.setEnabled(true)
+        initializing = false
+        try {
+            store.recordAsync(DiagnosticEvent.SPEECH_NATIVE_PREPARING)
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            assertNotSame(Thread.currentThread(), writerThread.get())
+        } finally { release.countDown() }
+        assertTrue(finished.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(1, DiagnosticLogStore(file).load().count)
+    }
+
+    @Test fun clearAlsoInvalidatesDroppedMarkersFromTheOldGeneration() = fixture { file, _ ->
+        var reject = true
+        val pending = mutableListOf<Runnable>()
+        val store = DiagnosticLogStore(file, executor = java.util.concurrent.Executor {
+            if (reject) throw java.util.concurrent.RejectedExecutionException()
+            pending += it
+        })
+        store.setEnabled(true)
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+        store.clear()
+        reject = false
+        store.recordAsync(DiagnosticEvent.SPEECH_REQUEST_ACCEPTED)
+        pending.single().run()
+        val rows = JSONObject(file.readText()).getJSONArray("events")
+        assertEquals(1, rows.length())
+        assertEquals("SPEECH_REQUEST_ACCEPTED", rows.getJSONObject(0).getString("event"))
+    }
+    @Test fun staleWorkerCannotConsumeTheNewGenerationsDroppedMarker() = fixture { file, _ ->
+        var reject = false
+        val pending = mutableListOf<Runnable>()
+        val store = DiagnosticLogStore(file, executor = java.util.concurrent.Executor {
+            if (reject) throw java.util.concurrent.RejectedExecutionException()
+            pending += it
+        })
+        store.setEnabled(true)
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+        store.clear()
+        reject = true
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+        reject = false
+        store.recordAsync(DiagnosticEvent.SPEECH_HTTP_COMPLETED)
+        pending.forEach { it.run() }
+        val rows = JSONObject(file.readText()).getJSONArray("events")
+        assertEquals(2, rows.length())
+        assertEquals("DIAGNOSTIC_EVENTS_DROPPED", rows.getJSONObject(0).getString("event"))
+        assertEquals("SPEECH_HTTP_COMPLETED", rows.getJSONObject(1).getString("event"))
+    }
+
 }

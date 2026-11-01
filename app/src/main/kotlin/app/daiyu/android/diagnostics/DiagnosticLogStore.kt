@@ -12,10 +12,29 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Executor
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal enum class DiagnosticEvent {
     DATA_STARTED, DATA_COMPLETED, DATA_FAILED,
     RUN_SLICE_STARTED, RUN_WAITING_USER, RUN_COMPLETED, RUN_INTERRUPTED, RUN_FAILED,
+    SPEECH_REQUEST_ACCEPTED, SPEECH_REQUEST_STALE, SPEECH_CONFIGURATION_READY, SPEECH_CONFIGURATION_FAILED,
+    SPEECH_ENGINE_SYSTEM, SPEECH_ENGINE_DOUBAO, SPEECH_ENGINE_OTHER,
+    SPEECH_HOST_REQUESTED, SPEECH_HOST_QUEUED, SPEECH_HOST_SPEAKING, SPEECH_HOST_TERMINAL,
+    SPEECH_HOST_RELEASED, SPEECH_HOST_RELEASE_FAILED,
+    SPEECH_OBSERVER_CANCELLED, SPEECH_OBSERVER_FAILED, SPEECH_OBSERVER_ENDED,
+    SPEECH_PLAYER_QUEUED, SPEECH_HTTP_STARTED, SPEECH_HTTP_COMPLETED, SPEECH_HTTP_FAILED, SPEECH_HTTP_CANCELLED,
+    SPEECH_CALL_SUBMITTED, SPEECH_RESPONSE_HEADERS, SPEECH_RESPONSE_FIRST_BYTES, SPEECH_RESPONSE_BODY_COMPLETED,
+    SPEECH_CALL_FAILED, SPEECH_CALL_CANCELLED,
+    SPEECH_AUDIO_DECODED, SPEECH_AUDIO_STORED, SPEECH_NATIVE_PREPARING, SPEECH_NATIVE_PREPARED,
+    SPEECH_FOCUS_GRANTED, SPEECH_FOCUS_DENIED, SPEECH_NATIVE_STARTED,
+    SPEECH_PLAYER_COMPLETED, SPEECH_PLAYER_FAILED, SPEECH_PLAYER_CANCELLED, SPEECH_PLAYER_CLOSED,
+    SPEECH_MEDIA_RELEASED, SPEECH_MEDIA_RELEASE_FAILED,
+    SPEECH_UI_PREPARING, SPEECH_UI_PLAYING, SPEECH_UI_TERMINAL,
+    DIAGNOSTIC_EVENTS_DROPPED,
 }
 internal data class DiagnosticEntry(val timeMs: Long, val event: DiagnosticEvent)
 internal data class DiagnosticLogState(val loaded: Boolean = false, val enabled: Boolean = false,
@@ -26,12 +45,16 @@ internal class DiagnosticLogStore(
     private val file: File,
     private val clock: () -> Long = System::currentTimeMillis,
     private val write: (File, ByteArray) -> Unit = ::writeDiagnosticFile,
+    private val executor: Executor = diagnosticEventExecutor,
 ) {
     val frames = FramePerformanceLog(File(file.parentFile, "page-frames"))
     private val lock = Any()
     private var entries = emptyList<DiagnosticEntry>()
     private var initialized = false
     private var readable = true
+    private class AsyncGeneration { val dropped = AtomicBoolean() }
+    @Volatile private var asyncGeneration = AsyncGeneration()
+    private val submissionLock = Any()
     private val mutableState = MutableStateFlow(DiagnosticLogState())
     val state = mutableState.asStateFlow()
 
@@ -43,17 +66,39 @@ internal class DiagnosticLogStore(
     fun setEnabled(enabled: Boolean) = synchronized(lock) {
         requireReadable()
         persist(enabled, entries)
+        asyncGeneration = AsyncGeneration()
         frames.setEnabled(enabled)
     }
 
     /** Worker-only. Diagnostics failure does not determine a request or persistence outcome. */
-    fun record(event: DiagnosticEvent) = synchronized(lock) {
+    fun record(event: DiagnosticEvent) {
+        try { recordEntry(DiagnosticEntry(clock(), event)) }
+        catch (_: Exception) { synchronized(lock) { markUnavailable() } }
+    }
+
+    /** Capture occurrence time before the ordered, bounded worker queue; never perform UI-thread I/O. */
+    fun recordAsync(event: DiagnosticEvent) {
+        val generation = asyncGeneration
         try {
-            requireReadable()
-            if (mutableState.value.enabled) {
-                val entry = DiagnosticEntry(clock().also { require(it >= 0) }, event)
-                persist(true, (entries + entry).takeLast(MAX_ENTRIES))
+            synchronized(submissionLock) {
+                val entry = DiagnosticEntry(clock(), event)
+                executor.execute {
+                    synchronized(lock) {
+                        if (generation !== asyncGeneration) return@synchronized
+                        if (generation.dropped.getAndSet(false)) recordEntry(entry.copy(event = DiagnosticEvent.DIAGNOSTIC_EVENTS_DROPPED), generation)
+                        recordEntry(entry, generation)
+                    }
+                }
             }
+        } catch (_: Exception) { generation.dropped.set(true) }
+    }
+
+    private fun recordEntry(entry: DiagnosticEntry, generation: AsyncGeneration? = null) = synchronized(lock) {
+        try {
+            if (generation != null && generation !== asyncGeneration) return@synchronized
+            requireReadable()
+            require(entry.timeMs >= 0)
+            if (mutableState.value.enabled) persist(true, (entries + entry).takeLast(MAX_ENTRIES))
         } catch (_: Exception) { markUnavailable() }
     }
 
@@ -63,6 +108,7 @@ internal class DiagnosticLogStore(
             catch (_: Exception) { false }
         frames.clear()
         persist(enabled, emptyList())
+        asyncGeneration = AsyncGeneration()
     }
 
     fun exportSnapshot(): ByteArray = synchronized(lock) {
@@ -142,6 +188,12 @@ internal class DiagnosticLogStore(
         internal const val MAX_ENTRIES = 1024
         internal const val MAX_BYTES = 512 * 1024
     }
+}
+
+private val diagnosticEventExecutor: Executor by lazy {
+    ThreadPoolExecutor(1, 1, 5, TimeUnit.SECONDS, ArrayBlockingQueue(64),
+        { action -> Thread(action, "daiyu-speech-diagnostics").apply { isDaemon = true } },
+        ThreadPoolExecutor.AbortPolicy()).apply { allowCoreThreadTimeOut(true) }
 }
 
 @Synchronized

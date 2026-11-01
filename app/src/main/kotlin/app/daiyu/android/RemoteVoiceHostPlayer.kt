@@ -6,6 +6,8 @@ import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.voice.*
+import app.daiyu.android.diagnostics.DiagnosticEvent
+import app.daiyu.android.diagnostics.DiagnosticLogStore
 import app.daiyu.android.voice.network.VoiceNetworkAdapters
 import app.daiyu.android.voice.providers.*
 import kotlinx.coroutines.*
@@ -24,8 +26,10 @@ internal class RemoteVoiceHostPlayer(
     private val scope: CoroutineScope,
     private val runtime: ControllerVoiceRuntime,
     private val frozen: FrozenVoiceSpeech,
-    private val transport: VoiceHttpTransport = VoiceNetworkAdapters.speechHttp(frozen.configuration.speech().engine),
+    transport: VoiceHttpTransport? = null,
+    private val diagnostics: DiagnosticLogStore? = null,
 ) : VoiceHostPlayer {
+    private val transport = transport ?: VoiceNetworkAdapters.speechHttp(frozen.configuration.speech().engine, diagnostics)
     private val mutable = MutableStateFlow(SpeechPlaybackState())
     override val state = mutable.asStateFlow()
     private var owner: String? = null
@@ -57,6 +61,7 @@ internal class RemoteVoiceHostPlayer(
         if (config.voice.startsWith("mimo-local-") && frozen.reference == null) return false
         releaseMedia()
         mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.QUEUED)
+        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_PLAYER_QUEUED)
         deadline = scope.launch(Dispatchers.Main.immediate) {
             delay(VoiceNetworkAdapters.speechTimeoutMillis(config.speech().engine))
             if (!closed && mutable.value.requestId == requestId && mutable.value.phase == SpeechPhase.QUEUED && player == null) {
@@ -80,11 +85,23 @@ internal class RemoteVoiceHostPlayer(
                         cap = frozen.upload?.consume(requestId, text) ?: frozen.playbackLimitMs
                         check(cap in 1..frozen.playbackLimitMs)
                         check(!closed && runtime.current(frozen))
-                        transport.execute(request, maxBytes)
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
+                        try {
+                            transport.execute(request, maxBytes).also {
+                                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_COMPLETED)
+                            }
+                        } catch (cancelled: CancellationException) {
+                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_CANCELLED)
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_FAILED)
+                            throw failure
+                        }
                     }
                     val account = if (frozen.doubaoResolver != null) frozen.doubaoResolver.invoke() else frozen.doubaoPersonal
                     SpeechSynthesisClient(guarded, reference).synthesize(config.speech(), text, config.voice, account)
                 }
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_AUDIO_DECODED)
                 ensureActive()
                 if (closed || mutable.value.requestId != requestId) return@launch
                 if (!runtime.current(frozen)) {
@@ -95,6 +112,7 @@ internal class RemoteVoiceHostPlayer(
                 // The original player starts manual read-aloud after native preparation.
                 file = File.createTempFile("voice-", ".audio", context.cacheDir)
                 checkNotNull(file).writeBytes(SpeechAudioFile.normalize(bytes))
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_AUDIO_STORED)
                 val next = MediaPlayer()
                 player = next
                 val attributes = AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -106,6 +124,7 @@ internal class RemoteVoiceHostPlayer(
                     if (closed || player !== source || !runtime.current(frozen)) {
                         if (player === source) finish(owner, requestId, false)
                     } else try {
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_NATIVE_PREPARED)
                         deadline?.cancel(); deadline = null
                         // Manual read-aloud starts unknown/long tracks as in the original player.
                         // Only an explicit automatic personal-voice grant reserves audio duration.
@@ -118,14 +137,17 @@ internal class RemoteVoiceHostPlayer(
                         }
                         focus = lease
                         if (!lease.acquire()) {
+                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_FOCUS_DENIED)
                             finish(owner, requestId, false, SpeechError.AUDIO_FOCUS_DENIED)
                             return@setOnPreparedListener
                         }
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_FOCUS_GRANTED)
                         if (closed || player !== source || !runtime.current(frozen)) {
                             if (player === source) finish(owner, requestId, false)
                             return@setOnPreparedListener
                         }
                         source.start()
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_NATIVE_STARTED)
                         mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.SPEAKING)
                         // Secondary wall-clock cutoff as well as rejecting over-limit media durations.
                         if (closed || player !== source) return@setOnPreparedListener
@@ -147,8 +169,12 @@ internal class RemoteVoiceHostPlayer(
                         finish(owner, requestId, false, SpeechError.PREPARATION_TIMEOUT)
                     }
                 }
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_NATIVE_PREPARING)
                 next.prepareAsync()
-            } catch (cancelled: CancellationException) { throw cancelled }
+            } catch (cancelled: CancellationException) {
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_PLAYER_CANCELLED)
+                throw cancelled
+            }
             catch (_: Exception) {
                 if (!closed && mutable.value.requestId == requestId) finish(owner, requestId, false)
             }
@@ -164,6 +190,7 @@ internal class RemoteVoiceHostPlayer(
     }
     private fun finish(owner: String, requestId: String, success: Boolean,
         error: SpeechError = SpeechError.PLAYBACK_FAILED) {
+        diagnostics?.recordAsync(if (success) DiagnosticEvent.SPEECH_PLAYER_COMPLETED else DiagnosticEvent.SPEECH_PLAYER_FAILED)
         // Fence callbacks before strict release. Release failures propagate to the existing poisoned gate.
         try { releaseMedia() } catch (_: Throwable) { /* Latched; closeStrict MUST report this to the gate. */ }
         mutable.value = if (success && releaseFailure == null) SpeechPlaybackState(owner, requestId, SpeechPhase.COMPLETED)
@@ -179,6 +206,7 @@ internal class RemoteVoiceHostPlayer(
         if (!closed) {
             closed = true
             unobserve()
+            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_PLAYER_CLOSED)
             val previous = mutable.value
             try { releaseMedia() } finally {
                 // Publish only after strict release: a collector can synchronously close us again.
@@ -210,7 +238,9 @@ internal class RemoteVoiceHostPlayer(
                     }
                 }
             } finally { oldFocus?.closeStrict() }
+            if (p != null || oldFile != null || oldFocus != null) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_MEDIA_RELEASED)
         } catch (failure: Throwable) {
+            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_MEDIA_RELEASE_FAILED)
             releaseFailure = releaseFailure ?: failure
             throw failure
         } finally { releasing = false }

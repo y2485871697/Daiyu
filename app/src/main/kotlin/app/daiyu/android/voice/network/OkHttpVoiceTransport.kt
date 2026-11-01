@@ -1,5 +1,7 @@
 package app.daiyu.android.voice.network
 
+import app.daiyu.android.diagnostics.DiagnosticEvent
+import app.daiyu.android.diagnostics.DiagnosticLogStore
 import app.daiyu.android.voice.providers.SpeechEngine
 import app.daiyu.android.voice.providers.VoiceHttpRequest
 import app.daiyu.android.voice.providers.VoiceHttpResponse
@@ -23,6 +25,7 @@ import okio.BufferedSink
 
 internal class OkHttpVoiceTransport(
     private val calls: Call.Factory = client,
+    private val diagnostics: DiagnosticLogStore? = null,
 ) : VoiceHttpTransport {
     override suspend fun execute(request: VoiceHttpRequest, maxResponseBytes: Int): VoiceHttpResponse {
         checkNetwork(maxResponseBytes in 1..NetworkLimits.HTTP_BYTES)
@@ -44,10 +47,15 @@ internal class OkHttpVoiceTransport(
             calls.newCall(builder.build())
         } catch (_: Exception) { throw networkFailure() }
         return suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation { call.cancel() }
+            continuation.invokeOnCancellation {
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_CANCELLED)
+                call.cancel()
+            }
             try {
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_SUBMITTED)
                 call.enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) {
+                        diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
                         if (continuation.isActive) continuation.resumeWithException(networkFailure())
                     }
                     override fun onResponse(call: Call, response: Response) {
@@ -55,30 +63,39 @@ internal class OkHttpVoiceTransport(
                         try {
                             val result = response.use {
                                 if (!continuation.isActive) return
+                                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_HEADERS)
                                 val source = it.body ?: throw networkFailure()
                                 checkNetwork(source.contentLength() <= maxResponseBytes)
                                 val output = ByteArrayOutputStream(minOf(maxResponseBytes, 8192))
                                 source.byteStream().use { input ->
                                     val buffer = ByteArray(8192)
+                                    var firstBytes = true
                                     while (true) {
                                         if (!continuation.isActive) return
                                         // At most one excess byte is consumed; no unbounded readBytes()/string().
                                         val count = input.read(buffer, 0, minOf(buffer.size, maxResponseBytes - output.size() + 1))
                                         if (count < 0) break
                                         checkNetwork(output.size().toLong() + count <= maxResponseBytes)
+                                        if (count > 0 && firstBytes) {
+                                            firstBytes = false
+                                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_FIRST_BYTES)
+                                        }
                                         output.write(buffer, 0, count)
                                     }
                                 }
+                                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_BODY_COMPLETED)
                                 VoiceHttpResponse(it.code, it.header("Content-Type"), output.toByteArray())
                             }
                             if (continuation.isActive) continuation.resume(result)
                         } catch (_: Exception) {
+                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
                             call.cancel()
                             if (continuation.isActive) continuation.resumeWithException(networkFailure())
                         }
                     }
                 })
             } catch (_: Exception) {
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
                 call.cancel()
                 if (continuation.isActive) continuation.resumeWithException(networkFailure())
             }

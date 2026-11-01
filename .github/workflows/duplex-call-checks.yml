@@ -63,7 +63,7 @@ jobs:
           import json, os, unittest
           from pathlib import Path
           records = []
-          patterns = ('test_chat_voice_feedback_contract.py', 'test_toast_concise_copy_contract.py', 'test_message_speech_button_contract.py') if os.environ['CHECK_SCOPE'] == 'speech' else ('test_doubao_call_sheet_contract.py', 'test_chat_voice_feedback_contract.py', 'test_call_entry_corrections_contract.py', 'test_voice_long_press_menu_contract.py')
+          patterns = ('test_chat_voice_feedback_contract.py', 'test_toast_concise_copy_contract.py', 'test_message_speech_button_contract.py', 'test_message_speech_diagnostics_contract.py') if os.environ['CHECK_SCOPE'] == 'speech' else ('test_doubao_call_sheet_contract.py', 'test_chat_voice_feedback_contract.py', 'test_call_entry_corrections_contract.py', 'test_voice_long_press_menu_contract.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
@@ -87,7 +87,7 @@ jobs:
               Path('duplex-call-checks', name).unlink(missing_ok=True)
           PYRESET
           if [[ "$CHECK_SCOPE" == speech ]]; then
-            classes=(app.daiyu.android.voice.SpeechAudioFileTest app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.RemoteVoicePlaybackBudgetTest app.daiyu.android.VoiceHostTest app.daiyu.android.VoiceHostGateTest app.daiyu.android.voice.network.HttpVoiceNetworkTest app.daiyu.android.ActivityVoiceAccountPreviewHostTest app.daiyu.android.AccountPreviewSpeechPlayerTailTest app.daiyu.android.voice.account.PersonalVoicePreviewTest)
+            classes=(app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.voice.SpeechAudioFileTest app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.RemoteVoicePlaybackBudgetTest app.daiyu.android.VoiceHostTest app.daiyu.android.VoiceHostGateTest app.daiyu.android.voice.network.HttpVoiceNetworkTest app.daiyu.android.ActivityVoiceAccountPreviewHostTest app.daiyu.android.AccountPreviewSpeechPlayerTailTest app.daiyu.android.voice.account.PersonalVoicePreviewTest)
           else
             classes=(app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
           fi
@@ -112,7 +112,7 @@ jobs:
                       'app.daiyu.android.voice.network.SocketVoiceNetworkTest',
                       'app.daiyu.android.voice.network.WebSocketBoundsTest'}
           if os.environ['CHECK_SCOPE'] == 'speech':
-              required = {'app.daiyu.android.voice.SpeechAudioFileTest', 'app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest', 'app.daiyu.android.RemoteVoicePlaybackBudgetTest', 'app.daiyu.android.VoiceHostTest', 'app.daiyu.android.VoiceHostGateTest', 'app.daiyu.android.voice.network.HttpVoiceNetworkTest', 'app.daiyu.android.ActivityVoiceAccountPreviewHostTest', 'app.daiyu.android.AccountPreviewSpeechPlayerTailTest', 'app.daiyu.android.voice.account.PersonalVoicePreviewTest'}
+              required = {'app.daiyu.android.diagnostics.DiagnosticLogStoreTest', 'app.daiyu.android.voice.SpeechAudioFileTest', 'app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest', 'app.daiyu.android.RemoteVoicePlaybackBudgetTest', 'app.daiyu.android.VoiceHostTest', 'app.daiyu.android.VoiceHostGateTest', 'app.daiyu.android.voice.network.HttpVoiceNetworkTest', 'app.daiyu.android.ActivityVoiceAccountPreviewHostTest', 'app.daiyu.android.AccountPreviewSpeechPlayerTailTest', 'app.daiyu.android.voice.account.PersonalVoicePreviewTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert required == set(names) and len(names) == len(set(names)), (names, required)

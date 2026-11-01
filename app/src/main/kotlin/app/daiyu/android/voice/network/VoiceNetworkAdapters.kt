@@ -15,6 +15,7 @@ object VoiceNetworkAdapters {
     fun speechHttp(engine: SpeechEngine): VoiceHttpTransport = OkHttpVoiceTransport(
         if (engine == SpeechEngine.DOUBAO) OkHttpVoiceTransport.doubaoSpeechClient else OkHttpVoiceTransport.speechClient,
     )
+    internal fun speechTimeoutMillis(engine: SpeechEngine): Long = if (engine == SpeechEngine.DOUBAO) 210_000L else 90_000L
     fun asr(): VoiceSocketTransport = AsrNetworkTransport()
     fun duplex(): DuplexTransport = DuplexNetworkTransport()
 }

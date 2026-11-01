@@ -18,4 +18,5 @@
     <string name="voice_host_audio_focus_denied">音频被占用，请稍后重试</string>
     <string name="voice_host_audio_focus_lost">朗读已被中断</string>
     <string name="voice_host_preparation_timeout">音频准备超时</string>
+    <string name="voice_host_synthesis_timeout">朗读合成超时</string>
 </resources>

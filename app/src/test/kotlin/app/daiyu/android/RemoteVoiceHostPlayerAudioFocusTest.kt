@@ -6,11 +6,13 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import app.daiyu.android.voice.SpeechAudioFixtures
 import app.daiyu.android.voice.SpeechAudioFile
+import app.daiyu.android.voice.AudioOwnerGate
 import app.daiyu.android.voice.SpeechError
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.providers.VoiceHttpResponse
 import app.daiyu.android.voice.providers.VoiceHttpTransport
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.test.*
 import org.junit.After
 import org.junit.Assert.*
@@ -54,11 +56,30 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         host = newHost()
     }
 
-    private fun newHost(frozen: FrozenVoiceSpeech = FrozenVoiceSpeech(config)): RemoteVoiceHostPlayer =
-        RemoteVoiceHostPlayer(context, scope, runtime, frozen, VoiceHttpTransport { _, _ ->
+    private fun newHost(
+        frozen: FrozenVoiceSpeech = FrozenVoiceSpeech(config),
+        transport: VoiceHttpTransport = VoiceHttpTransport { _, _ ->
             requests++
             VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio)
-        }).also { it.bindOwner("owner") }
+        },
+        playerScope: CoroutineScope = scope,
+    ): RemoteVoiceHostPlayer = RemoteVoiceHostPlayer(context, playerScope, runtime, frozen, transport)
+        .also { it.bindOwner("owner") }
+
+    private fun drainUntil(condition: () -> Boolean) {
+        val end = System.nanoTime() + 5_000_000_000L
+        while (!condition() && System.nanoTime() < end) {
+            dispatcher.scheduler.runCurrent()
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            Thread.sleep(2)
+        }
+        assertTrue(condition())
+    }
+
+    private fun assertGateReleased(gate: AudioOwnerGate) {
+        assertTrue(gate.releaseHealthy())
+        assertNull(gate.javaClass.getDeclaredField("lease").apply { isAccessible = true }.get(gate))
+    }
 
     @After fun teardown() {
         runCatching { host.closeStrict() }
@@ -249,6 +270,152 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)
         host.closeStrict()
         assertFalse(file.exists())
+    }
+
+    @Test fun runtimeInvalidationEndsQueuedMessageAndReleasesItsActualGate() {
+        host.closeStrict()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean()
+        val response = CompletableDeferred<VoiceHttpResponse>()
+        host = newHost(transport = VoiceHttpTransport { _, _ ->
+            requests++; entered.countDown()
+            try { response.await() } finally { cancelled.set(true) }
+        })
+        val gate = AudioOwnerGate()
+        val message = VoiceHost(scope, gate) { host }
+        message.enter("conversation"); message.setForeground(true)
+        try {
+            assertTrue(message.speak(message.owner, "message", "你好"))
+            drainUntil { entered.count == 0L }
+            assertEquals(SpeechPhase.QUEUED, message.state.value.phase)
+            runtime.invalidateSpeech(VoiceProfile.CONVERSATION)
+            dispatcher.scheduler.runCurrent()
+            assertEquals(SpeechPhase.QUEUED, message.state.value.phase)
+            runtime.invalidateSpeech(VoiceProfile.READ_ALOUD)
+            drainUntil { message.state.value.phase == SpeechPhase.STOPPED && cancelled.get() }
+            assertGateReleased(gate)
+            response.complete(VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio))
+            dispatcher.scheduler.runCurrent()
+            assertEquals(SpeechPhase.STOPPED, message.state.value.phase)
+            assertTrue(media.isEmpty())
+            assertEquals(1, requests)
+        } finally { message.close() }
+    }
+
+    @Test fun synthesisCancellationDoesNotLeaveMessageOrLeaseQueued() {
+        host.closeStrict()
+        host = newHost(transport = VoiceHttpTransport { _, _ ->
+            requests++
+            throw CancellationException("fixture-only")
+        })
+        val gate = AudioOwnerGate()
+        val message = VoiceHost(scope, gate) { host }
+        message.enter("conversation"); message.setForeground(true)
+        try {
+            assertTrue(message.speak(message.owner, "message", "你好"))
+            drainUntil { message.state.value.phase == SpeechPhase.ERROR }
+            assertEquals(SpeechError.PLAYBACK_FAILED, message.state.value.error)
+            assertGateReleased(gate)
+            assertTrue(media.isEmpty())
+            assertEquals(1, requests)
+        } finally { message.close() }
+    }
+
+    @Test fun cancelledPlaybackScopeRejectsBeforePublishingQueuedOrCallingTransport() {
+        scope.cancel()
+        assertFalse(host.play("owner", "message", "你好"))
+        assertFalse(voiceHostIsPreparing(host.state.value))
+        dispatcher.scheduler.runCurrent()
+        assertEquals(0, requests)
+        assertTrue(media.isEmpty())
+    }
+
+    @Test fun cancellationBeforeLaunchStartsStillTerminatesObservedMessage() {
+        host.closeStrict()
+        val playbackScope = CoroutineScope(SupervisorJob() + dispatcher)
+        val gate = AudioOwnerGate()
+        host = newHost(playerScope = playbackScope)
+        val message = VoiceHost(scope, gate) { host }
+        message.enter("conversation"); message.setForeground(true)
+        try {
+            assertTrue(message.speak(message.owner, "message", "你好"))
+            playbackScope.cancel()
+            drainUntil { message.state.value.phase == SpeechPhase.ERROR }
+            assertGateReleased(gate)
+            assertEquals(0, requests)
+            assertTrue(media.isEmpty())
+        } finally { message.close(); playbackScope.cancel() }
+    }
+
+    @Test fun synthesisBudgetIncludesWaitingBeforeMediaExistsAndCancelsTransport() {
+        host.closeStrict()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean()
+        val response = CompletableDeferred<VoiceHttpResponse>()
+        host = newHost(transport = VoiceHttpTransport { _, _ ->
+            requests++; entered.countDown()
+            try { response.await() } finally { cancelled.set(true) }
+        })
+        val gate = AudioOwnerGate()
+        val message = VoiceHost(scope, gate) { host }
+        message.enter("conversation"); message.setForeground(true)
+        try {
+            assertTrue(message.speak(message.owner, "message", "你好"))
+            drainUntil { entered.count == 0L }
+            dispatcher.scheduler.advanceTimeBy(210_000L - 1)
+            dispatcher.scheduler.runCurrent()
+            assertEquals(SpeechPhase.QUEUED, message.state.value.phase)
+            assertTrue(media.isEmpty())
+            dispatcher.scheduler.advanceTimeBy(1)
+            drainUntil { message.state.value.phase == SpeechPhase.ERROR && cancelled.get() }
+            assertEquals(SpeechError.SYNTHESIS_TIMEOUT, message.state.value.error)
+            assertGateReleased(gate)
+            response.complete(VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio))
+            dispatcher.scheduler.runCurrent()
+            assertEquals(SpeechError.SYNTHESIS_TIMEOUT, message.state.value.error)
+            assertTrue(media.isEmpty())
+            assertEquals(1, requests)
+        } finally { message.close() }
+    }
+
+    @Test fun successfulSynthesisCancelsItsBudgetBeforePreparationAndPlayback() {
+        host.closeStrict()
+        host = newHost(FrozenVoiceSpeech(config, playbackLimitMs = 500_000L))
+        val (_, shadow) = preparing()
+        shadow.invokePreparedListener()
+        dispatcher.scheduler.runCurrent()
+        dispatcher.scheduler.advanceTimeBy(210_000L)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)
+    }
+
+    @Test fun configurationBecomingStaleBeforeMediaCreationTerminatesTheRequest() {
+        host.closeStrict()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val response = CompletableDeferred<VoiceHttpResponse>()
+        host = newHost(transport = VoiceHttpTransport { _, _ -> entered.countDown(); response.await() })
+        assertTrue(host.play("owner", "message", "你好"))
+        drainUntil { entered.count == 0L }
+        runtime.javaClass.getDeclaredField("state").apply { isAccessible = true }.set(runtime, VoiceProfileEnvelope(emptyMap()))
+        response.complete(VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio))
+        drainUntil { host.state.value.phase == SpeechPhase.ERROR }
+        assertTrue(media.isEmpty())
+    }
+
+    @Test fun explicitClosePublishesTerminalOnlyAfterNativeResourcesAreReleased() {
+        val (_, shadow) = preparing()
+        var observedReleased = false
+        val observation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            host.state.collect { state ->
+                if (state.phase == SpeechPhase.STOPPED) observedReleased = shadow.state == ShadowMediaPlayer.State.END
+            }
+        }
+        try {
+            host.closeStrict()
+            dispatcher.scheduler.runCurrent()
+            assertEquals(SpeechPhase.STOPPED, host.state.value.phase)
+            assertTrue(observedReleased)
+        } finally { observation.cancel() }
     }
 
 }

@@ -53,6 +53,10 @@ class HttpVoiceNetworkTest {
         assertEquals(90_000, standard.callTimeoutMillis)
         assertEquals(180_000, doubao.readTimeoutMillis)
         assertEquals(210_000, doubao.callTimeoutMillis)
+        for (engine in app.daiyu.android.voice.providers.SpeechEngine.entries) {
+            assertEquals(if (engine == app.daiyu.android.voice.providers.SpeechEngine.DOUBAO) 210_000L else 90_000L,
+                VoiceNetworkAdapters.speechTimeoutMillis(engine))
+        }
         assertEquals(30_000, OkHttpVoiceTransport.client.readTimeoutMillis)
         assertEquals(60_000, OkHttpVoiceTransport.client.callTimeoutMillis)
         for (client in listOf(standard, doubao)) {

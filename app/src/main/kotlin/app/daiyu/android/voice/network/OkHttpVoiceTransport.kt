@@ -1,5 +1,6 @@
 package app.daiyu.android.voice.network
 
+import app.daiyu.android.voice.providers.SpeechEngine
 import app.daiyu.android.voice.providers.VoiceHttpRequest
 import app.daiyu.android.voice.providers.VoiceHttpResponse
 import app.daiyu.android.voice.providers.VoiceHttpTransport
@@ -86,10 +87,12 @@ internal class OkHttpVoiceTransport(
 
     companion object {
         internal val speechClient: OkHttpClient by lazy {
-            client.newBuilder().readTimeout(60, TimeUnit.SECONDS).callTimeout(90, TimeUnit.SECONDS).build()
+            client.newBuilder().readTimeout(60, TimeUnit.SECONDS)
+                .callTimeout(VoiceNetworkAdapters.speechTimeoutMillis(SpeechEngine.OPENAI), TimeUnit.MILLISECONDS).build()
         }
         internal val doubaoSpeechClient: OkHttpClient by lazy {
-            speechClient.newBuilder().readTimeout(180, TimeUnit.SECONDS).callTimeout(210, TimeUnit.SECONDS).build()
+            speechClient.newBuilder().readTimeout(180, TimeUnit.SECONDS)
+                .callTimeout(VoiceNetworkAdapters.speechTimeoutMillis(SpeechEngine.DOUBAO), TimeUnit.MILLISECONDS).build()
         }
         // Shared immutable connection pool only; every public factory returns a new adapter.
         internal val client: OkHttpClient by lazy {

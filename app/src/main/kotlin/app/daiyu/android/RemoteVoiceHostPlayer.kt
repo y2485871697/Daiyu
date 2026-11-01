@@ -52,12 +52,18 @@ internal class RemoteVoiceHostPlayer(
         return accepted
     }
     private fun playOnMain(owner: String, requestId: String, text: String): Boolean {
-        if (closed || releaseFailure != null || this.owner != owner || !runtime.current(frozen)) return false
+        if (closed || !scope.isActive || releaseFailure != null || this.owner != owner || !runtime.current(frozen)) return false
         val config = frozen.configuration
         if (config.voice.startsWith("mimo-local-") && frozen.reference == null) return false
         releaseMedia()
         mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.QUEUED)
-        job = scope.launch(Dispatchers.Main.immediate) {
+        deadline = scope.launch(Dispatchers.Main.immediate) {
+            delay(VoiceNetworkAdapters.speechTimeoutMillis(config.speech().engine))
+            if (!closed && mutable.value.requestId == requestId && mutable.value.phase == SpeechPhase.QUEUED && player == null) {
+                finish(owner, requestId, false, SpeechError.SYNTHESIS_TIMEOUT)
+            }
+        }
+        val synthesisJob = scope.launch(Dispatchers.Main.immediate) {
             try {
                 var cap = frozen.playbackLimitMs
                 val bytes = withContext(Dispatchers.IO) {
@@ -80,7 +86,12 @@ internal class RemoteVoiceHostPlayer(
                     SpeechSynthesisClient(guarded, reference).synthesize(config.speech(), text, config.voice, account)
                 }
                 ensureActive()
-                if (closed || mutable.value.requestId != requestId || !runtime.current(frozen)) return@launch
+                if (closed || mutable.value.requestId != requestId) return@launch
+                if (!runtime.current(frozen)) {
+                    finish(owner, requestId, false)
+                    return@launch
+                }
+                deadline?.cancel(); deadline = null
                 // The original player starts manual read-aloud after native preparation.
                 file = File.createTempFile("voice-", ".audio", context.cacheDir)
                 checkNotNull(file).writeBytes(SpeechAudioFile.normalize(bytes))
@@ -142,6 +153,13 @@ internal class RemoteVoiceHostPlayer(
                 if (!closed && mutable.value.requestId == requestId) finish(owner, requestId, false)
             }
         }
+        job = synthesisJob
+        synthesisJob.invokeOnCompletion { cause ->
+            if (cause is CancellationException) releaseOnMain(handler) {
+                if (!closed && job === synthesisJob && mutable.value.requestId == requestId &&
+                    mutable.value.phase == SpeechPhase.QUEUED) finish(owner, requestId, false)
+            }
+        }
         return true
     }
     private fun finish(owner: String, requestId: String, success: Boolean,
@@ -161,7 +179,16 @@ internal class RemoteVoiceHostPlayer(
         if (!closed) {
             closed = true
             unobserve()
-            releaseMedia()
+            val previous = mutable.value
+            try { releaseMedia() } finally {
+                // Publish only after strict release: a collector can synchronously close us again.
+                if (previous.phase == SpeechPhase.QUEUED || previous.phase == SpeechPhase.SPEAKING) {
+                    mutable.value = previous.copy(
+                        phase = if (releaseFailure == null) SpeechPhase.STOPPED else SpeechPhase.ERROR,
+                        error = if (releaseFailure == null) null else SpeechError.STOP_FAILED,
+                    )
+                }
+            }
         }
         releaseFailure?.let { throw it }
     }

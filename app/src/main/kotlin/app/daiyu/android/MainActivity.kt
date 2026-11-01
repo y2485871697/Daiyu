@@ -7971,6 +7971,7 @@ internal fun voiceHostStatusResource(state: SpeechPlaybackState): Int? = when (s
         SpeechError.AUDIO_FOCUS_DENIED -> R.string.voice_host_audio_focus_denied
         SpeechError.AUDIO_FOCUS_LOST -> R.string.voice_host_audio_focus_lost
         SpeechError.PREPARATION_TIMEOUT -> R.string.voice_host_preparation_timeout
+        SpeechError.SYNTHESIS_TIMEOUT -> R.string.voice_host_synthesis_timeout
         SpeechError.PLAYBACK_FAILED, null -> R.string.voice_host_playback_failed
     }
     SpeechPhase.IDLE, SpeechPhase.READY, SpeechPhase.CLOSED -> null

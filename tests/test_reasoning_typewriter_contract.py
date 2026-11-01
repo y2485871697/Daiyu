@@ -72,7 +72,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
     def test_body_adapter_and_reasoning_share_one_clock(self):
         typing = (CHAT / 'MarkdownTyping.kt').read_text()
         self.assertIn('return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, turn.status != RunStatus.RUNNING && prefix.size == turn.content.size,', ' '.join(typing.split()))
-        self.assertIn('motion.update(parts, baselineLength, streaming, terminal)', typing)
+        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live)', typing)
         self.assertEqual(1, typing.count('withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }'))
         self.assertIn('rememberUpdatedState(onVisibleAdvance)', typing)
 

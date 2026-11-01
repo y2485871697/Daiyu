@@ -135,6 +135,38 @@ class MarkdownRevealTest {
         assertEquals(6, state.advance(admitted, 1_250_000_000))
     }
 
+    @Test fun liveBodyNeedNotObserveAStreamingPhaseToRevealItsFirstAnswer() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, streaming = false, terminal = false, live = true)
+        val answer = state.update(listOf(part("x".repeat(500))), 0, streaming = false, terminal = true)!!
+        assertEquals(0, answer.start)
+        var advances = 0
+        state.advance(answer, 1_000_000_000L) { advances++ }
+        assertTrue(state.advance(answer, 1_050_000_000L) { advances++ } in 1 until answer.total)
+        assertTrue(advances > 0)
+        assertEquals(answer.total, state.advance(answer, 1_250_000_000L))
+        val edited = state.update(listOf(part("x".repeat(501))), 0, streaming = false, terminal = true)!!
+        assertEquals("Completed edits still use a silent baseline", 501, edited.start)
+    }
+
+    @Test fun emptyTerminalCannotCloseALiveBodyBeforeItsFirstAnswer() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, streaming = true, terminal = false)
+        state.update(emptyList(), 0, streaming = false, terminal = true)
+        val answer = state.update(listOf(part("answer")), 0, streaming = false, terminal = true)!!
+        assertEquals(0, answer.start)
+    }
+
+    @Test fun liveEvidenceSurvivesAnUnavailableProjectionAndDoesNotReplayHistory() {
+        val live = MarkdownTypingState(emptyList())
+        live.update(null, null, streaming = false, terminal = false, live = true)
+        val answer = live.update(listOf(part("answer")), 0, streaming = false, terminal = true)!!
+        assertEquals(0, answer.start)
+        val history = MarkdownTypingState(emptyList())
+        history.update(emptyList(), 0, streaming = false, terminal = true)
+        assertEquals(6, history.update(listOf(part("answer")), 0, streaming = false, terminal = true)!!.start)
+    }
+
     @Test fun lateTerminalTargetsDrainToTheirExactEnd() {
         val state = MarkdownTypingState(listOf(source("")))
         state.update(listOf(part("")), 0, true, false)

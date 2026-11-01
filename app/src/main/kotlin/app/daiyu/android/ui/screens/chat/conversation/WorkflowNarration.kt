@@ -48,7 +48,7 @@ internal fun WorkflowNarrationContent(
         val reveal = key(expanded) {
             rememberMarkdownReveal(sources, projection, streaming = running && !paused,
                 terminal = !running && projection?.sources == texts, resetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
-                enabled = expanded && !stopped && !paused, allowBaselinePrefix = false, blockedSources = blocked)
+                enabled = expanded && !stopped && !paused, allowBaselinePrefix = false, blockedSources = blocked, live = running)
         }
         content(remember(projection, reveal) { WorkflowNarration(projection, reveal) })
     }

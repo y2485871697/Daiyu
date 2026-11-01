@@ -77,7 +77,7 @@ internal fun rememberMarkdownReveal(
     }
     return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming,
         turn.status != RunStatus.RUNNING && prefix.size == turn.content.size, resetEpoch, onVisibleAdvance, enabled,
-        blockedSources = blockedSources)
+        blockedSources = blockedSources, live = turn.status == RunStatus.RUNNING)
 }
 
 @Composable
@@ -91,6 +91,7 @@ internal fun rememberMarkdownReveal(
     enabled: Boolean = true,
     allowBaselinePrefix: Boolean = true,
     blockedSources: Set<String> = emptySet(),
+    live: Boolean = streaming,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
@@ -112,8 +113,10 @@ internal fun rememberMarkdownReveal(
         } }
     }
     val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
-    val target = remember(motion, parts, baselineLength, streaming, terminal) {
-        motion.update(parts, baselineLength, streaming, terminal)
+    val exactProjection = projection?.sources == sources.map { it.text }
+    val targetTerminal = terminal && exactProjection
+    val target = remember(motion, parts, baselineLength, streaming, targetTerminal, live) {
+        motion.update(parts, baselineLength, streaming, targetTerminal, live)
     }
     val advanceLimit = remember(target, blockedSources) {
         target?.parts?.takeWhile { it.source.id !in blockedSources }?.sumOf { it.length.toLong() }
@@ -131,7 +134,7 @@ internal fun rememberMarkdownReveal(
         }
         if (end < current.total) motion.pause(current)
     }
-    val exact = projection?.sources == sources.map { it.text } && baselineLength != null && target != null &&
+    val exact = exactProjection && baselineLength != null && target != null &&
         target.parts == parts && target.parts.map { it.source } == sources
     val currentTarget = rememberUpdatedState(target)
     val budgets = remember(identity, resetEpoch, frame) { MarkdownRevealBudgets(currentTarget, frame) }

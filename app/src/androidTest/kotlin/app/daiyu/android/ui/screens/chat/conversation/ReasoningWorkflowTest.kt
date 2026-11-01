@@ -41,7 +41,10 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testMixedTerminalAnswerStartsTypingOnlyAfterWorkflowDisposal() = verifyAnswerAdmission(mixed = true, terminal = true)
     fun testUnclassifiedLiveAnswerWaitsForTurnEndThenWorkflowDisposal() = verifyAnswerAdmission(mixed = true, terminal = false)
 
-    private fun verifyAnswerAdmission(mixed: Boolean, terminal: Boolean) {
+    fun testLegacyTerminalBodyTypesWithoutAStreamingSnapshot() = verifyAnswerAdmission(mixed = false, terminal = true, streamed = false)
+    fun testMixedTerminalBodyTypesWithoutAStreamingSnapshot() = verifyAnswerAdmission(mixed = true, terminal = true, streamed = false)
+
+    private fun verifyAnswerAdmission(mixed: Boolean, terminal: Boolean, streamed: Boolean = true) {
         prepare()
         val answer = "ANSWER " + "visible text ".repeat(18)
         runBlocking {
@@ -58,7 +61,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 val source = message(listOf(tool("t1")) + if (ready) listOf(MessageBlock.Text("body", answer)) else emptyList(), emptyList())
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 val turn = mapped(source).let { if (mixed) it else it.copy(content = emptyList()) }
-                AssistantTurn(turn.copy(isStreaming = !done), ChatScreenActions(),
+                AssistantTurn(turn.copy(isStreaming = streamed && !done), ChatScreenActions(),
                     onVisibleAdvance = { advances.incrementAndGet() }, onRevealSettled = { settled.set(it) })
             } } }
             ui.mainClock.advanceTimeBy(400)

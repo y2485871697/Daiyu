@@ -26,6 +26,15 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'var shown = motion.visible(current)', 'if (end < current.total) motion.pause(current)'):
             self.assertIn(token, typing)
 
+    def test_live_ownership_and_exact_terminal_are_independent_of_streaming_speed(self):
+        typing = (BASE / 'MarkdownTyping.kt').read_text()
+        motion = (BASE / 'MarkdownReveal.kt').read_text()
+        self.assertIn('live: Boolean = streaming', typing)
+        self.assertIn('val targetTerminal = terminal && exactProjection', typing)
+        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live)', typing)
+        self.assertIn('if (live || streaming) { seenLive = true; closed = false }', motion)
+        self.assertIn('if (terminal && total > 0 && start >= total) closed = true', motion)
+
     def test_container_passes_state_without_subscribing_to_the_frame(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         blocks = ui.split('private fun MarkdownBlocks(', 1)[1].split('private fun MarkdownBlockBody(', 1)[0]

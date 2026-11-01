@@ -15,7 +15,9 @@ class WorkflowNarrationContract(unittest.TestCase):
         self.assertIn('if (work?.running == true) AssistantWorkflowContent(work, steps, emptyList(), narration, pending = body)', workflow)
         self.assertIn('ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }', chat)
         self.assertIn('steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }', chat)
-        self.assertNotIn('ordered.pending', chat)
+        self.assertNotIn('ordered.pending.filterIsInstance', chat)
+        self.assertIn('ordered.pending.isEmpty() && contentReady', chat)
+        self.assertIn('live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()', chat)
 
     def test_real_source_identity_and_all_trailing_text_items_are_retained(self):
         mapper = (BASE / 'ChatTurnMapper.kt').read_text()

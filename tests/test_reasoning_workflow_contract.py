@@ -56,7 +56,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         source = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertNotIn('ReportedReasoningCard(', source)
         self.assertEqual(1, source.count('WorkProcessCard('))
-        self.assertIn('val ordered = rememberAssistantWorkflowContent(turn)', source)
+        self.assertIn('val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)', source)
         self.assertIn('val ordered = remember(turn) { turn.workflowContent() }', (CHAT / 'AssistantWorkflowContent.kt').read_text())
         self.assertIn('MessageContent(steps,', source)
         self.assertIn('ReasoningStepRow(ownerKey, reported, connector,', source)

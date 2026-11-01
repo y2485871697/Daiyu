@@ -31,8 +31,8 @@ class MarkdownTypingContract(unittest.TestCase):
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)", self.chat)
         self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)
-        self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources)", self.chat)
-        self.assertIn("blockedSources = blockedSources)", self.chat)
+        self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources,", self.chat)
+        self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
         self.assertIn("withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }", self.typing)
         for source in [self.typing, self.reveal]:
             for forbidden in ["MarkdownParser.parse", "MarkdownText.render(", "substring(0,", "Thread.sleep", "delay("]:
@@ -84,7 +84,7 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_elapsed_time_drain_and_stale_target_guards_are_present(self):
         for token in ["if (target !== expected)", "frameNanos - lastFrame", "250_000_000.0",
-                      "if (streaming) { seenStreaming = true; closed = false }", "if (parts == null || baselineLength == null) return target",
+                      "if (live || streaming) { seenLive = true; closed = false }", "if (parts == null || baselineLength == null) return target",
                       "previous[index].id == next[index].id", "next[index].text.startsWith(previous[index].text)"]:
             self.assertIn(token, self.reveal)
 

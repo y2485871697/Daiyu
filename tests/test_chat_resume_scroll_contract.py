@@ -60,19 +60,22 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('if (resumeFollowPending) revealResetEpoch++', self.chat)
         self.assertIn('revealResetEpoch = revealResetEpoch', self.chat)
         self.assertIn(
-            'rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance, '
-            'enabled = turn.content.isNotEmpty() || reasoningReady, reasoningReady = handoff::ready, blockedSources = blockedSources)',
+            'rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming, '
+            'terminal = generationComplete, resetEpoch = revealResetEpoch, '
+            'onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources, '
+            'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())',
             ' '.join(self.chat.split()),
         )
         self.assertIn('remember(identity, resetEpoch) { sources.toList() }', self.typing)
         self.assertIn('remember(identity, resetEpoch) { MarkdownTypingState(baseline) }', self.typing)
         self.assertIn(
             'return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, '
-            'turn.status != RunStatus.RUNNING && prefix.size == turn.content.size, resetEpoch, onVisibleAdvance, enabled, blockedSources = blockedSources)',
+            'turn.status != RunStatus.RUNNING && prefix.size == turn.content.size, resetEpoch, onVisibleAdvance, enabled, '
+            'blockedSources = blockedSources, live = turn.status == RunStatus.RUNNING)',
             ' '.join(self.typing.split()),
         )
-        self.assertIn('remember(motion, parts, baselineLength, streaming, terminal)', self.typing)
-        self.assertIn('motion.update(parts, baselineLength, streaming, terminal)', self.typing)
+        self.assertIn('remember(motion, parts, baselineLength, streaming, targetTerminal, live)', self.typing)
+        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live)', self.typing)
         self.assertNotIn('key(revealResetEpoch)', self.chat)
         resume_gate = (
             'resumeFollowPending && tail != null && '

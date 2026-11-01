@@ -166,11 +166,12 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var lastFrame = 0L
     private var drainStart = 0L
     private var drainPosition = 0.0
-    private var seenStreaming = false
+    private var seenLive = false
     private var closed = false
 
-    fun update(parts: List<MarkdownTypingPart>?, baselineLength: Int?, streaming: Boolean, terminal: Boolean): MarkdownTypingTarget? {
-        if (streaming) { seenStreaming = true; closed = false }
+    fun update(parts: List<MarkdownTypingPart>?, baselineLength: Int?, streaming: Boolean, terminal: Boolean,
+        live: Boolean = streaming): MarkdownTypingTarget? {
+        if (live || streaming) { seenLive = true; closed = false }
         if (parts == null || baselineLength == null) return target
         val previous = target
         val sources = parts.map { it.source }
@@ -178,7 +179,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         val appending = markdownTypingAppends(previous?.parts?.map { it.source } ?: baseline, sources)
         val mapped = if (previous != null && appending) mappedMarkdownPosition(previous, parts, position) else position
         val start = when {
-            !seenStreaming || closed || !appending -> total
+            !seenLive || closed || !appending -> total
             previous == null -> baselineLength.coerceAtMost(total)
             else -> mapped.toInt().coerceAtMost(total)
         }
@@ -187,7 +188,8 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (!streaming) { drainStart = 0L; drainPosition = position }
         val next = MarkdownTypingTarget(parts, start, streaming, terminal)
         target = next
-        if (terminal && start >= total) closed = true
+        // An empty live body can still be waiting for its first classified answer.
+        if (terminal && total > 0 && start >= total) closed = true
         return next
     }
 

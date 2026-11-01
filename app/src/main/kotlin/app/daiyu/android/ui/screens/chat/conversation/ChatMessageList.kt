@@ -501,7 +501,7 @@ internal fun AssistantTurn(
     val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)
     val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)
     val contentReady = projection?.sources == sources
-    val generationComplete = turn.status != RunStatus.RUNNING && contentReady
+    val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady
     var answerReleased by rememberSaveable(turn.listKey) {
         mutableStateOf(ordered.work == null && reasoningReady && ordered.body.isNotEmpty())
     }
@@ -512,7 +512,8 @@ internal fun AssistantTurn(
     }
     val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,
         terminal = generationComplete, resetEpoch = revealResetEpoch,
-        onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources)
+        onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources,
+        live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { mutableStateOf(false) }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true

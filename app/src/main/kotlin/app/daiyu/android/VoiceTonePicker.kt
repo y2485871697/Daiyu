@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.components.GroupedPickerSearch
+import app.daiyu.android.ui.components.GroupedPickerEmptyState
 import app.daiyu.android.ui.components.pickerGroupSurface
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.haptics.clickable
@@ -85,71 +86,74 @@ internal fun VoiceTonePicker(
             GroupedPickerSearch(query, { query = it }, "搜索音色", "搜索音色",
                 Modifier.testTag("voice-tone-search"))
             Spacer(Modifier.height(16.dp))
-            message?.let { Text(it, color = colors.muted, fontSize = 13.sp, lineHeight = 20.sp,
+            if (groups.isNotEmpty()) message?.let { Text(it, color = colors.muted, fontSize = 13.sp, lineHeight = 20.sp,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)) }
             extraContent()
-            LazyColumn(Modifier.testTag("voice-tone-list").fillMaxWidth().weight(1f)
-                .padding(end = 2.dp).selectableGroup(), state = listState) {
-                groups.forEach { (category, rows) ->
-                    val open = if (search.isNotEmpty()) category !in searchCollapsed else expanded == category
-                    val surface = Color.White.copy(alpha = if (colors.dark) .012f else .14f)
-                    item(key = "heading:$category") {
-                        Row(Modifier.animateItem(fadeInSpec = null, placementSpec = tween(220), fadeOutSpec = null)
-                            .testTag("voice-tone-group:$category").fillMaxWidth()
-                            .pickerGroupSurface(top = true, bottom = !open, surface = surface, line = colors.line)
-                            .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                                if (search.isNotEmpty()) searchCollapsed = if (open) searchCollapsed + category else searchCollapsed - category
-                                else expanded = if (open) null else category
-                            }.semantics { heading(); stateDescription = if (open) "已展开" else "已折叠" }
-                            .heightIn(min = 56.dp).padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(category, color = colors.toolbar, fontSize = 14.sp, lineHeight = 20.sp,
-                                    fontWeight = FontWeight.Medium, textAlign = TextAlign.Start,
-                                    modifier = Modifier.fillMaxWidth().testTag("voice-tone-group-name:$category"))
-                                Text("${rows.size} 个音色", color = colors.muted, fontSize = 12.sp, lineHeight = 18.sp)
-                            }
-                            Icon(DaiyuIcons.ChevronRight, null,
-                                Modifier.size(18.dp).settingsDisclosureRotation(open), tint = colors.muted)
-                        }
-                    }
-                    if (open) itemsIndexed(rows, key = { _, voice -> "voice:${voice.id}" }) { index, voice ->
-                        val selected = voice.id == selectedId
-                        Box(Modifier.animateItem(fadeInSpec = tween(220), placementSpec = tween(220), fadeOutSpec = null)
-                            .fillMaxWidth().pickerGroupSurface(top = false, bottom = index == rows.lastIndex,
-                                surface = surface, line = colors.line)
-                            .padding(start = 4.dp, end = 4.dp, bottom = if (index == rows.lastIndex) 4.dp else 2.dp)) {
-                            Row(Modifier.testTag(voice.tag).fillMaxWidth().alpha(if (voice.enabled) 1f else .45f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(when { selected -> colors.selectionContainer; colors.dark -> colors.background; else -> Color.Transparent })
-                                .selectable(selected = selected, enabled = voice.enabled, role = Role.RadioButton,
-                                    interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                    onClick = { onSelect(voice.id) })
-                                .heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 12.dp),
+            Box(Modifier.fillMaxWidth().weight(1f).testTag("voice-tone-content")) {
+                LazyColumn(Modifier.testTag("voice-tone-list").fillMaxSize()
+                    .padding(end = 2.dp).selectableGroup(), state = listState) {
+                    groups.forEach { (category, rows) ->
+                        val open = if (search.isNotEmpty()) category !in searchCollapsed else expanded == category
+                        val surface = Color.White.copy(alpha = if (colors.dark) .012f else .14f)
+                        item(key = "heading:$category") {
+                            Row(Modifier.animateItem(fadeInSpec = null, placementSpec = tween(220), fadeOutSpec = null)
+                                .testTag("voice-tone-group:$category").fillMaxWidth()
+                                .pickerGroupSurface(top = true, bottom = !open, surface = surface, line = colors.line)
+                                .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                                    if (search.isNotEmpty()) searchCollapsed = if (open) searchCollapsed + category else searchCollapsed - category
+                                    else expanded = if (open) null else category
+                                }.semantics { heading(); stateDescription = if (open) "已展开" else "已折叠" }
+                                .heightIn(min = 56.dp).padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(voice.name, color = if (selected) colors.selectionContent else colors.text,
-                                        fontSize = 16.sp, lineHeight = 24.sp, textAlign = TextAlign.Start,
-                                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    voice.summary?.let { Text(it, color = colors.muted, fontSize = 12.sp, lineHeight = 18.sp,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp)) }
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(category, color = colors.toolbar, fontSize = 14.sp, lineHeight = 20.sp,
+                                        fontWeight = FontWeight.Medium, textAlign = TextAlign.Start,
+                                        modifier = Modifier.fillMaxWidth().testTag("voice-tone-group-name:$category"))
+                                    Text("${rows.size} 个音色", color = colors.muted, fontSize = 12.sp, lineHeight = 18.sp)
                                 }
-                                Box(Modifier.size(22.dp).testTag("voice-tone-indicator:${voice.id}").clip(CircleShape)
-                                    .background(if (selected) colors.accent else Color.Transparent), contentAlignment = Alignment.Center) {
-                                    if (selected) Icon(DaiyuIcons.Check, "已选择", Modifier.size(14.dp), tint = colors.onPrimary)
+                                Icon(DaiyuIcons.ChevronRight, null,
+                                    Modifier.size(18.dp).settingsDisclosureRotation(open), tint = colors.muted)
+                            }
+                        }
+                        if (open) itemsIndexed(rows, key = { _, voice -> "voice:${voice.id}" }) { index, voice ->
+                            val selected = voice.id == selectedId
+                            Box(Modifier.animateItem(fadeInSpec = tween(220), placementSpec = tween(220), fadeOutSpec = null)
+                                .fillMaxWidth().pickerGroupSurface(top = false, bottom = index == rows.lastIndex,
+                                    surface = surface, line = colors.line)
+                                .padding(start = 4.dp, end = 4.dp, bottom = if (index == rows.lastIndex) 4.dp else 2.dp)) {
+                                Row(Modifier.testTag(voice.tag).fillMaxWidth().alpha(if (voice.enabled) 1f else .45f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(when { selected -> colors.selectionContainer; colors.dark -> colors.background; else -> Color.Transparent })
+                                    .selectable(selected = selected, enabled = voice.enabled, role = Role.RadioButton,
+                                        interactionSource = remember { MutableInteractionSource() }, indication = null,
+                                        onClick = { onSelect(voice.id) })
+                                    .heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(voice.name, color = if (selected) colors.selectionContent else colors.text,
+                                            fontSize = 16.sp, lineHeight = 24.sp, textAlign = TextAlign.Start,
+                                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        voice.summary?.let { Text(it, color = colors.muted, fontSize = 12.sp, lineHeight = 18.sp,
+                                            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp)) }
+                                    }
+                                    Box(Modifier.size(22.dp).testTag("voice-tone-indicator:${voice.id}").clip(CircleShape)
+                                        .background(if (selected) colors.accent else Color.Transparent), contentAlignment = Alignment.Center) {
+                                        if (selected) Icon(DaiyuIcons.Check, "已选择", Modifier.size(14.dp), tint = colors.onPrimary)
+                                    }
                                 }
                             }
                         }
-                    }
-                    item(key = "gap:$category") {
-                        Spacer(Modifier.animateItem(fadeInSpec = null, placementSpec = tween(220), fadeOutSpec = null).height(12.dp))
+                        item(key = "gap:$category") {
+                            Spacer(Modifier.animateItem(fadeInSpec = null, placementSpec = tween(220), fadeOutSpec = null).height(12.dp))
+                        }
                     }
                 }
-                if (groups.isEmpty() && (search.isNotEmpty() || message == null)) item(key = "empty") {
-                    Text(if (search.isNotEmpty()) "没有找到匹配的音色" else "暂无可选音色", color = colors.muted, fontSize = 14.sp, lineHeight = 22.sp,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
-                }
+                if (groups.isEmpty()) GroupedPickerEmptyState(
+                    if (search.isNotEmpty()) "没有找到匹配的音色" else message ?: "暂无可选音色",
+                    Modifier.matchParentSize().testTag("voice-tone-empty"),
+                    fontSize = if (search.isEmpty() && message != null) 13.sp else 14.sp,
+                    lineHeight = if (search.isEmpty() && message != null) 20.sp else 22.sp)
             }
         }
     }

@@ -23,7 +23,8 @@ class ModelPickerCaptionContractTest(unittest.TestCase):
     def test_shared_picker_keeps_real_status_feedback_instead_of_hiding_all_messages(self):
         text = (SRC / 'ui/screens/chat/conversation/ChatModelPicker.kt').read_text()
         for fragment in ('showStatusMessages: Boolean = true', 'state.message != null -> state.message',
-                         'if (showStatusMessages && status != null) Text(status',
+                         'if (showStatusMessages && status != null && hasListContent) Text(status',
+                         'showStatusMessages && status != null -> status', 'GroupedPickerEmptyState(it,',
                          'state.loading -> "正在读取模型目录…"', '"当前任务结束后可切换模型"'):
             self.assertIn(fragment, text)
         self.assertNotIn(PROMPT, text)

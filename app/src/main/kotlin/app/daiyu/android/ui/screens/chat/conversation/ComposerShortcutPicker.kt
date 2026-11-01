@@ -79,14 +79,10 @@ internal fun ComposerShortcutPicker(kind: ComposerShortcutKind, initialQuery: St
                 }
             }
             if (filtered?.isEmpty() == true) item {
-                if (conversation) {
-                    Text("暂无可引用会话", Modifier.fillMaxWidth().padding(20.dp),
-                        color = colors.muted, fontSize = 13.sp)
-                } else {
-                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("暂无可用 Skill", Modifier.padding(20.dp), color = colors.muted,
-                            fontSize = 13.sp, textAlign = TextAlign.Center)
-                    }
+                Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(if (conversation) "暂无可引用会话" else "暂无可用 Skill",
+                        Modifier.fillMaxWidth().padding(20.dp), color = colors.muted,
+                        fontSize = 13.sp, textAlign = TextAlign.Center)
                 }
             }
         }

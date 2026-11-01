@@ -14,15 +14,12 @@ class SkillPickerEmptyStateContractTest(unittest.TestCase):
         self.assertIn('error != null -> error; filtered == null -> "正在加载"', status)
         self.assertIn('"个会话" else "个 Skill"', status)
 
-    def test_skill_empty_item_fills_and_centers_in_list_without_changing_conversations(self):
+    def test_both_empty_kinds_fill_and_center_in_the_same_list_viewport(self):
         source = PICKER.read_text()
         empty = source.split("if (filtered?.isEmpty() == true) item {", 1)[1]
-        self.assertIn('if (conversation) {', empty)
-        self.assertIn('Text("暂无可引用会话", Modifier.fillMaxWidth().padding(20.dp)', empty)
-        skill = empty.split("} else {", 1)[1]
-        self.assertIn("Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center)", skill)
-        self.assertIn('Text("暂无可用 Skill"', skill)
-        self.assertIn("textAlign = TextAlign.Center", skill)
+        self.assertIn("Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center)", empty)
+        self.assertIn('Text(if (conversation) "暂无可引用会话" else "暂无可用 Skill"', empty)
+        self.assertIn("textAlign = TextAlign.Center", empty)
         self.assertIn('testTag("reference-picker-list")', source)
         self.assertIn('clickable { onChoose(choice) }', source)
 

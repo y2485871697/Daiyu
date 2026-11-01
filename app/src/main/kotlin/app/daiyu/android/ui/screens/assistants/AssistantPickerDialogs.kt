@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -108,7 +109,8 @@ fun AssistantPickerDialog(
                 modifier = Modifier.alignByBaseline(), fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("assistant-list"),
-            contentPadding = PaddingValues(start = 2.dp * s, end = 2.dp * s, top = 2.dp * s, bottom = 7.dp * s),
+            contentPadding = if (filtered.isEmpty()) PaddingValues(0.dp)
+                else PaddingValues(start = 2.dp * s, end = 2.dp * s, top = 2.dp * s, bottom = 7.dp * s),
             verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
             items(filtered, key = { it.id }) { profile ->
                 AssistantProfileCard(profile, profile.id == selectedId,
@@ -117,9 +119,11 @@ fun AssistantPickerDialog(
                     modifier = Modifier.testTag("assistant-item-${profile.id}"))
             }
             if (filtered.isEmpty()) item {
-                Text(stringResource(R.string.assistant_empty), color = colors.muted, fontSize = (13f * s).sp,
-                    lineHeight = (20f * s).sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp * s, vertical = 22.dp * s))
+                Box(Modifier.fillParentMaxSize().testTag("assistant-picker-empty"), contentAlignment = Alignment.Center) {
+                    Text(stringResource(R.string.assistant_empty), color = colors.muted, fontSize = (13f * s).sp,
+                        lineHeight = (20f * s).sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp * s, vertical = 22.dp * s))
+                }
             }
         }
     }

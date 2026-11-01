@@ -36,7 +36,8 @@ class PetErrorLoggingContract(unittest.TestCase):
         self.assertIn('catch (_: Exception) { failed = true; onLoadFailure() }', settings)
         picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')
         self.assertIn('showStatusMessages: Boolean = true', picker)
-        self.assertIn('if (showStatusMessages && status != null) Text(status,', picker)
+        self.assertIn('if (showStatusMessages && status != null && hasListContent) Text(status,', picker)
+        self.assertIn('showStatusMessages && status != null -> status', picker)
         self.assertIn('val canSelect = state.enabled && !state.loading', picker)
         self.assertIn('enabled = canSelect', picker)
 

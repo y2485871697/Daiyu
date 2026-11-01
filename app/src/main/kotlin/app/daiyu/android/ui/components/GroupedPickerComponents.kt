@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -52,6 +54,17 @@ internal fun GroupedPickerSearch(
                 }
             }
         })
+}
+
+@Composable
+internal fun GroupedPickerEmptyState(message: String, modifier: Modifier = Modifier,
+    fontSize: TextUnit = 14.sp, lineHeight: TextUnit = 22.sp) {
+    val colors = usagePalette()
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Text(message, color = colors.muted, fontSize = fontSize, lineHeight = lineHeight,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp))
+    }
 }
 
 // Draw a continuous card across lazy rows without composing an entire large catalog at once.

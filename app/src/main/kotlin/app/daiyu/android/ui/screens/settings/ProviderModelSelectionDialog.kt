@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import app.daiyu.android.model.catalog.ModelSelectionState
 import app.daiyu.android.ui.components.MiuixDialogActions
 import app.daiyu.android.ui.components.usagePalette
+import app.daiyu.android.ui.components.GroupedPickerEmptyState
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import top.yukonga.miuix.kmp.basic.Text
@@ -137,8 +138,8 @@ internal fun ProviderModelSelectionDialog(
                 )
             }
             if (selection.visibleCount == 0) {
-                Text(if (selection.totalCount == 0) "远端模型目录为空" else "没有匹配的模型",
-                    modifier = Modifier.padding(vertical = 16.dp).testTag("provider-model-empty"))
+                GroupedPickerEmptyState(if (selection.totalCount == 0) "远端模型目录为空" else "没有匹配的模型",
+                    modifier = Modifier.fillMaxWidth().weight(1f).testTag("provider-model-empty"))
             } else {
                 LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("provider-model-list")) {
                     items(selection.visibleModels, key = { it.id }) { model ->

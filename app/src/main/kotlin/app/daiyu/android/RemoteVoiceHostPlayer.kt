@@ -38,10 +38,10 @@ internal class RemoteVoiceHostPlayer(
     @Volatile private var closed = false
     private var releaseFailure: Throwable? = null
     private val handler = Handler(Looper.getMainLooper())
-    private val unobserve = runtime.observeInvalidation { profile ->
+    private val unobserve: () -> Unit = runtime.observeInvalidation { profile ->
         if (profile == null || profile == frozen.profile) releaseOnMain(handler) { closeStrict() }
     }
-    override fun bindOwner(owner: String) = releaseOnMain(handler) {
+    override fun bindOwner(owner: String): Unit = releaseOnMain(handler) {
         check(!closed)
         if (this.owner != null && this.owner != owner) releaseMedia()
         this.owner = owner
@@ -148,7 +148,7 @@ internal class RemoteVoiceHostPlayer(
         if (this.owner != owner) return false
         closeStrict(); return true
     }
-    override fun closeStrict() = releaseOnMain(handler) {
+    override fun closeStrict(): Unit = releaseOnMain(handler) {
         check(!releasing) { "voice_release_in_progress" }
         if (!closed) {
             closed = true

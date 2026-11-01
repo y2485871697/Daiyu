@@ -7,7 +7,7 @@ import app.daiyu.android.storage.ConversationDatabase
 import java.security.MessageDigest
 
 /** Per accepted run. Check physical rows (including segments) before expanding any request.
- * The two exceptions are exact capabilities, never message-ID prefixes. */
+ * Exceptions are exact capabilities or deterministic history views, never message-ID prefixes. */
 internal class ControllerVisionAuthorization(
     private val database: ConversationDatabase,
     private val assistant: Message,
@@ -46,7 +46,10 @@ internal class ControllerVisionAuthorization(
                 val projection = saved != null && saved.id == assistant.id && saved.runId == assistant.runId &&
                     saved.role == Message.ASSISTANT_ROLE && saved.status == RunStatus.RUNNING && saved.error == null &&
                     row == saved.copy(status = RunStatus.COMPLETED, error = null)
-                check(row == saved || summary || projection || candidate != null && saved == null && row == candidate) {
+                // The model may receive the deterministic terminal-UNKNOWN view, never an
+                // arbitrary rewritten owner. Compare against authoritative physical data first.
+                val historicalProjection = saved != null && row == ModelHistory.project(listOf(saved)).single()
+                check(row == saved || historicalProjection || summary || projection || candidate != null && saved == null && row == candidate) {
                     "auxiliary_raw_row_not_authorized"
                 }
             }

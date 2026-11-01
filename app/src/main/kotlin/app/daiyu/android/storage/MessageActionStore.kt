@@ -161,9 +161,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         }
         val prefix = MessageHistoryCut.prefix(history, userIndex)
         // Historical tool results stay data. No prior tool session, approval or attempt is resumed.
-        require(MessageHistory.expand(prefix).none { row -> row.blocks.any { it is MessageBlock.Tool && it.result == null } }) {
-            "保留的历史有未确认工具结果；请先核实结果"
-        }
+        ModelHistory.requireResolvedTools(prefix)
         require(history.all { SQLiteMessageVideoStore.readVerified(db, it).isEmpty() }) {
             "重新提交原视频需要新的上传批准"
         }

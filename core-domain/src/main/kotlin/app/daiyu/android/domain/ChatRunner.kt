@@ -664,7 +664,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     }
                     if (!admitted) continue
                     val opened = try {
-                        if (tool is CatalogTool) model.open(modelHistory, requestDefinitions) else model.open(modelHistory)
+                        val projected = ModelHistory.requireResolvedTools(modelHistory)
+                        if (tool is CatalogTool) model.open(projected, requestDefinitions) else model.open(projected)
                     } catch (failure: Exception) {
                         val invalidated = synchronized(terminalLock) {
                             if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
@@ -1473,7 +1474,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     failure.codes.mapNotNull(::toolFailureDiagnostic).distinct().take(4).joinToString("、").let { if (it.isEmpty()) "" else "（原因：$it）" } else
                 if (failure is TransportReconnectDeadlineException) failure.userMessage else
                 if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.userMessage else "请求失败，请检查模型设置或网络"
-            val next = current.copy(status = status, error = if (status == RunStatus.STOPPED || status == RunStatus.COMPLETED) null else baseError)
+            // Close only ended, uncertain executions. This is a reported UNKNOWN, not a
+            // result cache or a ledger confirmation; the current run still stops here.
+            val unknownIds = records.values.filter { it.disposition == ToolDisposition.UNKNOWN }
+                .map { it.invocation.id }.toSet()
+            val next = current.copy(status = status,
+                blocks = current.blocks.map { block ->
+                    if (block is MessageBlock.Tool && block.result == null && block.invocation.id in unknownIds)
+                        block.copy(result = ModelHistory.UNKNOWN_TOOL_RESULT) else block
+                },
+                error = if (status == RunStatus.STOPPED || status == RunStatus.COMPLETED) null else baseError)
             val runtime = options.runtimeStore
             val terminalCommitWasAttempted = wasReserved && status == RunStatus.COMPLETED
             // A terminal write may have succeeded before throwing. Never replace it with

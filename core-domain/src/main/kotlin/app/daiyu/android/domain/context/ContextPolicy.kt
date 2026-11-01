@@ -67,7 +67,7 @@ data class CompressionPolicy(val enabled: Boolean = false, val contextTokens: Lo
 }
 
 /** Deliberately an estimate, never presented as provider usage. UTF-8 bytes is conservative. */
-fun estimateTokens(messages: List<Message>): Long = MessageHistory.expand(messages).sumOf { m ->
+fun estimateTokens(messages: List<Message>): Long = MessageHistory.expand(ModelHistory.project(messages)).sumOf { m ->
     16L + m.blocks.sumOf { b -> when (b) {
         is MessageBlock.Text -> b.text.toByteArray(Charsets.UTF_8).size.toLong()
         // A byte-count heuristic only, not provider image usage; never count just the tiny reference.

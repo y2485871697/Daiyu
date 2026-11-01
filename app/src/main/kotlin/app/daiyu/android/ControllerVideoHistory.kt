@@ -181,8 +181,8 @@ internal class ControllerMessageVideos(
     }
 
     /** The initial empty active assistant is not model input. On later Runner opens its sealed
-     * segments may be supplied as COMPLETED while SQLite still owns RUNNING; only that status/error
-     * projection is tolerated. All other physical history and every video user must be present.
+     * segments may be supplied as COMPLETED while SQLite still owns RUNNING. Historical UNKNOWN
+     * rows may use the same deterministic model view. Every physical row and video user remains required.
      * modelFactory is a test seam; production constructs ResponsesModel with the SAME permission
      * and frozen assistant instructions. No caller-supplied generic ModelPort can drop videos.
      * postApproval is run-local and mandatory for videos: each actual freeze is registered before
@@ -215,7 +215,7 @@ internal class ControllerMessageVideos(
             }
             val rows = physicalVideoHistoryCopy(source)
             validateVideoHistory(rows, emptyList())
-            fun normalized(values: List<Message>): List<Message> = MessageHistory.expand(values).map { row ->
+            fun normalized(values: List<Message>): List<Message> = MessageHistory.expand(ModelHistory.project(values)).map { row ->
                 if (row.id == activeAssistant && row.role == Message.ASSISTANT_ROLE)
                     row.copy(status = RunStatus.COMPLETED, error = null) else row
             }

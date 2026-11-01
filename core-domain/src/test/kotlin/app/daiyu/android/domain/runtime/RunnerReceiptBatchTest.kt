@@ -62,7 +62,12 @@ class RunnerReceiptBatchTest {
         assertEquals("saved", records[0].result)
         assertNull(records[1].result)
         assertTrue(records[2].result!!.contains("executed\":false"))
-        assertEquals("saved", result.blocks.filterIsInstance<MessageBlock.Tool>().first().result)
+        assertEquals(listOf("saved", ModelHistory.UNKNOWN_TOOL_RESULT, records[2].result),
+            result.blocks.filterIsInstance<MessageBlock.Tool>().map { it.result })
+        assertEquals(result.blocks, result.historySegments.flatMap { it.blocks })
+        assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT,
+            probe.checkpoints.last().message.blocks.filterIsInstance<MessageBlock.Tool>()[1].result)
+        assertTrue(probe.outputs.isEmpty()) // Never feed UNKNOWN back into this run.
         assertTrue(result.error!!.contains("禁止重放"))
     }
     @Test fun stopSignalReachesDispatcherAndKeepsKnownReceipts() {
@@ -86,6 +91,8 @@ class RunnerReceiptBatchTest {
             assertEquals(1, probe.executions)
             assertEquals(1, probe.rounds)
             assertTrue(probe.checkpoints.last().tools.all { it.disposition == ToolDisposition.UNKNOWN && it.result == null })
+            assertTrue(result.blocks.filterIsInstance<MessageBlock.Tool>().all { it.result == ModelHistory.UNKNOWN_TOOL_RESULT })
+            assertEquals(result.blocks, result.historySegments.flatMap { it.blocks })
         }
     }
     @Test fun twoBatchRoutesCannotBeConfiguredTogether() {

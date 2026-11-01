@@ -35,7 +35,7 @@ class RunnerToolBoundaryTest {
             assertEquals(RunStatus.FAILED, result.status); assertEquals(1, rounds); assertEquals(1, executions)
             assertTrue(result.error!!.contains("禁止重放")); assertFalse(result.error!!.contains("private-token-secret"))
             assertEquals(code == "adapter_result_unconfirmed_io", result.error!!.contains("adapter_result_unconfirmed_io"))
-            assertNull(result.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
+            assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, result.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
         }
     }
 
@@ -111,6 +111,8 @@ class RunnerToolBoundaryTest {
         assertEquals(0, executions)
         assertEquals(ExecutionPhase.TERMINAL, writes.last().phase)
         assertEquals(ToolDisposition.UNKNOWN, writes.last().tools.single().disposition)
+        assertNull(writes.last().tools.single().result)
+        assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, result.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
         assertTrue(result.error!!.contains("禁止重放"))
     }
 
@@ -349,10 +351,13 @@ class RunnerToolBoundaryTest {
                 is ExecutionReceipt.NotExecuted -> error("unexpected non-execution")
             }
         }
+        val priorHistory = mutableListOf<Message>()
         fun runWithNewRunner(index: Int, invocation: ToolInvocation) {
             val checkpoints = mutableListOf<RunCheckpoint>()
             val message = initial.copy(id = MessageId("assistant-$index"), runId = RunId("run-$index"))
-            val runner = ChatRunner(ModelPort { object : ModelSession {
+            val runner = ChatRunner(ModelPort { supplied ->
+                assertEquals(ModelHistory.project(priorHistory), supplied)
+                object : ModelSession {
                 var round = 0
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     if (round++ == 0) sink(ModelEvent.ToolReady(invocation))
@@ -363,11 +368,17 @@ class RunnerToolBoundaryTest {
                 override fun save(checkpoint: RunCheckpoint) { checkpoints += checkpoint }
             }, toolJournal = journal())) {}
             val before = claims
-            val result = runner.run(message, emptyList())
+            val result = runner.run(message, priorHistory.toList())
+            priorHistory += result
             assertEquals(before + 1, claims)
             assertEquals(RunStatus.FAILED, result.status)
             assertEquals(ExecutionPhase.TERMINAL, checkpoints.last().phase)
             assertEquals(ToolDisposition.UNKNOWN, checkpoints.last().tools.single().disposition)
+            assertNull(checkpoints.last().tools.single().result)
+            assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, result.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
+            assertEquals(result.blocks, result.historySegments.flatMap { it.blocks })
+            assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, ModelHistory.project(listOf(result)).single()
+                .blocks.filterIsInstance<MessageBlock.Tool>().single().result)
         }
         val originalJson = """{"target":"a","body":"hello"}"""
         runWithNewRunner(1, ToolInvocation(ToolCallId("original"), "write_note_local", originalJson))

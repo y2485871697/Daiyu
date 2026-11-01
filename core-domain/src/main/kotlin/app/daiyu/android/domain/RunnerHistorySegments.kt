@@ -77,11 +77,12 @@ internal class RunnerHistorySegments(private val initial: Message, private val n
         reasoning.clear()
         return project(message)
     }
-    private fun active(message: Message, completedToolsOnly: Boolean): List<MessageHistorySegment> {
+    private fun active(message: Message, reportedToolsOnly: Boolean): List<MessageHistorySegment> {
         val assigned = mutableSetOf<String>()
         fun segment(start: Int, end: Int, items: List<String>, last: Boolean): MessageHistorySegment? {
             val blocks = message.blocks.subList(start, end)
-            fun keep(block: MessageBlock) = !completedToolsOnly || block !is MessageBlock.Tool || block.result != null
+            // A result means reported, not confirmed: UNKNOWN reports must survive too.
+            fun keep(block: MessageBlock) = !reportedToolsOnly || block !is MessageBlock.Tool || block.result != null
             val reported = reasoning.values.filter { value ->
                 val offset = value.blockOffset
                 value.itemId !in assigned && (if (offset == null) start == blockStart
@@ -95,7 +96,7 @@ internal class RunnerHistorySegments(private val initial: Message, private val n
             val kept = blocks.filter(::keep)
             if (kept.isEmpty() && items.isEmpty() && reported.isEmpty()) return null
             // Interrupted batches cannot replay protocol calls whose tools were never executed.
-            val safeItems = if (completedToolsOnly && blocks.any { it is MessageBlock.Tool && it.result == null }) emptyList() else items
+            val safeItems = if (reportedToolsOnly && blocks.any { it is MessageBlock.Tool && it.result == null }) emptyList() else items
             return MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, kept.toList(), safeItems.toList(),
                 createdAt = message.createdAt, reportedReasoning = reported)
         }

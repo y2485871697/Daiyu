@@ -102,7 +102,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     }
     private fun requireCapacity(policy: CompressionPolicy, messages: List<Message>) {
         val budget = policy.sendBudgetTokens ?: return
-        val estimate = if (policy.tokenTail) MessageHistory.expand(messages).sumOf(TokenTailCompression::messageTokens) else estimateTokens(messages)
+        val estimate = if (policy.tokenTail) MessageHistory.expand(ModelHistory.project(messages))
+            .sumOf(TokenTailCompression::messageTokens) else estimateTokens(messages)
         if (!policy.fitsSendBudget(estimate))
             throw ContextCapacityExceededException(estimate, budget)
     }

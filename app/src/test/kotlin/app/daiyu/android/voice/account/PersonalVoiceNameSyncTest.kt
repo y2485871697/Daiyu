@@ -244,4 +244,57 @@ class PersonalVoiceNameSyncTest {
         sync(store)
     }
 
+    @Test fun missingCatalogInstanceRetriesOnlyResourceMetadataAcrossRestart() = runBlocking {
+        val file = File(folder.root, "missing-instance.json")
+        var aliasUpdates = 0
+        val actions = mutableListOf<String>()
+        val store = PersonalVoices(file, AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action") ?: request.url.pathSegments.last(); actions += action
+            when (action) {
+                "voice_clone" -> accepted()
+                "BatchListMegaTTSTrainStatus" -> {
+                    val rows = JSONArray()
+                    if (body(request).getString("State") == "Success") rows.put(JSONObject().put("SpeakerID", "S_owned")
+                        .put("Alias", "old").put("State", "Success"))
+                    response(JSONObject().put("Result", JSONObject().put("TotalCount", rows.length()).put("Statuses", rows)))
+                }
+                "ResourcePacksStatus" -> response(JSONObject().put("Result", JSONObject().put("TotalCount", 1)
+                    .put("Packs", JSONArray().put(resource()))))
+                "AliasResourcePack" -> {
+                    aliasUpdates++; assertEquals("resource-instance", body(request).getString("InstanceNumber"))
+                    throw IOException("lost alias response")
+                }
+                else -> error("Never re-train or query speech after creation")
+            }
+        })
+        create(store)
+        try { sync(store); fail("expected lost alias receipt") } catch (_: IOException) { }
+        assertTrue(store.state.value.single().nameSyncPending)
+        assertTrue(store.state.value.single().accepted); assertEquals(2, store.state.value.single().status)
+        val retryActions = mutableListOf<String>()
+        val restarted = PersonalVoices(file, AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; retryActions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> {
+                    val rows = JSONArray()
+                    if (body(request).getString("State") == "Success") rows.put(JSONObject().put("SpeakerID", "S_owned")
+                        .put("Alias", "old").put("State", "Success"))
+                    response(JSONObject().put("Result", JSONObject().put("TotalCount", rows.length()).put("Statuses", rows)))
+                }
+                "ResourcePacksStatus" -> response(JSONObject().put("Result", JSONObject().put("TotalCount", 1)
+                    .put("Packs", JSONArray().put(resource("我的声音").apply { remove("InstanceNumber") }))))
+                else -> error("Confirmed cloud name must not update again")
+            }
+        })
+        restarted.load()
+        assertTrue(restarted.state.value.single().nameSyncPending)
+        assertTrue(restarted.state.value.single().accepted); assertEquals(2, restarted.state.value.single().status)
+        sync(restarted)
+        assertFalse(restarted.state.value.single().nameSyncPending)
+        assertEquals("我的声音", restarted.state.value.single().name)
+        assertEquals(1, aliasUpdates)
+        assertEquals(listOf("voice_clone") + nameReads + listOf("ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertEquals(nameReads + "ResourcePacksStatus", retryActions)
+    }
+
 }

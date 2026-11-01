@@ -27,6 +27,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private var importQueryFails = false
     private var importVoiceQueryFails = false
     private var importAliasFails = false
+    private var importCatalogInstanceMissing = false
     private var remoteImportAlias = "remote name"
     private var creationQueryFails = false
     private var creationRemoteIds = listOf("S_available")
@@ -72,6 +73,14 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                 if (request.url.host == "open.volcengineapi.com") {
                     check(!importQueryFails) { "Synthetic import query failure" }
                     when (request.url.queryParameter("Action")) {
+                        "ResourcePacksStatus" -> {
+                            check(body.getString("ProjectName") == "default")
+                            check(body.getJSONArray("ResourceIDs").toString() == JSONArray().put("volc.megatts.voiceclone").toString())
+                            check(body.getJSONArray("Types").toString() == JSONArray().put("access").toString())
+                            JSONObject().put("Result", JSONObject().put("TotalCount", 1)
+                                .put("Packs", JSONArray().put(JSONObject().put("TrainID", "S_available")
+                                    .put("InstanceNumber", "import-resource").put("Alias", remoteImportAlias))))
+                        }
                         "AliasResourcePack" -> {
                             check(!importAliasFails) { "Synthetic alias failure" }
                             check(body.getString("TrainID") == "S_available")
@@ -99,7 +108,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                             JSONObject().put("Result", JSONObject().put("TotalCount", ids.size)
                                 .put("Statuses", JSONArray().apply { ids.forEach {
                                     put(JSONObject().put("SpeakerID", it).put("State", state).put("Alias", if (aliasLookup) remoteImportAlias else it)
-                                        .put("InstanceNO", "import-resource").put("AvailableTrainingTimes", if (it == "S_exhausted") 0 else 3))
+                                        .apply { if (!importCatalogInstanceMissing) put("InstanceNO", "import-resource") }.put("AvailableTrainingTimes", if (it == "S_exhausted") 0 else 3))
                                 } }))
                         }
                     }
@@ -603,6 +612,19 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         assertEquals(6, requests.get()); assertEquals("我的备注", remoteImportAlias)
         val voice = resources.voices.state.value.single { it.id == "S_available" }
         assertEquals("我的备注", voice.name); assertFalse(voice.nameSyncPending)
+        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testImportWithMissingCatalogInstanceUsesOriginalResourceWithoutClone() {
+        mount(available = true, flow = "IMPORT")
+        importCatalogInstanceMissing = true
+        importDirectly("补查实例名称")
+        val success = "声音已导入，名称已同步到云端。"
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
+        assertImportedVoiceReadyForUse()
+        assertEquals(7, requests.get()); assertEquals("补查实例名称", remoteImportAlias)
+        val voice = resources.voices.state.value.single { it.id == "S_available" }
+        assertEquals("补查实例名称", voice.name); assertFalse(voice.nameSyncPending)
         assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
     }
 

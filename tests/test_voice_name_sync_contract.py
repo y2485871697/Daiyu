@@ -20,8 +20,18 @@ class VoiceNameSyncContractTest(unittest.TestCase):
                       '.put("TrainID", id).put("InstanceNumber", instance).put("Alias", name)',
                       'resource.instanceNumber', 'resource.alias == name', 'listOf(ak, sk)'):
             self.assertIn(token, source)
-        for forbidden in ('ResourcePacksStatus', 'voice_clone', 'X-Api-Key', '10029', 'Thread.sleep', 'delay(', 'retry('):
+        for forbidden in ('voice_clone', 'X-Api-Key', '10029', 'Thread.sleep', 'delay(', 'retry('):
             self.assertNotIn(forbidden, source)
+
+    def test_missing_catalog_instance_uses_scoped_complete_resource_lookup(self):
+        source = (SRC / "voice/account/DoubaoVoiceAliases.kt").read_text()
+        for token in ('resource.instanceNumber.isBlank()', 'findResourcePack(ak, sk, project, id)',
+                      '"ResourcePacksStatus"', '.put("ResourceIDs", JSONArray().put("volc.megatts.voiceclone"))',
+                      '.put("Types", JSONArray().put("access"))', 'pack.opt("TrainID") != id',
+                      'if (matched != null)', 'pack.opt("InstanceNumber") as? String', 'pack?.opt("Alias") == name'):
+            self.assertIn(token, source)
+        self.assertLess(source.index('if (resource.alias == name) return'), source.index('resource.instanceNumber.isBlank()'))
+        self.assertLess(source.index('if (instance.isBlank())'), source.index('request("AliasResourcePack"'))
 
     def test_panel_uses_saved_account_credentials_and_separates_feedback(self):
         panel = (SRC / "VoiceAccountPanel.kt").read_text()

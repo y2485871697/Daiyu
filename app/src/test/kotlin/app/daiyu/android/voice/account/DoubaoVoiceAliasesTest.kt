@@ -1,6 +1,7 @@
 package app.daiyu.android.voice.account
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
 import okhttp3.Request
 import okio.Buffer
 import org.json.JSONArray
@@ -61,8 +62,11 @@ class DoubaoVoiceAliasesTest {
             var updates = 0
             val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
                 if (request.url.queryParameter("Action") == "AliasResourcePack") updates++
-                assertEquals("BatchListMegaTTSTrainStatus", request.url.queryParameter("Action"))
-                listed(request, rows)
+                when (request.url.queryParameter("Action")) {
+                    "BatchListMegaTTSTrainStatus" -> listed(request, rows)
+                    "ResourcePacksStatus" -> response(JSONObject().put("TotalCount", 0).put("Packs", JSONArray()))
+                    else -> error("No mutation allowed")
+                }
             })
             try { rename(api); fail("expected exact mapping failure") } catch (_: VoiceCatalogFailure) { }
             assertEquals(0, updates)
@@ -143,5 +147,156 @@ class DoubaoVoiceAliasesTest {
             })
             try { rename(api); fail("expected acknowledgement failure") } catch (_: VoiceCatalogFailure) { }
         }
+    }
+
+    private fun packs(rows: JSONArray, total: Int = rows.length()) =
+        response(JSONObject().put("TotalCount", total).put("Packs", rows))
+    private fun missingInstance(request: Request, alias: String = "old") =
+        listed(request, JSONArray().put(slot(alias = alias).apply { remove("InstanceNO") }))
+
+    @Test fun omittedCatalogInstanceFallsBackToScopedResourcePackAndNamesOnlyOriginalId() = runBlocking {
+        for (instance in listOf(null, JSONObject.NULL, "", "   ", 42)) {
+            val actions = mutableListOf<String>()
+            val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                val action = request.url.queryParameter("Action")!!; actions += action
+                val json = body(request)
+                when (action) {
+                    "BatchListMegaTTSTrainStatus" -> listed(request, JSONArray().put(slot().apply {
+                        remove("InstanceNO"); if (instance != null) put("InstanceNO", instance)
+                    }))
+                    "ResourcePacksStatus" -> {
+                        assertEquals("2025-05-20", request.url.queryParameter("Version"))
+                        assertEquals("project", json.getString("ProjectName"))
+                        assertEquals("[\"volc.megatts.voiceclone\"]", json.getJSONArray("ResourceIDs").toString())
+                        assertEquals("[\"access\"]", json.getJSONArray("Types").toString())
+                        assertEquals(100, json.getInt("PageSize")); assertEquals(1, json.getInt("PageNumber"))
+                        assertFalse(json.has("TrainID")); assertFalse(json.has("audio")); assertNull(request.header("X-Api-Key"))
+                        val raw = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
+                        assertEquals(Signing.hash(raw), request.header("X-Content-Sha256"))
+                        packs(JSONArray().put(pack(instance = "original-instance").put("ResourceID", "volc.megatts.voiceclone").put("PackType", "access")))
+                    }
+                    "AliasResourcePack" -> {
+                        assertEquals("original-instance", json.getString("InstanceNumber"))
+                        assertEquals("S_owned", json.getString("TrainID")); assertEquals("名称", json.getString("Alias"))
+                        response(pack(alias = "名称", instance = "original-instance"))
+                    }
+                    else -> error("No training or synthesis: $action")
+                }
+            })
+            rename(api); assertEquals(reads + listOf("ResourcePacksStatus", "AliasResourcePack"), actions)
+        }
+    }
+
+    @Test fun matchingRawCatalogAliasNeedsNoInstanceOrFallbackOrUpdate() = runBlocking {
+        val actions = mutableListOf<String>()
+        val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+            actions += request.url.queryParameter("Action")!!; missingInstance(request, "名称")
+        })
+        rename(api); assertEquals(reads, actions)
+    }
+
+    @Test fun fallbackReadsEveryPageBeforeUpdatingEvenWhenTargetIsOnFirstPage() = runBlocking {
+        val actions = mutableListOf<String>()
+        val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; actions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ResourcePacksStatus" -> if (body(request).getInt("PageNumber") == 1) {
+                    packs(JSONArray().put(pack(instance = "first-page-instance")).also { rows ->
+                        repeat(99) { rows.put(pack(id = "S_other$it", instance = "wrong-instance")) }
+                    }, 101)
+                } else packs(JSONArray().put(pack(id = "S_last")), 101)
+                "AliasResourcePack" -> {
+                    assertEquals("first-page-instance", body(request).getString("InstanceNumber"))
+                    response(pack(alias = "名称", instance = "first-page-instance"))
+                }
+                else -> error("Unexpected action $action")
+            }
+        })
+        rename(api)
+        assertEquals(reads + listOf("ResourcePacksStatus", "ResourcePacksStatus", "AliasResourcePack"), actions)
+    }
+
+    @Test fun fallbackRejectsMissingForeignDuplicateOrUnusableResourceWithoutUpdate() = runBlocking {
+        val failures = listOf(
+            packs(JSONArray()), packs(JSONArray().put(pack(id = "S_other"))),
+            packs(JSONArray().put(pack()).put(pack(instance = "second"))),
+            packs(JSONArray().put(pack(instance = ""))),
+            packs(JSONArray().put(pack().put("InstanceNumber", 42))),
+            packs(JSONArray().put(pack().put("ResourceID", "volc.service_type.10029"))),
+            packs(JSONArray().put(pack().put("PackType", "prepaid"))),
+            packs(JSONArray().put(pack().put("Details", JSONObject().put("Aliasable", false)))),
+            packs(JSONArray().put(pack()), 2),
+            response(JSONObject().put("TotalCount", "1").put("Packs", JSONArray().put(pack()))),
+            response(JSONObject().put("TotalCount", 1).put("Statuses", JSONArray().put(slot()))),
+            response(JSONObject().put("TotalCount", 0).put("Packs", "not-a-list")),
+            response(JSONObject().put("TotalCount", 1).put("Packs", JSONArray().put("not-an-object"))),
+            AccountResponse(403, "{\"ResponseMetadata\":{\"Error\":{\"Code\":\"AccessDenied\"}}}".toByteArray()),
+            AccountResponse(200, "{}".toByteArray()),
+        )
+        for (failure in failures) {
+            var updates = 0
+            val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                when (request.url.queryParameter("Action")) {
+                    "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                    "ResourcePacksStatus" -> failure
+                    else -> { updates++; error("No update allowed") }
+                }
+            })
+            try { rename(api); fail("expected resource lookup failure") } catch (_: VoiceCatalogFailure) { }
+            assertEquals(0, updates)
+        }
+    }
+
+    @Test fun fallbackRejectsLaterDuplicateAndPageContradictionsBeforeUpdate() = runBlocking {
+        for (second in listOf(
+            packs(JSONArray().put(pack(instance = "different-instance")), 101),
+            packs(JSONArray().put(pack(id = "S_last")), 102),
+            response(JSONObject().put("TotalCount", 101).put("PageNumber", 1).put("Packs", JSONArray().put(pack(id = "S_last")))),
+            response(JSONObject().put("TotalCount", 101).put("PageSize", 10).put("Packs", JSONArray().put(pack(id = "S_last")))),
+        )) {
+            var pageCalls = 0
+            val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+                when (request.url.queryParameter("Action")) {
+                    "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                    "ResourcePacksStatus" -> {
+                        pageCalls++
+                        if (pageCalls == 1) packs(JSONArray().put(pack()).also { rows ->
+                            repeat(99) { rows.put(pack(id = "S_other$it")) }
+                        }, 101) else second
+                    }
+                    else -> error("Ambiguous or incomplete mapping must not update")
+                }
+            })
+            try { rename(api); fail("expected complete resource check failure") } catch (_: VoiceCatalogFailure) { }
+            assertEquals(2, pageCalls)
+        }
+    }
+
+    @Test fun fallbackRawAliasConfirmsLostUpdateWithoutInstanceOrAnotherMutation() = runBlocking {
+        val actions = mutableListOf<String>()
+        val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; actions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ResourcePacksStatus" -> packs(JSONArray().put(pack(alias = "名称", instance = "")))
+                else -> error("Already named resource must not update")
+            }
+        })
+        rename(api); assertEquals(reads + "ResourcePacksStatus", actions)
+    }
+
+    @Test fun fallbackCancellationEscapesWithoutAliasMutation() = runBlocking {
+        val actions = mutableListOf<String>()
+        val api = DoubaoVoiceAliases(AccountHttpTransport { request, _ ->
+            val action = request.url.queryParameter("Action")!!; actions += action
+            when (action) {
+                "BatchListMegaTTSTrainStatus" -> missingInstance(request)
+                "ResourcePacksStatus" -> throw CancellationException("view left")
+                else -> error("No update after cancellation")
+            }
+        })
+        try { rename(api); fail("cancellation must escape") } catch (_: CancellationException) { }
+        assertEquals(reads + "ResourcePacksStatus", actions)
     }
 }

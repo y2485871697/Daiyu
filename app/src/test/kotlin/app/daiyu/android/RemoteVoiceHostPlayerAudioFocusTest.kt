@@ -114,13 +114,14 @@ class RemoteVoiceHostPlayerAudioFocusTest {
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)) {
             val (_, shadow) = preparing("message-$loss")
             shadow.invokePreparedListener()
-            val request = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
-            request.onAudioFocusChangeListener.onAudioFocusChange(loss)
+            val focusRequest = shadowOf(audio).lastAudioFocusRequest
+            val request = focusRequest.audioFocusRequest
+            focusRequest.listener.onAudioFocusChange(loss)
             assertEquals(SpeechPhase.ERROR, host.state.value.phase)
             assertEquals(SpeechError.AUDIO_FOCUS_LOST, host.state.value.error)
             assertSame(request, shadowOf(audio).lastAbandonedAudioFocusRequest)
             assertEquals(ShadowMediaPlayer.State.END, shadow.state)
-            request.onAudioFocusChangeListener.onAudioFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+            focusRequest.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_GAIN)
             assertEquals(SpeechPhase.ERROR, host.state.value.phase)
         }
         assertEquals(3, requests)
@@ -128,11 +129,12 @@ class RemoteVoiceHostPlayerAudioFocusTest {
 
     @Test fun oldFocusLossCannotStopTheNextTrackEvenForTheSameMessageId() {
         preparing().second.invokePreparedListener()
-        val old = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
+        val oldFocus = shadowOf(audio).lastAudioFocusRequest
+        val old = oldFocus.audioFocusRequest
         val (current, shadow) = preparing()
         shadow.invokePreparedListener()
         val latest = shadowOf(audio).lastAudioFocusRequest.audioFocusRequest
-        old.onAudioFocusChangeListener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS)
+        oldFocus.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS)
         assertTrue(current.isPlaying)
         assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)
         assertSame(old, shadowOf(audio).lastAbandonedAudioFocusRequest)

@@ -439,7 +439,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         return delegate.start(message, invocations, cancelled)
                                     }
                                 } }
-                                val runner = ChatRunner(selected, memory, tools, RunnerOptions(maxRounds = if (assembly == null) 1 else 64,
+                                val runner = ChatRunner(selected, memory, tools, RunnerOptions(
                                     receiptBatchExecutor = receipts,
                                     runtimeStore = usageRecorder?.let { recorder -> object : RuntimeStore {
                                         override fun save(checkpoint: RunCheckpoint) = recorder.record(record, checkpoint)

@@ -45,7 +45,7 @@ class ChildModelExecutionToolsTest {
             if (automaticDrain) observer(ChildToolDrain.Drained)
         }
     }
-    private class Port(private val toolsExpected: Boolean = true, private val useTool: Boolean = true) : CatalogFixturePort {
+    private class Port(private val toolsExpected: Boolean = true, private val useTool: Boolean = true, private val toolRounds: Int = 1) : CatalogFixturePort {
         val opens = AtomicInteger()
         val requests = AtomicInteger()
         val cancelled = CountDownLatch(1)
@@ -56,9 +56,12 @@ class ChildModelExecutionToolsTest {
             assertEquals(toolsExpected, definitions.isNotEmpty()); opens.incrementAndGet()
             return object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                    if (requests.incrementAndGet() == 1 && useTool) {
+                    val request = requests.incrementAndGet()
+                    if (request <= toolRounds && useTool) {
+                        if (request > 1) assertEquals(listOf("read-once"), outputs.map { it.output })
                         beforeTool()
-                        sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "fixture", "{}")))
+                        val id = if (toolRounds == 1) "read" else "read-$request"
+                        sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId(id), "fixture", "{}")))
                     } else {
                         if (useTool) assertEquals(1, outputs.size)
                         sink(ModelEvent.TextFinal("answer", "continued"))
@@ -85,6 +88,18 @@ class ChildModelExecutionToolsTest {
             assertTrue(result is ExecutionReceipt.Confirmed)
             assertEquals(1, assembly.prepares.get()); assertEquals(1, assembly.executions.get())
             assertEquals(1, port.opens.get()); assertEquals(2, port.requests.get())
+        } finally { batch.close() }
+    }
+    @Test fun executionContinuesBeyondFormerRoundLimitsInSameSession() {
+        val parent = Parent(); val assembly = Assembly(); val port = Port(toolRounds = 128)
+        val batch = parent.bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1, ChildModelRole.IMPLEMENTATION) { port }),
+            toolAssembly = factory(assembly)))
+        try {
+            val result = batch.execute(parent.context(), listOf(ChildModelTask("one", "continue tools", ChildToolAccess.DEFAULT)))
+            assertTrue(result is ExecutionReceipt.Confirmed)
+            assertTrue((result as ExecutionReceipt.Confirmed).payload.contains("continued"))
+            assertEquals(1, assembly.prepares.get()); assertEquals(128, assembly.executions.get())
+            assertEquals(1, port.opens.get()); assertEquals(129, port.requests.get())
         } finally { batch.close() }
     }
     @Test fun reviewCannotAcquireToolsEvenWhenRequested() {

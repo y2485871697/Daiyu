@@ -168,7 +168,7 @@ internal object RunCheckpointCodec {
             tools.getJSONObject(it).optString("disposition") == ToolDisposition.IN_FLIGHT.name })
         val outputs = value.getJSONArray("outputs")
         require(tools.length() <= 10_000 && outputs.length() <= 10_000)
-        val round = integer(value, "round"); require(round in 0..100)
+        val round = integer(value, "round"); require(round in 0..Int.MAX_VALUE.toLong())
         return Decoded(RunCheckpoint(message, if (context != null) projectedHistory() else messages("history"), ExecutionPhase.valueOf(string(value, "phase")),
             (0 until tools.length()).map { i -> val t = tools.getJSONObject(i)
                 fields(t, "id", "name", "arguments", "disposition", "result")
@@ -181,7 +181,7 @@ internal object RunCheckpointCodec {
     }
     private fun validate(value: RunCheckpoint) {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)
-        require(value.round in 0..100 && value.messageReconciled)
+        require(value.round >= 0 && value.messageReconciled)
         value.transport?.let { transport ->
             val request = value.request
             require(request != null && request.operation != RequestOperation.OPEN)

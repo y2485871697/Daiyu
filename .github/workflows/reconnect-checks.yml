@@ -12,7 +12,7 @@ on:
         type: string
         required: true
       check_scope:
-        description: 展示增量、完整重连链路或工具续轮上限
+        description: 展示增量、完整重连链路或无轮数限制的工具续轮
         type: choice
         options: [full, presentation, tool-rounds]
         default: full
@@ -85,13 +85,15 @@ jobs:
               -I scripts/cooperation/checks_only.init.gradle \
               -PdaiyuCheckGraph=reconnect-checks/domain-task-graph.json \
               :core-domain:test \
-              --tests 'app.daiyu.android.domain.ChatRunnerRoundLimitTest' \
+              --tests 'app.daiyu.android.domain.ChatRunnerContinuationTest' \
               --tests 'app.daiyu.android.domain.ChatRunnerTest' \
               --tests 'app.daiyu.android.domain.ChatRunnerLiveToolsTest' \
               --tests 'app.daiyu.android.domain.runtime.RunnerCheckpointTest' \
               --tests 'app.daiyu.android.domain.runtime.RunnerReceiptBatchTest' \
               --tests 'app.daiyu.android.domain.runtime.RunnerToolBoundaryTest' \
               --tests 'app.daiyu.android.domain.delegation.ChildModelBatchTest' \
+              --tests 'app.daiyu.android.domain.delegation.ChildModelExecutionToolsTest' \
+              --tests 'app.daiyu.android.domain.delegation.ToolEnabledChildRunTest' \
               2>&1 | tee reconnect-checks/domain-gradle.log
             exit 0
           fi
@@ -112,17 +114,26 @@ jobs:
             --tests 'app.daiyu.android.domain.MessageHistoryTest' \
             2>&1 | tee reconnect-checks/domain-gradle.log
       - name: 准备既有离线依赖（不打包）
-        if: inputs.check_scope != 'tool-rounds'
         run: |
           ./gradlew --no-daemon --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=reconnect-checks/prepare-task-graph.json \
             :app:prepareOfflineSpeechRuntime
       - name: 所选重连范围的定向验证（不打包）
-        if: inputs.check_scope != 'tool-rounds'
         shell: bash
         run: |
           set -o pipefail
+          if [ "$CHECK_SCOPE" = tool-rounds ]; then
+            ./gradlew --no-daemon --parallel --build-cache --console=plain \
+              -I scripts/cooperation/checks_only.init.gradle \
+              -PdaiyuCheckGraph=reconnect-checks/app-task-graph.json \
+              :app:compileDebugKotlin :app:testDebugUnitTest \
+              --tests 'app.daiyu.android.backup.RunCheckpointCodecTest' \
+              --tests 'app.daiyu.android.storage.SQLiteRuntimeSnapshotTest' \
+              --tests 'app.daiyu.android.storage.RuntimeCheckpointReuseTest' \
+              2>&1 | tee reconnect-checks/app-gradle.log
+            exit 0
+          fi
           tests=(
             --tests 'app.daiyu.android.ui.screens.chat.conversation.Reconnect*'
             --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest'
@@ -164,8 +175,8 @@ jobs:
               roots.pop('domain')
               required = {'app': {'ReconnectPartsTest', 'ReconnectPositionCodecTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest', 'ReasoningHandoffTest'}}
           if os.environ['CHECK_SCOPE'] == 'tool-rounds':
-              roots.pop('app')
-              required = {'domain': {'ChatRunnerRoundLimitTest', 'ChatRunnerTest', 'ChatRunnerLiveToolsTest', 'RunnerCheckpointTest', 'RunnerReceiptBatchTest', 'RunnerToolBoundaryTest', 'ChildModelBatchTest'}}
+              required = {'domain': {'ChatRunnerContinuationTest', 'ChatRunnerTest', 'ChatRunnerLiveToolsTest', 'RunnerCheckpointTest', 'RunnerReceiptBatchTest', 'RunnerToolBoundaryTest', 'ChildModelBatchTest', 'ChildModelExecutionToolsTest', 'ToolEnabledChildRunTest'},
+                          'app': {'RunCheckpointCodecTest', 'SQLiteRuntimeSnapshotTest', 'RuntimeCheckpointReuseTest'}}
           reports = {}
           for scope, root in roots.items():
               suites = [ET.parse(p).getroot() for p in root.glob('TEST-*.xml')]
@@ -184,6 +195,12 @@ jobs:
           else:
               graph = json.loads(Path('reconnect-checks/domain-task-graph.json').read_text())
               assert ':core-domain:test' in graph
+              graph = json.loads(Path('reconnect-checks/app-task-graph.json').read_text())
+              assert ':app:compileDebugKotlin' in graph and ':app:testDebugUnitTest' in graph
+              log = Path('reconnect-checks/app-gradle.log').read_text()
+              for task in (':app:compileDebugKotlin', ':app:testDebugUnitTest'):
+                  match = re.search(r'^> Task ' + re.escape(task) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
+                  assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
           assert not [str(p) for p in Path('.').rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
           record = dict(check_id=os.environ['CHECK_ID'], check_scope=os.environ['CHECK_SCOPE'], source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'], attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), reports=reports, contracts=json.loads(Path('reconnect-checks/contracts.json').read_text()), apk_built=False, instrumentation_run=False)
           Path('reconnect-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')

@@ -21,6 +21,27 @@ class RunCheckpointCodecTest {
         val empty=value.copy(history=emptyList(),supplements=emptyList(),tools=emptyList(),outputs=emptyList())
         assertEquals(empty,RunCheckpointCodec.decode(RunCheckpointCodec.encode(empty)))
     }
+    @Test fun roundCounterBeyondFormerCapsRoundTripsAndPreservesRecoveryReceipts() {
+        for (round in listOf(101, 130, 10_001, Int.MAX_VALUE)) {
+            val value = checkpoint().copy(round = round)
+            val decoded = RunCheckpointCodec.decode(RunCheckpointCodec.encode(value))
+            assertEquals(value, decoded)
+            val recovered = ProcessRecovery.interrupt(decoded).copy(messageReconciled = true)
+            assertEquals(round, recovered.round)
+            assertEquals(value.tools, recovered.tools)
+            assertEquals(value.outputs, recovered.outputs)
+            assertEquals(recovered, RunCheckpointCodec.decode(RunCheckpointCodec.encode(recovered)))
+        }
+    }
+    @Test fun roundCounterStillRejectsNegativeNonIntegerAndOverflowValues() {
+        val wire = RunCheckpointCodec.encode(checkpoint())
+        for (invalid in listOf<Any>(-1, Int.MAX_VALUE.toLong() + 1, "130", 1.5, true, JSONObject.NULL)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                RunCheckpointCodec.decode(JSONObject(wire).put("round", invalid).toString())
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.encode(checkpoint().copy(round = -1)) }
+    }
     @Test fun cacheCreationRoundTripsAndOldSnapshotsRemainUnknown() {
         val request = RequestCheckpoint("request", "attempt", "owner", RequestOperation.NEXT)
         for (creation in listOf(0L, 2L)) {
@@ -43,7 +64,7 @@ class RunCheckpointCodecTest {
     @Test fun strictVersionTypesBoundsAndOwnership() {
         val text=RunCheckpointCodec.encode(checkpoint())
         val mutations=listOf<(JSONObject)->Unit>({it.put("version",9)}, {it.put("revision","4")},
-            {it.put("owner","")},{it.put("round",101)},{it.put("message_reconciled",false)},
+            {it.put("owner","")},{it.put("round",-1)},{it.put("message_reconciled",false)},
             {it.put("phase","TERMINAL")},{it.put("extra",true)}, {it.put("request_unconfirmed",1)})
         mutations.forEach {mutate-> val json=JSONObject(text);mutate(json);reject {RunCheckpointCodec.decode(json.toString())}}
         reject {RunCheckpointCodec.decode(text+" []")}

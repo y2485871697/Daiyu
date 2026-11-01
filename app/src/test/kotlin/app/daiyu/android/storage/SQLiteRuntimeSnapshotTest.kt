@@ -50,6 +50,15 @@ class SQLiteRuntimeSnapshotTest {
             }
         } finally { SQLiteDatabase.deleteDatabase(file) }
     }
+    @Test fun longRunningRoundCountersPersistAndReadWithoutFormerRoundCap() {
+        database { db ->
+            for (round in listOf(101, 130, 10_001, Int.MAX_VALUE)) {
+                val value = checkpoint(1).copy(round = round)
+                write(db, value)
+                assertEquals(value, SQLiteRuntimeStore.readCheckpointSnapshot(db, "assistant"))
+            }
+        }
+    }
     private fun concurrentRead(interruptAt: String) {
         var hook: ((String) -> Unit)? = null
         database(afterQuery = { hook?.invoke(it) }) { db ->

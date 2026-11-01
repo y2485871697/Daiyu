@@ -137,11 +137,10 @@ class MessageHistoryRegenerationTest {
         assertEquals(1, count(content) { it.optString("type") == "tool_result" &&
             it.optString("tool_use_id") == call.id.value && it.getString("content") == ModelHistory.UNKNOWN_TOOL_RESULT })
         val native = NativeCompletionRequest.history(ProviderProtocol.CHAT_COMPLETIONS, history)
-        assertEquals(1, count(native) { it.optJSONArray("tool_calls")?.let { calls ->
-            (0 until calls.length()).count { index -> calls.getJSONObject(index).getString("id") == call.id.value } == 1 })
         val nativeCalls = (0 until native.length()).map(native::getJSONObject)
             .mapNotNull { it.optJSONArray("tool_calls") }
             .flatMap { calls -> (0 until calls.length()).map(calls::getJSONObject) }
+        assertEquals(1, nativeCalls.count { it.getString("id") == call.id.value })
         assertEquals(JSONObject(call.arguments).toString(), nativeCalls.single { it.getString("id") == call.id.value }
             .getJSONObject("function").getString("arguments"))
         assertEquals(1, count(native) { it.optString("role") == "tool" &&
@@ -161,7 +160,8 @@ class MessageHistoryRegenerationTest {
         assertEquals(call.id.value, geminiResult.getString("id"))
         assertEquals(call.name, geminiCall.getString("name"))
         assertEquals(call.name, geminiResult.getString("name"))
-        assertTrue(org.json.JSONObject(call.arguments).similar(geminiCall.getJSONObject("args")))
+        assertEquals(JSONObject(call.arguments).toString(), geminiCall.getJSONObject("args").toString())
+        assertEquals(prompt, geminiCall.getJSONObject("args").getJSONArray("tasks").getJSONObject(0).getString("prompt"))
         assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, geminiResult.getJSONObject("response").getString("output"))
     }
 

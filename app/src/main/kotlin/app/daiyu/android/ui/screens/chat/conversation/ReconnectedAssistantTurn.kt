@@ -30,23 +30,24 @@ internal fun ReconnectedAssistantTurn(
             onVisibleAdvance, onRevealSettled, onContentDisplayed, onContentReady = onContentReady)
         return
     }
-    val ready = remember(turn.listKey) { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
-    val displayed = remember(turn.listKey) { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
-    val settled = remember(turn.listKey) { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
+    val ready = remember(turn.listKey) { mutableStateMapOf<String, ReconnectPart>() }
+    val displayed = remember(turn.listKey) { mutableStateMapOf<String, ReconnectPart>() }
+    val settled = remember(turn.listKey) { mutableStateMapOf<String, ReconnectPart>() }
     SideEffect {
-        onContentReady(parts.parts.all { ready[it.turn.listKey] == it.turn })
-        onContentDisplayed(parts.parts.all { displayed[it.turn.listKey] == it.turn })
-        onRevealSettled(parts.parts.all { settled[it.turn.listKey] == it.turn })
+        onContentReady(parts.parts.all { ready[it.turn.listKey] == it })
+        onContentDisplayed(parts.parts.all { displayed[it.turn.listKey] == it })
+        onRevealSettled(parts.parts.all { settled[it.turn.listKey] == it })
     }
     val identityIndex = parts.parts.indexOfFirst { it.turn.hasVisibleResponse() }.coerceAtLeast(0)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         parts.parts.forEachIndexed { index, part -> key(part.turn.listKey) {
             AssistantTurn(part.turn, actions, imageLoader, dedicatedTool, toolContent, speaking,
                 revealResetEpoch, onVisibleAdvance,
-                onRevealSettled = { if (it) settled[part.turn.listKey] = part.turn else settled.remove(part.turn.listKey) },
-                onContentDisplayed = { if (it) displayed[part.turn.listKey] = part.turn else displayed.remove(part.turn.listKey) },
-                onContentReady = { if (it) ready[part.turn.listKey] = part.turn else ready.remove(part.turn.listKey) },
-                showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex, actionTurn = turn)
+                onRevealSettled = { if (it) settled[part.turn.listKey] = part else settled.remove(part.turn.listKey) },
+                onContentDisplayed = { if (it) displayed[part.turn.listKey] = part else displayed.remove(part.turn.listKey) },
+                onContentReady = { if (it) ready[part.turn.listKey] = part else ready.remove(part.turn.listKey) },
+                showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex, actionTurn = turn,
+                workflowContent = part.workflow)
             part.after.forEach { entry -> key(entry.id) { ChatTimelineDivider(entry) } }
         } }
     }

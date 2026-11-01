@@ -6,7 +6,11 @@ import app.daiyu.android.timeline.TimelineAnchor
 /** Ordered display evidence, never a replacement for a persisted message. */
 data class ReconnectSourceUi(val owner: TimelineAnchor, val start: Long, val content: List<MessageContentUi>)
 
-internal data class ReconnectPart(val turn: ChatTurnUi.Assistant, val after: List<ChatTimelineEntry.Reconnect>)
+internal data class ReconnectPart(val turn: ChatTurnUi.Assistant, val after: List<ChatTimelineEntry.Reconnect>,
+    val workflow: AssistantWorkflowContent)
+
+private enum class ReconnectContentRole { WORKFLOW, BODY, PENDING }
+private data class ReconnectContent(val item: MessageContentUi, val role: ReconnectContentRole)
 internal data class ReconnectParts(val parts: List<ReconnectPart>, val placedIds: Set<String>)
 
 private fun MessageContentUi.units(): Long = when (this) {
@@ -26,13 +30,23 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
             } == true
     }.sortedWith(compareBy({ it.position!!.offset }, { it.created }, { it.id }))
     if (cuts.isEmpty()) return ReconnectParts(emptyList(), emptySet())
-    val pending = source.content.toMutableList()
+    // Classify before cutting: freezing a slice cannot turn an answer into process narration.
+    val sourceWorkflow = turn.copy(content = source.content).workflowContent()
+    val pending = source.content.mapIndexed { index, item ->
+        val role = when {
+            index < sourceWorkflow.steps.size -> ReconnectContentRole.WORKFLOW
+            sourceWorkflow.pending.isNotEmpty() -> ReconnectContentRole.PENDING
+            else -> ReconnectContentRole.BODY
+        }
+        ReconnectContent(item, role)
+    }.toMutableList()
     var consumed = source.start
-    val parts = mutableListOf<Pair<List<MessageContentUi>, List<ChatTimelineEntry.Reconnect>>>()
+    val parts = mutableListOf<Pair<List<ReconnectContent>, List<ChatTimelineEntry.Reconnect>>>()
     for ((offset, lines) in cuts.groupBy { it.position!!.offset }) {
-        val head = mutableListOf<MessageContentUi>()
+        val head = mutableListOf<ReconnectContent>()
         while (pending.isNotEmpty()) {
-            val item = pending.first()
+            val tagged = pending.first()
+            val item = tagged.item
             val length = item.units()
             if (consumed + length <= offset) {
                 head += pending.removeAt(0)
@@ -50,12 +64,12 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
                 if (safe > 0) {
                     when (item) {
                         is MessageContentUi.Text -> {
-                            head += item.copy(text = text.take(safe))
-                            pending[0] = item.copy(text = text.drop(safe))
+                            head += tagged.copy(item = item.copy(text = text.take(safe)))
+                            pending[0] = tagged.copy(item = item.copy(text = text.drop(safe)))
                         }
                         is MessageContentUi.Reasoning -> {
-                            head += item.copy(reported = item.reported.copy(text = text.take(safe), activeSinceNanos = null))
-                            pending[0] = item.copy(reported = item.reported.copy(text = text.drop(safe)))
+                            head += tagged.copy(item = item.copy(reported = item.reported.copy(text = text.take(safe), activeSinceNanos = null)))
+                            pending[0] = tagged.copy(item = item.copy(reported = item.reported.copy(text = text.drop(safe))))
                         }
                         else -> Unit
                     }
@@ -70,25 +84,32 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
     parts += pending.toList() to emptyList()
     return ReconnectParts(parts.mapIndexed { index, (content, lines) ->
         val live = index == parts.lastIndex
-        val displayed = if (live) content else content.map { item ->
-            if (item is MessageContentUi.Reasoning) item.copy(reported = item.reported.copy(activeSinceNanos = null)) else item
+        val displayed = content.map { tagged ->
+            val item = tagged.item
+            if (!live && item is MessageContentUi.Reasoning)
+                tagged.copy(item = item.copy(reported = item.reported.copy(activeSinceNanos = null))) else tagged
         }
-        val work = turn.workProcess?.let { original -> original.copy(segments = displayed.mapNotNull { item -> when (item) {
-            is MessageContentUi.Reasoning -> WorkSegmentUi(reasoning = item.reported)
-            is MessageContentUi.Tool -> WorkSegmentUi(steps = listOf(item.step))
-            is MessageContentUi.Text -> WorkSegmentUi(narration = item.text)
-            else -> null
-        } }, summary = if (live) original.summary else "已完成", running = live && original.running,
+        fun items(role: ReconnectContentRole) = displayed.filter { it.role == role }.map { it.item }
+        val steps = items(ReconnectContentRole.WORKFLOW)
+        val work = sourceWorkflow.work?.takeIf { steps.isNotEmpty() }?.let { original -> original.copy(
+            segments = steps.mapNotNull { item -> when (item) {
+                is MessageContentUi.Reasoning -> WorkSegmentUi(reasoning = item.reported)
+                is MessageContentUi.Tool -> WorkSegmentUi(steps = listOf(item.step))
+                is MessageContentUi.Text -> WorkSegmentUi(narration = item.text)
+                else -> null
+            } }, summary = if (live) original.summary else "已完成", running = live && original.running,
             controlActivity = original.controlActivity.takeIf { live }) }
-        val reasoning = displayed.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }
+        val workflow = AssistantWorkflowContent(work, steps, items(ReconnectContentRole.BODY),
+            sourceWorkflow.plainNarration, items(ReconnectContentRole.PENDING))
+        val reasoning = displayed.map { it.item }.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }
         ReconnectPart(turn.copy(
-            listKey = "${turn.listKey}:reconnect-part:$index", finalText = "", finalContent = emptyList(), content = displayed,
+            listKey = "${turn.listKey}:reconnect-part:$index", finalText = "", finalContent = emptyList(), content = displayed.map { it.item },
             status = if (live) turn.status else app.daiyu.android.domain.RunStatus.COMPLETED,
             sourceListKeys = turn.sourceListKeys.ifEmpty { listOf(turn.listKey) },
             workProcess = work, reportedReasoning = reasoning,
             error = turn.error.takeIf { live }, isStreaming = live && turn.isStreaming,
             reconnectSource = null,
-        ), lines)
+        ), lines, workflow)
     }, cuts.mapTo(hashSetOf()) { it.id })
 }
 
@@ -114,16 +135,5 @@ internal fun reconnectFallbackEntries(turn: ChatTurnUi, timeline: List<ChatTimel
             entry is ChatTimelineEntry.Reconnect && entry.position != null &&
                 turns.none { entry.anchor.listKey in keys(it) } &&
                 turns.lastOrNull { sameOwner(it, entry) }?.listKey == turn.listKey)
-    }
-}
-
-/** Preserve unresolved live text as pending while frozen workflow prefixes stay in their host. */
-internal fun reconnectWorkflowContent(turn: ChatTurnUi.Assistant, ordered: AssistantWorkflowContent,
-    frozen: Boolean): AssistantWorkflowContent {
-    val work = turn.workProcess ?: return ordered
-    return when {
-        frozen -> ordered.copy(work = work, steps = turn.content, body = emptyList(), pending = emptyList())
-        work.running -> ordered.copy(work = work, body = emptyList(), pending = ordered.pending + ordered.body)
-        else -> ordered
     }
 }

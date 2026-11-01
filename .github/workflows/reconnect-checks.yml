@@ -11,6 +11,11 @@ on:
         description: 本次定向检查标识
         type: string
         required: true
+      check_scope:
+        description: 本轮仅展示增量或完整重连链路
+        type: choice
+        options: [full, presentation]
+        default: full
 permissions:
   contents: read
 concurrency:
@@ -24,6 +29,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       CHECK_ID: ${{ inputs.check_id }}
+      CHECK_SCOPE: ${{ inputs.check_scope }}
       SKIP_JDK_VERSION_CHECK: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -54,10 +60,13 @@ jobs:
           mkdir -p reconnect-checks
           set -o pipefail
           python3 -B - 2>&1 <<'PY' | tee reconnect-checks/contracts.log
-          import json, unittest
+          import json, os, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_chat_timeline_contract.py', 'test_reasoning_flow_stability_contract.py', 'test_rikkahub_protocol_port_contract.py'):
+          patterns = ('test_chat_timeline_contract.py', 'test_reasoning_flow_stability_contract.py')
+          if os.environ['CHECK_SCOPE'] != 'presentation':
+              patterns += ('test_rikkahub_protocol_port_contract.py',)
+          for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -67,6 +76,7 @@ jobs:
           PY
           python3 scripts/verify_boundaries.py
       - name: 领域重连、事务与恢复定向测试
+        if: inputs.check_scope != 'presentation'
         shell: bash
         run: |
           set -o pipefail
@@ -92,28 +102,36 @@ jobs:
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=reconnect-checks/prepare-task-graph.json \
             :app:prepareOfflineSpeechRuntime
-      - name: 四协议、预算、时间线与Compose定向验证（不打包）
+      - name: 所选重连范围的定向验证（不打包）
         shell: bash
         run: |
           set -o pipefail
+          tests=(
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.Reconnect*'
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest'
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatProjectionTest'
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowContentTest'
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowCompositionTest'
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowMapperTest'
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.WorkflowNarrationCompositionTest'
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ReasoningHandoffTest'
+            --tests 'app.daiyu.android.timeline.ReconnectPositionCodecTest'
+          )
+          if [ "$CHECK_SCOPE" != presentation ]; then
+            tests+=(
+              --tests 'app.daiyu.android.model.AllProtocolRequestRetryTest'
+              --tests 'app.daiyu.android.model.ResponsesBackgroundResumeTest'
+              --tests 'app.daiyu.android.model.reconnect.*'
+              --tests 'app.daiyu.android.model.usage.UsageRecordingModelTest'
+              --tests 'app.daiyu.android.ControllerAuxiliaryVisionTest'
+              --tests 'app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest'
+              --tests 'app.daiyu.android.timeline.*'
+            )
+          fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=reconnect-checks/app-task-graph.json \
-            :app:compileDebugKotlin :app:testDebugUnitTest \
-            --tests 'app.daiyu.android.model.AllProtocolRequestRetryTest' \
-            --tests 'app.daiyu.android.model.ResponsesBackgroundResumeTest' \
-            --tests 'app.daiyu.android.model.reconnect.*' \
-            --tests 'app.daiyu.android.model.usage.UsageRecordingModelTest' \
-            --tests 'app.daiyu.android.ControllerAuxiliaryVisionTest' \
-            --tests 'app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest' \
-            --tests 'app.daiyu.android.timeline.*' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.Reconnect*' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatProjectionTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowContentTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.AssistantWorkflowCompositionTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowMapperTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.WorkflowNarrationCompositionTest' \
+            :app:compileDebugKotlin :app:testDebugUnitTest "${tests[@]}" \
             :app:compileDebugAndroidTestKotlin \
             2>&1 | tee reconnect-checks/app-gradle.log
       - name: 核对测试证据与零安装包
@@ -125,6 +143,9 @@ jobs:
           roots = {'domain': Path('core-domain/build/test-results/test'), 'app': Path('app/build/test-results/testDebugUnitTest')}
           required = {'domain': {'ContinuationTextTest', 'ChatRunnerRequestRetryTest', 'ChatRunnerBatchTransactionTest', 'ChatRunnerAttemptGateTest', 'ChatRunnerTransportResumeTest', 'ChatRunnerResumeCheckpointTest', 'ChatRunnerUsageCheckpointTest', 'RunnerHistorySegmentsTest', 'RunnerHistorySegmentsTimeTest', 'ProviderEventDeliveryGateTest', 'MessageHistoryTest'},
                       'app': {'AllProtocolRequestRetryTest', 'ResponsesBackgroundResumeTest', 'ReconnectRunnerTimelineTest', 'ModelErrorReconnectTest', 'UsageRecordingModelTest', 'ControllerAuxiliaryVisionTest', 'AuxiliaryVisionModelAdapterTest', 'ChatTimelineCodecTest', 'ReconnectPositionCodecTest', 'ReconnectPartsTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest'}}
+          if os.environ['CHECK_SCOPE'] == 'presentation':
+              roots.pop('domain')
+              required = {'app': {'ReconnectPartsTest', 'ReconnectPositionCodecTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest', 'ReasoningHandoffTest'}}
           reports = {}
           for scope, root in roots.items():
               suites = [ET.parse(p).getroot() for p in root.glob('TEST-*.xml')]
@@ -140,7 +161,7 @@ jobs:
               match = re.search(r'^> Task ' + re.escape(task) + r'(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
               assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
           assert not [str(p) for p in Path('.').rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
-          record = dict(check_id=os.environ['CHECK_ID'], source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'], attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), reports=reports, contracts=json.loads(Path('reconnect-checks/contracts.json').read_text()), apk_built=False, instrumentation_run=False)
+          record = dict(check_id=os.environ['CHECK_ID'], check_scope=os.environ['CHECK_SCOPE'], source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'], attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), reports=reports, contracts=json.loads(Path('reconnect-checks/contracts.json').read_text()), apk_built=False, instrumentation_run=False)
           Path('reconnect-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
           print(json.dumps(record, ensure_ascii=False))
           PY

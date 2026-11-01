@@ -486,9 +486,9 @@ internal fun AssistantTurn(
     showActions: Boolean = true,
     actionTurn: ChatTurnUi.Assistant = turn,
     onContentReady: (Boolean) -> Unit = {},
+    workflowContent: AssistantWorkflowContent? = null,
 ) = key(turn.listKey) {
-    val baseOrdered = rememberAssistantWorkflowContent(turn)
-    val ordered = if (actionTurn !== turn) reconnectWorkflowContent(turn, baseOrdered, frozen = !showActions) else baseOrdered
+    val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)
     val bodySources = remember(ordered.body) {
         ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
     }

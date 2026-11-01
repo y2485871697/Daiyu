@@ -62,4 +62,56 @@ class ReconnectBoundaryPlacementTest : WiredActivityTestCase() {
         ui.onNodeWithTag("timeline:one").assertIsDisplayed()
         ui.onNodeWithTag("timeline:legacy").assertIsDisplayed()
     }
+
+    fun testFinalAnswerAndEmptyTailAfterOldWorkflowNeverAddAnEmptyCard() {
+        val tool = MessageBlock.Tool(ToolInvocation(ToolCallId("old"), "search", "{}"), "done")
+        var row by mutableStateOf(message("unused").copy(blocks = listOf(tool, MessageBlock.Text("body", "beforeafter"))))
+        val entry = event(7).copy(status = "succeeded")
+        var copied: String? = null
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ChatMessageList(ChatTurnMapper.map(listOf(row), reconnects = listOf(entry)),
+                ChatScreenActions(onCopy = { copied = it }), timeline = listOf(entry))
+        } } }
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.onAllNodesWithText("before").fetchSemanticsNodes().size == 1 &&
+                ui.onAllNodesWithText("after").fetchSemanticsNodes().size == 1
+        }
+        ui.onAllNodesWithTag("work-process-surface", useUnmergedTree = true).assertCountEquals(1)
+        val work = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val before = ui.onNodeWithText("before").fetchSemanticsNode().boundsInRoot
+        val line = ui.onNodeWithTag("timeline:one").fetchSemanticsNode().boundsInRoot
+        val after = ui.onNodeWithText("after").fetchSemanticsNode().boundsInRoot
+        assertTrue(work.bottom <= before.top)
+        assertTrue(before.bottom <= line.top)
+        assertTrue(line.bottom <= after.top)
+        mainThread { row = row.copy(blocks = listOf(tool, MessageBlock.Text("body", "before"))) }
+        ui.waitForIdle()
+        ui.onAllNodesWithTag("work-process-surface", useUnmergedTree = true).assertCountEquals(1)
+        ui.onAllNodesWithTag("timeline:one").assertCountEquals(1)
+        ui.onAllNodesWithText("助手").assertCountEquals(1)
+        ui.onAllNodesWithContentDescription("复制回答").assertCountEquals(1)
+        ui.onNodeWithContentDescription("复制回答").performClick()
+        assertEquals(anchor.listKey, copied)
+    }
+
+    fun testThoughtContinuationUsesTwoIndependentWorkflowCardsAroundTheDivider() {
+        val row = message("").copy(blocks = emptyList(), reportedReasoning = listOf(
+            ReportedReasoning("thought", "oldnew", blockOffset = 0)))
+        val entry = event(3).copy(status = "succeeded")
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ChatMessageList(ChatTurnMapper.map(listOf(row), reconnects = listOf(entry)),
+                ChatScreenActions(), timeline = listOf(entry))
+        } } }
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.onAllNodesWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNodes().size == 2
+        }
+        val cards = ui.onAllNodesWithTag("work-process-surface", useUnmergedTree = true)
+            .fetchSemanticsNodes().sortedBy { it.boundsInRoot.top }
+        val line = ui.onNodeWithTag("timeline:one").fetchSemanticsNode().boundsInRoot
+        assertTrue(cards.first().boundsInRoot.bottom <= line.top)
+        assertTrue(line.bottom <= cards.last().boundsInRoot.top)
+        ui.onAllNodesWithTag("timeline:one").assertCountEquals(1)
+        ui.onAllNodesWithText("助手").assertCountEquals(1)
+    }
+
 }

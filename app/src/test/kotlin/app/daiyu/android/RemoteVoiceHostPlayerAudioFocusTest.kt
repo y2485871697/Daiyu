@@ -36,6 +36,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     private lateinit var config: VoiceConfiguration
     private val media = mutableListOf<Pair<MediaPlayer, ShadowMediaPlayer>>()
     private var requests = 0
+    private var synthesizedContentType = "audio/mpeg"
     private var synthesizedAudio = byteArrayOf(73, 68, 51, 4, 0, 0, 0, 0, 0, 0, 0)
 
     @Before fun setup() {
@@ -56,7 +57,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     private fun newHost(frozen: FrozenVoiceSpeech = FrozenVoiceSpeech(config)): RemoteVoiceHostPlayer =
         RemoteVoiceHostPlayer(context, scope, runtime, frozen, VoiceHttpTransport { _, _ ->
             requests++
-            VoiceHttpResponse(200, "audio/mpeg", synthesizedAudio)
+            VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio)
         }).also { it.bindOwner("owner") }
 
     @After fun teardown() {
@@ -237,10 +238,12 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     }
 
     @Test fun synthesizedStreamedWaveIsFinalizedAtTheActualPlaybackBoundary() {
-        synthesizedAudio = SpeechAudioFixtures.wave()
+        val wave = SpeechAudioFixtures.wave()
+        synthesizedContentType = "application/json"
+        synthesizedAudio = ("{\"code\":0,\"audio\":\"" + java.util.Base64.getEncoder().encodeToString(wave) + "\"}").toByteArray()
         val (_, shadow) = preparing()
         val file = host.javaClass.getDeclaredField("file").apply { isAccessible = true }.get(host) as java.io.File
-        assertArrayEquals(SpeechAudioFile.normalize(synthesizedAudio), file.readBytes())
+        assertArrayEquals(SpeechAudioFile.normalize(wave), file.readBytes())
         assertEquals(163532L, SpeechAudioFixtures.read(file.readBytes(), 74))
         shadow.invokePreparedListener()
         assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)

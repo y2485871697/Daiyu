@@ -218,7 +218,7 @@ class ReconnectPartsTest {
     @Test fun thoughtAcrossTheBreakpointHasIndependentWorkflowCardsWithOnlyItsOwnText() {
         for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED)) {
             val owner = message("", status).copy(blocks = emptyList(), reportedReasoning = listOf(
-                ReportedReasoning("thought", "oldnew", activeSinceNanos = if (status == RunStatus.RUNNING) 1L else null, blockOffset = 0)))
+                ReportedReasoning("thought", "oldnew", elapsedMillis = 0L, activeSinceNanos = if (status == RunStatus.RUNNING) 1L else null, blockOffset = 0)))
             val event = line(3)
             val turn = mapped(listOf(owner), listOf(event)).single()
             val parts = reconnectParts(turn, listOf(event)).parts

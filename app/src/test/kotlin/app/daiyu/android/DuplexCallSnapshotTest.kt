@@ -23,6 +23,23 @@ class DuplexCallSnapshotTest {
         assertSame(replacement, replacement.advance(listening.state, 2200))
     }
 
+    @Test fun defaultIsPrivateAndLiveRouteChangesAreProjectedButTerminalKeepsTheLastRoute() {
+        val initial = DuplexCallSnapshot(5, "chat", DuplexState(VoiceOwner("chat", "call")), 100)
+        assertFalse(initial.speaker)
+        val connecting = initial.advance(initial.state.copy(phase = DuplexPhase.CONNECTING), 110, true)
+        assertFalse(connecting.speaker)
+        val private = connecting.advance(connecting.state.copy(phase = DuplexPhase.LISTENING), 120, false)
+        assertFalse(private.speaker)
+        val speaker = private.advance(private.state.copy(phase = DuplexPhase.SPEAKING), 150, true)
+        assertTrue(speaker.speaker)
+        val end = speaker.advance(speaker.state.copy(phase = DuplexPhase.CANCELLED), 190, false)
+        assertTrue(end.speaker)
+        assertSame(end, end.advance(end.state.copy(phase = DuplexPhase.LISTENING), 200, false))
+        val replacement = DuplexCallSnapshot(6, "chat", DuplexState(VoiceOwner("chat", "new")), 210)
+        assertFalse(replacement.speaker)
+        assertSame(replacement, replacement.advance(speaker.state, 220, true))
+    }
+
     @Test fun everyTerminalFreezesEndTimeTextAndControls() {
         for (phase in listOf(DuplexPhase.COMPLETE, DuplexPhase.CANCELLED, DuplexPhase.FAILED, DuplexPhase.UNKNOWN)) {
             val owner = VoiceOwner("real-conversation", "request")

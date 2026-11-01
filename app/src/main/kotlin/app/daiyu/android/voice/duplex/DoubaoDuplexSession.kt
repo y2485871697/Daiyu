@@ -118,8 +118,13 @@ class DoubaoDuplexSession(
             if (!current()) return
             try { action() }
             catch (failure: SendFailure) {
-                terminal = if (failure.result == DuplexSendResult.UNKNOWN) DuplexPhase.UNKNOWN to "send_outcome_unknown_no_retry"
-                    else DuplexPhase.FAILED to "send_rejected"
+                terminal = when (failure.result) {
+                    DuplexSendResult.UNKNOWN -> DuplexPhase.UNKNOWN to "send_outcome_unknown_no_retry"
+                    DuplexSendResult.CONNECTION_CLOSED -> DuplexPhase.UNKNOWN to "connection_closed_no_retry"
+                    DuplexSendResult.CONNECTION_FAILED -> DuplexPhase.UNKNOWN to "connection_lost_no_retry"
+                    DuplexSendResult.BACKPRESSURE -> DuplexPhase.FAILED to "outbound_backpressure"
+                    else -> DuplexPhase.FAILED to "send_rejected"
+                }
             } catch (_: Exception) { terminal = DuplexPhase.FAILED to "invalid_event_or_audio" }
         }
         terminal?.let { finish(it.first, it.second) }

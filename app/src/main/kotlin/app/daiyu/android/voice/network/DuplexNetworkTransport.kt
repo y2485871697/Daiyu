@@ -19,6 +19,7 @@ internal class DuplexNetworkTransport(
     private var drained = false
     private var opened = false
     private var terminal = false
+    private var terminalFailure = false
     private val executor = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
         ArrayBlockingQueue(NetworkLimits.QUEUED_MESSAGES), { task ->
             Thread(task, "voice-duplex-network-callback").apply { isDaemon = true }
@@ -47,7 +48,8 @@ internal class DuplexNetworkTransport(
         try { boundedUtf8(json, NetworkLimits.FRAME_BYTES) }
         catch (_: Exception) { return DuplexSendResult.REJECTED }
         val result = synchronized(lock) {
-            if (drained || terminal || !opened) return DuplexSendResult.REJECTED
+            if (terminal) return if (terminalFailure) DuplexSendResult.CONNECTION_FAILED else DuplexSendResult.CONNECTION_CLOSED
+            if (drained || !opened) return DuplexSendResult.REJECTED
             try { peer?.sendText(json) ?: DuplexSendResult.REJECTED }
             catch (_: Exception) { DuplexSendResult.UNKNOWN }
         }
@@ -97,6 +99,7 @@ internal class DuplexNetworkTransport(
         val socket = synchronized(lock) {
             if (drained || terminal) return
             terminal = true
+            terminalFailure = failure
             // Failure/overflow discards stale audio/transcripts. EOF preserves already queued messages.
             if (failure) executor.queue.clear()
             try {
@@ -106,6 +109,7 @@ internal class DuplexNetworkTransport(
                 }
             } catch (_: RejectedExecutionException) {
                 // A full EOF queue becomes a bounded failure, never an unbounded fallback queue.
+                terminalFailure = true
                 executor.queue.clear()
                 try {
                     executor.execute {

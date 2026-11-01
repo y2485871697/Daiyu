@@ -66,6 +66,26 @@ class DoubaoDuplexFixtureTest {
         override fun close() { session.close() }
     }
 
+    @Test fun pcmPreservesTransportTerminalCauseAndBackpressureNeverReplaysAudio() {
+        val cases = mapOf(DuplexSendResult.CONNECTION_CLOSED to "connection_closed_no_retry",
+            DuplexSendResult.CONNECTION_FAILED to "connection_lost_no_retry",
+            DuplexSendResult.BACKPRESSURE to "outbound_backpressure")
+        for ((result, reason) in cases) {
+            val call = Call(); call.ready()
+            call.wire.result = result
+            call.audio.capture!!(ByteArray(640))
+            assertEquals(reason, call.session.state.value.reason)
+            assertEquals(if (result == DuplexSendResult.BACKPRESSURE) DuplexPhase.FAILED else DuplexPhase.UNKNOWN,
+                call.session.state.value.phase)
+            val count = call.wire.sent.size
+            call.audio.capture!!(ByteArray(640))
+            call.wire.listener.failed(); call.wire.listener.closed()
+            assertEquals(count, call.wire.sent.size)
+            assertEquals(reason, call.session.state.value.reason)
+            call.close()
+        }
+    }
+
     @Test fun protocolMatchesFrozenSeedDuplexAndDoesNotUseLegacyOrOpenAiAuth() {
         val config = DoubaoDuplexConfig("fixture-key", "personal-explicit-voice", "instructions")
         val request = DoubaoDuplexProtocol.request(config)

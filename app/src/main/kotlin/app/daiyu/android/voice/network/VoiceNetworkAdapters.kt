@@ -20,6 +20,9 @@ internal object NetworkLimits {
     const val REQUEST_BYTES = 4 * 1024 * 1024
     const val FRAME_BYTES = 1024 * 1024
     const val QUEUED_MESSAGES = 8
+    // 64 x 20ms PCM frames tolerate scheduling/TLS bursts without unbounded audio backlog.
+    const val OUTBOUND_MESSAGES = 64
+    const val OUTBOUND_BYTES = FRAME_BYTES + 14
     const val CONNECT_TIMEOUT_MS = 15_000
 }
 

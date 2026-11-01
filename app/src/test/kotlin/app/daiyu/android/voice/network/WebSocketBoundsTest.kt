@@ -1,15 +1,22 @@
 package app.daiyu.android.voice.network
 
+import app.daiyu.android.voice.duplex.DuplexSendResult
+import java.net.Socket
 import java.net.URI
 import java.nio.ByteBuffer
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import org.java_websocket.WebSocketImpl
 import org.java_websocket.client.WebSocketClient
+import org.java_websocket.enums.ReadyState
 import org.java_websocket.enums.Role
 import org.java_websocket.exceptions.InvalidHandshakeException
 import org.java_websocket.exceptions.LimitExceededException
 import org.java_websocket.framing.BinaryFrame
 import org.java_websocket.framing.ContinuousFrame
 import org.java_websocket.framing.Framedata
+import org.java_websocket.framing.PingFrame
 import org.java_websocket.framing.PongFrame
 import org.java_websocket.framing.TextFrame
 import org.java_websocket.handshake.ServerHandshake
@@ -18,6 +25,113 @@ import org.junit.Test
 
 /** Exercises the real pinned codec offline, not an imitation of the production frame decoder. */
 class WebSocketBoundsTest {
+    @Test fun outboundPcmBurstHasItsOwnBoundedBudgetAndDrainedFramesReleaseCapacity() {
+        val frames = ArrayList<ByteBuffer>()
+        repeat(64) {
+            assertTrue(outboundQueueHasRoom(frames, 1000))
+            frames += ByteBuffer.allocate(1014)
+        }
+        assertFalse(outboundQueueHasRoom(frames, 1000))
+        frames.removeAt(0)
+        assertTrue(outboundQueueHasRoom(frames, 1000))
+        assertEquals(8, NetworkLimits.QUEUED_MESSAGES) // Incoming callback cap is unchanged.
+    }
+
+    @Test fun outboundByteBudgetIncludesHeadersAndCannotBeBypassedWithLargeFrames() {
+        val limit = NetworkLimits.OUTBOUND_BYTES
+        val frames = listOf(ByteBuffer.allocate(limit - 100))
+        assertTrue(outboundQueueHasRoom(frames, 86))
+        assertFalse(outboundQueueHasRoom(frames, 87))
+        assertTrue(outboundQueueHasRoom(emptyList(), NetworkLimits.FRAME_BYTES))
+        assertFalse(outboundQueueHasRoom(emptyList(), Int.MAX_VALUE))
+        assertFalse(outboundQueueHasRoom(emptyList(), -1))
+        val consumed = ByteBuffer.allocate(limit + 100).apply { position(100); limit(limit - 1) }
+        assertTrue(outboundQueueHasRoom(listOf(consumed), 87)) // remaining(), not capacity().
+        assertFalse(outboundQueueHasRoom(List(64) { ByteBuffer.allocate(0) }, 0))
+    }
+
+    @Test fun realSendUsesTheOutboundCountAndByteBudgetsWithoutNetwork() {
+        val peer = BoundedWebSocket(URI("wss://example.invalid"), emptyMap(), NetworkLimits.FRAME_BYTES, Events())
+        val client = clientOf(peer)
+        val engine = client.connection as WebSocketImpl
+        openOffline(engine)
+        try {
+            repeat(64) { assertEquals(DuplexSendResult.ACCEPTED, peer.sendText("pcm")) }
+            assertEquals(64, engine.outQueue.size)
+            assertEquals(DuplexSendResult.BACKPRESSURE, peer.sendText("pcm"))
+            assertEquals(64, engine.outQueue.size)
+            engine.outQueue.poll()
+            assertEquals(DuplexSendResult.ACCEPTED, peer.sendText("pcm"))
+            engine.outQueue.clear()
+            engine.outQueue.add(ByteBuffer.allocate(NetworkLimits.OUTBOUND_BYTES - 14))
+            assertEquals(DuplexSendResult.BACKPRESSURE, peer.sendBinary(byteArrayOf(1)))
+            assertEquals(1, engine.outQueue.size)
+        } finally { peer.abort() }
+    }
+
+    @Test fun automaticPongSharesTheRealSendBudgetWithoutNetwork() {
+        for (byteLimit in listOf(false, true)) {
+            val events = Events()
+            val peer = BoundedWebSocket(URI("wss://example.invalid"), emptyMap(), NetworkLimits.FRAME_BYTES, events)
+            val client = clientOf(peer)
+            val engine = client.connection as WebSocketImpl
+            openOffline(engine)
+            try {
+                if (byteLimit) engine.outQueue.add(ByteBuffer.allocate(NetworkLimits.OUTBOUND_BYTES - 14))
+                else {
+                    repeat(63) { engine.outQueue.add(ByteBuffer.allocate(1)) }
+                    client.onWebsocketPing(engine, PingFrame().apply { setPayload(ByteBuffer.wrap(byteArrayOf(1))) })
+                    assertEquals(64, engine.outQueue.size)
+                    assertEquals(0, events.failures.get())
+                }
+                client.onWebsocketPing(engine, PingFrame().apply { setPayload(ByteBuffer.wrap(byteArrayOf(1))) })
+                assertEquals(1, events.failures.get())
+                assertEquals(DuplexSendResult.CONNECTION_FAILED, peer.sendText("pcm"))
+                assertTrue(engine.outQueue.isEmpty())
+            } finally { peer.abort() }
+        }
+    }
+
+    @Test fun realSocketPreservesTerminalCauseBeforeNotifyingTransport() {
+        for (code in listOf(1000, 1006)) {
+            val events = Events()
+            val peer = BoundedWebSocket(URI("wss://example.invalid"), emptyMap(), 16, events)
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val raw = object : Socket() {
+                override fun close() { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+            }
+            BoundedWebSocket::class.java.getDeclaredField("rawSocket").apply { isAccessible = true }.set(peer, raw)
+            val closer = Thread { clientOf(peer).onClose(code, "", true) }.apply { start() }
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS))
+                assertEquals(0, events.failures.get() + events.closes.get())
+                assertEquals(if (code == 1000) DuplexSendResult.CONNECTION_CLOSED else DuplexSendResult.CONNECTION_FAILED,
+                    peer.sendText("{}"))
+            } finally { release.countDown(); closer.join(3000); peer.abort() }
+            assertFalse(closer.isAlive)
+            assertEquals(1, events.failures.get() + events.closes.get())
+        }
+    }
+
+    private class Events : SocketEvents {
+        val failures = AtomicInteger()
+        val closes = AtomicInteger()
+        override fun opened() { }
+        override fun binary(bytes: ByteArray) { }
+        override fun text(text: String) { }
+        override fun failed() { failures.incrementAndGet() }
+        override fun closed() { closes.incrementAndGet() }
+    }
+
+    private fun clientOf(peer: BoundedWebSocket) =
+        BoundedWebSocket::class.java.getDeclaredField("client").apply { isAccessible = true }.get(peer) as WebSocketClient
+
+    private fun openOffline(engine: WebSocketImpl) {
+        // The pinned codec queues real frames; no connect(), DNS, socket or writer is started.
+        WebSocketImpl::class.java.getDeclaredField("readyState").apply { isAccessible = true }.set(engine, ReadyState.OPEN)
+    }
+
     @Test fun realClientCanBeCancelledBeforeConnectWithoutCallbacksOrNetwork() {
         val peer = BoundedWebSocket(URI("wss://example.invalid"), emptyMap(), 16, object : SocketEvents {
             override fun opened() = fail("not connected")

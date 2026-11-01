@@ -15,6 +15,8 @@ class DuplexRouteLeaseTest {
             }
         override val communicationMode = 3
         override var current: Int? = 8
+        var defaultPrivate: Int? = 2
+        override fun defaultPrivateTarget(): Int? = defaultPrivate
         var privateAvailable = true
         var accept = true
         val unavailable = mutableSetOf<Int>()
@@ -59,6 +61,55 @@ class DuplexRouteLeaseTest {
             return failure
         }
         throw AssertionError("close must report the platform failure")
+    }
+
+    @Test fun defaultPrivateStartupAndManualSwitchingRestoreThePreviousRoute() {
+        val routes = Routes().apply { current = 1 }
+        val lease = DuplexRouteLease(routes)
+        assertTrue(lease.startPrivate())
+        assertFalse(lease.speaker)
+        assertEquals(listOf(2), routes.selected)
+        assertFalse(lease.startPrivate())
+        assertTrue(lease.setSpeaker(true)); assertTrue(lease.speaker)
+        assertTrue(lease.setSpeaker(false)); assertFalse(lease.speaker)
+        lease.close()
+        assertEquals(1, routes.current); assertEquals(0, routes.mode)
+    }
+
+    @Test fun legacyDefaultDisablesSpeakerWithoutClaimingAScoSelection() {
+        val routes = Routes().apply { current = 0; defaultPrivate = 0; privateAvailable = false }
+        val lease = DuplexRouteLease(routes)
+        assertTrue(lease.startPrivate())
+        assertFalse(lease.speaker)
+        assertFalse(lease.setSpeaker(false)) // Legacy SCO confirmation stays conservative.
+        lease.close()
+        assertEquals(0, routes.current); assertEquals(0, routes.mode)
+    }
+
+    @Test fun defaultPrivateSelectionPrefersAnActiveDeviceAndThenExternalBeforeEarpiece() {
+        val ear = 2 to AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+        val speaker = 1 to AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        for (type in listOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET)) {
+            val external = 8 to type
+            for (devices in listOf(listOf(ear, speaker, external), listOf(external, ear, speaker))) {
+                assertEquals(8, privateCommunicationRouteTarget(devices, 8))
+                assertEquals(8, privateCommunicationRouteTarget(devices, 1))
+                assertEquals(2, privateCommunicationRouteTarget(devices, 2))
+            }
+        }
+        assertEquals(2, privateCommunicationRouteTarget(listOf(speaker, ear), 1))
+        assertNull(privateCommunicationRouteTarget(listOf(speaker), 1))
+    }
+
+    @Test fun unavailableOrRejectedDefaultDoesNotReportSuccessAndCloseRestoresMode() {
+        val routes = Routes().apply { defaultPrivate = null }
+        val lease = DuplexRouteLease(routes)
+        assertFalse(lease.startPrivate()); assertEquals(0, routes.mode)
+        routes.defaultPrivate = 2; routes.accept = false
+        assertFalse(lease.startPrivate()); assertFalse(lease.speaker)
+        routes.accept = true; lease.close()
+        assertEquals(0, routes.mode); assertEquals(8, routes.current)
     }
 
     @Test fun speakerAndPrivateRouteAreRealAndCloseRestoresOwnedModeAndRoute() {

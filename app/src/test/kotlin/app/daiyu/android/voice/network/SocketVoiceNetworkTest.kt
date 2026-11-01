@@ -204,6 +204,49 @@ class SocketVoiceNetworkTest {
         assertEquals(1, failures.get())
     }
 
+    @Test fun terminalCauseSurvivesPcmSendingBeforeQueuedCallbackDelivery() {
+        for (failure in listOf(false, true)) {
+            val factory = FakeSockets()
+            val transport = DuplexNetworkTransport(factory)
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            transport.connect(duplexRequest, object : Listener() {
+                override fun opened() { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+            })
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS))
+                if (failure) factory.events.failed() else factory.events.closed()
+                assertEquals(if (failure) DuplexSendResult.CONNECTION_FAILED else DuplexSendResult.CONNECTION_CLOSED,
+                    transport.send("{}"))
+                assertEquals(0, factory.peer.sends)
+            } finally { release.countDown(); transport.closeAndDrain() }
+        }
+    }
+
+    @Test fun fullIncomingQueueTurnsEofIntoTheSameTypedFailureAsItsCallback() {
+        val factory = FakeSockets()
+        val transport = DuplexNetworkTransport(factory)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val failed = CountDownLatch(1)
+        val closed = AtomicInteger()
+        transport.connect(duplexRequest, object : Listener() {
+            override fun opened() { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+            override fun failed() { failed.countDown() }
+            override fun closed() { closed.incrementAndGet() }
+        })
+        try {
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            repeat(NetworkLimits.QUEUED_MESSAGES) { factory.events.text("{}") }
+            factory.events.closed()
+            assertEquals(DuplexSendResult.CONNECTION_FAILED, transport.send("{}"))
+            assertEquals(0, factory.peer.sends)
+            release.countDown()
+            assertTrue(failed.await(2, TimeUnit.SECONDS))
+            assertEquals(0, closed.get())
+        } finally { release.countDown(); transport.closeAndDrain() }
+    }
+
     @Test fun uncertainDuplexSendReturnsUnknownWithoutReplay() {
         val factory = FakeSockets()
         val transport = DuplexNetworkTransport(factory)

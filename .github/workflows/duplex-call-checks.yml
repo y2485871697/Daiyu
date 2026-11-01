@@ -67,7 +67,7 @@ jobs:
           python3 scripts/verify_boundaries.py
       - name: 准备既有离线语音依赖（不打包）
         run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
-      - name: 实时通话视觉及入口定向单测和Compose源码编译（不打包）
+      - name: 实时通话布局、默认路由与发送预算定向检查（不打包）
         shell: bash
         run: |
           set -o pipefail
@@ -83,8 +83,11 @@ jobs:
             -PdaiyuCheckGraph=duplex-call-checks/task-graph.json \
             :app:compileDebugKotlin :app:testDebugUnitTest \
             --tests 'app.daiyu.android.DoubaoCallPresentationOwnerTest' \
-            --tests 'app.daiyu.android.ui.screens.chat.conversation.DoubaoGenieGeometryTest' \
-            --tests 'app.daiyu.android.CallEntryPolicyTest' \
+            --tests 'app.daiyu.android.DuplexCallSnapshotTest' \
+            --tests 'app.daiyu.android.voice.duplex.DuplexRouteLeaseTest' \
+            --tests 'app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest' \
+            --tests 'app.daiyu.android.voice.network.SocketVoiceNetworkTest' \
+            --tests 'app.daiyu.android.voice.network.WebSocketBoundsTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee duplex-call-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -94,8 +97,11 @@ jobs:
           import xml.etree.ElementTree as ET
           root = Path.cwd()
           required = {'app.daiyu.android.DoubaoCallPresentationOwnerTest',
-                      'app.daiyu.android.ui.screens.chat.conversation.DoubaoGenieGeometryTest',
-                      'app.daiyu.android.CallEntryPolicyTest'}
+                      'app.daiyu.android.DuplexCallSnapshotTest',
+                      'app.daiyu.android.voice.duplex.DuplexRouteLeaseTest',
+                      'app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest',
+                      'app.daiyu.android.voice.network.SocketVoiceNetworkTest',
+                      'app.daiyu.android.voice.network.WebSocketBoundsTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert required == set(names) and len(names) == len(set(names)), (names, required)

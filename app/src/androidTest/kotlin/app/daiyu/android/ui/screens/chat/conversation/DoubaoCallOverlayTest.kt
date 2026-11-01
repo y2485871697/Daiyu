@@ -14,6 +14,7 @@ import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -56,14 +57,14 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         speaker = false,
     )
 
-    private fun mount() {
+    private fun mount(height: Dp? = null) {
         activity = startMain()
         ui.mainClock.autoAdvance = false
         mainThread {
             call = session()
             activity.setContent {
                 MaterialTheme {
-                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                    BoxWithConstraints(if (height == null) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height)) {
                         val density = LocalDensity.current
                         val w = constraints.maxWidth.toFloat()
                         val h = constraints.maxHeight.toFloat()
@@ -124,6 +125,30 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         try {
             if (::activity.isInitialized) mainThread { activity.finish() }
         } finally { super.tearDown() }
+    }
+
+    fun testStatusAndControlsMoveDownWithoutMovingTheOrbOrEnlargingThePanel() {
+        mount(); finishOpening()
+        val density = instrumentation.targetContext.resources.displayMetrics.density
+        val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
+        fun nearDp(expected: Float, actual: Float) = assertEquals(expected * density, actual, 2f)
+        fun bounds(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        nearDp(374f, panel.height)
+        nearDp(68f, bounds("doubao-call-orb").top - panel.top)
+        nearDp(66f, bounds("doubao-call-orb").height)
+        nearDp(147f, bounds("doubao-call-status").top - panel.top)
+        nearDp(180f, bounds("doubao-call-status-detail").top - panel.top)
+        nearDp(80f, bounds("doubao-call-caption-area").height)
+        nearDp(284f, bounds("doubao-call-controls").top - panel.top)
+    }
+
+    fun testShortPanelKeepsControlsReachableByBodyScrollWithoutDraggingThePanel() {
+        mount(430.dp); finishOpening()
+        val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
+        ui.onNodeWithTag("doubao-call-hang-up").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithTag("doubao-call-speaker").performScrollTo().assertIsDisplayed().performClick()
+        assertEquals(1, speakerToggles)
+        assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
     }
 
     fun testSharedMotionIsStillOpeningAt380AndSettledBy470Not740() {

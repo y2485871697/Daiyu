@@ -94,6 +94,13 @@ internal class BoundedDraft(
     override fun copyInstance(): Draft = BoundedDraft(frameLimit, fragmentLimit)
 }
 
+/** Include the largest masked frame header; the upstream writer only removes queued buffers. */
+internal fun outboundQueueHasRoom(frames: Collection<ByteBuffer>, payloadBytes: Int): Boolean {
+    if (frames.size >= NetworkLimits.OUTBOUND_MESSAGES || payloadBytes < 0) return false
+    val nextWireBytes = payloadBytes.toLong() + 14L
+    return frames.sumOf { it.remaining().toLong() } + nextWireBytes <= NetworkLimits.OUTBOUND_BYTES
+}
+
 /** No TLS implementation or RFC6455 codec here: both belong to the platform / mature client. */
 internal class BoundedWebSocket(
     uri: URI,
@@ -104,6 +111,7 @@ internal class BoundedWebSocket(
     private val lock = Any()
     private var stopped = false
     private var terminal = false
+    private var terminalFailure = false
     private var started = false
     private var rawSocket: Socket? = null
     private var tlsSocket: SSLSocket? = null
@@ -138,7 +146,11 @@ internal class BoundedWebSocket(
         }
         override fun onClose(code: Int, reason: String, remote: Boolean) {
             val deliver = synchronized(lock) {
-                if (stopped || terminal) false else { terminal = true; true }
+                if (stopped || terminal) false else {
+                    terminal = true
+                    terminalFailure = code != 1000 && code != 1001
+                    true
+                }
             }
             // Upstream invokes onClose before marking its engine CLOSED. Defer no user work here;
             // internal event sinks only enqueue/detach, and abort must not recursively close engine.
@@ -155,7 +167,7 @@ internal class BoundedWebSocket(
             // Bound automatic pongs too. A slow peer cannot grow the client's unbounded outQueue.
             val overflow = synchronized(lock) {
                 if (stopped || terminal) return
-                if (engine().outQueue.size >= NetworkLimits.QUEUED_MESSAGES) true
+                if (!outboundQueueHasRoom(engine().outQueue, frame.payloadData.remaining())) true
                 else { super.onWebsocketPing(conn, frame); false }
             }
             if (overflow) fail()
@@ -209,7 +221,7 @@ internal class BoundedWebSocket(
 
     private fun fail() {
         val deliver = synchronized(lock) {
-            if (stopped || terminal) false else { terminal = true; true }
+            if (stopped || terminal) false else { terminal = true; terminalFailure = true; true }
         }
         if (deliver) events.failed()
         abort()
@@ -222,8 +234,9 @@ internal class BoundedWebSocket(
     }
 
     private fun send(size: Int, action: () -> Unit): DuplexSendResult = synchronized(lock) {
-        if (stopped || terminal || !client.isOpen || size > limit ||
-            engine().outQueue.size >= NetworkLimits.QUEUED_MESSAGES) return DuplexSendResult.REJECTED
+        if (terminal) return if (terminalFailure) DuplexSendResult.CONNECTION_FAILED else DuplexSendResult.CONNECTION_CLOSED
+        if (stopped || !client.isOpen || size > limit) return DuplexSendResult.REJECTED
+        if (!outboundQueueHasRoom(engine().outQueue, size)) return DuplexSendResult.BACKPRESSURE
         try {
             action()
             // ACCEPTED means locally queued, never a server acknowledgment.

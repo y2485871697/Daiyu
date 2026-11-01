@@ -25,7 +25,7 @@ class AndroidDuplexAudio(context: Context? = null) : DuplexAudio {
     private val route = context?.let {
         DuplexRouteLease(AndroidCommunicationRoute(it.applicationContext.getSystemService(AudioManager::class.java)))
     }
-    override val speaker: Boolean get() = route?.speaker ?: true
+    override val speaker: Boolean get() = route?.speaker ?: false
     override fun setSpeaker(speaker: Boolean): Boolean = synchronized(lock) {
         !closing && opened && route?.setSpeaker(speaker) == true
     }
@@ -51,7 +51,7 @@ class AndroidDuplexAudio(context: Context? = null) : DuplexAudio {
         synchronized(lock) {
             check(!opened && !closing) { "audio_single_use" }
             opened = true; failure = onFailure
-            check(route?.setSpeaker(true) != false) { "communication_route_unavailable" }
+            check(route?.startPrivate() != false) { "communication_route_unavailable" }
             val inputMin = AudioRecord.getMinBufferSize(16_000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val outputMin = AudioTrack.getMinBufferSize(24_000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             check(inputMin > 0 && outputMin > 0) { "audio_unavailable" }
@@ -217,6 +217,7 @@ internal interface DuplexRoutePort {
     val communicationMode: Int
     val current: Int?
     fun target(speaker: Boolean): Int?
+    fun defaultPrivateTarget(): Int? = target(false)
     fun isSpeaker(route: Int?): Boolean
     fun select(route: Int): Boolean
     fun isAvailable(route: Int): Boolean
@@ -233,10 +234,12 @@ internal class DuplexRouteLease(private val port: DuplexRoutePort) : AutoCloseab
     private var previousRoute: Int? = null
     private var ownedRoute: Int? = null
     val speaker: Boolean get() = port.isSpeaker(port.current)
-    @Synchronized fun setSpeaker(speaker: Boolean): Boolean {
+    @Synchronized fun startPrivate(): Boolean = !acquired && selectSpeaker(false, initial = true)
+    @Synchronized fun setSpeaker(speaker: Boolean): Boolean = selectSpeaker(speaker)
+    private fun selectSpeaker(speaker: Boolean, initial: Boolean = false): Boolean {
         if (closed) return false
         return try {
-            val target = port.target(speaker) ?: return false
+            val target = (if (initial) port.defaultPrivateTarget() else port.target(speaker)) ?: return false
             if (acquired && (port.mode != port.communicationMode || port.current != ownedRoute)) return false
             if (!acquired) {
                 previousMode = port.mode; previousRoute = port.current
@@ -283,6 +286,15 @@ internal class DuplexRouteLease(private val port: DuplexRoutePort) : AutoCloseab
         port.mode == port.communicationMode && port.current == ownedRoute
 }
 
+internal fun privateCommunicationRouteTarget(devices: List<Pair<Int, Int>>, current: Int?): Int? {
+    val external = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET)
+    val privateDevices = devices.filter { it.second in external || it.second == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+    return privateDevices.firstOrNull { it.first == current }?.first
+        ?: privateDevices.firstOrNull { it.second in external }?.first
+        ?: privateDevices.firstOrNull()?.first
+}
+
 /** Legacy speakerphone control cannot start or confirm SCO (or BLE) routing. */
 internal fun legacyPrivateRouteTarget(deviceTypes: List<Int>): Int? {
     // Even a co-enumerated earpiece does not prove where speakerphone=false will
@@ -306,11 +318,14 @@ private class AndroidCommunicationRoute(private val manager: AudioManager) : Dup
         if (Build.VERSION.SDK_INT >= 31) {
             val devices = manager.availableCommunicationDevices
             return if (speaker) devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.id
-            else devices.firstOrNull { it.type in PRIVATE_ROUTES }?.id
+            else privateCommunicationRouteTarget(devices.map { it.id to it.type }, current)
         }
         if (speaker) return 1
         return legacyPrivateRouteTarget(manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type })
     }
+    override fun defaultPrivateTarget(): Int? =
+        if (Build.VERSION.SDK_INT >= 31) target(false) else 0 // Disable speakerphone without starting or claiming SCO.
+
     override fun isSpeaker(route: Int?): Boolean = if (Build.VERSION.SDK_INT >= 31)
         manager.communicationDevice?.let { it.id == route && it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } == true
         else route == 1
@@ -332,11 +347,5 @@ private class AndroidCommunicationRoute(private val manager: AudioManager) : Dup
         if (Build.VERSION.SDK_INT >= 31) manager.clearCommunicationDevice()
         else manager.isSpeakerphoneOn = false
         return current
-    }
-    companion object {
-        private val PRIVATE_ROUTES = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET,
-            AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
-            AudioDeviceInfo.TYPE_BLE_HEADSET)
     }
 }

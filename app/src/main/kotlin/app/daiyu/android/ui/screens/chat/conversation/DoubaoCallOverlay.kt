@@ -78,7 +78,7 @@ data class DoubaoCallUi(
     val reply: String = "",
     val reason: String? = null,
     val muted: Boolean = false,
-    val speaker: Boolean = true,
+    val speaker: Boolean = false,
     val captionsEnabled: Boolean = true,
 )
 
@@ -393,28 +393,30 @@ private fun ExpandedCallContent(
             ) { CallGlyph(CallControl.MINIMIZE, Color(0xFFA59AB4), Modifier.size(20.dp)) }
         }
         }
-        // At the original 374dp size the body is 304dp: focus 143, captions 64, controls 78,
-        // and the reserved 19dp preview-notice space (no preview disclaimer in production).
+        // At 374dp the body is 304dp: focus 146, captions 80, controls 78.
+        // The old 19dp notice space now belongs to captions and lowers the controls.
         // Only this body scrolls on short screens; controls never share the drag recognizer.
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            val focusHeight = (maxHeight - 161.dp).coerceAtLeast(104.dp)
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(), enabled = enabled)) {
-            Column(Modifier.fillMaxWidth().height(focusHeight).padding(top = 3.dp, bottom = 6.dp),
+            val focusHeight = (maxHeight - 158.dp).coerceAtLeast(142.dp)
+            Column(Modifier.fillMaxSize().testTag("doubao-call-body").verticalScroll(rememberScrollState(), enabled = enabled)) {
+            Column(Modifier.fillMaxWidth().height(focusHeight).padding(top = 8.dp, bottom = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically)) {
+                verticalArrangement = Arrangement.Center) {
                 // CSS's 66dp orb has an out-of-layout 7dp halo.
-                Box(Modifier.size(66.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(66.dp).testTag("doubao-call-orb"), contentAlignment = Alignment.Center) {
                     CallWave(state.orbState(), Modifier.requiredSize(80.dp), running = running)
                 }
+                Spacer(Modifier.height(13.dp))
                 Text(state.statusLabel(), color = Color(0xFF51445F), fontSize = 19.sp, lineHeight = 28.sp,
                     fontWeight = FontWeight(550),
                     modifier = Modifier.height(28.dp).testTag("doubao-call-status"),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(5.dp))
                 Text(state.statusDetail(), color = Color(0xFFAAA0B6), fontSize = 10.sp, lineHeight = 16.sp,
                     modifier = Modifier.height(16.dp).testTag("doubao-call-status-detail"),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Column(Modifier.fillMaxWidth().height(64.dp).padding(bottom = 4.dp)
+            Column(Modifier.fillMaxWidth().height(80.dp).testTag("doubao-call-caption-area").padding(bottom = 4.dp)
                 .drawWithContent {
                     drawContent()
                     drawLine(Color(0x4DECE6F2), Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
@@ -424,7 +426,7 @@ private fun ExpandedCallContent(
                     if (state.reply.isNotBlank()) CaptionLine("豆包", state.reply, reply = true)
                 }
             }
-            Row(Modifier.fillMaxWidth().height(78.dp),
+            Row(Modifier.fillMaxWidth().height(78.dp).testTag("doubao-call-controls"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 CallControlButton(CallControl.MIC, "麦克风", "doubao-call-mute", state.muted, enabled, actions.onToggleMute, Modifier.weight(1f))
@@ -432,7 +434,6 @@ private fun ExpandedCallContent(
                 CallControlButton(CallControl.CAPTIONS, "字幕", "doubao-call-captions", state.captionsEnabled, enabled, actions.onToggleCaptions, Modifier.weight(1f))
                 CallControlButton(CallControl.HANG_UP, "挂断", "doubao-call-hang-up", false, enabled, actions.onHangUp, Modifier.weight(1f))
             }
-            Spacer(Modifier.height(19.dp))
             }
         }
     }

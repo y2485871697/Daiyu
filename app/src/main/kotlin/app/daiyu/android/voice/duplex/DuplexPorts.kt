@@ -1,7 +1,7 @@
 package app.daiyu.android.voice.duplex
 
 /** UNKNOWN means bytes might have left the process. Never replay an uncertain send. */
-enum class DuplexSendResult { ACCEPTED, REJECTED, UNKNOWN }
+enum class DuplexSendResult { ACCEPTED, REJECTED, UNKNOWN, BACKPRESSURE, CONNECTION_CLOSED, CONNECTION_FAILED }
 
 /**
  * One instance per call; connect/send are nonblocking and must not wait for a callback.
@@ -40,7 +40,7 @@ interface DuplexAudio {
     fun stopImmediately() { flush(Long.MAX_VALUE) }
     /** False means unavailable/failed; callers must not optimistically update UI. */
     fun setSpeaker(speaker: Boolean): Boolean = false
-    val speaker: Boolean get() = true
+    val speaker: Boolean get() = false
     /** Must stop capture, purge playback, release effects/recorder/player, and join workers. */
     fun closeAndDrain()
 }

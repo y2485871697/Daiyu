@@ -11,11 +11,23 @@ import org.junit.Test
 class DoubaoCallPresentationOwnerTest {
     private fun snapshot(key: Long = 1, phase: DuplexPhase = DuplexPhase.LISTENING,
         transcript: String = "保留用户字幕", reply: String = "保留回复", muted: Boolean = false,
-        endedAtMillis: Long? = null) = DuplexCallSnapshot(
+        endedAtMillis: Long? = null, speaker: Boolean = false) = DuplexCallSnapshot(
         sessionKey = key, conversationId = "chat-A",
         state = DuplexState(VoiceOwner("chat-A", "call-$key"), phase, transcript, reply),
-        startedAtMillis = 100, endedAtMillis = endedAtMillis, muted = muted,
+        startedAtMillis = 100, endedAtMillis = endedAtMillis, muted = muted, speaker = speaker,
     )
+
+    @Test fun privateDefaultAndManualSpeakerSurvivePresentationChangesAndFreezeOnClose() {
+        val owner = DoubaoCallPresentationOwner()
+        owner.update(snapshot()); assertFalse(owner.state!!.speaker)
+        owner.update(snapshot(speaker = true)); owner.minimize(1); owner.expand(1)
+        assertTrue(owner.state!!.speaker)
+        owner.beginClose(1, 300)
+        owner.update(snapshot(speaker = false, phase = DuplexPhase.CANCELLED))
+        assertTrue(owner.state!!.speaker)
+        owner.finishClose(1); owner.update(snapshot(key = 2))
+        assertFalse(owner.state!!.speaker)
+    }
 
     @Test fun minimizeAndRestoreKeepTheSameCallAndControls() {
         val owner = DoubaoCallPresentationOwner()

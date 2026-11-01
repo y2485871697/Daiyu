@@ -24,11 +24,13 @@ data class DuplexCallSnapshot(
     val startedAtMillis: Long,
     val endedAtMillis: Long? = null,
     val muted: Boolean = false,
-    val speaker: Boolean = true,
+    val speaker: Boolean = false,
 ) {
-    internal fun advance(next: DuplexState, now: Long): DuplexCallSnapshot {
+    internal fun advance(next: DuplexState, now: Long, liveSpeaker: Boolean? = null): DuplexCallSnapshot {
         if (endedAtMillis != null || next.owner != state.owner) return this
-        return copy(state = next, endedAtMillis = if (next.phase.isCallTerminal()) now else null)
+        return copy(state = next, endedAtMillis = if (next.phase.isCallTerminal()) now else null,
+            speaker = if (next.phase in setOf(DuplexPhase.LISTENING, DuplexPhase.THINKING, DuplexPhase.SPEAKING))
+                liveSpeaker ?: speaker else speaker)
     }
     internal fun controls(key: Long): Boolean = sessionKey == key && endedAtMillis == null && !state.phase.isCallTerminal()
 }
@@ -136,7 +138,8 @@ internal class ActivityRemoteVoiceHost(
     private fun publishDuplex(call: DoubaoDuplexSession, state: DuplexState) {
         if (duplex !== call) return
         val prior = mutableDuplexSnapshot.value ?: return
-        mutableDuplexSnapshot.value = prior.advance(state, SystemClock.elapsedRealtime())
+        mutableDuplexSnapshot.value = prior.advance(state, SystemClock.elapsedRealtime(),
+            call.speaker.takeUnless { call.state.value.phase.isCallTerminal() })
     }
     fun stopDuplex(sessionKey: Long) {
         val call = duplex ?: return

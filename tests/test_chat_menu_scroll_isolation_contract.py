@@ -32,7 +32,8 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         host, overlay = source.split('private fun BoxScope.ChatMenuOverlay(', 1)
         host = host.split('internal fun ChatMenuLayer(', 1)[1]
         overlay = overlay.split('internal fun ChatAnchoredMenu(', 1)[0]
-        self.assertIn('Box(Modifier.fillMaxSize().captureForTopBar(backdrop)) { content() }', host)
+        self.assertIn('ChatMenuCaptureContent(state) { capture ->', host)
+        self.assertIn('Box(Modifier.fillMaxSize().captureForTopBar(if (capture) backdrop else null)) { content() }', host)
         self.assertIn('ChatMenuOverlay(state, backdrop, diagnostic, probe)', host)
         self.assertNotIn('state.active', host)
         self.assertNotIn('mutableStateOf(Rect.Zero)', host)
@@ -40,11 +41,32 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         self.assertIn('ChatMenuOverlayContent(state) { menu ->', overlay)
         runtime = (CHAT / 'ChatMenuOverlayContent.kt').read_text()
         self.assertIn('var active by mutableStateOf<T?>(null)', runtime)
+        self.assertIn('content(state.active != null)', runtime)
         self.assertIn('state.active?.let { menu ->', runtime)
         self.assertIn('key(menu) { content(menu) }', runtime)
         leaf = (CHAT / 'ChatAutomaticCompressionContent.kt').read_text()
         self.assertIn('@Composable\ninternal fun ChatAutomaticCompressionContent(', leaf)
         self.assertIn('content(readState())', leaf)
+
+    def test_capture_gates_only_the_modifier_for_the_full_mounted_lifetime(self):
+        source = (CHAT / 'ChatMenuLayer.kt').read_text()
+        host = source.split('internal fun ChatMenuLayer(', 1)[1].split('private fun BoxScope.ChatMenuOverlay(', 1)[0]
+        self.assertEqual(1, host.count('{ content() }'))
+        self.assertEqual(1, host.count('.captureForTopBar('))
+        self.assertIn('captureForTopBar(if (capture) backdrop else null)', host)
+        runtime = (CHAT / 'ChatMenuOverlayContent.kt').read_text()
+        capture = runtime.split('internal fun <T : Any> ChatMenuCaptureContent(', 1)[1].split('/** Keep menu ownership', 1)[0]
+        self.assertIn('content(state.active != null)', capture)
+        self.assertNotIn('expanded', capture)
+        owner = source.split('internal fun ChatAnchoredMenu(', 1)[1].split('internal fun ChatGlassMenuSurface(', 1)[0]
+        for token in ('if ((expanded || mounted) && layer != null)', 'delay(PopupExitRetentionMillis)',
+                      'DisposableEffect(layer, menu)', 'if (layer.active === menu) layer.active = null'):
+            self.assertIn(token, owner)
+        wrapper = (APP / 'ui/components/TopBarBackdrop.kt').read_text()
+        self.assertIn('if (Build.VERSION.SDK_INT < 33 || backdrop == null) this else layerBackdrop(backdrop)', wrapper)
+        # The shared production wrapper protects both nested hosts, not only an isolated fixture.
+        self.assertIn('ChatMenuLayer(modifier.fillMaxSize())', (APP / 'ui/components/ConversationSidePaneScaffold.kt').read_text())
+        self.assertIn('ChatMenuLayer(', (CHAT / 'ChatScreen.kt').read_text())
 
     def test_refresh_and_toggle_keep_authoritative_io_and_pending_gates(self):
         source = (APP / 'MainActivity.kt').read_text()

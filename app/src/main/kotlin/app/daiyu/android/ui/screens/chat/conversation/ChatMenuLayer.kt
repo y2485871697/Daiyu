@@ -117,7 +117,9 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
     SideEffect { diagnostic?.invoke(probe::snapshot) }
     Box(modifier) {
         CompositionLocalProvider(LocalMenuLayer provides state) {
-            Box(Modifier.fillMaxSize().captureForTopBar(backdrop)) { content() }
+            ChatMenuCaptureContent(state) { capture ->
+                Box(Modifier.fillMaxSize().captureForTopBar(if (capture) backdrop else null)) { content() }
+            }
         }
         ChatMenuOverlay(state, backdrop, diagnostic, probe)
     }

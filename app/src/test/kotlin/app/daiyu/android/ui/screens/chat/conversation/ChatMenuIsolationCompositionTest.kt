@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.AbstractApplier
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.BroadcastFrameClock
 import androidx.compose.runtime.Composition
 import androidx.compose.runtime.DisposableEffect
@@ -244,6 +245,130 @@ class ChatMenuIsolationCompositionTest {
             assertEquals(ChatAutomaticCompressionState(null, false), displayed)
             assertEquals(2, reads)
             assertEquals(1, pages)
+        } finally { host.close() }
+    }
+
+    private class CaptureOwner {
+        val expanded = mutableStateOf(true)
+    }
+
+    @Test fun captureFollowsMountedOwnerThroughExitReplacementAndRapidReopen() = runBlocking {
+        val host = Host(this)
+        val layer = ChatMenuLayerState<CaptureOwner>()
+        val first = CaptureOwner()
+        val second = CaptureOwner()
+        var capture = false
+        var expanded: Boolean? = null
+        var pageCommits = 0
+        var pageMounts = 0
+        var pageDisposals = 0
+        var pageIdentity: Any? = null
+        val page: @Composable () -> Unit = {
+            val identity = remember { Any() }
+            SideEffect { pageCommits++; pageIdentity = identity }
+            DisposableEffect(Unit) {
+                pageMounts++
+                onDispose { pageDisposals++ }
+            }
+        }
+        try {
+            host.composition.setContent {
+                ChatMenuCaptureContent(layer) { enabled ->
+                    SideEffect { capture = enabled }
+                    page()
+                }
+                ChatMenuOverlayContent(layer) { owner ->
+                    val value = owner.expanded.value
+                    SideEffect { expanded = value }
+                }
+            }
+            host.settle()
+            val originalPage = pageIdentity
+            assertFalse("A closed menu has no capture consumer", capture)
+            assertEquals(1, pageCommits)
+
+            layer.active = first
+            host.settle()
+            assertTrue(capture)
+            assertEquals(true, expanded)
+            first.expanded.value = false
+            host.settle()
+            assertEquals(false, expanded)
+            assertTrue("The mounted exit still needs its background", capture)
+
+            first.expanded.value = true // cancel exit before the owner is disposed
+            host.settle()
+            assertTrue(capture)
+            layer.active = second // replacement is still a live consumer
+            host.settle()
+            assertTrue(capture)
+            second.expanded.value = false
+            host.settle()
+            assertTrue("Replacement exit keeps capture until disposal", capture)
+            layer.active = null // ChatAnchoredMenu clears ownership after exit retention
+            host.settle()
+            assertFalse(capture)
+            layer.active = first
+            host.settle()
+            assertTrue("A fresh entry starts capture again", capture)
+            layer.active = null
+            host.settle()
+            assertFalse(capture)
+
+            assertSame("Capture changes must preserve page identity", originalPage, pageIdentity)
+            assertEquals("Only the capture wrapper recomposes", 1, pageCommits)
+            assertEquals(1, pageMounts)
+            assertEquals(0, pageDisposals)
+        } finally { host.close() }
+        assertEquals(1, pageDisposals)
+    }
+
+    @Test fun nestedMenuCapturesSubscribeOnlyToTheirOwnMountedConsumer() = runBlocking {
+        val host = Host(this)
+        val outer = ChatMenuLayerState<CaptureOwner>()
+        val inner = ChatMenuLayerState<CaptureOwner>()
+        val outerOwner = CaptureOwner()
+        val innerOwner = CaptureOwner()
+        var outerCapture = false
+        var innerCapture = false
+        var pages = 0
+        var identity: Any? = null
+        val page: @Composable () -> Unit = {
+            val instance = remember { Any() }
+            SideEffect { pages++; identity = instance }
+        }
+        try {
+            host.composition.setContent {
+                ChatMenuCaptureContent(outer) { capturingOuter ->
+                    SideEffect { outerCapture = capturingOuter }
+                    ChatMenuCaptureContent(inner) { capturingInner ->
+                        SideEffect { innerCapture = capturingInner }
+                        page()
+                    }
+                }
+            }
+            host.settle()
+            val originalPage = identity
+            assertFalse(outerCapture)
+            assertFalse(innerCapture)
+            inner.active = innerOwner
+            host.settle()
+            assertTrue(innerCapture)
+            assertFalse("Opening a chat menu must not capture the outer drawer host", outerCapture)
+            outer.active = outerOwner
+            host.settle()
+            assertTrue(innerCapture)
+            assertTrue(outerCapture)
+            inner.active = null
+            host.settle()
+            assertFalse(innerCapture)
+            assertTrue("Closing the inner menu must not stop the outer consumer", outerCapture)
+            outer.active = null
+            host.settle()
+            assertFalse(innerCapture)
+            assertFalse(outerCapture)
+            assertSame(originalPage, identity)
+            assertEquals("Nested capture switches must not rebuild the page", 1, pages)
         } finally { host.close() }
     }
 }

@@ -10,6 +10,15 @@ internal class ChatMenuLayerState<T : Any> {
     var active by mutableStateOf<T?>(null)
 }
 
+/** Capture only while an owner is mounted, including its retained exit animation. */
+@Composable
+internal fun <T : Any> ChatMenuCaptureContent(
+    state: ChatMenuLayerState<T>,
+    content: @Composable (Boolean) -> Unit,
+) {
+    content(state.active != null)
+}
+
 /** Keep menu ownership reads below the captured page's restart scope. */
 @Composable
 internal fun <T : Any> ChatMenuOverlayContent(

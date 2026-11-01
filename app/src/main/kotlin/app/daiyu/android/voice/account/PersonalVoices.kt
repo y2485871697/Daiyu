@@ -35,7 +35,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
     data class Voice(val id: String, val name: String, val account: String, val status: Int = -1,
         val models: Set<Int> = emptySet(), val demo: String = "", val error: String = "",
         val accepted: Boolean = false, val catalogState: String = "", val remaining: Int = -1,
-        val uncertain: Boolean = false, val nameSyncPending: Boolean = false) {
+        val uncertain: Boolean = false) {
         val canTrain get() = !uncertain && status != 1 && status != 4 &&
             catalogState !in setOf("Training", "Active", "Expired", "Reclaimed") && remaining != 0
         val unused get() = catalogState == "Unknown" && status !in 1..4 && !uncertain
@@ -82,11 +82,19 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         try { out.write(bytes); atomic.finishWrite(out) } catch (e: Exception) { atomic.failWrite(out); throw e }
         mutable.value = list
     }
-    @Synchronized private fun save(voice: Voice, preserveAccepted: Boolean = true) {
+    @Synchronized private fun save(voice: Voice, preserveAccepted: Boolean = true, preserveName: Boolean = true) {
         if ((voice.account to voice.id) in removed) return
         val old = mutable.value.firstOrNull { it.id == voice.id && it.account == voice.account }
-        val value = voice.copy(accepted = voice.accepted || (preserveAccepted && old?.accepted == true))
+        val value = voice.copy(name = if (preserveName) old?.name ?: voice.name else voice.name,
+            accepted = voice.accepted || (preserveAccepted && old?.accepted == true))
         persist(mutable.value.filterNot { it.account == value.account && it.id == value.id } + value)
+    }
+    @Synchronized fun renameLocal(voice: Voice, name: String) {
+        val displayName = name.trim()
+        require(displayName.isNotBlank()) { "请填写音色名称" }
+        val current = mutable.value.firstOrNull { it.account == voice.account && it.id == voice.id }
+            ?: error("本机记录已移除")
+        save(current.copy(name = displayName), preserveName = false)
     }
     @Synchronized fun removeLocal(voice: Voice) {
         require(mutable.value.none { it.account == voice.account && it.id == voice.id && it.uncertain }) {
@@ -123,14 +131,13 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         try {
             val previous = find(valid, config)
             val displayName = name.trim()
-            val voice = (previous?.copy(name = displayName.ifBlank { previous.name })
-                ?: Voice(valid, displayName.ifBlank { valid }, account.fingerprint))
-                .copy(nameSyncPending = (DoubaoVoiceIdentity.isSlot(valid) && displayName.isNotBlank()) || previous?.nameSyncPending == true)
+            val voice = previous?.copy(name = displayName.ifBlank { previous.name })
+                ?: Voice(valid, displayName.ifBlank { valid }, account.fingerprint)
             val result = updated(voice, request("get_voice", account.key, identity(voice)))
             currentCoroutineContext().ensureActive()
             require(result.canImport) { "此音色尚未复刻成功或不可用，未导入；请在云端确认后重试。" }
             val imported = result.copy(accepted = true)
-            save(imported); return imported
+            save(imported, preserveName = displayName.isBlank()); return imported
         } finally { finish(account.fingerprint, valid) }
     }
     suspend fun listImportable(config: SpeechProviderConfig, ak: String, sk: String, project: String): List<Voice> {
@@ -138,7 +145,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         val slots = DoubaoVoiceCatalog(transport).list(ak, sk, project)
         return slots.filter { it.state in setOf("Success", "Active") }.mapNotNull { slot ->
             currentCoroutineContext().ensureActive()
-            val candidate = Voice(slot.id, slot.name, account.fingerprint,
+            val candidate = Voice(slot.id, find(slot.id, config)?.name ?: slot.name, account.fingerprint,
                 catalogState = slot.state, remaining = slot.remaining)
             val verified = updated(candidate, request("get_voice", account.key, identity(candidate)))
             currentCoroutineContext().ensureActive()
@@ -155,8 +162,7 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             currentCoroutineContext().ensureActive()
             val local = find(slot.id, config)
             val voice = local ?: Voice(slot.id, slot.name, account.fingerprint)
-            voice.copy(name = if (voice.name == voice.id && !voice.nameSyncPending) slot.name else voice.name,
-                status = when (slot.state) {
+            voice.copy(status = when (slot.state) {
                     "Unknown" -> -1
                     "Training" -> 1
                     "Success" -> 2
@@ -187,23 +193,6 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
             } finally { finish(account.fingerprint, slot.id) }
         }
         return slots.size
-    }
-    suspend fun syncName(voice: Voice, config: SpeechProviderConfig, ak: String, sk: String, project: String) {
-        val account = VoiceAccountIdentity.from(config)
-        require(account.fingerprint == voice.account) { "请选择此音色所属账户" }
-        begin(voice.account, voice.id)
-        try {
-            val current = find(voice.id, config) ?: error("本机记录已移除")
-            if (!current.nameSyncPending) return
-            require(!current.uncertain) { "请先查询原音色，确认制作提交状态" }
-            DoubaoVoiceAliases(transport).rename(ak, sk, project, current.id, current.name)
-            currentCoroutineContext().ensureActive()
-            synchronized(this) {
-                find(current.id, config)?.takeIf { it.name == current.name }?.let {
-                    save(it.copy(nameSyncPending = false))
-                }
-            }
-        } finally { finish(voice.account, voice.id) }
     }
     suspend fun refresh(voice: Voice, config: SpeechProviderConfig) {
         val account = VoiceAccountIdentity.from(config)
@@ -236,8 +225,8 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
                 require(previous?.canTrain != false) { "此音色训练中、结果未知、已锁定或额度耗尽，请先查询" }
                 // Identity and uncertainty commit before ANY bytes can reach the network.
                 val pending = (previous ?: Voice(id, name.trim(), account.fingerprint))
-                    .copy(name = name.trim(), status = -1, accepted = false, uncertain = true, nameSyncPending = id.startsWith("S_"), models = emptySet(), demo = "", error = "提交结果未确认；仅可查询，不能重复训练")
-                save(pending, false)
+                    .copy(name = name.trim(), status = -1, accepted = false, uncertain = true, models = emptySet(), demo = "", error = "提交结果未确认；仅可查询，不能重复训练")
+                save(pending, false, preserveName = false)
                 pending
             }
             try {
@@ -354,14 +343,14 @@ internal class PersonalVoices(private val file: File, private val transport: Acc
         private fun encode(v: Voice) = JSONObject().put("id", v.id).put("name", v.name).put("account", v.account)
             .put("status", v.status).put("models", JSONArray(v.models.toList())).put("demo", v.demo)
             .put("error", v.error).put("accepted", v.accepted).put("catalogState", v.catalogState)
-            .put("remaining", v.remaining).put("uncertain", v.uncertain).put("nameSyncPending", v.nameSyncPending)
+            .put("remaining", v.remaining).put("uncertain", v.uncertain)
         private fun decode(j: JSONObject): Voice {
             val id = existingIdentity(j.getString("id")); val account = j.getString("account")
             require(account.matches(Regex("[a-f0-9]{64}")))
             val models = j.optJSONArray("models") ?: JSONArray()
             return Voice(id, j.getString("name"), account, j.optInt("status", -1),
                 (0 until models.length()).map { models.getInt(it) }.toSet(), j.optString("demo"), j.optString("error"),
-                j.optBoolean("accepted"), j.optString("catalogState"), j.optInt("remaining", -1), j.optBoolean("uncertain"), j.optBoolean("nameSyncPending"))
+                j.optBoolean("accepted"), j.optString("catalogState"), j.optInt("remaining", -1), j.optBoolean("uncertain"))
         }
     }
 }

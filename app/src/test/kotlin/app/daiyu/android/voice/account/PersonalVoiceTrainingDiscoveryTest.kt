@@ -89,7 +89,7 @@ class PersonalVoiceTrainingDiscoveryTest {
         assertEquals(before, index.readText())
     }
 
-    @Test fun remoteNamesFillPlaceholdersWhileLocalNamesUncertaintyAndKnownExhaustionSurvive() = runBlocking {
+    @Test fun localNamesIncludingIdPlaceholdersUncertaintyAndKnownExhaustionSurvive() = runBlocking {
         val index = File(folder.root, "names.json")
         val ids = listOf("S_placeholder", "S_named", "S_pending", "S_uncertain", "S_exhausted", "S_foreign")
         index.writeText(JSONArray().put(local(ids[0], ids[0])).put(local(ids[1], "我的备注"))
@@ -102,10 +102,9 @@ class PersonalVoiceTrainingDiscoveryTest {
         })
         store.load()
         val found = store.listTrainingSlots(config, "ak", "sk", "project").associateBy { it.id }
-        assertEquals("云端声音 S_placeholder", found.getValue(ids[0]).name)
+        assertEquals("S_placeholder", found.getValue(ids[0]).name)
         assertEquals("我的备注", found.getValue(ids[1]).name)
         assertEquals("待同步的新名称", found.getValue(ids[2]).name)
-        assertTrue(found.getValue(ids[2]).nameSyncPending)
         assertFalse(found.getValue(ids[3]).canTrain)
         assertTrue(found.getValue(ids[3]).uncertain)
         assertEquals(0, found.getValue(ids[4]).remaining)

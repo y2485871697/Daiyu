@@ -55,7 +55,7 @@ jobs:
           import json, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_voice_creation_cards_contract.py', 'test_voice_name_sync_contract.py', 'test_voice_quota_selection_contract.py', 'test_voice_personal_menu_contract.py', 'test_voice_account_notice_contract.py', 'test_voice_direct_operations_contract.py', 'test_cloud_voice_account_workflow.py'):
+          for pattern in ('test_voice_creation_cards_contract.py', 'test_voice_local_name_contract.py', 'test_voice_quota_selection_contract.py', 'test_voice_personal_menu_contract.py', 'test_voice_account_notice_contract.py', 'test_voice_direct_operations_contract.py', 'test_cloud_voice_account_workflow.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -83,11 +83,10 @@ jobs:
             --tests 'app.daiyu.android.AccountPageFeedbackTest' \
             --tests 'app.daiyu.android.VoiceAccountPanelLeafTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoiceImportTest' \
-            --tests 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoiceLocalNameTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoicesTest' \
-            --tests 'app.daiyu.android.voice.account.DoubaoVoiceAliasesTest' \
             --tests 'app.daiyu.android.voice.account.VoiceCatalogTest' \
             --tests 'app.daiyu.android.voice.account.VoiceCatalogResponseTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoiceTrainingDiscoveryTest' \
@@ -99,7 +98,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.VoiceAccountPanelLeafTest', 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest', 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest', 'app.daiyu.android.voice.account.DoubaoVoiceAliasesTest', 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest', 'app.daiyu.android.voice.account.PersonalVoiceImportTest', 'app.daiyu.android.voice.account.PersonalVoicesTest', 'app.daiyu.android.voice.account.VoiceCatalogTest', 'app.daiyu.android.voice.account.VoiceCatalogResponseTest', 'app.daiyu.android.voice.account.PersonalVoiceTrainingDiscoveryTest'}
+          expected = {'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.VoiceAccountPanelLeafTest', 'app.daiyu.android.voice.account.PersonalVoiceLocalNameTest', 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest', 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest', 'app.daiyu.android.voice.account.PersonalVoiceImportTest', 'app.daiyu.android.voice.account.PersonalVoicesTest', 'app.daiyu.android.voice.account.VoiceCatalogTest', 'app.daiyu.android.voice.account.VoiceCatalogResponseTest', 'app.daiyu.android.voice.account.PersonalVoiceTrainingDiscoveryTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

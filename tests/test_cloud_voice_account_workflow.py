@@ -19,8 +19,8 @@ class CloudVoiceAccountWorkflowTest(unittest.TestCase):
         classes = re.findall(r"--tests '([^']+)'", self.source)
         expected = {
             'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.VoiceAccountPanelLeafTest',
-            *('app.daiyu.android.voice.account.' + n for n in ('PersonalVoiceImportTest', 'PersonalVoiceNameSyncTest',
-              'PersonalVoiceSlotValidationTest', 'PersonalVoiceOverwriteTest', 'PersonalVoicesTest', 'DoubaoVoiceAliasesTest',
+            *('app.daiyu.android.voice.account.' + n for n in ('PersonalVoiceImportTest', 'PersonalVoiceLocalNameTest',
+              'PersonalVoiceSlotValidationTest', 'PersonalVoiceOverwriteTest', 'PersonalVoicesTest',
               'VoiceCatalogTest', 'VoiceCatalogResponseTest', 'PersonalVoiceTrainingDiscoveryTest')),
         }
         self.assertEqual(expected, set(classes))

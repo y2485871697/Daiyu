@@ -26,11 +26,8 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private val importAccountCleanup = mutableListOf<() -> Unit>()
     private var importQueryFails = false
     private var importVoiceQueryFails = false
-    private var importAliasFails = false
-    private var importCatalogInstanceMissing = false
-    private var importListInstanceAvailable = false
     private val importActions = mutableListOf<String>()
-    private var remoteImportAlias = "remote name"
+    private val remoteImportAlias = "remote name"
     private var creationQueryFails = false
     private var creationRemoteIds = listOf("S_available")
     private var creationRemaining = 3
@@ -77,40 +74,9 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                     val action = request.url.queryParameter("Action")!!
                     importActions += action
                     when (action) {
-                        "ListMegaTTSTrainStatus" -> {
-                            check(request.url.queryParameter("Version") == "2025-05-21")
-                            check(body.getString("ProjectName") == "default")
-                            check(body.getString("State") == "Success")
-                            check(body.getJSONArray("SpeakerIDs").toString() == JSONArray().put("S_available").toString())
-                            check(!body.has("PageNumber") && !body.has("PageSize"))
-                            JSONObject().put("Result", JSONObject().put("Statuses", JSONArray().apply {
-                                if (importListInstanceAvailable) put(JSONObject().put("SpeakerID", "S_available")
-                                    .put("InstanceNO", "import-resource").put("Alias", remoteImportAlias))
-                            }))
-                        }
-                        "ResourcePacksStatus" -> {
-                            check(body.getString("ProjectName") == "default")
-                            check(body.getJSONArray("ResourceIDs").toString() == JSONArray().put("volc.megatts.voiceclone").toString())
-                            check(body.getJSONArray("Types").toString() == JSONArray().put("access").put("quota").put("prepaid").toString())
-                            JSONObject().put("Result", JSONObject().put("TotalCount", 1)
-                                .put("Packs", JSONArray().put(JSONObject().put("TrainID", "S_available")
-                                    .put("InstanceNumber", "import-resource").put("Alias", remoteImportAlias).put("PackType", "prepaid"))))
-                        }
-                        "AliasResourcePack" -> {
-                            check(!importAliasFails) { "Synthetic alias failure" }
-                            check(body.getString("TrainID") == "S_available")
-                            check(body.getString("InstanceNumber") == "import-resource")
-                            remoteImportAlias = body.getString("Alias")
-                            JSONObject().put("Result", JSONObject().put("TrainID", "S_available")
-                                .put("InstanceNumber", "import-resource").put("Alias", remoteImportAlias))
-                        }
                         "BatchListMegaTTSTrainStatus" -> {
                             val state = body.getString("State")
-                            val aliasLookup = body.has("SpeakerIDs")
-                            if (aliasLookup) check(body.getJSONArray("SpeakerIDs").toString() == JSONArray().put("S_available").toString())
-                            val ids = if (aliasLookup) {
-                                if (state == "Success") listOf("S_available") else emptyList()
-                            } else when (state) {
+                            val ids = when (state) {
                                 "Unknown" -> listOf("S_unused")
                                 "Training" -> listOf("S_training")
                                 "Success" -> buildList {
@@ -122,8 +88,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
                             }
                             JSONObject().put("Result", JSONObject().put("TotalCount", ids.size)
                                 .put("Statuses", JSONArray().apply { ids.forEach {
-                                    put(JSONObject().put("SpeakerID", it).put("State", state).put("Alias", if (aliasLookup) remoteImportAlias else it)
-                                        .apply { if (!importCatalogInstanceMissing) put("InstanceNO", "import-resource") }.put("AvailableTrainingTimes", if (it == "S_exhausted") 0 else 3))
+                                    put(JSONObject().put("SpeakerID", it).put("State", state).put("Alias", it).put("AvailableTrainingTimes", if (it == "S_exhausted") 0 else 3))
                                 } }))
                         }
                         else -> error("Unexpected import metadata action: $action")
@@ -614,113 +579,62 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
         assertImportedVoiceReadyForUse()
         assertEquals(1, requests.get())
-        assertFalse(resources.voices.state.value.single { it.id == "S_available" }.nameSyncPending)
         assertEquals("remote name", remoteImportAlias)
         assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
     }
 
-    fun testImportWithRemarkNamesRemoteResourceWithoutConfirmationOrClone() {
+    fun testImportWithRemarkOnlyNamesTheLocalRecord() {
         mount(available = true, flow = "IMPORT")
         importDirectly("我的备注")
-        val success = "声音已导入，名称已同步到云端。"
+        val success = "声音已导入；没有重新制作。"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
         assertImportedVoiceReadyForUse()
-        assertEquals(6, requests.get()); assertEquals("我的备注", remoteImportAlias)
+        assertEquals(1, requests.get()); assertEquals("remote name", remoteImportAlias)
         val voice = resources.voices.state.value.single { it.id == "S_available" }
-        assertEquals("我的备注", voice.name); assertFalse(voice.nameSyncPending)
+        assertEquals("我的备注", voice.name)
         assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
     }
 
-    fun testImportWithMissingCatalogInstanceUsesOriginalResourceWithoutClone() {
-        mount(available = true, flow = "IMPORT")
-        importCatalogInstanceMissing = true
-        importDirectly("补查实例名称")
-        val success = "声音已导入，名称已同步到云端。"
-        ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
-        assertImportedVoiceReadyForUse()
-        assertEquals(8, requests.get()); assertEquals("补查实例名称", remoteImportAlias)
-        assertEquals(List(4) { "BatchListMegaTTSTrainStatus" } +
-            listOf("ListMegaTTSTrainStatus", "ResourcePacksStatus", "AliasResourcePack"), importActions)
-        val voice = resources.voices.state.value.single { it.id == "S_available" }
-        assertEquals("补查实例名称", voice.name); assertFalse(voice.nameSyncPending)
-        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
-    }
-
-    fun testImportWithListRecoveredInstanceSkipsResourcePacksAndClone() {
-        mount(available = true, flow = "IMPORT")
-        importCatalogInstanceMissing = true
-        importListInstanceAvailable = true
-        importDirectly("状态补查名称")
-        val success = "声音已导入，名称已同步到云端。"
-        ui.waitUntil(5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().size == 1 }
-        assertImportedVoiceReadyForUse()
-        assertEquals(7, requests.get()); assertEquals("状态补查名称", remoteImportAlias)
-        assertEquals(List(4) { "BatchListMegaTTSTrainStatus" } +
-            listOf("ListMegaTTSTrainStatus", "AliasResourcePack"), importActions)
-        val voice = resources.voices.state.value.single { it.id == "S_available" }
-        assertEquals("状态补查名称", voice.name); assertFalse(voice.nameSyncPending)
-        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
-    }
-
-    fun testImportAliasFailureKeepsVoiceAndDirectMenuRetryOnlyRenames() {
-        mount(available = true, flow = "IMPORT")
-        importAliasFails = true
-        importDirectly("重试备注")
-        val failure = "声音已导入，名称同步失败：名称操作结果未确认，请稍后重试名称同步。 可在原音色菜单重试名称同步。"
-        ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
-        assertImportedVoiceReadyForUse()
-        assertEquals(6, requests.get())
-        assertTrue(resources.voices.state.value.single { it.id == "S_available" }.nameSyncPending)
-        importAliasFails = false
-        node("voice-menu:S_available").performClick()
-        awaitUniqueTag("voice-choice-dialog")
-        awaitNodeWindowFocus(node("voice-choice-dialog"))
-        node("settings-radio:重试名称同步").performClick()
-        ui.onNodeWithText("确认本次操作").assertDoesNotExist()
-        ui.waitUntil(5_000) { resources.voices.state.value.none { it.id == "S_available" && it.nameSyncPending } }
-        assertEquals(11, requests.get()); assertEquals("重试备注", remoteImportAlias)
-        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
-    }
-
-    fun testPendingNameShowsRetryWithoutImplicitRequestsOrRecreation() {
+    fun testLegacyPendingNameCanBeRenamedLocallyWithoutCredentialsOrRequests() {
         mount(available = true, flow = "LIST", ready = true, namePending = true)
-        ui.onNode(hasText("名称待同步", substring = true) and
-            hasAnyAncestor(hasTestTag("settings-row:S_available")), useUnmergedTree = true).assertIsDisplayed()
+        ui.onNode(hasText("名称待同步", substring = true)).assertDoesNotExist()
         assertNoSideEffects()
         node("voice-menu:S_available").performClick()
         awaitUniqueTag("voice-choice-dialog")
         awaitNodeWindowFocus(node("voice-choice-dialog"))
-        node("settings-radio:重试名称同步").assertIsEnabled()
-        node("settings-radio:移除本机记录").assertIsEnabled()
-        node("settings-radio:查看状态").assertDoesNotExist()
-        ui.onAllNodes(hasAnyAncestor(hasTestTag("voice-choice-dialog")) and hasClickAction()).assertCountEquals(2)
+        node("settings-radio:查看状态").assertIsEnabled()
+        node("settings-radio:重试名称同步").assertDoesNotExist()
+        node("settings-radio:修改名称").assertIsEnabled().performClick()
+        awaitUniqueTag("settings-field:修改名称")
+        awaitNodeWindowFocus(node("settings-field:修改名称"))
         assertNoSideEffects()
-        node("settings-radio:重试名称同步").performClick()
-        ui.onNodeWithText("确认本次操作").assertDoesNotExist()
-        val failure = "名称同步失败：请先保存此音色所属账户的 AK、SK 和项目，再重试名称同步。 不要重新制作。"
-        ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
-        ui.onNodeWithText(failure).assertIsDisplayed()
+        node("settings-field:修改名称").performTextReplacement("少女")
+        ui.onNodeWithText("保存").performClick()
+        ui.waitUntil(5_000) { resources.voices.state.value.any { it.id == "S_available" && it.name == "少女" } }
+        reveal("settings-row:少女", "我的声音").assertIsDisplayed()
+        assertEquals(0, requests.get()); assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
         val voice = resources.voices.state.value.single { it.id == "S_available" }
-        assertTrue(voice.nameSyncPending); assertFalse(voice.uncertain)
-        assertNoSideEffects()
+        assertEquals(2, voice.status); assertFalse(voice.uncertain)
+        val restarted = PersonalVoices(index, AccountHttpTransport { _, _ -> error("No request on restart") })
+        restarted.load(); assertEquals("少女", restarted.state.value.single { it.id == "S_available" }.name)
+        assertEquals(beforePreferences, instrumentation.targetContext.getSharedPreferences("voice_account_control_secret_v1", 0).all)
     }
 
-    fun testPendingNameDoesNotBlockTrainingStatusQueryWhenCredentialsAreMissing() {
+    fun testLegacyPendingDoesNotChangeTheOrdinaryStatusQuery() {
         mount(available = true, flow = "LIST", ready = false, namePending = true, queryStatus = 2)
         node("voice-menu:S_available").performClick()
         awaitUniqueTag("voice-choice-dialog")
         awaitNodeWindowFocus(node("voice-choice-dialog"))
         node("settings-radio:查看状态").assertIsEnabled().performClick()
         ui.onNodeWithText("确认本次操作").assertDoesNotExist()
-        val failure = "名称同步失败：请先保存此音色所属账户的 AK、SK 和项目，再重试名称同步。 不要重新制作。"
-        ui.waitUntil(5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().size == 1 }
-        assertEquals(1, requests.get())
+        ui.waitUntil(5_000) { requests.get() == 1 && resources.voices.state.value.any { it.id == "S_available" && it.status == 2 } }
         val voice = resources.voices.state.value.single { it.id == "S_available" }
-        assertEquals(2, voice.status); assertTrue(voice.nameSyncPending); assertFalse(voice.uncertain)
-        assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
+        assertEquals("S_available", voice.name); assertFalse(voice.uncertain)
+        ui.onNode(hasText("名称待同步", substring = true)).assertDoesNotExist()
+        assertEquals(1, requests.get()); assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
     }
 
-    fun testRecordHasIconActionsTwoMenuChoicesAndQueryUpdatesSummary() {
+    fun testRecordHasIconActionsThreeMenuChoicesAndQueryUpdatesSummary() {
         mount(available = true, flow = "LIST", ready = true, queryStatus = 1)
         val play = node("voice-preview:S_available").assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
             .assertContentDescriptionEquals("播放试听").fetchSemanticsNode().boundsInRoot
@@ -739,7 +653,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         awaitNodeWindowFocus(node("voice-choice-dialog"))
         node("settings-radio:查看状态").assertIsEnabled()
         node("settings-radio:移除本机记录").assertIsEnabled()
-        ui.onAllNodes(hasAnyAncestor(hasTestTag("voice-choice-dialog")) and hasClickAction()).assertCountEquals(2)
+        ui.onAllNodes(hasAnyAncestor(hasTestTag("voice-choice-dialog")) and hasClickAction()).assertCountEquals(3)
         node("settings-radio:用于朗读").assertDoesNotExist()
         node("settings-radio:错误详情").assertDoesNotExist()
         node("settings-radio:查看状态").performClick()

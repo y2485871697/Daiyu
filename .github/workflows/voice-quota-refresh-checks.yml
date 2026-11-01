@@ -91,7 +91,7 @@ jobs:
             --tests 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoiceImportTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest' \
-            --tests 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoiceLocalNameTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoicesTest' \
             --tests 'app.daiyu.android.voice.account.VoiceCatalogTest' \
             --tests 'app.daiyu.android.voice.account.VoiceCatalogResponseTest' \
@@ -106,7 +106,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.voice.account.PersonalVoiceTrainingDiscoveryTest', 'app.daiyu.android.voice.account.VoiceCatalogResponseTest', 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest', 'app.daiyu.android.voice.account.PersonalVoicesTest', 'app.daiyu.android.voice.account.PersonalVoiceImportTest', 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest', 'app.daiyu.android.VoiceSettingsParityTest', 'app.daiyu.android.voice.account.VoiceCatalogTest', 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest', 'app.daiyu.android.VoiceAccountPanelLeafTest'}
+          expected = {'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.voice.account.PersonalVoiceTrainingDiscoveryTest', 'app.daiyu.android.voice.account.VoiceCatalogResponseTest', 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest', 'app.daiyu.android.voice.account.PersonalVoicesTest', 'app.daiyu.android.voice.account.PersonalVoiceImportTest', 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest', 'app.daiyu.android.VoiceSettingsParityTest', 'app.daiyu.android.voice.account.VoiceCatalogTest', 'app.daiyu.android.voice.account.PersonalVoiceLocalNameTest', 'app.daiyu.android.VoiceAccountPanelLeafTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

@@ -57,7 +57,7 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertIn('var slotPicker by remember(frozenConfiguration.revision)', self.panel)
         self.assertIn('slotPicker = false', block(self.panel, 'fun navigate(target: String)'))
         self.assertIn('slotPicker = false', block(self.panel, 'fun back()'))
-        self.assertIn('slotPicker = false; importSlotPicker = false; confirmation = null; operation?.cancel(); preview.stop()', self.panel)
+        self.assertIn('slotPicker = false; importSlotPicker = false; renameVoice = null; confirmation = null; operation?.cancel(); preview.stop()', self.panel)
         self.assertIn('if (target == "SYNC" || target == "ACCOUNT") parentPage = page', self.panel)
         self.assertIn('page = parentPage', block(self.panel, 'fun back()'))
 
@@ -125,14 +125,14 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         query = block(store, 'suspend fun listImportable(')
         self.assertIn('DoubaoVoiceCatalog(transport).list(ak, sk, project)', query)
         self.assertIn('it.state in setOf("Success", "Active")', query)
-        self.assertIn('val candidate = Voice(slot.id, slot.name, account.fingerprint', query)
+        self.assertIn('val candidate = Voice(slot.id, find(slot.id, config)?.name ?: slot.name, account.fingerprint', query)
         self.assertIn('request("get_voice", account.key, identity(candidate))', query)
         self.assertIn('verified.takeIf { it.canImport }', query)
         for effect in ('save(', 'persist(', 'begin(', 'voice_clone', 'state.value'):
             self.assertNotIn(effect, query)
         final = block(store, 'suspend fun importExisting(')
         self.assertLess(final.index('request("get_voice"'), final.index('require(result.canImport)'))
-        self.assertLess(final.index('require(result.canImport)'), final.index('save(imported)'))
+        self.assertLess(final.index('require(result.canImport)'), final.index('save(imported,'))
         self.assertNotIn('voice_clone', final)
         self.assertNotIn('切换为“全部”或“未复刻”', self.imported)
 

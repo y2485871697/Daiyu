@@ -254,7 +254,7 @@ internal class RemoteVoiceHostPlayer(
                 checkNotNull(output).drain()
                 diagnostics?.recordAsync(DiagnosticEvent.SPEECH_STREAM_DRAINED)
             }
-            ensureActive()
+            currentCoroutineContext().ensureActive()
             if (!closed && pcm === output && mutable.value.requestId == requestId && runtime.current(frozen)) {
                 finish(owner, requestId, true)
             }

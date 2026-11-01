@@ -469,12 +469,13 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         lateinit var started: () -> Unit
         val received = CompletableDeferred<Unit>()
         val allowDrain = CompletableDeferred<Unit>()
+        val drainEntered = CompletableDeferred<Unit>()
         var closes = 0
         override suspend fun write(bytes: ByteArray) {
             assertArrayEquals(byteArrayOf(1, 0, 2, 0), bytes)
             received.complete(Unit)
         }
-        override suspend fun drain() { allowDrain.await() }
+        override suspend fun drain() { drainEntered.complete(Unit); allowDrain.await() }
         override fun closeStrict() { closes++ }
     }
 
@@ -505,7 +506,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         assertEquals(SpeechPhase.QUEUED, host.state.value.phase)
         pcm.started(); drainUntil { host.state.value.phase == SpeechPhase.SPEAKING }
         assertFalse(end.isCompleted); assertTrue(media.isEmpty()); assertEquals(1, requests)
-        end.complete(Unit); drainUntil { cancelled.isCompleted }
+        end.complete(Unit); drainUntil { pcm.drainEntered.isCompleted }
         assertEquals(SpeechPhase.SPEAKING, host.state.value.phase); assertEquals(0, pcm.closes)
         pcm.allowDrain.complete(Unit); drainUntil { host.state.value.phase == SpeechPhase.COMPLETED }
         assertEquals(1, pcm.closes)
@@ -528,10 +529,16 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         assertTrue(host.play("owner", "message", "你好"))
         drainUntil { pcm.received.isCompleted }; pcm.started()
         drainUntil { host.state.value.phase == SpeechPhase.SPEAKING }
-        shadowOf(audio).lastAudioFocusRequest.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS)
-        drainUntil { cancelled.isCompleted && host.state.value.phase == SpeechPhase.ERROR }
-        assertEquals(SpeechError.AUDIO_FOCUS_LOST, host.state.value.error)
-        assertEquals(1, pcm.closes); assertEquals(1, requests)
+        var releasedAtTerminal = false
+        val observation = scope.launch(UnconfinedTestDispatcher(dispatcher.scheduler), start = CoroutineStart.UNDISPATCHED) {
+            host.state.collect { state -> if (state.phase == SpeechPhase.ERROR) releasedAtTerminal = pcm.closes == 1 }
+        }
+        try {
+            shadowOf(audio).lastAudioFocusRequest.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS)
+            drainUntil { cancelled.isCompleted && host.state.value.phase == SpeechPhase.ERROR }
+            assertEquals(SpeechError.AUDIO_FOCUS_LOST, host.state.value.error)
+            assertEquals(1, pcm.closes); assertEquals(1, requests); assertTrue(releasedAtTerminal)
+        } finally { observation.cancel() }
     }
 
     @Test fun pcmCloseDuringDrainFencesLateStartAndClosesExactlyOnce() {
@@ -539,7 +546,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         val pcm = PcmFixture(); val end = CompletableDeferred<Unit>(); val cancelled = CompletableDeferred<Unit>()
         host = streamingHost(pcm, end, cancelled)
         assertTrue(host.play("owner", "message", "你好"))
-        drainUntil { pcm.received.isCompleted }; end.complete(Unit); drainUntil { cancelled.isCompleted }
+        drainUntil { pcm.received.isCompleted }; end.complete(Unit); drainUntil { pcm.drainEntered.isCompleted }
         host.closeStrict(); pcm.started(); pcm.allowDrain.complete(Unit)
         dispatcher.scheduler.runCurrent(); shadowOf(android.os.Looper.getMainLooper()).idle()
         assertEquals(SpeechPhase.STOPPED, host.state.value.phase); assertEquals(1, pcm.closes)

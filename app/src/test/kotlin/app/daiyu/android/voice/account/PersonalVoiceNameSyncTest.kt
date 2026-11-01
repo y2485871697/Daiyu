@@ -268,6 +268,7 @@ class PersonalVoiceNameSyncTest {
             }
         })
         create(store)
+        store.accept(store.state.value.single())
         try { sync(store); fail("expected lost alias receipt") } catch (_: IOException) { }
         assertTrue(store.state.value.single().nameSyncPending)
         assertTrue(store.state.value.single().accepted); assertEquals(2, store.state.value.single().status)

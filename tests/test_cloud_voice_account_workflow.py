@@ -20,7 +20,8 @@ class CloudVoiceAccountWorkflowTest(unittest.TestCase):
         expected = {
             'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.VoiceAccountPanelLeafTest',
             *('app.daiyu.android.voice.account.' + n for n in ('PersonalVoiceImportTest', 'PersonalVoiceNameSyncTest',
-              'PersonalVoiceSlotValidationTest', 'PersonalVoiceOverwriteTest', 'PersonalVoicesTest', 'DoubaoVoiceAliasesTest')),
+              'PersonalVoiceSlotValidationTest', 'PersonalVoiceOverwriteTest', 'PersonalVoicesTest', 'DoubaoVoiceAliasesTest',
+              'VoiceCatalogTest', 'VoiceCatalogResponseTest', 'PersonalVoiceTrainingDiscoveryTest')),
         }
         self.assertEqual(expected, set(classes))
         self.assertEqual(len(expected), len(classes))

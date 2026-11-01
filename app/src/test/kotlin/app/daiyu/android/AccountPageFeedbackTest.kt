@@ -3,6 +3,8 @@ package app.daiyu.android
 import app.daiyu.android.voice.account.VoiceCatalogFailure
 import org.junit.Assert.*
 import org.junit.Test
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runBlocking
 
 class AccountPageFeedbackTest {
     @Test fun currentVisitDisplaysRealReadFailure() {
@@ -51,5 +53,25 @@ class AccountPageFeedbackTest {
     @Test fun trainingKeepsItsOwnUnknownSubmissionWarning() {
         assertEquals("制作结果未确认，请查询原音色，不要重复提交。",
             voiceAccountFailure(IllegalStateException("secret"), "制作结果未确认，请查询原音色，不要重复提交。"))
+    }
+    @Test fun nameSyncPreservesSafeReasonsWithoutBlamingCredentials() = runBlocking {
+        val reason = "资源实例响应不完整，未改名 HTTP 400 · InvalidParameter"
+        assertEquals(reason, voiceNameSyncFailure { throw VoiceCatalogFailure(reason) })
+        val unknown = voiceNameSyncFailure { throw IllegalStateException("secret-ak secret-sk response body") }!!
+        assertFalse(unknown.contains("secret")); assertFalse(unknown.contains("AK"))
+        assertEquals("名称操作结果未确认，请稍后重试名称同步。", unknown)
+    }
+    @Test fun confirmedNameSyncHasNoFailure() = runBlocking {
+        var calls = 0
+        assertNull(voiceNameSyncFailure { calls++ })
+        assertEquals(1, calls)
+    }
+    @Test fun cancelledNameSyncIsNotConvertedToFailureOrRetried() = runBlocking {
+        var calls = 0
+        try {
+            voiceNameSyncFailure { calls++; throw CancellationException("page left") }
+            fail("cancellation must escape")
+        } catch (_: CancellationException) { }
+        assertEquals(1, calls)
     }
 }

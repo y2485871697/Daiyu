@@ -32,8 +32,13 @@ class PersonalVoiceNameSyncTest {
         .put("available_training_times", 7).put("speaker_status", JSONArray().put(JSONObject().put("model_type", 5))))
     private fun resource(alias: String = "old") = JSONObject().put("TrainID", "S_owned")
         .put("InstanceNumber", "resource-instance").put("Alias", alias)
-    private fun listed(alias: String = "old") = response(JSONObject().put("Result", JSONObject()
-        .put("TotalCount", 1).put("Packs", JSONArray().put(resource(alias)))))
+    private fun listed(request: Request, alias: String = "old"): AccountResponse {
+        val rows = JSONArray()
+        if (body(request).getString("State") == "Success") rows.put(JSONObject().put("SpeakerID", "S_owned")
+            .put("InstanceNO", "resource-instance").put("Alias", alias).put("State", "Success"))
+        return response(JSONObject().put("Result", JSONObject().put("TotalCount", rows.length()).put("Statuses", rows)))
+    }
+    private val nameReads = List(4) { "BatchListMegaTTSTrainStatus" }
     private suspend fun create(store: PersonalVoices, slot: String? = "S_owned"): String {
         store.load()
         return store.create(config, PersonalVoices.Sample.of(byteArrayOf(1, 2), "wav"), "我的声音", slot, true)
@@ -53,7 +58,7 @@ class PersonalVoiceNameSyncTest {
                     assertTrue(pending.getBoolean("nameSyncPending")); assertTrue(pending.getBoolean("uncertain"))
                     assertEquals("S_owned", json.getString("speaker_id")); accepted()
                 }
-                "ResourcePacksStatus" -> { assertNull(request.header("X-Api-Key")); assertEquals("saved-project", json.getString("ProjectName")); listed() }
+                "BatchListMegaTTSTrainStatus" -> { assertNull(request.header("X-Api-Key")); assertEquals("saved-project", json.getString("ProjectName")); listed(request) }
                 "AliasResourcePack" -> {
                     assertEquals("S_owned", json.getString("TrainID")); assertEquals("resource-instance", json.getString("InstanceNumber"))
                     assertEquals("我的声音", json.getString("Alias")); assertFalse(json.has("audio")); assertNull(request.header("X-Api-Key"))
@@ -63,7 +68,7 @@ class PersonalVoiceNameSyncTest {
             }
         })
         assertEquals("S_owned", create(store)); sync(store)
-        assertEquals(listOf("voice_clone", "ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertEquals(listOf("voice_clone") + nameReads + "AliasResourcePack", actions)
         val voice = store.state.value.single()
         assertFalse(voice.nameSyncPending); assertFalse(voice.uncertain); assertEquals(2, voice.status)
         assertEquals("我的声音", voice.name); assertEquals(7, voice.remaining)
@@ -79,7 +84,7 @@ class PersonalVoiceNameSyncTest {
             val action = request.url.queryParameter("Action") ?: request.url.pathSegments.last(); actions += action
             when (action) {
                 "voice_clone" -> accepted()
-                "ResourcePacksStatus" -> listed()
+                "BatchListMegaTTSTrainStatus" -> listed(request)
                 "AliasResourcePack" -> { updates++; if (updates == 1) throw IOException("lost alias response")
                     response(JSONObject().put("Result", resource("我的声音"))) }
                 else -> error("No re-clone or training query allowed")
@@ -113,7 +118,7 @@ class PersonalVoiceNameSyncTest {
             val action = request.url.queryParameter("Action") ?: request.url.pathSegments.last(); actions += action
             when (action) {
                 "get_voice" -> accepted()
-                "ResourcePacksStatus" -> listed()
+                "BatchListMegaTTSTrainStatus" -> listed(request)
                 "AliasResourcePack" -> response(JSONObject().put("Result", resource("我的声音")))
                 else -> error("Never resubmit")
             }
@@ -121,7 +126,7 @@ class PersonalVoiceNameSyncTest {
         restarted.load()
         try { sync(restarted); fail("expected query gate") } catch (_: IllegalArgumentException) { }
         assertTrue(actions.isEmpty()); restarted.refresh(restarted.state.value.single(), config); sync(restarted)
-        assertEquals(listOf("get_voice", "ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertEquals(listOf("get_voice") + nameReads + "AliasResourcePack", actions)
     }
 
     @Test fun cancellationKeepsPendingAndRemoteReadbackAvoidsDuplicateUpdate() = runBlocking {
@@ -129,7 +134,7 @@ class PersonalVoiceNameSyncTest {
         val store = PersonalVoices(file, AccountHttpTransport { request, _ ->
             when (request.url.queryParameter("Action")) {
                 null -> accepted()
-                "ResourcePacksStatus" -> listed()
+                "BatchListMegaTTSTrainStatus" -> listed(request)
                 else -> throw CancellationException("view left after request")
             }
         })
@@ -137,7 +142,7 @@ class PersonalVoiceNameSyncTest {
         try { sync(store); fail("expected cancellation") } catch (_: CancellationException) { }
         assertTrue(store.state.value.single().nameSyncPending)
         val restarted = PersonalVoices(file, AccountHttpTransport { request, _ ->
-            assertEquals("ResourcePacksStatus", request.url.queryParameter("Action")); listed("我的声音")
+            assertEquals("BatchListMegaTTSTrainStatus", request.url.queryParameter("Action")); listed(request, "我的声音")
         })
         restarted.load(); sync(restarted); assertFalse(restarted.state.value.single().nameSyncPending)
     }
@@ -171,10 +176,10 @@ class PersonalVoiceNameSyncTest {
             val json = body(request)
             when (action) {
                 "get_voice" -> { assertEquals("S_owned", json.getString("speaker_id")); accepted() }
-                "ResourcePacksStatus" -> {
+                "BatchListMegaTTSTrainStatus" -> {
                     val pending = JSONArray(file.readText()).getJSONObject(0)
                     assertTrue(pending.getBoolean("nameSyncPending"))
-                    assertEquals("我的声音", pending.getString("name")); listed()
+                    assertEquals("我的声音", pending.getString("name")); listed(request)
                 }
                 "AliasResourcePack" -> {
                     assertEquals("S_owned", json.getString("TrainID"))
@@ -188,7 +193,7 @@ class PersonalVoiceNameSyncTest {
         val imported = store.importExisting(config, " S_owned ", "  我的声音  ")
         assertEquals("S_owned", imported.id); assertTrue(imported.nameSyncPending)
         sync(store)
-        assertEquals(listOf("get_voice", "ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertEquals(listOf("get_voice") + nameReads + "AliasResourcePack", actions)
         assertFalse(store.state.value.single().nameSyncPending)
         assertEquals("我的声音", store.state.value.single().name)
     }
@@ -201,7 +206,7 @@ class PersonalVoiceNameSyncTest {
             actions += action
             when (action) {
                 "get_voice" -> accepted()
-                "ResourcePacksStatus" -> listed()
+                "BatchListMegaTTSTrainStatus" -> listed(request)
                 "AliasResourcePack" -> throw IOException("alias receipt lost")
                 else -> error("Import must not train")
             }
@@ -210,11 +215,11 @@ class PersonalVoiceNameSyncTest {
         try { sync(store); fail("Expected alias failure") } catch (_: IOException) { }
         assertTrue(store.state.value.single().tts); assertTrue(store.state.value.single().nameSyncPending)
         val restarted = PersonalVoices(file, AccountHttpTransport { request, _ ->
-            assertEquals("ResourcePacksStatus", request.url.queryParameter("Action")); listed("我的声音")
+            assertEquals("BatchListMegaTTSTrainStatus", request.url.queryParameter("Action")); listed(request, "我的声音")
         })
         restarted.load(); assertEquals("我的声音", restarted.state.value.single().name)
         sync(restarted); assertFalse(restarted.state.value.single().nameSyncPending)
-        assertEquals(listOf("get_voice", "ResourcePacksStatus", "AliasResourcePack"), actions)
+        assertEquals(listOf("get_voice") + nameReads + "AliasResourcePack", actions)
     }
 
     @Test fun blankImportRemarkDoesNotStartRenameOrClearAnExistingPendingName() = runBlocking {

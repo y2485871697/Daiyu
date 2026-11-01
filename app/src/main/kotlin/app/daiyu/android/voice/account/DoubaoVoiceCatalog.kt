@@ -23,9 +23,10 @@ private inline fun checkCatalog(valid: Boolean, message: () -> String) {
 
 /** Retained from frozen doubao/DoubaoVoiceCatalog; control plane, never synthesis credentials. */
 internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
-    data class Slot(val id: String, val name: String, val state: String, val remaining: Int)
-    suspend fun list(ak: String, sk: String, project: String): List<Slot> {
+    data class Slot(val id: String, val name: String, val state: String, val remaining: Int, val instanceNumber: String = "", val alias: String? = null)
+    suspend fun list(ak: String, sk: String, project: String, speakerId: String? = null): List<Slot> {
         require(ak.isNotBlank() && sk.isNotBlank() && project.isNotBlank()) { "请填写 AK、SK 和项目名" }
+        require(speakerId == null || speakerId.matches(Regex("S_[A-Za-z0-9_-]+")))
         val result = linkedMapOf<String, Slot>()
         for (state in listOf("Unknown", "Training", "Success", "Active")) {
             var expectedTotal: Int? = null
@@ -33,7 +34,8 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
             for (page in 1..20) {
                 currentCoroutineContext().ensureActive()
                 val body = JSONObject().put("ProjectName", project).put("State", state)
-                    .put("PageNumber", page).put("PageSize", 100).toString()
+                    .put("PageNumber", page).put("PageSize", 100)
+                    .apply { if (speakerId != null) put("SpeakerIDs", JSONArray().put(speakerId)) }.toString()
                 val response = transport.execute(signedRequest(ak, sk, body, Instant.now()), AccountHttpTransportLimit)
                 val root = readResponse(response, listOf(ak, sk))
                 val data = root.optJSONObject("Result")
@@ -46,6 +48,8 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
                 val total = totalLong.toInt()
                 checkCatalog(expectedTotal == null || expectedTotal == total) { "音色列表总数在分页中变化，未取得完整列表" }
                 expectedTotal = total
+                if (data.has("PageNumber")) checkCatalog(data.opt("PageNumber") == page) { "音色列表页码不符，未取得完整列表" }
+                if (data.has("PageSize")) checkCatalog(data.opt("PageSize") == 100) { "音色列表页大小不符，未取得完整列表" }
                 val rawItems = data.opt("Statuses")
                 val items = when {
                     rawItems is JSONArray -> rawItems
@@ -62,10 +66,15 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
                     val id = item.opt("SpeakerID") as? String
                         ?: throw VoiceCatalogFailure("音色列表 SpeakerID 缺失或格式无效，未取得完整列表。")
                     checkCatalog(id.matches(Regex("S_[A-Za-z0-9_-]+"))) { "音色列表包含无效槽位，未取得完整列表" }
+                    checkCatalog(speakerId == null || id == speakerId) { "音色列表返回了未请求的音色，未改名" }
+                    val instance = (item.opt("InstanceNO") as? String).orEmpty()
+                    if (speakerId != null && id in result) {
+                        checkCatalog(result.getValue(id).instanceNumber == instance) { "同一音色匹配到多个实例，未改名" }
+                    }
                     checkCatalog(stateIds.add(id)) { "音色列表包含重复槽位，未取得完整列表" }
                     // Separate state requests are not one snapshot: keep the latest observation, as in the prior observation contract.
                     result[id] = Slot(id, item.optString("Alias").ifBlank { id }, item.optString("State", state),
-                        item.optInt("AvailableTrainingTimes", -1))
+                        item.optInt("AvailableTrainingTimes", -1), instance, item.opt("Alias") as? String)
                 }
                 if (offset + items.length() == total) break
                 checkCatalog(page < 20) { "音色超过 2000 条，请按项目缩小查询范围" }

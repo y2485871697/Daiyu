@@ -88,6 +88,9 @@ jobs:
             --tests 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest' \
             --tests 'app.daiyu.android.voice.account.PersonalVoicesTest' \
             --tests 'app.daiyu.android.voice.account.DoubaoVoiceAliasesTest' \
+            --tests 'app.daiyu.android.voice.account.VoiceCatalogTest' \
+            --tests 'app.daiyu.android.voice.account.VoiceCatalogResponseTest' \
+            --tests 'app.daiyu.android.voice.account.PersonalVoiceTrainingDiscoveryTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee voice-account-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -96,7 +99,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.VoiceAccountPanelLeafTest', 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest', 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest', 'app.daiyu.android.voice.account.DoubaoVoiceAliasesTest', 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest', 'app.daiyu.android.voice.account.PersonalVoiceImportTest', 'app.daiyu.android.voice.account.PersonalVoicesTest'}
+          expected = {'app.daiyu.android.AccountPageFeedbackTest', 'app.daiyu.android.VoiceAccountPanelLeafTest', 'app.daiyu.android.voice.account.PersonalVoiceNameSyncTest', 'app.daiyu.android.voice.account.PersonalVoiceOverwriteTest', 'app.daiyu.android.voice.account.DoubaoVoiceAliasesTest', 'app.daiyu.android.voice.account.PersonalVoiceSlotValidationTest', 'app.daiyu.android.voice.account.PersonalVoiceImportTest', 'app.daiyu.android.voice.account.PersonalVoicesTest', 'app.daiyu.android.voice.account.VoiceCatalogTest', 'app.daiyu.android.voice.account.VoiceCatalogResponseTest', 'app.daiyu.android.voice.account.PersonalVoiceTrainingDiscoveryTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

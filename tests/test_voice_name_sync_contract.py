@@ -15,22 +15,26 @@ class VoiceNameSyncContractTest(unittest.TestCase):
 
     def test_alias_is_separate_and_scoped_to_original_exact_resource(self):
         source = (SRC / "voice/account/DoubaoVoiceAliases.kt").read_text()
-        for token in ('"ResourcePacksStatus"', '"AliasResourcePack"', 'Version=2025-05-20',
-                      'pack.optString("TrainID") != id', 'check(matched == null)',
+        for token in ('"AliasResourcePack"', 'Version=2025-05-20',
+                      'DoubaoVoiceCatalog(transport).list(ak, sk, project, speakerId = id)',
                       '.put("TrainID", id).put("InstanceNumber", instance).put("Alias", name)',
-                      'resource.optString("Alias") == name', 'listOf(ak, sk)'):
+                      'resource.instanceNumber', 'resource.alias == name', 'listOf(ak, sk)'):
             self.assertIn(token, source)
-        for forbidden in ('voice_clone', 'X-Api-Key', '10029', 'Thread.sleep', 'delay(', 'retry('):
+        for forbidden in ('ResourcePacksStatus', 'voice_clone', 'X-Api-Key', '10029', 'Thread.sleep', 'delay(', 'retry('):
             self.assertNotIn(forbidden, source)
 
     def test_panel_uses_saved_account_credentials_and_separates_feedback(self):
         panel = (SRC / "VoiceAccountPanel.kt").read_text()
         helper = panel[panel.index('suspend fun syncName('):panel.index('fun beginFlow(')]
         self.assertIn('resources.preferences.load(voice.account)', helper)
-        self.assertIn('saved?.keyId.orEmpty()', helper)
-        self.assertIn('saved?.secret.orEmpty()', helper)
-        self.assertIn('saved?.project.orEmpty()', helper)
-        self.assertIn('catch (cancelled: CancellationException) { throw cancelled }', helper)
+        self.assertIn('saved.keyId', helper)
+        self.assertIn('saved.secret', helper)
+        self.assertIn('saved.project', helper)
+        self.assertIn('voiceNameSyncFailure { syncName(voice) }', helper)
+        failure_helper = (SRC / "AccountPageFeedback.kt").read_text()
+        self.assertIn('catch (cancelled: CancellationException)', failure_helper)
+        self.assertIn('voiceAccountFailure(failure,', failure_helper)
+        self.assertNotIn('catch (_: Exception) { false }', helper)
         self.assertNotIn('resources.voices.create(', helper)
         self.assertEqual(1, panel.count('resources.voices.create('))
         self.assertIn('声音已提交，名称同步失败', panel)

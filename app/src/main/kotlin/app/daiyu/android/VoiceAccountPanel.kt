@@ -249,12 +249,12 @@ internal fun VoiceAccountPanel(
     }
     suspend fun syncName(voice: PersonalVoices.Voice) {
         val saved = withContext(Dispatchers.IO) { resources.preferences.load(voice.account) }
-        resources.voices.syncName(voice, speech!!, saved?.keyId.orEmpty(), saved?.secret.orEmpty(), saved?.project.orEmpty())
+        if (saved == null || saved.keyId.isBlank() || saved.secret.isBlank() || saved.project.isBlank()) {
+            throw VoiceCatalogFailure("请先保存此音色所属账户的 AK、SK 和项目，再重试名称同步。")
+        }
+        resources.voices.syncName(voice, speech!!, saved.keyId, saved.secret, saved.project)
     }
-    suspend fun trySyncName(voice: PersonalVoices.Voice): Boolean = try {
-        syncName(voice); true
-    } catch (cancelled: CancellationException) { throw cancelled }
-    catch (_: Exception) { false }
+    suspend fun trySyncName(voice: PersonalVoices.Voice): String? = voiceNameSyncFailure { syncName(voice) }
     fun beginFlow(target: String) {
         if (!current() || busy) return
         name = ""; existingId = ""; slotId = ""; manualSlotId = ""; postpaid = false; sampleUri = null
@@ -439,14 +439,15 @@ internal fun VoiceAccountPanel(
                             val imported = resources.voices.importExisting(speech!!, id, n)
                             currentCoroutineContext().ensureActive()
                             check(current() && feedback.visit == origin)
-                            val nameSynced = imported.takeIf { it.nameSyncPending && !it.uncertain }?.let { trySyncName(it) }
+                            val nameSyncAttempted = imported.nameSyncPending && !imported.uncertain
+                            val nameFailure = if (nameSyncAttempted) trySyncName(imported) else null
                             currentCoroutineContext().ensureActive()
                             check(current() && feedback.visit == origin)
                             clearPageFeedback(); page = "LIST"
-                            feedback = feedback.report(feedback.visit, when (nameSynced) {
-                                true -> "声音已导入，名称已同步到云端。"
-                                false -> "声音已导入，名称同步失败；可在原音色菜单重试名称同步。"
-                                null -> if (n.isNotBlank() && !DoubaoVoiceIdentity.isSlot(imported.id))
+                            feedback = feedback.report(feedback.visit, when {
+                                nameFailure != null -> "声音已导入，名称同步失败：$nameFailure 可在原音色菜单重试名称同步。"
+                                nameSyncAttempted -> "声音已导入，名称已同步到云端。"
+                                else -> if (n.isNotBlank() && !DoubaoVoiceIdentity.isSlot(imported.id))
                                     "声音已导入；此自定义音色暂不支持云端改名，备注已保存在本机。"
                                 else "声音已导入；没有重新制作。"
                             })
@@ -578,14 +579,15 @@ internal fun VoiceAccountPanel(
                                 if (!current() || feedback.visit != origin) throw CancellationException("account_page_changed")
                                 val id = resources.voices.create(speech!!, sample, n, slot, confirmed = true)
                                 val created = resources.voices.find(id, speech!!)
-                                val nameSynced = created?.takeIf { it.nameSyncPending && !it.uncertain }?.let { trySyncName(it) }
+                                val nameSyncAttempted = created?.let { it.nameSyncPending && !it.uncertain } == true
+                                val nameFailure = if (nameSyncAttempted) trySyncName(checkNotNull(created)) else null
                                 currentCoroutineContext().ensureActive()
                                 check(current() && feedback.visit == origin)
                                 clearPageFeedback(); page = "LIST"; step = 0
-                                feedback = feedback.report(feedback.visit, when (nameSynced) {
-                                    true -> "声音已提交，名称已同步到云端；请在原音色菜单查询制作状态。"
-                                    false -> "声音已提交，名称同步失败；可在原音色菜单重试名称同步，不要重新制作。"
-                                    null -> "已提交制作，请在原音色菜单查询状态，不要重复提交。"
+                                feedback = feedback.report(feedback.visit, when {
+                                    nameFailure != null -> "声音已提交，名称同步失败：$nameFailure 可在原音色菜单重试名称同步，不要重新制作。"
+                                    nameSyncAttempted -> "声音已提交，名称已同步到云端；请在原音色菜单查询制作状态。"
+                                    else -> "已提交制作，请在原音色菜单查询状态，不要重复提交。"
                                 })
                             } finally { sample.clear(); sampleUri = null; agreed = false }
                         }
@@ -675,8 +677,9 @@ internal fun VoiceAccountPanel(
                         "QUERY" -> execute { report ->
                             if (!latestVoice.nameSyncPending || latestVoice.uncertain || !latestVoice.tts) resources.voices.refresh(latestVoice, speech!!)
                             resources.voices.find(latestVoice.id, speech!!)?.takeIf { it.nameSyncPending && !it.uncertain }?.let {
-                                report(if (trySyncName(it)) "名称已同步到云端；没有重新制作。"
-                                    else "名称同步失败；请检查已保存的 AK／SK 与项目后重试，不要重新制作。")
+                                val nameFailure = trySyncName(it)
+                                report(if (nameFailure == null) "名称已同步到云端；没有重新制作。"
+                                    else "名称同步失败：$nameFailure 不要重新制作。")
                             }
                         }
                         "REMOVE" -> if (!latestVoice.uncertain) ask(null) {

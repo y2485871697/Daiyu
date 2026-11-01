@@ -30,7 +30,7 @@ class VoiceDirectOperationsContractTest(unittest.TestCase):
         self.assertNotIn('仅查询已有声音，不上传录音、不重新制作。备注名称最多 80 字。', self.panel)
         self.assertIn('name = it.take(80)', self.panel)
         imported = block(self.panel, 'SettingsRow("导入声音",')
-        for token in ('val imported = resources.voices.importExisting(', 'trySyncName(it)',
+        for token in ('val imported = resources.voices.importExisting(', 'trySyncName(imported)',
                       '声音已导入，名称已同步到云端。', '声音已导入，名称同步失败',
                       'currentCoroutineContext().ensureActive()', 'check(current() && feedback.visit == origin)'):
             self.assertIn(token, imported)

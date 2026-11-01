@@ -209,7 +209,10 @@ class ImageModelInputTest {
             assertEquals(listOf("first", "second"), resolver.owners.map { it.messageId })
             val messages = history(protocol, history, plan)
             val base = body(config, messages)
-            val expectedBytes = ImageRequestPreflight.bytes(config.requestOptions.apply(base, protocol), config, plan) { false }
+            val configured = config.requestOptions.apply(base, protocol)
+            val request = if (protocol == ProviderProtocol.MESSAGES)
+                DaiyuPromptCaching.apply(configured, config.requestOptions.promptCacheRetention) else configured
+            val expectedBytes = ImageRequestPreflight.bytes(request, config, plan) { false }
             val conn = Connection(events(protocol))
             var connections = 0
             val session = model(config) { url -> assertEquals(config.requestEndpoint(), url.toString()); connections++; conn }

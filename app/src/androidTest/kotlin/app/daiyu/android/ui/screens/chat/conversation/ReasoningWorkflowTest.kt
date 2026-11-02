@@ -82,7 +82,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 } else AssistantTurn(displayed, ChatScreenActions(),
                     onVisibleAdvance = { advances.incrementAndGet() }, onRevealSettled = { settled.set(it) })
             } } }
-            ui.mainClock.advanceTimeBy(400)
+            ui.mainClock.advanceTimeBy(if (history) 128 else 400)
             if (history) {
                 ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
                 assertEquals(0, advances.get())

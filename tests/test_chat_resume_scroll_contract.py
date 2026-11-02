@@ -27,7 +27,7 @@ class ChatResumeScrollContract(unittest.TestCase):
     def test_resume_does_not_issue_a_new_request_or_replay_a_consumed_serial(self):
         request = self.chat.split('LaunchedEffect(scrollRequest,', 1)[1].split('// Keep a single motion', 1)[0]
         self.assertIn('tailIndex, touchEpoch, scrollResumed)', request)
-        self.assertIn('if (!scrollResumed) return@LaunchedEffect', request)
+        self.assertIn('if (!scrollResumed || !pageActive) return@LaunchedEffect', request)
         self.assertIn('it.serial != consumedScrollSerial', request)
         self.assertIn('listState.animateScrollToItem(index)', request)
         resume = self.chat.split('Lifecycle.Event.ON_RESUME -> {', 1)[1].split('else -> Unit', 1)[0]

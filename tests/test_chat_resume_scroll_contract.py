@@ -27,7 +27,7 @@ class ChatResumeScrollContract(unittest.TestCase):
     def test_resume_does_not_issue_a_new_request_or_replay_a_consumed_serial(self):
         request = self.chat.split('LaunchedEffect(scrollRequest,', 1)[1].split('// Keep a single motion', 1)[0]
         self.assertIn('tailIndex, touchEpoch, scrollResumed)', request)
-        self.assertIn('if (!scrollResumed) return@LaunchedEffect', request)
+        self.assertIn('if (!scrollResumed || !pageActive) return@LaunchedEffect', request)
         self.assertIn('it.serial != consumedScrollSerial', request)
         self.assertIn('listState.animateScrollToItem(index)', request)
         resume = self.chat.split('Lifecycle.Event.ON_RESUME -> {', 1)[1].split('else -> Unit', 1)[0]
@@ -63,7 +63,7 @@ class ChatResumeScrollContract(unittest.TestCase):
             'rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming, '
             'terminal = generationComplete, resetEpoch = revealResetEpoch, '
             'onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources, '
-            'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())',
+            'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)',
             ' '.join(self.chat.split()),
         )
         self.assertIn('remember(identity, resetEpoch) { sources.toList() }', self.typing)
@@ -74,8 +74,8 @@ class ChatResumeScrollContract(unittest.TestCase):
             'blockedSources = blockedSources, live = turn.status == RunStatus.RUNNING)',
             ' '.join(self.typing.split()),
         )
-        self.assertIn('remember(motion, parts, baselineLength, streaming, targetTerminal, live)', self.typing)
-        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live)', self.typing)
+        self.assertIn('remember(motion, parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
+        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
         self.assertNotIn('key(revealResetEpoch)', self.chat)
         resume_gate = (
             'resumeFollowPending && tail != null && '

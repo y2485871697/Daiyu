@@ -84,7 +84,7 @@ class MarkdownAdmissionCompositionTest {
                 reveal = rememberMarkdownReveal(body, parsed.value, streaming = displayed.isStreaming,
                     terminal = displayed.status != RunStatus.RUNNING && ordered.pending.isEmpty() && exact,
                     onVisibleAdvance = { advances++ }, blockedSources = if (admitted.value) emptySet() else setOf("answer"),
-                    live = displayed.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())
+                    live = displayed.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)
             }
             repeat(10) { frame() }
             val key = mountedKey
@@ -107,7 +107,17 @@ class MarkdownAdmissionCompositionTest {
             repeat(5) { frame() }
             assertTrue("First admitted body frames must be partial", reveal!!.limit("answer") in 1 until text.length)
             assertTrue(advances > 0)
-            repeat(25) { frame() }
+            repeat(50) { frame() }
+            val afterOldDrain = reveal!!.limit("answer")
+            assertTrue("The first second must remain paced: $afterOldDrain", afterOldDrain in 1..65)
+            assertFalse(reveal!!.settled)
+            val feedback = advances
+            admitted.value = false
+            repeat(50) { frame() }
+            assertEquals(afterOldDrain, reveal!!.limit("answer"))
+            assertEquals(feedback, advances)
+            admitted.value = true
+            repeat(450) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))
             assertTrue(reveal!!.settled)
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }

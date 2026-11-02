@@ -44,28 +44,52 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testLegacyTerminalBodyTypesWithoutAStreamingSnapshot() = verifyAnswerAdmission(mixed = false, terminal = true, streamed = false)
     fun testMixedTerminalBodyTypesWithoutAStreamingSnapshot() = verifyAnswerAdmission(mixed = true, terminal = true, streamed = false)
 
-    private fun verifyAnswerAdmission(mixed: Boolean, terminal: Boolean, streamed: Boolean = true) {
+    fun testPureFinalBodyDoesNotRushWhenCompletionArrives() =
+        verifyAnswerAdmission(mixed = false, terminal = true, workflow = false)
+    fun testCompletedHistoryDoesNotReplayTypewriterOrFeedback() =
+        verifyAnswerAdmission(mixed = false, terminal = true, workflow = false, history = true)
+
+    fun testLegacyListFinalBodyKeepsTypingAfterWorkflowDisposal() =
+        verifyAnswerAdmission(mixed = false, terminal = true, streamed = false, listEntry = true)
+    fun testMixedListFinalBodyKeepsTypingAfterWorkflowDisposal() =
+        verifyAnswerAdmission(mixed = true, terminal = true, streamed = false, listEntry = true)
+    fun testListCompletedHistoryDoesNotReplayTypewriterOrFeedback() =
+        verifyAnswerAdmission(mixed = false, terminal = true, workflow = false, history = true, listEntry = true)
+
+    private fun verifyAnswerAdmission(mixed: Boolean, terminal: Boolean, streamed: Boolean = true,
+        workflow: Boolean = true, history: Boolean = false, listEntry: Boolean = false) {
         prepare()
         val answer = "ANSWER " + "visible text ".repeat(18)
         runBlocking {
             projectMarkdown(listOf(answer))
             projectMarkdown(listOf(answer), parser = streamingMarkdownParser)
         }
-        var ready by mutableStateOf(false)
-        var done by mutableStateOf(false)
+        var ready by mutableStateOf(history)
+        var done by mutableStateOf(history)
         val advances = java.util.concurrent.atomic.AtomicInteger()
         val settled = java.util.concurrent.atomic.AtomicBoolean()
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                val source = message(listOf(tool("t1")) + if (ready) listOf(MessageBlock.Text("body", answer)) else emptyList(), emptyList())
+                val source = message((if (workflow) listOf(tool("t1")) else emptyList()) + if (ready) listOf(MessageBlock.Text("body", answer)) else emptyList(), emptyList())
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 val turn = mapped(source).let { if (mixed) it else it.copy(content = emptyList()) }
-                AssistantTurn(turn.copy(isStreaming = streamed && !done), ChatScreenActions(),
+                val displayed = turn.copy(isStreaming = streamed && !done)
+                if (listEntry) Box(Modifier.size(320.dp, 480.dp)) {
+                    ChatMessageList(listOf(displayed), ChatScreenActions(
+                        onVisibleTextAdvance = { advances.incrementAndGet() },
+                        onVisibleCompleted = { settled.set(it.isNotEmpty()) }))
+                } else AssistantTurn(displayed, ChatScreenActions(),
                     onVisibleAdvance = { advances.incrementAndGet() }, onRevealSettled = { settled.set(it) })
             } } }
-            ui.mainClock.advanceTimeBy(400)
-            ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
+            ui.mainClock.advanceTimeBy(if (history) 128 else 400)
+            if (history) {
+                ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
+                assertEquals(0, advances.get())
+                assertTrue(settled.get())
+                return
+            }
+            if (workflow) ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
             mainThread { ready = true; done = terminal }
             if (!terminal) {
                 ui.mainClock.advanceTimeBy(600)
@@ -89,16 +113,26 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             }
             assertTrue("First body frame is partial: ${firstVisible?.length}", firstVisible!!.length in 1 until answer.length)
             assertTrue(answer.startsWith(firstVisible!!))
+            assertTrue("First body frame cannot be a catch-up chunk", firstVisible!!.length <= 8)
             assertTrue(advances.get() > 0)
+            val beforeFeedback = advances.get()
+            ui.mainClock.advanceTimeBy(512)
+            val paced = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+                .single().config[SemanticsProperties.Text].joinToString("") { it.text }
+            assertTrue("Final body still types after the old 250 ms deadline", paced.length in firstVisible!!.length + 1..48)
+            assertTrue(advances.get() > beforeFeedback)
+            assertFalse(settled.get())
             mainThread { done = true }
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeBy(32)
                 ui.onAllNodesWithText(answer, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() && settled.get()
             }
             ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
-            ui.onNodeWithTag("work-process-header").performClick()
-            ui.mainClock.advanceTimeBy(400)
-            ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
+            if (workflow) {
+                ui.onNodeWithTag("work-process-header").performClick()
+                ui.mainClock.advanceTimeBy(400)
+                ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
+            }
         } finally { ui.mainClock.autoAdvance = true }
     }
 

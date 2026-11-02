@@ -62,15 +62,17 @@ internal fun ChatMediaPreviewHost(
     gallery: List<ChatMediaPreviewItem>,
     content: @Composable () -> Unit,
 ) {
+    val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current
     var selection by remember { mutableStateOf<ChatMediaPreviewSelection?>(null) }
     val currentGallery by rememberUpdatedState(gallery)
     CompositionLocalProvider(LocalOpenChatMediaPreview provides { requestedKey ->
-        selection = chatMediaPreviewSelection(currentGallery, requestedKey)
+        if (pageActive) selection = chatMediaPreviewSelection(currentGallery, requestedKey)
     }) {
         // Deliberately no layout wrapper: the caller retains its parent layout scope.
         content()
     }
-    selection?.let { opened ->
+    LaunchedEffect(pageActive) { if (!pageActive) selection = null }
+    selection?.takeIf { pageActive }?.let { opened ->
         key(opened) {
             ChatMediaPreviewDialog(opened) { selection = null }
         }

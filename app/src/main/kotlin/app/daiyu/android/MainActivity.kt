@@ -2181,6 +2181,184 @@ class MainActivity : ComponentActivity() {
                 androidx.activity.compose.BackHandler(enabled = retainedPage == "chat" && !sidebarVisible) {
                     handleRootBack { hideChatInputIme(focus, keyboard, view) }
                 }
+                val rootBodyRoute = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage
+                val chatBodyVisible = rootBodyRoute !in setOf(
+                    "balance-settings", "pet-settings", "pet-model-settings", "vision-settings", "manage",
+                    "conversation-search", "message-search", "usage", "child-tasks", "permission-check",
+                    "shizuku-settings", "terminal", "linux-settings", "chat-workspace", "generation-settings",
+                    "title-model-settings", "compression-settings", "reconnect-settings", "mcp-settings",
+                    "browser-settings", "gui-settings", "skills", "voice-settings", "session-gateway",
+                    "platform-settings", "settings", "offline-speech", "haptics", "providers", "models",
+                    "backup", "appearance", "subagents")
+                val rootChatContent: @Composable (Boolean) -> Unit = { routeActive ->
+                    ConversationSidePaneScaffold(
+                        state = paneState, visible = routeActive && sidebarVisible, backHandlerEnabled = routeActive,
+                        assistants = projectedAssistants, selectedAssistantId = if (selected == null) activeAssistant else selected?.assistantId.orEmpty(),
+                        onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
+                        onSearchChange = { paneState = paneState.copy(searchQuery = it) },
+                        onConversationSelected = { id -> selectPaneConversation(id) },
+                        onConversationRename = { item -> editRetainedConversation(item, false) },
+                        onConversationDelete = { item -> confirmDelete(item.id) },
+                        onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
+                        onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
+                        onConversationExport = { item -> backupGuard { pickConversationExports(listOf(item.id)) } },
+                        onConversationsExport = { ids -> backupGuard { pickConversationExports(ids) } },
+                        exportEnabled = controller.ready && controller.active == null && !controller.hasLiveChildTasks() &&
+                            controller.problem?.startsWith("会话恢复失败") != true && !backupBusy && !exportPickerPending && pendingBackupRequest == null,
+                        onNewConversation = { guard { createNewConversation(); dismissSidebar() } },
+                        onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
+                        onCreateFolder = { name -> guard { retainedData.createFolder(name); updatePane() } },
+                        onRenameFolder = { old, name -> guard {
+                            retainedData.changeFolder(old, name)
+                            if (paneState.selectedFolderId == old) paneState = paneState.copy(selectedFolderId = name)
+                            updatePane()
+                        } },
+                        onDeleteFolder = { name -> guard {
+                            retainedData.changeFolder(name, null)
+                            if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
+                            updatePane()
+                        } },
+                        onSelectAssistant = { id -> guard {
+                            if (sidebarVisible) selectCurrentConversationAssistant(id, renderedAssistantConversation, renderedAssistantGeneration)
+                        } },
+                        onEditAssistant = { id -> guard {
+                            if (!allowTaskConfigurationChange()) return@guard
+                            checkNotNull(assistantStore.read(id)) { "助手已不存在" }
+                            assistantEditReturnPage = retainedPage
+                            assistantEditReturnToSidebar = true
+                            dismissSidebar(); assistantEditingId = id; retainedPage = "assistant-edit"
+                        } },
+                        onOpenAssistants = { dismissSidebar(); openAssistantPicker(global = true) },
+                        onOpenSettings = { dismissSidebar(); retainedPage = "settings" },
+                        onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
+                        onOpenUsageStats = { dismissSidebar(); openUsagePage("chat") },
+                        onOpenSkills = { dismissSidebar(); guard { openSkillManagement() } },
+                        onOpenPermissions = { dismissSidebar(); retainedPage = "permission-check" },
+                    ) {
+                        chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
+                            val messageSpeech by speechHost.state.collectAsStateWithLifecycle()
+                            val speechMessageId = messageSpeech.requestId.takeIf {
+                                messageSpeech.owner == speechHost.owner && messageSpeech.phase == SpeechPhase.SPEAKING
+                            }
+                            val speechPreparingMessageId = messageSpeech.requestId.takeIf {
+                                messageSpeech.owner == speechHost.owner && voiceHostIsPreparing(messageSpeech)
+                            }
+                            LaunchedEffect(routeActive, messageSpeechAttempt, messageSpeech) {
+                                if (!routeActive) return@LaunchedEffect
+                                if (messageSpeech.requestId != null && messageSpeech.owner == speechHost.owner) {
+                                    controller.diagnostics?.recordAsync(when {
+                                        voiceHostIsPreparing(messageSpeech) -> DiagnosticEvent.SPEECH_UI_PREPARING
+                                        messageSpeech.phase == SpeechPhase.SPEAKING -> DiagnosticEvent.SPEECH_UI_PLAYING
+                                        else -> DiagnosticEvent.SPEECH_UI_TERMINAL
+                                    })
+                                }
+                                val event = messageSpeechAttempt to messageSpeech
+                                if (messageSpeech == speechHost.state.value && messageSpeech.owner == speechHost.owner &&
+                                    messageSpeech.phase in setOf(SpeechPhase.UNAVAILABLE, SpeechPhase.ERROR) &&
+                                    reportedMessageSpeechError != event) {
+                                    reportedMessageSpeechError = event
+                                    voiceHostStatusResource(messageSpeech)?.let { voiceConfigurationToast(getString(it)) }
+                                }
+                            }
+                            val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
+                                controller, selected?.id, contextReceiptRevision, controller.dataRevision,
+                                contextModelRevision, chatState.composer.phase, ready = controller.ready, active = routeActive && !sidebarVisible)
+                            val usageConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
+                            val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
+                            val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)
+                            BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+                                val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
+                                Column(Modifier.fillMaxSize()) {
+                                    val mediaLease = imageHost.mediaPreviews
+                                    val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot) {
+                                        chatMediaPreviewGallery(chatState.turns, mediaLease, messageMediaSnapshot)
+                                    }
+                                    app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
+                                    DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
+                                        composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
+                                            contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
+                                            contextTokensText = contextUsageLabels.second,
+                                            voiceModes = buildSet {
+                                                val voiceSettings = VoiceSettingsPreferences(applicationContext)
+                                                if (voiceSettings.enabled("input")) add(ChatMenuAction.VOICE_INPUT)
+                                                if (voiceSettings.enabled("conversation")) add(ChatMenuAction.VOICE_CHAT)
+                                                if (voiceSettings.enabled("realtime")) add(ChatMenuAction.VOICE_DOUBAO)
+                                            },
+                                            videoSendAvailable = inlineMessageEditor == null && videoComposerControls?.canSubmit == true,
+                                            videoSendBlocked = inlineMessageEditor == null && (videoComposerControls?.blocked == true ||
+                                                videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true))), chatActions(completionReadAction()), modifier = Modifier.weight(1f), turnExtras = { turn ->
+                                        if (routeActive && turn.segmentIndex == 0) {
+                                            QuestionCleanup(turn.id)
+                                        }
+                                    }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
+                                        readAutomaticCompression = {
+                                            app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
+                                                automaticCompression, automaticCompressionPending)
+                                        },
+                                        callUi = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value },
+                                        callActions = doubaoCallActions(), dedicatedTool = { step -> routeActive && DedicatedQuestion(step) },
+                                        toolContent = { step -> if (routeActive) ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
+                                        assistant = projectedAssistants.firstOrNull { it.id == (if (selected == null) activeAssistant else selected?.assistantId) },
+                                        composerAttachments = { if (routeActive && !sidebarVisible) key(editorGeneration) {
+                                            val editor = inlineMessageEditor
+                                            if (editor == null) {
+                                                ImageComposerPanel()
+                                                VideoComposerPanel()
+                                            } else {
+                                                val removalGeneration = editorGeneration
+                                                val removalRevision = draftRevision
+                                                val removalDataRevision = controller.dataRevision
+                                                val removalVisit = messageActionVisit
+                                                fun editImageRemovalCurrent(): Boolean =
+                                                    inlineMessageEditor === editor && !editor.uncertain &&
+                                                        activityUsable() && voiceForeground && selectionReady &&
+                                                        retainedPage == "chat" && !sidebarVisible &&
+                                                        selected?.id == editor.target.conversationId &&
+                                                        editorGeneration == removalGeneration &&
+                                                        draftRevision == removalRevision &&
+                                                        controller.dataRevision == removalDataRevision &&
+                                                        messageActionVisit === removalVisit &&
+                                                        messageEditTargetCurrent(editor) &&
+                                                        pendingTextSend == null && controller.textSendState() == null &&
+                                                        !controller.dataBusy && controller.active == null &&
+                                                        terminalEditor == null && virtualDisplayEditor == null &&
+                                                        !videoSending && !imageHost.sending && !shizukuWritesBlocked &&
+                                                        chatState.composer.enabled
+                                                app.daiyu.android.ui.screens.chat.conversation.ComposerEditAttachments(
+                                                    editor.images, editor.videos, imageHost.historyLoader,
+                                                    enabled = editImageRemovalCurrent(),
+                                                    onRemoveImage = { item ->
+                                                        if (editImageRemovalCurrent() && item in editor.images) {
+                                                            val retained = editor.images.filterNot { it == item }
+                                                            editor.additions.setRetainedImageCount(retained.size)
+                                                            inlineMessageEditor = editor.copy(images = retained)
+                                                            publishChat(rowsChanged = false)
+                                                        }
+                                                    })
+                                                val additions by editor.additions.attachments.state.collectAsStateWithLifecycle()
+                                                val additionActions = editor.additions.actions
+                                                ImageAttachments(additions, additionActions.copy(onRemove = { key ->
+                                                    if (editImageRemovalCurrent()) additionActions.onRemove(key)
+                                                }), editor.additions.loader, enabled = editImageRemovalCurrent(), compact = true,
+                                                    numberOffset = editor.images.size)
+                                                if (editor.uncertain) top.yukonga.miuix.kmp.basic.Text(
+                                                    "保存结果待核实；保留编辑附件，不会自动重发",
+                                                    modifier = Modifier.testTag("message-edit-unknown"))
+                                            }
+                                        } })
+                                    }
+                                    Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
+                                        .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
+                                        if (routeActive) {
+                                            DictationComposerEntry()
+                                            ShizukuComposerEntry()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 app.daiyu.android.ui.navigation.PageBackGestureHost(
                     routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,
                     contentKey = when (retainedPage) {
@@ -2199,6 +2377,11 @@ class MainActivity : ComponentActivity() {
                     dispatchBack = { onBackPressedDispatcher.onBackPressed() },
                     backTargetKey = pageBackPreviewTarget(),
                     previewScopeKey = selected?.id,
+                    retainedRootKey = "chat",
+                    retainedRootVisible = chatBodyVisible,
+                    retainedRootActive = retainedPage == "chat",
+                    retainedRootScopeKey = appearance,
+                    retainedRootContent = rootChatContent,
                 ) {
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
@@ -2599,170 +2782,7 @@ class MainActivity : ComponentActivity() {
                     "subagents" -> SubAgentSettingsScreen(onBack = { if (activityUsable() && retainedPage == "subagents") retainedPage = "settings" },
                         repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents",
                         modelSource = subAgentModelSource)
-                    else -> ConversationSidePaneScaffold(
-                        state = paneState, visible = sidebarVisible, backHandlerEnabled = true,
-                        assistants = projectedAssistants, selectedAssistantId = if (selected == null) activeAssistant else selected?.assistantId.orEmpty(),
-                        onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
-                        onSearchChange = { paneState = paneState.copy(searchQuery = it) },
-                        onConversationSelected = { id -> selectPaneConversation(id) },
-                        onConversationRename = { item -> editRetainedConversation(item, false) },
-                        onConversationDelete = { item -> confirmDelete(item.id) },
-                        onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
-                        onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
-                        onConversationExport = { item -> backupGuard { pickConversationExports(listOf(item.id)) } },
-                        onConversationsExport = { ids -> backupGuard { pickConversationExports(ids) } },
-                        exportEnabled = controller.ready && controller.active == null && !controller.hasLiveChildTasks() &&
-                            controller.problem?.startsWith("会话恢复失败") != true && !backupBusy && !exportPickerPending && pendingBackupRequest == null,
-                        onNewConversation = { guard { createNewConversation(); dismissSidebar() } },
-                        onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
-                        onCreateFolder = { name -> guard { retainedData.createFolder(name); updatePane() } },
-                        onRenameFolder = { old, name -> guard {
-                            retainedData.changeFolder(old, name)
-                            if (paneState.selectedFolderId == old) paneState = paneState.copy(selectedFolderId = name)
-                            updatePane()
-                        } },
-                        onDeleteFolder = { name -> guard {
-                            retainedData.changeFolder(name, null)
-                            if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
-                            updatePane()
-                        } },
-                        onSelectAssistant = { id -> guard {
-                            if (sidebarVisible) selectCurrentConversationAssistant(id, renderedAssistantConversation, renderedAssistantGeneration)
-                        } },
-                        onEditAssistant = { id -> guard {
-                            if (!allowTaskConfigurationChange()) return@guard
-                            checkNotNull(assistantStore.read(id)) { "助手已不存在" }
-                            assistantEditReturnPage = retainedPage
-                            assistantEditReturnToSidebar = true
-                            dismissSidebar(); assistantEditingId = id; retainedPage = "assistant-edit"
-                        } },
-                        onOpenAssistants = { dismissSidebar(); openAssistantPicker(global = true) },
-                        onOpenSettings = { dismissSidebar(); retainedPage = "settings" },
-                        onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
-                        onOpenUsageStats = { dismissSidebar(); openUsagePage("chat") },
-                        onOpenSkills = { dismissSidebar(); guard { openSkillManagement() } },
-                        onOpenPermissions = { dismissSidebar(); retainedPage = "permission-check" },
-                    ) {
-                        chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
-                            val messageSpeech by speechHost.state.collectAsStateWithLifecycle()
-                            val speechMessageId = messageSpeech.requestId.takeIf {
-                                messageSpeech.owner == speechHost.owner && messageSpeech.phase == SpeechPhase.SPEAKING
-                            }
-                            val speechPreparingMessageId = messageSpeech.requestId.takeIf {
-                                messageSpeech.owner == speechHost.owner && voiceHostIsPreparing(messageSpeech)
-                            }
-                            LaunchedEffect(messageSpeechAttempt, messageSpeech) {
-                                if (messageSpeech.requestId != null && messageSpeech.owner == speechHost.owner) {
-                                    controller.diagnostics?.recordAsync(when {
-                                        voiceHostIsPreparing(messageSpeech) -> DiagnosticEvent.SPEECH_UI_PREPARING
-                                        messageSpeech.phase == SpeechPhase.SPEAKING -> DiagnosticEvent.SPEECH_UI_PLAYING
-                                        else -> DiagnosticEvent.SPEECH_UI_TERMINAL
-                                    })
-                                }
-                                val event = messageSpeechAttempt to messageSpeech
-                                if (messageSpeech == speechHost.state.value && messageSpeech.owner == speechHost.owner &&
-                                    messageSpeech.phase in setOf(SpeechPhase.UNAVAILABLE, SpeechPhase.ERROR) &&
-                                    reportedMessageSpeechError != event) {
-                                    reportedMessageSpeechError = event
-                                    voiceHostStatusResource(messageSpeech)?.let { voiceConfigurationToast(getString(it)) }
-                                }
-                            }
-                            val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
-                                controller, selected?.id, contextReceiptRevision, controller.dataRevision,
-                                contextModelRevision, chatState.composer.phase, ready = controller.ready)
-                            val usageConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
-                            val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
-                            val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)
-                            BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
-                                val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
-                                Column(Modifier.fillMaxSize()) {
-                                    val mediaLease = imageHost.mediaPreviews
-                                    val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot) {
-                                        chatMediaPreviewGallery(chatState.turns, mediaLease, messageMediaSnapshot)
-                                    }
-                                    app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
-                                    DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                        composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
-                                            contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
-                                            contextTokensText = contextUsageLabels.second,
-                                            voiceModes = buildSet {
-                                                val voiceSettings = VoiceSettingsPreferences(applicationContext)
-                                                if (voiceSettings.enabled("input")) add(ChatMenuAction.VOICE_INPUT)
-                                                if (voiceSettings.enabled("conversation")) add(ChatMenuAction.VOICE_CHAT)
-                                                if (voiceSettings.enabled("realtime")) add(ChatMenuAction.VOICE_DOUBAO)
-                                            },
-                                            videoSendAvailable = inlineMessageEditor == null && videoComposerControls?.canSubmit == true,
-                                            videoSendBlocked = inlineMessageEditor == null && (videoComposerControls?.blocked == true ||
-                                                videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true))), chatActions(completionReadAction()), modifier = Modifier.weight(1f), turnExtras = { turn ->
-                                        if (turn.segmentIndex == 0) {
-                                            QuestionCleanup(turn.id)
-                                        }
-                                    }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
-                                        readAutomaticCompression = {
-                                            app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
-                                                automaticCompression, automaticCompressionPending)
-                                        },
-                                        callUi = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value },
-                                        callActions = doubaoCallActions(), dedicatedTool = { step -> DedicatedQuestion(step) },
-                                        toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
-                                        assistant = projectedAssistants.firstOrNull { it.id == (if (selected == null) activeAssistant else selected?.assistantId) },
-                                        composerAttachments = { if (!sidebarVisible) key(editorGeneration) {
-                                            val editor = inlineMessageEditor
-                                            if (editor == null) {
-                                                ImageComposerPanel()
-                                                VideoComposerPanel()
-                                            } else {
-                                                val removalGeneration = editorGeneration
-                                                val removalRevision = draftRevision
-                                                val removalDataRevision = controller.dataRevision
-                                                val removalVisit = messageActionVisit
-                                                fun editImageRemovalCurrent(): Boolean =
-                                                    inlineMessageEditor === editor && !editor.uncertain &&
-                                                        activityUsable() && voiceForeground && selectionReady &&
-                                                        retainedPage == "chat" && !sidebarVisible &&
-                                                        selected?.id == editor.target.conversationId &&
-                                                        editorGeneration == removalGeneration &&
-                                                        draftRevision == removalRevision &&
-                                                        controller.dataRevision == removalDataRevision &&
-                                                        messageActionVisit === removalVisit &&
-                                                        messageEditTargetCurrent(editor) &&
-                                                        pendingTextSend == null && controller.textSendState() == null &&
-                                                        !controller.dataBusy && controller.active == null &&
-                                                        terminalEditor == null && virtualDisplayEditor == null &&
-                                                        !videoSending && !imageHost.sending && !shizukuWritesBlocked &&
-                                                        chatState.composer.enabled
-                                                app.daiyu.android.ui.screens.chat.conversation.ComposerEditAttachments(
-                                                    editor.images, editor.videos, imageHost.historyLoader,
-                                                    enabled = editImageRemovalCurrent(),
-                                                    onRemoveImage = { item ->
-                                                        if (editImageRemovalCurrent() && item in editor.images) {
-                                                            val retained = editor.images.filterNot { it == item }
-                                                            editor.additions.setRetainedImageCount(retained.size)
-                                                            inlineMessageEditor = editor.copy(images = retained)
-                                                            publishChat(rowsChanged = false)
-                                                        }
-                                                    })
-                                                val additions by editor.additions.attachments.state.collectAsStateWithLifecycle()
-                                                val additionActions = editor.additions.actions
-                                                ImageAttachments(additions, additionActions.copy(onRemove = { key ->
-                                                    if (editImageRemovalCurrent()) additionActions.onRemove(key)
-                                                }), editor.additions.loader, enabled = editImageRemovalCurrent(), compact = true,
-                                                    numberOffset = editor.images.size)
-                                                if (editor.uncertain) top.yukonga.miuix.kmp.basic.Text(
-                                                    "保存结果待核实；保留编辑附件，不会自动重发",
-                                                    modifier = Modifier.testTag("message-edit-unknown"))
-                                            }
-                                        } })
-                                    }
-                                    Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
-                                        .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
-                                        DictationComposerEntry()
-                                        ShizukuComposerEntry()
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    else -> Unit
                 }
                 if (retainedPage == "assistant-edit") assistantEditingId?.let { id ->
                     var skills by remember(id) { mutableStateOf(emptyList<AssistantSkill>()) }
@@ -3350,6 +3370,7 @@ class MainActivity : ComponentActivity() {
         },
         onCompressionSendBlocked = { toast("正在压缩上下文") },
         onSend = send@{ text ->
+            if (!currentChat()) return@send
             if (compressionSendBlocked()) return@send
             if (currentDictationProjection() != null) return@send
             val editor = inlineMessageEditor
@@ -3371,6 +3392,7 @@ class MainActivity : ComponentActivity() {
             else if (!imageHost.busy && !videoSending) sendDraft(text)
         } },
         onSupplement = supplement@{ text ->
+            if (!currentChat()) return@supplement
             if (compressionSendBlocked()) return@supplement
             if (currentDictationProjection() != null) return@supplement
             if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {

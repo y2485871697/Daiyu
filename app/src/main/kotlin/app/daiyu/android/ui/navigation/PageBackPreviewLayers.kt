@@ -14,15 +14,19 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/** Freezes the outgoing live layer before its nodes detach; historical pages are pixels only. */
+/** Freezes the outgoing live layer before its nodes detach; detached pages keep their recorded layers. */
 internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope) {
-    internal class Frame(val key: Any, val layer: GraphicsLayer, var sourceKey: Any = key) {
+    internal class Frame(val key: Any, val layer: GraphicsLayer, var sourceKey: Any = key, var contentKey: Any = key) {
         var size = IntSize.Zero
         var childChangeCaptured: Boolean? = null
         var holdingForChild by mutableStateOf(false)
         var backTargetKey: Any? = null
         var returnDirection = 1f
         var animateReturn = false
+        var retainedDisplayList by mutableStateOf(false)
+        var contentRetained = false
+        val canDrawPreview: Boolean get() = image != null || (retainedDisplayList &&
+            !layer.isReleased && size != IntSize.Zero && layer.size == size)
         var image by mutableStateOf<ImageBitmap?>(null)
         var capture: Job? = null
     }
@@ -38,10 +42,14 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     var currentKey: Any? = null
         private set
 
-    fun enter(key: Any): Departure? {
+    fun enter(key: Any, contentKey: Any = key): Departure? {
         val previous = frames[currentKey]?.takeIf { currentKey != key }
         if (currentKey != key) frames[currentKey]?.let {
-            JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }
+            if (it.contentKey != contentKey && !it.contentRetained) {
+                JankDiagnostics.section("daiyu.back-preview=retain-detached") {
+                    it.retainedDisplayList = !it.layer.isReleased && it.size != IntSize.Zero && it.layer.size == it.size
+                }
+            } else JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }
         }
         currentKey = key
         val departure = pending
@@ -51,9 +59,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                 ?.let { Departure(it, key, 0f, predictive = false, direction = it.returnDirection) }
     }
 
-    fun transition(key: Any, backTargetKey: Any?, animateEnter: Boolean, size: IntSize): Departure? {
+    fun transition(key: Any, backTargetKey: Any?, animateEnter: Boolean, size: IntSize, contentKey: Any = key): Departure? {
         val previous = frames[currentKey]?.takeIf { currentKey != key }
-        val departure = enter(key)
+        val departure = enter(key, contentKey)
         if (departure != null) return departure
         if (!animateEnter || previous == null || !previous.animateReturn ||
             previous.sourceKey != backTargetKey || previous.childChangeCaptured == false) return null
@@ -94,9 +102,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
-    fun frame(key: Any, sourceKey: Any = key): Frame {
+    fun frame(key: Any, sourceKey: Any = key, contentKey: Any = key): Frame {
         frames.remove(key)?.let { release(it) }
-        return Frame(key, context.createGraphicsLayer(), sourceKey).also { frames[key] = it }
+        return Frame(key, context.createGraphicsLayer(), sourceKey, contentKey).also { frames[key] = it }
     }
 
     private fun release(frame: Frame) {
@@ -109,7 +117,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     fun find(key: Any?, size: IntSize): Frame? = frames[key]?.takeIf {
-        size != IntSize.Zero && it.size == size && it.image != null
+        size != IntSize.Zero && it.size == size && it.canDrawPreview
     }
 
     fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float): Departure {
@@ -124,7 +132,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         val iterator = frames.entries.iterator()
         while (frames.size > 8 && iterator.hasNext()) {
             val frame = iterator.next().value
-            if (frame.key in ancestors || frame === current || frame === target || frame === departure?.frame || frame.capture?.isActive == true) continue
+            if ((frame.key in ancestors && !frame.retainedDisplayList) || frame === current || frame === target || frame === departure?.frame || frame.capture?.isActive == true) continue
             iterator.remove()
             frame.image = null
             release(frame)
@@ -137,6 +145,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         frames.values.forEach {
             it.capture?.cancel()
             it.image = null
+            it.retainedDisplayList = false
             it.holdingForChild = false
             it.childChangeCaptured = null
         }

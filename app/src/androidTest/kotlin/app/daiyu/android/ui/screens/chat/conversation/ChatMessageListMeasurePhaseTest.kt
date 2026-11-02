@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
@@ -171,6 +172,44 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         } finally {
             ui.mainClock.autoAdvance = true
         }
+    }
+
+    fun testViewportRemeasureDoesNotRecomposeUnchangedComposerSlot() {
+        var viewportHeight by mutableStateOf(160.dp)
+        val compositions = java.util.concurrent.atomic.AtomicInteger()
+        val measuredHeight = java.util.concurrent.atomic.AtomicInteger()
+        val editor: @Composable (top.yukonga.miuix.kmp.blur.LayerBackdrop?) -> Unit = {
+            androidx.compose.runtime.SideEffect { compositions.incrementAndGet() }
+            Box(Modifier.height(40.dp))
+        }
+        mount {
+            ChatConversationLayers(
+                modifier = Modifier.height(viewportHeight).onSizeChanged { measuredHeight.set(it.height) },
+                messages = {}, composer = editor,
+            )
+        }
+        val initial = compositions.get()
+        val originalHeight = measuredHeight.get()
+        assertTrue(initial > 0)
+        mainThread { viewportHeight = 200.dp }
+        ui.waitForIdle()
+        assertTrue(measuredHeight.get() > originalHeight)
+        assertEquals(initial, compositions.get())
+    }
+
+    fun testRememberedComposerSlotStillUpdatesMessageInsetInTheSameLayout() {
+        var editorHeight by mutableStateOf(40.dp)
+        var messageInset = 0.dp
+        mount {
+            ChatConversationLayers(
+                messages = { inset -> androidx.compose.runtime.SideEffect { messageInset = inset } },
+                composer = { Box(Modifier.height(editorHeight)) },
+            )
+        }
+        assertEquals(40.dp, messageInset)
+        mainThread { editorHeight = 60.dp }
+        ui.waitForIdle()
+        assertEquals(60.dp, messageInset)
     }
 
 }

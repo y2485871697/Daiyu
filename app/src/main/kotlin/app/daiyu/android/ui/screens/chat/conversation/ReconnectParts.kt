@@ -21,6 +21,7 @@ private fun MessageContentUi.units(): Long = when (this) {
 
 /** Out-of-range coordinates are deliberately not consumed: the list renders their fallback. */
 internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelineEntry.Reconnect>): ReconnectParts {
+    if (events.isEmpty()) return ReconnectParts(emptyList(), emptySet())
     val source = turn.reconnectSource ?: return ReconnectParts(emptyList(), emptySet())
     val end = source.start + source.content.sumOf { it.units() }
     val cuts = events.filter {
@@ -40,16 +41,18 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
         }
         ReconnectContent(item, role)
     }.toMutableList()
+    var headIndex = 0
     var consumed = source.start
     val parts = mutableListOf<Pair<List<ReconnectContent>, List<ChatTimelineEntry.Reconnect>>>()
     for ((offset, lines) in cuts.groupBy { it.position!!.offset }) {
         val head = mutableListOf<ReconnectContent>()
-        while (pending.isNotEmpty()) {
-            val tagged = pending.first()
+        while (headIndex < pending.size) {
+            val tagged = pending[headIndex]
             val item = tagged.item
             val length = item.units()
             if (consumed + length <= offset) {
-                head += pending.removeAt(0)
+                head += tagged
+                headIndex++
                 consumed += length
             } else {
                 val count = (offset - consumed).coerceAtLeast(0L).toInt()
@@ -65,11 +68,11 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
                     when (item) {
                         is MessageContentUi.Text -> {
                             head += tagged.copy(item = item.copy(text = text.take(safe)))
-                            pending[0] = tagged.copy(item = item.copy(text = text.drop(safe)))
+                            pending[headIndex] = tagged.copy(item = item.copy(text = text.drop(safe)))
                         }
                         is MessageContentUi.Reasoning -> {
                             head += tagged.copy(item = item.copy(reported = item.reported.copy(text = text.take(safe), activeSinceNanos = null)))
-                            pending[0] = tagged.copy(item = item.copy(reported = item.reported.copy(text = text.drop(safe))))
+                            pending[headIndex] = tagged.copy(item = item.copy(reported = item.reported.copy(text = text.drop(safe))))
                         }
                         else -> Unit
                     }
@@ -81,7 +84,7 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
         parts += head to lines
     }
     // Even an empty live tail owns control state and the original reply's bottom actions.
-    parts += pending.toList() to emptyList()
+    parts += pending.subList(headIndex, pending.size).toList() to emptyList()
     return ReconnectParts(parts.mapIndexed { index, (content, lines) ->
         val live = index == parts.lastIndex
         val displayed = content.map { tagged ->
@@ -113,13 +116,51 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
     }, cuts.mapTo(hashSetOf()) { it.id })
 }
 
+private fun TimelineAnchor.reconnectOwnerKey(): Triple<String, String, String> =
+    Triple(conversationId, runId, messageId)
+
 internal fun reconnectPartsForTurns(turns: List<ChatTurnUi>, events: List<ChatTimelineEntry.Reconnect>): Map<String, ReconnectParts> {
+    val eventsByOwner = events.groupBy { it.anchor.reconnectOwnerKey() }
     val placed = hashSetOf<String>()
-    return turns.filterIsInstance<ChatTurnUi.Assistant>().associate { turn ->
-        val parts = reconnectParts(turn, events.filterNot { it.id in placed })
+    val result = LinkedHashMap<String, ReconnectParts>(turns.size)
+    for (row in turns) {
+        val turn = row as? ChatTurnUi.Assistant ?: continue
+        val candidates = turn.reconnectSource?.owner?.let { eventsByOwner[it.reconnectOwnerKey()] }.orEmpty()
+        val available = if (placed.isEmpty()) candidates else candidates.filterNot { it.id in placed }
+        val parts = reconnectParts(turn, available)
         placed += parts.placedIds
-        turn.listKey to parts
+        result[turn.listKey] = parts
     }
+    return result
+}
+
+internal fun reconnectFallbackEntriesForTurns(turns: List<ChatTurnUi>, timeline: List<ChatTimelineEntry>,
+    placedIds: Set<String>): Map<String, List<ChatTimelineEntry>> {
+    val rowsBySourceKey = hashMapOf<String, MutableList<Int>>()
+    val rowsByListKey = hashMapOf<String, MutableList<Int>>()
+    val lastListKeyByOwner = hashMapOf<Triple<String, String, String>, String>()
+    val after = arrayOfNulls<MutableList<ChatTimelineEntry>>(turns.size)
+    for ((index, turn) in turns.withIndex()) {
+        rowsByListKey.getOrPut(turn.listKey) { ArrayList() }.add(index)
+        val assistant = turn as? ChatTurnUi.Assistant
+        val sourceKeys = assistant?.sourceListKeys?.takeIf { it.isNotEmpty() } ?: listOf(turn.listKey)
+        for (sourceKey in sourceKeys.toSet()) rowsBySourceKey.getOrPut(sourceKey) { ArrayList() }.add(index)
+        assistant?.reconnectSource?.owner?.let { lastListKeyByOwner[it.reconnectOwnerKey()] = turn.listKey }
+    }
+    for (entry in timeline) {
+        if (entry.id in placedIds) continue
+        val rows = rowsBySourceKey[entry.anchor.listKey]
+            ?: if (entry is ChatTimelineEntry.Reconnect && entry.position != null) {
+                lastListKeyByOwner[entry.anchor.reconnectOwnerKey()]?.let { rowsByListKey[it] }
+            } else null
+        if (rows != null) for (index in rows) {
+            val entries = after[index] ?: ArrayList<ChatTimelineEntry>().also { after[index] = it }
+            entries.add(entry)
+        }
+    }
+    val result = LinkedHashMap<String, List<ChatTimelineEntry>>(turns.size)
+    for ((index, turn) in turns.withIndex()) result[turn.listKey] = after[index].orEmpty()
+    return result
 }
 
 internal fun reconnectFallbackEntries(turn: ChatTurnUi, timeline: List<ChatTimelineEntry>, placedIds: Set<String>,

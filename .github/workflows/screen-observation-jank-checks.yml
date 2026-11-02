@@ -12,9 +12,9 @@ on:
         type: string
         required: true
       check_scope:
-        description: 存储热路径、菜单重组隔离或全页UI卡顿诊断
+        description: 存储、菜单、诊断采集或返回专项增量检查
         type: choice
-        options: [storage, menu-scroll, ui-jank, ui-jank-recorder]
+        options: [storage, menu-scroll, ui-jank, ui-jank-recorder, page-back]
         default: storage
 permissions:
   contents: read
@@ -73,6 +73,10 @@ jobs:
                           'test_release_package.py', 'test_compile_release_contract.py',
                           'test_chat_menu_scroll_isolation_contract.py', 'test_chat_menu_shadow_contract.py',
                           'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py')
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
+              patterns = ('test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py',
+                          'test_chat_timeline_contract.py', 'test_reasoning_flow_stability_contract.py',
+                          'test_diagnostic_smoke_source.py')
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] in ('menu-scroll', 'ui-jank'):
               patterns += ('test_diagnostic_smoke_source.py', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
           for pattern in patterns:
@@ -123,6 +127,9 @@ jobs:
           if [[ "$SCREEN_JANK_CHECK_SCOPE" == ui-jank ]]; then
             classes=(app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
           fi
+          if [[ $SCREEN_JANK_CHECK_SCOPE == page-back ]]; then
+            classes=(app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest)
+          fi
           filters=()
           for class in "${classes[@]}"; do
             filters+=(--tests "$class")
@@ -148,6 +155,8 @@ jobs:
               expected = {'ChatMenuIsolationCompositionTest'}
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'ui-jank':
               expected = {'JankIncidentBufferTest', 'FramePerformanceLogTest', 'DiagnosticLogStoreTest', 'ChatMenuIsolationCompositionTest'}
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
+              expected = {'ReconnectPartsTest', 'ReconnectIndexTest', 'RootExitConfirmationTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

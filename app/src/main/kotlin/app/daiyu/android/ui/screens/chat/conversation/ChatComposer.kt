@@ -109,10 +109,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
+    val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val editing = actions.editingMessageKey != null
-    val toolbarEnabled = state.enabled && !editing
-    val attachmentEnabled = state.enabled
+    val toolbarEnabled = pageActive && state.enabled && !editing
+    val attachmentEnabled = pageActive && state.enabled
     val visualEnabled = state.enabled || state.gptSpeedSaving
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
@@ -128,6 +129,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         ComposerReferences(state.text, composingSource?.takeIf { it.first == state.text }?.second?.let { it.min until it.max })
     }
     fun editReferenceDraft(next: String, start: Int, end: Int): Boolean {
+        if (!pageActive) return false
         val edit = actions.onProjectedDraftEdit
         if (edit != null) return edit(references.source, next, start, end)
         actions.onTextChange(next)
@@ -135,8 +137,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         return true
     }
     var showContextTokens by rememberSaveable { mutableStateOf(false) }
-    var attachments by remember(state.editorGeneration, actions.editingMessageKey, state.enabled) { mutableStateOf(false) }
-    var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes, callUi?.sessionKey) { mutableStateOf(false) }
+    var attachments by remember(state.editorGeneration, actions.editingMessageKey, state.enabled, pageActive) { mutableStateOf(false) }
+    var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes, callUi?.sessionKey, pageActive) { mutableStateOf(false) }
     val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
     val preparingSend = state.preparingSendKey != null
@@ -177,10 +179,10 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         // Include the transparent 1dp CSS border in the composer box model.
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 4.dp).testTag("chat-composer-header"),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
+            ComposerChip(state.modelLabel.ifBlank { "模型" }, pageActive && state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = if (editing) null else ({ actions.onMenuAction(ChatMenuAction.COLLABORATION) }), visualEnabled = visualEnabled)
-            if (editing) ComposerCancelEdit(state.enabled, actions.onCancelMessageEdit)
+            if (editing) ComposerCancelEdit(pageActive && state.enabled, actions.onCancelMessageEdit)
             Row(Modifier.then(if (editing) Modifier.weight(1f).wrapContentWidth(Alignment.End) else Modifier)
                 .widthIn(max = 120.dp).heightIn(min = 22.dp).testTag("chat-context").clip(RoundedCornerShape(11.dp))
                 .border(1.dp, chrome.line, RoundedCornerShape(11.dp))
@@ -218,7 +220,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     animationSpec = spring(dampingRatio = 1f, stiffness = 500f),
                     alignment = Alignment.BottomCenter,
                 )) {
-                    ComposerReferenceChips(references.references, state.enabled, visualEnabled) { reference ->
+                    ComposerReferenceChips(references.references, pageActive && state.enabled, visualEnabled) { reference ->
                         if (state.editorGeneration == currentEditorGeneration && references.source == currentDraft) {
                             val next = references.remove(reference)
                             val projected = ComposerReferences(next)
@@ -239,7 +241,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             onValueChange = { value ->
                                 // Explicit dismissal and ON_STOP must not write back a collapsed selection.
                                 if (((!lifecycleDismissInProgress && !isInputDismissInProgress() && !app.daiyu.android.ui.components.InputDismissal.inProgress) || value.text != references.text) &&
-                                    lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+                                    pageActive && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
                                     mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
                                     val bodyChanged = value.text != references.text
                                     val next = references.edit(value.text)
@@ -268,6 +270,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 }
                             },
                             enabled = state.enabled,
+                            readOnly = !pageActive,
                             modifier = Modifier.testTag("chat-draft").workspacePullUpGesture(workspacePointers, openWorkspace).onFocusChanged { onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
                                 .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
                             maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
@@ -329,11 +332,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 preparingSend -> "text-send-cancel"
                                 textAction || state.phase == ComposerPhase.IDLE -> "chat-send"
                                 else -> "chat-control"
-                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, primaryEnabled)),
+                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, pageActive && primaryEnabled)),
                                 containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
                                     else (if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                         .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
-                                enabled = primaryEnabled || compressionBlocked, containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
+                                enabled = pageActive && (primaryEnabled || compressionBlocked), containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
                                 tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface
                                     else if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
@@ -346,7 +349,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             generating = state.showGenerationLoading(),
                             listening = state.listening,
                             // Closing remains gesture-enabled so a long press can say "请先挂断".
-                            enabled = callUi != null || voiceMenuEnabled,
+                            enabled = pageActive && (callUi != null || voiceMenuEnabled),
                             description = if (callUi != null) "挂断豆包实时通话"
                                 else if (state.voiceMode == ChatMenuAction.VOICE_DOUBAO) "开始豆包实时通话" else null,
                             callMotion = callMotion,
@@ -361,8 +364,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 }
         }
     }
-    if (attachments) ChatAttachmentSheet({ attachments = false }, actions.onMenuAction)
-    ChatVoiceModeMenu(voiceModes && voiceMenuEnabled && callUi == null, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
+    if (pageActive && attachments) ChatAttachmentSheet({ attachments = false }, actions.onMenuAction)
+    ChatVoiceModeMenu(pageActive && voiceModes && voiceMenuEnabled && callUi == null, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
 }
 
 @Composable

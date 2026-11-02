@@ -42,6 +42,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -165,6 +167,7 @@ private val LocalPageBackGesture = staticCompositionLocalOf<PageBackGestureState
 /** Keeps nested page handlers in the dispatcher's existing last-enabled-first order. */
 @Composable
 internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = true, onBack: () -> Unit) {
+    if (!LocalPageContentActive.current) return
     val state = LocalPageBackGesture.current
     if (state == null) {
         BackHandler(enabled, onBack)
@@ -262,6 +265,11 @@ internal fun PageBackGestureHost(
     contentKey: Any = routeKey,
     captureFromContent: Boolean = false,
     animateBackEnabled: Boolean = true,
+    retainedRootKey: Any? = null,
+    retainedRootVisible: Boolean = contentKey == retainedRootKey,
+    retainedRootActive: Boolean = retainedRootVisible,
+    retainedRootScopeKey: Any? = null,
+    retainedRootContent: (@Composable (Boolean) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -304,10 +312,10 @@ internal fun PageBackGestureHost(
     val visualBackTargetKey = stack.targetKey(routeKey, backTargetKey)
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     val departure = remember(layers, visualRouteKey) {
-        layers.transition(visualRouteKey, visualBackTargetKey, animateEnter = animateBackEnabled && resumed, size = viewport)
+        layers.transition(visualRouteKey, visualBackTargetKey, animateEnter = animateBackEnabled && resumed, size = viewport, contentKey = contentKey)
     }
     val frame = remember(layers, visualRouteKey) {
-        layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey)
+        layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey, contentKey = contentKey)
     }
     val target = layers.find(visualBackTargetKey, viewport)
     var departing by remember(departure) { mutableStateOf(departure != null) }
@@ -315,8 +323,8 @@ internal fun PageBackGestureHost(
     LaunchedEffect(departure, departure?.forwardSkipped) {
         if (departure != null) {
             if (!departure.forwardSkipped) {
-                departure.frame.capture?.join()
-                if (departure.frame.image != null && !departure.forwardSkipped) {
+                if (!departure.frame.retainedDisplayList) departure.frame.capture?.join()
+                if (departure.frame.canDrawPreview && !departure.forwardSkipped) {
                     if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
                     else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))
                 }
@@ -344,6 +352,8 @@ internal fun PageBackGestureHost(
         onDispose { state.alive = false; state.reset() }
     }
     SideEffect {
+        frame.contentRetained = retainedRootContent != null && retainedRootVisible
+        frame.contentKey = contentKey
         frame.sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey
         frame.backTargetKey = visualBackTargetKey
         frame.returnDirection = state.returnDirection
@@ -371,7 +381,7 @@ internal fun PageBackGestureHost(
         }
     }
 
-    val showDeparture = departure != null && departing && departure.frame.image != null && !departure.forwardSkipped && state.previewAllowed
+    val showDeparture = departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed
     val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)
     val returning by rememberUpdatedState(showDeparture && departure?.forward == false)
     val claimSwipe by rememberUpdatedState {
@@ -448,7 +458,7 @@ internal fun PageBackGestureHost(
                     translationX = -state.direction * size.width * 0.25f * (1f - progress)
                     alpha = 1f - 0.1f * (1f - progress)
                 }.drawBehind {
-                    target.image?.let { drawImage(it) }
+                    drawPreview(target)
                 }.testTag("page-back-target"))
                 Box(Modifier.fillMaxSize().drawBehind {
                     drawRect(Color.Black, alpha = 0.5f * (1f - progress))
@@ -459,13 +469,13 @@ internal fun PageBackGestureHost(
                     translationX = -departure.direction * size.width * 0.25f * exit.value
                     alpha = 1f - 0.1f * exit.value
                 }.drawBehind {
-                    departure.frame.image?.let { drawImage(it) }
+                    drawPreview(departure.frame)
                 }.testTag("page-enter-previous"))
                 Box(Modifier.fillMaxSize().drawBehind {
                     drawRect(Color.Black, alpha = 0.5f * exit.value)
                 }.testTag("page-enter-scrim"))
             }
-            key(contentKey) {
+            key(if (retainedRootContent == null) contentKey else RetainedRootSurface) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
                     val visibleProgress = if (target != null && state.previewAllowed) progress else 0f
                     if (departure != null && showDeparture && departure.forward) {
@@ -498,7 +508,19 @@ internal fun PageBackGestureHost(
                             placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)
                         }
                     }
-                }.background(background)) { content() }
+                }.background(background)) {
+                    if (retainedRootContent != null) key(layers, previewScopeKey, retainedRootScopeKey) {
+                        val rootActive = retainedRootActive && resumed
+                        CompositionLocalProvider(
+                            LocalPageBackGesture provides state.takeIf { rootActive },
+                            LocalPageBackStackPath provides stackPath.takeIf { rootActive },
+                            LocalPageBackPreviewFrame provides frame.takeIf { retainedRootVisible && captureFromContent },
+                        ) {
+                            PageRetainedContent(retainedRootVisible, rootActive, resumed) { active -> retainedRootContent(active) }
+                        }
+                    }
+                    key(contentKey) { content() }
+                }
             }
             if (departure != null && showDeparture && !departure.forward) Box(Modifier.fillMaxSize().drawBehind {
                 val value = departure.progress + (1f - departure.progress) * exit.value
@@ -509,7 +531,7 @@ internal fun PageBackGestureHost(
                 translationX = kotlin.math.round(departure.direction * size.width * value)
             }.then(if (departure.direction > 0f) Modifier.absoluteSquircleClip(topLeft = cornerRadius, topRight = 0.dp, bottomRight = 0.dp, bottomLeft = cornerRadius)
                 else Modifier.absoluteSquircleClip(topLeft = 0.dp, topRight = cornerRadius, bottomRight = cornerRadius, bottomLeft = 0.dp)).drawBehind {
-                departure.frame.image?.let { drawImage(it) }
+                drawPreview(departure.frame)
             }.testTag("page-back-departure").pointerInput(departure) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false).consume()
@@ -531,3 +553,11 @@ internal fun PageBackGestureHost(
         }
     }
 }
+
+private fun DrawScope.drawPreview(frame: PageBackPreviewLayers.Frame) {
+    val image = frame.image
+    if (image != null) drawImage(image)
+    else if (frame.retainedDisplayList && frame.canDrawPreview) drawLayer(frame.layer)
+}
+
+private object RetainedRootSurface

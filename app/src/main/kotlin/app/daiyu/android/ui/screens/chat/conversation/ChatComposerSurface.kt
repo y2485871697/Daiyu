@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,12 +126,14 @@ internal fun ChatConversationLayers(
 ) {
     val backdrop = rememberTopBarBackdrop()
     val background = MiuixTheme.colorScheme.background
+    val editorContent: @Composable () -> Unit = remember(composer, backdrop) {
+        { Box(Modifier.fillMaxWidth()) { composer(backdrop) } }
+    }
     SubcomposeLayout(modifier.fillMaxSize()) { constraints ->
         val width = constraints.maxWidth
         val height = constraints.maxHeight
-        val editor = subcompose("composer") {
-            Box(Modifier.fillMaxWidth()) { composer(backdrop) }
-        }.single().measure(constraints.copy(minWidth = width, minHeight = 0))
+        val editor = subcompose("composer", editorContent).single()
+            .measure(constraints.copy(minWidth = width, minHeight = 0))
         val bottomInset = editor.height.toDp()
         val content = subcompose("messages") {
             Box(Modifier.fillMaxSize().captureForTopBar(backdrop).background(background)) {

@@ -46,26 +46,26 @@ internal val LocalPageBackStackPath = staticCompositionLocalOf<PageBackStackPath
 @Composable
 internal fun PageBackStack(routeKey: Any?, backTargetKey: Any? = null, content: @Composable () -> Unit) {
     val parent = LocalPageBackStackPath.current
-    if (parent == null) {
-        content()
-        return
+    val active = LocalPageContentActive.current && parent != null
+    val parentPath = parent?.path.orEmpty()
+    val path = if (routeKey == null) parentPath else parentPath + routeKey
+    val target = if (backTargetKey == null) parentPath else parentPath + backTargetKey
+    val entry = remember(parent?.registry, parent?.entry) { PageBackStackRegistry.Entry(parent?.entry) }
+    val child = remember(parent?.registry, entry, path) { parent?.let { PageBackStackPath(it.registry, path, entry) } }
+    remember(active, entry, path) {
+        if (active && (routeKey != null || entry.child)) checkNotNull(parent).registry.freezeCurrent()
+        Unit
     }
-    val path = if (routeKey == null) parent.path else parent.path + routeKey
-    val target = if (backTargetKey == null) parent.path else parent.path + backTargetKey
-    val entry = remember(parent.registry, parent.entry) { PageBackStackRegistry.Entry(parent.entry) }
-    val child = remember(entry, path) {
-        if (routeKey != null || entry.child) parent.registry.freezeCurrent()
-        PageBackStackPath(parent.registry, path, entry)
-    }
-    DisposableEffect(parent.registry, entry) {
-        parent.registry.entries.add(entry)
-        onDispose { parent.registry.entries.remove(entry) }
+    DisposableEffect(parent?.registry, entry, active) {
+        val registry = parent?.registry
+        if (active) checkNotNull(registry).entries.add(entry)
+        onDispose { if (active) registry?.entries?.remove(entry) }
     }
     SideEffect {
-        entry.child = routeKey != null
-        entry.parentPath = parent.path
+        entry.child = active && routeKey != null
+        entry.parentPath = parentPath
         entry.path = path
         entry.target = target
     }
-    CompositionLocalProvider(LocalPageBackStackPath provides child, content = content)
+    CompositionLocalProvider(LocalPageBackStackPath provides child.takeIf { active }, content = content)
 }

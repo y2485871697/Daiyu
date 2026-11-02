@@ -94,15 +94,15 @@ internal fun ChatMessageList(
     compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
     speechPreparingMessageId: String? = null,
 ) {
-    val reconnectPartsByKey = remember(turns, timeline) {
-        val reconnects = timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
-        reconnectPartsForTurns(turns, reconnects)
+    val reconnects = remember(timeline) {
+        timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
     }
+    val reconnectPartsByKey = remember(turns, reconnects) { reconnectPartsForTurns(turns, reconnects) }
     val placedReconnectIds = remember(reconnectPartsByKey) {
         reconnectPartsByKey.values.flatMapTo(hashSetOf()) { it.placedIds }
     }
     val fallbackAfter = remember(turns, timeline, placedReconnectIds) {
-        turns.associate { it.listKey to reconnectFallbackEntries(it, timeline, placedReconnectIds, turns) }
+        reconnectFallbackEntriesForTurns(turns, timeline, placedReconnectIds)
     }
     val compressionAfter = app.daiyu.android.timeline.compressionActivitiesByAnchor(
         compressionActivities + listOfNotNull(compressionActivity), timeline)
@@ -126,6 +126,7 @@ internal fun ChatMessageList(
     var initialPositionPending by remember {
         mutableStateOf(initialChatPositionPending(scrollRequest, consumedScrollSerial, followBottom))
     }
+    val pageActive by rememberUpdatedState(app.daiyu.android.ui.navigation.LocalPageContentActive.current)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var scrollResumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var resumeFollowPending by remember { mutableStateOf(false) }
@@ -171,7 +172,7 @@ internal fun ChatMessageList(
         }
     }
     fun canFollowBottom(): Boolean =
-        !initialPositionPending && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
+        !initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
             (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
 
     fun correctFollowClearance() {
@@ -202,7 +203,7 @@ internal fun ChatMessageList(
     }
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
     LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed) {
-        if (!scrollResumed) return@LaunchedEffect
+        if (!scrollResumed || !pageActive) return@LaunchedEffect
         val request = scrollRequest?.takeIf { it.serial != consumedScrollSerial }
         if (request != null || initialPositionPending && scrollRequest == null) {
             if (request != null) {
@@ -212,7 +213,7 @@ internal fun ChatMessageList(
             wasDragged = false
             // Subcomposition may start this effect during measurement.
             withFrameNanos { }
-            if (!scrollResumed) return@LaunchedEffect
+            if (!scrollResumed || !pageActive) return@LaunchedEffect
             if (request != null && (request.messageId != null || request.listKey != null)) {
                 val index = request.targetIndex(turns)
                 if (index >= 0) {
@@ -225,7 +226,7 @@ internal fun ChatMessageList(
                     // Initial placement is layout restoration, not streaming output to animate.
                     while (true) {
                         withFrameNanos { }
-                        if (!scrollResumed) return@LaunchedEffect
+                        if (!scrollResumed || !pageActive) return@LaunchedEffect
                         val index = currentTailIndex
                         val layout = listState.layoutInfo
                         if (index < 0 || layout.viewportSize.height <= 0) continue
@@ -345,10 +346,10 @@ internal fun ChatMessageList(
                 it.size > 0 && it.offset < visibleBottom &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
             }.map { it.key }.toSet()
-            currentReadAction to if (initialPositionPending) emptyList() else
+            currentReadAction to if (initialPositionPending || !pageActive) emptyList() else
                 completedVisibleTurns(visibleKeys, currentAssistants, readyTurns, revealedTurns)
         }.collect { (readAction, completed) ->
-            if (!initialPositionPending && completed.isNotEmpty()) {
+            if (pageActive && !initialPositionPending && completed.isNotEmpty()) {
                 // Wait for the formatted terminal body, not a shorter raw-text placeholder.
                 withFrameNanos { }
                 withFrameNanos { }
@@ -360,13 +361,13 @@ internal fun ChatMessageList(
                 }.map { it.key }.toSet()
                 val current = currentAssistants
                 readAction(completed.filter {
-                    !initialPositionPending && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
+                    pageActive && !initialPositionPending && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
                 }.map { it.listKey }.toSet())
             }
         }
     }
     Box(modifier.fillMaxSize()) {
-        LazyColumn(state = listState, userScrollEnabled = !initialPositionPending,
+        LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending,
             modifier = Modifier.testTag("chat-messages").fillMaxSize()
                 .then(clearanceLayout)
                 .drawWithContent { if (!initialPositionPending) drawContent() }
@@ -449,7 +450,8 @@ internal fun ChatMessageList(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
-    var showMenu by remember { mutableStateOf(false) }
+    val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current
+    var showMenu by remember(pageActive) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().then(if (turn.pending) Modifier.testTag("chat-send-preview") else Modifier),
         horizontalAlignment = Alignment.End) {
         BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
@@ -468,7 +470,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                     UserMessageText(turn.text)
                 }
             }
-            UserTurnMenu(showMenu, { showMenu = false }, turn.listKey, actions)
+            UserTurnMenu(pageActive && showMenu, { showMenu = false }, turn.listKey, actions)
             }
         }
         if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(

@@ -21,6 +21,9 @@ class WorkflowRenderIsolationContract(unittest.TestCase):
                       'work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey,',
                       'onAnswerReleased = { if (reasoningReady && answerPending) onAnswerReleased() }'):
             self.assertIn(token, source)
+        self.assertIn('val narrationSettled = narration.reveal.settled', host)
+        self.assertIn('SideEffect { if (narrationSettled) settledPhase = textPhase }', host)
+        self.assertNotIn('SideEffect { if (narration.reveal.settled)', host)
         renderer = source.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
                       'rememberUpdatedState(generationComplete)', 'return remember(plainNarration) { { text, modifier ->',

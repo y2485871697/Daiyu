@@ -204,9 +204,9 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val before = toolCommits.get()
         repeat(8) { index ->
             val answer = "answer update $index"
-            runBlocking { projectMarkdown(listOf(answer), parser = streamingMarkdownParser) }
+            runBlocking { projectMarkdown(listOf(answer), parser = defaultMarkdownParser) }
             mainThread { turn = turn.copy(finalText = answer, content = turn.content.dropLast(1) + MessageContentUi.Text("final", answer)) }
-            ui.waitForIdle()
+            ui.waitUntil(5_000) { ui.onNodeWithText(answer).isDisplayed() }
             ui.onNodeWithText(answer).assertIsDisplayed()
             assertEquals("Final answer updates must not recompose the unchanged dedicated workflow", before, toolCommits.get())
         }

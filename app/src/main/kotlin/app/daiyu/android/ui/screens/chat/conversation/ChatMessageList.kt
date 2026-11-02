@@ -652,7 +652,8 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                 running = work.running, paused = work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING,
                 expanded = expanded, stopped = stopped, revealResetEpoch = revealResetEpoch,
                 reasoningReady = { stopped || handoff.ready(it) }, onVisibleAdvance = onVisibleAdvance) { narration ->
-                SideEffect { if (narration.reveal.settled) settledPhase = textPhase }
+                val narrationSettled = narration.reveal.settled
+                SideEffect { if (narrationSettled) settledPhase = textPhase }
                 val textBody = rememberAssistantTextBody(plainNarration, narration.projection, narration.reveal, generationComplete)
                 MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
                     workflowTimeline = true,

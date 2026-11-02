@@ -29,13 +29,14 @@ class ToolReceiptTests(unittest.TestCase):
         for python in ("python", "python3"):
             for code in (0, 1, 7):
                 with self.subTest(python=python, code=code):
-                    def child(command, stdout, stderr):
+                    def child(command, stdout, stderr, env=None):
                         self.assertEqual(command, [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"])
                         self.assertEqual(stderr, subprocess.STDOUT)
+                        self.assertIsNone(env)
                         stdout.write(raw)
                         return code
                     console = io.BytesIO()
-                    with patch.dict(os.environ, self.env), patch.object(producer, "Path", return_value=self.root), \
+                    with patch.dict(os.environ, self.env, clear=True), patch.object(producer, "Path", return_value=self.root), \
                             patch.object(producer.subprocess, "call", side_effect=child), \
                             patch.object(producer.sys, "stdout", SimpleNamespace(buffer=console)):
                         self.assertEqual(producer.main(["--python", python]), code)
@@ -50,7 +51,7 @@ class ToolReceiptTests(unittest.TestCase):
             with self.subTest(error=type(error).__name__):
                 self.root.mkdir(exist_ok=True)
                 (self.root / "receipt.json").write_text('{"exit_code":0}')
-                with patch.dict(os.environ, self.env), patch.object(producer, "Path", return_value=self.root), \
+                with patch.dict(os.environ, self.env, clear=True), patch.object(producer, "Path", return_value=self.root), \
                         patch.object(producer.subprocess, "call", side_effect=error):
                     with self.assertRaises(type(error)):
                         producer.record("python3")

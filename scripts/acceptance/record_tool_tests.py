@@ -24,9 +24,25 @@ SPEECH_MODULES = (
 )
 
 
+MENU_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
+    "BackdropDrawIsolationTest", "ChatGlassMenuSurfaceTest", "ChatGlassBackdropActivityTest",
+    "ChatMenuPlacementActivityTest", "ConversationPaneVisualTest", "PreviewDialogStatusBarActivityTest",
+))
+MENU_MODULES = (
+    "test_chat_menu_scroll_isolation_contract", "test_chat_menu_shadow_contract",
+    "test_chat_overflow_icon_colors_contract", "test_chat_outside_tap_contract",
+    "test_dialog_motion_contract.DialogMotionContractTest.test_production_glass_menu_uses_original_popup_motion_and_exit_retention",
+    "test_dialog_motion_contract.DialogMotionContractTest.test_more_button_is_transparent_but_keeps_selection_semantics",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt", "test_speech_platform_discovery",
+)
+
+
 def command_for(python, env):
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == SPEECH_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *SPEECH_MODULES, "-v"], "speech-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MENU_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *MENU_MODULES, "-v"], "menu-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

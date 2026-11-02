@@ -44,12 +44,21 @@ if requested is not None and any(not re.fullmatch(
     raise ValueError("Expected comma-separated complete instrumentation class names")
 speech_target = {"app.daiyu.android.voice.SpeechAudioFileAndroidTest"}
 speech_only = mode == "smoke" and requested == speech_target
+menu_target = {"app.daiyu.android." + name for name in (
+    "BackdropDrawIsolationTest", "ChatGlassMenuSurfaceTest", "ChatGlassBackdropActivityTest",
+    "ChatMenuPlacementActivityTest", "ConversationPaneVisualTest", "PreviewDialogStatusBarActivityTest",
+)}
+menu_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(menu_target)
+menu_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                for name in menu_target}
 speech_source = Path("app/src/androidTest/kotlin/app/daiyu/android/voice/SpeechAudioFileAndroidTest.kt")
 classes = {}
 for path in sorted(Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
         continue
     if speech_only and path != speech_source:
+        continue
+    if menu_only and path not in menu_sources:
         continue
     source = path.read_text()
     if path.suffix == ".kt":
@@ -98,7 +107,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only else "full",
+                discovery_scope="targeted" if speech_only or menu_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

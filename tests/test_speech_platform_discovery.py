@@ -78,6 +78,56 @@ class SpeechPlatformDiscoveryTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Unknown instrumentation test class", result.stderr)
 
+    def menu_fixture(self, root):
+        from test_record_tool_tests_scope import recorder
+        self.fixture(root)
+        for name in recorder.MENU_PLATFORM_CLASSES:
+            path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("package app.daiyu.android\nclass " + name.rsplit(".", 1)[1]
+                            + " : TestCase() {\n fun testOne() {}\n}\n")
+        return ",".join(recorder.MENU_PLATFORM_CLASSES)
+
+    def test_exact_menu_scope_ignores_unrelated_multi_class_files_and_covers_every_requested_class(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            classes = self.menu_fixture(root)
+            selected = []
+            for shard in range(4):
+                result = self.select(root, shard, classes=classes)
+                self.assertEqual(0, result.returncode, result.stderr)
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertEqual(set(classes.split(",")), set(inventory["all_classes"]))
+                selected.extend(selection["selected_classes"])
+            self.assertCountEqual(classes.split(","), selected)
+
+    def test_unapproved_menu_filters_keep_full_inventory_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            classes = self.menu_fixture(root)
+            for filtered in (classes.rsplit(",", 1)[0], classes + ",app.daiyu.android.UnknownTest",
+                             classes + "," + classes.split(",")[0]):
+                result = self.select(root, classes=filtered)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+
+    def test_menu_scope_rejects_ambiguous_and_missing_requested_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            classes = self.menu_fixture(root)
+            path = root / "app/src/androidTest/kotlin/app/daiyu/android/BackdropDrawIsolationTest.kt"
+            with path.open("a") as output:
+                output.write("class OtherTest : TestCase() {}\n")
+            result = self.select(root, classes=classes)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            path.unlink()
+            result = self.select(root, classes=classes)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Unknown instrumentation test class", result.stderr)
+
     def test_full_inventory_and_legacy_class_remain_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

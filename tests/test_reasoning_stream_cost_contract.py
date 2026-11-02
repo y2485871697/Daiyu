@@ -66,6 +66,20 @@ class ReasoningStreamCostContract(unittest.TestCase):
         self.assertIn('(parent.value - start).coerceIn(0, length)', helper)
         self.assertNotIn('return@forEachIndexed', source)
 
+    def test_long_workflow_reveal_limits_use_precomputed_source_ranges(self):
+        source = (SRC / 'ui/screens/chat/conversation/MarkdownReveal.kt').read_text()
+        target = source.split('internal class MarkdownTypingTarget(', 1)[1].split('internal class MarkdownTypingState', 1)[0]
+        lookup = target.split('fun limit(id: String, visible: Int): Int {', 1)[1]
+        self.assertIn('putIfAbsent(part.source.id, PartRange(offset, part.length))', target)
+        self.assertIn('var offset = 0L', target)
+        self.assertIn('val range = ranges[id] ?: return 0', lookup)
+        self.assertNotIn('for (', lookup)
+        self.assertNotIn('parts.', lookup)
+        regression = (SRC.parents[4] / 'test/kotlin/app/daiyu/android/ui/screens/chat/conversation/MarkdownRevealInvalidationTest.kt').read_text()
+        self.assertIn('longWorkflowAnimationFramesDoNotRescanCompletedSources', regression)
+        self.assertIn('repeat(120)', regression)
+        self.assertIn('0, sourceReads', regression)
+
     def test_context_strings_are_remembered_by_numbers_and_locale(self):
         helper = (SRC / 'ui/screens/chat/conversation/ChatContextUsage.kt').read_text()
         self.assertIn('remember(usage.inputTokens, usage.windowTokens, locale)', helper)

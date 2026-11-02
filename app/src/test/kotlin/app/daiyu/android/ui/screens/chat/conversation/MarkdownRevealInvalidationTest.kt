@@ -7,6 +7,86 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealInvalidationTest {
+    @Test fun longWorkflowAnimationFramesDoNotRescanCompletedSources() {
+        val count = 256
+        val length = 256
+        val sourceParts = List(count) { MarkdownTypingPart(MarkdownTypingSource("part:$it", "x".repeat(length)), length) }
+        var sourceReads = 0
+        val parts = object : AbstractList<MarkdownTypingPart>() {
+            override val size: Int get() = sourceParts.size
+            override fun get(index: Int): MarkdownTypingPart {
+                sourceReads++
+                return sourceParts[index]
+            }
+        }
+        val start = (count - 1) * length
+        val target = MarkdownTypingTarget(parts, start, streaming = true, terminal = false)
+        val frame = mutableStateOf(MarkdownTypingFrame(target, start))
+        val budgets = MarkdownRevealBudgets(mutableStateOf<MarkdownTypingTarget?>(target), frame)
+        val limits = List(count) { budgets.visibility("part:$it") }
+        val observer = SnapshotStateObserver { it() }
+        var completedChanges = 0
+        var activeChanges = 0
+        val changed: (Int) -> Unit = { if (it == count - 1) activeChanges++ else completedChanges++ }
+        fun observe() = limits.forEachIndexed { index, limit ->
+            observer.observeReads(index, changed) { limit.value }
+        }
+        Snapshot.sendApplyNotifications()
+        observer.start()
+        try {
+            observe()
+            sourceReads = 0
+            repeat(120) { index ->
+                frame.value = MarkdownTypingFrame(target, start + index + 1)
+                Snapshot.sendApplyNotifications()
+                observe()
+            }
+            assertEquals("Per-frame budgets must not walk historical workflow parts", 0, sourceReads)
+            assertEquals("Completed leaves must remain idle", 0, completedChanges)
+            assertEquals(120, activeChanges)
+            limits.dropLast(1).forEach { assertEquals(length, it.value) }
+            assertEquals(120, limits.last().value)
+            assertEquals(0, target.limit("missing", Int.MAX_VALUE))
+        } finally { observer.stop(); observer.clear() }
+    }
+
+    @Test fun indexedLimitsPreserveFirstDuplicateAndEmptyPartBoundaries() {
+        val parts = listOf(
+            MarkdownTypingPart(MarkdownTypingSource("first", "abc"), 3),
+            MarkdownTypingPart(MarkdownTypingSource("empty", ""), 0),
+            MarkdownTypingPart(MarkdownTypingSource("first", "defghij"), 7),
+            MarkdownTypingPart(MarkdownTypingSource("last", "kl"), 2),
+        )
+        val target = MarkdownTypingTarget(parts, 0, streaming = true, terminal = false)
+        fun reference(id: String, visible: Int): Int {
+            var remaining = visible
+            for (part in parts) {
+                if (part.source.id == id) return remaining.coerceIn(0, part.length)
+                remaining = (remaining - part.length).coerceAtLeast(0)
+            }
+            return 0
+        }
+        for (visible in listOf(-1, 0, 1, 2, 3, 4, 9, 10, 11, 12, Int.MAX_VALUE)) {
+            for (id in listOf("first", "empty", "last", "missing")) {
+                assertEquals("id=$id visible=$visible", reference(id, visible), target.limit(id, visible))
+            }
+        }
+        assertEquals(0, MarkdownTypingTarget(emptyList(), 0, false, true).limit("missing", 100))
+    }
+
+    @Test fun indexedLimitsKeepOffsetsBeyondTheSaturatedTotalHidden() {
+        val target = MarkdownTypingTarget(listOf(
+            MarkdownTypingPart(MarkdownTypingSource("first", "a"), Int.MAX_VALUE - 2),
+            MarkdownTypingPart(MarkdownTypingSource("frontier", "b"), 6),
+            MarkdownTypingPart(MarkdownTypingSource("hidden", "c"), 10),
+        ), 0, streaming = true, terminal = false)
+        assertEquals(Int.MAX_VALUE, target.total)
+        assertEquals(Int.MAX_VALUE - 2, target.limit("first", Int.MAX_VALUE))
+        assertEquals(2, target.limit("frontier", Int.MAX_VALUE))
+        assertEquals(0, target.limit("hidden", Int.MAX_VALUE))
+        assertEquals(0, target.limit("frontier", -1))
+    }
+
     @Test fun intermediateFramesInvalidateTheTextLeafButNotWorkflowReadiness() {
         val target = MarkdownTypingTarget(listOf(
             MarkdownTypingPart(MarkdownTypingSource("first", "abcdefghijkl"), 12),

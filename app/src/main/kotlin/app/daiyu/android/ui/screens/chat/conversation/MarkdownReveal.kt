@@ -148,13 +148,18 @@ internal class MarkdownTypingTarget(
     val terminal: Boolean,
 ) {
     val total = parts.sumOf { it.length.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-    fun limit(id: String, visible: Int): Int {
-        var remaining = visible
+    private data class PartRange(val start: Long, val length: Int)
+    private val ranges = buildMap<String, PartRange> {
+        var offset = 0L
         for (part in parts) {
-            if (part.source.id == id) return remaining.coerceIn(0, part.length)
-            remaining = (remaining - part.length).coerceAtLeast(0)
+            putIfAbsent(part.source.id, PartRange(offset, part.length))
+            offset += part.length
         }
-        return 0
+    }
+
+    fun limit(id: String, visible: Int): Int {
+        val range = ranges[id] ?: return 0
+        return (visible.toLong() - range.start).coerceIn(0L, range.length.toLong()).toInt()
     }
 }
 

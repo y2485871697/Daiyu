@@ -12,9 +12,9 @@ on:
         type: string
         required: true
       check_scope:
-        description: 工作流程、环境圆点、发送状态、表格样式、冷启动或附件弹层的定向检查范围
+        description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动或附件弹层的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, attachment-contracts]
+        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts]
         default: workflow
 permissions:
   contents: read
@@ -80,6 +80,10 @@ jobs:
                           'test_markdown_body_visibility_contract.py', 'test_markdown_typing_contract.py',
                           'test_large_history_storage_contract.py', 'test_markdown_entry_contract.py',
                           'test_streaming_follow_contract.py', 'test_chat_menu_scroll_isolation_contract.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
+              patterns = ('test_reasoning_stream_cost_contract.py', 'test_workflow_render_isolation_contract.py',
+                          'test_markdown_typing_contract.py', 'test_chat_resume_scroll_contract.py',
+                          'test_task_scroll_smoke_scope.py', 'test_diagnostic_smoke_source.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
@@ -115,6 +119,10 @@ jobs:
                      MarkdownPreparationCompositionTest MarkdownRevealTest ChatTurnMapperTest ChatInitialPositionPolicyTest)
             filters+=(--tests app.daiyu.android.context.ContextTimelineColdStartTest)
           fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then
+            classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest
+                     AssistantWorkflowCompositionTest WorkflowNarrationCompositionTest ReasoningStreamCompositionTest)
+          fi
           for class in "${classes[@]}"; do
             filters+=(--tests "app.daiyu.android.ui.screens.chat.conversation.$class")
           done
@@ -144,6 +152,9 @@ jobs:
               expected = {'RestoredMarkdownTest', 'MarkdownProjectionCacheTest', 'MarkdownProjectionTest',
                           'MarkdownPreparationCompositionTest', 'MarkdownRevealTest', 'ChatTurnMapperTest',
                           'ChatInitialPositionPolicyTest', 'ContextTimelineColdStartTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
+              expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
+                          'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

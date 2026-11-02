@@ -53,6 +53,25 @@ PAGE_BACK_MODULES = (
 )
 
 
+TASK_SCROLL_PLATFORM_CLASSES = (
+    'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
+)
+TASK_SCROLL_MODULES = (
+    'test_reasoning_stream_cost_contract',
+    'test_workflow_render_isolation_contract',
+    'test_markdown_typing_contract',
+    'test_chat_resume_scroll_contract',
+    'test_diagnostic_smoke_source',
+    'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt',
+    'test_task_scroll_smoke_scope',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 def command_for(python, env):
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == SPEECH_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *SPEECH_MODULES, "-v"], "speech-targeted"
@@ -62,6 +81,9 @@ def command_for(python, env):
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(PAGE_BACK_PLATFORM_CLASSES)):
         return [python, '-B', '-m', 'unittest', *PAGE_BACK_MODULES, '-v'], 'page-back-targeted'
+    if (env.get('SMOKE_MODE') == 'smoke'
+            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(TASK_SCROLL_PLATFORM_CLASSES)):
+        return [python, '-B', '-m', 'unittest', *TASK_SCROLL_MODULES, '-v'], 'task-scroll-targeted'
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

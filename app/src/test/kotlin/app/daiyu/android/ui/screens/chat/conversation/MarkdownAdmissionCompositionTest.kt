@@ -111,10 +111,12 @@ class MarkdownAdmissionCompositionTest {
             val afterOldDrain = reveal!!.limit("answer")
             assertTrue("The first second must remain paced: $afterOldDrain", afterOldDrain in 1..65)
             assertFalse(reveal!!.settled)
-            val feedback = advances
             admitted.value = false
+            frame()
+            val paused = reveal!!.limit("answer")
+            val feedback = advances
             repeat(50) { frame() }
-            assertEquals(afterOldDrain, reveal!!.limit("answer"))
+            assertEquals(paused, reveal!!.limit("answer"))
             assertEquals(feedback, advances)
             admitted.value = true
             repeat(450) { frame() }

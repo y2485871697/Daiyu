@@ -17,6 +17,10 @@ logcat -v brief -T 1 -s DaiyuJank:I > "$LOG" &
 LOGGER=$!
 TRACE_PID=
 DIR=/data/user/0/app.daiyu.android/no_backup/jank-diagnostics-v1
+# Atomic incident renames are observable even when INFO logs are unavailable.
+metadata_signature() {
+  stat -c '%n:%i:%Y:%s' "$DIR"/incident-*.json 2>/dev/null || :
+}
 copy_metadata() {
   if test -d "$DIR"; then mkdir -p "$BASE/metadata-$1"; cp "$DIR"/incident-*.json "$BASE/metadata-$1/" 2>/dev/null || :; fi
 }
@@ -34,28 +38,37 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 START=$(date +%s)
 INDEX=0
-# Fix the trigger baseline before READY so the first trigger is never swallowed.
+# Do not wait for READY: the app may already be open and INFO logs may be absent.
 BASELINE=0
-while ! grep -q DAIYU_JANK_READY "$LOG"; do
-  test $(( $(date +%s) - START )) -lt 900 || exit 0
-  sleep 1
-done
+METADATA_BASELINE=$(metadata_signature)
+printf '%s\n' "$METADATA_BASELINE" > "$BASE/metadata-baseline.txt"
 while test "$INDEX" -lt 6 && test $(( $(date +%s) - START )) -lt 900; do
   INDEX=$((INDEX + 1))
   OUT="$BASE/incident-$INDEX.perfetto-trace"
-  # Acknowledge actual data-source startup, rather than assuming a fixed sleep.
-  if ! perfetto --background-wait --txt -c "$CONFIG" -o "$OUT" > "$BASE/perfetto-$INDEX.log" 2>&1; then
+  SESSION="daiyu-jank-$$-$INDEX"
+  RUNTIME_CONFIG="$BASE/config-$INDEX.pbtxt"
+  sed '/^[[:space:]]*unique_session_name:/d' "$CONFIG" > "$RUNTIME_CONFIG"
+  printf '\nunique_session_name: "%s"\n' "$SESSION" >> "$RUNTIME_CONFIG"
+  if ! perfetto --background-wait --txt -c "$RUNTIME_CONFIG" -o "$OUT" > "$BASE/perfetto-$INDEX.log" 2>&1; then
     echo 'PERFETTO_START_FAILED' >> "$BASE/recorder.log"
     exit 1
   fi
   TRACE_PID=$(sed -n '/^[0-9][0-9]*$/p' "$BASE/perfetto-$INDEX.log" | tail -n 1)
   case "$TRACE_PID" in ''|*[!0-9]*) echo 'PERFETTO_PID_MISSING' >> "$BASE/recorder.log"; exit 1;; esac
+  # v46 may acknowledge an error exit. Require the exact live, STARTED session.
+  kill -0 "$TRACE_PID" 2>/dev/null || { echo 'PERFETTO_START_EARLY_EXIT' >> "$BASE/recorder.log"; exit 1; }
+  SESSION_STATE=$(perfetto --query --long 2> "$BASE/query-$INDEX.log" | awk -v name="$SESSION" '$3 == "STARTED" && $NF == name { print }')
+  test -n "$SESSION_STATE" || { echo 'PERFETTO_SESSION_NOT_STARTED' >> "$BASE/recorder.log"; exit 1; }
+  printf '%s\n' "$SESSION_STATE" > "$BASE/session-$INDEX.txt"
+  pidof app.daiyu.android > "$BASE/target-pid-start-$INDEX.txt" || :
   echo "TRACE_ARMED $INDEX" >> "$BASE/recorder.log"
   while kill -0 "$TRACE_PID" 2>/dev/null; do
     COUNT=$(grep -c DAIYU_JANK_TRIGGER "$LOG" || :)
-    if test "$COUNT" -gt "$BASELINE"; then
-      BASELINE=$COUNT
+    METADATA_NOW=$(metadata_signature)
+    if test "$COUNT" -gt "$BASELINE" || test "$METADATA_NOW" != "$METADATA_BASELINE"; then
+      echo "TRACE_TRIGGER $INDEX" >> "$BASE/recorder.log"
       trigger_perfetto daiyu_ui_jank_v1
+      copy_metadata "trigger-$INDEX"
       break
     fi
     sleep 1
@@ -66,9 +79,11 @@ while test "$INDEX" -lt 6 && test $(( $(date +%s) - START )) -lt 900; do
   test -s "$OUT" || { echo 'TRACE_EMPTY' >> "$BASE/recorder.log"; exit 1; }
   PID=$(pidof app.daiyu.android || :)
   if test -n "$PID"; then
-    printf '%s\n' "$PID" > "$BASE/target-pid-$INDEX.txt"
+    printf '%s\n' "$PID" > "$BASE/target-pid-end-$INDEX.txt"
     timeout -s TERM -k 1 10 dumpsys gfxinfo app.daiyu.android framestats > "$BASE/frames-$INDEX.txt" || :
   fi
   copy_metadata "$INDEX"
+  echo "TRACE_SAVED $INDEX" >> "$BASE/recorder.log"
   BASELINE=$(grep -c DAIYU_JANK_TRIGGER "$LOG" || :)
+  METADATA_BASELINE=$(metadata_signature)
 done

@@ -2,6 +2,9 @@ from pathlib import Path
 import sys
 import re
 import unittest
+import subprocess
+import tempfile
+import os
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -69,17 +72,70 @@ class JankDiagnosticsContract(unittest.TestCase):
     def test_system_trace_is_root_owned_bounded_and_triggered_after_slow_frame(self):
         shell=(ROOT/'scripts/diagnostics/record-ui-jank.sh').read_text()
         config=(ROOT/'scripts/diagnostics/ui-jank.pbtxt').read_text()
-        self.assertIn('DAIYU_JANK_READY',shell)
+        self.assertNotIn('while ! grep -q DAIYU_JANK_READY',shell)
         self.assertIn('timeout -s TERM -k 5 900',shell)
         self.assertIn("trap 'exit 143' TERM",shell)
         self.assertIn('perfetto --background-wait',shell)
-        self.assertLess(shell.index('BASELINE=0'), shell.index('while ! grep -q DAIYU_JANK_READY'))
+        self.assertLess(shell.index('METADATA_BASELINE=$(metadata_signature)'), shell.index('perfetto --background-wait'))
+        self.assertIn('test \"$METADATA_NOW\" != \"$METADATA_BASELINE\"',shell)
+        self.assertIn('PERFETTO_START_EARLY_EXIT',shell)
+        self.assertIn('PERFETTO_SESSION_NOT_STARTED',shell)
+        self.assertLess(shell.index('SESSION_STATE=$(perfetto --query'),shell.index('echo \"TRACE_ARMED'))
         self.assertIn('trigger_perfetto daiyu_ui_jank_v1',shell)
+        self.assertLess(shell.index('trigger_perfetto daiyu_ui_jank_v1'),shell.index('copy_metadata \"trigger-$INDEX\"'))
+        self.assertLess(shell.index('target-pid-start-$INDEX'),shell.index('echo \"TRACE_ARMED'))
+        self.assertIn('target-pid-end-$INDEX',shell)
         self.assertIn('"$INDEX" -lt 6',shell)
         self.assertIn(' -lt 900',shell)
         self.assertNotIn('input tap',shell)
         self.assertNotIn('am start',shell)
+        self.assertNotRegex(config,r'(?m)^\s*duration_ms:')
+        self.assertIn('trigger_timeout_ms: 900000',config)
         self.assertIn('fill_policy: RING_BUFFER',config)
         self.assertIn('stop_delay_ms: 2000',config)
         self.assertIn('clear_period_ms: 5000',config)
         self.assertIn('scan_all_processes_on_start: true',config)
+
+    def test_metadata_signature_detects_final_writes_without_logs_and_ignores_tmp(self):
+        source=(ROOT/'scripts/diagnostics/record-ui-jank.sh').read_text()
+        function=source.split('metadata_signature() {',1)[1].split('\n}',1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            def signature():
+                return subprocess.run(['sh','-c','DIR="$1";'+function,'sh',directory],
+                                      check=True,text=True,capture_output=True).stdout
+            self.assertEqual('',signature())
+            temporary=Path(directory)/'incident-1.tmp'
+            temporary.write_text('{}')
+            self.assertEqual('',signature())
+            target=Path(directory)/'incident-1.json'
+            temporary.replace(target)
+            first=signature()
+            self.assertTrue(first)
+            self.assertEqual(first,signature())
+            original=target.stat()
+            temporary.write_text('{}')
+            os.utime(temporary,ns=(original.st_atime_ns,original.st_mtime_ns))
+            temporary.replace(target)
+            self.assertNotEqual(first,signature())
+            first=signature()
+            target.write_text('{"complete":true}')
+            self.assertNotEqual(first,signature())
+            second=signature()
+            stat=target.stat()
+            os.utime(target,(stat.st_atime,stat.st_mtime+15))
+            self.assertNotEqual(second,signature())
+
+    def test_session_match_requires_exact_name_and_started_state(self):
+        source=(ROOT/'scripts/diagnostics/record-ui-jank.sh').read_text()
+        rule=re.search(r"awk -v name=\"\$SESSION\" '([^']+)'",source).group(1)
+        for row,expected in [
+            ('3 0 STARTED (2) 69632 900 4 16:31:31 daiyu-jank-10-1',True),
+            ('3 0 STARTED (2) 69632 900 4 16:31:31 daiyu-jank-10-10',False),
+            ('3 0 CONFIGURED (2) 69632 900 4 16:31:31 daiyu-jank-10-1',False),
+            ('Tracing sessions: 1 (started: 0)',False),
+            ('',False),
+        ]:
+            with self.subTest(row=row):
+                result=subprocess.run(['awk','-v','name=daiyu-jank-10-1',rule],input=row+'\n',
+                                      text=True,capture_output=True,check=True)
+                self.assertEqual(expected,bool(result.stdout.strip()))

@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 存储热路径、菜单重组隔离或全页UI卡顿诊断
         type: choice
-        options: [storage, menu-scroll, ui-jank]
+        options: [storage, menu-scroll, ui-jank, ui-jank-recorder]
         default: storage
 permissions:
   contents: read
@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   storage:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.check_scope != 'ui-jank-recorder'
     runs-on: ubuntu-26.04
     timeout-minutes: 35
     env:
@@ -181,4 +181,42 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/reports/tests/testDebugUnitTest/
             app/build/reports/host-pty/
+          if-no-files-found: error
+
+  recorder:
+    if: github.ref == 'refs/heads/main' && inputs.check_scope == 'ui-jank-recorder'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 核对采集器增量源码
+        run: |
+          test -n "$EXPECTED_SHA"
+          python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - name: 仅采集器契约与脚本检查（不编译）
+        shell: bash
+        run: |
+          mkdir -p recorder-checks
+          set -o pipefail
+          python3 -B -m unittest discover -s tests -p test_jank_diagnostics_contract.py -v 2>&1 | tee recorder-checks/contracts.log
+          python3 scripts/verify_boundaries.py 2>&1 | tee recorder-checks/boundaries.log
+          bash -n scripts/diagnostics/record-ui-jank.sh
+          ruby -rpsych -e 'ARGV.each { |f| Psych.parse_file(f) }' .github/workflows/screen-observation-jank-checks.yml
+          git rev-parse HEAD > recorder-checks/source-sha.txt
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          assert not any(p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks') for p in Path.cwd().rglob('*'))
+          record = dict(source_sha=Path('recorder-checks/source-sha.txt').read_text().strip(), run_id=os.environ['GITHUB_RUN_ID'], run_attempt=os.environ['GITHUB_RUN_ATTEMPT'], expected_sha=os.environ['EXPECTED_SHA'], package_scan_empty=True, scope='ui-jank-recorder', contracts_passed=True, apk_built=False, jvm_tests_run=False, instrumentation_run=False)
+          Path('recorder-checks/record.json').write_text(json.dumps(record, indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: UI卡顿采集器定向检查
+          path: recorder-checks/
           if-no-files-found: error

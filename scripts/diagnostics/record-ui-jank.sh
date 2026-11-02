@@ -2,7 +2,7 @@
 # Run only via the authorized Android root daemon tool. No install, input or app launch.
 set -eu
 BASE=${1:?supply an absolute evidence directory}
-case "$BASE" in /data/local/tmp/eta/*) ;; *) echo 'evidence directory must be under /data/local/tmp/eta' >&2; exit 2;; esac
+case "$BASE" in /data/local/tmp/daiyu-ui-jank/*) ;; *) echo 'evidence directory must be under /data/local/tmp/daiyu-ui-jank' >&2; exit 2;; esac
 CONFIG=${2:?supply the ui-jank.pbtxt path}
 # The wrapper deadline includes startup, waits, postprocessing and bounded cleanup.
 if test "${3:-}" != --bounded; then

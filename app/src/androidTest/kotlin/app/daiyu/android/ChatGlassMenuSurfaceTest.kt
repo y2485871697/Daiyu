@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.Canvas
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
 import top.yukonga.miuix.kmp.blur.Backdrop
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
@@ -163,6 +165,7 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
         val alpha = mutableStateOf(1f)
         val scale = mutableStateOf(1f)
         val side = mutableIntStateOf(160)
+        val shift = mutableIntStateOf(0)
         val revision = mutableIntStateOf(0)
         val visible = MutableTransitionState(false).apply { targetState = true }
         val motion = PopupMotion(visible, fraction, alpha)
@@ -174,12 +177,19 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
                     val counted = remember(source) { CountingMenuBackdrop(source, recordings) }
                     Box(Modifier.fillMaxSize().testTag("recorder-host"), contentAlignment = Alignment.Center) {
                         Canvas(Modifier.fillMaxSize().captureForTopBar(source)) {
-                            drawRect(if (revision.intValue == 0) Color.Red else Color.Blue)
+                            if (revision.intValue < 2) {
+                                drawRect(if (revision.intValue == 0) Color.Red else Color.Blue)
+                            } else {
+                                drawRect(Color.Red)
+                                drawRect(Color.Blue, topLeft = Offset(size.width / 2, 0f),
+                                    size = Size(size.width / 2, size.height))
+                            }
                         }
                         // A missing consumer cannot pass by showing the same source through it.
                         Box(Modifier.fillMaxSize().background(Color.Black))
                         ChatGlassMenuSurface(counted,
-                            Modifier.requiredSize(side.intValue.dp, 120.dp)
+                            Modifier.offset { IntOffset(shift.intValue.dp.roundToPx(), 0) }
+                                .requiredSize(side.intValue.dp, 120.dp)
                                 .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
                                 .testTag("recorder-menu"), motion) {
                             Box(Modifier.requiredSize(80.dp, 40.dp))
@@ -205,11 +215,32 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
         val changed = committedPixels()
         val blue = changed[changed.width / 2, changed.height / 2]
         assertTrue("Draw-only background changes must not freeze behind the cached menu", blue.blue > blue.red + .02f)
-        mainThread { side.intValue = 200; scale.value = .8f }
+        mainThread { side.intValue = 200 }
         val resized = committedPixels()
-        assertTrue("Coordinate/size changes must refresh the backdrop recorder", recordings.get() > first)
-        assertTrue("Resized/scaled menu still samples the live blue source",
+        assertTrue("Size changes must refresh the backdrop recorder", recordings.get() > first)
+        assertTrue("Resized menu still samples the live blue source",
             resized[resized.width / 2, resized.height / 2].blue > resized[resized.width / 2, resized.height / 2].red + .02f)
+        mainThread { revision.intValue = 2 }
+        committedPixels()
+        for (x in listOf(-72, 72, -72)) {
+            // Change position without resizing/recomposing the backdrop parameters.
+            mainThread { shift.intValue = x }
+            val moved = committedPixels()
+            val center = moved[moved.width / 2, moved.height / 2]
+            if (x < 0) assertTrue("Moved menu samples the red half", center.red > center.blue + .02f)
+            else assertTrue("Moved menu samples the blue half", center.blue > center.red + .02f)
+        }
+        mainThread { shift.intValue = -28 }
+        for (factor in listOf(1f, .55f, .8f, 1f)) {
+            mainThread { scale.value = factor }
+            val transformed = committedPixels()
+            // Quarter-width point crosses the source color boundary only at full scale.
+            val sample = transformed[transformed.width * 3 / 4, transformed.height / 2]
+            if (factor == 1f) assertTrue("Full scale samples blue to the right of the source boundary",
+                sample.blue > sample.red + .01f)
+            else assertTrue("Scale-only change updates backdrop sampling on the red side",
+                sample.red > sample.blue + .01f)
+        }
     }
 
     fun testAnimationFramesKeepMenuContentCompositionAndMeasurementStable() {

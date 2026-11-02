@@ -92,6 +92,7 @@ internal fun rememberMarkdownReveal(
     allowBaselinePrefix: Boolean = true,
     blockedSources: Set<String> = emptySet(),
     live: Boolean = streaming,
+    paceTerminal: Boolean = false,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
@@ -115,8 +116,8 @@ internal fun rememberMarkdownReveal(
     val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
     val exactProjection = projection?.sources == sources.map { it.text }
     val targetTerminal = terminal && exactProjection
-    val target = remember(motion, parts, baselineLength, streaming, targetTerminal, live) {
-        motion.update(parts, baselineLength, streaming, targetTerminal, live)
+    val target = remember(motion, parts, baselineLength, streaming, targetTerminal, live, paceTerminal) {
+        motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)
     }
     val advanceLimit = remember(target, blockedSources) {
         target?.parts?.takeWhile { it.source.id !in blockedSources }?.sumOf { it.length.toLong() }

@@ -146,6 +146,7 @@ internal class MarkdownTypingTarget(
     val start: Int,
     val streaming: Boolean,
     val terminal: Boolean,
+    val paceTerminal: Boolean = false,
 ) {
     val total = parts.sumOf { it.length.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     fun limit(id: String, visible: Int): Int {
@@ -170,7 +171,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var closed = false
 
     fun update(parts: List<MarkdownTypingPart>?, baselineLength: Int?, streaming: Boolean, terminal: Boolean,
-        live: Boolean = streaming): MarkdownTypingTarget? {
+        live: Boolean = streaming, paceTerminal: Boolean = false): MarkdownTypingTarget? {
         if (live || streaming) { seenLive = true; closed = false }
         if (parts == null || baselineLength == null) return target
         val previous = target
@@ -186,7 +187,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (previous == null || position >= previous.total || !appending) lastFrame = 0L
         position = if (previous != null && appending && start < total) mapped.coerceAtMost(total.toDouble()) else start.toDouble()
         if (!streaming) { drainStart = 0L; drainPosition = position }
-        val next = MarkdownTypingTarget(parts, start, streaming, terminal)
+        val next = MarkdownTypingTarget(parts, start, streaming, terminal, paceTerminal)
         target = next
         // An empty live body can still be waiting for its first classified answer.
         if (terminal && total > 0 && start >= total) closed = true
@@ -210,9 +211,10 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (lastFrame == 0L) lastFrame = frameNanos
         val elapsed = ((frameNanos - lastFrame).coerceAtLeast(0L) / 1_000_000_000.0).coerceAtMost(0.05)
         lastFrame = frameNanos
-        if (expected.streaming) {
-            position = (position + maxOf(70.0, (end - position) * 7.0) * elapsed)
-                .coerceAtMost(end.toDouble())
+        if (expected.streaming || expected.terminal && expected.paceTerminal) {
+            // A newly admitted answer is output, not a 250 ms terminal catch-up.
+            val speed = if (expected.streaming) maxOf(70.0, (end - position) * 7.0) else 70.0
+            position = (position + speed * elapsed).coerceAtMost(end.toDouble())
         } else {
             if (drainStart == 0L) { drainStart = frameNanos; drainPosition = position }
             val fraction = ((frameNanos - drainStart).coerceAtLeast(0L) / 250_000_000.0).coerceAtMost(1.0)

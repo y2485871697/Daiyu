@@ -167,6 +167,40 @@ class MarkdownRevealTest {
         assertEquals(6, history.update(listOf(part("answer")), 0, streaming = false, terminal = true)!!.start)
     }
 
+    @Test fun terminalBodyKeepsItsNormalCharacterPacePastTheOldDrainDeadline() {
+        for (frameMillis in listOf(8L, 16L)) {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, streaming = false, terminal = false, live = true)
+            val answer = state.update(listOf(part("字".repeat(500))), 0, streaming = false, terminal = true,
+                paceTerminal = true)!!
+            var time = 1_000_000_000L
+            state.advance(answer, time)
+            var shown = 0
+            var advances = 0
+            repeat((1_000L / frameMillis).toInt()) {
+                time += frameMillis * 1_000_000L
+                val next = state.advance(answer, time) { advances++ }
+                assertTrue("No frame may flush a text chunk", next - shown in 0..2)
+                shown = next
+            }
+            assertTrue("One second reveals about 70 characters, not all 500: $shown", shown in 68..71)
+            assertTrue(advances > 40)
+            state.pause(answer)
+            assertEquals("Blocked time must not become catch-up", shown, state.advance(answer, time + 10_000_000_000L))
+            var previous = shown
+            repeat(500) {
+                time += 16_000_000L
+                val next = state.advance(answer, time + 10_000_000_000L)
+                assertTrue(next - previous in 0..2)
+                previous = next
+            }
+            assertEquals(answer.total, previous)
+            val edited = state.update(listOf(part("字".repeat(501))), 0, streaming = false, terminal = true,
+                paceTerminal = true)!!
+            assertEquals("Editing a completed answer stays silent", 501, edited.start)
+        }
+    }
+
     @Test fun lateTerminalTargetsDrainToTheirExactEnd() {
         val state = MarkdownTypingState(listOf(source("")))
         state.update(listOf(part("")), 0, true, false)

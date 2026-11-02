@@ -60,6 +60,25 @@ class MarkdownRevealHapticsTest {
         assertEquals(done, f.advances)
     }
 
+    @Test fun pacedTerminalBodyStillEmitsVisibleTicksAfterTheOldDrainDeadline() {
+        val f = Fixture()
+        f.motion.update(emptyList(), 0, streaming = false, terminal = false, live = true)
+        val target = f.motion.update(listOf(MarkdownTypingPart(MarkdownTypingSource("final", "字".repeat(500)), 500)),
+            0, streaming = false, terminal = true, paceTerminal = true)!!
+        f.frame(target, 1000)
+        for (time in 1016L..1320L step 16L) f.frame(target, time)
+        val before = f.requests.size
+        assertTrue(f.motion.visible(target) in 1..24)
+        for (time in 1336L..2000L step 16L) f.frame(target, time)
+        assertTrue(f.requests.size > before + 10)
+        assertTrue(f.motion.visible(target) in 68..71)
+        assertTrue(f.requests.all { it.kind == HapticKind.TICK })
+        f.engine.updateSettings(HapticSettings(generation = false))
+        val muted = f.requests.size
+        for (time in 2016L..2200L step 16L) f.frame(target, time)
+        assertEquals(muted, f.requests.size)
+    }
+
     @Test fun historyReplacementStaleTargetAndResumeCatchupDoNotNotify() {
         val f = Fixture()
         val first = f.target("x".repeat(200))

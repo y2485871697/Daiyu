@@ -31,9 +31,25 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         motion = (BASE / 'MarkdownReveal.kt').read_text()
         self.assertIn('live: Boolean = streaming', typing)
         self.assertIn('val targetTerminal = terminal && exactProjection', typing)
-        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live)', typing)
+        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', typing)
         self.assertIn('if (live || streaming) { seenLive = true; closed = false }', motion)
         self.assertIn('if (terminal && total > 0 && start >= total) closed = true', motion)
+
+    def test_terminal_answer_is_paced_without_changing_workflow_narration_drain(self):
+        chat = (BASE / 'ChatMessageList.kt').read_text()
+        narration = (BASE / 'WorkflowNarration.kt').read_text()
+        motion = (BASE / 'MarkdownReveal.kt').read_text()
+        self.assertIn('live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)', chat)
+        self.assertNotIn('paceTerminal = true', narration)
+        self.assertIn('expected.streaming || expected.terminal && expected.paceTerminal', motion)
+        self.assertIn('else 70.0', motion)
+        self.assertIn('250_000_000.0', motion)
+        device = (Path(__file__).resolve().parents[1] /
+                  'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text()
+        for token in ('advanceTimeBy(512)', 'paced.length in firstVisible!!.length + 1..48',
+                      'testPureFinalBodyDoesNotRushWhenCompletionArrives',
+                      'testCompletedHistoryDoesNotReplayTypewriterOrFeedback'):
+            self.assertIn(token, device)
 
     def test_container_passes_state_without_subscribing_to_the_frame(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()

@@ -59,6 +59,20 @@ class JankDiagnosticsContract(unittest.TestCase):
             self.assertNotIn('fraction.value',block)
             self.assertNotIn('firstVisibleItemScrollOffset',block)
 
+    def test_concrete_draw_and_freeze_spans_do_not_cross_suspension_as_sync_sections(self):
+        helper = (APP/'diagnostics/JankDiagnostics.kt').read_text()
+        section = helper.split('inline fun <T> section(', 1)[1].split('    fun ready()', 1)[0]
+        self.assertLess(section.index('if (!BuildConfig.JANK_DIAGNOSTICS)'), section.index('Trace.beginSection'))
+        self.assertIn('finally { Trace.endSection() }', section)
+        menu = (APP/'ui/screens/chat/conversation/ChatMenuLayer.kt').read_text()
+        for name in ('wide', 'tight'):
+            self.assertIn('JankDiagnostics.section("daiyu.menu-shadow=' + name + '")', menu)
+        freeze = (APP/'ui/navigation/PageBackPreviewLayers.kt').read_text().split('private fun freeze(', 1)[1].split('    fun frame(', 1)[0]
+        self.assertLess(freeze.index('section("daiyu.back-preview=freeze-start")'), freeze.index('scope.launch(start = CoroutineStart.UNDISPATCHED)'))
+        self.assertLess(freeze.index('beginPhase("daiyu.back-preview=freeze"'), freeze.index('toImageBitmap()'))
+        self.assertIn('finally {', freeze)
+        self.assertIn('endPhase("daiyu.back-preview=freeze"', freeze)
+
     def test_incident_is_bounded_and_off_callback_disk_io(self):
         s=(APP/'diagnostics/JankDiagnostics.kt').read_text()
         self.assertIn('ArrayBlockingQueue(4)',s)

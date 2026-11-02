@@ -21,6 +21,11 @@ internal object JankDiagnostics {
         ThreadPoolExecutor(1, 1, 15, TimeUnit.SECONDS, ArrayBlockingQueue(4),
             { work -> Thread(work, "daiyu-jank-writer").apply { isDaemon = true } }).apply { allowCoreThreadTimeOut(true) }
     }
+    inline fun <T> section(name: String, block: () -> T): T {
+        if (!BuildConfig.JANK_DIAGNOSTICS) return block()
+        Trace.beginSection(name)
+        return try { block() } finally { Trace.endSection() }
+    }
     fun ready() {
         if (BuildConfig.JANK_DIAGNOSTICS) Log.i("DaiyuJank", "DAIYU_JANK_READY")
     }

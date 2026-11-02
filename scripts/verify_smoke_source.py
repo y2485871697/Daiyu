@@ -14,7 +14,7 @@ def verify(env, record, source_run, jobs, changed):
     sha = env['SOURCE_SHA']
     run_id = env['SOURCE_RUN_ID']
     variant = env.get('SOURCE_VARIANT', 'debug')
-    if variant not in ('debug', 'release', 'daily', 'compile'):
+    if variant not in ('debug', 'release', 'daily', 'compile', 'diagnostic'):
         raise ValueError('补检应用包变体无效')
     if not re.fullmatch(r'[0-9a-f]{40}', sha) or not run_id.isdecimal():
         raise ValueError('补检必须指定完整源码SHA与run ID')
@@ -24,19 +24,25 @@ def verify(env, record, source_run, jobs, changed):
             or source_run['workflow_id'] != 397560064 or source_run['status'] != 'completed'
             or source_run.get('conclusion') not in ('success', 'failure')):
         raise ValueError('源run身份或终态不符')
-    job_name = ('增量Release编译（不运行全量）' if variant == 'compile' else
+    job_name = ('增量Release编译（不运行全量）' if variant in ('compile', 'diagnostic') else
                 '单测、检查与生产Release' if variant in ('release', 'daily') else '单测、检查与开发包')
     if not any(j['name'] == job_name and j['conclusion'] == 'success' for j in jobs):
         raise ValueError('源应用包构建没有成功')
     if (record['source_sha'] != sha or str(record['run_id']) != run_id
             or str(record['attempt']) != '1' or record['application_id'] != 'app.daiyu.android'
-            or record.get('variant') != ('release' if variant in ('daily', 'compile') else variant) or record.get('debuggable') is not (variant == 'debug')):
+            or record.get('variant') != ('release-diagnostic' if variant == 'diagnostic' else
+                                         'release' if variant in ('daily', 'compile') else variant) or record.get('debuggable') is not (variant == 'debug')):
         raise ValueError('应用包记录与源run或变体不符')
     if variant in ('release', 'daily', 'compile') and (record.get('production_delivery') is not True
             or record.get('profileable') is not False
             or record.get('test_application_id') != 'app.daiyu.android.test'):
         raise ValueError('源应用包不是生产Release')
-    if variant == 'compile' and (record.get('validation_scope') != 'compile-only'
+    if variant == 'diagnostic' and (record.get('production_delivery') is not False
+            or record.get('profileable') is not True or record.get('jank_diagnostics') is not True
+            or record.get('test_application_id') != 'app.daiyu.android.test'
+            or env.get('SMOKE_MODE') != 'smoke' or env.get('GITHUB_SHA') != sha or changed):
+        raise ValueError('诊断Release仅允许同SHA的明确补检，不是正式交付')
+    if variant in ('compile', 'diagnostic') and (record.get('validation_scope') != 'compile-only'
             or record.get('full_regression_passed') is not False
             or record.get('unit_tests_run') is not False or record.get('instrumentation_run') is not False
             or (env.get('GITHUB_SHA') != sha and not changed) or not env.get('SMOKE_TEST_CLASSES')):
@@ -151,6 +157,28 @@ def verify_candidate_archive(root, artifact, archive):
             raise ValueError('候选下载文件与归档字节不符')
 
 
+def verify_diagnostic_files(root, record):
+    from verify_release_package import verify_manifests
+    apk_names = (f'代鱼-0.1.0-{record["source_sha"][:8]}.apk', 'tests/platform-test.apk')
+    if set(record.get('sha256', {})) != set(apk_names):
+        raise ValueError('诊断应用与测试包摘要集合不符')
+    if {p.relative_to(root).as_posix() for p in root.rglob('*.apk')} != set(apk_names):
+        raise ValueError('诊断应用与测试包文件集合不符')
+    for name in apk_names:
+        path = root / name
+        with path.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if path.stat().st_size == 0 or digest != record['sha256'][name]:
+            raise ValueError('诊断应用或测试包摘要与构建记录不符')
+    texts = []
+    for name in ('app-manifest.xml', 'test-manifest.xml'):
+        raw = (root / name).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != record.get('manifest_sha256', {}).get(name):
+            raise ValueError('诊断manifest摘要与构建记录不符')
+        texts.append(raw.decode('utf-8'))
+    verify_manifests(*texts, diagnostic=True)
+
+
 def main():
     env = os.environ
     run_id = env['SOURCE_RUN_ID']
@@ -191,11 +219,13 @@ def main():
     else:
         record = json.loads(Path('delivery/构建记录.json').read_text())
         verify(env, record, source_run, jobs, changed)
+        if env.get('SOURCE_VARIANT') == 'diagnostic':
+            verify_diagnostic_files(Path('delivery'), record)
     Path('smoke').mkdir(exist_ok=True)
     Path('smoke/source.json').write_text(json.dumps(dict(build_sha=env['SOURCE_SHA'], build_run=run_id,
         build_attempt=1, build_variant=env.get('SOURCE_VARIANT', 'debug'), check_sha=env['GITHUB_SHA'], check_run=env['GITHUB_RUN_ID'], check_attempt=env['GITHUB_RUN_ATTEMPT'],
         changed_validation_files=changed, source_artifact=source_artifact,
-        formal_acceptance=False if env.get('SOURCE_VARIANT') in ('candidate', 'daily', 'compile') else None), ensure_ascii=False) + '\n')
+        formal_acceptance=False if env.get('SOURCE_VARIANT') in ('candidate', 'daily', 'compile', 'diagnostic') else None), ensure_ascii=False) + '\n')
     print('既有应用包身份、变体及应用源码一致性核对通过')
 
 

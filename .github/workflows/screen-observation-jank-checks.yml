@@ -73,6 +73,8 @@ jobs:
                           'test_release_package.py', 'test_compile_release_contract.py',
                           'test_chat_menu_scroll_isolation_contract.py', 'test_chat_menu_shadow_contract.py',
                           'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py')
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] in ('menu-scroll', 'ui-jank'):
+              patterns += ('test_diagnostic_smoke_source.py', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
           for pattern in patterns:
               suite = (unittest.TestLoader().discover('tests', pattern=pattern) if pattern.endswith('.py')
                        else unittest.TestLoader().loadTestsFromName(pattern))

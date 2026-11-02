@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.navigation
 
 import androidx.compose.runtime.getValue
+import app.daiyu.android.diagnostics.JankDiagnostics
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
@@ -39,7 +40,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
 
     fun enter(key: Any): Departure? {
         val previous = frames[currentKey]?.takeIf { currentKey != key }
-        if (currentKey != key) frames[currentKey]?.let { freeze(it) }
+        if (currentKey != key) frames[currentKey]?.let {
+            JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }
+        }
         currentKey = key
         val departure = pending
         pending = null
@@ -64,23 +67,29 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         frames[currentKey]?.let {
             it.childChangeCaptured = it.animateReturn && it.size != IntSize.Zero
             it.holdingForChild = it.childChangeCaptured == true
-            freeze(it)
+            JankDiagnostics.section("daiyu.back-preview=child-change") { freeze(it) }
         }
     }
 
     private fun freeze(frame: Frame) {
         if (frame.image != null || frame.size == IntSize.Zero || frame.capture?.isCompleted == false) return
         val epoch = previewEpoch
-        frame.capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            try {
-                // API28+ completes here; API26 submits its hardware Surface before suspending.
-                val image = frame.layer.toImageBitmap()
-                if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = image
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = null
-                android.util.Log.w("DaiyuBackPreview", "freeze failed type=${failure.javaClass.simpleName}")
+        JankDiagnostics.section("daiyu.back-preview=freeze-start") {
+            frame.capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                val traceCookie = System.identityHashCode(frame)
+                JankDiagnostics.beginPhase("daiyu.back-preview=freeze", traceCookie)
+                try {
+                    // API28+ completes here; API26 submits its hardware Surface before suspending.
+                    val image = frame.layer.toImageBitmap()
+                    if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = image
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = null
+                    android.util.Log.w("DaiyuBackPreview", "freeze failed type=${failure.javaClass.simpleName}")
+                } finally {
+                    JankDiagnostics.endPhase("daiyu.back-preview=freeze", traceCookie)
+                }
             }
         }
     }

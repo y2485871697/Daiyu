@@ -3,6 +3,14 @@ package app.daiyu.android
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.GraphicsContext
+import androidx.compose.ui.graphics.shadow.ShadowContext
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.platform.LocalGraphicsContext
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.collection.MutableScatterMap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -145,6 +153,64 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
                 }
             }
         }
+    }
+
+    fun testAnimatedShadowOpacityReusesRenderersWhileParameterAlphaDoesNot() {
+        val alpha = mutableStateOf(.1f)
+        val fraction = mutableStateOf(1f)
+        val visible = MutableTransitionState(false).apply { targetState = true }
+        val motion = PopupMotion(visible, fraction, alpha)
+        var productionContext: ShadowContext? = null
+        var negativeContext: ShadowContext? = null
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode = AppearanceThemeMode.LIGHT),
+                    applyInterfaceScale = false) {
+                    val graphics = LocalGraphicsContext.current
+                    val production = remember { ShadowContext() }
+                    val negative = remember { ShadowContext() }
+                    val isolated = remember(graphics, production) {
+                        object : GraphicsContext by graphics {
+                            override val shadowContext = production
+                        }
+                    }
+                    SideEffect {
+                        productionContext = production
+                        negativeContext = negative
+                    }
+                    Box(Modifier.fillMaxSize().background(Color.White).testTag("shadow-cache-host"),
+                        contentAlignment = Alignment.Center) {
+                        CompositionLocalProvider(LocalGraphicsContext provides isolated) {
+                            ChatGlassMenuSurface(null, Modifier.requiredSize(156.dp, 120.dp), motion) {}
+                        }
+                        Canvas(Modifier.requiredSize(156.dp, 120.dp)) {
+                            val painter = negative.createDropShadowPainter(RoundedCornerShape(19.dp),
+                                Shadow(radius = 34.dp, color = Color.Black, alpha = alpha.value))
+                            with(painter) { draw(size) }
+                        }
+                    }
+                }
+            }
+        }
+        for (opacity in listOf(.1f, .2f, .35f, .5f, .7f, .9f, 1f, .5f)) {
+            mainThread { alpha.value = opacity }
+            ui.waitForIdle()
+            ui.onNodeWithTag("shadow-cache-host").captureToImage()
+            mainThread {
+                assertEquals("production shadows reuse the same two renderers",
+                    2, rendererCount(checkNotNull(productionContext)))
+            }
+        }
+        mainThread {
+            assertTrue("parameter-alpha negative control grows the renderer cache",
+                rendererCount(checkNotNull(negativeContext)) >= 7)
+        }
+    }
+
+    private fun rendererCount(context: ShadowContext): Int {
+        // Fixed 1.9.0 implementation: inspect the actual native cache, not a draw-count proxy.
+        val field = context.javaClass.getDeclaredField("dropShadowCache").apply { isAccessible = true }
+        return (field.get(context) as? MutableScatterMap<*, *>)?.size ?: 0
     }
 
     fun testAnimationFramesKeepMenuContentCompositionAndMeasurementStable() {

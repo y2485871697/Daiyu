@@ -44,7 +44,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.shadow.Shadow
+import app.daiyu.android.diagnostics.JankDiagnostics
+import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.geometry.Rect
@@ -329,21 +331,32 @@ private fun menuRevealFraction(motion: PopupMotion?): Float =
 @Composable
 private fun ChatMenuShadows(motion: PopupMotion?, dark: Boolean, modifier: Modifier) {
     val shape = remember { RoundedCornerShape(19.dp) }
+    val shadowContext = LocalGraphicsContext.current.shadowContext
     Box(modifier
         .graphicsLayer {
             scaleY = menuRevealFraction(motion)
             transformOrigin = TransformOrigin(.5f, 0f)
         }
-        .dropShadow(shape) {
-            this.radius = (if (dark) 35.dp else 34.dp).toPx()
-            offset = Offset(0f, (if (dark) 14.dp else 12.dp).toPx())
-            color = if (dark) Color(0x55000000) else Color(0x164C3A6B)
-            alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
-        }
-        .dropShadow(shape) {
-            this.radius = 6.dp.toPx()
-            offset = Offset(0f, 2.dp.toPx())
-            color = if (dark) Color(0x22000000) else Color(0x05342048)
-            alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
+        .drawWithCache {
+            // Keep animated opacity out of Compose 1.9's shadow-renderer cache key.
+            val wide = shadowContext.createDropShadowPainter(shape, Shadow(
+                radius = if (dark) 35.dp else 34.dp,
+                offset = DpOffset(0.dp, if (dark) 14.dp else 12.dp),
+                color = if (dark) Color(0x55000000) else Color(0x164C3A6B),
+            ))
+            val tight = shadowContext.createDropShadowPainter(shape, Shadow(
+                radius = 6.dp,
+                offset = DpOffset(0.dp, 2.dp),
+                color = if (dark) Color(0x22000000) else Color(0x05342048),
+            ))
+            onDrawBehind {
+                val opacity = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
+                JankDiagnostics.section("daiyu.menu-shadow=wide") {
+                    with(wide) { draw(size, alpha = opacity) }
+                }
+                JankDiagnostics.section("daiyu.menu-shadow=tight") {
+                    with(tight) { draw(size, alpha = opacity) }
+                }
+            }
         })
 }

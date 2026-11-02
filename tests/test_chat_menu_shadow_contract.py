@@ -27,8 +27,9 @@ class ChatMenuShadowContract(unittest.TestCase):
         self.assertIn("ChatMenuShadows(motion, dark, Modifier.matchParentSize())", self.surface)
         self.assertLess(self.surface.index("ChatMenuShadows("), self.surface.index("Column(Modifier"))
         self.assertNotIn(".dropShadow(", self.surface)
-        self.assertEqual(2, self.shadows.count(".dropShadow(shape) {"))
-        self.assertLess(self.shadows.index(".graphicsLayer {"), self.shadows.index(".dropShadow(shape) {"))
+        self.assertEqual(2, self.shadows.count("shadowContext.createDropShadowPainter(shape, Shadow("))
+        self.assertNotIn(".dropShadow(", self.shadows)
+        self.assertLess(self.shadows.index(".graphicsLayer {"), self.shadows.index(".drawWithCache {"))
         self.assertNotIn(".daiyuMenuClipReveal", self.shadows)
         self.assertLess(self.surface.index(".graphicsLayer {"), self.surface.index(".daiyuMenuClipReveal("))
         self.assertLess(self.surface.index(".daiyuMenuClipReveal("), self.surface.index(".clip(shape).then(blur)"))
@@ -39,7 +40,7 @@ class ChatMenuShadowContract(unittest.TestCase):
         self.assertIn("val shape = remember { RoundedCornerShape(19.dp) }", self.shadows)
         self.assertIn(".graphicsLayer {", self.shadows)
         prefix, layer_and_shadows = self.shadows.split(".graphicsLayer {", 1)
-        layer, shadows = layer_and_shadows.split(".dropShadow(", 1)
+        layer, shadows = layer_and_shadows.split(".drawWithCache {", 1)
         self.assertIn("scaleY = menuRevealFraction(motion)", layer)
         self.assertIn("transformOrigin = TransformOrigin(.5f, 0f)", layer)
         self.assertNotIn("menuRevealFraction(", prefix)
@@ -53,10 +54,17 @@ class ChatMenuShadowContract(unittest.TestCase):
 
     def test_shadow_opacity_is_read_by_each_draw_block_not_composition(self):
         self.assertIn("motion: PopupMotion? = null", self.surface)
-        self.assertNotIn("val opacity =", self.shadows)
+        self.assertIn("onDrawBehind {\n                val opacity =", self.shadows)
+        cache, draw = self.shadows.split("onDrawBehind {", 1)
+        self.assertNotIn("motion?.alpha?.value", cache)
+        self.assertNotIn("alpha =", cache)
+        self.assertIn("LocalGraphicsContext.current.shadowContext", self.shadows)
         self.assertNotIn(".copy(alpha", self.shadows)
-        self.assertEqual(2, self.shadows.count("alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)"))
-        for token in ["35.dp else 34.dp", "14.dp else 12.dp", "6.dp.toPx()", "2.dp.toPx()",
+        self.assertEqual(1, draw.count("(motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)"))
+        self.assertIn("with(wide) { draw(size, alpha = opacity) }", draw)
+        self.assertIn("with(tight) { draw(size, alpha = opacity) }", draw)
+        self.assertLess(draw.index("with(wide)"), draw.index("with(tight)"))
+        for token in ["35.dp else 34.dp", "14.dp else 12.dp", "radius = 6.dp", "DpOffset(0.dp, 2.dp)",
                       "0x55000000", "0x164C3A6B", "0x22000000", "0x05342048"]:
             self.assertIn(token, self.shadows)
         self.assertIn("delay(PopupExitRetentionMillis)", self.host)
@@ -76,6 +84,9 @@ class ChatMenuShadowContract(unittest.TestCase):
 
     def test_android_regression_covers_frame_updates_with_real_backdrop_and_stable_body(self):
         test = PIXELS.read_text()
+        self.assertIn("testAnimatedShadowOpacityReusesRenderersWhileParameterAlphaDoesNot", test)
+        self.assertIn("production shadows reuse the same two renderers", test)
+        self.assertIn("parameter-alpha negative control grows the renderer cache", test)
         for token in ["testAnimationFramesKeepMenuContentCompositionAndMeasurementStable",
                       "rememberTopBarBackdrop()", "captureForTopBar(backdrop)",
                       "contentCompositions.incrementAndGet()", "contentMeasures.incrementAndGet()",

@@ -51,7 +51,7 @@ class JankDiagnosticsContract(unittest.TestCase):
             self.assertIn('ObserveDiagnosticInteraction("'+kind+'")',source)
             marker='ObserveDiagnosticInteraction("'+kind+'")'
             prefix,tail=source.split(marker,1)
-            indent=prefix.rsplit('\n',1)[-1]
+            indent=re.match(r'[ \t]*',prefix.rsplit('\n',1)[-1]).group()
             block=re.split(r'(?m)^'+re.escape(indent)+r'\}',tail,maxsplit=1)[0]
             self.assertNotIn('fraction.value',block)
             self.assertNotIn('firstVisibleItemScrollOffset',block)

@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
 import app.daiyu.android.ui.app.LocalBlurEnabled
 import app.daiyu.android.ui.app.LocalTopBarBlurStyle
@@ -68,7 +69,8 @@ internal fun TopBarBackdrop(
 }
 
 internal fun Modifier.captureForTopBar(backdrop: LayerBackdrop?): Modifier =
-    if (Build.VERSION.SDK_INT < 33 || backdrop == null) this else layerBackdrop(backdrop)
+    // The capture node draws content twice; replay one display list instead of the subtree.
+    if (Build.VERSION.SDK_INT < 33 || backdrop == null) this else layerBackdrop(backdrop).graphicsLayer()
 
 @Composable
 internal fun topBarContainerColor(backdrop: LayerBackdrop?, surfaceColor: Color = MiuixTheme.colorScheme.surface): Color =

@@ -68,6 +68,20 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         self.assertIn('ChatMenuLayer(modifier.fillMaxSize())', (APP / 'ui/components/ConversationSidePaneScaffold.kt').read_text())
         self.assertIn('ChatMenuLayer(', (CHAT / 'ChatScreen.kt').read_text())
 
+    def test_capture_replays_an_inner_display_list_instead_of_drawing_the_page_twice(self):
+        source = (APP / 'ui/components/TopBarBackdrop.kt').read_text()
+        helper = source.split('internal fun Modifier.captureForTopBar(', 1)[1].split('@Composable', 1)[0]
+        self.assertIn('layerBackdrop(backdrop).graphicsLayer()', helper)
+        self.assertNotIn('graphicsLayer().layerBackdrop', helper)
+        self.assertIn('Build.VERSION.SDK_INT < 33 || backdrop == null', helper)
+        renderer = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/BackdropDrawIsolationTest.kt').read_text()
+        for token in ('Modifier.layerBackdrop(checkNotNull(backdrop))', 'AtomicIntegerArray',
+                      'testProductionMenuOpenExitAndReopenDoNotRedrawTheStaticBodyPerAnimationFrame',
+                      'testParentRedrawReusesBodyAndContentChangesAndResizeStayLive',
+                      'node("draw-count-body").captureToImage()', 'initial, draws.get(0)',
+                      'assertSame(modifier, modifier.captureForTopBar(null))'):
+            self.assertIn(token, renderer)
+
     def test_refresh_and_toggle_keep_authoritative_io_and_pending_gates(self):
         source = (APP / 'MainActivity.kt').read_text()
         self.assertIn('onMore = { if (currentChat()) refreshAutomaticCompression() }', source)

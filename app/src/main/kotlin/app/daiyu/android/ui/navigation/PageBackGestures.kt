@@ -153,9 +153,9 @@ internal val LocalPageBackPreviewFrame = staticCompositionLocalOf<PageBackPrevie
 internal fun Modifier.pageBackPreviewSource(): Modifier {
     val frame = LocalPageBackPreviewFrame.current ?: return this
     return drawWithContent {
-        frame.size = IntSize(size.width.toInt(), size.height.toInt())
         frame.layer.record { this@drawWithContent.drawContent() }
         drawLayer(frame.layer)
+        frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))
     }.background(MiuixTheme.colorScheme.background)
 }
 
@@ -320,7 +320,7 @@ internal fun PageBackGestureHost(
     LaunchedEffect(departure, departure?.forwardSkipped) {
         if (departure != null) {
             if (!departure.forwardSkipped) {
-                if (!departure.frame.retainedDisplayList) departure.frame.capture?.join()
+                departure.frame.capture?.join()
                 if (departure.frame.canDrawPreview && !departure.forwardSkipped) {
                     if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
                     else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))
@@ -349,7 +349,7 @@ internal fun PageBackGestureHost(
         onDispose { state.alive = false; state.reset() }
     }
     SideEffect {
-        frame.contentRetained = retainedRootContent != null && retainedRootVisible
+        layers.setActive(resumed)
         frame.contentKey = contentKey
         frame.sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey
         frame.backTargetKey = visualBackTargetKey
@@ -490,7 +490,7 @@ internal fun PageBackGestureHost(
                     if (departure?.forward == true && departing && !showDeparture) {
                         departure.forwardSkipped = true
                     }
-                    val held = frame.image.takeIf { frame.holdingForChild && frame.childChangeCaptured == true && state.previewAllowed }
+                    val held = if (frame.holdingForChild && frame.childChangeCaptured == true && state.previewAllowed) frame.image else null
                     if (held != null) drawImage(held)
                     else {
                         if (frame.holdingForChild) frame.childChangeCaptured = false
@@ -499,9 +499,9 @@ internal fun PageBackGestureHost(
                 }.drawWithContent {
                     if (captureFromContent) drawContent()
                     else {
-                        frame.size = IntSize(size.width.toInt(), size.height.toInt())
                         frame.layer.record { this@drawWithContent.drawContent() }
                         drawLayer(frame.layer)
+                        frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))
                     }
                 }.background(background)) {
                     if (retainedRootContent != null) key(previewScopeKey, retainedRootScopeKey) {
@@ -552,7 +552,6 @@ internal fun PageBackGestureHost(
 private fun DrawScope.drawPreview(frame: PageBackPreviewLayers.Frame) {
     val image = frame.image
     if (image != null) drawImage(image)
-    else if (frame.retainedDisplayList && frame.canDrawPreview) drawLayer(frame.layer)
 }
 
 private object RetainedRootSurface

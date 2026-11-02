@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -16,6 +17,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalGraphicsContext
+import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
@@ -103,6 +114,84 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         dismissIme()
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun testPreparedSnapshotRejectsLateGenerationAndClosedResults() {
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        ui.waitForIdle()
+        mainThread {
+            val scheduler = TestCoroutineScheduler()
+            val clock = object : MonotonicFrameClock {
+                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
+            }
+            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
+            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
+            val layers = PageBackPreviewLayers(graphics, scope) {
+                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
+            }
+            try {
+                layers.enter("source")
+                val frame = layers.frame("source")
+                layers.setActive(true)
+                frame.recorded(IntSize(2, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals(1, copies.size)
+                frame.recorded(IntSize(2, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals("a layer has only one copy in flight", 1, copies.size)
+                copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                assertNull("old generation must not publish", frame.ready)
+                assertEquals(2, copies.size)
+                val current = ImageBitmap(2, 2)
+                copies[1].complete(current); scheduler.runCurrent()
+                assertSame(current, frame.ready)
+                assertNull("warmup must not publish into live draw state", frame.image)
+                frame.recorded(IntSize(2, 2))
+                layers.freezeCurrent()
+                assertSame("same-size prepared pixels survive a newer live draw", current, frame.image)
+                assertEquals("return must not make another copy", 2, copies.size)
+
+                layers.clearPreviews()
+                frame.recorded(IntSize(3, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals(3, copies.size)
+                layers.setActive(false)
+                layers.setActive(true)
+                scheduler.runCurrent()
+                assertEquals("resume waits for the old copy to drain", 3, copies.size)
+                copies[2].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
+                assertNull("pause epoch must reject a late bitmap", frame.ready)
+                assertNull(frame.image)
+                assertEquals("draining the old epoch restarts resumed warmup", 4, copies.size)
+                val resumed = ImageBitmap(3, 2)
+                copies[3].complete(resumed); scheduler.runCurrent()
+                assertSame(resumed, frame.ready)
+
+                layers.clearPreviews()
+                frame.recorded(IntSize(3, 2))
+                layers.freezeCurrent()
+                assertEquals("cold return never copies pixels in the navigation callback", 4, copies.size)
+                assertFalse(frame.canDrawPreview)
+
+                layers.clearPreviews()
+                frame.recorded(IntSize(3, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals(5, copies.size)
+                layers.close()
+                assertFalse("in-flight source must not release early", frame.layer.isReleased)
+                copies[4].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
+                assertTrue(frame.layer.isReleased)
+                assertNull(frame.ready)
+                assertNull(frame.image)
+            } finally {
+                copies.forEach { it.complete(ImageBitmap(3, 2)) }
+                scheduler.runCurrent()
+                layers.close()
+                scope.cancel()
+            }
+        }
     }
 
     private fun changeScreen(value: String) {

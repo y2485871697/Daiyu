@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import app.daiyu.android.diagnostics.JankDiagnostics
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.GraphicsContext
 import androidx.compose.ui.graphics.layer.GraphicsLayer
@@ -12,23 +13,41 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** Freezes the outgoing live layer before its nodes detach; detached pages keep their recorded layers. */
-internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope) {
-    internal class Frame(val key: Any, val layer: GraphicsLayer, var sourceKey: Any = key, var contentKey: Any = key) {
+/** Historical previews own pixels; live pages prepare them after drawing settles. */
+internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope,
+    private val snapshot: suspend (Frame) -> ImageBitmap = { frame -> frame.layer.toImageBitmap() }) {
+    internal class Frame(val key: Any, val layer: GraphicsLayer, var sourceKey: Any = key, var contentKey: Any = key,
+        private val onRecorded: (Frame) -> Unit) {
         var size = IntSize.Zero
+        var generation = 0L
+        var readyGeneration = -1L
+        var readySize = IntSize.Zero
         var childChangeCaptured: Boolean? = null
         var holdingForChild by mutableStateOf(false)
         var backTargetKey: Any? = null
         var returnDirection = 1f
         var animateReturn = false
-        var retainedDisplayList by mutableStateOf(false)
-        var contentRetained = false
-        val canDrawPreview: Boolean get() = image != null || (retainedDisplayList &&
-            !layer.isReleased && size != IntSize.Zero && layer.size == size)
+        var frozen = false
+        var releaseRequested = false
+        val canDrawPreview: Boolean get() = image?.let { it.width == size.width && it.height == size.height } == true
+        val hasFreshImage: Boolean get() = ready != null && readyGeneration == generation && readySize == size
+        var ready: ImageBitmap? = null
         var image by mutableStateOf<ImageBitmap?>(null)
+        var warmup: Job? = null
         var capture: Job? = null
+        val captures = mutableSetOf<Job>()
+
+        fun recorded(size: IntSize) {
+            this.size = size
+            generation++
+            onRecorded(this)
+        }
     }
     internal class Departure(val frame: Frame, val target: Any, val progress: Float,
         val predictive: Boolean, val direction: Float, val forward: Boolean = false) {
@@ -38,6 +57,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     private val frames = LinkedHashMap<Any, Frame>()
     private var pending: Departure? = null
     private var closed = false
+    private var active = false
     private var previewEpoch = 0L
     var currentKey: Any? = null
         private set
@@ -45,11 +65,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun enter(key: Any, contentKey: Any = key): Departure? {
         val previous = frames[currentKey]?.takeIf { currentKey != key }
         if (currentKey != key) frames[currentKey]?.let {
-            if (it.contentKey != contentKey && !it.contentRetained) {
-                JankDiagnostics.section("daiyu.back-preview=retain-detached") {
-                    it.retainedDisplayList = !it.layer.isReleased && it.size != IntSize.Zero && it.layer.size == it.size
-                }
-            } else JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }
+            JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }
         }
         currentKey = key
         val departure = pending
@@ -79,41 +95,83 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
+    fun setActive(value: Boolean) {
+        if (active == value) return
+        active = value
+        if (!value) clearPreviews()
+        else frames[currentKey]?.let { schedule(it) }
+    }
+
+    private fun schedule(frame: Frame) {
+        if (closed || !active || frame.frozen || frame.releaseRequested || currentKey != frame.key || frame.size == IntSize.Zero) return
+        frame.warmup?.cancel()
+        frame.warmup = scope.launch {
+            if (frame.ready == null) withFrameNanos { } else delay(64)
+            if (!closed && active && !frame.frozen && frames[frame.key] === frame && currentKey == frame.key) {
+                capture(frame)
+            }
+        }
+    }
+
     private fun freeze(frame: Frame) {
-        if (frame.image != null || frame.size == IntSize.Zero || frame.capture?.isCompleted == false) return
+        frame.warmup?.cancel()
+        frame.frozen = true
+        if (!active || closed || frame.releaseRequested) return
+        frame.image = frame.ready?.takeIf { frame.readySize == frame.size }
+        JankDiagnostics.section(if (frame.image != null) "daiyu.back-preview=cache-hit" else "daiyu.back-preview=not-ready") { }
+    }
+
+    private fun capture(frame: Frame) {
+        if (closed || !active || frame.releaseRequested || frame.hasFreshImage || frame.size == IntSize.Zero || frame.layer.isReleased ||
+            frame.captures.any { !it.isCompleted }) return
         val epoch = previewEpoch
+        val generation = frame.generation
+        val size = frame.size
         JankDiagnostics.section("daiyu.back-preview=freeze-start") {
-            frame.capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 val traceCookie = System.identityHashCode(frame)
                 JankDiagnostics.beginPhase("daiyu.back-preview=freeze", traceCookie)
                 try {
-                    // API28+ completes here; API26 submits its hardware Surface before suspending.
-                    val image = frame.layer.toImageBitmap()
-                    if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = image
+                    // API26 must finish its submitted Surface copy before releasing the source layer.
+                    val image = withContext(NonCancellable) { snapshot(frame) }
+                    if (isActive && active && !closed && !frame.releaseRequested && previewEpoch == epoch &&
+                        frames[frame.key] === frame && frame.generation == generation && frame.size == size) {
+                        frame.readyGeneration = generation
+                        frame.readySize = size
+                        frame.ready = image
+                        if (frame.frozen) frame.image = image
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
-                    if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = null
                     android.util.Log.w("DaiyuBackPreview", "freeze failed type=${failure.javaClass.simpleName}")
                 } finally {
                     JankDiagnostics.endPhase("daiyu.back-preview=freeze", traceCookie)
                 }
+            }
+            frame.capture = capture
+            frame.captures.add(capture)
+            capture.invokeOnCompletion {
+                frame.captures.remove(capture)
+                if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)
+                else if (previewEpoch != epoch || frame.generation != generation) schedule(frame)
             }
         }
     }
 
     fun frame(key: Any, sourceKey: Any = key, contentKey: Any = key): Frame {
         frames.remove(key)?.let { release(it) }
-        return Frame(key, context.createGraphicsLayer(), sourceKey, contentKey).also { frames[key] = it }
+        return Frame(key, context.createGraphicsLayer(), sourceKey, contentKey, ::schedule).also { frames[key] = it }
     }
 
     private fun release(frame: Frame) {
-        // Each visit owns its frame, so an older capture can never publish into a new visit.
-        val capture = frame.capture
-        if (capture != null && !capture.isCompleted) {
-            capture.invokeOnCompletion { context.releaseGraphicsLayer(frame.layer) }
-            capture.cancel()
-        } else context.releaseGraphicsLayer(frame.layer)
+        if (frame.releaseRequested) return
+        frame.releaseRequested = true
+        frame.warmup?.cancel()
+        frame.image = null
+        frame.ready = null
+        if (frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)
+        else frame.captures.toList().forEach { it.cancel() }
     }
 
     fun find(key: Any?, size: IntSize): Frame? = frames[key]?.takeIf {
@@ -121,20 +179,25 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float): Departure {
+        freeze(frame)
         return Departure(frame, target, progress, predictive, direction).also { pending = it }
     }
 
     fun abandon(departure: Departure) {
-        if (pending === departure) pending = null
+        if (pending === departure) {
+            pending = null
+            departure.frame.frozen = false
+            departure.frame.image = null
+            schedule(departure.frame)
+        }
     }
 
     fun trim(current: Frame, target: Frame?, departure: Departure?, ancestors: Set<Any>) {
         val iterator = frames.entries.iterator()
         while (frames.size > 8 && iterator.hasNext()) {
             val frame = iterator.next().value
-            if ((frame.key in ancestors && !frame.retainedDisplayList) || frame === current || frame === target || frame === departure?.frame || frame.capture?.isActive == true) continue
+            if (frame.key in ancestors || frame === current || frame === target || frame === departure?.frame || frame.captures.any { it.isActive }) continue
             iterator.remove()
-            frame.image = null
             release(frame)
         }
     }
@@ -143,21 +206,22 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         previewEpoch++
         pending = null
         frames.values.forEach {
-            it.capture?.cancel()
+            it.warmup?.cancel()
+            it.captures.toList().forEach { capture -> capture.cancel() }
             it.image = null
-            it.retainedDisplayList = false
+            it.ready = null
+            it.readyGeneration = -1L
             it.holdingForChild = false
             it.childChangeCaptured = null
+            it.frozen = false
         }
     }
 
     fun close() {
         closed = true
+        active = false
         pending = null
-        frames.values.forEach {
-            it.image = null
-            release(it)
-        }
+        frames.values.forEach { release(it) }
         frames.clear()
     }
 }

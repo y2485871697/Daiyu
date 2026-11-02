@@ -210,7 +210,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (currentKey != key) frames[currentKey]?.let {', enter)
         self.assertIn('JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }', enter)
         self.assertLess(enter.index('freeze(it)'), enter.index('currentKey = key'))
-        self.assertIn('capture.invokeOnCompletion { context.releaseGraphicsLayer(frame.layer) }', layers)
+        self.assertIn('if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)', layers)
         self.assertIn('frames.remove(key)?.let { release(it) }', layers)
         self.assertNotIn('drawLayer(target.layer)', self.host)
         self.assertNotIn('drawLayer(departure.frame.layer)', self.host)
@@ -220,7 +220,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertEqual(1, self.host.count('{ content() }'))
         surface = self.host.split('key(if (retainedRootContent == null) contentKey else RetainedRootSurface) {', 1)[1].split('testTag("page-back-departure-scrim")', 1)[0]
         self.assertIn('testTag("page-back-surface")', surface)
-        self.assertIn('frame.size = IntSize(size.width.toInt(), size.height.toInt())', surface)
+        self.assertIn('frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))', surface)
         self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', surface)
         self.assertIn('drawLayer(frame.layer)', surface)
         self.assertIn('key(previewScopeKey, retainedRootScopeKey)', surface)
@@ -232,14 +232,29 @@ class PageBackGestureContractTest(unittest.TestCase):
         for tag in ('page-back-target', 'page-back-departure'):
             self.assertIn('testTag("' + tag + '")', self.host)
 
-    def test_detached_display_list_and_single_retained_root_have_explicit_guards(self):
+    def test_prepared_pixels_and_single_retained_root_have_explicit_guards(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         retained = (APP / 'ui/navigation/PageRetainedContent.kt').read_text()
-        self.assertIn('it.contentKey != contentKey && !it.contentRetained', layers)
-        self.assertIn('it.layer.size == it.size', layers)
-        self.assertIn('it.retainedDisplayList = false', layers)
-        self.assertIn('else if (frame.retainedDisplayList && frame.canDrawPreview) drawLayer(frame.layer)', self.host)
-        self.assertIn('frame.contentRetained = retainedRootContent != null && retainedRootVisible', self.host)
+        self.assertNotIn('retainedDisplayList', layers + self.host)
+        preview = self.host.split('private fun DrawScope.drawPreview(', 1)[1]
+        self.assertNotIn('drawLayer(', preview)
+        self.assertIn('if (image != null) drawImage(image)', preview)
+        for guard in ('frame.generation == generation', 'frame.size == size',
+                      'previewEpoch == epoch', 'frames[frame.key] === frame',
+                      '!frame.releaseRequested', 'frame.hasFreshImage',
+                      'withContext(NonCancellable) { snapshot(frame) }',
+                      'frame.captures.toList().forEach { it.cancel() }'):
+            self.assertIn(guard, layers)
+        self.assertEqual(2, self.host.count('frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))'))
+        self.assertIn('layers.setActive(resumed)', self.host)
+        self.assertIn('var ready: ImageBitmap? = null', layers)
+        self.assertIn('if (frame.frozen) frame.image = image', layers)
+        freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun capture(', 1)[0]
+        self.assertNotIn('capture(frame)', freeze)
+        self.assertIn('frame.image = frame.ready?.takeIf { frame.readySize == frame.size }', freeze)
+        self.assertIn('frame.captures.any { !it.isCompleted }', layers)
+        self.assertIn('previewEpoch != epoch || frame.generation != generation', layers)
+        self.assertIn('if (frame.ready == null) withFrameNanos { } else delay(64)', layers)
         self.assertIn('retainedRootKey = "chat"', self.main)
         self.assertEqual(1, self.main.count('chatPageState.SaveableStateProvider('))
         self.assertIn('backHandlerEnabled = routeActive', self.main)
@@ -293,7 +308,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('"history-search" -> null', self.main)
         self.assertIn('val showDeparture = departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed', self.host)
         effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped)', 1)[1].split('SideEffect { layers.trim', 1)[0]
-        self.assertIn('if (!departure.frame.retainedDisplayList) departure.frame.capture?.join()', effect)
+        self.assertIn('departure.frame.capture?.join()', effect)
         self.assertLess(effect.index('departure.frame.capture?.join()'), effect.index('if (departure.frame.canDrawPreview && !departure.forwardSkipped)'))
         self.assertIn('if (departure != null && showDeparture && !departure.forward)', self.host)
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()

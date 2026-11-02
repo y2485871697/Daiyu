@@ -4,6 +4,7 @@ import android.os.Build
 import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
@@ -14,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.toPixelMap
@@ -91,6 +94,7 @@ class BackdropDrawIsolationTest : WiredActivityTestCase() {
                 }
             }
         }
+        captureScreenNode(node("live-body"))
         val initial = draws.get(0)
         assertTrue(initial > 0)
         repeat(12) { frame -> mainThread { parentFrame.intValue = frame + 1 } }
@@ -109,6 +113,7 @@ class BackdropDrawIsolationTest : WiredActivityTestCase() {
 
     fun testProductionMenuOpenExitAndReopenDoNotRedrawTheStaticBodyPerAnimationFrame() {
         if (Build.VERSION.SDK_INT < 33) return
+        ui.mainClock.autoAdvance = false
         val expanded = mutableStateOf(false)
         val revision = mutableIntStateOf(0)
         val draws = AtomicIntegerArray(2)
@@ -132,21 +137,27 @@ class BackdropDrawIsolationTest : WiredActivityTestCase() {
                 }
             }
         }
+        captureScreenNode(node("menu-message-body"))
         val initial = draws.get(0)
+        assertTrue(initial > 0)
         repeat(2) {
             mainThread { expanded.value = true }
             repeat(12) { awaitVisualIdle() }
+            captureScreenNode(node("menu-message-body"))
             node("draw-isolation-menu").assertExists()
             assertEquals("Opening/animation must not re-record static message content", initial, draws.get(0))
             mainThread { expanded.value = false }
             ui.mainClock.advanceTimeBy(200)
             awaitVisualIdle()
+            captureScreenNode(node("menu-message-body"))
             node("draw-isolation-menu").assertDoesNotExist()
             assertEquals("Exit/disposal keeps the same message display list", initial, draws.get(0))
         }
         mainThread { expanded.value = true }
         mainThread { revision.intValue = 1 }
+        captureScreenNode(node("menu-message-body"))
         assertEquals("A live background update with an open menu is drawn once", 1, draws.get(1))
+        ui.mainClock.autoAdvance = true
     }
 
     fun testBlurConsumersShowDrawOnlyUpdatesWithoutChangingTheirParameters() {
@@ -154,6 +165,7 @@ class BackdropDrawIsolationTest : WiredActivityTestCase() {
         for (progressive in listOf(false, true)) {
             val revision = mutableIntStateOf(0)
             val side = mutableIntStateOf(200)
+            val consume = mutableStateOf(false)
             val colors = listOf(Color.Red, Color.Blue, Color.Green)
             val draws = AtomicIntegerArray(3)
             mainThread {
@@ -165,7 +177,13 @@ class BackdropDrawIsolationTest : WiredActivityTestCase() {
                                 val token = revision.intValue
                                 draws.incrementAndGet(token)
                                 drawRect(colors[token])
+                                if (size.width > 220.dp.toPx()) {
+                                    drawRect(Color.Yellow, topLeft = Offset(size.width / 2, size.height / 2),
+                                        size = Size(size.width / 2, size.height / 2))
+                                }
                             }
+                            // Outside the captured subtree: a transparent/missing consumer reveals black.
+                            Box(Modifier.fillMaxSize().background(Color.Black))
                             val blur = if (progressive) Modifier.progressiveTextureBlur(
                                 backdrop = backdrop, shape = RectangleShape,
                                 gradient = ProgressiveBlur.Top.copy(curve = 2.2f), blurRadius = 10f,
@@ -175,21 +193,27 @@ class BackdropDrawIsolationTest : WiredActivityTestCase() {
                                 colors = BlurColors(blendColors = emptyList(), saturation = 1f),
                             )
                             Box(Modifier.align(Alignment.BottomEnd).requiredSize(100.dp)
-                                .then(blur).testTag("live-blur-consumer"))
+                                .then(if (consume.value) blur else Modifier).testTag("live-blur-consumer"))
                         }
                     }
                 }
             }
+            val disabled = captureScreenNode(node("live-blur-consumer")).toPixelMap()
+            assertColor(Color.Black, disabled[disabled.width / 2, disabled.height / 2])
+            mainThread { consume.value = true }
             for (frame in colors.indices) {
                 if (frame > 0) mainThread { revision.intValue = frame }
                 // Capture the committed window, not a forced redraw of only the consumer node.
                 val pixels = captureScreenNode(node("live-blur-consumer")).toPixelMap()
                 assertColor(colors[frame], pixels[pixels.width / 2, pixels.height / 2])
-                assertEquals("Draw-only update stays live through blur progressive=$progressive", 1, draws.get(frame))
+                if (frame == 0) assertTrue("Initial capture is drawn", draws.get(frame) > 0)
+                else assertEquals("Draw-only update stays live through blur progressive=$progressive", 1, draws.get(frame))
             }
+            val beforeResize = draws.get(2)
             mainThread { side.intValue = 240 }
             val moved = captureScreenNode(node("live-blur-consumer")).toPixelMap()
-            assertColor(Color.Green, moved[moved.width / 2, moved.height / 2])
+            assertColor(Color.Yellow, moved[moved.width / 2, moved.height / 2])
+            assertEquals("New size and newly exposed sampling region are recorded once", beforeResize + 1, draws.get(2))
         }
     }
 

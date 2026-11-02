@@ -40,8 +40,8 @@ def verify(env, record, source_run, jobs, changed):
     if variant == 'diagnostic' and (record.get('production_delivery') is not False
             or record.get('profileable') is not True or record.get('jank_diagnostics') is not True
             or record.get('test_application_id') != 'app.daiyu.android.test'
-            or env.get('SMOKE_MODE') != 'smoke' or env.get('GITHUB_SHA') != sha or changed):
-        raise ValueError('诊断Release仅允许同SHA的明确补检，不是正式交付')
+            or env.get('SMOKE_MODE') != 'smoke'):
+        raise ValueError('诊断Release仅允许应用未变化的明确补检，不是正式交付')
     if variant in ('compile', 'diagnostic') and (record.get('validation_scope') != 'compile-only'
             or record.get('full_regression_passed') is not False
             or record.get('unit_tests_run') is not False or record.get('instrumentation_run') is not False
@@ -60,7 +60,7 @@ def verify(env, record, source_run, jobs, changed):
         'scripts/adb_bounded.sh', 'scripts/install_bounded_adb.sh',
         'scripts/verify_boundaries.py', 'scripts/daily_release.py',
     }
-    if variant == 'compile':
+    if variant in ('compile', 'diagnostic'):
         validation_files.update({'docs/重构清单.md', '更新说明.md'})
     validation_dirs = ('scripts/acceptance/', 'tests/', 'docs/acceptance/')
     if any(not isinstance(path, str) or '\\' in path

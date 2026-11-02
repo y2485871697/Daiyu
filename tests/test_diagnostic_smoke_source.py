@@ -26,15 +26,18 @@ class DiagnosticSmokeSourceTests(unittest.TestCase):
                         workflow_id=397560064, status='completed', conclusion='success')
         self.jobs = [dict(name='增量Release编译（不运行全量）', conclusion='success')]
 
-    def test_only_same_sha_explicit_diagnostic_smoke_is_accepted(self):
+    def test_only_unchanged_application_explicit_diagnostic_smoke_is_accepted(self):
         source.verify(self.env, self.record, self.run, self.jobs, [])
         for key, value in (('SOURCE_VARIANT', 'compile'), ('SOURCE_VARIANT', 'release'),
                            ('GITHUB_SHA', 'b' * 40), ('SMOKE_MODE', 'compile'),
                            ('SMOKE_TEST_CLASSES', '')):
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 source.verify(dict(self.env, **{key: value}), self.record, self.run, self.jobs, [])
-        with self.assertRaises(ValueError):
-            source.verify(self.env, self.record, self.run, self.jobs, ['tests/changed.py'])
+        source.verify(dict(self.env, GITHUB_SHA='b' * 40), self.record, self.run, self.jobs, ['tests/changed.py'])
+        for changed in (['app/src/main/kotlin/Changed.kt'], ['app/src/androidTest/kotlin/Changed.kt'],
+                        ['app/build.gradle.kts'], ['.github/workflows/build.yml'], ['tests/../app/file']):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                source.verify(dict(self.env, GITHUB_SHA='b' * 40), self.record, self.run, self.jobs, changed)
 
     def test_diagnostic_flags_cannot_be_relabelled_or_omitted(self):
         for key, value in (('variant', 'release'), ('debuggable', True), ('profileable', False),

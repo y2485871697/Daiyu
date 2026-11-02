@@ -204,7 +204,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('it.image != null', layers)
         self.assertIn('frame.layer.toImageBitmap()', layers)
         self.assertIn('scope.launch(start = CoroutineStart.UNDISPATCHED)', layers)
-        self.assertLess(layers.index('frames[currentKey]?.let { freeze(it) }'), layers.index('currentKey = key'))
+        enter = layers.split('    fun enter(key: Any): Departure? {', 1)[1].split('    fun transition(', 1)[0]
+        self.assertIn('if (currentKey != key) frames[currentKey]?.let {', enter)
+        self.assertIn('JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }', enter)
+        self.assertLess(enter.index('freeze(it)'), enter.index('currentKey = key'))
         self.assertIn('capture.invokeOnCompletion { context.releaseGraphicsLayer(frame.layer) }', layers)
         self.assertIn('frames.remove(key)?.let { release(it) }', layers)
         self.assertNotIn('drawLayer(target.layer)', self.host)

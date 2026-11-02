@@ -17,6 +17,36 @@ class DoubaoCallPresentationOwnerTest {
         startedAtMillis = 100, endedAtMillis = endedAtMillis, muted = muted, speaker = speaker,
     )
 
+    @Test fun initialConnectionUsesListeningVisualWithoutChangingTheBackendPhase() {
+        val owner = DoubaoCallPresentationOwner()
+        for (phase in listOf(DuplexPhase.IDLE, DuplexPhase.CONNECTING)) {
+            val source = snapshot(phase = phase)
+            owner.update(source)
+            assertEquals(phase, source.state.phase)
+            assertEquals(DoubaoCallVisualState.LISTENING, owner.state!!.visualState)
+            assertEquals(100L, owner.state!!.startedAtMillis)
+            owner.minimize(1)
+            owner.update(source)
+            assertEquals(MINI, owner.state!!.presentation)
+            assertEquals(DoubaoCallVisualState.LISTENING, owner.state!!.visualState)
+            owner.expand(1)
+            assertEquals(EXPANDED, owner.state!!.presentation)
+        }
+    }
+
+    @Test fun mutedConnectionAndConnectionFailureKeepTheirHonestStates() {
+        val owner = DoubaoCallPresentationOwner()
+        owner.update(snapshot(phase = DuplexPhase.CONNECTING, muted = true))
+        assertEquals(DoubaoCallVisualState.MUTED, owner.state!!.visualState)
+        owner.update(snapshot(phase = DuplexPhase.FAILED, endedAtMillis = 400))
+        assertEquals(DoubaoCallVisualState.ERROR, owner.state!!.visualState)
+        assertEquals(400L, owner.state!!.endedAtMillis)
+        owner.beginClose(1, 500)
+        owner.update(snapshot(phase = DuplexPhase.CONNECTING))
+        assertEquals(CLOSING, owner.state!!.presentation)
+        assertEquals(DoubaoCallVisualState.ERROR, owner.state!!.visualState)
+    }
+
     @Test fun privateDefaultAndManualSpeakerSurvivePresentationChangesAndFreezeOnClose() {
         val owner = DoubaoCallPresentationOwner()
         owner.update(snapshot()); assertFalse(owner.state!!.speaker)

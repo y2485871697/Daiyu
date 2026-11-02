@@ -64,13 +64,13 @@ import kotlin.math.roundToInt
 // This is a presentation-only contract. The owner must stop the real call synchronously in
 // onHangUp, publish CLOSING, retain this session until completion, and ignore stale session keys.
 enum class DoubaoCallPresentation { EXPANDED, MINI, CLOSING }
-enum class DoubaoCallVisualState { CONNECTING, LISTENING, RESPONDING, MUTED, RECONNECTING, ENDED, ERROR }
+enum class DoubaoCallVisualState { LISTENING, RESPONDING, MUTED, ENDED, ERROR }
 
 data class DoubaoCallUi(
     val sessionKey: Long,
     val conversationKey: String?,
     val presentation: DoubaoCallPresentation = DoubaoCallPresentation.EXPANDED,
-    val visualState: DoubaoCallVisualState = DoubaoCallVisualState.CONNECTING,
+    val visualState: DoubaoCallVisualState = DoubaoCallVisualState.LISTENING,
     /** Monotonic milliseconds in the SystemClock.elapsedRealtime() time base, not wall time. */
     val startedAtMillis: Long,
     val endedAtMillis: Long? = null,
@@ -337,21 +337,17 @@ private fun callClock(state: DoubaoCallUi): String {
 }
 
 private fun DoubaoCallUi.statusDetail(): String = reason?.takeIf { it.isNotBlank() } ?: when (visualState) {
-    DoubaoCallVisualState.CONNECTING -> "正在建立通话连接"
     DoubaoCallVisualState.LISTENING -> if (muted) "麦克风已关闭" else "不用着急，我一直在这里"
     DoubaoCallVisualState.RESPONDING -> "正在回应你的话"
     DoubaoCallVisualState.MUTED -> "麦克风已关闭"
-    DoubaoCallVisualState.RECONNECTING -> "正在恢复通话连接"
     DoubaoCallVisualState.ENDED -> "本次通话已结束"
     DoubaoCallVisualState.ERROR -> "暂时无法继续通话"
 }
 
 private fun DoubaoCallUi.statusLabel(): String = when (visualState) {
-    DoubaoCallVisualState.CONNECTING -> "正在连接…"
     DoubaoCallVisualState.LISTENING -> "我在听，你说"
     DoubaoCallVisualState.RESPONDING -> "豆包正在回应"
     DoubaoCallVisualState.MUTED -> "麦克风已静音"
-    DoubaoCallVisualState.RECONNECTING -> "正在重新连接…"
     DoubaoCallVisualState.ENDED -> "通话已结束"
     DoubaoCallVisualState.ERROR -> "连接遇到问题"
 }
@@ -548,11 +544,10 @@ internal fun CallWave(
     }
     val ended = state == DoubaoCallVisualState.ENDED || state == DoubaoCallVisualState.ERROR
     val muted = state == DoubaoCallVisualState.MUTED
-    val connecting = state == DoubaoCallVisualState.CONNECTING || state == DoubaoCallVisualState.RECONNECTING
     val style = DoubaoGenieGeometry.orbStyle(DoubaoGenieGeometry.OrbMode.valueOf(state.name), compact)
     val frame = DoubaoGenieGeometry.orbFrame(phaseMillis ?: elapsed,
         responding = state == DoubaoCallVisualState.RESPONDING, compact = compact,
-        connecting = connecting, still = muted || ended || reducedMotion)
+        still = muted || ended || reducedMotion)
     Box(modifier.testTag(if (compact) "doubao-call-mini-orb" else "doubao-call-orb"), contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
             val unit = size.minDimension / if (compact) 37f else 80f
@@ -574,17 +569,7 @@ internal fun CallWave(
                 // :after inset:7px; 52px border box -> 25.5px stroke-centre radius.
                 drawCircle(Color(0x77E0D4EF), 25.5f * unit, center, style = Stroke(unit))
             }
-            if (!style.showWave && !style.spinner) return@Canvas
-            if (style.spinner) {
-                // 28px CSS border-box, 2px border -> stroke-centre radius 13px.
-                val r = 13f * unit
-                val topLeft = Offset(center.x - r, center.y - r)
-                val arcSize = androidx.compose.ui.geometry.Size(r * 2, r * 2)
-                drawArc(Color(0xFFD6C7E9), 0f, 360f, false, topLeft, arcSize, style = Stroke(2f * unit))
-                drawArc(Color(0xFF9577BB), -135f + frame.spinnerDegrees, 90f, false,
-                    topLeft, arcSize, style = Stroke(2f * unit))
-                return@Canvas
-            }
+            if (!style.showWave) return@Canvas
             val barScale = if (compact) .65f else 1f
             val barColor = Color(style.bars)
             frame.barHeights.forEachIndexed { index, animatedHeight ->

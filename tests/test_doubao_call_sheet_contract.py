@@ -94,6 +94,24 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertIn('val width = 3f * barScale * unit', overlay)
         self.assertIn('(index - 2) * 6f * barScale * unit', overlay)
 
+    def test_connecting_visual_is_removed_while_backend_connection_admission_remains(self):
+        overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
+        owner = (SRC / 'DoubaoCallPresentationOwner.kt').read_text()
+        session = (SRC / 'voice/duplex/DoubaoDuplexSession.kt').read_text()
+        self.assertIn('val visualState: DoubaoCallVisualState = DoubaoCallVisualState.LISTENING', overlay)
+        self.assertIn('DuplexPhase.IDLE, DuplexPhase.CONNECTING,', owner)
+        self.assertIn('DuplexPhase.LISTENING, DuplexPhase.THINKING -> if (snapshot.muted)', owner)
+        for removed in ('DoubaoCallVisualState.CONNECTING', 'DoubaoCallVisualState.RECONNECTING',
+                        '正在连接', '正在建立通话连接', '正在重新连接', '正在恢复通话连接',
+                        'style.spinner', 'drawArc(', 'connecting = connecting'):
+            self.assertNotIn(removed, overlay)
+        self.assertIn('if (!style.showWave) return@Canvas', overlay)
+        self.assertIn('update(DuplexPhase.CONNECTING)', session)
+        created = session.split('"session.created" ->', 1)[1].split('"conversation.item.input_audio_transcription.started"', 1)[0]
+        self.assertIn('if (opened && !created)', created)
+        self.assertIn('update(DuplexPhase.LISTENING)', created)
+        self.assertIn('audio.startCapture capture@', created)
+
     def test_entrance_and_exit_use_the_same_cubic_bezier_without_changing_duration(self):
         overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
         self.assertIn('CallMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)', overlay)

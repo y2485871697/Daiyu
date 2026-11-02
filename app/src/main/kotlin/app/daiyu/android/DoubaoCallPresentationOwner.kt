@@ -24,7 +24,7 @@ internal class DoubaoCallPresentationOwner {
             conversationKey = snapshot.conversationId,
             presentation = if (sameCall) previous!!.presentation else DoubaoCallPresentation.EXPANDED,
             visualState = when (snapshot.state.phase) {
-                DuplexPhase.IDLE, DuplexPhase.CONNECTING -> DoubaoCallVisualState.CONNECTING
+                DuplexPhase.IDLE, DuplexPhase.CONNECTING,
                 DuplexPhase.LISTENING, DuplexPhase.THINKING -> if (snapshot.muted) DoubaoCallVisualState.MUTED else DoubaoCallVisualState.LISTENING
                 DuplexPhase.SPEAKING -> DoubaoCallVisualState.RESPONDING
                 DuplexPhase.COMPLETE, DuplexPhase.CANCELLED -> DoubaoCallVisualState.ENDED

@@ -25,6 +25,11 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ComposeActivityTestCase
 import app.daiyu.android.MainActivity
+import app.daiyu.android.DoubaoCallPresentationOwner
+import app.daiyu.android.DuplexCallSnapshot
+import app.daiyu.android.voice.VoiceOwner
+import app.daiyu.android.voice.duplex.DuplexPhase
+import app.daiyu.android.voice.duplex.DuplexState
 
 /**
  * Component/owner-contract tests, not a fake voice backend. The fixture owner stops business in
@@ -57,11 +62,11 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         speaker = false,
     )
 
-    private fun mount(height: Dp? = null) {
+    private fun mount(height: Dp? = null, initialState: DoubaoCallUi? = null) {
         activity = startMain()
         ui.mainClock.autoAdvance = false
         mainThread {
-            call = session()
+            call = initialState ?: session()
             activity.setContent {
                 MaterialTheme {
                     BoxWithConstraints(if (height == null) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height)) {
@@ -149,6 +154,31 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithTag("doubao-call-speaker").performScrollTo().assertIsDisplayed().performClick()
         assertEquals(1, speakerToggles)
         assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
+    }
+
+    fun testConnectingBackendOpensWithListeningWavesInPanelAndCapsule() {
+        val source = DuplexCallSnapshot(10L, "component-test",
+            DuplexState(VoiceOwner("component-test", "connecting"), DuplexPhase.CONNECTING),
+            SystemClock.elapsedRealtime())
+        val owner = DoubaoCallPresentationOwner()
+        mainThread { owner.update(source) }
+        mount(initialState = owner.state)
+        finishOpening()
+        val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
+        ui.onNodeWithText("我在听，你说").assertIsDisplayed()
+        ui.onNodeWithText("不用着急，我一直在这里").assertIsDisplayed()
+        ui.onNodeWithText("正在连接", substring = true).assertDoesNotExist()
+        ui.onNodeWithText("正在建立通话连接").assertDoesNotExist()
+        ui.onNodeWithTag("doubao-call-orb", useUnmergedTree = true).assertExists()
+        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.onNodeWithText("我在听，你说").assertIsDisplayed()
+        ui.onNodeWithText("正在连接", substring = true).assertDoesNotExist()
+        ui.onNodeWithTag("doubao-call-mini-orb", useUnmergedTree = true).assertExists()
+        ui.onNodeWithTag("doubao-call-expand").performClick()
+        ui.onNodeWithText("我在听，你说").assertIsDisplayed()
+        assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
+        assertEquals(DuplexPhase.CONNECTING, source.state.phase)
+        assertEquals(0, hangUps)
     }
 
     fun testSpeakingAndListeningLabelsFollowStateInBothPanelAndCapsule() {

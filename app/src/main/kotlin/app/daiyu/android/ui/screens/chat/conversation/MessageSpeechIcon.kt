@@ -11,8 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -27,12 +25,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 @Composable
 internal fun MessageSpeechIcon(speaking: Boolean, modifier: Modifier = Modifier, preparing: Boolean = false) {
     val tint = conversationColors().muted
-    if (preparing) {
-        CircularProgressIndicator(modifier = modifier.testTag("message-speech-preparing")
-            .semantics { contentDescription = "停止朗读" }, size = 13.dp, strokeWidth = 1.5.dp)
-        return
-    }
-    if (!speaking) {
+    if (!speaking && !preparing) {
         Icon(DaiyuIcons.Speak, "朗读", modifier.testTag("message-speech-idle"), tint = tint)
         return
     }
@@ -49,7 +42,7 @@ internal fun MessageSpeechIcon(speaking: Boolean, modifier: Modifier = Modifier,
     val outer = remember { Path().apply {
         moveTo(18f, 5f); cubicTo(22f, 8.5f, 22f, 15.5f, 18f, 19f)
     } }
-    Canvas(modifier.testTag("message-speech-playing").semantics { contentDescription = "停止朗读" }) {
+    Canvas(modifier.testTag(if (preparing) "message-speech-preparing" else "message-speech-playing").semantics { contentDescription = "停止朗读" }) {
         val stroke = Stroke(width = 1.75f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         scale(size.width / 24f, size.height / 24f, pivot = androidx.compose.ui.geometry.Offset.Zero) {
             drawPath(body, tint, style = stroke)

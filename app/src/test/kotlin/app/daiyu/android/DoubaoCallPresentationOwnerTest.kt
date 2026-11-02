@@ -89,12 +89,25 @@ class DoubaoCallPresentationOwnerTest {
         assertEquals(400L, owner.state!!.endedAtMillis)
     }
 
-    @Test fun visibleReplyMapsToRespondingRatherThanClaimingPhysicalAudio() {
+    @Test fun respondingAndIdleShareTheSameStateAcrossPanelAndCapsule() {
         val owner = DoubaoCallPresentationOwner()
-        for (phase in listOf(DuplexPhase.THINKING, DuplexPhase.SPEAKING)) {
+        owner.update(snapshot(phase = DuplexPhase.SPEAKING))
+        assertEquals(DoubaoCallVisualState.RESPONDING, owner.state!!.visualState)
+        owner.minimize(1)
+        owner.update(snapshot(phase = DuplexPhase.SPEAKING))
+        assertEquals(MINI, owner.state!!.presentation)
+        assertEquals(DoubaoCallVisualState.RESPONDING, owner.state!!.visualState)
+        for (phase in listOf(DuplexPhase.LISTENING, DuplexPhase.THINKING)) {
             owner.update(snapshot(phase = phase))
-            assertEquals(DoubaoCallVisualState.RESPONDING, owner.state!!.visualState)
+            assertEquals(DoubaoCallVisualState.LISTENING, owner.state!!.visualState)
+            owner.expand(1)
+            assertEquals(DoubaoCallVisualState.LISTENING, owner.state!!.visualState)
+            owner.minimize(1)
         }
+        owner.update(snapshot(phase = DuplexPhase.SPEAKING, muted = true))
+        assertEquals(DoubaoCallVisualState.RESPONDING, owner.state!!.visualState)
+        owner.update(snapshot(phase = DuplexPhase.THINKING, muted = true))
+        assertEquals(DoubaoCallVisualState.MUTED, owner.state!!.visualState)
     }
 
     @Test fun clearingOnOwnerOrLifecycleChangeDropsEvenAClosingPicture() {

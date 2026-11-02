@@ -41,8 +41,12 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
             self.assertIn('speechPreparingMessageId: String? = null', (CHAT / name).read_text())
         self.assertIn('preparing = preparing', (CHAT / 'ReconnectedAssistantTurn.kt').read_text())
         icon = (CHAT / 'MessageSpeechIcon.kt').read_text()
-        self.assertLess(icon.index('if (preparing)'), icon.index('val transition = rememberInfiniteTransition'))
-        self.assertIn('message-speech-preparing', icon)
+        self.assertLess(icon.index('if (!speaking && !preparing)'), icon.index('val transition = rememberInfiniteTransition'))
+        self.assertIn('if (preparing) "message-speech-preparing" else "message-speech-playing"', icon)
+        self.assertEqual(1, icon.count('val transition = rememberInfiniteTransition'))
+        self.assertEqual(1, icon.count('Canvas('))
+        self.assertNotIn('CircularProgressIndicator', icon)
+        self.assertNotIn('ProgressBarRangeInfo', icon)
 
     def test_same_button_switches_stop_before_start_only_gates(self):
         main = (SRC / 'MainActivity.kt').read_text()
@@ -64,7 +68,7 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         icon = (CHAT / 'MessageSpeechIcon.kt').read_text()
         self.assertIn('if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) })', bar)
         self.assertIn('MessageSpeechIcon(speaking, Modifier.size(13.dp), preparing)', bar)
-        self.assertLess(icon.index('if (!speaking)'), icon.index('val transition = rememberInfiniteTransition'))
+        self.assertLess(icon.index('if (!speaking && !preparing)'), icon.index('val transition = rememberInfiniteTransition'))
         for part in ('DaiyuIcons.Speak, "朗读"', 'contentDescription = "停止朗读"', 'drawPath(body, tint, style = stroke)',
                      'drawPath(inner, tint, alpha =', 'drawPath(outer, tint, alpha =', 'tween(800, easing = LinearEasing)'):
             self.assertIn(part, icon)

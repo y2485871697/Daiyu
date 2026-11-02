@@ -94,6 +94,34 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertIn('val width = 3f * barScale * unit', overlay)
         self.assertIn('(index - 2) * 6f * barScale * unit', overlay)
 
+    def test_entrance_and_exit_use_the_same_cubic_bezier_without_changing_duration(self):
+        overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
+        self.assertIn('CallMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)', overlay)
+        self.assertIn('progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = CallMotionEasing))', overlay)
+        self.assertIn('progress.animateTo(0f, tween(remaining.coerceAtLeast(1), easing = CallMotionEasing))', overlay)
+        self.assertNotIn('LinearEasing', overlay)
+
+    def test_native_tail_drives_both_labels_and_waves_not_server_done_or_microphone_bytes(self):
+        session = (SRC / 'voice/duplex/DoubaoDuplexSession.kt').read_text()
+        audio = (SRC / 'voice/duplex/AndroidDuplexAudio.kt').read_text()
+        owner = (SRC / 'DoubaoCallPresentationOwner.kt').read_text()
+        overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
+        for value in ('audio.finishPlayback(audioEpoch)', 'generation == playbackGeneration',
+                      'audioEpoch == epoch', '(id.isEmpty() || id == responseId) && tailRequested'):
+            self.assertIn(value, session)
+        self.assertIn('check(turnBytes > 0) { "empty_audio" }; finishResponsePlayback()', session)
+        self.assertIn('"response.done" -> if (acceptResponse(e, false)) finishResponsePlayback()', session)
+        self.assertIn('copy(reply = text.accept(e))', session)
+        self.assertNotIn('copy(reply = text.accept(e), phase = DuplexPhase.SPEAKING)', session)
+        self.assertIn('packet.onDrained.invoke()', audio)
+        self.assertIn('playbackHeadPosition', audio)
+        self.assertIn('writtenFrames += it / 2', audio)
+        self.assertIn('DuplexPhase.LISTENING, DuplexPhase.THINKING ->', owner)
+        self.assertIn('DuplexPhase.SPEAKING -> DoubaoCallVisualState.RESPONDING', owner)
+        self.assertEqual(2, overlay.count('Text(state.statusLabel()'))
+        self.assertEqual(2, overlay.count('CallWave(state.orbState()'))
+        self.assertIn('if (muted && visualState == DoubaoCallVisualState.LISTENING)', overlay)
+
     def test_shared_420ms_progress_reverses_a_frozen_raster_not_live_child_layers(self):
         overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
         screen = (CHAT / 'ChatScreen.kt').read_text()

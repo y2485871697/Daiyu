@@ -29,11 +29,13 @@ class AndroidDuplexAudio(context: Context? = null) : DuplexAudio {
     override fun setSpeaker(speaker: Boolean): Boolean = synchronized(lock) {
         !closing && opened && route?.setSpeaker(speaker) == true
     }
-    private data class Packet(val bytes: ByteArray, val epoch: Long)
+    private data class Packet(val bytes: ByteArray, val epoch: Long, val onDrained: (() -> Unit)? = null)
     private val lock = Any()
     private val drained = CountDownLatch(1)
     private val queue = ArrayDeque<Packet>()
     private var queuedBytes = 0
+    private var writtenFrames = 0L
+    private var startThresholdFrames = 1
     private var epoch = 0L
     @Volatile private var closing = false
     private var opened = false
@@ -75,6 +77,8 @@ class AndroidDuplexAudio(context: Context? = null) : DuplexAudio {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
                 .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(maxOf(outputMin * 2, 24_000)).build()
             check(player!!.state == AudioTrack.STATE_INITIALIZED) { "speaker_unavailable" }
+            startThresholdFrames = if (Build.VERSION.SDK_INT >= 31) player!!.setStartThresholdInFrames(1)
+                else player!!.bufferSizeInFrames
             player!!.play()
             playback = Thread({ playLoop() }, "doubao-duplex-playback").also { it.start() }
         }
@@ -108,11 +112,18 @@ class AndroidDuplexAudio(context: Context? = null) : DuplexAudio {
         }
     }
 
+    override fun finishPlayback(epoch: Long, onDrained: () -> Unit) {
+        synchronized(lock) {
+            if (closing || epoch != this.epoch) return
+            queue.addLast(Packet(ByteArray(0), epoch, onDrained))
+        }
+    }
+
     override fun flush(epoch: Long) {
         synchronized(lock) {
             if (closing) return
             require(epoch >= this.epoch)
-            this.epoch = epoch; queue.clear(); queuedBytes = 0
+            this.epoch = epoch; queue.clear(); queuedBytes = 0; writtenFrames = 0
             // The writer uses this same lock for each small nonblocking write: no
             // in-flight old partial packet can be re-enqueued after hardware flush.
             player?.let { it.pause(); it.flush(); it.play() }
@@ -126,21 +137,54 @@ class AndroidDuplexAudio(context: Context? = null) : DuplexAudio {
                     if (queue.isEmpty()) null else queue.removeFirst().also { queuedBytes -= it.bytes.size }
                 }
                 if (packet == null) { Thread.sleep(5); continue }
-                var offset = 0
-                while (!closing && offset < packet.bytes.size) {
-                    val n = synchronized(lock) {
-                        if (closing || packet.epoch != epoch) -1
-                        else checkNotNull(player).write(packet.bytes, offset,
-                            minOf(2048, packet.bytes.size - offset), AudioTrack.WRITE_NON_BLOCKING).also {
-                            check(it >= 0) { "playback_write_failed" }
+                if (packet.onDrained != null) {
+                    val target = synchronized(lock) {
+                        if (closing || packet.epoch != epoch) null else writtenFrames
+                    } ?: continue
+                    // Short tails must cross the native start threshold on older APIs too.
+                    val padding = synchronized(lock) {
+                        if (closing || packet.epoch != epoch) 0 else {
+                            val head = checkNotNull(player).playbackHeadPosition.toLong() and 0xffffffffL
+                            val pending = (target - head) and 0xffffffffL
+                            if (pending in 1..startThresholdFrames.toLong())
+                                (startThresholdFrames - pending).toInt() else 0
                         }
                     }
-                    if (n < 0) break
-                    offset += n
-                    if (n == 0) Thread.sleep(5)
-                }
+                    if (padding > 0) writePacket(Packet(ByteArray(padding * 2), packet.epoch))
+                    while (!closing) {
+                        val complete = synchronized(lock) {
+                            if (closing || packet.epoch != epoch) null else {
+                                val head = checkNotNull(player).playbackHeadPosition.toLong() and 0xffffffffL
+                                ((head - target) and 0xffffffffL) < 0x80000000L
+                            }
+                        } ?: break
+                        if (complete) {
+                            // Never acquire the session lock while holding the audio lock.
+                            packet.onDrained.invoke()
+                            break
+                        }
+                        Thread.sleep(5)
+                    }
+                } else writePacket(packet)
             }
         } catch (_: Exception) { signalFailure() }
+    }
+
+    private fun writePacket(packet: Packet) {
+        var offset = 0
+        while (!closing && offset < packet.bytes.size) {
+            val n = synchronized(lock) {
+                if (closing || packet.epoch != epoch) -1
+                else checkNotNull(player).write(packet.bytes, offset,
+                    minOf(2048, packet.bytes.size - offset), AudioTrack.WRITE_NON_BLOCKING).also {
+                    check(it >= 0 && it % 2 == 0) { "playback_write_failed" }
+                    writtenFrames += it / 2
+                }
+            }
+            if (n < 0) break
+            offset += n
+            if (n == 0) Thread.sleep(5)
+        }
     }
 
     private fun signalFailure() {

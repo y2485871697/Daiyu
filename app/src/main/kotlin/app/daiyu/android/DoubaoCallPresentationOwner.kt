@@ -25,8 +25,8 @@ internal class DoubaoCallPresentationOwner {
             presentation = if (sameCall) previous!!.presentation else DoubaoCallPresentation.EXPANDED,
             visualState = when (snapshot.state.phase) {
                 DuplexPhase.IDLE, DuplexPhase.CONNECTING -> DoubaoCallVisualState.CONNECTING
-                DuplexPhase.LISTENING -> if (snapshot.muted) DoubaoCallVisualState.MUTED else DoubaoCallVisualState.LISTENING
-                DuplexPhase.THINKING, DuplexPhase.SPEAKING -> DoubaoCallVisualState.RESPONDING
+                DuplexPhase.LISTENING, DuplexPhase.THINKING -> if (snapshot.muted) DoubaoCallVisualState.MUTED else DoubaoCallVisualState.LISTENING
+                DuplexPhase.SPEAKING -> DoubaoCallVisualState.RESPONDING
                 DuplexPhase.COMPLETE, DuplexPhase.CANCELLED -> DoubaoCallVisualState.ENDED
                 DuplexPhase.FAILED, DuplexPhase.UNKNOWN -> DoubaoCallVisualState.ERROR
             },

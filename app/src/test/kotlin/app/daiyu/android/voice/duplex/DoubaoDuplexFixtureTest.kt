@@ -45,6 +45,12 @@ class DoubaoDuplexFixtureTest {
         }
         override fun stopImmediately() { stops++; pending.clear() }
         var onDrain: (() -> Unit)? = null
+        val playbackTails = mutableListOf<() -> Unit>()
+        override fun finishPlayback(epoch: Long, onDrained: () -> Unit) { playbackTails += onDrained }
+        fun playTail(index: Int = playbackTails.lastIndex) {
+            pending.clear()
+            playbackTails[index].invoke()
+        }
         val pending = mutableListOf<Pair<Long, ByteArray>>()
         val flushed = mutableListOf<Long>()
         override fun open(onFailure: () -> Unit) { opens++ }
@@ -64,6 +70,73 @@ class DoubaoDuplexFixtureTest {
         init { session.start() }
         fun ready() { wire.listener.opened(); wire.receive("session.created") }
         override fun close() { session.close() }
+    }
+
+    @Test fun providerDoneKeepsSpeakingUntilNativeTailAndLateTextCannotRestartIt() {
+        Call().use { c ->
+            c.ready()
+            c.wire.receive("response.output_audio.started", id = "r1")
+            c.wire.receive("response.output_audio.delta", "audio", "AAABAA==", "r1")
+            c.wire.receive("response.output_audio.done", id = "r1")
+            c.wire.receive("response.done", id = "r1")
+            c.wire.receive("response.done", id = "r1")
+            assertEquals(1, c.audio.playbackTails.size)
+            assertEquals(DuplexPhase.SPEAKING, c.session.state.value.phase)
+            c.audio.capture!!(ByteArray(640))
+            c.wire.receive("conversation.item.input_audio_transcription.started")
+            c.wire.receive("conversation.item.input_audio_transcription.delta", "text", "…")
+            assertEquals(DuplexPhase.SPEAKING, c.session.state.value.phase)
+            c.audio.playTail()
+            assertEquals(DuplexPhase.LISTENING, c.session.state.value.phase)
+            c.wire.receive("response.output_text.done", "text", "完整字幕", "r1")
+            assertEquals("完整字幕", c.session.state.value.reply)
+            assertEquals(DuplexPhase.LISTENING, c.session.state.value.phase)
+        }
+    }
+
+    @Test fun confirmedMicrophoneSpeechInterruptsTailButSpeculationDoesNot() {
+        Call().use { c ->
+            c.ready()
+            c.wire.receive("response.output_audio.started", id = "r1")
+            c.wire.receive("response.output_audio.delta", "audio", "AAABAA==", "r1")
+            c.wire.receive("response.output_audio.done", id = "r1")
+            c.wire.receive("conversation.item.input_audio_transcription.started")
+            c.wire.receive("conversation.item.input_audio_transcription.delta", "text", "停")
+            assertEquals(DuplexPhase.LISTENING, c.session.state.value.phase)
+            assertEquals(listOf(1L), c.audio.flushed)
+            c.wire.receive("conversation.item.input_audio_transcription.completed", "text", "停")
+            assertEquals(DuplexPhase.THINKING, c.session.state.value.phase)
+            c.audio.playTail(0)
+            assertEquals(DuplexPhase.THINKING, c.session.state.value.phase)
+        }
+    }
+
+    @Test fun oldPlaybackCompletionCannotEndTheNewResponseOrReviveAClosedCall() {
+        val c = Call()
+        c.ready()
+        for (id in listOf("r1", "r2")) {
+            c.wire.receive("response.output_audio.started", id = id)
+            c.wire.receive("response.output_audio.delta", "audio", "AAABAA==", id)
+            c.wire.receive("response.output_audio.done", id = id)
+        }
+        c.audio.playTail(0)
+        assertEquals(DuplexPhase.SPEAKING, c.session.state.value.phase)
+        c.audio.playTail(1)
+        assertEquals(DuplexPhase.LISTENING, c.session.state.value.phase)
+        c.close()
+        c.audio.playTail(1)
+        assertEquals(DuplexPhase.CANCELLED, c.session.state.value.phase)
+    }
+
+    @Test fun textWithoutAudioDoesNotPretendToBeSpeaking() {
+        Call().use { c ->
+            c.ready()
+            c.wire.receive("response.output_text.delta", "text", "只有字幕", "r1")
+            assertEquals(DuplexPhase.LISTENING, c.session.state.value.phase)
+            c.wire.receive("response.done", id = "r1")
+            assertEquals(DuplexPhase.LISTENING, c.session.state.value.phase)
+            assertTrue(c.audio.playbackTails.isEmpty())
+        }
     }
 
     @Test fun pcmPreservesTransportTerminalCauseAndBackpressureNeverReplaysAudio() {

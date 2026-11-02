@@ -60,6 +60,8 @@ class DoubaoDuplexSession(
     private var opened = false
     private var epoch = 0L
     private var turnBytes = 0L
+    private var playbackGeneration = 0L
+    private var tailRequested = false
     private var responseId = ""
     private val discarded = LinkedHashSet<String>()
     private var suppressOutput = false
@@ -162,7 +164,8 @@ class DoubaoDuplexSession(
                         val done = e.optString("type").endsWith(".completed")
                         interruption.transcript(DoubaoDuplexProtocol.eventText(e), done) {
                             retireCurrentResponse()
-                            suppressOutput = true; epoch++; audio.flush(epoch); turnBytes = 0
+                            suppressOutput = true; playbackGeneration++; tailRequested = false
+                            epoch++; audio.flush(epoch); turnBytes = 0
                             text.reset()
                             mutableState.value = mutableState.value.copy(transcript = "", reply = "")
                         }?.let { recognized ->
@@ -173,25 +176,31 @@ class DoubaoDuplexSession(
                         }
                     }
                     "response.output_audio.started" -> if (acceptResponse(e, true)) {
-                        turnBytes = 0; update(DuplexPhase.SPEAKING)
+                        playbackGeneration++; tailRequested = false; turnBytes = 0
+                        update(DuplexPhase.SPEAKING)
                     }
                     "response.output_text.delta", "response.output_text.done" -> if (acceptResponse(e, false)) {
-                        mutableState.value = mutableState.value.copy(reply = text.accept(e), phase = DuplexPhase.SPEAKING)
+                        mutableState.value = mutableState.value.copy(reply = text.accept(e))
                     }
                     "response.output_audio.delta" -> if (acceptResponse(e, false)) {
                         val bytes = java.util.Base64.getDecoder().decode(
                             DoubaoDuplexProtocol.audioPayload(e).filterNot(Char::isWhitespace))
                         check(bytes.size % 2 == 0)
-                        if (bytes.isNotEmpty()) { turnBytes += bytes.size; audio.enqueue(bytes, epoch) }
+                        if (bytes.isNotEmpty()) {
+                            if (tailRequested) { playbackGeneration++; tailRequested = false }
+                            turnBytes += bytes.size; audio.enqueue(bytes, epoch)
+                            update(DuplexPhase.SPEAKING)
+                        }
                     }
                     "response.output_audio.done" -> if (acceptResponse(e, false)) {
-                        check(turnBytes > 0) { "empty_audio" }; update(DuplexPhase.LISTENING)
+                        check(turnBytes > 0) { "empty_audio" }; finishResponsePlayback()
                     }
                     "response.canceled" -> if (acceptResponse(e, false)) {
                         retireCurrentResponse()
+                        playbackGeneration++; tailRequested = false
                         epoch++; audio.flush(epoch); suppressOutput = true; update(DuplexPhase.LISTENING)
                     }
-                    "response.done" -> if (acceptResponse(e, false)) update(DuplexPhase.LISTENING)
+                    "response.done" -> if (acceptResponse(e, false)) finishResponsePlayback()
                     "error" -> error("provider_error") // Never surface potentially sensitive server text.
                     "session.closed" -> complete = true
                     // Unknown extensions are ignored, never resent or translated into OpenAI events.
@@ -201,6 +210,21 @@ class DoubaoDuplexSession(
         }
         override fun failed() = finish(DuplexPhase.UNKNOWN, "connection_lost_no_retry")
         override fun closed() = finish(DuplexPhase.UNKNOWN, "connection_closed_no_retry")
+    }
+
+    private fun finishResponsePlayback() {
+        if (tailRequested) return
+        if (turnBytes == 0L) { update(DuplexPhase.LISTENING); return }
+        tailRequested = true
+        val generation = playbackGeneration
+        val audioEpoch = epoch
+        val id = responseId
+        audio.finishPlayback(audioEpoch) {
+            event {
+                if (generation == playbackGeneration && audioEpoch == epoch &&
+                    (id.isEmpty() || id == responseId) && tailRequested) update(DuplexPhase.LISTENING)
+            }
+        }
     }
 
     private fun retireCurrentResponse() {
@@ -219,7 +243,13 @@ class DoubaoDuplexSession(
             if (!boundary && (id.isEmpty() || id == responseId)) return false
             suppressOutput = false
         }
-        if (id.isNotEmpty()) responseId = id
+        if (id.isNotEmpty()) {
+            if (responseId.isNotEmpty() && id != responseId) {
+                retireCurrentResponse()
+                playbackGeneration++; tailRequested = false; turnBytes = 0
+            }
+            responseId = id
+        }
         return created
     }
 

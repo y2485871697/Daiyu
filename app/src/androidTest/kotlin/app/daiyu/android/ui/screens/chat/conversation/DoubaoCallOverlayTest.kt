@@ -151,6 +151,25 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
     }
 
+    fun testSpeakingAndListeningLabelsFollowStateInBothPanelAndCapsule() {
+        mount(); finishOpening()
+        mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.RESPONDING, muted = false) }
+        ui.onNodeWithText("豆包正在回应").assertIsDisplayed()
+        ui.onNodeWithText("我在听，你说").assertDoesNotExist()
+        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.onNodeWithText("豆包正在回应").assertIsDisplayed()
+        ui.onNodeWithTag("doubao-call-mini-orb", useUnmergedTree = true).assertExists()
+        mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.LISTENING) }
+        ui.onNodeWithText("我在听，你说").assertIsDisplayed()
+        ui.onNodeWithText("豆包正在回应").assertDoesNotExist()
+        ui.onNodeWithTag("doubao-call-expand").performClick()
+        ui.onNodeWithText("我在听，你说").assertIsDisplayed()
+        ui.onNodeWithText("不用着急，我一直在这里").assertIsDisplayed()
+        mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.RESPONDING) }
+        ui.onNodeWithText("豆包正在回应").assertIsDisplayed()
+        assertEquals(0, hangUps)
+    }
+
     fun testSharedMotionIsStillOpeningAt380AndSettledBy470Not740() {
         mount()
         ui.mainClock.advanceTimeBy(380L)

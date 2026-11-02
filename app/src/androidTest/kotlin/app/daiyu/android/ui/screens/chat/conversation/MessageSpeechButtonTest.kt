@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
@@ -66,13 +67,18 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPreparationUsesLoadingInsteadOfWaveAndTheSameButtonCanStop() {
+    fun testPreparationUsesSpeakerWavesWithoutLoadingAndTheSameButtonCanStop() {
         preparing = true
         mountBar()
-        ui.onNodeWithTag("message-speech-preparing", useUnmergedTree = true).assertExists()
+        ui.onNodeWithTag("message-speech-preparing", useUnmergedTree = true)
+            .assertExists().assertWidthIsEqualTo(13.dp).assertHeightIsEqualTo(13.dp)
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ProgressBarRangeInfo))
         ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithTag("message-speech-idle", useUnmergedTree = true).assertDoesNotExist()
+        val preparingBounds = ui.onNodeWithContentDescription("停止朗读").assertHasClickAction().fetchSemanticsNode().boundsInRoot
         ui.onNodeWithContentDescription("停止朗读").performClick()
-        ui.onNodeWithContentDescription("朗读").assertExists()
+        val idleBounds = ui.onNodeWithContentDescription("朗读").assertHasClickAction().fetchSemanticsNode().boundsInRoot
+        assertEquals(preparingBounds, idleBounds)
         assertEquals(listOf("answer"), clicks)
         assertEquals(0, fixture.opens.get())
     }
@@ -102,14 +108,26 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
     }
 
     fun testSpeakerWavesAnimateInsideUnchangedHitTarget() {
+        assertSpeakerWavesAnimate(preparingFirst = false)
+    }
+
+    fun testPreparingSpeakerWavesAnimateInsideUnchangedHitTarget() {
+        assertSpeakerWavesAnimate(preparingFirst = true)
+    }
+
+    private fun assertSpeakerWavesAnimate(preparingFirst: Boolean) {
         ui.mainClock.autoAdvance = false
         try {
+            mainThread { preparing = preparingFirst }
             mountBar()
-            ui.onNodeWithContentDescription("朗读").performClick()
+            if (!preparingFirst) ui.onNodeWithContentDescription("朗读").performClick()
             ui.mainClock.advanceTimeByFrame()
             val button = ui.onNodeWithContentDescription("停止朗读")
             val beforeBounds = button.fetchSemanticsNode().boundsInRoot
-            val waves = ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true)
+            val waveTag = if (preparingFirst) "message-speech-preparing" else "message-speech-playing"
+            val waves = ui.onNodeWithTag(waveTag, useUnmergedTree = true)
+                .assertWidthIsEqualTo(13.dp).assertHeightIsEqualTo(13.dp)
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ProgressBarRangeInfo))
             awaitVisualIdle()
             val first = waves.captureToImage().toPixelMap()
             val firstTime = ui.mainClock.currentTime
@@ -136,10 +154,11 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
             assertTrue("Animation fixture must retain scale=1: $diagnostic", animationContext.get().startsWith("scale=1.0 "))
             assertTrue("Speaker wave pixels must change: $diagnostic", changed > 0)
         } finally {
-            mainThread { speaking = false }
+            mainThread { speaking = false; preparing = false }
             ui.mainClock.autoAdvance = true
         }
         ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithTag("message-speech-preparing", useUnmergedTree = true).assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 }

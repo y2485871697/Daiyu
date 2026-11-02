@@ -3,7 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
@@ -97,6 +97,8 @@ internal class DoubaoCallMotionState {
     var transforming by mutableStateOf(false)
 }
 
+private val CallMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
 private val CallInk = Color(0xFF34313F)
 private val CallLavender = Color(0xFFF3EFF8)
 private val CallRed = Color(0xFFE77983)
@@ -178,7 +180,7 @@ private fun DoubaoCallSession(
                     motion.transforming = true
                     // Never start the clock on an empty/unrecorded GraphicsLayer.
                     snapshotFlow { snapshotReady }.first { it }
-                    progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = LinearEasing))
+                    progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = CallMotionEasing))
                 } else {
                     // Minimize/restore is intentionally immediate, not another Genie entrance.
                     progress.snapTo(1f)
@@ -195,7 +197,7 @@ private fun DoubaoCallSession(
                 coroutineContext.ensureActive()
                 frozenBitmap = bitmap
                 val remaining = (DoubaoGenieGeometry.DURATION_MILLIS * progress.value).roundToInt()
-                progress.animateTo(0f, tween(remaining.coerceAtLeast(1), easing = LinearEasing))
+                progress.animateTo(0f, tween(remaining.coerceAtLeast(1), easing = CallMotionEasing))
                 // Give the p=0 surface a draw opportunity before the owner unmounts it. A zero
                 // duration scale has no extra wait; both directions already honor the system scale.
                 if ((coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f) > 0f) withFrameNanos { }
@@ -516,7 +518,7 @@ private fun CallControlButton(
 }
 
 private fun DoubaoCallUi.orbState(): DoubaoCallVisualState =
-    if (muted && visualState !in listOf(DoubaoCallVisualState.ENDED, DoubaoCallVisualState.ERROR))
+    if (muted && visualState == DoubaoCallVisualState.LISTENING)
         DoubaoCallVisualState.MUTED else visualState
 
 /** Preview .voice-orb/.mini-orb, including the two hairlines and inset light, not a flat disc. */

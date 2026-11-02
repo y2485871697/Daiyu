@@ -35,6 +35,8 @@ interface DuplexAudio {
     fun open(onFailure: () -> Unit)
     fun startCapture(onPcm: (ByteArray) -> Unit)
     fun enqueue(pcm: ByteArray, epoch: Long)
+    /** Queue a tail marker. Invoke asynchronously, outside audio locks, only after its PCM has played. */
+    fun finishPlayback(epoch: Long, onDrained: () -> Unit)
     fun flush(epoch: Long)
     /** Fence capture/playback and stop/pause/flush hardware now; never join workers. */
     fun stopImmediately() { flush(Long.MAX_VALUE) }

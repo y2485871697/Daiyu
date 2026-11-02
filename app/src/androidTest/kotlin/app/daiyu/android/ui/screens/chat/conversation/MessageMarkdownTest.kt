@@ -177,15 +177,15 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             app.daiyu.android.domain.RunId("prepared-run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
             listOf(app.daiyu.android.domain.MessageBlock.Text("first", first),
                 app.daiyu.android.domain.MessageBlock.Text("second", second)), RunStatus.COMPLETED)
+        val turn = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
+        assertEquals(sources, turn.workflowContent().body.filterIsInstance<MessageContentUi.Text>().map { it.text })
         prepareRestoredMarkdown(listOf(message), parser = parser)
         val preparedCalls = calls.get()
         val compositions = CopyOnWriteArrayList<MarkdownProjection?>()
         show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
             val projection = rememberMarkdownProjection(sources)
             SideEffect { compositions += projection }
-            AssistantTurn(ChatTurnUi.Assistant("prepared-mixed", status = RunStatus.COMPLETED,
-                content = listOf(MessageContentUi.Text("first", first), MessageContentUi.Text("second", second))),
-                ChatScreenActions())
+            AssistantTurn(turn, ChatScreenActions())
         } }
         assertTrue(compositions.isNotEmpty())
         assertTrue(compositions.all { it?.sources == sources && it.parser === parser })

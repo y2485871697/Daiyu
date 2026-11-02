@@ -21,8 +21,11 @@ class ChatInitialPositionContract(unittest.TestCase):
     def test_only_fresh_initial_bottom_position_is_concealed(self):
         chat = CHAT.read_text()
         initial = chat.split('var initialPositionPending by remember {', 1)[1].split('val lifecycle', 1)[0]
-        self.assertIn('it.serial != consumedScrollSerial', initial)
-        self.assertIn('it.followBottom && it.messageId == null && it.listKey == null', initial)
+        policy = (CHAT.parent / 'ChatInitialPosition.kt').read_text()
+        self.assertIn('initialChatPositionPending(scrollRequest, consumedScrollSerial, followBottom)', initial)
+        self.assertIn('it.serial != consumedSerial', policy)
+        self.assertIn('it.followBottom && it.messageId == null && it.listKey == null', policy)
+        self.assertIn('} ?: followBottom', policy)
         self.assertIn('.drawWithContent { if (!initialPositionPending) drawContent() }', chat)
 
     def test_initial_alignment_waits_for_measured_ready_content_and_snaps(self):
@@ -31,10 +34,22 @@ class ChatInitialPositionContract(unittest.TestCase):
         for token in ('withFrameNanos', 'layout.viewportSize.height', 'layout.visibleItemsInfo',
                       'readyTurns[it.listKey] != it', 'it.listKey in visibleKeys && !it.isStreaming', 'revealedTurns[it.listKey] != it',
                       'layout.afterContentPadding - layout.viewportEndOffset', 'listState.canScrollForward',
-                      'listState.scrollBy(overflow.toFloat())', 'initialPositionPending = false'):
+                      'listState.scrollBy(overflow.toFloat())', 'aligned = true'):
             self.assertIn(token, initial)
         self.assertNotIn('animateScroll', initial)
-        self.assertLess(initial.index('listState.scrollBy(overflow.toFloat())'), initial.rindex('initialPositionPending = false'))
+        self.assertLess(initial.index('listState.scrollBy(overflow.toFloat())'), initial.rindex('aligned = true'))
+
+    def test_empty_snapshot_preserves_pending_and_first_measure_is_seeded(self):
+        chat = CHAT.read_text()
+        self.assertIn('rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)', chat)
+        self.assertIn('initialChatListIndex(scrollRequest, scrollRequest?.targetIndex(turns) ?: -1, tailIndex)', chat)
+        self.assertIn('initialPositionPending = retainInitialChatPosition(initialPositionPending, followBottom)', chat)
+        self.assertNotIn('if (!followBottom || tailIndex < 0)', chat)
+        self.assertIn('request != null || initialPositionPending && scrollRequest == null', chat)
+        self.assertIn('it.index == index && it.key == currentTailKey', chat)
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatInitialPositionTest.kt').read_text()
+        self.assertIn('testEmptySnapshotKeepsFirstPlacementPendingUntilHistoryArrives', device)
+        self.assertIn('testFirstVisitWithoutScrollRequestDoesNotAnimateColdHistoryIntoPlace', device)
 
     def test_hidden_rows_cannot_take_touch_or_send_visibility_receipts(self):
         chat = CHAT.read_text()

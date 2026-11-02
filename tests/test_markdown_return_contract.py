@@ -15,7 +15,8 @@ class MarkdownReturnContract(unittest.TestCase):
 
     def test_first_composition_uses_exact_cached_ast_before_producer_runs(self):
         ui = self.ui.split("internal fun rememberMarkdownProjection(", 1)[1].split("\n@Composable", 1)[0]
-        self.assertIn("markdownProjectionCache.get(sources, parser)", ui)
+        self.assertIn("markdownProjectionCache.get(sources, parser) ?: markdownProjectionCache.getPrepared(sources, parser)", ui)
+        self.assertLess(ui.index("markdownProjectionCache.getPrepared(sources, parser)"), ui.index("produceState<MarkdownProjection?>"))
         self.assertIn("produceState<MarkdownProjection?>(cached, parserIdentity)", ui)
         self.assertIn("collectMarkdownProjections(snapshotFlow { requested }, parser) { value = it }", ui)
         self.assertIn("return cached ?: completed?.takeIf { it.parser === parser && isMarkdownAppend(it.sources, sources) }", ui)

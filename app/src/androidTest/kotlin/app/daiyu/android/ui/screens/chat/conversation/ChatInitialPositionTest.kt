@@ -45,7 +45,8 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
     private var probeEpoch by mutableStateOf(0)
     private val capturedProbes = CopyOnWriteArrayList<Pair<String, Int>>()
     private var owner by mutableStateOf("first")
-    private var request by mutableStateOf(ChatScrollRequest(1))
+    private var request by mutableStateOf<ChatScrollRequest?>(ChatScrollRequest(1))
+    private var rowsAvailable by mutableStateOf(true)
     private var body by mutableStateOf("")
     private var tailHeight by mutableStateOf(700.dp)
     private var viewportTop = 0f
@@ -130,7 +131,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                         }) {
                             holder.SaveableStateProvider(visit) {
                                 key(visit) {
-                                    ChatMessageList(turns, ChatScreenActions(
+                                    ChatMessageList(if (rowsAvailable) turns else emptyList(), ChatScreenActions(
                                         onVisibleCompleted = { reads += it },
                                         onVisibleTextAdvance = { advances += it },
                                     ), scrollRequest = request, turnExtras = { turn ->
@@ -154,7 +155,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         ui.runOnUiThread {
             owner = id
             body = text
-            request = ChatScrollRequest(request.serial + 1)
+            request = ChatScrollRequest((request?.serial ?: 0) + 1)
         }
     }
 
@@ -223,6 +224,42 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             switchTo("second")
+            frames()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+        awaitDraw("second")
+        assertOnlyAlignedDraws("second")
+    }
+
+    fun testEmptySnapshotKeepsFirstPlacementPendingUntilHistoryArrives() {
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread {
+                rowsAvailable = false
+                owner = "second"
+                request = ChatScrollRequest(2)
+            }
+            frames(4)
+            assertTrue(draws.none { it.frameOwner == "second" })
+            ui.runOnUiThread { rowsAvailable = true }
+            frames()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+        awaitDraw("second")
+        assertOnlyAlignedDraws("second")
+    }
+
+    fun testFirstVisitWithoutScrollRequestDoesNotAnimateColdHistoryIntoPlace() {
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread {
+                owner = "second"
+                request = null
+            }
             frames()
         } finally {
             ui.mainClock.autoAdvance = true

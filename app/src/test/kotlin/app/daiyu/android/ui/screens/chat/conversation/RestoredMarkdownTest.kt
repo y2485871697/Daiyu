@@ -21,8 +21,75 @@ class RestoredMarkdownTest {
         val parser: (String) -> List<MarkdownBlock> = { calls += it; MarkdownParser.parse(it) }
         prepareRestoredMarkdown(listOf(original), cache, parser)
         assertEquals(listOf(a, b), calls)
-        assertNotNull(cache.getPrepared(listOf(a, b), parser))
+        val turn = ChatTurnMapper.map(listOf(original)).single() as ChatTurnUi.Assistant
+        val sources = turn.workflowContent().body.filterIsInstance<MessageContentUi.Text>().map { it.text }
+        assertEquals(listOf(a, b), sources)
+        assertNotNull(cache.getPrepared(sources, parser))
         assertFalse(restoredMarkdownSources(listOf(original)).contains("$a\n\n$b"))
+    }
+
+    @Test fun longOrdinarySegmentsPrepareTheProductionSourcesInsteadOfAnUnusedJoinedCopy() {
+        val first = "a".repeat(100_000)
+        val second = "b".repeat(100_000)
+        val original = message(first, second)
+        val turn = ChatTurnMapper.map(listOf(original)).single() as ChatTurnUi.Assistant
+        val sources = turn.workflowContent().body.filterIsInstance<MessageContentUi.Text>().map { it.text }
+        val cache = MarkdownProjectionCache()
+        val calls = mutableListOf<String>()
+        val parser: (String) -> List<MarkdownBlock> = { calls += it; MarkdownParser.parse(it) }
+        prepareRestoredMarkdown(listOf(original), cache, parser)
+        assertEquals(listOf(first, second), sources)
+        assertEquals(sources, calls)
+        val prepared = cache.getPrepared(sources, parser)!!
+        assertSame(parser, prepared.parser)
+        sources.forEach { assertEquals(MarkdownParser.parse(it), prepared.blocks[it]) }
+        assertNull(cache.getBlocks(turn.finalText, parser))
+        assertNull(cache.getPrepared(sources, streamingMarkdownParser))
+        assertEquals(original.blocks, listOf(MessageBlock.Text("text-0", first), MessageBlock.Text("text-1", second)))
+    }
+
+    @Test fun shortOrdinarySegmentsUseOnlyTheirRealEntryBudget() {
+        val original = message("**first**", "second `code`")
+        val cache = MarkdownProjectionCache(maxEntries = 2)
+        val calls = mutableListOf<String>()
+        val parser: (String) -> List<MarkdownBlock> = { calls += it; MarkdownParser.parse(it) }
+        prepareRestoredMarkdown(listOf(original), cache, parser)
+        val turn = ChatTurnMapper.map(listOf(original)).single() as ChatTurnUi.Assistant
+        val sources = turn.workflowContent().body.filterIsInstance<MessageContentUi.Text>().map { it.text }
+        assertEquals(listOf("**first**", "second `code`"), sources)
+        assertEquals(sources, calls)
+        assertNotNull(cache.getPrepared(sources, parser))
+        assertNull(cache.getBlocks(turn.finalText, parser))
+        prepareRestoredMarkdown(listOf(original), cache, parser)
+        assertEquals(sources, calls)
+    }
+
+    @Test fun completedHistorySegmentsMatchTheMappedBodyAndDoNotWarmJoinedCopies() {
+        val original = message("tail").copy(historySegments = listOf(
+            MessageHistorySegment(MessageId("answer"), Message.ASSISTANT_ROLE,
+                listOf(MessageBlock.Text("one", "**earlier**"))),
+            MessageHistorySegment(MessageId("answer"), Message.ASSISTANT_ROLE,
+                listOf(MessageBlock.Text("two", "later `code`"))),
+        ))
+        val cache = MarkdownProjectionCache()
+        prepareRestoredMarkdown(listOf(original), cache)
+        val turns = ChatTurnMapper.map(listOf(original)).filterIsInstance<ChatTurnUi.Assistant>()
+        val sources = turns.flatMap { it.workflowContent().body.filterIsInstance<MessageContentUi.Text>().map { it.text } }
+        assertEquals(listOf("**earlier**", "later `code`"), sources)
+        assertNotNull(cache.getPrepared(sources, defaultMarkdownParser))
+        assertNull(cache.getPrepared(listOf(sources.joinToString("\n\n")), defaultMarkdownParser))
+    }
+
+    @Test fun aSingleOrdinarySourceKeepsTheDefaultParserIdentity() {
+        val original = message("**single**")
+        val cache = MarkdownProjectionCache()
+        prepareRestoredMarkdown(listOf(original), cache)
+        val turn = ChatTurnMapper.map(listOf(original)).single() as ChatTurnUi.Assistant
+        val sources = turn.workflowContent().body.filterIsInstance<MessageContentUi.Text>().map { it.text }
+        val prepared = cache.getPrepared(sources, defaultMarkdownParser)!!
+        assertSame(defaultMarkdownParser, prepared.parser)
+        assertEquals(MarkdownParser.parse("**single**"), prepared.blocks["**single**"])
+        assertNull(cache.getPrepared(sources, streamingMarkdownParser))
     }
 
     @Test fun prewarmingACompositeCacheHitCannotEvictAnotherSelectedSource() {
@@ -44,12 +111,14 @@ class RestoredMarkdownTest {
         val calls = mutableListOf<String>()
         val parser: (String) -> List<MarkdownBlock> = { calls += it; MarkdownParser.parse(it) }
         prepareRestoredMarkdown(listOf(original), cache, parser)
-        for (sources in listOf(listOf("**first**\n\nSecond paragraph."), listOf("**first**", "Second paragraph."))) {
-            val ready = cache.getPrepared(sources, parser)!!
-            assertEquals(sources, ready.sources)
-            assertSame(parser, ready.parser)
-            sources.forEach { assertEquals(MarkdownParser.parse(it), ready.blocks[it]) }
-        }
+        val turn = ChatTurnMapper.map(listOf(original)).single() as ChatTurnUi.Assistant
+        val sources = turn.workflowContent().body.filterIsInstance<MessageContentUi.Text>().map { it.text }
+        assertEquals(listOf("**first**", "Second paragraph."), sources)
+        val ready = cache.getPrepared(sources, parser)!!
+        assertEquals(sources, ready.sources)
+        assertSame(parser, ready.parser)
+        sources.forEach { assertEquals(MarkdownParser.parse(it), ready.blocks[it]) }
+        assertNull(cache.getPrepared(listOf(turn.finalText), parser))
         val firstCalls = calls.toList()
         prepareRestoredMarkdown(listOf(original), cache, parser)
         assertEquals(firstCalls, calls)

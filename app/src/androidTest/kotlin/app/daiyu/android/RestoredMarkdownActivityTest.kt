@@ -13,11 +13,11 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
     private lateinit var conversation: Conversation
     private lateinit var original: List<Pair<Long, Message>>
     private val marker = UUID.randomUUID().toString()
-    private val source get() = "Restored **$marker**.\n\nSecond paragraph."
+    private val sources get() = listOf("Restored **$marker**.", "Second paragraph.")
     private val rendered get() = "Restored $marker."
 
     override fun createFixture(): RunControlFixture {
-        assertNull(markdownProjectionCache.getPrepared(listOf(source), defaultMarkdownParser))
+        assertNull(markdownProjectionCache.getPrepared(sources, defaultMarkdownParser))
         val result = RunControlFixture(instrumentation.targetContext, beforeController = { database, preferences ->
             conversation = database.create("default")
             val user = Message(MessageId("restored-user"), conversation.id, RunId("restored-run"), Message.USER_ROLE,
@@ -33,7 +33,7 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
         try {
             awaitControl("history recovery ready before Activity mounts") { result.controller.ready }
             assertNotNull("Ready must already include the exact historical AST",
-                markdownProjectionCache.getPrepared(listOf(source), defaultMarkdownParser))
+                markdownProjectionCache.getPrepared(sources, defaultMarkdownParser))
             return result
         } catch (failure: Throwable) {
             result.close()

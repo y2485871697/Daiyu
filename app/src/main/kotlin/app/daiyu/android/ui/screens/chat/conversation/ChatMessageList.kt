@@ -112,16 +112,19 @@ internal fun ChatMessageList(
     val currentTailIndex by rememberUpdatedState(tailIndex)
     val currentTailKey by rememberUpdatedState(
         tailCompressions.lastOrNull()?.let { "chat-context-compressing:${it.id}" } ?: turns.lastOrNull()?.listKey)
-    val listState = rememberLazyListState()
+    // Seed the first measure at the destination, not at the oldest loaded message.
+    // LazyListState's saver still owns an existing reader position on restoration.
+    val initialIndex = initialChatListIndex(scrollRequest, scrollRequest?.targetIndex(turns) ?: -1, tailIndex)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val dragging by listState.interactionSource.collectIsDraggedAsState()
     var followBottom by rememberSaveable { mutableStateOf(true) }
     var wasDragged by remember { mutableStateOf(false) }
     var touchEpoch by remember { mutableStateOf(0L) }
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
+    // No request yet is also a first visit, not live output. Keep this pending
+    // through an empty snapshot; otherwise cold Markdown growth is animated.
     var initialPositionPending by remember {
-        mutableStateOf(scrollRequest?.let {
-            it.serial != consumedScrollSerial && it.followBottom && it.messageId == null && it.listKey == null
-        } == true)
+        mutableStateOf(initialChatPositionPending(scrollRequest, consumedScrollSerial, followBottom))
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var scrollResumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
@@ -200,20 +203,23 @@ internal fun ChatMessageList(
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
     LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed) {
         if (!scrollResumed) return@LaunchedEffect
-        scrollRequest?.takeIf { it.serial != consumedScrollSerial }?.let { request ->
-            followBottom = request.followBottom && request.messageId == null && request.listKey == null
-            if (!followBottom || tailIndex < 0) initialPositionPending = false
+        val request = scrollRequest?.takeIf { it.serial != consumedScrollSerial }
+        if (request != null || initialPositionPending && scrollRequest == null) {
+            if (request != null) {
+                followBottom = request.followBottom && request.messageId == null && request.listKey == null
+            }
+            initialPositionPending = retainInitialChatPosition(initialPositionPending, followBottom)
             wasDragged = false
             // Subcomposition may start this effect during measurement.
             withFrameNanos { }
             if (!scrollResumed) return@LaunchedEffect
-            if (request.messageId != null || request.listKey != null) {
+            if (request != null && (request.messageId != null || request.listKey != null)) {
                 val index = request.targetIndex(turns)
                 if (index >= 0) {
                     listState.animateScrollToItem(index)
                     consumedScrollSerial = request.serial
                 }
-            } else if (request.followBottom && tailIndex >= 0) {
+            } else if (followBottom && tailIndex >= 0) {
                 listState.scrollToItem(tailIndex)
                 if (initialPositionPending) {
                     // Initial placement is layout restoration, not streaming output to animate.
@@ -222,8 +228,8 @@ internal fun ChatMessageList(
                         if (!scrollResumed) return@LaunchedEffect
                         val index = currentTailIndex
                         val layout = listState.layoutInfo
-                        if (layout.viewportSize.height <= 0) continue
-                        val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+                        if (index < 0 || layout.viewportSize.height <= 0) continue
+                        val last = layout.visibleItemsInfo.lastOrNull { it.index == index && it.key == currentTailKey }
                         if (last == null) {
                             listState.scrollToItem(index)
                             continue
@@ -238,11 +244,11 @@ internal fun ChatMessageList(
                             listState.scrollBy(overflow.toFloat())
                             continue
                         }
-                        initialPositionPending = false
+                        initialPositionPending = retainInitialChatPosition(initialPositionPending, followBottom, aligned = true)
                         break
                     }
                 }
-                consumedScrollSerial = request.serial
+                if (request != null) consumedScrollSerial = request.serial
             }
         }
     }

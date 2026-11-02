@@ -12,8 +12,9 @@ internal fun restoredMarkdownSources(messages: List<Message>): List<String> =
         .flatMap { message ->
             val texts = message.blocks.filterIsInstance<MessageBlock.Text>().map { it.text }
             val summaries = message.reportedReasoning.filter { hasReportedReasoningText(it.text) }.map { it.text }
-            summaries + if (message.blocks.any { it is MessageBlock.Tool || it is MessageBlock.Image }) texts
-            else texts + texts.joinToString("\n\n")
+            // The production mapper preserves Text item boundaries in finalContent (and mixed content).
+            // A joined copy is not rendered; warming it first can evict every actual segment.
+            summaries + texts
         }
 
 /** Called by the recovery worker, before historical turns become visible. Only inert ASTs are kept. */

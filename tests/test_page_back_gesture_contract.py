@@ -314,7 +314,7 @@ class PageBackGestureContractTest(unittest.TestCase):
     def test_local_visual_routes_keep_ancestors_and_cancel_never_adds_a_pop(self):
         stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
         for wiring in ('fun attached(', 'parentPath', 'freezeCurrent()',
-                       'entry.child = routeKey != null', 'entry.path = path', 'entry.target = target'):
+                       'entry.child = active && routeKey != null', 'entry.path = path', 'entry.target = target'):
             self.assertIn(wiring, stack)
         self.assertIn('stack.ancestorKeys(routeKey, backTargetKey)', self.host)
         self.assertIn('predictiveGeneration', self.host)
@@ -364,9 +364,9 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_local_stack_freezes_before_replacing_content_and_validates_ancestors(self):
         stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
-        self.assertLess(stack.index('parent.registry.freezeCurrent()'), stack.index('    CompositionLocalProvider'))
-        for token in ('attached(it) && it.path == entry.parentPath', 'entries.remove(entry)',
-                      'entry.child = routeKey != null', 'PageBackRouteKey(root, path)', 'ancestorKeys'):
+        self.assertLess(stack.index('checkNotNull(parent).registry.freezeCurrent()'), stack.index('    CompositionLocalProvider'))
+        for token in ('attached(it) && it.path == entry.parentPath', 'registry?.entries?.remove(entry)',
+                      'entry.child = active && routeKey != null', 'PageBackRouteKey(root, path)', 'ancestorKeys'):
             self.assertIn(token, stack)
         self.assertNotIn('key(routeKey)', stack)
         self.assertIn('stack.freezeCurrent = { layers.freezeCurrent() }', self.host)

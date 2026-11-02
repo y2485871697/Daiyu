@@ -168,8 +168,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
         MenuEntry("目录引用", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
     )
     val colors = usagePalette()
-    ChatSelectionSheet("附件", onDismiss, subtitle = "选择你要添加的内容", showCloseButton = false,
-        titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
+    ChatSelectionSheet("附件", onDismiss, showCloseButton = false, titleFontSize = 20.sp) {
         val finishSelection = app.daiyu.android.ui.components.rememberBottomSheetAction()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             entries.forEach { entry ->

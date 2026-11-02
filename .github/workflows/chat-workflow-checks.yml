@@ -12,9 +12,9 @@ on:
         type: string
         required: true
       check_scope:
-        description: 工作流程、环境圆点、发送状态或表格样式的定向检查范围
+        description: 工作流程、环境圆点、发送状态、表格样式或附件弹层的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table]
+        options: [workflow, environment-dots, composer-send, markdown-table, attachment-contracts]
         default: workflow
 permissions:
   contents: read
@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   workflow:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.check_scope != 'attachment-contracts'
     runs-on: ubuntu-26.04
     timeout-minutes: 35
     env:
@@ -159,4 +159,49 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/reports/tests/testDebugUnitTest/
             app/build/reports/host-pty/
+          if-no-files-found: error
+
+  attachment-contracts:
+    if: github.ref == 'refs/heads/main' && inputs.check_scope == 'attachment-contracts'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: 附件弹层定向契约（不编译、不打包）
+        shell: bash
+        run: |
+          test -n "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          mkdir -p attachment-checks
+          set -o pipefail
+          python3 -B - 2>&1 <<'PY' | tee attachment-checks/contracts.log
+          import json, os, unittest
+          from pathlib import Path
+          records = []
+          for pattern in ('test_chat_attachment_sizing_contract.py',
+                          'test_shared_sheet_spacing_contract.py',
+                          'test_sheet_selection_exit_contract.py'):
+              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              assert suite.countTestCases() > 0, pattern
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              assert result.wasSuccessful() and not result.skipped, pattern
+              records.append(dict(pattern=pattern, tests=result.testsRun, skipped=0))
+          record = dict(source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'],
+                        run_id=os.environ['GITHUB_RUN_ID'], attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+                        check_scope='attachment-contracts', contracts=records,
+                        apk_built=False, instrumentation_run=False, kotlin_compiled=False)
+          Path('attachment-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(record, ensure_ascii=False))
+          PY
+      - name: 上传附件契约证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 附件弹层契约检查
+          path: attachment-checks/
           if-no-files-found: error

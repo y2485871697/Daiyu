@@ -89,9 +89,7 @@ class ChatAttachmentSizingActivityTest : WiredActivityTestCase() {
             val title = textLayout("附件")
             assertEquals(20.sp, title.layoutInput.style.fontSize)
             assertEquals(26.sp, title.layoutInput.style.lineHeight)
-            val subtitle = textLayout("选择你要添加的内容")
-            assertEquals(14.sp, subtitle.layoutInput.style.fontSize)
-            assertEquals(18.sp, subtitle.layoutInput.style.lineHeight)
+            ui.onNodeWithText("选择你要添加的内容", useUnmergedTree = true).assertDoesNotExist()
             val surface = node("chat-selection-sheet").fetchSemanticsNode().boundsInRoot
             var previousTag: String? = null
             for ((label, action) in entries) {

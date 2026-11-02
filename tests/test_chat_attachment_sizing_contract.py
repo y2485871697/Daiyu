@@ -19,12 +19,22 @@ class ChatAttachmentSizingContract(unittest.TestCase):
         self.assertIn("subtitleFontSize: TextUnit = 12.sp", self.shell)
         self.assertIn("fontSize = titleFontSize, lineHeight = 26.sp", self.shell)
         self.assertIn("fontSize = subtitleFontSize, lineHeight = 18.sp", self.shell)
-        self.assertIn("titleFontSize = 20.sp, subtitleFontSize = 14.sp", self.attachment)
+        self.assertIn("titleFontSize = 20.sp", self.attachment)
         for file in UI.rglob("*.kt"):
             if file.name not in {"ChatMenus.kt", "ChatSelectionSheet.kt"}:
                 text = file.read_text()
                 for call in re.findall(r"\bChatSelectionSheet\s*\(([^)]*)\)", text, re.S):
                     self.assertNotRegex(call, r"\b(?:titleFontSize|subtitleFontSize)\s*=", str(file))
+
+    def test_attachment_omits_subtitle_and_its_spacing_without_changing_shared_shell(self):
+        self.assertIn('ChatSelectionSheet("附件", onDismiss, showCloseButton = false, titleFontSize = 20.sp)',
+                      self.attachment)
+        for token in ["选择你要添加的内容", "选择你要添加的附件", "subtitle", "Spacer("]:
+            self.assertNotIn(token, self.attachment)
+        self.assertIn("subtitle: String? = null", self.shell)
+        self.assertRegex(self.shell, r"subtitle\?\.let\s*\{\s*Text\(it,[\s\S]*?\.padding\(top = 4\.dp\)\)\s*\}")
+        self.assertIn("Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)", self.shell)
+        self.assertIn(".heightIn(min = if (showCloseButton) 40.dp else 0.dp)", self.shell)
 
     def test_four_entries_keep_mapping_click_semantics_and_dismiss_order(self):
         self.assertEqual([
@@ -36,7 +46,7 @@ class ChatAttachmentSizingContract(unittest.TestCase):
                       self.attachment))
         self.assertIn("import app.daiyu.android.ui.haptics.clickable", self.menus)
         self.assertIn("indication = null", self.attachment)
-        self.assertIn("role = Role.Button) { onDismiss(); onAction(entry.action) }", self.attachment)
+        self.assertIn("role = Role.Button) { finishSelection { onDismiss(); onAction(entry.action) } }", self.attachment)
         self.assertIn("showCloseButton = false", self.attachment)
 
     def test_rows_use_readable_text_icons_and_flexible_touch_targets(self):

@@ -50,7 +50,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -153,12 +152,10 @@ internal val LocalPageBackPreviewFrame = staticCompositionLocalOf<PageBackPrevie
 @Composable
 internal fun Modifier.pageBackPreviewSource(): Modifier {
     val frame = LocalPageBackPreviewFrame.current ?: return this
-    return layout { measurable, constraints ->
-        val placeable = measurable.measure(constraints)
-        layout(placeable.width, placeable.height) {
-            frame.size = IntSize(placeable.width, placeable.height)
-            placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)
-        }
+    return drawWithContent {
+        frame.size = IntSize(size.width.toInt(), size.height.toInt())
+        frame.layer.record { this@drawWithContent.drawContent() }
+        drawLayer(frame.layer)
     }.background(MiuixTheme.colorScheme.background)
 }
 
@@ -499,17 +496,15 @@ internal fun PageBackGestureHost(
                         if (frame.holdingForChild) frame.childChangeCaptured = false
                         drawContent()
                     }
-                }.layout { measurable, constraints ->
-                    val placeable = measurable.measure(constraints)
-                    layout(placeable.width, placeable.height) {
-                        if (captureFromContent) placeable.place(x = 0, y = 0)
-                        else {
-                            frame.size = IntSize(placeable.width, placeable.height)
-                            placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)
-                        }
+                }.drawWithContent {
+                    if (captureFromContent) drawContent()
+                    else {
+                        frame.size = IntSize(size.width.toInt(), size.height.toInt())
+                        frame.layer.record { this@drawWithContent.drawContent() }
+                        drawLayer(frame.layer)
                     }
                 }.background(background)) {
-                    if (retainedRootContent != null) key(layers, previewScopeKey, retainedRootScopeKey) {
+                    if (retainedRootContent != null) key(previewScopeKey, retainedRootScopeKey) {
                         val rootActive = retainedRootActive && resumed
                         CompositionLocalProvider(
                             LocalPageBackGesture provides state.takeIf { rootActive },

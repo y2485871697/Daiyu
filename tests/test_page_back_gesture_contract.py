@@ -183,10 +183,11 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('captureFromContent = retainedPage == "chat" && !sidebarVisible', self.main)
         self.assertIn('captureFromContent: Boolean = false', self.host)
         self.assertIn('LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }', self.host)
-        self.assertIn('if (captureFromContent) placeable.place(x = 0, y = 0)', self.host)
+        self.assertIn('if (captureFromContent) drawContent()', self.host)
         source = self.host.split('internal fun Modifier.pageBackPreviewSource()', 1)[1].split('private val LocalPageBackGesture', 1)[0]
         self.assertIn('LocalPageBackPreviewFrame.current ?: return this', source)
-        self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', source)
+        self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', source)
+        self.assertIn('drawLayer(frame.layer)', source)
         drawer = (APP / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
         self.assertIn('import app.daiyu.android.ui.navigation.pageBackPreviewSource', drawer)
         self.assertIn('.captureForTopBar(backdrop).pageBackPreviewSource()) { content() }', drawer)
@@ -196,7 +197,8 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_previous_page_is_readonly_recorded_content_not_a_second_composition(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', self.host)
+        self.assertNotIn('placeWithLayer', self.host)
+        self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', self.host)
         self.assertIn('drawPreview(target)', self.host)
         self.assertIn('drawPreview(departure.frame)', self.host)
         self.assertIn('if (target != null && state.previewAllowed) progress else 0f', self.host)
@@ -218,9 +220,11 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertEqual(1, self.host.count('{ content() }'))
         surface = self.host.split('key(if (retainedRootContent == null) contentKey else RetainedRootSurface) {', 1)[1].split('testTag("page-back-departure-scrim")', 1)[0]
         self.assertIn('testTag("page-back-surface")', surface)
-        self.assertIn('frame.size = IntSize(placeable.width, placeable.height)', surface)
-        self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', surface)
-        self.assertNotIn('frame.layer.record', surface)
+        self.assertIn('frame.size = IntSize(size.width.toInt(), size.height.toInt())', surface)
+        self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', surface)
+        self.assertIn('drawLayer(frame.layer)', surface)
+        self.assertIn('key(previewScopeKey, retainedRootScopeKey)', surface)
+        self.assertNotIn('key(layers, previewScopeKey, retainedRootScopeKey)', surface)
         self.assertIn('if (held != null) drawImage(held)', surface)
         self.assertIn('drawContent()', surface)
         self.assertEqual(1, surface.count('{ content() }'))

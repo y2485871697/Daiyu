@@ -24,7 +24,7 @@ class MarkdownColdStartContract(unittest.TestCase):
         self.assertIn('var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current))', source)
         self.assertIn('sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody', source)
         self.assertIn('if (hasDisplayBody) hasProjectedBody = true', source)
-        self.assertIn('turn.status != RunStatus.RUNNING && !initialBodyPending', source)
+        self.assertIn('showActions && actionTurn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady', source)
         self.assertIn('SideEffect { onContentReady(contentReady) }', source)
         self.assertIn('val revealSettled = reveal.settled', source)
         self.assertIn('SideEffect { onRevealSettled(revealSettled) }', source)

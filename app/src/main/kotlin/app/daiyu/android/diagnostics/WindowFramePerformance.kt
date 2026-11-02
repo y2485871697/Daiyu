@@ -34,6 +34,7 @@ internal class WindowFramePerformance private constructor(
     private val activity: ComponentActivity, private val store: DiagnosticLogStore,
 ) {
     private val log = store.frames
+    private val diagnostic = app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS
     private val windows = LinkedHashMap<Window, String>()
     private val sessions = LinkedHashMap<Window, Session>() // Main thread owns listener membership.
     private var thread: HandlerThread? = null
@@ -42,20 +43,30 @@ internal class WindowFramePerformance private constructor(
     private val contexts = LinkedHashMap<Window, LinkedHashMap<Any, String>>()
     private fun path(window: Window) = (listOf(route) + (contexts[window]?.values?.toList() ?: emptyList())).joinToString("/")
     internal fun context(window: Window, token: Any, label: String?) {
-        val labels = contexts.getOrPut(window) { LinkedHashMap() }
-        if (label == null) labels.remove(token) else labels[token] = label
+        if (label == null) {
+            val labels = contexts[window] ?: return
+            labels.remove(token)
+            if (labels.isEmpty()) contexts.remove(window)
+        } else contexts.getOrPut(window) { LinkedHashMap() }[token] = label
         val current = path(window)
         val now = System.nanoTime()
         val session = sessions[window]
         handler?.post { session?.timeline?.change(now, current); session?.batch?.flush("context") }
     }
     private var resumed = false
-    private var enabled = false
+    private var enabled = diagnostic
     private var closed = false
     @Volatile private var retired: CountDownLatch? = null
 
     private inner class Session(val window: Window, val kind: String) {
         val timeline = PerformanceRouteTimeline()
+        val incident: JankIncidentBuffer = JankIncidentBuffer(
+            emit = { rows, complete -> JankDiagnostics.save(activity.applicationContext, kind, rows, complete) },
+            trigger = {
+                JankDiagnostics.trigger()
+                handler?.postDelayed({ incident.checkpoint() }, 2000)
+            },
+        )
         val batch = PerformanceFrameBatch({ epoch, row ->
             row.put("window", kind).put("sdk", Build.VERSION.SDK_INT)
             row.put("app_version", app.daiyu.android.BuildConfig.VERSION_NAME)
@@ -65,7 +76,8 @@ internal class WindowFramePerformance private constructor(
         })
         @Volatile var refreshHz = refreshRate(window)
         val listener = Window.OnFrameMetricsAvailableListener { _, metrics, drops ->
-            val epoch = log.captureEpoch() ?: return@OnFrameMetricsAvailableListener
+            val epoch = log.captureEpoch()
+            if (epoch == null && !diagnostic) return@OnFrameMetricsAvailableListener
             try {
             val intended = metrics.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP)
             val vsync = intended.takeIf { it > 0 } ?: System.nanoTime()
@@ -77,9 +89,12 @@ internal class WindowFramePerformance private constructor(
                 metrics.getMetric(FrameMetrics.DRAW_DURATION), metrics.getMetric(FrameMetrics.SYNC_DURATION),
                 metrics.getMetric(FrameMetrics.COMMAND_ISSUE_DURATION), metrics.getMetric(FrameMetrics.SWAP_BUFFERS_DURATION),
                 if (Build.VERSION.SDK_INT >= 31) metrics.getMetric(FrameMetrics.GPU_DURATION) else -1L)
-            batch.add(epoch, timeline.pageAt(vsync), PerformanceFrame(vsync,
+            val frame = PerformanceFrame(vsync,
                 metrics.getMetric(FrameMetrics.TOTAL_DURATION), budget, refreshHz, stages, drops.coerceAtLeast(0),
-                metrics.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 1L))
+                metrics.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 1L)
+            val page = timeline.pageAt(vsync)
+            if (epoch != null) batch.add(epoch, page, frame)
+            if (diagnostic) incident.add(page, frame)
             } catch (_: RuntimeException) { log.reportCaptureFailure() }
         }
     }
@@ -125,7 +140,7 @@ internal class WindowFramePerformance private constructor(
         val session = sessions.remove(window) ?: return
         try { window.removeOnFrameMetricsAvailableListener(session.listener) }
         catch (_: RuntimeException) { /* Window may already have been removed by the platform. */ }
-        handler?.post { session.batch.flush("window_detached") }
+        handler?.post { session.batch.flush("window_detached"); session.incident.flush() }
     }
     private fun reconcile() {
         activity.window.decorView.removeCallbacks(heartbeat)
@@ -149,7 +164,7 @@ internal class WindowFramePerformance private constructor(
         }
     }
     internal fun registerWindow(window: Window, kind: String) { windows[window] = kind; attach(window, kind) }
-    internal fun unregisterWindow(window: Window) { windows.remove(window); detach(window) }
+    internal fun unregisterWindow(window: Window) { windows.remove(window); contexts.remove(window); detach(window) }
 
     companion object {
         private val hosts = WeakHashMap<Activity, WindowFramePerformance>()
@@ -181,7 +196,7 @@ internal class WindowFramePerformance private constructor(
             host.log.registerCapture(host, flushHook)
             val observer = LifecycleEventObserver { _, event ->
                 when (event) {
-                    Lifecycle.Event.ON_RESUME -> { host.resumed = true; host.reconcile() }
+                    Lifecycle.Event.ON_RESUME -> { host.resumed = true; host.reconcile(); if (host.diagnostic) JankDiagnostics.ready() }
                     Lifecycle.Event.ON_PAUSE -> { host.resumed = false; host.reconcile() }
                     Lifecycle.Event.ON_DESTROY -> {
                         host.closed = true; host.reconcile(); hosts.remove(activity)
@@ -193,7 +208,7 @@ internal class WindowFramePerformance private constructor(
             activity.lifecycleScope.launch {
                 withContext(Dispatchers.IO) { store.load() }
                 store.state.collect { state ->
-                    host.enabled = state.loaded && state.enabled && !state.unavailable
+                    host.enabled = host.diagnostic || (state.loaded && state.enabled && !state.unavailable)
                     host.reconcile()
                 }
             }
@@ -250,9 +265,9 @@ internal fun ObserveFrameContext(category: String, detail: String, stateKey: Any
     val dialog = (view.parent as? DialogWindowProvider)?.window
     val window = dialog ?: (context.findFrameActivity()?.window)
     val token = remember(host, window, category) { Any() }
-    val safeCategory = category.takeIf { it in setOf("screen", "chat-session", "terminal-mode", "terminal-session", "linux-tab", "browser-tab", "browser-panel", "provider-tab", "popup") } ?: "context"
+    val safeCategory = category.takeIf { it in setOf("screen", "chat-session", "terminal-mode", "terminal-session", "linux-tab", "browser-tab", "browser-panel", "provider-tab", "popup", "interaction") } ?: "context"
     val safeDetail = if (category == "screen") PerformanceScreenNames.label(detail) else detail.takeIf {
-        it in setOf("new", "selected", "android-simple", "android-console", "linux-simple", "linux-console", "basic", "files", "content", "history", "settings", "downloads", "models", "connection", "receipt", "active", "paused")
+        it in setOf("new", "selected", "android-simple", "android-console", "linux-simple", "linux-console", "basic", "files", "content", "history", "settings", "downloads", "models", "connection", "receipt", "active", "paused", "menu-open", "menu-exit", "back-predictive", "back-drag", "page-transition", "back-settle", "idle")
     } ?: "detail"
     DisposableEffect(host, window, token, safeDetail, stateKey) {
         if (window != null) host?.context(window, token, "$safeCategory=$safeDetail")
@@ -269,4 +284,37 @@ private fun Context.findFrameActivity(): Activity? {
         context = base
     }
     return context as? Activity
+}
+
+/** Only discrete labels are observed; animated fractions/coordinates never enter composition. */
+@Composable
+internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String) {
+    if (!app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS) return
+    val context = LocalContext.current
+    val host = WindowFramePerformance.forContext(context)
+    val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: context.findFrameActivity()?.window
+    val token = remember(host, window, kind) { Any() }
+    val current = androidx.compose.runtime.rememberUpdatedState(readPhase)
+    val safeKind = kind.takeIf { it in setOf("menu", "popup", "navigation", "drawer", "chat-scroll") } ?: "interaction"
+    androidx.compose.runtime.LaunchedEffect(host, window, token) {
+        val cookie = System.identityHashCode(token)
+        var activeSpan: String? = null
+        try {
+            androidx.compose.runtime.snapshotFlow { current.value() }.collect { phase ->
+                val safePhase = phase.takeIf { it in setOf("idle", "entering", "open", "exiting", "retained",
+                    "drag", "scroll", "predictive", "settle", "forward", "return", "closed", "moving") } ?: "idle"
+                if (window != null) host?.context(window, token, "$safeKind=$safePhase")
+                activeSpan?.let { JankDiagnostics.endPhase(it, cookie) }
+                activeSpan = "daiyu.$safeKind=$safePhase"
+                JankDiagnostics.beginPhase(checkNotNull(activeSpan), cookie)
+                JankDiagnostics.counter("daiyu.$safeKind", when (safePhase) {
+                    "idle", "closed" -> 0; "entering", "drag" -> 1; "open", "scroll", "predictive" -> 2
+                    "exiting", "settle", "moving" -> 3; "forward" -> 4; "return" -> 5; else -> 6
+                })
+            }
+        } finally {
+            activeSpan?.let { JankDiagnostics.endPhase(it, cookie) }
+            if (window != null) host?.context(window, token, null)
+        }
+    }
 }

@@ -252,6 +252,9 @@ internal fun ChatMessageList(
             }
         }
     }
+    app.daiyu.android.diagnostics.ObserveDiagnosticInteraction("chat-scroll") {
+        if (!scrollResumed || !listState.isScrollInProgress) "idle" else if (currentDragging) "drag" else "scroll"
+    }
     LaunchedEffect(listState) {
         snapshotFlow { Triple(scrollResumed, currentDragging, listState.isScrollInProgress) }
             .collect { (resumed, dragged, scrolling) ->

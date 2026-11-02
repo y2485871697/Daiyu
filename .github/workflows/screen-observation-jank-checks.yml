@@ -12,9 +12,9 @@ on:
         type: string
         required: true
       check_scope:
-        description: 存储热路径或聊天滚动期间菜单重组隔离
+        description: 存储热路径、菜单重组隔离或全页UI卡顿诊断
         type: choice
-        options: [storage, menu-scroll]
+        options: [storage, menu-scroll, ui-jank]
         default: storage
 permissions:
   contents: read
@@ -68,6 +68,11 @@ jobs:
                       'test_dialog_motion_contract.DialogMotionContractTest.test_more_button_is_transparent_but_keeps_selection_semantics') if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'menu-scroll' else (
                       'test_checkpoint_encoding_hotpath_contract.py', 'test_runtime_checkpoint_reuse_contract.py',
                       'test_large_history_storage_contract.py', 'test_runtime_commit_hotpath_contract.py')
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'ui-jank':
+              patterns = ('test_jank_diagnostics_contract.py', 'test_page_frame_logging_contract.py',
+                          'test_release_package.py', 'test_compile_release_contract.py',
+                          'test_chat_menu_scroll_isolation_contract.py', 'test_chat_menu_shadow_contract.py',
+                          'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py')
           for pattern in patterns:
               suite = (unittest.TestLoader().discover('tests', pattern=pattern) if pattern.endswith('.py')
                        else unittest.TestLoader().loadTestsFromName(pattern))
@@ -78,6 +83,11 @@ jobs:
           Path('screen-jank-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
           PY
           python3 scripts/verify_boundaries.py
+          if test "$SCREEN_JANK_CHECK_SCOPE" = ui-jank; then
+            bash -n scripts/diagnostics/record-ui-jank.sh
+            python3 -m py_compile scripts/verify_release_package.py
+            ruby -rpsych -e 'ARGV.each { |f| Psych.parse_file(f) }' .github/workflows/build.yml .github/workflows/screen-observation-jank-checks.yml
+          fi
       - name: 准备既有离线语音依赖（不打包）
         run: |
           ./gradlew --no-daemon --console=plain \
@@ -108,6 +118,9 @@ jobs:
           if [[ "$SCREEN_JANK_CHECK_SCOPE" == menu-scroll ]]; then
             classes=(app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
           fi
+          if [[ "$SCREEN_JANK_CHECK_SCOPE" == ui-jank ]]; then
+            classes=(app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
+          fi
           filters=()
           for class in "${classes[@]}"; do
             filters+=(--tests "$class")
@@ -131,6 +144,8 @@ jobs:
                       'RunCheckpointCodecTest', 'ArchiveCheckpointArrayTest', 'Utf8PayloadTest'}
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'menu-scroll':
               expected = {'ChatMenuIsolationCompositionTest'}
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'ui-jank':
+              expected = {'JankIncidentBufferTest', 'FramePerformanceLogTest', 'DiagnosticLogStoreTest', 'ChatMenuIsolationCompositionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

@@ -116,6 +116,14 @@ internal fun DaiyuDropdownMenu(
 
     val motion = rememberPopupMotion(expanded)
     val visibleState = motion.visibleState
+    app.daiyu.android.diagnostics.ObserveDiagnosticInteraction("popup") {
+        when {
+            visibleState.targetState && visibleState.isIdle -> "open"
+            visibleState.targetState -> "entering"
+            visibleState.isIdle -> "retained"
+            else -> "exiting"
+        }
+    }
     val fraction = motion.fraction
     val alpha = motion.alpha
 

@@ -15,7 +15,7 @@ TEST_ID = APP_ID + '.test'
 ANDROID = '{http://schemas.android.com/apk/res/android}'
 
 
-def verify_manifests(app_xml, test_xml):
+def verify_manifests(app_xml, test_xml, diagnostic=False):
     app, tests = ET.fromstring(app_xml), ET.fromstring(test_xml)
     if app.tag != 'manifest' or tests.tag != 'manifest' or app.get('package') != APP_ID or tests.get('package') != TEST_ID:
         raise ValueError('release_package_identity_mismatch')
@@ -27,7 +27,16 @@ def verify_manifests(app_xml, test_xml):
     application = applications[0]
     if application.get(ANDROID + 'debuggable', 'false') != 'false' or application.get(ANDROID + 'testOnly', 'false') != 'false':
         raise ValueError('release_debug_or_test_only_forbidden')
-    if any(node.get(ANDROID + 'shell', 'false') != 'false' for node in application.findall('profileable')):
+    profileable_nodes = application.findall('profileable')
+    if any(node.get(ANDROID + 'shell', 'false') not in ('false', 'true') for node in profileable_nodes):
+        raise ValueError('release_shell_profileable_forbidden')
+    profileable = any(node.get(ANDROID + 'shell', 'false') == 'true' for node in profileable_nodes)
+    marker = application.find("meta-data[@" + ANDROID + "name='app.daiyu.android.JANK_DIAGNOSTICS']")
+    marked = marker is not None and marker.get(ANDROID + 'value') == 'true'
+    if diagnostic:
+        if not profileable or not marked:
+            raise ValueError('diagnostic_flags_required')
+    elif profileable or marked:
         raise ValueError('release_shell_profileable_forbidden')
     for manifest, package in ((app, APP_ID), (tests, TEST_ID)):
         if manifest.get(ANDROID + 'sharedUserId'):
@@ -40,7 +49,7 @@ def verify_manifests(app_xml, test_xml):
         raise ValueError('release_instrumentation_mismatch')
 
 
-def verify_delivery(apkanalyzer, apksigner, delivery, env, run=subprocess.run):
+def verify_delivery(apkanalyzer, apksigner, delivery, env, run=subprocess.run, diagnostic=False):
     record_path = delivery / '构建记录.json'
     record_path.unlink(missing_ok=True)
     sha = env['GITHUB_SHA']
@@ -63,7 +72,7 @@ def verify_delivery(apkanalyzer, apksigner, delivery, env, run=subprocess.run):
             for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                 digest.update(chunk)
         sums[apk.relative_to(delivery).as_posix()] = digest.hexdigest()
-    verify_manifests(*manifests)
+    verify_manifests(*manifests, diagnostic=diagnostic)
     manifest_sums = {}
     for name, text in zip(('app-manifest.xml', 'test-manifest.xml'), manifests):
         raw = text.encode('utf-8')
@@ -72,7 +81,8 @@ def verify_delivery(apkanalyzer, apksigner, delivery, env, run=subprocess.run):
     (delivery / '签名证据.txt').write_text('\n'.join(signatures), encoding='utf-8')
     record = dict(source_sha=sha, version_name='0.1.0', version_code=1, application_id=APP_ID,
                   test_application_id=TEST_ID, signing='daiyu-fixed', certificate_sha256=EXPECTED_CERT,
-                  variant='release', debuggable=False, profileable=False, production_delivery=True,
+                  variant='release-diagnostic' if diagnostic else 'release', debuggable=False, profileable=diagnostic,
+                  jank_diagnostics=diagnostic, production_delivery=not diagnostic,
                   run_id=env['GITHUB_RUN_ID'], attempt=env['GITHUB_RUN_ATTEMPT'],
                   sha256=sums, manifest_sha256=manifest_sums)
     record_path.write_text(json.dumps(record, ensure_ascii=False) + '\n', encoding='utf-8')
@@ -84,5 +94,6 @@ if __name__ == '__main__':
     parser.add_argument('--apkanalyzer', required=True, type=Path)
     parser.add_argument('--apksigner', required=True, type=Path)
     parser.add_argument('--delivery', required=True, type=Path)
+    parser.add_argument('--diagnostic', action='store_true')
     args = parser.parse_args()
-    verify_delivery(args.apkanalyzer, args.apksigner, args.delivery, os.environ)
+    verify_delivery(args.apkanalyzer, args.apksigner, args.delivery, os.environ, diagnostic=args.diagnostic)

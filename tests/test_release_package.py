@@ -143,7 +143,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertNotIn('daiyuSyntheticApplication', release)
         self.assertIn('scripts/verify_release_package.py --apkanalyzer', release)
         self.assertIn('scripts/verify_license_bundle.py', release)
-        self.assertIn("name: ${{ inputs.mode == 'compile' && '代鱼增量Release包' || inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}", release)
+        self.assertIn("name: ${{ inputs.jank_diagnostics && '代鱼诊断Release包' || inputs.mode == 'compile' && '代鱼增量Release包' || inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}", release)
         self.assertLess(release.index('scripts/verify_release_package.py'), release.index('name: 上传生产Release候选包'))
         self.assertIn('needs: [build, release, candidate]', smoke)
         self.assertIn("(inputs.mode == 'release' || inputs.mode == 'daily') && needs.release.result == 'success'", smoke)

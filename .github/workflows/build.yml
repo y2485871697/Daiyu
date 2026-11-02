@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'compile' && format('代鱼增量Release编译 {0}', inputs.check_id) || inputs.mode == 'daily' && format('代鱼日常Release {0}-targeted', inputs.check_id) || inputs.mode == 'candidate' && format('代鱼定向候选 {0}-filtered', inputs.check_id) || inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
+run-name: ${{ inputs.jank_diagnostics && format('代鱼诊断Release编译 {0}', inputs.check_id) || inputs.mode == 'compile' && format('代鱼增量Release编译 {0}', inputs.check_id) || inputs.mode == 'daily' && format('代鱼日常Release {0}-targeted', inputs.check_id) || inputs.mode == 'candidate' && format('代鱼定向候选 {0}-filtered', inputs.check_id) || inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +18,10 @@ on:
           - release
         default: compile
         required: true
+      jank_diagnostics:
+        description: 仅compile诊断Release，自动帧留证及shell profileable（非普通交付）
+        type: boolean
+        default: false
       smoke_api:
         description: smoke/candidate目标API（正式构建始终双API）
         type: choice
@@ -268,6 +272,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: 限定诊断包仅增量compile模式
+        env:
+          JANK_DIAGNOSTICS: ${{ inputs.jank_diagnostics }}
+        run: test "$JANK_DIAGNOSTICS" != true || test "$SMOKE_MODE" = compile
       - name: 核对完整构建源码身份
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
@@ -320,7 +328,13 @@ jobs:
           DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
           DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
           DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
-        run: ./gradlew --no-daemon -PdaiyuProductionRelease=true :app:assembleRelease :app:assembleReleaseAndroidTest
+        shell: bash
+        run: |
+          if test '${{ inputs.jank_diagnostics }}' = true; then
+            ./gradlew --no-daemon -PdaiyuProductionRelease=true -PdaiyuJankDiagnostics=true :app:assembleRelease :app:assembleReleaseAndroidTest
+          else
+            ./gradlew --no-daemon -PdaiyuProductionRelease=true :app:assembleRelease :app:assembleReleaseAndroidTest
+          fi
       - name: 清理临时签名文件
         if: always()
         run: rm -f -- "$RUNNER_TEMP/daiyu-release.p12"
@@ -332,7 +346,13 @@ jobs:
           mkdir -p delivery/tests
           cp app/build/outputs/apk/androidTest/release/app-release-androidTest.apk delivery/tests/platform-test.apk
           cp app/build/outputs/apk/release/app-release.apk "delivery/代鱼-0.1.0-${short}.apk"
-          python3 scripts/verify_release_package.py --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner" --delivery delivery
+          diagnostic_args=()
+          if test '${{ inputs.jank_diagnostics }}' = true; then
+            diagnostic_args=(--diagnostic)
+            mkdir -p delivery/diagnostics
+            cp scripts/diagnostics/* delivery/diagnostics/
+          fi
+          python3 scripts/verify_release_package.py --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner" --delivery delivery "${diagnostic_args[@]}"
           python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"
           if test "$SMOKE_MODE" = daily; then
             cp daily-plan.json delivery/daily-plan.json
@@ -359,7 +379,7 @@ jobs:
       - name: 上传生产Release候选包
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: ${{ inputs.mode == 'compile' && '代鱼增量Release包' || inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}
+          name: ${{ inputs.jank_diagnostics && '代鱼诊断Release包' || inputs.mode == 'compile' && '代鱼增量Release包' || inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}
           path: delivery/
           if-no-files-found: error
   synthetic:

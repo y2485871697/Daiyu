@@ -45,6 +45,12 @@ val daiyuPhysicalPerformance = providers.gradleProperty("daiyuPhysicalPerformanc
 val daiyuProductionRelease = providers.gradleProperty("daiyuProductionRelease").map {
     it.toBooleanStrictOrNull() ?: error("daiyuProductionRelease 必须是 true 或 false")
 }.getOrElse(false)
+val daiyuJankDiagnostics = providers.gradleProperty("daiyuJankDiagnostics").map {
+    it.toBooleanStrictOrNull() ?: error("daiyuJankDiagnostics 必须是 true 或 false")
+}.getOrElse(false)
+check(!daiyuJankDiagnostics || (!daiyuSyntheticApplication && !daiyuPhysicalPerformance)) {
+    "诊断包不得混用合成数据或性能夹具"
+}
 check(!daiyuProductionRelease || (!daiyuSyntheticApplication && !daiyuPhysicalPerformance)) {
     "生产 Release 不得启用隔离或性能配置"
 }
@@ -63,6 +69,8 @@ android {
     if (daiyuPhysicalPerformance || daiyuProductionRelease) testBuildType = "release"
     defaultConfig {
         applicationId = "app.daiyu.android"
+        buildConfigField("boolean", "JANK_DIAGNOSTICS", daiyuJankDiagnostics.toString())
+        manifestPlaceholders["jankDiagnostics"] = daiyuJankDiagnostics.toString()
         minSdk = 26
         targetSdk = 37
         proguardFiles("offline-speech-rules.pro")
@@ -138,7 +146,7 @@ android {
         release {
             isMinifyEnabled = false
             isDebuggable = false
-            isProfileable = daiyuPhysicalPerformance
+            isProfileable = daiyuPhysicalPerformance || daiyuJankDiagnostics
             if (daiyuSyntheticApplication) applicationIdSuffix = ".synthetic"
             if (fixedSigning) signingConfig = signingConfigs.getByName("release")
         }

@@ -18,6 +18,13 @@ class CompileReleaseContract(unittest.TestCase):
         self.assertIn('scripts/verify_release_package.py', self.release)
         self.assertIn('scripts/verify_license_bundle.py --apk', self.release)
 
+    def test_diagnostic_compile_is_explicit_and_not_a_production_delivery(self):
+        self.assertIn('      jank_diagnostics:', self.workflow)
+        self.assertIn('test "$JANK_DIAGNOSTICS" != true || test "$SMOKE_MODE" = compile', self.release)
+        self.assertIn('-PdaiyuProductionRelease=true -PdaiyuJankDiagnostics=true', self.release)
+        self.assertIn('diagnostic_args=(--diagnostic)', self.release)
+        self.assertIn("'代鱼诊断Release包'", self.release)
+
     def test_compile_skips_full_tools_unit_and_lint(self):
         self.assertIn('if test "$SMOKE_MODE" != compile; then python3 scripts/acceptance/record_tool_tests.py --python python3; fi', self.release)
         self.assertIn("      - name: 单测与 Lint\n        if: inputs.mode != 'compile'", self.release)

@@ -141,6 +141,15 @@ private fun BoxScope.ChatMenuOverlay(
         }) {
         ChatMenuOverlayContent(state) { menu ->
             val motion = rememberPopupMotion(menu.expanded())
+            app.daiyu.android.diagnostics.ObserveDiagnosticInteraction("menu") {
+                when {
+                    motion.visibleState.targetState && motion.visibleState.isIdle -> "open"
+                    motion.visibleState.targetState -> "entering"
+                    motion.visibleState.isIdle -> "retained"
+                    else -> "exiting"
+                }
+            }
+
             BackHandler(enabled = menu.expanded(), onBack = menu.onDismiss)
             Layout(
                 modifier = Modifier.fillMaxSize()

@@ -237,6 +237,10 @@ internal fun ConversationSidePaneScaffold(
         )
     }
 
+    app.daiyu.android.diagnostics.ObserveDiagnosticInteraction("drawer") {
+        if (drawerState.isAnimationRunning) "moving"
+        else if (drawerState.currentValue == DrawerValue.Open) "open" else "closed"
+    }
     LaunchedEffect(drawerState) {
         snapshotFlow { drawerState.currentValue to drawerState.isAnimationRunning }
             .collectLatest { (value, running) ->

@@ -359,6 +359,18 @@ internal fun PageBackGestureHost(
     val activeDeparture = departing && !(departure?.forward == true &&
         (!state.previewAllowed || departure.forwardSkipped))
     state.transitionBlocked = activeDeparture || (state.previewAllowed && !state.active && progress > 0f)
+    val diagnosticSettling = state.transitionBlocked
+    app.daiyu.android.diagnostics.ObserveDiagnosticInteraction("navigation") {
+        when {
+            state.active && state.predictive -> "predictive"
+            state.active -> "drag"
+            activeDeparture && departure?.forward == true -> "forward"
+            activeDeparture -> "return"
+            diagnosticSettling -> "settle"
+            else -> "idle"
+        }
+    }
+
     val showDeparture = departure != null && departing && departure.frame.image != null && !departure.forwardSkipped && state.previewAllowed
     val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)
     val returning by rememberUpdatedState(showDeparture && departure?.forward == false)

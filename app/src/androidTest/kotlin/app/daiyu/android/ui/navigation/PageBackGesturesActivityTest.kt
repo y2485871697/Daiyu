@@ -122,8 +122,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         }
         dismissIme()
         ui.waitForIdle()
+        val sourceImage = captureScreenNode(ui.onNodeWithTag("page-back-surface"))
         if (capturePreviousPage) {
-            val sourceImage = captureScreenNode(ui.onNodeWithTag("page-back-surface"))
             logPreviewPixels("source", sourceImage)
             val sourcePixels = sourceImage.toPixelMap()
             val source = sourcePixels[2, sourcePixels.height / 2]

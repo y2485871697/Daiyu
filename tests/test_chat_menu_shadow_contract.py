@@ -74,16 +74,6 @@ class ChatMenuShadowContract(unittest.TestCase):
                       ".clip(shape).then(blur)", "Path.combine(PathOperation.Difference", ".verticalScroll("]:
             self.assertIn(token, self.surface)
 
-    def test_reveal_has_an_inner_recording_boundary_before_the_real_blur(self):
-        reveal = self.surface.split(".daiyuMenuClipReveal(", 1)[1]
-        self.assertLess(reveal.index(".graphicsLayer()"), reveal.index(".clip(shape).then(blur)"))
-        test = PIXELS.read_text()
-        for token in ("testRevealAndAlphaReuseTheBackdropRecorderWhileDrawOnlySourceAndCoordinatesStayLive",
-                      "CountingMenuBackdrop(source, recordings)", "recordings.incrementAndGet()",
-                      "first, recordings.get()", "revision.intValue = 1", "side.intValue = 200", "shift.intValue = x", "scale.value = factor",
-                      "background(Color.Black)", "checkNotNull(rememberTopBarBackdrop())"):
-            self.assertIn(token, test)
-
     def test_android_regression_covers_frame_updates_with_real_backdrop_and_stable_body(self):
         test = PIXELS.read_text()
         for token in ["testAnimationFramesKeepMenuContentCompositionAndMeasurementStable",

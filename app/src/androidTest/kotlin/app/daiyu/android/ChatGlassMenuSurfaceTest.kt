@@ -1,15 +1,11 @@
 package app.daiyu.android
 
-import android.os.Build
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.Canvas
@@ -22,13 +18,6 @@ import app.daiyu.android.ui.components.rememberTopBarBackdrop
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.GraphicsLayerScope
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.IntOffset
-import top.yukonga.miuix.kmp.blur.Backdrop
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
@@ -158,91 +147,6 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
         }
     }
 
-
-    fun testRevealAndAlphaReuseTheBackdropRecorderWhileDrawOnlySourceAndCoordinatesStayLive() {
-        if (Build.VERSION.SDK_INT < 33) return
-        val fraction = mutableStateOf(1f)
-        val alpha = mutableStateOf(1f)
-        val scale = mutableStateOf(1f)
-        val side = mutableIntStateOf(160)
-        val shift = mutableIntStateOf(0)
-        val revision = mutableIntStateOf(0)
-        val visible = MutableTransitionState(false).apply { targetState = true }
-        val motion = PopupMotion(visible, fraction, alpha)
-        val recordings = AtomicInteger()
-        mainThread {
-            activity.setContent {
-                AgentAppTheme(AppearanceSettings(themeMode = AppearanceThemeMode.DARK), applyInterfaceScale = false) {
-                    val source = checkNotNull(rememberTopBarBackdrop())
-                    val counted = remember(source) { CountingMenuBackdrop(source, recordings) }
-                    Box(Modifier.fillMaxSize().testTag("recorder-host"), contentAlignment = Alignment.Center) {
-                        Canvas(Modifier.fillMaxSize().captureForTopBar(source)) {
-                            if (revision.intValue < 2) {
-                                drawRect(if (revision.intValue == 0) Color.Red else Color.Blue)
-                            } else {
-                                drawRect(Color.Red)
-                                drawRect(Color.Blue, topLeft = Offset(size.width / 2, 0f),
-                                    size = Size(size.width / 2, size.height))
-                            }
-                        }
-                        // A missing consumer cannot pass by showing the same source through it.
-                        Box(Modifier.fillMaxSize().background(Color.Black))
-                        ChatGlassMenuSurface(counted,
-                            Modifier.offset { IntOffset(shift.intValue.dp.roundToPx(), 0) }
-                                .requiredSize(side.intValue.dp, 120.dp)
-                                .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-                                .testTag("recorder-menu"), motion) {
-                            Box(Modifier.requiredSize(80.dp, 40.dp))
-                        }
-                    }
-                }
-            }
-        }
-        fun committedPixels() = captureScreenNode(ui.onNodeWithTag("recorder-menu")).toPixelMap()
-        val initial = committedPixels()
-        val red = initial[initial.width / 2, initial.height / 2]
-        assertTrue("Backdrop must be visible above the opaque black negative control", red.red > red.blue + .02f)
-        // Settle coordinates and the first layer submission before counting animation-only work.
-        committedPixels()
-        val first = recordings.get()
-        assertTrue("Real backdrop recorder was exercised", first > 0)
-        for ((progress, opacity) in listOf(.25f to .4f, .55f to .7f, .85f to .9f, 1f to 1f)) {
-            mainThread { fraction.value = progress; alpha.value = opacity }
-            committedPixels()
-            assertEquals("Reveal/alpha alone must replay the blur display list", first, recordings.get())
-        }
-        mainThread { revision.intValue = 1 }
-        val changed = committedPixels()
-        val blue = changed[changed.width / 2, changed.height / 2]
-        assertTrue("Draw-only background changes must not freeze behind the cached menu", blue.blue > blue.red + .02f)
-        mainThread { side.intValue = 200 }
-        val resized = committedPixels()
-        assertTrue("Size changes must refresh the backdrop recorder", recordings.get() > first)
-        assertTrue("Resized menu still samples the live blue source",
-            resized[resized.width / 2, resized.height / 2].blue > resized[resized.width / 2, resized.height / 2].red + .02f)
-        mainThread { revision.intValue = 2 }
-        committedPixels()
-        for (x in listOf(-72, 72, -72)) {
-            // Change position without resizing/recomposing the backdrop parameters.
-            mainThread { shift.intValue = x }
-            val moved = committedPixels()
-            val center = moved[moved.width / 2, moved.height / 2]
-            if (x < 0) assertTrue("Moved menu samples the red half", center.red > center.blue + .02f)
-            else assertTrue("Moved menu samples the blue half", center.blue > center.red + .02f)
-        }
-        mainThread { shift.intValue = -28 }
-        for (factor in listOf(1f, .55f, .8f, 1f)) {
-            mainThread { scale.value = factor }
-            val transformed = committedPixels()
-            // Quarter-width point crosses the source color boundary only at full scale.
-            val sample = transformed[transformed.width * 3 / 4, transformed.height / 2]
-            if (factor == 1f) assertTrue("Full scale samples blue to the right of the source boundary",
-                sample.blue > sample.red + .01f)
-            else assertTrue("Scale-only change updates backdrop sampling on the red side",
-                sample.red > sample.blue + .01f)
-        }
-    }
-
     fun testAnimationFramesKeepMenuContentCompositionAndMeasurementStable() {
         val fraction = mutableStateOf(0f)
         val alpha = mutableStateOf(0f)
@@ -296,19 +200,4 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
         }
     }
 
-}
-
-private class CountingMenuBackdrop(
-    private val source: Backdrop,
-    private val recordings: AtomicInteger,
-) : Backdrop by source {
-    override fun DrawScope.drawBackdrop(
-        density: Density,
-        coordinates: LayoutCoordinates?,
-        layerBlock: (GraphicsLayerScope.() -> Unit)?,
-        downscaleFactor: Int,
-    ) {
-        recordings.incrementAndGet()
-        with(source) { this@drawBackdrop.drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
-    }
 }

@@ -52,6 +52,16 @@ menu_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(menu_tar
 menu_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                 for name in menu_target}
 speech_source = Path("app/src/androidTest/kotlin/app/daiyu/android/voice/SpeechAudioFileAndroidTest.kt")
+page_back_target = {
+    'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',
+    'app.daiyu.android.ui.navigation.PageBackStackActivityTest',
+    'app.daiyu.android.ui.navigation.PageEnterActivityTest',
+    'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
+}
+page_back_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(page_back_target)
+page_back_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
+                     for name in page_back_target}
 classes = {}
 for path in sorted(Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
@@ -59,6 +69,8 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
     if speech_only and path != speech_source:
         continue
     if menu_only and path not in menu_sources:
+        continue
+    if page_back_only and path not in page_back_sources:
         continue
     source = path.read_text()
     if path.suffix == ".kt":
@@ -107,7 +119,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only or menu_only else "full",
+                discovery_scope="targeted" if speech_only or menu_only or page_back_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

@@ -34,8 +34,12 @@ class DiagnosticSmokeSourceTests(unittest.TestCase):
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 source.verify(dict(self.env, **{key: value}), self.record, self.run, self.jobs, [])
         source.verify(dict(self.env, GITHUB_SHA='b' * 40), self.record, self.run, self.jobs, ['tests/changed.py'])
+        source.verify(dict(self.env, GITHUB_SHA='b' * 40), self.record, self.run, self.jobs,
+                      ['app/src/test/kotlin/ChangedTest.kt'])
         for changed in (['app/src/main/kotlin/Changed.kt'], ['app/src/androidTest/kotlin/Changed.kt'],
-                        ['app/build.gradle.kts'], ['.github/workflows/build.yml'], ['tests/../app/file']):
+                        ['app/src/test/../main/kotlin/Changed.kt'], ['app/src/testFixtures/kotlin/Changed.kt'],
+                        ['app/src/debug/kotlin/Changed.kt'], ['app/build.gradle.kts'],
+                        ['.github/workflows/build.yml'], ['tests/../app/file']):
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 source.verify(dict(self.env, GITHUB_SHA='b' * 40), self.record, self.run, self.jobs, changed)
 

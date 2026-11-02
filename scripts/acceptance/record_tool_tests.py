@@ -37,12 +37,31 @@ MENU_MODULES = (
 )
 
 
+PAGE_BACK_PLATFORM_CLASSES = (
+    'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',
+    'app.daiyu.android.ui.navigation.PageBackStackActivityTest',
+    'app.daiyu.android.ui.navigation.PageEnterActivityTest',
+    'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
+)
+PAGE_BACK_MODULES = (
+    'test_page_back_gesture_contract', 'test_page_back_repeat_contract',
+    'test_chat_timeline_contract', 'test_reasoning_flow_stability_contract',
+    'test_diagnostic_smoke_source', 'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt', 'test_page_back_smoke_scope',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 def command_for(python, env):
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == SPEECH_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *SPEECH_MODULES, "-v"], "speech-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MENU_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *MENU_MODULES, "-v"], "menu-targeted"
+    if (env.get('SMOKE_MODE') == 'smoke'
+            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(PAGE_BACK_PLATFORM_CLASSES)):
+        return [python, '-B', '-m', 'unittest', *PAGE_BACK_MODULES, '-v'], 'page-back-targeted'
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

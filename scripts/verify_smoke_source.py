@@ -63,6 +63,8 @@ def verify(env, record, source_run, jobs, changed):
     if variant in ('compile', 'diagnostic'):
         validation_files.update({'docs/重构清单.md', '更新说明.md'})
     validation_dirs = ('scripts/acceptance/', 'tests/', 'docs/acceptance/')
+    if variant in ('compile', 'diagnostic'):
+        validation_dirs += ('app/src/test/',)
     if any(not isinstance(path, str) or '\\' in path
            or any(part in ('', '.', '..') for part in path.split('/'))
            or not (path in validation_files or path.startswith(validation_dirs))

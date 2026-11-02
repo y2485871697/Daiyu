@@ -123,14 +123,22 @@ internal fun rememberMarkdownReveal(
         target?.parts?.takeWhile { it.source.id !in blockedSources }?.sumOf { it.length.toLong() }
             ?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: 0
     }
-    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, enabled, advanceLimit) {
+    val sourcesCompatible = remember(target, sources) {
+        target?.let { markdownTypingAppends(it.parts.map { part -> part.source }, sources) } == true
+    }
+    val canAdvance = enabled && sourcesCompatible
+    val currentCanAdvance by rememberUpdatedState(canAdvance)
+    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, canAdvance, advanceLimit) {
         val current = target ?: return@produceState
         var shown = motion.visible(current)
         value = MarkdownTypingFrame(current, shown)
-        if (!enabled) { motion.pause(current); return@produceState }
+        if (!canAdvance) { motion.pause(current); return@produceState }
         val end = maxOf(shown, minOf(current.total, advanceLimit))
         while (shown < end) {
-            shown = withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }
+            shown = withFrameNanos { frameNanos ->
+                if (currentCanAdvance) motion.advance(current, frameNanos, end) { currentAdvance() }
+                else { motion.pause(current); motion.visible(current) }
+            }
             value = MarkdownTypingFrame(current, shown)
         }
         if (end < current.total) motion.pause(current)

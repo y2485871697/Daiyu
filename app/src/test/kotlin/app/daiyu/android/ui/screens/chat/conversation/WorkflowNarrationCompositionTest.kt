@@ -174,6 +174,69 @@ class WorkflowNarrationCompositionTest {
         } finally { release.countDown(); composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 
+    @Test fun replacementPausesTheObsoleteProjectionAndLaterAppendStillTypes() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val parser: (String) -> List<MarkdownBlock> = { source ->
+            listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(source))))
+        }
+        fun projection(source: String) = MarkdownProjection(listOf(source), mapOf(source to parser(source)), parser)
+        val first = "initial"
+        val pending = first + "a".repeat(500)
+        val replacement = "replacement"
+        val next = replacement + "b".repeat(500)
+        val text = mutableStateOf(first)
+        val parsed = mutableStateOf<MarkdownProjection?>(projection(first))
+        var reveal: MarkdownReveal? = null
+        var advances = 0
+        var time = 1_000_000_000L
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        suspend fun until(ready: () -> Boolean) = withTimeout(10_000) { while (!ready()) frame() }
+        try {
+            projectMarkdown(listOf(first), parser)
+            composition.setContent {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("r", text.value)), parsed.value,
+                        streaming = true, terminal = false, allowBaselinePrefix = false,
+                        onVisibleAdvance = { advances++ })
+                }
+            }
+            until { reveal?.settled == true }
+            text.value = pending
+            parsed.value = projection(pending)
+            until { advances > 0 }
+            assertTrue(reveal!!.limit("r") in first.length until pending.length)
+
+            text.value = replacement
+            frame()
+            val paused = advances
+            val obsoleteVisible = reveal!!.limit("r")
+            repeat(30) { frame() }
+            assertEquals("Obsolete projection must not advance while replacement is pending", obsoleteVisible, reveal!!.limit("r"))
+            assertEquals("Replacement must not leave the previous typing loop running", paused, advances)
+            assertFalse(reveal!!.settled)
+
+            parsed.value = projection(replacement)
+            until { reveal!!.settled }
+            assertEquals(replacement.length, reveal!!.limit("r"))
+            assertEquals(paused, advances)
+            text.value = next
+            parsed.value = projection(next)
+            until { advances > paused }
+            assertTrue(reveal!!.limit("r") in (replacement.length + 1) until next.length)
+            until { reveal!!.settled }
+            assertEquals(next.length, reveal!!.limit("r"))
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
     @Test fun onlyTextAfterTheFirstUnreleasedThoughtIsBlocked() {
         val thought = ReportedReasoning("r", "thought")
         val before = MessageContentUi.Text("before", "visible")

@@ -33,7 +33,9 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
-        self.assertIn("withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }", self.typing)
+        self.assertIn("if (currentCanAdvance) motion.advance(current, frameNanos, end) { currentAdvance() }", self.typing)
+        self.assertIn("target, canAdvance, advanceLimit", self.typing)
+        self.assertIn("val currentCanAdvance by rememberUpdatedState(canAdvance)", self.typing)
         for source in [self.typing, self.reveal]:
             for forbidden in ["MarkdownParser.parse", "MarkdownText.render(", "substring(0,", "Thread.sleep", "delay("]:
                 self.assertNotIn(forbidden, source)

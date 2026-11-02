@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.captureForTopBar
 import app.daiyu.android.ui.components.rememberTopBarBackdrop
+import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
@@ -261,7 +262,7 @@ internal fun ChatAnchoredMenu(
 
 @Composable
 internal fun ChatGlassMenuSurface(
-    backdrop: LayerBackdrop?,
+    backdrop: Backdrop?,
     modifier: Modifier,
     motion: PopupMotion? = null,
     content: @Composable () -> Unit,
@@ -284,6 +285,8 @@ internal fun ChatGlassMenuSurface(
                 preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
                 clipWhenFullyRevealed = false,
             )
+            // Reveal redraws its clip, not the backdrop recorder and menu contents.
+            .graphicsLayer()
             .clip(shape).then(blur)
             .pointerInput(Unit) { detectTapGestures(onTap = {}) }
             .background(Brush.linearGradient(shades))

@@ -31,7 +31,7 @@ class ReconnectIndexTest {
         val events = listOf(event("same-b", 3L, owner.copy(segment = 77)), event("end", 6L),
             event("shared", 2L), event("zero", 0L), event("same-a", 3L), event("tail", 4L),
             event("shared", 1L, other), event("other-only", 1L, other),
-            event("legacy", null), event("negative", -1L), event("far", 99L))
+            event("legacy", null), event("far", 99L))
         val placed = hashSetOf<String>()
         val expected = rows.filterIsInstance<ChatTurnUi.Assistant>().associate { row ->
             val parts = reconnectParts(row, events.filterNot { it.id in placed })
@@ -42,6 +42,11 @@ class ReconnectIndexTest {
         val duplicate = event("duplicate", 1L)
         assertEquals(listOf(duplicate, duplicate), reconnectPartsForTurns(listOf(turn("single")),
             listOf(duplicate, duplicate)).getValue("single").parts.flatMap { it.after })
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun negativeOffsetsAreRejectedBeforeIndexing() {
+        ReconnectPosition(-1L)
     }
 
     @Test fun originalEventsAreReadOnceForDistinctOwners() {

@@ -56,10 +56,15 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: 检查源码边界
         run: |
+          set -o pipefail
           mkdir -p gui-screenshot-checks
-          python3 scripts/verify_boundaries.py
-          python3 -B -m unittest discover -s tests -p 'test_ordinary_tool_wiring_contract.py' -v
-          python3 -B -m unittest discover -s tests -p 'test_gui_app_launch_contract.py' -v
+          python3 scripts/verify_boundaries.py 2>&1 | tee gui-screenshot-checks/boundaries.log
+          PYTHONPATH=tests python3 -B -m unittest -v \
+            test_ordinary_tool_wiring_contract.OrdinaryToolWiringContract.test_normal_run_registers_real_scopes_and_capabilities \
+            test_ordinary_tool_wiring_contract.OrdinaryToolWiringContract.test_gui_target_is_validated_before_session_mutation \
+            2>&1 | tee gui-screenshot-checks/ordinary-gui-contracts.log
+          python3 -B -m unittest discover -s tests -p 'test_gui_app_launch_contract.py' -v \
+            2>&1 | tee gui-screenshot-checks/app-launch-contracts.log
       - name: 准备既有离线语音依赖（不打包）
         run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
       - name: 截图通道定向单测及Compose源码编译（不打包）

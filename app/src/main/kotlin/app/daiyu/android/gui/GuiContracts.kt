@@ -19,24 +19,33 @@ internal data class GuiNode(
 )
 internal class GuiObservation(
     val observationId: String, val packageName: String, val windowId: Int,
-    val generation: Long, val capturedAt: Long, nodes: List<GuiNode>, val truncated: Boolean,
+    val generation: Long, val capturedAt: Long, nodes: List<GuiNode>, val truncated: Boolean, val maxNodes: Int = 128,
 ) {
     val nodes: List<GuiNode> = Collections.unmodifiableList(nodes.toList())
 }
-internal enum class GuiOperation { TAP, LONG_PRESS, SCROLL_FORWARD, SCROLL_BACKWARD, INPUT, BACK, HOME, RECENTS, NOTIFICATIONS }
-internal data class GuiAction(val observationId: String, val operation: GuiOperation, val nodeId: Int? = null, val text: String? = null) {
+internal enum class GuiOperation { TAP, LONG_PRESS, SCROLL_FORWARD, SCROLL_BACKWARD, INPUT, IME_SUBMIT,
+    COORDINATE_TAP, SWIPE, BACK, HOME, RECENTS, NOTIFICATIONS }
+internal data class GuiGesture(val x: Int, val y: Int, val endX: Int, val endY: Int, val durationMillis: Long) {
+    init { require(listOf(x, y, endX, endY).all { it in 0..100_000 } && durationMillis in 50..2000) }
+}
+internal fun guiTreeDepth(maxNodes: Int): Int = if (maxNodes <= 128) 16 else 32
+internal fun guiTreeChildren(maxNodes: Int): Int = if (maxNodes <= 128) 64 else maxNodes
+internal data class GuiAction(val observationId: String, val operation: GuiOperation, val nodeId: Int? = null, val text: String? = null,
+    val gesture: GuiGesture? = null) {
     init {
         require(observationId.isNotBlank())
         val nodeAction = operation in setOf(GuiOperation.TAP, GuiOperation.LONG_PRESS,
-            GuiOperation.SCROLL_FORWARD, GuiOperation.SCROLL_BACKWARD, GuiOperation.INPUT)
+            GuiOperation.SCROLL_FORWARD, GuiOperation.SCROLL_BACKWARD, GuiOperation.INPUT, GuiOperation.IME_SUBMIT)
         require(nodeAction == (nodeId != null))
         require(nodeId == null || nodeId >= 0)
         require((operation == GuiOperation.INPUT) == (text != null))
         require(text == null || text.length <= 4096)
+        require((operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE)) == (gesture != null))
+        if (operation == GuiOperation.COORDINATE_TAP) require(gesture!!.x == gesture.endX && gesture.y == gesture.endY)
     }
     fun effect(owner: GuiOwner): WriteEffect = WriteEffect("gui", operation.name.lowercase(),
         "${owner.sessionId.length}:${owner.sessionId}:${owner.runId.length}:${owner.runId}:$observationId:${nodeId ?: "global"}",
-        text?.let { "${it.length}:$it" } ?: "invoke")
+        text?.let { "${it.length}:$it" } ?: gesture?.let { "${it.x},${it.y},${it.endX},${it.endY},${it.durationMillis}" } ?: "invoke")
 }
 internal data class GuiAppLaunch(val packageName: String) {
     init { require(GuiUserActionRequest.validTargetPackage(packageName)) { "invalid_target_package" } }

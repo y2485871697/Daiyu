@@ -137,6 +137,12 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         boundOwner !== owner || boundAuthorization !== authorization -> GuiResult.Rejected("GUI_RUN_OWNER_MISMATCH")
         else -> null
     }
+    internal fun replacementRejection(owner: RunExecutionOwner, authorization: TaskAuthorization): GuiResult.Rejected? =
+        ioFence.unknownRejection() ?: when {
+            closed.get() -> GuiResult.Rejected("GUI_AUTHORIZATION_REVOKED")
+            boundOwner !== owner || boundAuthorization !== authorization -> GuiResult.Rejected("GUI_RUN_OWNER_MISMATCH")
+            else -> null
+        }
     private var dynamic = false
     @Synchronized internal fun bindDynamic(owner: RunExecutionOwner, authorization: TaskAuthorization) {
         check(frozenWrites == null && boundOwner == null && !closed.get()) { "gui_approval_frozen" }
@@ -147,10 +153,10 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         boundOwner = owner
         boundAuthorization = authorization
     }
-    internal fun dynamicObserve(cancelled: () -> Boolean): GuiResult<GuiObservation> = onWorker(cancelled) {
+    internal fun dynamicObserve(cancelled: () -> Boolean, maxNodes: Int = 128): GuiResult<GuiObservation> = onWorker(cancelled) {
         check(dynamic)
         val approval = GuiRuntime.approveReads(lease, GuiReadApproval(1, 0))
-        if (approval is GuiResult.Rejected) approval else GuiRuntime.observe(lease)
+        if (approval is GuiResult.Rejected) approval else GuiRuntime.observe(lease, maxNodes)
     }
     internal fun dynamicLaunch(request: GuiAppLaunch, authorization: TaskAuthorization,
         cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
@@ -167,10 +173,10 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
             if (target !is GuiResult.Value) target as GuiResult.Rejected
             else {
                 val approved = GuiRuntime.approveAction(lease, action)
-                if (approved !is GuiResult.Value) approved as GuiResult.Rejected else GuiRuntime.action(lease, action)
+                if (approved !is GuiResult.Value) approved as GuiResult.Rejected else GuiRuntime.beginAction(lease, action)
             }
         }
-    }
+    }.let { awaitAction(it, cancelled) }
     internal fun dynamicScreenshot(observationId: String?, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
         val started = onWorker(cancelled) {
             check(dynamic)
@@ -193,14 +199,31 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         }
         return awaitScreenshot(started, cancelled)
     }
-    fun observe(cancelled: () -> Boolean): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease) }
+    fun observe(cancelled: () -> Boolean, maxNodes: Int = 128): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease, maxNodes) }
     fun action(action: GuiAction, cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
         if (action.effect(identity) !in frozenWrites.orEmpty()) GuiResult.Rejected("EXACT_ACTION_NOT_AUTHORIZED")
-        else GuiRuntime.action(lease, action)
-    }.also { if (it is GuiResult.Unknown) ioFence.unknown() }
+        else GuiRuntime.beginAction(lease, action)
+    }.let { awaitAction(it, cancelled) }.also { if (it is GuiResult.Unknown) ioFence.unknown() }
     fun screenshot(observationId: String, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
         val started = onWorker(cancelled) { GuiResult.Value(GuiRuntime.screenshot(lease, observationId)) }
         return awaitScreenshot(started, cancelled)
+    }
+    private fun awaitAction(started: GuiResult<CompletableFuture<GuiResult<String>>>,
+        cancelled: () -> Boolean): GuiResult<String> {
+        if (started !is GuiResult.Value) return when (started) {
+            is GuiResult.Rejected -> started
+            is GuiResult.Unknown -> started
+            else -> error("unreachable")
+        }
+        val result = try {
+            val value = started.value.get(5, TimeUnit.SECONDS)
+            if (closed.get() || cancelled()) GuiResult.Unknown("ACTION_RESULT_REVOKED_UNCONFIRMED") else value
+        } catch (failure: Exception) {
+            if (failure is InterruptedException) Thread.currentThread().interrupt()
+            GuiResult.Unknown("GESTURE_RESULT_UNCONFIRMED")
+        }
+        if (result is GuiResult.Unknown) ioFence.unknown()
+        return result
     }
     private fun awaitScreenshot(started: GuiResult<CompletableFuture<GuiResult<GuiScreenshot>>>,
         cancelled: () -> Boolean): GuiResult<GuiScreenshot> {

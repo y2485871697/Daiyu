@@ -48,10 +48,10 @@ internal abstract class RunOwnedToolScope(
         }
         return PreparedTool.contextual(admit = ::deny) { deny(it) ?: execute(it) }
     }
-    protected fun write(effect: WriteEffect, execute: (ToolExecutionContext) -> ExecutionReceipt): PreparedTool =
+    protected fun write(effect: WriteEffect, repeatConfirmed: Boolean = false, execute: (ToolExecutionContext) -> ExecutionReceipt): PreparedTool =
         PreparedTool.approvedWrite(effect, approve = { context ->
             if (denial(context) != null) null else TaskAuthorization(authorization.sessionId, authorization.taskId, setOf(effect))
-        }, admit = { denial(it) }) { context ->
+        }, admit = { denial(it) }, repeatConfirmed = repeatConfirmed) { context ->
             denial(context, original = false) ?: if (context.authorization.sessionId != authorization.sessionId ||
                 context.authorization.taskId != authorization.taskId || context.authorization.allowedWrites != setOf(effect))
                 ExecutionReceipt.NotExecuted("task_write_not_authorized") else execute(context)

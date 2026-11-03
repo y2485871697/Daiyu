@@ -21,6 +21,7 @@ internal data class GuiUserActionRequest(
             require(json.keys().asSequence().toSet().all { it in setOf("operation", "text", "target_package") })
             require(json.get("operation") is String)
             val operation = GuiOperation.valueOf(json.getString("operation").uppercase(Locale.ROOT))
+            require(operation !in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE)) { "gui_gesture_requires_observed_coordinates" }
             val input = if (operation == GuiOperation.INPUT) {
                 require(json.has("text") && json.get("text") is String)
                 json.getString("text").also { require(it.length <= 4096) }

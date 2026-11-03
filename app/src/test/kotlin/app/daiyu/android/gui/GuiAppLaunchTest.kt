@@ -68,6 +68,8 @@ class GuiAppLaunchTest {
                 setBoundsInScreen(Rect(0, 0, 100, 100))
                 ReflectionHelpers.setField(this, "mWindowId", 7 + launches)
                 shadowOf(this).setAccessibilityWindowInfo(window)
+                shadowOf(this).setRefreshReturnValue(true)
+                shadowOf(this).setOnPerformActionListener { _, _ -> true }
             }
         }
         override fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? {
@@ -82,8 +84,17 @@ class GuiAppLaunchTest {
             delivered = Intent(intent)
             rootPackage = intent.component!!.packageName
         }
-        override fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit) =
-            error("app launch must not capture the screen")
+        var captures = 0
+        var holdCapture = false
+        var heldFailure: ((Int) -> Unit)? = null
+        override fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit) {
+            captures++
+            if (holdCapture) { heldFailure = failure; return }
+            success(object : GuiCaptureFrame {
+                override fun encode(observationId: String) = GuiResult.Value(GuiScreenshot(observationId, 1, 1, byteArrayOf(1)))
+                override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) { request.resourcesDisposed() }
+            })
+        }
     }
 
     @Before fun setUp() {
@@ -149,6 +160,97 @@ class GuiAppLaunchTest {
         return result
     }
 
+    @Test fun relaunchingTheSameAppAfterAnotherAppActuallyLaunchesAgain() {
+        val f = Fixture()
+        assertTrue(f.call("first") is DispatchOutcome.Confirmed)
+        assertTrue(f.callTool("launch_app", "{\"package_name\":\"other.app\"}", "other") is DispatchOutcome.Confirmed)
+        assertTrue(f.call("again") is DispatchOutcome.Confirmed)
+        assertEquals(3, platform.launches)
+        assertEquals(target, platform.rootPackage)
+        assertTrue((f.call("again") as DispatchOutcome.Confirmed).replayed)
+        assertEquals(3, platform.launches)
+    }
+    @Test fun omittedTargetStaysBoundToTheObservedApplicationForNodeActionsAndScreenshots() {
+        val f = Fixture()
+        platform.rootPackage = target
+        val observed = f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"$target\"}", "observe") as DispatchOutcome.Confirmed
+        val id = JSONObject(observed.payload).getString("observation_id")
+        assertTrue(f.callTool("screen", "{\"operation\":\"screenshot\",\"observation_id\":\"$id\"}", "image") is DispatchOutcome.Confirmed)
+        assertTrue(f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"$id\"}", "tap") is DispatchOutcome.Confirmed)
+        assertEquals(1, platform.captures)
+    }
+    @Test fun implicitSelfScreenshotRetainsNarrowTargetAndDoesNotAskForExternalLocation() {
+        val f = Fixture(TaskSurfacePreference.ASK)
+        platform.rootPackage = service.packageName
+        assertTrue(f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"${service.packageName}\"}", "self") is DispatchOutcome.Confirmed)
+        val image = f.callTool("screen", "{\"operation\":\"screenshot\"}", "visual") as DispatchOutcome.Confirmed
+        assertTrue(JSONObject(image.payload).has("capture_id"))
+        assertEquals(0, f.questions)
+        assertEquals(1, platform.captures)
+    }
+    @Test fun mismatchedTargetAndObservationNeverReplaceTheHeldSession() {
+        val f = Fixture()
+        platform.rootPackage = target
+        val first = f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"$target\"}", "observe") as DispatchOutcome.Confirmed
+        val id = JSONObject(first.payload).getString("observation_id")
+        assertEquals(DispatchOutcome.NotExecuted("OBSERVATION_TARGET_MISMATCH_NOT_EXECUTED"),
+            f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"$id\",\"target_package\":\"other.app\"}", "wrong-target"))
+        assertEquals(DispatchOutcome.NotExecuted("OBSERVATION_ID_MISMATCH"),
+            f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"wrong\"}", "wrong-id"))
+        assertTrue(f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"$id\"}", "correct") is DispatchOutcome.Confirmed)
+    }
+    @Test fun revocationRejectsOldObservationAndFreshObservationCanRecoverAfterReconnection() {
+        val f = Fixture()
+        platform.rootPackage = target
+        val first = f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"$target\"}", "before") as DispatchOutcome.Confirmed
+        val id = JSONObject(first.payload).getString("observation_id")
+        platform.enabled = false
+        assertTrue(f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"$id\"}", "revoked") is DispatchOutcome.NotExecuted)
+        assertTrue(f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"other.app\"}", "still-disabled") is DispatchOutcome.NotExecuted)
+        platform.enabled = true
+        GuiRuntime.connected(service)
+        platform.rootPackage = target
+        val fresh = f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"$target\"}", "recovered") as DispatchOutcome.Confirmed
+        assertNotEquals(id, JSONObject(fresh.payload).getString("observation_id"))
+        assertEquals(DispatchOutcome.NotExecuted("OBSERVATION_ID_MISMATCH"),
+            f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"$id\"}", "old"))
+    }
+
+    @Test fun defaultScreenshotTargetSurvivesRevocationAndPendingCaptureDrain() {
+        val f = Fixture()
+        platform.rootPackage = target
+        val observed = f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"$target\"}", "before-drain") as DispatchOutcome.Confirmed
+        val id = JSONObject(observed.payload).getString("observation_id")
+        val held = ReflectionHelpers.getField<GuiRunSession>(f.scope, "current")
+        platform.holdCapture = true
+        assertTrue(GuiRuntime.approveReads(held.lease, GuiReadApproval(0, 1)) is GuiResult.Value)
+        val pending = GuiRuntime.screenshot(held.lease, id)
+        assertFalse(pending.isDone)
+        GuiRuntime.disconnected(service); GuiRuntime.connected(service)
+        assertEquals(DispatchOutcome.NotExecuted("FOREGROUND_DRAIN_PENDING_NOT_EXECUTED"),
+            f.callTool("screen", "{\"operation\":\"screenshot\"}", "wait-for-drain"))
+        platform.heldFailure!!(1)
+        assertTrue(held.releaseConfirmed)
+        platform.holdCapture = false; platform.rootPackage = "other.app"
+        assertEquals(DispatchOutcome.NotExecuted("TARGET_PACKAGE_MISMATCH_NOT_EXECUTED"),
+            f.callTool("screen", "{\"operation\":\"screenshot\"}", "after-drain"))
+        assertEquals(1, platform.captures)
+    }
+    @Test fun sessionUnknownCannotBeHiddenByRevocationAndFreshReadOrLaunch() {
+        val f = Fixture()
+        platform.rootPackage = target
+        assertTrue(f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"$target\"}", "before-unknown") is DispatchOutcome.Confirmed)
+        val held = ReflectionHelpers.getField<GuiRunSession>(f.scope, "current")
+        held.onCentralUnknown()
+        GuiRuntime.disconnected(service); GuiRuntime.connected(service)
+        val reads = platform.rootReads
+        assertEquals(DispatchOutcome.NotExecuted("GUI_PREVIOUS_OPERATION_UNCONFIRMED"),
+            f.callTool("screen", "{\"operation\":\"observe\"}", "fresh"))
+        assertEquals(DispatchOutcome.NotExecuted("GUI_PREVIOUS_OPERATION_UNCONFIRMED"), f.call("launch-after-unknown"))
+        assertEquals(reads, platform.rootReads)
+        assertEquals(0, platform.launches)
+        assertSame(held, ReflectionHelpers.getField<GuiRunSession>(f.scope, "current"))
+    }
     @Test fun advertisedLaunchIsExactWriteAndPreparingNeverTouchesAndroid() {
         val f = Fixture()
         val tool = f.scope.tools.single { it.definition.name == "launch_app" }

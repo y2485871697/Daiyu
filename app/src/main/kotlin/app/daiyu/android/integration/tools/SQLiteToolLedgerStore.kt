@@ -36,7 +36,7 @@ class SQLiteToolLedgerStore(
                         text("session_id"), text("call_id"), text("task_id"), text("request_key"),
                         if (cursor.isNull(effectIndex)) null else cursor.getString(effectIndex),
                         text("owner"), LedgerState.valueOf(text("state")), text("payload"),
-                        errorFlag == 1, text("code")
+                        errorFlag == 1, text("code"), cursor.getInt(cursor.getColumnIndexOrThrow("repeatable")) == 1
                     ))
                 }
             }
@@ -51,6 +51,7 @@ class SQLiteToolLedgerStore(
                         put("request_key", entry.requestKey); put("effect_key", entry.effectKey); put("owner", entry.owner)
                         put("state", entry.state.name); put("payload", entry.payload)
                         put("is_error", if (entry.isError) 1 else 0); put("code", entry.code)
+                        put("repeatable", if (entry.repeatable) 1 else 0)
                     }
                     db.insertOrThrow("tool_ledger", null, values)
                 }
@@ -77,6 +78,11 @@ class SQLiteToolLedgerStore(
                 payload TEXT NOT NULL, is_error INTEGER NOT NULL CHECK(is_error IN (0,1)), code TEXT NOT NULL,
                 PRIMARY KEY(session_id, call_id)
             )""".trimIndent())
+            val columns = mutableSetOf<String>()
+            db.rawQuery("PRAGMA table_info(tool_ledger)", null).use { cursor ->
+                while (cursor.moveToNext()) columns.add(cursor.getString(cursor.getColumnIndexOrThrow("name")))
+            }
+            if ("repeatable" !in columns) db.execSQL("ALTER TABLE tool_ledger ADD COLUMN repeatable INTEGER NOT NULL DEFAULT 0 CHECK(repeatable IN (0,1))")
             db.execSQL("CREATE INDEX IF NOT EXISTS tool_ledger_effect ON tool_ledger(effect_key)")
         }
 

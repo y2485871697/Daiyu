@@ -2,7 +2,6 @@ package app.daiyu.android.gui
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
-import android.graphics.Region
 import app.daiyu.android.tasksurface.TaskSurfaceSelfTarget
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
@@ -225,21 +224,19 @@ class GuiRuntimeScreenshotTest {
 
     private fun permitGestureWindow(overlay: Boolean = false) {
         platform.listedWindows = {
-            fun window(id: Int, type: Int, layer: Int, bounds: Rect): AccessibilityWindowInfo = AccessibilityWindowInfo.obtain().apply {
-                ReflectionHelpers.callInstanceMethod<Unit>(this, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, id))
-                ReflectionHelpers.callInstanceMethod<Unit>(this, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, type))
-                ReflectionHelpers.callInstanceMethod<Unit>(this, "setLayer", ClassParameter.from(Int::class.javaPrimitiveType!!, layer))
-                if (android.os.Build.VERSION.SDK_INT >= 30)
-                    ReflectionHelpers.callInstanceMethod<Unit>(this, "setRegionInScreen", ClassParameter.from(Region::class.java, Region(bounds)))
-                else ReflectionHelpers.callInstanceMethod<Unit>(this, "setBoundsInScreen", ClassParameter.from(Rect::class.java, bounds))
-                if (android.os.Build.VERSION.SDK_INT >= 30)
-                    ReflectionHelpers.callInstanceMethod<Unit>(this, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, 0))
-                assertEquals(id, this.id); assertEquals(type, this.type); assertEquals(layer, this.layer)
-                assertEquals(bounds, Rect().also { getBoundsInScreen(it) })
-            }
+            val application = listedWindow(pkg = platform.pkg, id = platform.windowId, active = platform.active, layer = 1)
+            shadowOf(application).setBoundsInScreen(Rect(0, 0, 100, 100))
+            assertTrue(application.isActive)
+            assertEquals(Rect(0, 0, 100, 100), Rect().also { application.getBoundsInScreen(it) })
             buildList {
-                add(window(platform.windowId, AccessibilityWindowInfo.TYPE_APPLICATION, 1, Rect(0, 0, 100, 100)))
-                if (overlay) add(window(99, AccessibilityWindowInfo.TYPE_INPUT_METHOD, 2, Rect(10, 10, 40, 40)))
+                add(application)
+                if (overlay) add(AccessibilityWindowInfo.obtain().apply {
+                    shadowOf(this).apply {
+                        setId(99); setType(AccessibilityWindowInfo.TYPE_INPUT_METHOD); setLayer(2)
+                        if (android.os.Build.VERSION.SDK_INT >= 30) setDisplayId(0)
+                        setBoundsInScreen(Rect(10, 10, 40, 40))
+                    }
+                })
             }
         }
     }
@@ -337,7 +334,11 @@ class GuiRuntimeScreenshotTest {
         assertEquals(1, platform.nodeActions)
     }
 
-    private fun observe(): GuiObservation = (session.previewFromUser() as GuiResult.Value).value
+    private fun observe(): GuiObservation {
+        val result = session.previewFromUser()
+        assertTrue(result.toString(), result is GuiResult.Value)
+        return (result as GuiResult.Value).value
+    }
     private fun approve(observation: GuiObservation): GuiAction =
         GuiAction(observation.observationId, GuiOperation.TAP, 1).also {
             assertTrue(session.approveExactActionFromUser(it) is GuiResult.Value)

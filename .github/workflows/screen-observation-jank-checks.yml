@@ -128,7 +128,7 @@ jobs:
             classes=(app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
           fi
           if [[ $SCREEN_JANK_CHECK_SCOPE == page-back ]]; then
-            classes=(app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest)
+            classes=(app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest)
           fi
           filters=()
           for class in "${classes[@]}"; do
@@ -156,7 +156,7 @@ jobs:
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'ui-jank':
               expected = {'JankIncidentBufferTest', 'FramePerformanceLogTest', 'DiagnosticLogStoreTest', 'ChatMenuIsolationCompositionTest'}
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
-              expected = {'ReconnectPartsTest', 'ReconnectIndexTest', 'RootExitConfirmationTest'}
+              expected = {'ReconnectPartsTest', 'ReconnectIndexTest', 'RootExitConfirmationTest', 'PageBackMotionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

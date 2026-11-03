@@ -50,7 +50,8 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
     internal class Departure(val frame: Frame, val target: Any, val progress: Float,
-        val predictive: Boolean, val direction: Float, val forward: Boolean = false) {
+        val predictive: Boolean, val direction: Float, val forward: Boolean = false,
+        val velocity: Float = 0f, val targetImage: ImageBitmap? = null) {
         var forwardSkipped by mutableStateOf(false)
     }
 
@@ -72,7 +73,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         pending = null
         return departure?.takeIf { it.target == key && it.frame === previous }
             ?: previous?.takeIf { it.animateReturn && it.backTargetKey == key && it.size != IntSize.Zero }
-                ?.let { Departure(it, key, 0f, predictive = false, direction = it.returnDirection) }
+                ?.let { Departure(it, key, 0f, predictive = false, direction = it.returnDirection, targetImage = frames[key]?.image) }
     }
 
     fun transition(key: Any, backTargetKey: Any?, animateEnter: Boolean, size: IntSize, contentKey: Any = key): Departure? {
@@ -113,7 +114,21 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
+    fun beginGesture(frame: Frame): Boolean {
+        if (!frame.hasFreshImage) return false
+        freeze(frame)
+        return frame.canDrawPreview
+    }
+
+    fun resume(frame: Frame) {
+        if (frames[currentKey] !== frame || !frame.frozen || frame.holdingForChild || pending?.frame === frame) return
+        frame.frozen = false
+        frame.image = null
+        schedule(frame)
+    }
+
     private fun freeze(frame: Frame) {
+        if (frame.frozen) return
         frame.warmup?.cancel()
         frame.frozen = true
         if (!active || closed || frame.releaseRequested) return
@@ -134,12 +149,11 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                 try {
                     // API26 must finish its submitted Surface copy before releasing the source layer.
                     val image = withContext(NonCancellable) { snapshot(frame) }
-                    if (isActive && active && !closed && !frame.releaseRequested && previewEpoch == epoch &&
+                    if (isActive && active && !closed && !frame.releaseRequested && !frame.frozen && previewEpoch == epoch &&
                         frames[frame.key] === frame && frame.generation == generation && frame.size == size) {
                         frame.readyGeneration = generation
                         frame.readySize = size
                         frame.ready = image
-                        if (frame.frozen) frame.image = image
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -178,17 +192,16 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         size != IntSize.Zero && it.size == size && it.canDrawPreview
     }
 
-    fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float): Departure {
+    fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float, velocity: Float = 0f): Departure {
         freeze(frame)
-        return Departure(frame, target, progress, predictive, direction).also { pending = it }
+        return Departure(frame, target, progress, predictive, direction, velocity = velocity,
+            targetImage = frames[target]?.image).also { pending = it }
     }
 
     fun abandon(departure: Departure) {
         if (pending === departure) {
             pending = null
-            departure.frame.frozen = false
-            departure.frame.image = null
-            schedule(departure.frame)
+            // The visible cancel settle still owns this image; resume unlocks it at rest.
         }
     }
 

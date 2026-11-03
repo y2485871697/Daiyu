@@ -154,9 +154,9 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('gestureWidth * 0.5f + viewConfiguration.touchSlop', self.host)
         self.assertIn('screensPerSecond >= 1f -> true', self.host)
         self.assertIn('screensPerSecond <= -1f -> false', self.host)
-        self.assertIn('if (commit && state.alive) state.dispatchBack { currentBack() }', self.host)
-        self.assertIn('state.dispatchBack { currentBack() }', self.host)
-        handoff = self.host.split('fun dispatchBack(back:', 1)[1].split('private var owner:', 1)[0]
+        self.assertIn('if (commit && state.alive) state.dispatchBack(screensPerSecond) { currentBack() }', self.host)
+        self.assertIn('state.dispatchBack(screensPerSecond) { currentBack() }', self.host)
+        handoff = self.host.split('fun dispatchBack(velocity: Float = 0f, back:', 1)[1].split('private var owner:', 1)[0]
         self.assertIn('try { back() }', handoff)
         self.assertIn('finally { swipeCommit = null; dispatching = false }', handoff)
         self.assertNotIn('withFrameNanos', handoff)
@@ -248,7 +248,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertEqual(2, self.host.count('frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))'))
         self.assertIn('layers.setActive(resumed)', self.host)
         self.assertIn('var ready: ImageBitmap? = null', layers)
-        self.assertIn('if (frame.frozen) frame.image = image', layers)
+        self.assertIn('!frame.frozen && previewEpoch == epoch', layers)
+        self.assertNotIn('if (frame.frozen) frame.image = image', layers)
         freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun capture(', 1)[0]
         self.assertNotIn('capture(frame)', freeze)
         self.assertIn('frame.image = frame.ready?.takeIf { frame.readySize == frame.size }', freeze)
@@ -277,7 +278,7 @@ class PageBackGestureContractTest(unittest.TestCase):
                        '"legacy-library" -> "backup"'):
             self.assertIn(wiring, target)
         self.assertIn('themeKey, configuration, insetsKey, density, layoutDirection, previewScopeKey', self.host)
-        self.assertIn('exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))', self.host)
+        self.assertIn('initialVelocity = pageBackInitialVelocity(departure.progress, departure.velocity)', self.host)
         self.assertIn('if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)', self.host)
 
     def test_zero_progress_returns_follow_the_departing_visits_exact_predecessor(self):
@@ -288,7 +289,7 @@ class PageBackGestureContractTest(unittest.TestCase):
             self.assertIn(wiring, self.host)
         for wiring in ('val previous = frames[currentKey]?.takeIf { currentKey != key }',
                        'it.animateReturn && it.backTargetKey == key && it.size != IntSize.Zero',
-                       'Departure(it, key, 0f, predictive = false, direction = it.returnDirection)'):
+                       'Departure(it, key, 0f, predictive = false, direction = it.returnDirection, targetImage = frames[key]?.image)'):
             self.assertIn(wiring, layers)
         enter = layers.split('fun enter(key: Any, contentKey: Any = key): Departure?', 1)[1].split('fun freezeCurrent()', 1)[0]
         self.assertLess(enter.index('departure?.takeIf'), enter.index('previous?.takeIf'))
@@ -298,7 +299,7 @@ class PageBackGestureContractTest(unittest.TestCase):
     def test_button_returns_use_original_500ms_curve_and_keep_gesture_spring(self):
         self.assertIn('import top.yukonga.miuix.kmp.nav.runtime.NavProgrammaticEasing', self.host)
         self.assertIn('if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))', self.host)
-        self.assertIn('else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))', self.host)
+        self.assertIn('else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f),', self.host)
         gradle = (ROOT / 'app/build.gradle.kts').read_text()
         self.assertIn('implementation("top.yukonga.miuix.kmp:miuix-nav-android:0.9.4-rc01")', gradle)
 
@@ -308,8 +309,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('"history-search" -> null', self.main)
         self.assertIn('val showDeparture = departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed', self.host)
         effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped)', 1)[1].split('SideEffect { layers.trim', 1)[0]
-        self.assertIn('departure.frame.capture?.join()', effect)
-        self.assertLess(effect.index('departure.frame.capture?.join()'), effect.index('if (departure.frame.canDrawPreview && !departure.forwardSkipped)'))
+        self.assertNotIn('.join()', effect)
+        self.assertIn('if (departure.frame.canDrawPreview && !departure.forwardSkipped)', effect)
         self.assertIn('if (departure != null && showDeparture && !departure.forward)', self.host)
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         self.assertIn('it.target == key && it.frame === previous', layers)
@@ -406,6 +407,39 @@ class PageBackGestureContractTest(unittest.TestCase):
             self.assertIn(f'getBoolean("{key}"', store)
             self.assertIn(f'putBoolean("{key}"', store)
         self.assertIn('.commit()', store)
+
+
+    def test_release_motion_carries_velocity_without_restarting_from_zero(self):
+        self.assertIn('state.dispatchBack(screensPerSecond) { currentBack() }', self.host)
+        self.assertIn('SwipeCommit(progress, predictive, direction, velocity)', self.host)
+        self.assertIn('value, predictive, direction, velocity, previewAllowed, back ->', self.host)
+        self.assertIn('layers.prepare(frame, visualBackTargetKey, value, predictive, direction, velocity)', self.host)
+        self.assertIn('Animatable(if (departure?.forward == false) departure.progress else 0f)', self.host)
+        self.assertIn('val value = exit.value', self.host)
+        self.assertNotIn('departure.progress + (1f - departure.progress) * exit.value', self.host)
+
+    def test_gesture_pins_fresh_pixels_before_motion_and_unlocks_at_rest(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        self.assertIn('if (!frame.hasFreshImage) return false', layers)
+        self.assertIn('if (frame.frozen) return', layers)
+        self.assertIn('gesturePreviewReady = beginPreview()', self.host)
+        self.assertIn('beginPreview = { currentTarget != null && layers.beginGesture(frame) }', self.host)
+        self.assertIn('if (!previewAllowed) frame.animateReturn = false', self.host)
+        self.assertIn('state.previewAllowed && (state.active || progress > 0f) -> frame.image', self.host)
+        self.assertIn('departure != null && showDeparture && !departure.forward -> departure.targetImage', self.host)
+        self.assertIn('layers.resume(frame)', self.host)
+        self.assertIn('state.restorePreview()', self.host)
+
+    def test_continuity_has_native_velocity_pending_copy_and_pixel_regressions(self):
+        base = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation'
+        gestures = (base / 'PageBackGesturesActivityTest.kt').read_text()
+        stack = (base / 'PageBackStackActivityTest.kt').read_text()
+        for name in ('testReleaseVelocityContinuesIntoDeparture', 'testPinnedPixelsSurviveContentUpdateUntilCommit', 'testCancelledGestureRestoresCurrentLivePixels'):
+            self.assertIn('fun ' + name + '()', gestures)
+        for name in ('testReturnAdvancesWhileCaptureIsPending', 'testColdReturnDoesNotWaitOrEnableLatePreview', 'testFrozenPreviewRejectsSameGenerationLateCopy'):
+            self.assertIn('fun ' + name + '()', stack)
+        self.assertIn('assertFalse(gate.isCompleted)', stack)
+        self.assertIn('same-generation late copy cannot replace the visible image', stack)
 
 
 if __name__ == '__main__':

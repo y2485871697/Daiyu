@@ -71,6 +71,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var nestedPreview = true
     private var backCount = 0
     private var nestedCount = 0
+    private var currentColor by mutableStateOf(Color.Blue)
+    private var observedFrame: PageBackPreviewLayers.Frame? = null
     private var rowClicks = 0
     private var sliderValue by mutableStateOf(0.2f)
     private var inputText by mutableStateOf("a text field with selectable content")
@@ -84,7 +86,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                     val renderedRoute = route
                     PageBackGestureHost(renderedRoute, canBack, swipe, predictive,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
-                        backTargetKey = if (renderedRoute == "test-page") "previous-page" else null) {
+                        backTargetKey = if (renderedRoute == "test-page") "previous-page" else null,
+                        captureFromContent = !horizontalChild && !clickableRows && !sliderChild && !textChild) {
+                        val currentFrame = LocalPageBackPreviewFrame.current
+                        androidx.compose.runtime.SideEffect { observedFrame = currentFrame }
                         PageBackHandler(enabled = canBack, previewEnabled = previewAllowed) {
                             backCount++
                             if (navigateOnBack) route = "previous-page"
@@ -113,7 +118,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                                 .horizontalScroll(horizontal)) {
                                 Box(Modifier.width(900.dp).height(120.dp)) { Text("scroll child") }
                             }
-                        } else Box(Modifier.fillMaxSize().background(if (renderedRoute == "previous-page") Color.Red else Color.Blue)) {
+                        } else Box(Modifier.fillMaxSize().pageBackPreviewSource().background(if (renderedRoute == "previous-page") Color.Red else currentColor)) {
                             Text(renderedRoute)
                         }
                     }
@@ -642,6 +647,82 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             assertEquals(1, backCount)
         } finally { ui.mainClock.autoAdvance = true }
     }
+
+    private fun prepareCurrentPixels() {
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        ui.waitUntil(5_000) { observedFrame?.hasFreshImage == true }
+    }
+
+    fun testReleaseVelocityContinuesIntoDeparture() {
+        predictive = false
+        navigateOnBack = true
+        mount(capturePreviousPage = true)
+        prepareCurrentPixels()
+        ui.mainClock.autoAdvance = false
+        try {
+            val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .55f, height * .6f), 96)
+                moveTo(Offset(width * .65f, height * .6f), 16)
+                moveTo(Offset(width * .75f, height * .6f), 16)
+            }
+            ui.mainClock.advanceTimeBy(32)
+            val released = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            ui.onNodeWithTag("page-back-host").performTouchInput { up() }
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
+            ui.mainClock.advanceTimeByFrame()
+            val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+            assertEquals("release position stays continuous", released.left, start.left, 1.1f)
+            ui.mainClock.advanceTimeByFrame()
+            val next = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+            val remaining = initial.right - start.left
+            assertTrue("release momentum survives the first spring frame", next.left - start.left > remaining * .08f)
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    private fun assertPinnedPixels(commit: Boolean) {
+        predictive = false
+        navigateOnBack = true
+        mount(capturePreviousPage = true)
+        prepareCurrentPixels()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .65f, height * .6f), 240)
+            }
+            ui.mainClock.advanceTimeBy(32)
+            mainThread { currentColor = Color.Green }
+            ui.mainClock.advanceTimeBy(32)
+            val held = captureScreenNode(ui.onNodeWithTag("page-back-surface")).toPixelMap()
+            val before = held[held.width / 2, held.height / 2]
+            assertTrue("drag keeps its pinned blue pixels", before.blue > .9f && before.green < .1f)
+            if (commit) {
+                ui.onNodeWithTag("page-back-host").performTouchInput { up() }
+                assertEquals("previous-page", route)
+                assertEquals(1, backCount)
+                ui.mainClock.advanceTimeByFrame()
+                val pixels = captureScreenNode(ui.onNodeWithTag("page-back-departure")).toPixelMap()
+                val after = pixels[pixels.width / 2, pixels.height / 2]
+                assertTrue("release must not replace the blue drag image", after.blue > .9f && after.green < .1f)
+            } else {
+                ui.onNodeWithTag("page-back-host").performTouchInput { cancel() }
+                ui.mainClock.advanceTimeBy(1000)
+                val pixels = captureScreenNode(ui.onNodeWithTag("page-back-surface")).toPixelMap()
+                val restored = pixels[pixels.width / 2, pixels.height / 2]
+                assertTrue("cancel restores the latest green live page", restored.green > .9f && restored.blue < .1f)
+                assertEquals("test-page", route)
+                assertEquals(0, backCount)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testPinnedPixelsSurviveContentUpdateUntilCommit() = assertPinnedPixels(true)
+    fun testCancelledGestureRestoresCurrentLivePixels() = assertPinnedPixels(false)
 
     fun testGesturePreferencesPersistIndependently() {
         val preferences = activity.getSharedPreferences("page-back-gestures-test", 0)

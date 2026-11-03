@@ -194,6 +194,125 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun testFrozenPreviewRejectsSameGenerationLateCopy() {
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        ui.waitForIdle()
+        mainThread {
+            val scheduler = TestCoroutineScheduler()
+            val clock = object : MonotonicFrameClock {
+                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
+            }
+            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
+            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
+            val layers = PageBackPreviewLayers(graphics, scope) {
+                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
+            }
+            try {
+                layers.enter("source")
+                val frame = layers.frame("source")
+                layers.setActive(true)
+                frame.recorded(IntSize(2, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                val first = ImageBitmap(2, 2)
+                copies[0].complete(first); scheduler.runCurrent()
+                assertTrue(layers.beginGesture(frame))
+                assertSame(first, frame.image)
+                layers.resume(frame)
+                assertNull(frame.image)
+                frame.recorded(IntSize(2, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals(2, copies.size)
+                val capturedGeneration = frame.generation
+                layers.freezeCurrent()
+                assertSame(first, frame.image)
+                copies[1].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                assertEquals(capturedGeneration, frame.generation)
+                assertSame("same-generation late copy cannot replace the visible image", first, frame.image)
+                assertSame(first, frame.ready)
+                layers.clearPreviews()
+                frame.recorded(IntSize(2, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                layers.freezeCurrent()
+                assertFalse(frame.canDrawPreview)
+                copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                assertNull("a cold frozen visit cannot enable a late preview", frame.image)
+            } finally {
+                copies.forEach { if (!it.isCompleted) it.complete(ImageBitmap(2, 2)) }
+                scheduler.runCurrent()
+                layers.close(); scope.cancel(); scheduler.runCurrent()
+            }
+        }
+    }
+
+    private fun assertReturnDoesNotWaitForCopy(withPreparedImage: Boolean) {
+        val gate = CompletableDeferred<Unit>()
+        var blockCopies = false
+        var copiesWaiting = 0
+        var currentFrame: PageBackPreviewLayers.Frame? = null
+        var paint by mutableStateOf(Color.Blue)
+        try {
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val rendered = screen
+                    PageBackGestureHost(rendered, canNavigateBack = rendered == "settings",
+                        swipeDismissEnabled = false, predictiveBackEnabled = false,
+                        dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
+                        backTargetKey = if (rendered == "settings") "chat" else null,
+                        captureFromContent = true, previewCapture = { frame ->
+                            if (blockCopies && frame.key == "settings") { copiesWaiting++; gate.await() }
+                            frame.layer.toImageBitmap()
+                        }) {
+                        val observed = LocalPageBackPreviewFrame.current
+                        androidx.compose.runtime.SideEffect { currentFrame = observed }
+                        PageBackHandler(enabled = rendered == "settings") { backCount++; screen = "chat" }
+                        Box(Modifier.fillMaxSize().pageBackPreviewSource().background(if (rendered == "chat") Color.Red else paint))
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        mainThread { blockCopies = !withPreparedImage; screen = "settings" }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        if (withPreparedImage) {
+            ui.waitUntil(5_000) { currentFrame?.ready != null }
+            mainThread { blockCopies = true; paint = Color.Green }
+            captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        }
+        ui.waitUntil(5_000) { copiesWaiting > 0 }
+        ui.mainClock.autoAdvance = false
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            assertEquals("business pop is synchronous while capture is pending", "chat", screen)
+            assertEquals(1, backCount)
+            assertFalse(gate.isCompleted)
+            ui.mainClock.advanceTimeByFrame()
+            if (withPreparedImage) {
+                val initial = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                ui.mainClock.advanceTimeBy(64)
+                val moved = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                assertTrue("pending copy must not hold the first animation frames", moved.left > initial.left)
+                assertTrue("return still has an intermediate frame", moved.left < initial.right)
+            } else ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            assertFalse(gate.isCompleted)
+            mainThread { gate.complete(Unit) }
+            ui.mainClock.advanceTimeBy(64)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            assertEquals(1, backCount)
+        } finally {
+            gate.complete(Unit)
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testReturnAdvancesWhileCaptureIsPending() = assertReturnDoesNotWaitForCopy(true)
+    fun testColdReturnDoesNotWaitOrEnableLatePreview() = assertReturnDoesNotWaitForCopy(false)
+
     private fun changeScreen(value: String) {
         mainThread { screen = value }
         ui.waitForIdle()

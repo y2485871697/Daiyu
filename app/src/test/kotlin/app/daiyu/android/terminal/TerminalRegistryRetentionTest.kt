@@ -46,7 +46,7 @@ class TerminalRegistryRetentionTest {
             startProcess = { TestProcess() }
         }
         try {
-            val session = registry.execute("terminal_open", JSONObject().put("request_id", "open")).getString("session_id")
+            val session = registry.execute("terminal_open", JSONObject().put("request_id", "open-android")).getString("session_id")
             test(root, registry, session)
         } finally {
             registry.close()
@@ -63,7 +63,9 @@ class TerminalRegistryRetentionTest {
         registry.startProcess = { starts++; TestProcess() }
         var firstId = ""
         repeat(130) { index ->
-            val result = registry.execute("terminal_exec", command(session, index))
+            val reopened = registry.execute("terminal_open", JSONObject().put("request_id", "open-android"))
+            assertEquals(session, reopened.getString("session_id"))
+            val result = registry.execute("terminal_exec", command(reopened.getString("session_id"), index))
             assertEquals(result.toString(), "executed", result.optString("execution"))
             if (index == 0) firstId = result.getString("job_id")
         }

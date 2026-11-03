@@ -35,6 +35,8 @@ class RunCommandToolsTest {
         var duringConsent: () -> Unit = {}
         val effects = mutableListOf<WriteEffect>()
         val executedCommands = mutableListOf<String>()
+        val openRequests = mutableSetOf<String>()
+        val executionRequests = mutableSetOf<String>()
         private val gate = CommandApprovalGate({ fail("automatic consent must not post UI") }, { ownerCurrent && it === owner })
         val leaf = RunCommandTools(androidConfiguration, owner, task, null,
             approve = { context, effect, disclosure ->
@@ -51,11 +53,13 @@ class RunCommandToolsTest {
                 object : CommandTransport {
                     override fun execute(name: String, arguments: JSONObject): JSONObject {
                         if (name == "terminal_open") {
+                            openRequests.add(arguments.getString("request_id"))
                             onOpen()
                             openError?.let { return JSONObject().put("ok", false).put("error", it) }
                             return JSONObject().put("ok", true).put("session_id", "session")
                         }
                         executions++
+                        executionRequests.add(arguments.getString("request_id"))
                         if (failExecute) throw java.io.IOException("sent but receipt lost")
                         executedCommands.add(arguments.getString("command"))
                         return JSONObject().put("ok", true).put("execution", execution)
@@ -88,6 +92,22 @@ class RunCommandToolsTest {
         assertTrue((fixture.dispatch("replay", command = commands.first()) as DispatchOutcome.Confirmed).replayed)
         assertEquals(4, fixture.executions)
         fixture.leaf.close()
+    }
+    @Test fun continuous130CommandsReuseOneFrozenSessionAndKeepExactCommandIdentities() {
+        val fixture = Fixture(automaticConsent = true)
+        try {
+            repeat(130) { index ->
+                assertTrue(fixture.dispatch("long-$index", command = "echo exact-$index") is DispatchOutcome.Confirmed)
+            }
+            assertEquals(1, fixture.created)
+            assertEquals(setOf("open-android"), fixture.openRequests)
+            assertEquals(130, fixture.executionRequests.size)
+            assertEquals(130, fixture.effects.toSet().size)
+            assertEquals(130, fixture.executions)
+            assertTrue((fixture.dispatch("repeat-first", command = "echo exact-0") as DispatchOutcome.Confirmed).replayed)
+            assertEquals(130, fixture.executions)
+            assertTrue(fixture.task.allowedWrites.isEmpty())
+        } finally { fixture.leaf.close() }
     }
     @Test fun automaticDefaultStillRejectsStopExpiredOwnerAndForeignOwner() {
         val stopped = Fixture(automaticConsent = true)

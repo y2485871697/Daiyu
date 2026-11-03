@@ -258,7 +258,7 @@ internal class RunCommandTools(
         val request = call.invocation.id.value.let { id -> MessageDigest.getInstance("SHA-256")
             .digest(id.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it.toInt() and 255) } }
         if (call.cancelled()) return ExecutionReceipt.NotExecuted("terminal_cancelled_before_open")
-        val opened = registry.execute("terminal_open", JSONObject().put("request_id", "open-$request"))
+        val opened = registry.execute("terminal_open", JSONObject().put("request_id", "open-$environment"))
         if (!opened.optBoolean("ok")) return ExecutionReceipt.NotExecuted(opened.optString("error", "terminal_open_failed"))
         if (call.cancelled() || synchronized(lock) { closed })
             return ExecutionReceipt.NotExecuted("terminal_cancelled_before_command")

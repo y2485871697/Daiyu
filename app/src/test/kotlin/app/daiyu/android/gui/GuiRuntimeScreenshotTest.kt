@@ -2,6 +2,7 @@ package app.daiyu.android.gui
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
+import android.graphics.Region
 import app.daiyu.android.tasksurface.TaskSurfaceSelfTarget
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
@@ -228,9 +229,13 @@ class GuiRuntimeScreenshotTest {
                 ReflectionHelpers.callInstanceMethod<Unit>(this, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, id))
                 ReflectionHelpers.callInstanceMethod<Unit>(this, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, type))
                 ReflectionHelpers.callInstanceMethod<Unit>(this, "setLayer", ClassParameter.from(Int::class.javaPrimitiveType!!, layer))
-                ReflectionHelpers.callInstanceMethod<Unit>(this, "setBoundsInScreen", ClassParameter.from(Rect::class.java, bounds))
+                if (android.os.Build.VERSION.SDK_INT >= 30)
+                    ReflectionHelpers.callInstanceMethod<Unit>(this, "setRegionInScreen", ClassParameter.from(Region::class.java, Region(bounds)))
+                else ReflectionHelpers.callInstanceMethod<Unit>(this, "setBoundsInScreen", ClassParameter.from(Rect::class.java, bounds))
                 if (android.os.Build.VERSION.SDK_INT >= 30)
                     ReflectionHelpers.callInstanceMethod<Unit>(this, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, 0))
+                assertEquals(id, this.id); assertEquals(type, this.type); assertEquals(layer, this.layer)
+                assertEquals(bounds, Rect().also { getBoundsInScreen(it) })
             }
             buildList {
                 add(window(platform.windowId, AccessibilityWindowInfo.TYPE_APPLICATION, 1, Rect(0, 0, 100, 100)))
@@ -238,12 +243,14 @@ class GuiRuntimeScreenshotTest {
             }
         }
     }
-    @Test fun explicitCoordinateTapWaitsForTerminalGestureReceiptAndRetiresObservation() {
+    @Test @Config(sdk = [26, 30]) fun explicitCoordinateTapWaitsForTerminalGestureReceiptAndRetiresObservation() {
         permitGestureWindow()
         val observed = observe()
         val action = GuiAction(observed.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(20, 30, 20, 30, 50))
         assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
-        val started = GuiRuntime.beginAction(session.lease, action) as GuiResult.Value
+        val result = GuiRuntime.beginAction(session.lease, action)
+        assertTrue(result.toString(), result is GuiResult.Value)
+        val started = result as GuiResult.Value
         assertEquals(1, platform.gestures)
         assertEquals(action.gesture, platform.submittedGesture)
         assertFalse(started.value.isDone)
@@ -260,7 +267,9 @@ class GuiRuntimeScreenshotTest {
         val observed = observe()
         val action = GuiAction(observed.observationId, GuiOperation.SWIPE, gesture = GuiGesture(50, 90, 50, 10, 800))
         assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
-        val started = GuiRuntime.beginAction(session.lease, action) as GuiResult.Value
+        val result = GuiRuntime.beginAction(session.lease, action)
+        assertTrue(result.toString(), result is GuiResult.Value)
+        val started = result as GuiResult.Value
         session.close()
         assertFalse(session.releaseConfirmed)
         rejected(GuiRuntime.openForUser(GuiOwner("other", "run")), "FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")

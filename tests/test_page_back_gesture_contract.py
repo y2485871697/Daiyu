@@ -154,6 +154,9 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('gestureWidth * 0.5f + viewConfiguration.touchSlop', self.host)
         self.assertIn('screensPerSecond >= 1f -> true', self.host)
         self.assertIn('screensPerSecond <= -1f -> false', self.host)
+        self.assertIn('VelocityTracker().also { it.addPointerInputChange(down) }', self.host)
+        self.assertIn('velocity.addPointerInputChange(change)', self.host)
+        self.assertNotIn('velocity.addPosition(change.uptimeMillis, change.position)', self.host)
         self.assertIn('if (commit && state.alive) state.dispatchBack(screensPerSecond) { currentBack() }', self.host)
         self.assertIn('state.dispatchBack(screensPerSecond) { currentBack() }', self.host)
         handoff = self.host.split('fun dispatchBack(velocity: Float = 0f, back:', 1)[1].split('private var owner:', 1)[0]

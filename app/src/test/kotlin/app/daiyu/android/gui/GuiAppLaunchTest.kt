@@ -258,9 +258,11 @@ class GuiAppLaunchTest {
     @Test fun unknownLaunchIsNotRetriedWithANewCallId() {
         val f = Fixture()
         platform.failure = IllegalStateException("unknown binder delivery")
-        assertTrue(f.call("first") is DispatchOutcome.Unknown)
+        assertEquals(DispatchOutcome.Unknown("APPLICATION_LAUNCH_UNCONFIRMED"), f.call("first"))
+        assertEquals(1, platform.launches)
         platform.failure = null
-        assertTrue(f.call("second") is DispatchOutcome.NotExecuted)
+        assertEquals(DispatchOutcome.Unknown("unknown_effect_protected"), f.call("second"))
+        assertEquals(1, platform.resolutions)
         assertEquals(1, platform.launches)
     }
     @Test fun launchRequiresExactLeaseTargetAndRetiresOldObservations() {

@@ -682,10 +682,16 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeByFrame()
             val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
             assertEquals("release position stays continuous", released.left, start.left, 1.1f)
+            // The first animation callback initializes play time to t=0 after departure composition.
+            ui.mainClock.advanceTimeByFrame()
+            val springStart = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+            assertEquals("the spring t=0 keeps the release position", start.left, springStart.left, 1.1f)
             ui.mainClock.advanceTimeByFrame()
             val next = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
-            val remaining = initial.right - start.left
-            assertTrue("release momentum survives the first spring frame", next.left - start.left > remaining * .08f)
+            val remaining = initial.right - springStart.left
+            val delta = next.left - springStart.left
+            assertTrue("release momentum survives the first positive-time spring frame: delta=$delta remaining=$remaining",
+                delta > remaining * .08f)
             ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
         } finally { ui.mainClock.autoAdvance = true }

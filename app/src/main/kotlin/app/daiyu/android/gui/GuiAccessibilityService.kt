@@ -1,8 +1,10 @@
 package app.daiyu.android.gui
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
 import android.content.Intent
+import android.graphics.Path
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
@@ -100,6 +102,18 @@ internal interface GuiRuntimeAccess {
     fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? =
         current.packageManager.getLaunchIntentForPackage(packageName)
     fun startActivity(current: GuiAccessibilityService, intent: Intent) { current.startActivity(intent) }
+    fun gesture(current: GuiAccessibilityService, gesture: GuiGesture, completed: (Boolean) -> Unit): Boolean {
+        val path = Path().apply {
+            moveTo(gesture.x.toFloat(), gesture.y.toFloat())
+            if (gesture.x != gesture.endX || gesture.y != gesture.endY) lineTo(gesture.endX.toFloat(), gesture.endY.toFloat())
+        }
+        val request = GestureDescription.Builder().addStroke(
+            GestureDescription.StrokeDescription(path, 0, gesture.durationMillis)).build()
+        return current.dispatchGesture(request, object : AccessibilityService.GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription) { completed(true) }
+            override fun onCancelled(gestureDescription: GestureDescription) { completed(false) }
+        }, GuiRuntime.main)
+    }
     @androidx.annotation.RequiresApi(30)
     fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit)
 }
@@ -169,6 +183,7 @@ internal object GuiRuntime {
         owner != null && try { target?.isCurrent(owner, ownPackage) == true } catch (_: Exception) { false }
     private fun targetRejection(lease: GuiLeaseGate.Lease): GuiResult.Rejected? {
         gate.rejection(lease)?.let { return it }
+        if (gestures.containsKey(lease)) return GuiResult.Rejected("GESTURE_IN_PROGRESS_NOT_EXECUTED")
         val binding = targetBinding?.takeIf { it.lease === lease }
             ?: return GuiResult.Rejected("GUI_AUTHORIZATION_REVOKED")
         if (binding.selfTarget != null &&
@@ -203,6 +218,8 @@ internal object GuiRuntime {
         ownerCurrent: () -> Boolean, onNotExecuted: (String) -> Unit, onRevoked: () -> Unit,
         deliver: (GuiConfirmedDelivery) -> Boolean, productDefaults: Boolean = false): GuiResult<Unit> {
         onMain(); operationRejection(session.lease, operation)?.let { return it }; screenRejection()?.let { return it }
+        if (operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE))
+            return GuiResult.Rejected("GUI_GESTURE_REQUIRES_OBSERVED_COORDINATES")
         selfRootRejection(session.lease)?.let { return it }
         if (confirmation != null) return GuiResult.Rejected("CONFIRMATION_ALREADY_OPEN")
         val host = GuiConfirmationOverlay(service!!, session, operation, text, ownerCurrent, onNotExecuted, onRevoked, deliver, productDefaults)
@@ -313,7 +330,7 @@ internal object GuiRuntime {
     }
     private data class NodeContext(val packageName: String, val windowId: Int, val children: Int, val visible: Boolean)
     private data class TreeSample(val packageName: String, val windowId: Int, val nodes: List<GuiNode>,
-        val contexts: List<NodeContext>, val truncated: Boolean) {
+        val contexts: List<NodeContext>, val truncated: Boolean, val maxNodes: Int) {
         // Redacted passwords and incomplete traversals cannot prove tree equality.
         val verifiable: Boolean get() = !truncated && nodes.none { it.password }
     }
@@ -346,7 +363,7 @@ internal object GuiRuntime {
             if (!collect(target, null, 0)) continue
             val ancestors = mutableListOf<Int>()
             var parent = target.parent
-            while (parent != null && ancestors.size < 16) {
+            while (parent != null && ancestors.size < guiTreeDepth(tree.maxNodes)) {
                 ancestors += parent
                 parent = tree.nodes[parent].parent
             }
@@ -428,7 +445,7 @@ internal object GuiRuntime {
         val own = targetPackage == service!!.packageName
         if (own && !selfCurrent(selfTarget, surfaceOwner, service!!.packageName))
             return GuiResult.Rejected("SELF_APP_TARGET_LOST")
-        if (captures.isNotEmpty() || closingLeases.isNotEmpty()) return GuiResult.Rejected("FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
+        if (captures.isNotEmpty() || gestures.isNotEmpty() || closingLeases.isNotEmpty()) return GuiResult.Rejected("FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
         return when (val acquired = gate.acquire(owner)) {
             is GuiResult.Value -> {
                 targetBinding = TargetBinding(acquired.value, targetPackage,
@@ -480,6 +497,7 @@ internal object GuiRuntime {
         return gate.approvedActions(lease)
     }
     private val captures = mutableMapOf<GuiLeaseGate.Lease, Int>()
+    private val gestures = mutableMapOf<GuiLeaseGate.Lease, CompletableFuture<GuiResult<String>>>()
     private val draining = mutableMapOf<GuiLeaseGate.Lease, () -> Unit>()
     private val closingLeases = mutableSetOf<GuiLeaseGate.Lease>()
     internal fun close(lease: GuiLeaseGate.Lease, onReleased: () -> Unit) {
@@ -493,7 +511,7 @@ internal object GuiRuntime {
         finishDrain(lease)
     }
     private fun finishDrain(lease: GuiLeaseGate.Lease) {
-        if ((captures[lease] ?: 0) != 0) return
+        if ((captures[lease] ?: 0) != 0 || gestures.containsKey(lease)) return
         val callback = draining.remove(lease) ?: return
         closingLeases.remove(lease)
         gate.close(lease)
@@ -600,7 +618,7 @@ internal object GuiRuntime {
         var complete = !observed.truncated
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
             try {
-                if (++count > 128 || depth > 16) { complete = false; return }
+                if (++count > observed.maxNodes || depth > guiTreeDepth(observed.maxNodes)) { complete = false; return }
                 if (original != null) {
                     val rect = Rect(); node.getBoundsInScreen(rect)
                     val fields = identity(node)
@@ -611,9 +629,9 @@ internal object GuiRuntime {
                         node.isScrollable == original.scrollable && node.isEditable == original.editable &&
                         node.isPassword == original.password && node.isEnabled == original.enabled && node.isVisibleToUser) matches++
                 }
-                if (node.childCount > 64) complete = false
-                for (i in 0 until minOf(node.childCount, 64)) {
-                    if (count >= 128) { complete = false; break }
+                if (node.childCount > guiTreeChildren(observed.maxNodes)) complete = false
+                for (i in 0 until minOf(node.childCount, guiTreeChildren(observed.maxNodes))) {
+                    if (count >= observed.maxNodes) { complete = false; break }
                     val child = node.getChild(i)
                     if (child == null) complete = false else visit(child, depth + 1)
                 }
@@ -630,14 +648,14 @@ internal object GuiRuntime {
     /** Same admission, node/depth/child/text bounds for publishing and private verification.
      * Verification never retains nodes, consumes a read, publishes an ID, or changes approvals. */
     @Suppress("DEPRECATION")
-    private fun sampleTree(lease: GuiLeaseGate.Lease, retain: Boolean): GuiResult<TreeSample> {
+    private fun sampleTree(lease: GuiLeaseGate.Lease, retain: Boolean, maxNodes: Int = 128): GuiResult<TreeSample> {
         val fetched = externalRoot(lease, service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
         val source = fetched.value
         val result = mutableListOf<GuiNode>()
         val contexts = mutableListOf<NodeContext>()
         var truncated = false
-        var textBudget = 16_384
+        var textBudget = maxNodes * 128
         fun bounded(value: CharSequence?): String {
             val limit = minOf(512, textBudget)
             val text = value?.take(limit)?.toString().orEmpty()
@@ -646,7 +664,7 @@ internal object GuiRuntime {
             return text
         }
         fun visit(node: AccessibilityNodeInfo, parent: Int?, depth: Int) {
-            if (result.size >= 128 || depth > 16) { truncated = true; node.recycle(); return }
+            if (result.size >= maxNodes || depth > guiTreeDepth(maxNodes)) { truncated = true; node.recycle(); return }
             val id = result.size
             if (retain) {
                 retained[id] = node
@@ -662,9 +680,9 @@ internal object GuiRuntime {
                 val pkg = node.packageName
                 if ((pkg?.length ?: 0) > 256) truncated = true
                 contexts += NodeContext(pkg?.take(256)?.toString().orEmpty(), node.windowId, count, node.isVisibleToUser)
-                if (count > 64) truncated = true
-                for (index in 0 until minOf(count, 64)) {
-                    if (result.size >= 128) { truncated = true; break }
+                if (count > guiTreeChildren(maxNodes)) truncated = true
+                for (index in 0 until minOf(count, guiTreeChildren(maxNodes))) {
+                    if (result.size >= maxNodes) { truncated = true; break }
                     val child = node.getChild(index)
                     if (child == null) truncated = true else visit(child, id, depth + 1)
                 }
@@ -674,11 +692,12 @@ internal object GuiRuntime {
         return try {
             visit(source, null, 0)
             val root = contexts.first()
-            GuiResult.Value(TreeSample(root.packageName, root.windowId, result, contexts, truncated))
+            GuiResult.Value(TreeSample(root.packageName, root.windowId, result, contexts, truncated, maxNodes))
         } catch (_: Exception) { GuiResult.Rejected("OBSERVATION_UNAVAILABLE") }
     }
 
-    internal fun observe(lease: GuiLeaseGate.Lease): GuiResult<GuiObservation> {
+    internal fun observe(lease: GuiLeaseGate.Lease, maxNodes: Int = 128): GuiResult<GuiObservation> {
+        require(maxNodes in 128..512)
         onMain(); targetRejection(lease)?.let { return it }
         staleEvent = null; staleLoggedFor = null
         gate.retireObservation(lease); clearNodes()
@@ -686,16 +705,18 @@ internal object GuiRuntime {
         val permit = gate.consumeRead(lease, screenshot = false)
         if (permit !is GuiResult.Value) return permit as GuiResult.Rejected
         val startGeneration = generation
-        val sampled = sampleTree(lease, retain = true)
+        val sampled = sampleTree(lease, retain = true, maxNodes = maxNodes)
         if (sampled !is GuiResult.Value) { clearNodes(); return sampled as GuiResult.Rejected }
         val tree = sampled.value
         if (isSelfLease(lease)) retainSelfTargets(tree)
         val observation = GuiObservation(UUID.randomUUID().toString(), tree.packageName, tree.windowId, startGeneration,
-            SystemClock.elapsedRealtime(), tree.nodes, tree.truncated)
+            SystemClock.elapsedRealtime(), tree.nodes, tree.truncated, maxNodes)
         val published = gate.publish(lease, observation)
         if (published is GuiResult.Value) screenshotBinding = observation.observationId to tree else clearNodes()
         return published
     }
+
+    private fun observedMaxNodes(lease: GuiLeaseGate.Lease): Int = lease.observation?.maxNodes ?: 128
 
     /** Logical stability only, not physical atomicity of a platform frame and accessibility tree. */
     private fun validateScreenshot(lease: GuiLeaseGate.Lease, observationId: String): GuiResult.Rejected? {
@@ -707,7 +728,7 @@ internal object GuiRuntime {
         val binding = screenshotBinding?.takeIf { it.first == observationId }?.second
             ?: return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
         if (!binding.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
-        val sampled = sampleTree(lease, retain = false)
+        val sampled = sampleTree(lease, retain = false, maxNodes = observedMaxNodes(lease))
         if (sampled !is GuiResult.Value) {
             if (sampled is GuiResult.Rejected && sampled.code == "SELF_APP_TARGET_LOST") return sampled
             return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
@@ -759,10 +780,28 @@ internal object GuiRuntime {
             } finally { active.recycle() }
             if (!sameWindow) return rejectChangedTarget(lease, "OBSERVATION_STALE")
         } catch (_: Exception) { return GuiResult.Rejected("ACTIVE_WINDOW_UNAVAILABLE_NOT_EXECUTED") }
+        if (action.operation == GuiOperation.IME_SUBMIT) {
+            if (Build.VERSION.SDK_INT < 30) return GuiResult.Rejected("IME_SUBMIT_UNSUPPORTED_API_NOT_EXECUTED")
+            if (node == null || !node.isEditable || !node.isFocused ||
+                node.actionList.none { it.id == AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id })
+                return GuiResult.Rejected("IME_SUBMIT_NOT_SUPPORTED_BY_FOCUSED_NODE_NOT_EXECUTED")
+        }
+        action.gesture?.let { gesture ->
+            val bounds = observed.nodes.firstOrNull()?.bounds ?: return GuiResult.Rejected("OBSERVATION_REQUIRED")
+            fun inside(x: Int, y: Int) = x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom
+            if (!inside(gesture.x, gesture.y) || !inside(gesture.endX, gesture.endY))
+                return GuiResult.Rejected("GESTURE_OUTSIDE_OBSERVED_WINDOW_NOT_EXECUTED")
+            val binding = screenshotBinding?.takeIf { it.first == observed.observationId }?.second
+                ?: return GuiResult.Rejected("GESTURE_TREE_UNVERIFIABLE_NOT_EXECUTED")
+            val sampled = sampleTree(lease, retain = false, maxNodes = observed.maxNodes)
+            if (!binding.verifiable || sampled !is GuiResult.Value || sampled.value != binding)
+                return rejectChangedTarget(lease, "GESTURE_TREE_CHANGED_OR_INCOMPLETE_NOT_EXECUTED")
+        }
         val consumed = gate.consumeAction(lease, action, generation)
         if (consumed is GuiResult.Rejected) return consumed
         // No coordinate/ancestor fallback or automatic retry when an advertised action is unsupported.
         return try {
+            if (action.gesture != null) return dispatchGesture(current, lease, action.gesture)
             val accepted = when (action.operation) {
                 GuiOperation.TAP -> node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 GuiOperation.LONG_PRESS -> node!!.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
@@ -771,6 +810,8 @@ internal object GuiRuntime {
                 GuiOperation.INPUT -> node!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text)
                 })
+                GuiOperation.IME_SUBMIT -> node!!.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE -> error("gesture_required")
                 GuiOperation.BACK -> current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
                 GuiOperation.HOME -> current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
                 GuiOperation.RECENTS -> current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
@@ -779,6 +820,40 @@ internal object GuiRuntime {
             GuiResult.Value(if (accepted) "PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED" else "PLATFORM_ACTION_REJECTED")
         } catch (_: Exception) { GuiResult.Unknown("ACTION_DELIVERY_UNCONFIRMED") }
         finally { generation++; clearNodes() }
+    }
+
+    internal fun beginAction(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<CompletableFuture<GuiResult<String>>> {
+        val result = action(lease, action)
+        return when (result) {
+            is GuiResult.Value -> GuiResult.Value(gestures[lease] ?: CompletableFuture.completedFuture(result))
+            is GuiResult.Rejected -> result
+            is GuiResult.Unknown -> result
+        }
+    }
+    private fun dispatchGesture(current: GuiAccessibilityService, lease: GuiLeaseGate.Lease,
+        gesture: GuiGesture): GuiResult<String> {
+        val future = CompletableFuture<GuiResult<String>>()
+        gestures[lease] = future
+        return try {
+            val accepted = access.gesture(current, gesture) { completed ->
+                onMain()
+                if (gestures[lease] === future) {
+                    gestures.remove(lease)
+                    future.complete(if (completed) GuiResult.Value("PLATFORM_GESTURE_COMPLETED_NOT_VERIFIED")
+                        else GuiResult.Unknown("GESTURE_CANCELLED_UNCONFIRMED"))
+                    finishDrain(lease)
+                }
+            }
+            if (!accepted) {
+                gestures.remove(lease)
+                future.complete(GuiResult.Value("PLATFORM_GESTURE_REJECTED"))
+                GuiResult.Value("PLATFORM_GESTURE_REJECTED")
+            } else if (future.isDone) future.getNow(GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED"))
+            else GuiResult.Value("PLATFORM_GESTURE_ACCEPTED_NOT_VERIFIED")
+        } catch (_: Exception) {
+            // Submission may have reached Android; only its terminal callback may release the slot.
+            GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED")
+        }
     }
 
     /** No capture occurs while observing. API 30+ only; secure windows/platform errors stay errors. */

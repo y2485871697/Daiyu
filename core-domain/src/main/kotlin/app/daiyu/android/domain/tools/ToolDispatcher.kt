@@ -76,7 +76,7 @@ class ToolDispatcher(
             if (plan.writeEffect != null && plan.writeEffect !in task.allowedWrites && plan.approveWrite == null)
                 return rejected("task_write_not_authorized")
             plans.add(plan)
-            requests.add(LedgerRequest(invocation.id.value, invocationKey(invocation, definition, arguments), plan.writeEffect?.key()))
+            requests.add(LedgerRequest(invocation.id.value, invocationKey(invocation, definition, arguments), plan.writeEffect?.key(), plan.repeatConfirmed))
         }
         val effects = requests.mapNotNull { it.effectKey }
         if (effects.distinct().size != effects.size) return rejected("duplicate_batch_effect")

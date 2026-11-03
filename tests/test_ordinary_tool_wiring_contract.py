@@ -19,9 +19,12 @@ class OrdinaryToolWiringContract(unittest.TestCase):
     def test_gui_target_is_validated_before_session_mutation(self):
         gui = (K / 'integration/tools/RunOrdinaryGuiTools.kt').read_text()
         self.assertIn('GuiUserActionRequest.validTargetPackage(requestedTarget)', gui)
-        self.assertIn('session != null && requested == target', gui)
+        self.assertIn('session != null && admission == null && selectedTarget == target', gui)
+        self.assertIn('observed.observationId != observationId', gui)
+        self.assertIn('requested != null && requested != observed.packageName', gui)
         self.assertNotIn('requested == null || requested == target', gui)
-        self.assertIn('current = null; target = null', gui)
+        self.assertIn('current = null; observation = null', gui)
+        self.assertIn('replacementRejection(owner, authorization)', gui)
         self.assertIn('backgroundSupported = false', gui)
         self.assertIn('TASK_SURFACE_BACKGROUND_UNSUPPORTED', gui)
 

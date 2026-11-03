@@ -119,7 +119,7 @@ internal class GuiConfirmationOverlay(
                     !node.password && node.enabled && when (operation) {
                         GuiOperation.TAP -> node.clickable
                         GuiOperation.LONG_PRESS -> node.longClickable
-                        GuiOperation.INPUT -> node.editable
+                        GuiOperation.INPUT, GuiOperation.IME_SUBMIT -> node.editable
                         else -> node.scrollable
                     }
                 }.forEach { node ->

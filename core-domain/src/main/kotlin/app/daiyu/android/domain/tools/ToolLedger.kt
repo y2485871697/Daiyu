@@ -13,7 +13,8 @@ data class LedgerEntry(
     val state: LedgerState = LedgerState.UNKNOWN,
     val payload: String = "",
     val isError: Boolean = false,
-    val code: String = "execution_unconfirmed"
+    val code: String = "execution_unconfirmed",
+    val repeatable: Boolean = false
 )
 
 /** Transactions must serialize across ALL users of a store and commit durably BEFORE returning.
@@ -34,7 +35,8 @@ class InMemoryToolLedgerStore : ToolLedgerStore {
     }
 }
 
-internal data class LedgerRequest(val callId: String, val requestKey: String, val effectKey: String?)
+internal data class LedgerRequest(val callId: String, val requestKey: String, val effectKey: String?,
+    val repeatConfirmed: Boolean = false)
 internal sealed interface Reservation {
     data class Accepted(val entries: List<LedgerEntry>, val owner: String) : Reservation
     data class Rejected(val code: String, val unknownIndices: Set<Int> = emptySet()) : Reservation
@@ -47,13 +49,20 @@ class ToolLedger(private val store: ToolLedgerStore) {
         check(entries.all { listOf(it.sessionId, it.callId, it.taskId, it.requestKey, it.owner).all(String::isNotBlank) }) { "invalid_ledger" }
         val activeEffects = entries.filter { it.effectKey != null && it.state != LedgerState.NOT_EXECUTED }.groupBy { it.effectKey }
         check(activeEffects.values.all { group ->
-            group.size == 1 || group.all { it.state == LedgerState.CONFIRMED && it.payload == group.first().payload && it.isError == group.first().isError }
+            if (group.any { it.repeatable }) group.count { it.state == LedgerState.UNKNOWN } <= 1
+            else group.size == 1 || group.all { it.state == LedgerState.CONFIRMED && it.payload == group.first().payload && it.isError == group.first().isError }
         }) { "invalid_ledger" }
         val matches = requests.map { request ->
             val byId = entries.singleOrNull { it.sessionId == sessionId && it.callId == request.callId }
             if (byId != null && (byId.requestKey != request.requestKey || byId.effectKey != request.effectKey || byId.taskId != taskId))
                 return@transaction Reservation.Rejected("call_id_conflict")
-            byId ?: request.effectKey?.let { key -> entries.firstOrNull { it.effectKey == key && it.state != LedgerState.NOT_EXECUTED } }
+            byId ?: request.effectKey?.let { key ->
+                // A newer uncertain execution must never be hidden by an older confirmed receipt.
+                entries.firstOrNull { it.effectKey == key && it.state == LedgerState.UNKNOWN }
+                    ?: if (request.repeatConfirmed) null else entries.firstOrNull {
+                        it.effectKey == key && it.state == LedgerState.CONFIRMED
+                    }
+            }
         }
         val unknown = matches.withIndex().filter { it.value?.state == LedgerState.UNKNOWN }.map { it.index }.toSet()
         if (unknown.isNotEmpty()) return@transaction Reservation.Rejected("unknown_effect_protected", unknown)
@@ -63,7 +72,7 @@ class ToolLedger(private val store: ToolLedgerStore) {
             if (previous != null && previous.sessionId == sessionId && previous.callId == request.callId) previous
             else LedgerEntry(sessionId, request.callId, taskId, request.requestKey, request.effectKey, owner,
                 previous?.state ?: LedgerState.UNKNOWN, previous?.payload.orEmpty(), previous?.isError ?: false,
-                previous?.code ?: "execution_unconfirmed").also { entries.add(it) }
+                previous?.code ?: "execution_unconfirmed", request.repeatConfirmed).also { entries.add(it) }
         }
         Reservation.Accepted(reserved, owner)
     }

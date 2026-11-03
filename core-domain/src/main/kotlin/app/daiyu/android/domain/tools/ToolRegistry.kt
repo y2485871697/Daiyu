@@ -68,7 +68,8 @@ class PreparedTool private constructor(
     private val contextualExecution: ((ToolExecutionContext) -> ExecutionReceipt)?,
     internal val isUserBarrier: Boolean = false,
     private val contextAdmission: ((ToolExecutionContext) -> ExecutionReceipt.NotExecuted?)? = null,
-    internal val approveWrite: ((ToolExecutionContext) -> TaskAuthorization?)? = null
+    internal val approveWrite: ((ToolExecutionContext) -> TaskAuthorization?)? = null,
+    internal val repeatConfirmed: Boolean = false
 ) {
     constructor(writeEffect: WriteEffect? = null, execute: () -> ExecutionReceipt) : this(writeEffect, execute, null)
     internal val requiresContext: Boolean get() = contextualExecution != null
@@ -82,9 +83,10 @@ class PreparedTool private constructor(
          * Called only for a fresh ledger reservation, outside validation and admission. */
         fun approvedWrite(effect: WriteEffect, approve: (ToolExecutionContext) -> TaskAuthorization?,
             admit: (ToolExecutionContext) -> ExecutionReceipt.NotExecuted?,
+            repeatConfirmed: Boolean = false,
             execute: (ToolExecutionContext) -> ExecutionReceipt): PreparedTool =
             PreparedTool(effect, { error("tool_execution_context_required") }, execute,
-                contextAdmission = admit, approveWrite = approve)
+                contextAdmission = admit, approveWrite = approve, repeatConfirmed = repeatConfirmed)
 
         fun userBarrier(): PreparedTool =
             PreparedTool(null, { error("user_barrier_requires_start") }, null, isUserBarrier = true)

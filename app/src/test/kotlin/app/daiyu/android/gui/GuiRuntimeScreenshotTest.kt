@@ -94,6 +94,17 @@ class GuiRuntimeScreenshotTest {
         var displayId = 0
         var active = true
         var windowType = AccessibilityWindowInfo.TYPE_APPLICATION
+        var gestures = 0
+        var gestureAccepted = true
+        var gestureCompleted: ((Boolean) -> Unit)? = null
+        var submittedGesture: GuiGesture? = null
+        override fun gesture(current: GuiAccessibilityService, gesture: GuiGesture, completed: (Boolean) -> Unit): Boolean {
+            gestures++; submittedGesture = gesture; gestureCompleted = completed
+            return gestureAccepted
+        }
+        var editable = false
+        var focused = false
+        var imeAdvertised = false
         var nodeActions = 0
         var rootClickable = true
         var actionAccepted = true
@@ -146,6 +157,8 @@ class GuiRuntimeScreenshotTest {
             fun node(text: String): AccessibilityNodeInfo = AccessibilityNodeInfo.obtain().apply {
                 packageName = pkg; className = "View"; this.text = text
                 isEnabled = true; isVisibleToUser = true; isClickable = true
+                isEditable = editable; isFocused = focused
+                if (imeAdvertised) addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER)
                 setBoundsInScreen(Rect(0, 0, 100, 100))
                 ReflectionHelpers.setField(this, "mWindowId", this@Platform.windowId)
                 shadowOf(this).setAccessibilityWindowInfo(window)
@@ -207,6 +220,82 @@ class GuiRuntimeScreenshotTest {
         GuiRuntime.disconnected(service)
         GuiRuntime.access = originalAccess; GuiRuntime.encoder = originalEncoder
         CopyingWindowNodeShadow.refresh = null
+    }
+
+    @Test fun explicitCoordinateTapWaitsForTerminalGestureReceiptAndRetiresObservation() {
+        val observed = observe()
+        val action = GuiAction(observed.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(20, 30, 20, 30, 50))
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        val started = GuiRuntime.beginAction(session.lease, action) as GuiResult.Value
+        assertEquals(1, platform.gestures)
+        assertEquals(action.gesture, platform.submittedGesture)
+        assertFalse(started.value.isDone)
+        rejected(GuiRuntime.observe(session.lease), "GESTURE_IN_PROGRESS_NOT_EXECUTED")
+        platform.gestureCompleted!!(true)
+        assertEquals(GuiResult.Value("PLATFORM_GESTURE_COMPLETED_NOT_VERIFIED"), started.value.completed())
+        rejected(GuiRuntime.validateExactTarget(session.lease, action), "OBSERVATION_REQUIRED")
+    }
+    @Test fun freeSwipeKeepsScreenLeaseUntilCancelledCallbackAndNeverRetries() {
+        val observed = observe()
+        val action = GuiAction(observed.observationId, GuiOperation.SWIPE, gesture = GuiGesture(50, 90, 50, 10, 800))
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        val started = GuiRuntime.beginAction(session.lease, action) as GuiResult.Value
+        session.close()
+        assertFalse(session.releaseConfirmed)
+        rejected(GuiRuntime.openForUser(GuiOwner("other", "run")), "FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
+        platform.gestureCompleted!!(false)
+        assertEquals(GuiResult.Unknown("GESTURE_CANCELLED_UNCONFIRMED"), started.value.completed())
+        assertTrue(session.releaseConfirmed)
+        assertEquals(1, platform.gestures)
+    }
+    @Test fun coordinatesOutsideApplicationOrOnChangedTreeNeverDispatch() {
+        var observed = observe()
+        var action = GuiAction(observed.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(100, 30, 100, 30, 50))
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        rejected(GuiRuntime.action(session.lease, action), "GESTURE_OUTSIDE_OBSERVED_WINDOW_NOT_EXECUTED")
+        observed = observe()
+        action = GuiAction(observed.observationId, GuiOperation.SWIPE, gesture = GuiGesture(50, 90, 50, 10, 500))
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        platform.label = "changed-without-event"
+        rejected(GuiRuntime.action(session.lease, action), "GESTURE_TREE_CHANGED_OR_INCOMPLETE_NOT_EXECUTED")
+        assertEquals(0, platform.gestures)
+    }
+    @Test fun imeSubmitRequiresFocusedEditableNodeAndAdvertisedPlatformAction() {
+        platform.editable = true; platform.focused = true; platform.imeAdvertised = true
+        val observed = observe()
+        val action = GuiAction(observed.observationId, GuiOperation.IME_SUBMIT, 1)
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
+        assertEquals(1, platform.nodeActions)
+        platform.focused = false
+        val fresh = observe()
+        val unfocused = GuiAction(fresh.observationId, GuiOperation.IME_SUBMIT, 1)
+        assertTrue(session.approveExactActionFromUser(unfocused) is GuiResult.Value)
+        rejected(GuiRuntime.action(session.lease, unfocused), "IME_SUBMIT_NOT_SUPPORTED_BY_FOCUSED_NODE_NOT_EXECUTED")
+        assertEquals(1, platform.nodeActions)
+    }
+    @Test @Config(sdk = [26]) fun imeSubmitOnOlderAndroidIsExplicitlyNotExecuted() {
+        platform.editable = true; platform.focused = true
+        val observed = observe()
+        val action = GuiAction(observed.observationId, GuiOperation.IME_SUBMIT, 1)
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        rejected(GuiRuntime.action(session.lease, action), "IME_SUBMIT_UNSUPPORTED_API_NOT_EXECUTED")
+        assertEquals(0, platform.nodeActions)
+    }
+    @Test fun freshExpandedObservationRecoversTruncatedTreeWithoutRevivingOldIds() {
+        platform.descendants = 160
+        val original = observe()
+        assertTrue(original.truncated)
+        assertTrue(GuiRuntime.validateExactTarget(session.lease, GuiAction(original.observationId, GuiOperation.TAP, 1)) is GuiResult.Rejected)
+        assertTrue(session.approveReadsFromUser(GuiReadApproval(1, 0)) is GuiResult.Value)
+        val expanded = (GuiRuntime.observe(session.lease, 512) as GuiResult.Value).value
+        assertFalse(expanded.truncated); assertEquals(162, expanded.nodes.size)
+        assertNotEquals(original.observationId, expanded.observationId)
+        rejected(GuiRuntime.validateExactTarget(session.lease, GuiAction(original.observationId, GuiOperation.TAP, 1)), "OBSERVATION_ID_MISMATCH")
+        val action = GuiAction(expanded.observationId, GuiOperation.TAP, 161)
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
+        assertEquals(1, platform.nodeActions)
     }
 
     private fun observe(): GuiObservation = (session.previewFromUser() as GuiResult.Value).value

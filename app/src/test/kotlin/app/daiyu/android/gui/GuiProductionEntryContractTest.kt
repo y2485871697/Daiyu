@@ -12,7 +12,7 @@ class GuiProductionEntryContractTest {
         catch (_: org.json.JSONException) {}
     }
     @Test fun allProductionOperationsParseAndOnlyInputAcceptsFullText() {
-        for (operation in GuiOperation.entries) {
+        for (operation in GuiOperation.entries.filter { it !in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE) }) {
             val raw = JSONObject().put("operation", operation.name.lowercase())
             if (operation == GuiOperation.INPUT) raw.put("text", "  full\n\"input\"  ")
             val request = GuiUserActionRequest.parse(raw.toString())
@@ -20,6 +20,8 @@ class GuiProductionEntryContractTest {
             assertNull(request.targetPackage)
             assertEquals(if (operation == GuiOperation.INPUT) "  full\n\"input\"  " else null, request.text)
         }
+        rejected("""{"operation":"coordinate_tap"}""")
+        rejected("""{"operation":"swipe"}""")
         val complete = "x".repeat(4096)
         assertEquals(complete, GuiUserActionRequest.parse(JSONObject().put("operation", "input").put("text", complete).toString()).text)
         listOf("{}", "{\"operation\":1}", "{\"operation\":\"input\"}",

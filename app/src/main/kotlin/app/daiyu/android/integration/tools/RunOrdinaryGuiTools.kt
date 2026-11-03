@@ -11,7 +11,8 @@ import java.util.concurrent.CompletableFuture
 
 internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: TaskAuthorization,
     private val location: RunScreenLocation) : RunOwnedToolScope(owner, authorization) {
-    private var current: GuiRunSession? = null
+    @Volatile private var current: GuiRunSession? = null
+    private var observation: GuiObservation? = null
     private var target: String? = null
     init { retain(location) }
     private val targetField = ArgumentField("target_package", ArgumentType.Text(256, minimumLength = 1), required = false)
@@ -25,17 +26,20 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             require(requestedTarget == null || GuiUserActionRequest.validTargetPackage(requestedTarget)) { "invalid_target_package" }
             if (!action) {
                 val screenshot = arguments.text("operation") == "screenshot"
-                require(screenshot || !arguments.contains("observation_id")) { "observation_id_not_allowed_for_observe" }
+                require((screenshot || !arguments.contains("observation_id")) && (!screenshot || !arguments.contains("max_nodes"))) { "observation_id_not_allowed_for_observe" }
                 val observationId = if (arguments.contains("observation_id")) arguments.text("observation_id") else null
-                return read { context -> withSession(requestedTarget, context) { session ->
-                    if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled), GuiScreenToolFactory::screenshotJson) else encode(session.dynamicObserve(context.cancelled), GuiScreenToolFactory::observationJson)
+                return read { context -> withSession(if (screenshot && observationId == null) requestedTarget ?: target else requestedTarget, context, observationId) { session ->
+                    if (observationId == null) observation = null
+                    if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled), GuiScreenToolFactory::screenshotJson)
+                    else encode(session.dynamicObserve(context.cancelled, GuiScreenToolFactory.maxNodes(arguments))) { observed ->
+                        observation = observed
+                        GuiScreenToolFactory.observationJson(observed)
+                    }
                 } }
             }
-            val command = GuiAction(arguments.text("observation_id"), GuiOperation.valueOf(arguments.text("operation").uppercase()),
-                if (arguments.contains("node_id")) arguments.integer("node_id").toInt() else null,
-                if (arguments.contains("text")) arguments.text("text") else null)
+            val command = GuiScreenToolFactory.parseAction(arguments)
             val effect = command.effect(GuiOwner(authorization.sessionId, owner.runId.value))
-            return this@RunOrdinaryGuiTools.write(effect) { context -> withSession(requestedTarget, context) { session ->
+            return this@RunOrdinaryGuiTools.write(effect) { context -> withSession(requestedTarget, context, command.observationId) { session ->
                 encode(session.dynamicAction(command, context.authorization, context.cancelled)) { status ->
                     JSONObject().put("observation_id", command.observationId).put("status", status).put("verified_ui_result", false).toString()
                 }
@@ -51,8 +55,9 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                 ArgumentField("package_name", ArgumentType.Text(256, minimumLength = 1)))))
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val request = GuiAppLaunch(arguments.text("package_name"))
-            return write(request.effect(GuiOwner(authorization.sessionId, owner.runId.value))) { context ->
+            return write(request.effect(GuiOwner(authorization.sessionId, owner.runId.value)), repeatConfirmed = true) { context ->
                 withSession(request.packageName, context) { session ->
+                    observation = null
                     encode(session.dynamicLaunch(request, context.authorization, context.cancelled)) { status ->
                         JSONObject().put("package_name", request.packageName).put("status", status)
                             .put("verified_ui_result", false).toString()
@@ -61,9 +66,20 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             }
         }
     }
-    private fun withSession(requested: String?, context: ToolExecutionContext,
+    private fun withSession(requested: String?, context: ToolExecutionContext, observationId: String? = null,
         execute: (GuiRunSession) -> ExecutionReceipt): ExecutionReceipt {
-        val route = location.route(requested, backgroundSupported = false) { !live() || context.cancelled() }
+        denial(context, original = false)?.let { return it }
+        current?.replacementRejection(owner, authorization)?.let { return ExecutionReceipt.NotExecuted(it.code) }
+        val selectedTarget = if (observationId != null) {
+            val observed = observation
+            if (observed == null || observed.observationId != observationId)
+                return ExecutionReceipt.NotExecuted("OBSERVATION_ID_MISMATCH")
+            if (requested != null && requested != observed.packageName)
+                return ExecutionReceipt.NotExecuted("OBSERVATION_TARGET_MISMATCH_NOT_EXECUTED")
+            target
+        } else requested
+        if (observationId != null) current?.admission(owner, authorization)?.let { return ExecutionReceipt.NotExecuted(it.code) }
+        val route = location.route(selectedTarget, backgroundSupported = false) { !live() || context.cancelled() }
         if (route !is TaskSurfaceDecision.Ready) return ExecutionReceipt.NotExecuted(
             (route as? TaskSurfaceDecision.NotExecuted)?.code ?: "TASK_SURFACE_NOT_READY")
         if (route.surface != TaskSurface.FOREGROUND) return ExecutionReceipt.NotExecuted("TASK_SURFACE_BACKGROUND_UNSUPPORTED")
@@ -75,21 +91,25 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             if (abandoned.get() || !live() || context.cancelled()) future.complete(GuiResult.Rejected("CANCELLED_NOT_EXECUTED"))
             else {
                 val session = current
-                if (session != null && requested == target) future.complete(GuiResult.Value(session))
+                val admission = session?.admission(owner, authorization)
+                val replacementDenied = session?.replacementRejection(owner, authorization)
+                if (replacementDenied != null) future.complete(replacementDenied)
+                else if (admission != null && observationId != null) future.complete(admission)
+                else if (session != null && admission == null && selectedTarget == target) future.complete(GuiResult.Value(session))
                 else {
-                    current = null; target = null
+                    current = null; observation = null
                     session?.close()
                     if (session != null && !session.releaseConfirmed) future.complete(GuiResult.Rejected("FOREGROUND_DRAIN_PENDING_NOT_EXECUTED"))
                     else {
-                        val opened = GuiRuntime.openForUser(GuiOwner(authorization.sessionId, owner.runId.value), requested,
+                        val opened = GuiRuntime.openForUser(GuiOwner(authorization.sessionId, owner.runId.value), selectedTarget,
                             route.selfTarget, owner)
                         if (opened is GuiResult.Value) {
                             val held = opened.value
                             retain(held) { done -> observeGuiDrain(held, done) }
-                            current = held; target = requested
+                            current = held; target = selectedTarget
                             held.bindDynamic(owner, authorization)
                             if (abandoned.get() || !live() || context.cancelled()) {
-                                held.close(); current = null; target = null
+                                held.close(); current = null
                             }
                         }
                         future.complete(opened)

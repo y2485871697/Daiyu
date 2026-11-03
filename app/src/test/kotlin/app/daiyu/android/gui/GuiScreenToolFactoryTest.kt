@@ -43,7 +43,26 @@ class GuiScreenToolFactoryTest {
         invalid { tool.prepare(tool.definition.schema.parse("{\"operation\":\"tap\",\"observation_id\":\"obs\"}")) }
         invalid { tool.prepare(tool.definition.schema.parse("{\"operation\":\"home\",\"observation_id\":\"obs\",\"node_id\":0}")) }
         invalid { tool.prepare(tool.definition.schema.parse("{\"operation\":\"tap\",\"observation_id\":\"obs\",\"node_id\":0,\"text\":\"hidden\"}")) }
-        invalid { tool.definition.schema.parse("{\"operation\":\"tap\",\"observation_id\":\"obs\",\"node_id\":128}") }
+        invalid { tool.definition.schema.parse("{\"operation\":\"tap\",\"observation_id\":\"obs\",\"node_id\":512}") }
+    }
+    @Test fun gesturesHaveExactEffectsAndRejectMixedOrIncompleteParameters() {
+        val tool = tools.getValue("screen_action")
+        fun plan(json: String) = tool.prepare(tool.definition.schema.parse(json))
+        val tap = plan("""{"operation":"coordinate_tap","observation_id":"obs","x":10,"y":20}""")
+        assertEquals(GuiAction("obs", GuiOperation.COORDINATE_TAP, gesture = GuiGesture(10, 20, 10, 20, 50)).effect(session.identity), tap.writeEffect)
+        val swipe = plan("""{"operation":"swipe","observation_id":"obs","x":10,"y":20,"end_x":30,"end_y":40,"duration_ms":800}""")
+        assertEquals(GuiAction("obs", GuiOperation.SWIPE, gesture = GuiGesture(10, 20, 30, 40, 800)).effect(session.identity), swipe.writeEffect)
+        invalid { plan("""{"operation":"coordinate_tap","observation_id":"obs","x":10}""") }
+        invalid { plan("""{"operation":"tap","observation_id":"obs","node_id":0,"x":10,"y":20}""") }
+        invalid { plan("""{"operation":"swipe","observation_id":"obs","x":10,"y":20}""") }
+        invalid { plan("""{"operation":"swipe","observation_id":"obs","x":10,"y":20,"end_x":30,"end_y":40,"duration_ms":2001}""") }
+        invalid { plan("""{"operation":"ime_submit","observation_id":"obs"}""") }
+    }
+    @Test fun boundedTreeExpansionIsObserveOnlyAndNeverExceeds512Nodes() {
+        val tool = tools.getValue("screen")
+        assertNull(tool.prepare(tool.definition.schema.parse("""{"operation":"observe","max_nodes":512}""")).writeEffect)
+        invalid { tool.definition.schema.parse("""{"operation":"observe","max_nodes":513}""") }
+        invalid { tool.prepare(tool.definition.schema.parse("""{"operation":"screenshot","observation_id":"obs","max_nodes":512}""")) }
     }
     @Test fun serializedTreeReportsBoundedEvidenceAndNeverCreatesScreenshot() {
         val json = GuiScreenToolFactory.observationJson(GuiObservation("obs", "example.app", 1, 3, 100,

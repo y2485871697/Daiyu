@@ -8,6 +8,7 @@ internal class GuiIoFence {
     private val closed = AtomicBoolean(false)
     private val unknown = AtomicBoolean(false)
     fun close() { closed.set(true) }
+    fun unknownRejection(): GuiResult.Rejected? = if (unknown.get()) GuiResult.Rejected("GUI_PREVIOUS_OPERATION_UNCONFIRMED") else null
     fun unknown() { unknown.set(true) }
     fun rejection(): GuiResult.Rejected? = when {
         closed.get() -> GuiResult.Rejected("GUI_AUTHORIZATION_REVOKED")
@@ -30,6 +31,12 @@ internal data class GuiConfirmedDelivery(
         .put("observation_id", action.observationId).apply {
             action.nodeId?.let { put("node_id", it) }
             action.text?.let { put("text", it) }
+            action.gesture?.let {
+                put("x", it.x); put("y", it.y)
+                if (action.operation == GuiOperation.SWIPE) {
+                    put("end_x", it.endX); put("end_y", it.endY); put("duration_ms", it.durationMillis)
+                }
+            }
         }.toString()
 }
 
@@ -47,7 +54,7 @@ internal object GuiExactTarget {
         observation.nodes.filter { node -> !node.password && node.enabled && when (operation) {
             GuiOperation.TAP -> node.clickable
             GuiOperation.LONG_PRESS -> node.longClickable
-            GuiOperation.INPUT -> node.editable
+            GuiOperation.INPUT, GuiOperation.IME_SUBMIT -> node.editable
             GuiOperation.SCROLL_FORWARD, GuiOperation.SCROLL_BACKWARD -> node.scrollable
             else -> false
         } }

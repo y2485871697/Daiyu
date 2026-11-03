@@ -13,7 +13,7 @@ internal class RunOrdinaryPlatformTools(owner: RunExecutionOwner, authorization:
                 kind.capability, ToolEffect.WRITE, kind.schema)
             override fun prepare(arguments: ToolArguments): PreparedTool {
                 val action = PlatformAction.parse(kind, arguments.canonicalJson())
-                return write(action.effect) { context -> backend.execute(action) { !live() || context.cancelled() } }
+                return write(action.effect, repeatConfirmed = true) { context -> backend.execute(action) { !live() || context.cancelled() } }
             }
         }
     }

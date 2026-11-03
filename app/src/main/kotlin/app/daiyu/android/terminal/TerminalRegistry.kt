@@ -165,7 +165,18 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val job=Job(id,scope!!,conversationOwner!!,session,mode,command,b,File(directory,"$id.log"),File(directory,"$id.script"))
         try {
             synchronized(jobs) {
-                if(jobs.size>=MAX_GLOBAL_JOBS || jobs.values.count { it.log.parentFile.canonicalPath==directory.canonicalPath }>=MAX_JOBS || !storageAvailable()) return error("job_or_log_retention_limit")
+                if (!hasJobCapacity()) {
+                    val completed = jobs.values.filter { it.log.parentFile == directory }.associate { existing ->
+                        val process = existing.handle?.process
+                        existing.id to (existing.dispatchFinished && existing.mode != "daemon" && existing.startupCleanup == null &&
+                            if (process == null) existing.state in setOf("start_failed", "cancelled_before_dispatch")
+                            else !process.isAlive && existing.outputComplete && existing.reader?.isAlive == false &&
+                                ((existing.mode == "sync" && !existing.unknown) || existing.outputObserved))
+                    }
+                    TerminalJobRetention(directory, File(context.filesDir, "terminal-journal")).reclaim(
+                        completed, ::hasJobCapacity, { jobs.remove(it) })
+                }
+                if (!hasJobCapacity()) return error("job_or_log_retention_limit")
                 // Durable pending metadata must precede process launch and command dispatch.
                 jobs[id]=job // Even reservation persistence failure remains inspectable in this process.
                 saveJob(job)
@@ -229,6 +240,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         } finally {
             applyCancellation(job)
             if (job.handle == null) job.script.delete()
+            synchronized(jobs) { job.dispatchFinished = true }
         }
     }
     private fun dispatchedError(job:Job,code:String)=identity(job.backend).put("ok",false).put("error",code).put("execution","unknown").put("job_id",job.id).put("state","dispatched")
@@ -251,11 +263,19 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             }
         }.apply { isDaemon=true; name="terminal-log-${job.id}"; start() }
     }
-    private fun poll(args:JSONObject):JSONObject {
+    private fun poll(args:JSONObject):JSONObject = synchronized(jobs) { pollLocked(args) }
+    private fun pollLocked(args:JSONObject):JSONObject {
         val id=args.getString("job_id"); require(id.matches(Regex("[a-f0-9-]{36}")))
         val offset=args.optLong("offset",0); val limit=args.optInt("limit",16384); require(offset>=0 && limit in 1..65536)
         val job=synchronized(jobs) { jobs[id] }
-        if(job!=null) { if(!owns(job)) return error("job_not_owned_by_conversation_or_run"); return page(job,offset,limit) }
+        if(job!=null) {
+            if(!owns(job)) return error("job_not_owned_by_conversation_or_run")
+            val drainedBeforeRead = job.outputComplete && job.reader?.isAlive == false && job.handle?.process?.isAlive == false
+            return page(job,offset,limit).also { result ->
+                if (drainedBeforeRead && !result.optBoolean("has_more") &&
+                    result.optBoolean("log_available", true)) job.outputObserved = true
+            }
+        }
         val meta=File(directory,"$id.json")
         if(!meta.isFile) return error("job_not_found")
         val record=readRecord(meta); if(!owns(record)) return error("job_not_owned_by_conversation_or_run")
@@ -418,6 +438,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         synchronized(jobs) { jobs.values.filter { owns(it) }.forEach { job -> records[job.id]=page(job,0,1) } }
         return JSONObject().put("ok",true).put("jobs",JSONArray(records.values.toList())).put("limit",MAX_JOBS)
     }
+    private fun hasJobCapacity(): Boolean = jobs.size < MAX_GLOBAL_JOBS &&
+        jobs.values.count { it.log.parentFile.canonicalPath == directory.canonicalPath } < MAX_JOBS && storageAvailable()
     private fun storageAvailable():Boolean {
         // Called with jobs locked: reserve the full output allowance before dispatch, including
         // jobs whose pending metadata save failed. Delayed pumps must not share unused budget.
@@ -478,6 +500,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     }
     private data class OwnedProcess(val process: Process, val pid: Long, val start: String?)
     private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val command:String,val backend:SelectedBackend,val log:File,val script:File) {
+        @Volatile var dispatchFinished=false
+        @Volatile var outputObserved=false
         @Volatile var cancelRequested=false
         @Volatile var handle:OwnedProcess?=null
         @Volatile var startupCleanup:PtyStartupCleanup?=null

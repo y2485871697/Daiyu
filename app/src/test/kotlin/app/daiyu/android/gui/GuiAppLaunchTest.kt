@@ -26,15 +26,25 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowAccessibilityNodeInfo
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [30])
+@Config(sdk = [30], shadows = [GuiAppLaunchTest.CopyingWindowNodeShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 class GuiAppLaunchTest {
+    @Implements(AccessibilityNodeInfo::class)
+    class CopyingWindowNodeShadow : ShadowAccessibilityNodeInfo() {
+        @Implementation
+        public override fun getWindow(): AccessibilityWindowInfo? =
+            super.getWindow()?.let { AccessibilityWindowInfo.obtain(it) }
+    }
+
     private lateinit var service: GuiAccessibilityService
     private lateinit var originalAccess: GuiRuntimeAccess
     private lateinit var platform: Platform
@@ -181,6 +191,22 @@ class GuiAppLaunchTest {
         assertTrue(f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"$id\"}", "tap") is DispatchOutcome.Confirmed)
         assertEquals(1, platform.captures)
     }
+    @Test fun recyclingReturnedWindowPreservesTheLaunchFixtureNodeWindow() {
+        platform.rootPackage = target
+        val root = checkNotNull(platform.root(service))
+        try {
+            val first = checkNotNull(root.window)
+            try { assertEquals(7, first.id) } finally { first.recycle() }
+            assertEquals(7, root.windowId)
+            val second = checkNotNull(root.window)
+            try {
+                assertEquals(7, second.id)
+                assertEquals(AccessibilityWindowInfo.TYPE_APPLICATION, second.type)
+                assertTrue(second.isActive)
+            } finally { second.recycle() }
+        } finally { root.recycle() }
+    }
+
     @Test fun repeatedExternalChooserObservationsSurviveForeignContentAndDeliverOnlyOneTap() {
         val f = Fixture()
         assertTrue(f.call() is DispatchOutcome.Confirmed)
@@ -202,7 +228,9 @@ class GuiAppLaunchTest {
         assertNotEquals(first, fresh)
         foreignContent()
         val args = JSONObject().put("operation", "tap").put("node_id", 0).put("observation_id", fresh).toString()
-        assertTrue(f.callTool("screen_action", args, "tap") is DispatchOutcome.Confirmed)
+        val result = f.callTool("screen_action", args, "tap")
+        assertTrue(result.toString(), result is DispatchOutcome.Confirmed)
+        assertFalse((result as DispatchOutcome.Confirmed).isError)
         assertEquals(1, platform.launches); assertEquals(1, platform.nodeActions)
         assertTrue((f.callTool("screen_action", args, "tap") as DispatchOutcome.Confirmed).replayed)
         assertEquals(1, platform.nodeActions)

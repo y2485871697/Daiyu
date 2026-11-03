@@ -119,7 +119,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun testPreparedSnapshotRejectsLateGenerationAndClosedResults() {
+    fun testPreparedSnapshotRetainsLastGoodGenerationButRejectsInvalidEpochs() {
         lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
         mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
         ui.waitForIdle()
@@ -143,8 +143,12 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 frame.recorded(IntSize(2, 2))
                 scheduler.advanceTimeBy(65); scheduler.runCurrent()
                 assertEquals("a layer has only one copy in flight", 1, copies.size)
-                copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
-                assertNull("old generation must not publish", frame.ready)
+                val lastGood = ImageBitmap(2, 2)
+                copies[0].complete(lastGood); scheduler.runCurrent()
+                assertSame("completed same-size pixels remain usable during continuous redraw", lastGood, frame.ready)
+                assertFalse("last-good is not falsely marked fresh", frame.hasFreshImage)
+                assertEquals(frame.generation - 1, frame.readyGeneration)
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
                 assertEquals(2, copies.size)
                 val current = ImageBitmap(2, 2)
                 copies[1].complete(current); scheduler.runCurrent()
@@ -192,6 +196,51 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 scheduler.runCurrent()
                 layers.close()
                 scope.cancel()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun testContinuousRedrawStillPreparesAndRefreshesPixels() {
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        ui.waitForIdle()
+        mainThread {
+            val scheduler = TestCoroutineScheduler()
+            val clock = object : MonotonicFrameClock {
+                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
+            }
+            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
+            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
+            val layers = PageBackPreviewLayers(graphics, scope) {
+                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
+            }
+            try {
+                layers.enter("settings")
+                val frame = layers.frame("settings")
+                layers.setActive(true)
+                frame.recorded(IntSize(2, 2))
+                scheduler.runCurrent()
+                assertEquals(1, copies.size)
+                repeat(4) { frame.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
+                val first = ImageBitmap(2, 2)
+                copies[0].complete(first); scheduler.runCurrent()
+                assertSame("continuous redraw must not starve the first prepared bitmap", first, frame.ready)
+                assertFalse(frame.hasFreshImage)
+                repeat(4) { frame.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
+                assertEquals("redraw must not restart the 64ms refresh window", 2, copies.size)
+                val second = ImageBitmap(2, 2)
+                copies[1].complete(second); scheduler.runCurrent()
+                assertSame(second, frame.ready)
+                assertTrue(frame.hasFreshImage)
+                val beforeFreeze = copies.size
+                assertTrue(layers.beginGesture(frame))
+                assertSame(second, frame.image)
+                assertEquals("freezing must not initiate a copy", beforeFreeze, copies.size)
+            } finally {
+                layers.close()
+                copies.forEach { if (!it.isCompleted) it.complete(ImageBitmap(2, 2)) }
+                scheduler.runCurrent(); scope.cancel()
             }
         }
     }

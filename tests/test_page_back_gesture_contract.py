@@ -228,6 +228,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('drawLayer(frame.layer)', surface)
         self.assertIn('key(previewScopeKey, retainedRootScopeKey)', surface)
         self.assertNotIn('key(layers, previewScopeKey, retainedRootScopeKey)', surface)
+        self.assertIn('if (retainedRootContent != null && retainedRootVisible) null else departure.targetImage', surface)
         self.assertIn('if (held != null) drawImage(held)', surface)
         self.assertIn('drawContent()', surface)
         self.assertEqual(1, surface.count('{ content() }'))
@@ -242,7 +243,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         preview = self.host.split('private fun DrawScope.drawPreview(', 1)[1]
         self.assertNotIn('drawLayer(', preview)
         self.assertIn('if (image != null) drawImage(image)', preview)
-        for guard in ('frame.generation == generation', 'frame.size == size',
+        for guard in ('frame.readyGeneration = generation', 'frame.size == size',
                       'previewEpoch == epoch', 'frames[frame.key] === frame',
                       '!frame.releaseRequested', 'frame.hasFreshImage',
                       'withContext(NonCancellable) { snapshot(frame) }',
@@ -267,6 +268,25 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (!visible && (!visited || !resumed)) return', retained)
         self.assertIn('Modifier.clearAndSetSemantics {}', retained)
         self.assertNotIn('delay(', retained)
+
+    def test_continuous_redraw_uses_throttled_same_size_last_good_pixels(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('fun beginGesture(', 1)[0]
+        self.assertIn('frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }', schedule)
+        self.assertNotIn('frame.warmup?.cancel()', schedule)
+        self.assertLess(schedule.index('frame.warmup = null'), schedule.index('capture(frame)'))
+        capture = layers.split('private fun capture(frame: Frame)', 1)[1].split('fun frame(', 1)[0]
+        self.assertNotIn('frame.generation == generation', capture)
+        self.assertIn('image.width == size.width && image.height == size.height', capture)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        self.assertIn('fun testContinuousRedrawStillPreparesAndRefreshesPixels()', test)
+        retained = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
+        for method in ('testRealChatOrdinaryReturnDrawsLiveContentWithoutRemount',
+                       'testRealChatSwipeReturnDrawsLiveContentWithoutRemount'):
+            self.assertIn('fun ' + method + '()', retained)
+        for content in ('ChatConversationLayers(', 'ChatMessageList(', 'ChatComposer(',
+                        'liveDraws', 'originalMessage', 'page-back-departure'):
+            self.assertIn(content, retained)
 
     def test_preview_matches_root_return_target_and_invalidates_sensitive_context(self):
         for wiring in ('backTargetKey = pageBackPreviewTarget()', 'previewScopeKey = selected?.id'):

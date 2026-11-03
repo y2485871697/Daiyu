@@ -521,7 +521,8 @@ internal fun PageBackGestureHost(
                         departure.forwardSkipped = true
                     }
                     val held = when {
-                        departure != null && showDeparture && !departure.forward -> departure.targetImage
+                        departure != null && showDeparture && !departure.forward ->
+                            if (retainedRootContent != null && retainedRootVisible) null else departure.targetImage
                         state.previewAllowed && (state.active || progress > 0f) -> frame.image
                         frame.holdingForChild && frame.childChangeCaptured == true && state.previewAllowed -> frame.image
                         else -> null

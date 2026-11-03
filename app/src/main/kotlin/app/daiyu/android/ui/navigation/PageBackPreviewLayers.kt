@@ -105,9 +105,10 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
 
     private fun schedule(frame: Frame) {
         if (closed || !active || frame.frozen || frame.releaseRequested || currentKey != frame.key || frame.size == IntSize.Zero) return
-        frame.warmup?.cancel()
+        if (frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }) return
         frame.warmup = scope.launch {
             if (frame.ready == null) withFrameNanos { } else delay(64)
+            frame.warmup = null
             if (!closed && active && !frame.frozen && frames[frame.key] === frame && currentKey == frame.key) {
                 capture(frame)
             }
@@ -149,7 +150,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                     // API26 must finish its submitted Surface copy before releasing the source layer.
                     val image = withContext(NonCancellable) { snapshot(frame) }
                     if (isActive && active && !closed && !frame.releaseRequested && !frame.frozen && previewEpoch == epoch &&
-                        frames[frame.key] === frame && frame.generation == generation && frame.size == size) {
+                        frames[frame.key] === frame && frame.size == size && image.width == size.width && image.height == size.height) {
                         frame.readyGeneration = generation
                         frame.readySize = size
                         frame.ready = image

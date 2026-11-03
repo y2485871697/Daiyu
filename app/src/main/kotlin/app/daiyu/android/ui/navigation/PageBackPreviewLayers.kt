@@ -104,7 +104,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     private fun schedule(frame: Frame) {
-        if (closed || !active || frame.frozen || frame.releaseRequested || currentKey != frame.key || frame.size == IntSize.Zero) return
+        if (closed || !active || frame.frozen || frame.releaseRequested || currentKey != frame.key || frame.generation == 0L || frame.size == IntSize.Zero) return
         if (frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }) return
         frame.warmup = scope.launch {
             if (frame.ready == null) withFrameNanos { } else delay(64)
@@ -174,8 +174,21 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     fun frame(key: Any, sourceKey: Any = key, contentKey: Any = key): Frame {
-        frames.remove(key)?.let { release(it) }
-        return Frame(key, context.createGraphicsLayer(), sourceKey, contentKey, ::schedule).also { frames[key] = it }
+        val previous = frames.remove(key)
+        return Frame(key, context.createGraphicsLayer(), sourceKey, contentKey, ::schedule).also { frame ->
+            if (previous != null && !previous.releaseRequested && previous.sourceKey == sourceKey && previous.contentKey == contentKey) {
+                previous.ready?.takeIf { previous.readySize == previous.size &&
+                    it.width == previous.size.width && it.height == previous.size.height }?.let { image ->
+                    // The returning visit may still be covered by its child's departure.
+                    // Keep its prepared pixels, not the old layer or its recording generation.
+                    frame.size = previous.size
+                    frame.readySize = previous.readySize
+                    frame.ready = image
+                }
+            }
+            previous?.let { release(it) }
+            frames[key] = frame
+        }
     }
 
     private fun release(frame: Frame) {

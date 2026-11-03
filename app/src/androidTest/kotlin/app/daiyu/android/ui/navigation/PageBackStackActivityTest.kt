@@ -246,6 +246,73 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    fun testReturningVisitInheritsOnlyMatchingPreparedPixelsNotItsLayerOrGeneration() {
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        mainThread {
+            val scheduler = TestCoroutineScheduler()
+            val clock = object : MonotonicFrameClock {
+                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
+            }
+            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
+            var copies = 0
+            val layers = PageBackPreviewLayers(graphics, scope) { copies++; ImageBitmap(2, 2) }
+            try {
+                layers.enter("settings")
+                val previous = layers.frame("settings")
+                layers.setActive(true)
+                previous.recorded(IntSize(2, 2))
+                scheduler.runCurrent()
+                val pixels = checkNotNull(previous.ready)
+                previous.holdingForChild = true
+                previous.childChangeCaptured = true
+                previous.animateReturn = true
+                layers.enter("detail")
+                layers.frame("detail")
+                layers.enter("settings")
+                val returned = layers.frame("settings")
+                assertNotSame(previous, returned)
+                assertNotSame(previous.layer, returned.layer)
+                assertTrue("replacing a visit releases its layer", previous.layer.isReleased)
+                assertNull(previous.ready)
+                assertSame("independent prepared pixels survive the old layer's release", pixels, returned.ready)
+                assertEquals(IntSize(2, 2), returned.size)
+                assertEquals(0L, returned.generation)
+                assertEquals(-1L, returned.readyGeneration)
+                assertFalse("inherited pixels do not pretend the new layer was recorded", returned.hasFreshImage)
+                assertFalse(returned.holdingForChild)
+                assertNull(returned.childChangeCaptured)
+                assertFalse(returned.animateReturn)
+                assertTrue("the next gesture is ready before this visit draws", layers.beginGesture(returned))
+                assertSame(pixels, returned.image)
+                layers.resume(returned)
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals("never copy an unrecorded replacement layer", 1, copies)
+                returned.recorded(IntSize(2, 2))
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals(2, copies)
+                assertTrue("a real new recording replaces the inherited generation", returned.hasFreshImage)
+                assertNotSame(pixels, returned.ready)
+                layers.clearPreviews()
+                assertNull("pause invalidation cannot be inherited", layers.frame("settings").ready)
+
+                for (mismatch in listOf("source", "content", "size", "pixels")) {
+                    val cached = layers.frame("settings")
+                    cached.size = IntSize(2, 2)
+                    cached.readySize = IntSize(2, 2)
+                    cached.ready = ImageBitmap(if (mismatch == "pixels") 3 else 2, 2)
+                    if (mismatch == "size") cached.size = IntSize(3, 2)
+                    val rejected = layers.frame("settings", sourceKey = if (mismatch == "source") "other" else "settings",
+                        contentKey = if (mismatch == "content") "other" else "settings")
+                    assertNull("incompatible $mismatch must not cross visits", rejected.ready)
+                    assertEquals(IntSize.Zero, rejected.size)
+                    assertFalse(layers.beginGesture(rejected))
+                }
+            } finally { layers.close(); scope.cancel() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun testFrozenPreviewRejectsSameGenerationLateCopy() {
         lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
         mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
@@ -474,9 +541,11 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         mainThread { localPage = 1 }
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        awaitPreparedCurrentPixels()
         mainThread { localPage = 2 }
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        awaitPreparedCurrentPixels()
         ui.mainClock.autoAdvance = false
         try {
             for (expectedPage in listOf<Int?>(1, null)) {
@@ -502,6 +571,17 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertEquals(expectedPage, localPage)
                 assertEquals(previousCount + 1, backCount)
                 if (previousCount == 0) awaitDepartureCapture()
+                else {
+                    ui.mainClock.advanceTimeByFrame()
+                    val host = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
+                    val outgoing = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                    ui.mainClock.advanceTimeBy(64)
+                    val advanced = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                    assertTrue("second departure must move, not just pop", if (rtl) advanced.right < outgoing.right else advanced.left > outgoing.left)
+                    val progress = if (rtl) (host.right - advanced.right) / host.width else (advanced.left - host.left) / host.width
+                    assertTrue("second departure has an intermediate frame: $progress", progress > 0f && progress < 1f)
+                    ui.onNodeWithTag("page-back-departure-scrim").assertExists()
+                }
                 assertEquals("settings", screen)
                 assertEquals(1, controllers)
                 assertEquals(0, disposed)

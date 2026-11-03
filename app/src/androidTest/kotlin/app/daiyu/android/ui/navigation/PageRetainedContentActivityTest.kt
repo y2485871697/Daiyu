@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.platform.graphics.HardwareRendererCompat
 import app.daiyu.android.ui.screens.chat.conversation.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.lifecycle.Lifecycle
@@ -123,7 +125,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)
 
-    private fun assertRealChatReturn(swipe: Boolean) {
+    private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false) {
         val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
         if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
         var marker by mutableStateOf(Color.Green)
@@ -132,6 +134,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         var liveDraws = 0
         var chatFrame: PageBackPreviewLayers.Frame? = null
         var settingsFrame: PageBackPreviewLayers.Frame? = null
+        var detailFrame: PageBackPreviewLayers.Frame? = null
+        var settingsDetail by mutableStateOf(false)
         val draft = ComposerUi("retained draft", selectionStart = 2, selectionEnd = 5)
         val actions = ChatScreenActions()
         val turns = List(12) { ChatTurnUi.User("u$it", "earlier row $it") } +
@@ -141,16 +145,21 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 parent = Parent().also { it.registry.currentState = Lifecycle.State.RESUMED }
                 activity.setContent {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                        CompositionLocalProvider(LocalLifecycleOwner provides parent) {
+                        CompositionLocalProvider(LocalLifecycleOwner provides parent,
+                            LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                             val rendered = route
                             PageBackGestureHost(rendered, contentKey = rendered,
                                 canNavigateBack = rendered != "chat",
                                 swipeDismissEnabled = true, predictiveBackEnabled = false,
                                 dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
-                                backTargetKey = if (rendered == "chat") null else "chat",
+                                backTargetKey = when (rendered) { "chat" -> null; "appearance" -> "settings"; else -> "chat" },
                                 retainedRootKey = "chat", retainedRootScopeKey = scopeKey,
                                 previewCapture = { frame ->
-                                    if (frame.key == "chat") chatFrame = frame else settingsFrame = frame
+                                    when (frame.key) {
+                                        "chat" -> chatFrame = frame
+                                        "settings" -> settingsFrame = frame
+                                        else -> detailFrame = frame
+                                    }
                                     frame.layer.toImageBitmap()
                                 },
                                 retainedRootContent = {
@@ -175,8 +184,11 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                 },
                             ) {
                                 if (rendered != "chat") {
-                                    PageBackHandler { detailBacks++; route = "chat" }
-                                    Box(Modifier.fillMaxSize().background(Color.Blue).testTag("detail-root"))
+                                    PageBackHandler { detailBacks++; route = if (rendered == "appearance") "settings" else "chat" }
+                                    PageBackStack(if (settingsDetail) "detail" else null) {
+                                        PageBackHandler(enabled = settingsDetail) { detailBacks++; settingsDetail = false }
+                                        Box(Modifier.fillMaxSize().background(if (settingsDetail || rendered == "appearance") Color.Yellow else Color.Blue).testTag("detail-root"))
+                                    }
                                 }
                             }
                         }
@@ -205,10 +217,57 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(1000)
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
             ui.waitUntil(5_000) { settingsFrame?.ready != null }
+            if (nested) {
+                mainThread { if (topLevel) route = "appearance" else settingsDetail = true }
+                ui.mainClock.advanceTimeBy(1000)
+                captureScreenNode(ui.onNodeWithTag("page-back-host"))
+                ui.waitUntil(5_000) { detailFrame?.ready != null }
+            }
             mainThread { marker = Color.Magenta }
             val beforeReturnDraws = liveDraws
             ui.mainClock.autoAdvance = false
-            if (swipe) {
+            if (nested) {
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    swipe(Offset(width * if (rtl) .95f else .05f, height * .6f),
+                        Offset(width * if (rtl) .35f else .65f, height * .6f), 320)
+                }
+                assertEquals("first pop stays in settings", "settings", route)
+                assertFalse(settingsDetail)
+                assertEquals(1, detailBacks)
+                ui.mainClock.advanceTimeByFrame()
+                val firstHost = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
+                val firstStart = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                ui.mainClock.advanceTimeBy(32)
+                val first = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                assertTrue("first departure must also move before handoff", if (rtl) first.right < firstStart.right else first.left > firstStart.left)
+                val firstProgress = if (rtl) (firstHost.right - first.right) / firstHost.width
+                    else (first.left - firstHost.left) / firstHost.width
+                assertTrue("first departure is still running: $firstProgress", firstProgress > 0f && firstProgress < 1f)
+                val secondDown = firstHost.left + firstHost.width * if (rtl) .20f else .80f
+                assertTrue("second down hits the running departure", secondDown > first.left && secondDown < first.right)
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    down(Offset(width * if (rtl) .20f else .80f, height * .6f))
+                    moveTo(Offset(width * if (rtl) .10f else .90f, height * .6f), 32)
+                    moveTo(Offset(width * if (rtl) .06f else .94f, height * .6f), 16)
+                }
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("second gesture must not pop before up", "settings", route)
+                assertEquals(1, detailBacks)
+                ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                ui.onNodeWithTag("page-back-target").assertExists()
+                val dragging = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+                val dragProgress = if (rtl) (firstHost.right - dragging.right) / firstHost.width
+                    else (dragging.left - firstHost.left) / firstHost.width
+                assertTrue("second gesture immediately owns visible motion: $dragProgress", dragProgress > 0f && dragProgress < .18f)
+                val targetPixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+                val target = targetPixels[(targetPixels.width * if (rtl) .95f else .05f).toInt(), targetPixels.height / 2]
+                assertTrue("second gesture reveals cached green chat, not the child or blank: $target",
+                    target.green > .35f && target.red < .15f && target.blue < .15f)
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    moveTo(Offset(width * if (rtl) .01f else .99f, height * .6f), 16)
+                    up()
+                }
+            } else if (swipe) {
                 ui.onNodeWithTag("page-back-host").performTouchInput {
                     down(Offset(width * .02f, height * .6f))
                     moveTo(Offset(width * .12f, height * .6f), 16)
@@ -221,19 +280,35 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertEquals("business return is synchronous", "chat", route)
             }
             assertEquals("chat", route)
-            assertEquals(1, detailBacks)
+            assertEquals(if (nested) 2 else 1, detailBacks)
             ui.mainClock.advanceTimeByFrame()
             val departure = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
             ui.mainClock.advanceTimeBy(64)
             val advanced = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
-            assertTrue("departure must animate after synchronous pop", advanced.left > departure.left)
+            assertTrue("departure must animate after synchronous pop", if (rtl) advanced.right < departure.right else advanced.left > departure.left)
             val hostBounds = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
-            assertTrue("sample must be left of the departing settings", advanced.left > hostBounds.left + hostBounds.width * .05f)
+            val returnProgress = if (rtl) (hostBounds.right - advanced.right) / hostBounds.width
+                else (advanced.left - hostBounds.left) / hostBounds.width
+            assertTrue("second departure stays in an intermediate frame: $returnProgress", returnProgress > .05f && returnProgress < 1f)
+            val liveBounds = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            val parallax = hostBounds.width * .25f * (1f - returnProgress)
+            if (rtl) assertEquals(hostBounds.left + parallax, liveBounds.left, 1.1f)
+            else assertEquals(hostBounds.right - parallax, liveBounds.right, 1.1f)
+            ui.onNodeWithTag("page-back-departure-scrim").assertExists()
             val pixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
             val returnMarker = ui.onNodeWithTag("retained-live-marker").fetchSemanticsNode().boundsInRoot
+            val sampleX = (pixels.width * if (rtl) .95f else .05f).toInt()
             assertTrue("fixed return sample is inside the live marker", returnMarker.contains(Offset(
-                hostBounds.left + (pixels.width * .05f).toInt(), hostBounds.top + pixels.height / 2)))
-            val sample = pixels[(pixels.width * .05f).toInt(), pixels.height / 2]
+                hostBounds.left + sampleX, hostBounds.top + pixels.height / 2)))
+            val sample = pixels[sampleX, pixels.height / 2]
+            if (nested) {
+                val outgoingX = (pixels.width * if (rtl) .05f else .95f).toInt()
+                assertTrue("outgoing probe is inside the departing settings", advanced.contains(Offset(
+                    hostBounds.left + outgoingX, hostBounds.top + pixels.height / 2)))
+                val outgoing = pixels[outgoingX, pixels.height / 2]
+                assertTrue("second departure owns blue settings pixels, not yellow child: $outgoing",
+                    outgoing.blue > .85f && outgoing.red < .15f && outgoing.green < .15f)
+            }
             assertTrue("live chat must draw underneath the departure, not an old target bitmap", liveDraws > beforeReturnDraws)
             assertTrue("return must reveal current magenta chat pixels, not old green or white: $sample",
                 sample.red > .35f && sample.blue > .35f && sample.green < .15f)
@@ -250,6 +325,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange,
                 androidx.compose.ui.text.TextRange(2, 5)))
             ui.onAllNodesWithTag("markdown-pending").assertCountEquals(0)
+            assertEquals(if (nested) 2 else 1, detailBacks)
+            assertEquals(0, rootBacks)
             assertEquals(1, mounts)
             assertEquals(0, disposals)
         } finally {
@@ -257,6 +334,12 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
         }
     }
+
+    fun testRealChatRapidNestedSwipeReturnsKeepBothAnimations() = assertRealChatReturn(swipe = true, nested = true)
+
+    fun testRealChatRapidNestedSwipeReturnsKeepBothAnimationsInRtl() = assertRealChatReturn(swipe = true, nested = true, rtl = true)
+
+    fun testRealChatRapidTopLevelSwipeReturnsKeepBothAnimations() = assertRealChatReturn(swipe = true, nested = true, topLevel = true)
 
     fun testHiddenRootReleasesOnPauseAndIsNotRemountedUntilVisited() {
         mount()

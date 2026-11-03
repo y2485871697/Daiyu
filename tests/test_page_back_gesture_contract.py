@@ -214,7 +214,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }', enter)
         self.assertLess(enter.index('freeze(it)'), enter.index('currentKey = key'))
         self.assertIn('if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)', layers)
-        self.assertIn('frames.remove(key)?.let { release(it) }', layers)
+        self.assertIn('val previous = frames.remove(key)', layers)
+        self.assertIn('previous?.let { release(it) }', layers)
         self.assertNotIn('drawLayer(target.layer)', self.host)
         self.assertNotIn('drawLayer(departure.frame.layer)', self.host)
         self.assertIn('frames.size > 8', layers)
@@ -287,6 +288,30 @@ class PageBackGestureContractTest(unittest.TestCase):
         for content in ('ChatConversationLayers(', 'ChatMessageList(', 'ChatComposer(',
                         'liveDraws', 'originalMessage', 'page-back-departure'):
             self.assertIn(content, retained)
+
+    def test_returning_visit_keeps_only_compatible_prepared_pixels_for_rapid_back(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        replacement = layers.split('fun frame(key: Any', 1)[1].split('private fun release(', 1)[0]
+        for guard in ('!previous.releaseRequested', 'previous.sourceKey == sourceKey',
+                      'previous.contentKey == contentKey', 'previous.readySize == previous.size',
+                      'it.width == previous.size.width && it.height == previous.size.height',
+                      'frame.ready = image', 'context.createGraphicsLayer()', 'previous?.let { release(it) }'):
+            self.assertIn(guard, replacement)
+        self.assertLess(replacement.index('frame.ready = image'), replacement.index('release(it)'))
+        self.assertNotIn('frame.generation =', replacement)
+        self.assertNotIn('frame.readyGeneration =', replacement)
+        schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('fun beginGesture(', 1)[0]
+        self.assertIn('frame.generation == 0L', schedule)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        self.assertIn('fun testReturningVisitInheritsOnlyMatchingPreparedPixelsNotItsLayerOrGeneration()', test)
+        retained = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
+        for method in ('testRealChatRapidNestedSwipeReturnsKeepBothAnimations',
+                       'testRealChatRapidNestedSwipeReturnsKeepBothAnimationsInRtl',
+                       'testRealChatRapidTopLevelSwipeReturnsKeepBothAnimations'):
+            self.assertIn('fun ' + method + '()', retained)
+        for assertion in ('second down hits the running departure', 'second gesture immediately owns visible motion',
+                          'second departure owns blue settings pixels, not yellow child'):
+            self.assertIn(assertion, retained)
 
     def test_preview_matches_root_return_target_and_invalidates_sensitive_context(self):
         for wiring in ('backTargetKey = pageBackPreviewTarget()', 'previewScopeKey = selected?.id'):

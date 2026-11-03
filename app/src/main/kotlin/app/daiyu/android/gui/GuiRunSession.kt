@@ -153,7 +153,8 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         boundOwner = owner
         boundAuthorization = authorization
     }
-    internal fun dynamicObserve(cancelled: () -> Boolean, maxNodes: Int = 128): GuiResult<GuiObservation> = onWorker(cancelled) {
+    internal fun dynamicObserve(cancelled: () -> Boolean): GuiResult<GuiObservation> = dynamicObserve(cancelled, 128)
+    internal fun dynamicObserve(cancelled: () -> Boolean, maxNodes: Int): GuiResult<GuiObservation> = onWorker(cancelled) {
         check(dynamic)
         val approval = GuiRuntime.approveReads(lease, GuiReadApproval(1, 0))
         if (approval is GuiResult.Rejected) approval else GuiRuntime.observe(lease, maxNodes)
@@ -199,7 +200,8 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         }
         return awaitScreenshot(started, cancelled)
     }
-    fun observe(cancelled: () -> Boolean, maxNodes: Int = 128): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease, maxNodes) }
+    fun observe(cancelled: () -> Boolean): GuiResult<GuiObservation> = observe(cancelled, 128)
+    fun observe(cancelled: () -> Boolean, maxNodes: Int): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease, maxNodes) }
     fun action(action: GuiAction, cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
         if (action.effect(identity) !in frozenWrites.orEmpty()) GuiResult.Rejected("EXACT_ACTION_NOT_AUTHORIZED")
         else GuiRuntime.beginAction(lease, action)

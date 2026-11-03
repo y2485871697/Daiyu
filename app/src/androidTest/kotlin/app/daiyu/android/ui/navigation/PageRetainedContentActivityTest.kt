@@ -275,8 +275,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertTrue("second down hits the running departure", secondDown > first.left && secondDown < first.right)
                 ui.onNodeWithTag("page-back-host").performTouchInput {
                     down(Offset(width * if (rtl) .20f else .80f, height * .6f))
-                    moveTo(Offset(width * if (rtl) .10f else .90f, height * .6f), 32)
-                    moveTo(Offset(width * if (rtl) .06f else .94f, height * .6f), 16)
+                    moveTo(Offset(width * if (rtl) .14f else .86f, height * .6f), 32)
+                    moveTo(Offset(width * if (rtl) .10f else .90f, height * .6f), 16)
                 }
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("second gesture must not pop before up", "settings", route)
@@ -292,8 +292,9 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertTrue("second gesture reveals cached green chat, not the child or blank: $target",
                     target.green > .35f && target.red < .15f && target.blue < .15f)
                 ui.onNodeWithTag("page-back-host").performTouchInput {
-                    for (fraction in listOf(.945f, .96f, .975f, .99f)) {
-                        moveTo(Offset(width * if (rtl) 1f - fraction else fraction, height * .6f), 4)
+                    // Re-establish a constant 1.25 screens/s release after the pixel observation.
+                    for (fraction in listOf(.92f, .94f, .96f, .98f)) {
+                        moveTo(Offset(width * if (rtl) 1f - fraction else fraction, height * .6f), 16)
                     }
                     up()
                 }

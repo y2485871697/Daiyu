@@ -152,6 +152,12 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         val approval = GuiRuntime.approveReads(lease, GuiReadApproval(1, 0))
         if (approval is GuiResult.Rejected) approval else GuiRuntime.observe(lease)
     }
+    internal fun dynamicLaunch(request: GuiAppLaunch, authorization: TaskAuthorization,
+        cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
+        if (!dynamic || authorization.sessionId != identity.sessionId || authorization.taskId != identity.runId ||
+            authorization.allowedWrites != setOf(request.effect(identity))) GuiResult.Rejected("EXACT_ACTION_NOT_AUTHORIZED")
+        else GuiRuntime.launchApp(lease, request) { closed.get() || cancelled() || ioFence.rejection() != null }
+    }
     internal fun dynamicAction(action: GuiAction, authorization: TaskAuthorization,
         cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
         if (!dynamic || authorization.sessionId != identity.sessionId || authorization.taskId != identity.runId ||

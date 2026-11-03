@@ -38,6 +38,11 @@ internal data class GuiAction(val observationId: String, val operation: GuiOpera
         "${owner.sessionId.length}:${owner.sessionId}:${owner.runId.length}:${owner.runId}:$observationId:${nodeId ?: "global"}",
         text?.let { "${it.length}:$it" } ?: "invoke")
 }
+internal data class GuiAppLaunch(val packageName: String) {
+    init { require(GuiUserActionRequest.validTargetPackage(packageName)) { "invalid_target_package" } }
+    fun effect(owner: GuiOwner): WriteEffect = WriteEffect("gui", "launch_app",
+        "${owner.sessionId.length}:${owner.sessionId}:${owner.runId.length}:${owner.runId}:$packageName", "launch")
+}
 internal sealed interface GuiResult<out T> {
     data class Value<T>(val value: T) : GuiResult<T>
     /** Guaranteed no requested action was attempted. */

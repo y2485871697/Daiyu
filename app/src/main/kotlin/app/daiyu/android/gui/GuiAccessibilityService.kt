@@ -97,6 +97,9 @@ internal interface GuiRuntimeAccess {
             current.getSystemService(PowerManager::class.java).isInteractive
     fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? = current.rootInActiveWindow
     fun windows(current: GuiAccessibilityService): List<android.view.accessibility.AccessibilityWindowInfo> = current.windows.orEmpty()
+    fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? =
+        current.packageManager.getLaunchIntentForPackage(packageName)
+    fun startActivity(current: GuiAccessibilityService, intent: Intent) { current.startActivity(intent) }
     @androidx.annotation.RequiresApi(30)
     fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit)
 }
@@ -435,6 +438,32 @@ internal object GuiRuntime {
             is GuiResult.Rejected -> acquired
             is GuiResult.Unknown -> acquired
         }
+    }
+    internal fun launchApp(lease: GuiLeaseGate.Lease, request: GuiAppLaunch,
+        cancelled: () -> Boolean = { false }): GuiResult<String> {
+        onMain()
+        if (cancelled()) return GuiResult.Rejected("CANCELLED_NOT_EXECUTED")
+        targetRejection(lease)?.let { return it }; screenRejection()?.let { return it }
+        if (targetBinding?.packageName != request.packageName)
+            return GuiResult.Rejected("APPLICATION_TARGET_MISMATCH_NOT_EXECUTED")
+        val current = service!!
+        val intent = try { access.launchIntent(current, request.packageName) }
+        catch (_: Exception) { return GuiResult.Rejected("APPLICATION_RESOLUTION_FAILED_NOT_EXECUTED") }
+            ?: return GuiResult.Rejected("APPLICATION_NOT_LAUNCHABLE_NOT_EXECUTED")
+        if (intent.component?.packageName != request.packageName)
+            return GuiResult.Rejected("APPLICATION_TARGET_MISMATCH_NOT_EXECUTED")
+        if (cancelled()) return GuiResult.Rejected("CANCELLED_NOT_EXECUTED")
+        targetRejection(lease)?.let { return it }; screenRejection()?.let { return it }
+        return try {
+            access.startActivity(current, Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            GuiResult.Value("PLATFORM_LAUNCH_ACCEPTED_NOT_VERIFIED")
+        } catch (_: android.content.ActivityNotFoundException) {
+            GuiResult.Rejected("APPLICATION_NOT_LAUNCHABLE_NOT_EXECUTED")
+        } catch (_: SecurityException) {
+            GuiResult.Rejected("APPLICATION_LAUNCH_PERMISSION_DENIED_NOT_EXECUTED")
+        } catch (_: Exception) {
+            GuiResult.Unknown("APPLICATION_LAUNCH_UNCONFIRMED")
+        } finally { gate.retireObservation(lease); generation++; clearNodes() }
     }
     internal fun approveReads(lease: GuiLeaseGate.Lease, approval: GuiReadApproval): GuiResult<Unit> {
         onMain(); targetRejection(lease)?.let { return it }; return gate.approveReads(lease, approval)

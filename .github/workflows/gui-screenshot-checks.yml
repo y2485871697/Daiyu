@@ -58,6 +58,8 @@ jobs:
         run: |
           mkdir -p gui-screenshot-checks
           python3 scripts/verify_boundaries.py
+          python3 -B -m unittest discover -s tests -p 'test_ordinary_tool_wiring_contract.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_gui_app_launch_contract.py' -v
       - name: 准备既有离线语音依赖（不打包）
         run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
       - name: 截图通道定向单测及Compose源码编译（不打包）
@@ -75,6 +77,7 @@ jobs:
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=gui-screenshot-checks/task-graph.json \
             :app:compileDebugKotlin :app:testDebugUnitTest \
+            --tests 'app.daiyu.android.gui.GuiAppLaunchTest' \
             --tests 'app.daiyu.android.gui.GuiCaptureDisposalTest' \
             --tests 'app.daiyu.android.gui.GuiCaptureRequestTest' \
             --tests 'app.daiyu.android.gui.GuiLeaseGateTest' \
@@ -91,7 +94,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.gui.GuiCaptureRequestTest', 'app.daiyu.android.gui.GuiLeaseGateTest', 'app.daiyu.android.gui.GuiProductionConfirmationTest', 'app.daiyu.android.gui.GuiRuntimeScreenshotTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.gui.GuiProductionEntryContractTest', 'app.daiyu.android.gui.GuiCaptureDisposalTest', 'app.daiyu.android.gui.GuiScreenToolFactoryTest'}
+          expected = {'app.daiyu.android.gui.GuiAppLaunchTest', 'app.daiyu.android.gui.GuiCaptureRequestTest', 'app.daiyu.android.gui.GuiLeaseGateTest', 'app.daiyu.android.gui.GuiProductionConfirmationTest', 'app.daiyu.android.gui.GuiRuntimeScreenshotTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.gui.GuiProductionEntryContractTest', 'app.daiyu.android.gui.GuiCaptureDisposalTest', 'app.daiyu.android.gui.GuiScreenToolFactoryTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

@@ -1,0 +1,277 @@
+package app.daiyu.android.gui
+
+import android.content.ComponentName
+import android.content.Intent
+import android.os.Looper
+import android.graphics.Rect
+import android.view.accessibility.AccessibilityWindowInfo
+import org.robolectric.util.ReflectionHelpers
+import org.robolectric.util.ReflectionHelpers.ClassParameter
+import org.json.JSONObject
+import android.view.accessibility.AccessibilityNodeInfo
+import app.daiyu.android.RunScreenLocation
+import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.RunExecutionOwner
+import app.daiyu.android.domain.tools.*
+import app.daiyu.android.integration.tools.RunOrdinaryGuiTools
+import app.daiyu.android.tasksurface.*
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
+@LooperMode(LooperMode.Mode.PAUSED)
+class GuiAppLaunchTest {
+    private lateinit var service: GuiAccessibilityService
+    private lateinit var originalAccess: GuiRuntimeAccess
+    private lateinit var platform: Platform
+    private val scopes = mutableListOf<RunOrdinaryGuiTools>()
+    private val target = "com.eg.android.AlipayGphone"
+
+    private class Platform : GuiRuntimeAccess {
+        var enabled = true
+        var unlocked = true
+        var rootReads = 0
+        var resolutions = 0
+        var launches = 0
+        var launchable = true
+        var resolvedPackage: String? = null
+        var beforeResolve: (() -> Unit)? = null
+        var failure: Exception? = null
+        var delivered: Intent? = null
+        override fun enabled(current: GuiAccessibilityService) = enabled
+        override fun unlocked(current: GuiAccessibilityService) = unlocked
+        var rootPackage: String? = null
+        override fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? {
+            rootReads++
+            val pkg = rootPackage ?: return null
+            val window = AccessibilityWindowInfo.obtain()
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, 7 + launches))
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, AccessibilityWindowInfo.TYPE_APPLICATION))
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setActive", ClassParameter.from(Boolean::class.javaPrimitiveType!!, true))
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, 0))
+            return AccessibilityNodeInfo.obtain().apply {
+                packageName = pkg; className = "View"; text = "application"
+                isEnabled = true; isVisibleToUser = true; isClickable = true
+                setBoundsInScreen(Rect(0, 0, 100, 100))
+                ReflectionHelpers.setField(this, "mWindowId", 7 + launches)
+                shadowOf(this).setAccessibilityWindowInfo(window)
+            }
+        }
+        override fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? {
+            resolutions++
+            beforeResolve?.invoke()
+            return if (!launchable) null else Intent(Intent.ACTION_MAIN)
+                .setComponent(ComponentName(resolvedPackage ?: packageName, "$packageName.MainActivity"))
+        }
+        override fun startActivity(current: GuiAccessibilityService, intent: Intent) {
+            launches++
+            failure?.let { throw it }
+            delivered = Intent(intent)
+            rootPackage = intent.component!!.packageName
+        }
+        override fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit) =
+            error("app launch must not capture the screen")
+    }
+
+    @Before fun setUp() {
+        originalAccess = GuiRuntime.access
+        platform = Platform()
+        GuiRuntime.access = platform
+        service = Robolectric.buildService(GuiAccessibilityService::class.java).create().get()
+        GuiRuntime.connected(service)
+    }
+    @After fun tearDown() {
+        scopes.forEach { it.close() }
+        shadowOf(Looper.getMainLooper()).idle()
+        GuiRuntime.disconnected(service)
+        GuiRuntime.access = originalAccess
+    }
+
+    private fun owner(): RunExecutionOwner {
+        var captured: RunExecutionOwner? = null
+        val executor = object : ReceiptBatchToolExecutor {
+            override fun bindOwner(owner: RunExecutionOwner) { captured = owner }
+            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
+        }
+        ChatRunner(ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = Unit
+            override fun cancel() = Unit
+        } }, object : ConversationStore { override fun save(message: Message) = Unit }, BatteryTool { error("unused") },
+            RunnerOptions(receiptBatchExecutor = executor)) {}.run(Message(MessageId("a"), ConversationId("c"),
+            RunId("r"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
+        return checkNotNull(captured)
+    }
+    private inner class Fixture(preference: TaskSurfacePreference = TaskSurfacePreference.FOREGROUND,
+        answer: TaskSurface? = TaskSurface.FOREGROUND) {
+        val owner = owner()
+        val auth = TaskAuthorization("s", "r", emptySet())
+        var questions = 0
+        val location = RunScreenLocation(owner, TaskSurfaceStore(object : TaskSurfacePersistence {
+            override fun read() = "task-surface-v1\n${preference.name}\n"
+            override fun write(record: String) = error("launch must not change the saved preference")
+        }), service.packageName, { true }) { questions++; it.answer(answer) }
+        val scope = RunOrdinaryGuiTools(owner, auth, location).also { scopes += it }
+        val dispatcher = ToolDispatcher(ToolRegistry().apply { scope.tools.forEach(::register) }.snapshot(),
+            SessionCapabilities("s", setOf(GuiScreenToolFactory.CAPABILITY)), ToolLedger(InMemoryToolLedgerStore()))
+        fun callTool(name: String, arguments: String, id: String): DispatchOutcome = worker {
+            dispatcher.dispatchOwned(auth, listOf(ToolInvocation(ToolCallId(id), name, arguments)), owner) { false }.single().outcome
+        }
+        fun call(id: String = "launch", task: TaskAuthorization = auth, token: RunExecutionOwner = owner,
+            cancelled: () -> Boolean = { false }): DispatchOutcome = worker {
+            dispatcher.dispatchOwned(task, listOf(ToolInvocation(ToolCallId(id), "launch_app",
+                "{\"package_name\":\"$target\"}")), token, cancelled).single().outcome
+        }
+    }
+    private fun <T> worker(block: () -> T): T {
+        val future = FutureTask(block)
+        val thread = Thread(future).apply { start() }
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (!future.isDone && System.nanoTime() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(1)
+        }
+        val result = future.get(1, TimeUnit.SECONDS)
+        thread.join(1000)
+        assertFalse(thread.isAlive)
+        return result
+    }
+
+    @Test fun advertisedLaunchIsExactWriteAndPreparingNeverTouchesAndroid() {
+        val f = Fixture()
+        val tool = f.scope.tools.single { it.definition.name == "launch_app" }
+        assertEquals(ToolEffect.WRITE, tool.definition.effect)
+        assertEquals(GuiScreenToolFactory.CAPABILITY, tool.definition.capability)
+        val prepared = tool.prepare(tool.definition.schema.parse("{\"package_name\":\"$target\"}"))
+        assertEquals(GuiAppLaunch(target).effect(GuiOwner("s", "r")), prepared.writeEffect)
+        assertEquals(0, platform.resolutions)
+        assertEquals(0, platform.launches)
+        assertEquals(0, f.questions)
+        listOf("bad package", "https://example.com", "com.foo;input").forEach { invalid ->
+            try { GuiAppLaunch(invalid); fail(invalid) } catch (_: IllegalArgumentException) { }
+        }
+    }
+    @Test fun ordinaryLaunchFromAssistantNeedsNoObservationAndUsesCentralLedgerOnce() {
+        val f = Fixture()
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        assertEquals(1, platform.launches)
+        assertEquals(0, platform.rootReads)
+        assertEquals(target, platform.delivered!!.component!!.packageName)
+        assertTrue(platform.delivered!!.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+    }
+    @Test fun selfHomeRejectionDoesNotPreventNativeLaunchThenFreshExternalObserveInSameDispatcher() {
+        val f = Fixture()
+        platform.rootPackage = service.packageName
+        val self = f.callTool("screen", "{\"operation\":\"observe\",\"target_package\":\"${service.packageName}\"}", "self") as DispatchOutcome.Confirmed
+        val selfId = JSONObject(self.payload).getString("observation_id")
+        assertTrue(f.callTool("screen_action", "{\"operation\":\"home\",\"observation_id\":\"$selfId\",\"target_package\":\"${service.packageName}\"}", "home") is DispatchOutcome.NotExecuted)
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        val external = f.callTool("screen", "{\"operation\":\"observe\"}", "external") as DispatchOutcome.Confirmed
+        val observed = JSONObject(external.payload)
+        assertEquals(target, observed.getString("package_name"))
+        assertNotEquals(selfId, observed.getString("observation_id"))
+        assertEquals(1, platform.launches)
+        assertTrue(shadowOf(service).globalActionsPerformed.isEmpty())
+    }
+    @Test fun externalLaunchStillUsesTheBaseLocationAfterASelfRoute() {
+        val f = Fixture(TaskSurfacePreference.BACKGROUND)
+        assertTrue(f.location.route(service.packageName, false) { false } is TaskSurfaceDecision.Ready)
+        assertTrue(f.call() is DispatchOutcome.NotExecuted)
+        assertEquals(0, platform.resolutions)
+        assertEquals(0, platform.launches)
+    }
+    @Test fun askIsAnsweredThroughExistingLocationHostWithoutChangingPreferences() {
+        val f = Fixture(TaskSurfacePreference.ASK)
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        assertEquals(1, f.questions)
+        assertEquals(1, platform.launches)
+    }
+    @Test fun cancelledLocationCannotBeBypassedByEarlierSelfRouting() {
+        val f = Fixture(TaskSurfacePreference.ASK, answer = null)
+        f.location.route(service.packageName, false) { false }
+        assertTrue(f.call() is DispatchOutcome.NotExecuted)
+        assertEquals(1, f.questions)
+        assertEquals(0, platform.resolutions)
+        assertEquals(0, platform.launches)
+    }
+    @Test fun foregroundBusyDoesNotResolveLaunchOrStealAnotherOwner() {
+        val held = (GuiRuntime.openForUser(GuiOwner("other", "other")) as GuiResult.Value).value
+        try {
+            assertTrue(Fixture().call() is DispatchOutcome.NotExecuted)
+            assertEquals(0, platform.resolutions)
+            assertEquals(0, platform.launches)
+        } finally { held.close() }
+    }
+    @Test fun forgedOwnerAuthorizationCancellationAndClosedScopeNeverLaunch() {
+        val f = Fixture()
+        assertTrue(f.call("auth", task = TaskAuthorization("s", "r", emptySet())) is DispatchOutcome.NotExecuted)
+        assertTrue(f.call("owner", token = owner()) is DispatchOutcome.NotExecuted)
+        assertTrue(f.call("cancel", cancelled = { true }) is DispatchOutcome.NotExecuted)
+        f.scope.close()
+        assertTrue(f.call("closed") is DispatchOutcome.NotExecuted)
+        assertEquals(0, platform.launches)
+    }
+    @Test fun lockAndPermissionRevocationDuringResolutionAreRecheckedBeforeLaunch() {
+        val f = Fixture()
+        platform.beforeResolve = { platform.unlocked = false }
+        assertTrue(f.call("locked") is DispatchOutcome.NotExecuted)
+        assertEquals(0, platform.launches)
+        f.scope.close()
+        platform.unlocked = true
+        val permission = Fixture()
+        platform.beforeResolve = { platform.enabled = false }
+        assertTrue(permission.call("permission") is DispatchOutcome.NotExecuted)
+        assertEquals(2, platform.resolutions)
+        assertFalse(platform.enabled)
+        assertEquals(0, platform.launches)
+    }
+    @Test fun cancellationDuringPackageResolutionNeverReachesStartActivity() {
+        val f = Fixture()
+        var cancelled = false
+        platform.beforeResolve = { cancelled = true }
+        assertTrue(f.call(cancelled = { cancelled }) is DispatchOutcome.NotExecuted)
+        assertEquals(1, platform.resolutions)
+        assertEquals(0, platform.launches)
+    }
+    @Test fun missingOrDifferentResolvedApplicationNeverStarts() {
+        val f = Fixture()
+        platform.launchable = false
+        assertTrue(f.call("missing") is DispatchOutcome.NotExecuted)
+        platform.launchable = true
+        platform.resolvedPackage = "different.app"
+        assertTrue(f.call("different") is DispatchOutcome.NotExecuted)
+        assertEquals(0, platform.launches)
+    }
+    @Test fun unknownLaunchIsNotRetriedWithANewCallId() {
+        val f = Fixture()
+        platform.failure = IllegalStateException("unknown binder delivery")
+        assertTrue(f.call("first") is DispatchOutcome.Unknown)
+        platform.failure = null
+        assertTrue(f.call("second") is DispatchOutcome.NotExecuted)
+        assertEquals(1, platform.launches)
+    }
+    @Test fun launchRequiresExactLeaseTargetAndRetiresOldObservations() {
+        val session = (GuiRuntime.openForUser(GuiOwner("s", "r"), target) as GuiResult.Value).value
+        try {
+            assertTrue(GuiRuntime.launchApp(session.lease, GuiAppLaunch("different.app")) is GuiResult.Rejected)
+            val observation = GuiObservation("old", target, 7, 0, 0, emptyList(), true)
+            session.lease.observation = observation
+            session.lease.actions += GuiAction("old", GuiOperation.HOME)
+            assertTrue(GuiRuntime.launchApp(session.lease, GuiAppLaunch(target)) is GuiResult.Value)
+            assertNull(session.lease.observation)
+            assertTrue(session.lease.actions.isEmpty())
+            assertEquals(1, platform.launches)
+        } finally { session.close() }
+    }
+}

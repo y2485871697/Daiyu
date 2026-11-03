@@ -16,7 +16,7 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
     init { retain(location) }
     private val targetField = ArgumentField("target_package", ArgumentType.Text(256, minimumLength = 1), required = false)
     // Definitions stay identical to the finite GUI leaf, plus an explicit target routing parameter.
-    override val tools = listOf(false, true).map { action -> object : RegisteredTool {
+    override val tools: List<RegisteredTool> = listOf(false, true).map { action -> object : RegisteredTool {
         override val definition = (if (action) GuiScreenToolFactory.actionDefinition() else GuiScreenToolFactory.readDefinition(allowImplicitObservation = true))
             .let { original -> ToolDefinition(original.name, original.version, original.description,
                 original.capability, original.effect, ToolSchema(original.schema.fields + targetField)) }
@@ -41,7 +41,26 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                 }
             } }
         }
-    } }
+    } } + object : RegisteredTool {
+        override val definition = ToolDefinition("launch_app", 1,
+            "打开一个精确包名的已安装应用。不确定包名时先用search_apps搜索，不猜包名。" +
+                "从助手页面操作其它应用时直接调用本工具，不需要先观察助手或返回桌面。" +
+                "遵守本次前后台位置、原owner和屏幕占用；不使用shell、不更改权限。" +
+                "启动受理不等于目标页面已显示；需要操作页面时重新screen observe。UNKNOWN不得重发。",
+            GuiScreenToolFactory.CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
+                ArgumentField("package_name", ArgumentType.Text(256, minimumLength = 1)))))
+        override fun prepare(arguments: ToolArguments): PreparedTool {
+            val request = GuiAppLaunch(arguments.text("package_name"))
+            return write(request.effect(GuiOwner(authorization.sessionId, owner.runId.value))) { context ->
+                withSession(request.packageName, context) { session ->
+                    encode(session.dynamicLaunch(request, context.authorization, context.cancelled)) { status ->
+                        JSONObject().put("package_name", request.packageName).put("status", status)
+                            .put("verified_ui_result", false).toString()
+                    }
+                }
+            }
+        }
+    }
     private fun withSession(requested: String?, context: ToolExecutionContext,
         execute: (GuiRunSession) -> ExecutionReceipt): ExecutionReceipt {
         val route = location.route(requested, backgroundSupported = false) { !live() || context.cancelled() }

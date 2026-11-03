@@ -21,7 +21,7 @@ internal object GuiScreenToolFactory {
                 (if (allowImplicitObservation) "screenshot accepts a current observation_id for a tree-bound image; omit it for a current visual-only image. Visual-only results have capture_id, not observation_id; run observe before node actions. "
                  else "screenshot requires observation_id from a successful observe in this session. ") +
                 "IDs expire after ${GUI_OBSERVATION_TTL_MILLIS / 1000} seconds, a target window change, or an action. Never retry a stale ID automatically. " +
-                (if (allowImplicitObservation) "For the current screen omit any previous target_package. Self-app observation requires target_package=app.daiyu.android. " else "") +
+                (if (allowImplicitObservation) "For the current screen omit any previous target_package. Self-app observation requires target_package=app.daiyu.android. To open another app, use launch_app first; target_package only selects a window, it does not launch an app. " else "") +
                 "Window failures are not Android Root permission errors. Never use shell, input, screencap or uiautomator to bypass screen admission, target or location restrictions.",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("operation", ArgumentType.Text(16, setOf("observe", "screenshot"))),
@@ -47,7 +47,7 @@ internal object GuiScreenToolFactory {
 
     internal fun actionDefinition(): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact user-confirmed accessibility node or global action, bound to the same observation_id. " +
-                "No coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",
+                "Self-app observations do not authorize HOME/BACK/RECENTS/NOTIFICATIONS; when provided, use launch_app to open another app. No coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("operation", ArgumentType.Text(32, GuiOperation.entries.map { it.name.lowercase() }.toSet())),
                 ArgumentField("observation_id", ArgumentType.Text(64, minimumLength = 1)),

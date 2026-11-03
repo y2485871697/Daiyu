@@ -171,6 +171,17 @@ class GuiRuntimeScreenshotTest {
             }
             return if (stableNodes) AccessibilityNodeInfo.obtain(root) else root
         }
+        var appLaunches = 0
+        override fun launchIntent(current: GuiAccessibilityService, packageName: String): android.content.Intent =
+            android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .setComponent(android.content.ComponentName(packageName, "$packageName.MainActivity"))
+        override fun startActivity(current: GuiAccessibilityService, intent: android.content.Intent) {
+            appLaunches++
+            pkg = intent.component!!.packageName
+            windowId++
+            stableNodes = false; savedRoot = null; savedTarget = null; savedLabel = null
+            descendants = 0
+        }
         override fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit) {
             callbacks += success to failure
             if (throwOnSubmit) error("accepted but transport threw")
@@ -688,6 +699,31 @@ class GuiRuntimeScreenshotTest {
             rejected(session.prepareExactActionFromUser(operation, ownerCurrent = { true }, onConfirmed = { false }), code)
         }
         assertTrue(session.lease.actions.isEmpty()); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun explicitLaunchLeavesTruncatedSelfScopeAndRequiresFreshExternalObservation() {
+        platform.descendants = 2000
+        openSelf()
+        val self = observe()
+        assertTrue(self.truncated)
+        rejected(GuiRuntime.action(session.lease, GuiAction(self.observationId, GuiOperation.HOME)),
+            "SELF_APP_GLOBAL_ACTION_NOT_ALLOWED_NOT_EXECUTED")
+        val oldLease = session.lease
+        val target = "com.eg.android.AlipayGphone"
+        openTarget(target)
+        assertFalse(oldLease.valid)
+        assertTrue(GuiRuntime.launchApp(session.lease, GuiAppLaunch(target)) is GuiResult.Value)
+        assertNull(session.lease.observation)
+        val external = observe()
+        assertEquals(target, external.packageName)
+        assertNotEquals(self.observationId, external.observationId)
+        rejected(GuiRuntime.validateExactTarget(session.lease, GuiAction(self.observationId, GuiOperation.TAP, 1)),
+            "OBSERVATION_ID_MISMATCH")
+        val action = approve(external)
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        assertEquals(1, platform.appLaunches)
+        assertEquals(1, platform.nodeActions)
+        assertTrue(shadowOf(service).globalActionsPerformed.isEmpty())
     }
 
     @Test fun unchangedTargetRemainsValidAfterElevenSeconds() {

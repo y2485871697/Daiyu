@@ -136,6 +136,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         var settingsFrame: PageBackPreviewLayers.Frame? = null
         var detailFrame: PageBackPreviewLayers.Frame? = null
         var settingsDetail by mutableStateOf(false)
+        var observedStack: PageBackStackRegistry? = null
         val draft = ComposerUi("retained draft", selectionStart = 2, selectionEnd = 5)
         val actions = ChatScreenActions()
         val turns = List(12) { ChatTurnUi.User("u$it", "earlier row $it") } +
@@ -183,6 +184,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                     }
                                 },
                             ) {
+                                val registry = LocalPageBackStackPath.current?.registry
+                                SideEffect { observedStack = registry }
                                 if (rendered != "chat") {
                                     PageBackHandler { detailBacks++; route = if (rendered == "appearance") "settings" else "chat" }
                                     PageBackStack(if (settingsDetail) "detail" else null) {
@@ -236,7 +239,10 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 ui.onNodeWithTag("page-back-host").performTouchInput {
                     down(Offset(width * if (rtl) .95f else .05f, height * .6f))
                     moveTo(Offset(width * if (rtl) .85f else .15f, height * .6f), 32)
-                    moveTo(Offset(width * if (rtl) .35f else .65f, height * .6f), 288)
+                    for (step in 1..18) {
+                        val fraction = .15f + .50f * step / 18f
+                        moveTo(Offset(width * if (rtl) 1f - fraction else fraction, height * .6f), 16)
+                    }
                 }
                 ui.mainClock.advanceTimeByFrame()
                 assertTrue("child gesture locks its prepared pixels: key=${preparedDetail.key} frozen=${preparedDetail.frozen} image=${preparedDetail.image != null} animate=${preparedDetail.animateReturn} target=${preparedDetail.backTargetKey}",
@@ -252,6 +258,11 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertFalse(settingsDetail)
                 assertEquals(1, detailBacks)
                 ui.mainClock.advanceTimeByFrame()
+                if (!topLevel) {
+                    assertEquals("local pop publishes the parent path before the host observes it", "settings",
+                        checkNotNull(observedStack).routeKey("settings"))
+                    ui.mainClock.advanceTimeByFrame()
+                }
                 val firstHost = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
                 val firstStart = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
                 ui.mainClock.advanceTimeBy(32)
@@ -281,8 +292,9 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertTrue("second gesture reveals cached green chat, not the child or blank: $target",
                     target.green > .35f && target.red < .15f && target.blue < .15f)
                 ui.onNodeWithTag("page-back-host").performTouchInput {
-                    moveTo(Offset(width * if (rtl) .04f else .96f, height * .6f), 4)
-                    moveTo(Offset(width * if (rtl) .01f else .99f, height * .6f), 4)
+                    for (fraction in listOf(.945f, .96f, .975f, .99f)) {
+                        moveTo(Offset(width * if (rtl) 1f - fraction else fraction, height * .6f), 4)
+                    }
                     up()
                 }
             } else if (swipe) {

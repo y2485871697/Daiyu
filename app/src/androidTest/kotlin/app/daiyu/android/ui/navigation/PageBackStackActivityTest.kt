@@ -51,6 +51,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     private var background = Color.Black
     private var drawingWasEnabled = false
     private var capturedFrame: PageBackPreviewLayers.Frame? = null
+    private var observedStack: PageBackStackRegistry? = null
 
     override fun setUp() {
         super.setUp()
@@ -79,6 +80,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         animateBackEnabled = animateBackEnabled,
                         previewCapture = { frame -> capturedFrame = frame; frame.layer.toImageBitmap() },
                         backTargetKey = if (rendered == "settings") "chat" else null) {
+                        val registry = LocalPageBackStackPath.current?.registry
+                        androidx.compose.runtime.SideEffect { observedStack = registry }
                         PageBackHandler(enabled = rendered == "settings", previewEnabled = previewEnabled) { backCount++; drawerPainted = false; screen = "chat" }
                         if (drawerPreviewSource && rendered != "settings") {
                             Box(Modifier.fillMaxSize()) {
@@ -573,6 +576,9 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertEquals(previousCount + 1, backCount)
                 if (previousCount == 0) awaitDepartureCapture()
                 else {
+                    ui.mainClock.advanceTimeByFrame()
+                    assertEquals("local second pop publishes the settings-root path", "settings",
+                        checkNotNull(observedStack).routeKey("settings"))
                     ui.mainClock.advanceTimeByFrame()
                     val host = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
                     val outgoing = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot

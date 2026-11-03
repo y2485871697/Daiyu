@@ -277,7 +277,8 @@ internal object GuiRuntime {
     internal fun changed(value: GuiAccessibilityService, event: AccessibilityEvent) {
         onMain()
         if (service !== value) return
-        val observed = targetBinding?.lease?.observation
+        val lease = targetBinding?.lease
+        val observed = lease?.observation
         val pkg = event.packageName?.toString()
         val content = event.eventType in setOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
@@ -288,7 +289,14 @@ internal object GuiRuntime {
         // The self lease still validates the active root and original target twice before delivery.
         val localContent = content && (pkg == value.packageName || pkg == null && sameWindow || otherWindow)
         val previousGeneration = generation
-        changed(value, contentOnly = localContent)
+        val keepExternalNodes = event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            observed != null && observed.windowId >= 0 && otherWindow && lease != null &&
+            !isSelfLease(lease) && retained.isNotEmpty()
+        if (keepExternalNodes) {
+            // Other-window content cannot prove this external target changed. Retain exact nodes
+            // for live revalidation, while screenshots and actions without a node stay dirty.
+            contentChanged = true
+        } else changed(value, contentOnly = localContent)
         if (observed != null && observed.generation == previousGeneration &&
             (generation != previousGeneration || staleEvent == null)) {
             staleEvent = StaleEvent(observed.observationId, event.eventType, event.windowId,

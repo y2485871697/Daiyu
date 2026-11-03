@@ -975,10 +975,143 @@ class GuiRuntimeScreenshotTest {
         assertNull(session.lease.observation); assertNoActions()
     }
 
-    @Test fun anExternalLeaseDoesNotBorrowTheSelfEventScope() {
+    @Test fun foreignWindowContentKeepsTheExactExternalNodeBeforeApproval() {
+        for (pkg in listOf(null, service.packageName, platform.pkg)) {
+            openTarget(null)
+            val observation = observe()
+            val reads = platform.rootReads
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                pkg, observation.windowId + 1))
+            assertEquals(reads, platform.rootReads)
+            assertEquals(observation.observationId, session.lease.observation!!.observationId)
+            val action = GuiAction(observation.observationId, GuiOperation.TAP, 1)
+            assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+            rejected(screenshot(observation).completed(), "OBSERVATION_STALE")
+            assertTrue(platform.callbacks.isEmpty())
+            val actions = platform.nodeActions
+            assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"),
+                GuiRuntime.action(session.lease, action))
+            assertEquals(actions + 1, platform.nodeActions)
+            assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+            assertEquals(actions + 1, platform.nodeActions)
+        }
+        assertEquals(3, platform.nodeActions)
+        assertEquals(0, platform.gestures)
+    }
+
+    @Test fun foreignWindowContentCannotReviveRetiredExternalObservations() {
+        val retiring = listOf(
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED to platform.windowId,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED to -1,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_VIEW_CLICKED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_VIEW_FOCUSED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_VIEW_SELECTED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED to platform.windowId + 1,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED to platform.windowId + 1)
+        for ((type, window) in retiring) {
+            openTarget(null)
+            val observation = observe(); val action = approve(observation)
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                null, observation.windowId + 1))
+            service.onAccessibilityEvent(contentEvent(type, platform.pkg, window))
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                null, observation.windowId + 1))
+            rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        }
+        assertNoActions(); assertEquals(0, platform.gestures)
+    }
+
+    @Test fun foreignWindowContentStillRevalidatesExternalWindowPackageIdentityBoundsAndHandle() {
+        for (mutation in listOf("window", "package", "label", "bounds", "refresh", "duplicate")) {
+            platform.pkg = "external.app"; platform.windowId = 7; platform.label = "before"
+            platform.rootLabel = "root"; platform.targetBounds = Rect(0, 0, 100, 100)
+            platform.targetRefresh = true; platform.stableNodes = true
+            platform.savedRoot = null; platform.savedTarget = null
+            openTarget(null)
+            val observation = observe(); val action = approve(observation)
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                null, observation.windowId + 1))
+            val expected = when (mutation) {
+                "window" -> { platform.windowId++; "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED" }
+                "package" -> { platform.pkg = "another.app"; "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED" }
+                "label" -> { platform.label = "changed"; "TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED" }
+                "bounds" -> { platform.targetBounds = Rect(0, 25, 100, 125); "TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED" }
+                "refresh" -> { platform.targetRefresh = false; "NODE_STALE" }
+                else -> { platform.rootLabel = "before"; "TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED" }
+            }
+            rejected(GuiRuntime.action(session.lease, action), expected)
+            platform.pkg = "external.app"; platform.windowId = 7; platform.label = "before"
+            platform.rootLabel = "root"; platform.targetBounds = Rect(0, 0, 100, 100)
+            platform.targetRefresh = true
+            rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        }
+        assertNoActions(); assertEquals(0, platform.gestures)
+    }
+
+    @Test fun foreignWindowContentDoesNotGrantTruncatedExternalTreesTheSelfException() {
+        platform.descendants = 160
+        val observation = observe(); assertTrue(observation.truncated)
+        val action = approve(observation)
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            null, observation.windowId + 1))
+        rejected(GuiRuntime.action(session.lease, action), "TARGET_NOT_UNIQUE_RECONFIRM_NOT_EXECUTED")
+        assertNoActions(); assertEquals(0, platform.gestures)
+    }
+
+    @Test fun dirtyExternalObservationRejectsGlobalAndCoordinateActions() {
+        permitGestureWindow()
+        for (operation in listOf(GuiOperation.BACK, GuiOperation.COORDINATE_TAP)) {
+            openTarget(null)
+            val observation = observe()
+            val action = if (operation == GuiOperation.BACK) GuiAction(observation.observationId, operation)
+                else GuiAction(observation.observationId, operation, gesture = GuiGesture(20, 30, 20, 30, 50))
+            assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                null, observation.windowId + 1))
+            rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
+        }
+        assertNoActions(); assertEquals(0, platform.gestures)
+    }
+
+    @Test fun freshExternalObservationRecoversScreenshotWithoutRevivingTheOldId() {
+        val original = observe()
+        service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            null, original.windowId + 1))
+        rejected(screenshot(original).completed(), "OBSERVATION_STALE")
+        assertTrue(platform.callbacks.isEmpty())
+        val fresh = observe()
+        assertNotEquals(original.observationId, fresh.observationId)
+        rejected(GuiRuntime.validateExactTarget(session.lease,
+            GuiAction(original.observationId, GuiOperation.TAP, 1)), "OBSERVATION_ID_MISMATCH")
+        val result = screenshot(fresh)
+        val frame = platform.success(); worker.runAll()
+        assertTrue(result.completed() is GuiResult.Value); assertDisposed(frame)
+        assertTrue(GuiRuntime.action(session.lease, approve(fresh)) is GuiResult.Value)
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun foreignWindowContentRejectsExternalScreenshotDuringCallbackAndEncoding() {
+        for (duringEncoding in listOf(false, true)) {
+            openTarget(null)
+            val observation = observe(); val result = screenshot(observation)
+            val frame = if (duringEncoding) platform.success() else null
+            service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                null, observation.windowId + 1))
+            val delivered = frame ?: platform.success()
+            worker.runAll()
+            rejected(result.completed(), "OBSERVATION_STALE"); assertDisposed(delivered)
+        }
+        assertNoActions(); assertEquals(0, platform.gestures)
+    }
+
+    @Test fun externalSameWindowContentStillRetiresTheObservation() {
         val observation = observe(); val action = approve(observation)
         service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-            "com.android.systemui", observation.windowId + 1))
+            "com.android.systemui", observation.windowId))
         rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
         assertNoActions()
     }
@@ -1008,7 +1141,7 @@ class GuiRuntimeScreenshotTest {
         org.robolectric.shadows.ShadowLog.clear()
         val observation = observe(); val action = approve(observation)
         service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-            "com.android.systemui", observation.windowId + 1))
+            "com.android.systemui", observation.windowId))
         rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_STALE")
         val line = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui").single().msg
         assertTrue(line.contains("event_type=${AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED}"))

@@ -28,6 +28,20 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         self.assertIn('observe_again_with_max_nodes_512', factory)
         self.assertIn('ArgumentType.Integer(0, 511)', factory)
 
+    def test_foreign_window_content_only_preserves_exact_external_nodes(self):
+        runtime = (K / 'gui/GuiAccessibilityService.kt').read_text()
+        start = runtime.index('val keepExternalNodes =')
+        end = runtime.index('if (observed != null && observed.generation', start)
+        scoped = runtime[start:end]
+        self.assertIn('event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED', scoped)
+        self.assertIn('observed.windowId >= 0 && otherWindow', scoped)
+        self.assertIn('!isSelfLease(lease) && retained.isNotEmpty()', scoped)
+        self.assertIn('contentChanged = true', scoped)
+        self.assertNotIn('generation++', scoped)
+        self.assertIn('else changed(value, contentOnly = localContent)', scoped)
+        self.assertIn('if (contentChanged && action.nodeId == null)', runtime)
+        self.assertIn('if (contentChanged) return recordObservationRejection', runtime)
+
     def test_repeatable_flag_is_opt_in_and_durably_saved(self):
         scope = (K / 'integration/tools/RunOrdinaryPlatformTools.kt').read_text()
         store = (K / 'integration/tools/SQLiteToolLedgerStore.kt').read_text()

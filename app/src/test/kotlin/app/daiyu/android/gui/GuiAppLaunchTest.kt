@@ -8,6 +8,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import org.robolectric.util.ReflectionHelpers
 import org.robolectric.util.ReflectionHelpers.ClassParameter
 import org.json.JSONObject
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import app.daiyu.android.RunScreenLocation
 import app.daiyu.android.domain.*
@@ -46,6 +47,7 @@ class GuiAppLaunchTest {
         var rootReads = 0
         var resolutions = 0
         var launches = 0
+        var nodeActions = 0
         var launchable = true
         var resolvedPackage: String? = null
         var beforeResolve: (() -> Unit)? = null
@@ -69,7 +71,7 @@ class GuiAppLaunchTest {
                 ReflectionHelpers.setField(this, "mWindowId", 7 + launches)
                 shadowOf(this).setAccessibilityWindowInfo(window)
                 shadowOf(this).setRefreshReturnValue(true)
-                shadowOf(this).setOnPerformActionListener { _, _ -> true }
+                shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; true }
             }
         }
         override fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? {
@@ -179,6 +181,34 @@ class GuiAppLaunchTest {
         assertTrue(f.callTool("screen_action", "{\"operation\":\"tap\",\"node_id\":0,\"observation_id\":\"$id\"}", "tap") is DispatchOutcome.Confirmed)
         assertEquals(1, platform.captures)
     }
+    @Test fun repeatedExternalChooserObservationsSurviveForeignContentAndDeliverOnlyOneTap() {
+        val f = Fixture()
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        platform.rootPackage = "com.vivo.appfilter"
+        fun observe(id: String): String {
+            val result = f.callTool("screen", JSONObject().put("operation", "observe").toString(), id) as DispatchOutcome.Confirmed
+            return JSONObject(result.payload).getString("observation_id")
+        }
+        fun foreignContent() {
+            service.onAccessibilityEvent(AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED).apply {
+                packageName = service.packageName
+                ReflectionHelpers.callInstanceMethod<Unit>(this, "setWindowId",
+                    ClassParameter.from(Int::class.javaPrimitiveType!!, 7))
+            })
+        }
+        val first = observe("first")
+        foreignContent()
+        val fresh = observe("fresh")
+        assertNotEquals(first, fresh)
+        foreignContent()
+        val args = JSONObject().put("operation", "tap").put("node_id", 0).put("observation_id", fresh).toString()
+        assertTrue(f.callTool("screen_action", args, "tap") is DispatchOutcome.Confirmed)
+        assertEquals(1, platform.launches); assertEquals(1, platform.nodeActions)
+        assertTrue((f.callTool("screen_action", args, "tap") as DispatchOutcome.Confirmed).replayed)
+        assertEquals(1, platform.nodeActions)
+        assertEquals(0, platform.captures)
+    }
+
     @Test fun implicitSelfScreenshotRetainsNarrowTargetAndDoesNotAskForExternalLocation() {
         val f = Fixture(TaskSurfacePreference.ASK)
         platform.rootPackage = service.packageName

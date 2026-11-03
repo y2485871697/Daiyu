@@ -207,7 +207,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val baseline = baselinePixels[(baselinePixels.width * .05f).toInt(), baselinePixels.height / 2]
             assertTrue("the baseline probe must actually hit the green live-chat marker: $baseline",
                 baseline.green > .85f && baseline.red < .15f && baseline.blue < .15f)
-            ui.waitUntil(5_000) { chatFrame?.ready != null }
+            ui.waitUntil(5_000) { chatFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
             val originalMessage = answer.fetchSemanticsNode().id
             val originalBounds = answer.fetchSemanticsNode().boundsInRoot
             val originalComposer = ui.onNodeWithTag("chat-draft").fetchSemanticsNode().id
@@ -216,21 +216,38 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             mainThread { route = "settings" }
             ui.mainClock.advanceTimeBy(1000)
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
-            ui.waitUntil(5_000) { settingsFrame?.ready != null }
+            ui.waitUntil(5_000) { settingsFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
             if (nested) {
                 mainThread { if (topLevel) route = "appearance" else settingsDetail = true }
                 ui.mainClock.advanceTimeBy(1000)
                 captureScreenNode(ui.onNodeWithTag("page-back-host"))
-                ui.waitUntil(5_000) { detailFrame?.ready != null }
+                ui.waitUntil(5_000) { detailFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
             }
             mainThread { marker = Color.Magenta }
             val beforeReturnDraws = liveDraws
             ui.mainClock.autoAdvance = false
             if (nested) {
+                val preparedDetail = checkNotNull(detailFrame)
+                val preparedSettings = checkNotNull(settingsFrame)
+                assertTrue("prepared child owns this visit: key=${preparedDetail.key} frozen=${preparedDetail.frozen} released=${preparedDetail.releaseRequested}",
+                    !preparedDetail.frozen && !preparedDetail.releaseRequested && preparedDetail.readySize == preparedDetail.size)
+                assertTrue("settings target owns frozen pixels before first down: key=${preparedSettings.key} frozen=${preparedSettings.frozen} ready=${preparedSettings.ready != null} size=${preparedSettings.size}",
+                    !preparedSettings.releaseRequested && preparedSettings.canDrawPreview)
                 ui.onNodeWithTag("page-back-host").performTouchInput {
-                    swipe(Offset(width * if (rtl) .95f else .05f, height * .6f),
-                        Offset(width * if (rtl) .35f else .65f, height * .6f), 320)
+                    down(Offset(width * if (rtl) .95f else .05f, height * .6f))
+                    moveTo(Offset(width * if (rtl) .85f else .15f, height * .6f), 32)
+                    moveTo(Offset(width * if (rtl) .35f else .65f, height * .6f), 288)
                 }
+                ui.mainClock.advanceTimeByFrame()
+                assertTrue("child gesture locks its prepared pixels: key=${preparedDetail.key} frozen=${preparedDetail.frozen} image=${preparedDetail.image != null} animate=${preparedDetail.animateReturn} target=${preparedDetail.backTargetKey}",
+                    preparedDetail.frozen && preparedDetail.canDrawPreview && preparedDetail.animateReturn)
+                ui.onNodeWithTag("page-back-target").assertExists()
+                val firstDragHost = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
+                val firstDrag = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+                val firstDragProgress = if (rtl) (firstDragHost.right - firstDrag.right) / firstDragHost.width
+                    else (firstDrag.left - firstDragHost.left) / firstDragHost.width
+                assertTrue("first gesture has a prepared interactive preview: $firstDragProgress", firstDragProgress > .5f && firstDragProgress < .6f)
+                ui.onNodeWithTag("page-back-host").performTouchInput { up() }
                 assertEquals("first pop stays in settings", "settings", route)
                 assertFalse(settingsDetail)
                 assertEquals(1, detailBacks)
@@ -264,7 +281,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertTrue("second gesture reveals cached green chat, not the child or blank: $target",
                     target.green > .35f && target.red < .15f && target.blue < .15f)
                 ui.onNodeWithTag("page-back-host").performTouchInput {
-                    moveTo(Offset(width * if (rtl) .01f else .99f, height * .6f), 16)
+                    moveTo(Offset(width * if (rtl) .04f else .96f, height * .6f), 4)
+                    moveTo(Offset(width * if (rtl) .01f else .99f, height * .6f), 4)
                     up()
                 }
             } else if (swipe) {
@@ -279,6 +297,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 activity.onBackPressedDispatcher.onBackPressed()
                 assertEquals("business return is synchronous", "chat", route)
             }
+            assertEquals("both committed releases invoke their callbacks", if (nested) 2 else 1, detailBacks)
             assertEquals("chat", route)
             assertEquals(if (nested) 2 else 1, detailBacks)
             ui.mainClock.advanceTimeByFrame()

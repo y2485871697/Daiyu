@@ -538,6 +538,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     private fun assertRapidNestedSwipeReturns(rtl: Boolean = false) {
         screen = "settings"
         mount(local = true, rtl = rtl)
+        awaitPreparedCurrentPixels()
         mainThread { localPage = 1 }
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))

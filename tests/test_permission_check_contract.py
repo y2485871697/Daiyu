@@ -48,6 +48,17 @@ class PermissionCheckContractTest(unittest.TestCase):
         self.assertNotIn("getSharedPreferences", screen)
         self.assertNotIn("putBoolean", screen)
 
+    def test_rows_have_no_leading_icons_and_keep_status_navigation(self):
+        screen = (SETTINGS / "PermissionCheckScreen.kt").read_text()
+        self.assertNotIn("leading =", screen)
+        self.assertNotIn("SettingsIcon(", screen)
+        self.assertIn('SettingsRow(item.title, tag = "permission-check:${item.name.lowercase()}"', screen)
+        self.assertIn('SettingsRow("运行模式", tag = "permission-check:running-mode"', screen)
+        self.assertIn("system.open(item)", screen)
+        self.assertIn("runningModeOpen = true", screen)
+        self.assertIn('true -> "已授权"; false -> "未授权"; null -> "未确认"', screen)
+        self.assertIn("DaiyuIcon(DaiyuIcons.ChevronRight, null", screen)
+
     def test_permission_whitelist_tracks_reads_and_explicit_execution_service(self):
         boundary = (ROOT / "scripts/verify_boundaries.py").read_text()
         for name in ("PACKAGE_USAGE_STATS", "QUERY_ALL_PACKAGES", "POST_NOTIFICATIONS"):

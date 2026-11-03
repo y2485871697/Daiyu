@@ -55,25 +55,14 @@ internal fun PermissionCheckScreen(onBack: () -> Unit, modifier: Modifier = Modi
         item("permission-status") {
             SettingsCard {
                 PermissionCheckItem.entries.forEach { item ->
-                    SettingsRow(item.title, tag = "permission-check:${item.name.lowercase()}", leading = {
-                        SettingsIcon(when (item) {
-                            PermissionCheckItem.BACKGROUND -> DaiyuIcons.Timestamp
-                            PermissionCheckItem.OVERLAY -> DaiyuIcons.VirtualScreen
-                            PermissionCheckItem.APPS -> DaiyuIcons.AppIcon
-                            PermissionCheckItem.LOCATION -> DaiyuIcons.Locate
-                            PermissionCheckItem.NOTIFICATION_ACCESS -> DaiyuIcons.Shield
-                            PermissionCheckItem.USAGE -> DaiyuIcons.Chart
-                            PermissionCheckItem.ACCESSIBILITY -> DaiyuIcons.Accessibility
-                            PermissionCheckItem.TASK_NOTIFICATIONS -> DaiyuIcons.Bell
-                        })
-                    }, onClick = {
+                    SettingsRow(item.title, tag = "permission-check:${item.name.lowercase()}", onClick = {
                         if (current()) try { system.open(item) }
                         catch (_: Exception) { Toast.makeText(context, "无法打开系统设置", Toast.LENGTH_SHORT).show() }
                     }, trailing = {
                         PermissionCheckTrailing(when (statuses[item]) { true -> "已授权"; false -> "未授权"; null -> "未确认" })
                     })
                 }
-                SettingsRow("运行模式", tag = "permission-check:running-mode", leading = { SettingsIcon(DaiyuIcons.Key) },
+                SettingsRow("运行模式", tag = "permission-check:running-mode",
                     onClick = { if (current()) runningModeOpen = true }, trailing = {
                         PermissionCheckTrailing(when (runningMode) {
                             RunningMode.NORMAL -> "普通模式"

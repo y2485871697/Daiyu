@@ -44,13 +44,16 @@ class AccessibilityKeepAliveContract(unittest.TestCase):
         for value in ("ProcessBuilder", "Shizuku", "sendOrderedBroadcast", "ACTION_SET", "openForUser(", "getRootInActiveWindow"):
             self.assertNotIn(value, source)
 
-    def test_names_are_only_daiyu_and_disclosure_remains(self):
+    def test_names_are_only_daiyu_without_system_detail_description(self):
         for folder in ("values", "values-zh"):
             values = ET.parse(ROOT / f"app/src/main/res/{folder}/gui_strings.xml").getroot()
             self.assertEqual("代鱼", values.find("string[@name='gui_accessibility_label']").text)
-            description = values.find("string[@name='gui_accessibility_description']").text
-            self.assertIn("系统服务不等于授权 Agent", description)
-            self.assertIn("首次手动授予", description)
+            self.assertIsNone(values.find("string[@name='gui_accessibility_description']"))
+        service = ET.parse(ROOT / "app/src/main/res/xml/gui_accessibility_service.xml").getroot()
+        self.assertIsNone(service.get(A + "description"))
+        self.assertEqual("true", service.get(A + "canRetrieveWindowContent"))
+        self.assertEqual("true", service.get(A + "canTakeScreenshot"))
+        self.assertEqual("false", service.get(A + "isAccessibilityTool"))
 
     def test_health_provider_is_system_only_and_has_no_screen_payload(self):
         manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()

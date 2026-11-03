@@ -52,6 +52,7 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -427,7 +428,7 @@ internal fun PageBackGestureHost(
                     val interruptingReturn = returning
                     val owner = Any()
                     val predictiveGeneration = state.predictiveGeneration
-                    val velocity = VelocityTracker().also { it.addPosition(down.uptimeMillis, down.position) }
+                    val velocity = VelocityTracker().also { it.addPointerInputChange(down) }
                     var claimed = false
                     var consumedMovement = false
                     try {
@@ -437,7 +438,7 @@ internal fun PageBackGestureHost(
                             if (event.changes.size != 1 || !state.alive || state.predictiveGeneration != predictiveGeneration || (state.active && state.predictive)) break
                             val change = event.changes.single()
                             if (change.id != down.id) break
-                            velocity.addPosition(change.uptimeMillis, change.position)
+                            velocity.addPointerInputChange(change)
                             val dx = (change.position.x - down.position.x) * direction
                             val dy = abs(change.position.y - down.position.y)
                             if (!change.pressed) {

@@ -134,8 +134,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             val source = sourcePixels[2, sourcePixels.height / 2]
             assertTrue("source previous page must be red, actual=$source", source.red > 0.9f && source.blue < 0.1f)
         }
+        if (capturePreviousPage) prepareCurrentPixels()
         mainThread { route = "test-page" }
         ui.waitForIdle()
+        if (capturePreviousPage) prepareCurrentPixels()
     }
 
     fun testPauseAndHomeKeepLivePageAndGraphicsFrameWithoutMountingAgain() {
@@ -626,7 +628,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     fun testHorizontalSwipeWithPredictionEnabledKeepsItsCommitUntilDispatch() {
         predictive = true
         navigateOnBack = true
-        mount()
+        mount(capturePreviousPage = true)
         ui.mainClock.autoAdvance = false
         try {
             ui.onNodeWithTag("page-back-surface").performTouchInput {
@@ -650,14 +652,16 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
 
     private fun prepareCurrentPixels() {
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
-        ui.waitUntil(5_000) { observedFrame?.let { it.ready != null && it.readySize == it.size } == true }
+        ui.waitUntil(5_000) {
+            observedFrame?.let { it.key == route && !it.frozen && !it.releaseRequested && it.ready != null &&
+                it.size.width > 0 && it.size.height > 0 && it.readySize == it.size } == true
+        }
     }
 
     fun testReleaseVelocityContinuesIntoDeparture() {
         predictive = false
         navigateOnBack = true
         mount(capturePreviousPage = true)
-        prepareCurrentPixels()
         ui.mainClock.autoAdvance = false
         try {
             val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
@@ -691,7 +695,6 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         predictive = false
         navigateOnBack = true
         mount(capturePreviousPage = true)
-        prepareCurrentPixels()
         ui.mainClock.autoAdvance = false
         try {
             ui.onNodeWithTag("page-back-host").performTouchInput {

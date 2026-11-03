@@ -64,7 +64,7 @@ class MessageComposerEditContract(unittest.TestCase):
         composer = (UI / 'ChatComposer.kt').read_text()
         head = composer.split('.testTag("chat-composer-header")', 1)[1].split('.testTag("chat-composer-divider")', 1)[0]
         self.assertIn('Modifier.weight(1f).testTag("chat-model")', head)
-        self.assertIn('if (editing) ComposerCancelEdit(state.enabled, actions.onCancelMessageEdit)', head)
+        self.assertIn('if (editing) ComposerCancelEdit(pageActive && state.enabled, actions.onCancelMessageEdit)', head)
         self.assertIn('Modifier.weight(1f).wrapContentWidth(Alignment.End)', head)
         self.assertNotIn('.offset(', head)
         button = (UI / 'ComposerMessageEdit.kt').read_text().split('internal fun ComposerCancelEdit', 1)[1].split('/**', 1)[0]
@@ -95,12 +95,12 @@ class MessageComposerEditContract(unittest.TestCase):
         self.assertIn('text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable', models)
         composer = (UI / 'ChatComposer.kt').read_text()
         self.assertIn('state.text.isNotBlank() || state.editingMessageCanSubmit', composer)
-        self.assertIn('val toolbarEnabled = state.enabled && !editing', composer)
+        self.assertIn('val toolbarEnabled = pageActive && state.enabled && !editing', composer)
 
     def test_edit_model_and_attachment_controls_are_not_disabled_with_the_toolbar(self):
         composer = (UI / 'ChatComposer.kt').read_text()
-        self.assertIn('ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,', composer)
-        self.assertIn('val attachmentEnabled = state.enabled', composer)
+        self.assertIn('ComposerChip(state.modelLabel.ifBlank { "模型" }, pageActive && state.enabled, actions.onModelClick,', composer)
+        self.assertIn('val attachmentEnabled = pageActive && state.enabled', composer)
         self.assertIn('.testTag("chat-attach"), enabled = attachmentEnabled', composer)
         self.assertIn('onLongClick = if (editing) null', composer)
 

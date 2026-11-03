@@ -28,6 +28,29 @@ class ToolOutputPreviewTest {
         assertTrue(head.text.startsWith("head\n")); assertTrue(tail.text.endsWith("\ntail"))
         assertTrue(head.text.length <= 241); assertTrue(tail.text.length <= 241)
     }
+    @Test fun terminalPreviewOmitsTrailingLineEndingsBeforeSelectingItsWindow() {
+        val body = "/sdcard\n/sdcard"
+        for (ending in listOf("", "\n", "\r\n", "\n\n\n")) {
+            val raw = body + ending
+            assertEquals(ToolOutputPreview(body, false), toolOutputPreview(raw, tail = true))
+        }
+        assertEquals(ToolOutputPreview("x".repeat(240), false),
+            toolOutputPreview("x".repeat(240) + "\r\n", tail = true))
+    }
+    @Test fun terminalPreviewPreservesIndentationSpacesAndInteriorBlankLines() {
+        val body = "  first  \n\n  last  "
+        assertEquals(ToolOutputPreview(body, false), toolOutputPreview(body + "\n", tail = true))
+        assertEquals(ToolOutputPreview("", false), toolOutputPreview("\r\n\n", tail = true))
+        assertEquals(ToolOutputPreview("  ", false), toolOutputPreview("  \n", tail = true))
+    }
+    @Test fun longTerminalPreviewKeepsLastContentLinesInsteadOfTrailingEmptyRows() {
+        val raw = "first\nsecond\nthird\nfourth\n\n\n"
+        assertEquals(ToolOutputPreview("…second\nthird\nfourth", true), toolOutputPreview(raw, tail = true))
+    }
+    @Test fun nonLogDocumentsKeepTheirTrailingLineEndings() {
+        val raw = "  command  \n"
+        assertEquals(ToolOutputPreview(raw, false), toolOutputPreview(raw))
+    }
     @Test fun operationIconsFollowProtocolNotTitlesOrOutputText() {
         assertNotEquals(toolOperationGlyph("list_files", "{}"), toolOperationGlyph("read_text_file", "{}"))
         assertNotEquals(toolOperationGlyph("screen", "{\"operation\":\"observe\"}"), toolOperationGlyph("screen", "{\"operation\":\"screenshot\"}"))

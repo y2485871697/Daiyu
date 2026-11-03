@@ -346,6 +346,45 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         assertEquals(1, actionCount)
     }
 
+    fun testTerminalOutputsDoNotReserveRowsForTrailingLineEndings() {
+        var referenceHeight: Float? = null
+        for (ending in listOf("", "\n", "\r\n", "\n\n\n")) {
+            val raw = "/sdcard\n/sdcard" + ending
+            mainThread { activity.setContent {
+                CompositionLocalProvider(LocalDensity provides Density(phoneDensity, 1f)) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        Box(Modifier.width(240.dp)) { ToolDocument(ToolDisclosureUi("终端输出", raw, true)) }
+                    }
+                }
+            } }
+            val node = ui.onNodeWithTag("tool-document:终端输出", useUnmergedTree = true)
+                .assertTextEquals("/sdcard\n/sdcard")
+            val measured = layout(node)
+            assertEquals(2, measured.lineCount)
+            val frame = ui.onNodeWithTag("tool-document-frame:终端输出", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue(frame.height <= measured.size.height + 12f * phoneDensity + 1f)
+            referenceHeight?.let { assertEquals(it, frame.height, 1f) }
+            referenceHeight = frame.height
+        }
+        val raw = "first\nsecond\nthird\nfourth\n\n\n"
+        mainThread { activity.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(phoneDensity, 1f)) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Box(Modifier.width(240.dp)) { ToolDocument(ToolDisclosureUi("终端输出", raw, true)) }
+                }
+            }
+        } }
+        val preview = ui.onNodeWithTag("tool-output-preview:终端输出", useUnmergedTree = true)
+            .assertTextEquals("…second\nthird\nfourth")
+        val measured = layout(preview)
+        val frame = ui.onNodeWithTag("tool-document:终端输出").fetchSemanticsNode().boundsInRoot
+        assertEquals(3, measured.lineCount)
+        assertTrue(frame.height <= measured.size.height + 12f * phoneDensity + 1f)
+        ui.onNodeWithTag("tool-document:终端输出").performClick()
+        ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(raw)
+    }
+
     fun testOutputPreviewHasNoHintAndFullOutputStillOpens() {
         for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
             show(dark = dark, scale = 1f, fontScale = fontScale, narrow = true)

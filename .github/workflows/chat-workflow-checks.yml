@@ -12,9 +12,9 @@ on:
         type: string
         required: true
       check_scope:
-        description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动、附件弹层或权限界面的定向检查范围
+        description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动、附件弹层、权限界面或终端输出的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts]
+        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output]
         default: workflow
 permissions:
   contents: read
@@ -62,7 +62,7 @@ jobs:
           import json, os, unittest
           from pathlib import Path
           records = []
-          patterns = ('test_tool_card_html_contract.py',) if os.environ['WORKFLOW_CHECK_SCOPE'] == 'environment-dots' else (
+          patterns = ('test_tool_card_html_contract.py',) if os.environ['WORKFLOW_CHECK_SCOPE'] in ('environment-dots', 'terminal-output') else (
               'test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',
               'test_workflow_render_isolation_contract.py', 'test_reasoning_stream_cost_contract.py',
               'test_tool_card_html_contract.py', 'test_markdown_typing_contract.py',
@@ -123,6 +123,9 @@ jobs:
             classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest
                      AssistantWorkflowCompositionTest WorkflowNarrationCompositionTest ReasoningStreamCompositionTest)
           fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == terminal-output ]]; then
+            classes=(ToolOutputPreviewTest)
+          fi
           for class in "${classes[@]}"; do
             filters+=(--tests "app.daiyu.android.ui.screens.chat.conversation.$class")
           done
@@ -155,6 +158,8 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
                           'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'terminal-output':
+              expected = {'ToolOutputPreviewTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

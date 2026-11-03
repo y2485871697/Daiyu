@@ -160,6 +160,21 @@ class ToolCardHtmlContractTest(unittest.TestCase):
                       'clipboard.setText(AnnotatedString(document.text))', 'Text("复制全文"']:
             self.assertIn(token, dialog)
 
+    def test_terminal_preview_omits_trailing_empty_rows_without_mutating_full_output(self):
+        preview = (CHAT / 'ToolOutputPreview.kt').read_text()
+        self.assertIn('val content = if (tail) text.trimEnd(', preview)
+        self.assertIn('val truncated = content.length > 240', preview)
+        self.assertNotIn('.trim()', preview)
+        content = (CHAT / 'ToolCategoryContent.kt').read_text()
+        self.assertIn('Text(preview.text, Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)', content)
+        self.assertIn('val previewPadding = if (log) PaddingValues(horizontal = 8.dp, vertical = 6.dp)', content)
+        self.assertIn('ToolOutputDialog(document', content)
+        dialog = (CHAT / 'ToolOutputDialog.kt').read_text()
+        self.assertIn('AnnotatedString(document.text)', dialog)
+        geometry = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt').read_text()
+        self.assertIn('testTerminalOutputsDoNotReserveRowsForTrailingLineEndings', geometry)
+        self.assertIn('measured.size.height + 12f * phoneDensity + 1f', geometry)
+
     def test_output_preview_has_no_hint_or_fade_but_keeps_shared_dialog(self):
         content = (CHAT / "ToolCategoryContent.kt").read_text()
         self.assertIn("if (tappable) Box(surface", content)

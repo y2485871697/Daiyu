@@ -146,15 +146,17 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
         val surface = if (code) Modifier.fillMaxWidth().clip(shape)
             .background(colors.soft).border(1.dp, colors.line, shape)
         else Modifier.fillMaxWidth()
+        val previewPadding = if (log) PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+            else PaddingValues(start = 9.dp, end = 9.dp, top = 8.dp, bottom = 12.dp)
         if (tappable) Box(surface.testTag("tool-document:${document.title}")
             .conversationClickable(onClickLabel = "查看${document.title}") { opened = true }) {
             Text(preview.text, modifier = Modifier.fillMaxWidth()
-                .padding(start = 9.dp, end = 9.dp, top = 8.dp, bottom = 12.dp)
+                .padding(previewPadding)
                 .testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = colors.text)
         } else SelectionContainer {
             if (code) Box(surface.testTag("tool-document-frame:${document.title}")) {
-                Text(document.text, Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)
+                Text(preview.text, Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)
                     .testTag("tool-document:${document.title}"), style = style, color = colors.text)
             } else Text(document.text, surface.padding(vertical = 2.dp)
                 .testTag("tool-document:${document.title}"), style = style, color = colors.text)

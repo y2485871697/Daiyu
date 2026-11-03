@@ -195,15 +195,22 @@ class TerminalJobHistoryReaderTest {
         assertFalse(empty.getBoolean("has_more"))
     }
 
-    @Test fun fileAndRecordQuotasFailClosedWithNoUnboundedResult() = fixture { files, directory ->
-        record(directory)
-        repeat(TerminalJobHistoryReader.MAX_FILES) { File(directory, "ignored-$it.tmp").writeText("") }
-        val reader = reader(files)
-        assertEquals("job_directory_scan_limit", reader.list(owner).error)
-        assertTrue(reader.list(owner).records.isEmpty())
-        directory.deleteRecursively()
-        repeat(TerminalJobHistoryReader.MAX_JOBS + 1) { record(directory) }
-        assertEquals("job_history_limit", reader.list(owner).error)
-        assertTrue(reader.list(owner).records.isEmpty())
+    @Test fun hundredsOfRecordsAndUnrelatedFilesRemainReadableWithoutDeletion() = fixture { files, directory ->
+        val ids = (0 until 257).map { record(directory) }
+        ids.forEach { File(directory, "$it.log").writeText("retained-$it") }
+        repeat(300) { File(directory, "ignored-$it.tmp").writeText("untouched") }
+        val before = snapshot(files)
+        val history = reader(files)
+        val scan = history.list(owner)
+        assertNull(scan.error)
+        assertEquals(0, scan.skipped)
+        assertEquals(ids.sorted(), scan.records.map { it.jobId })
+        assertEquals(scan.records, reader(files).list(owner).records)
+        for (id in listOf(ids.first(), ids[128], ids.last())) {
+            val original = scan.records.single { it.jobId == id }
+            assertEquals("retained-$id", history.page(owner, original).getString("stdout"))
+            assertEquals("retained-$id", reader(files).page(owner, original).getString("stdout"))
+        }
+        assertEquals(before, snapshot(files))
     }
 }

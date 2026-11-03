@@ -52,10 +52,8 @@ internal class TerminalJobHistoryReader(
             val directory = openDirectory() ?: return Scan(emptyList())
             directory.use {
                 val records = mutableListOf<Record>()
-                var scanned = 0
                 directory.names().use { entries ->
                     for (entry in entries) {
-                        if (++scanned > MAX_FILES) return Scan(emptyList(), skipped, "job_directory_scan_limit")
                         val name = entry.fileName.toString()
                         if (!name.endsWith(".json")) continue
                         try {
@@ -63,7 +61,6 @@ internal class TerminalJobHistoryReader(
                             requireUuid(id)
                             val record = readRecord(directory, id, owner)
                             if (record != null) {
-                                if (records.size >= MAX_JOBS) return Scan(emptyList(), skipped, "job_history_limit")
                                 records.add(record)
                             }
                         } catch (_: Exception) { skipped++ }
@@ -215,8 +212,6 @@ internal class TerminalJobHistoryReader(
     companion object {
         private const val LINUX_O_CLOEXEC = 0x80000
         private const val LINUX_F_DUPFD_CLOEXEC = 1030
-        const val MAX_FILES = 256
-        const val MAX_JOBS = 64
         const val MAX_METADATA_BYTES = 16384
         const val MAX_LOG_BYTES = 262144
         const val MAX_PAGE_BYTES = 65536

@@ -80,7 +80,6 @@ jobs:
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=terminal-retention-checks/task-graph.json \
             :app:compileDebugKotlin :app:testDebugUnitTest \
-            --tests 'app.daiyu.android.terminal.TerminalJobRetentionTest' \
             --tests 'app.daiyu.android.terminal.TerminalRegistryRetentionTest' \
             --tests 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest' \
             --tests 'app.daiyu.android.integration.tools.TerminalJobSessionTest' \
@@ -94,7 +93,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.terminal.TerminalJobRetentionTest', 'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest'}
+          expected = {'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest'}
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest',) for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

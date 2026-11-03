@@ -145,7 +145,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     }
     private fun open():JSONObject {
         val b=backend(); val id=UUID.randomUUID().toString()
-        synchronized(sessions) { if (closed) return error("run_session_closed"); if(sessions.size>=MAX_JOBS) return error("session_limit"); sessions.add(id) }
+        synchronized(sessions) { if (closed) return error("run_session_closed"); sessions.add(id) }
         return identity(b).put("session_id",id).put("session_semantics","fixed_environment_command_shell; no persistent shell variables or cwd")
     }
     private fun exec(args:JSONObject):JSONObject {
@@ -165,18 +165,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val job=Job(id,scope!!,conversationOwner!!,session,mode,command,b,File(directory,"$id.log"),File(directory,"$id.script"))
         try {
             synchronized(jobs) {
-                if (!hasJobCapacity()) {
-                    val completed = jobs.values.filter { it.log.parentFile == directory }.associate { existing ->
-                        val process = existing.handle?.process
-                        existing.id to (existing.dispatchFinished && existing.mode != "daemon" && existing.startupCleanup == null &&
-                            if (process == null) existing.state in setOf("start_failed", "cancelled_before_dispatch")
-                            else !process.isAlive && existing.outputComplete && existing.reader?.isAlive == false &&
-                                ((existing.mode == "sync" && !existing.unknown) || existing.outputObserved))
-                    }
-                    TerminalJobRetention(directory, File(context.filesDir, "terminal-journal")).reclaim(
-                        completed, ::hasJobCapacity, { jobs.remove(it) })
-                }
-                if (!hasJobCapacity()) return error("job_or_log_retention_limit")
+                jobs.values.forEach(::releaseFinishedResources)
                 // Durable pending metadata must precede process launch and command dispatch.
                 jobs[id]=job // Even reservation persistence failure remains inspectable in this process.
                 saveJob(job)
@@ -240,7 +229,10 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         } finally {
             applyCancellation(job)
             if (job.handle == null) job.script.delete()
-            synchronized(jobs) { job.dispatchFinished = true }
+            synchronized(jobs) {
+                job.dispatchFinished = true
+                releaseFinishedResources(job)
+            }
         }
     }
     private fun dispatchedError(job:Job,code:String)=identity(job.backend).put("ok",false).put("error",code).put("execution","unknown").put("job_id",job.id).put("state","dispatched")
@@ -270,11 +262,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val job=synchronized(jobs) { jobs[id] }
         if(job!=null) {
             if(!owns(job)) return error("job_not_owned_by_conversation_or_run")
-            val drainedBeforeRead = job.outputComplete && job.reader?.isAlive == false && job.handle?.process?.isAlive == false
-            return page(job,offset,limit).also { result ->
-                if (drainedBeforeRead && !result.optBoolean("has_more") &&
-                    result.optBoolean("log_available", true)) job.outputObserved = true
-            }
+            return page(job,offset,limit).also { releaseFinishedResources(job) }
         }
         val meta=File(directory,"$id.json")
         if(!meta.isFile) return error("job_not_found")
@@ -282,19 +270,20 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         return readLog(File(directory,"$id.log"),offset,limit).put("job_id",id).put("backend",record.getString("backend"))
             .put("state","unknown_after_process_restart").put("exit_code",JSONObject.NULL).put("execution","unknown")
     }
-    private fun page(job:Job,offset:Long,limit:Int):JSONObject {
+    private fun page(job:Job,offset:Long,limit:Int):JSONObject = synchronized(job) {
+        val completion = job.completion
         val process=job.handle?.process; val running=process?.isAlive ?: false
-        val exitCode = if (process == null || running) null else if (process is RootScopeCommandProcess)
+        val exitCode = if (completion != null) completion.exitCode else if (process == null || running) null else if (process is RootScopeCommandProcess)
             process.exitCodeOrNull() else process.exitValue()
-        return readLog(job.log,offset,limit).put("job_id",job.id).put("backend",job.backend.name).put("uid",job.backend.uid).put("root",job.backend.root)
+        readLog(job.log,offset,limit).put("job_id",job.id).put("backend",job.backend.name).put("uid",job.backend.uid).put("root",job.backend.root)
             .put("host_uid",android.os.Process.myUid()).put("host_root",job.backend.root)
             .put("guest_uid",if(job.backend.name.startsWith("linux:")) job.backend.uid else JSONObject.NULL)
             .put("environment_id",job.backend.environmentId).put("mode",job.mode)
             .put("lifetime",if(job.mode=="daemon") "independent_of_registry_only_while_same_app_process_lives" else "session")
-            .put("state",if(process==null) job.state else if(running) "running" else "exited")
+            .put("state",completion?.state ?: if(process==null) job.state else if(running) "running" else "exited")
             .put("exit_code",exitCode ?: JSONObject.NULL)
-            .put("scope_drain_confirmed", process is RootScopeCommandProcess && !running)
-            .put("execution",if(process==null) (if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown") else if(running || exitCode == null || job.unknown || !job.outputComplete) "unknown" else "executed")
+            .put("scope_drain_confirmed", completion?.scopeDrained ?: (process is RootScopeCommandProcess && !running))
+            .put("execution",completion?.execution ?: if(process==null) (if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown") else if(running || exitCode == null || job.unknown || !job.outputComplete) "unknown" else "executed")
             .put("stderr_merged",true).put("log_truncated",job.truncated).put("output_complete",job.outputComplete)
     }
     private fun readLog(file:File,offset:Long,limit:Int):JSONObject {
@@ -312,11 +301,14 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         job.startupCleanup?.let { cleanup ->
             job.cancelRequested = true
             cleanup.requestClose()
-            return page(job, 0, 16384).put("stopped", cleanup.awaitTermination(1500))
-                .put("stop_scope", "owned_root_scope")
+            val stopped = cleanup.awaitTermination(1500)
+            if (stopped) releaseStartupCleanup(job, cleanup)
+            return page(job, 0, 16384).put("stopped", stopped).put("stop_scope", "owned_root_scope")
         }
         val handle=synchronized(job) {
             job.cancelRequested = true
+            if (job.completion != null) return page(job, 0, 16384)
+                .put("stopped", true).put("stop_scope", "already_exited")
             job.handle
         } ?: return JSONObject().put("ok", true).put("execution", if(job.state=="dispatching") "unknown" else "not_executed")
             .put("job_id",id).put("state",job.state).put("stop_requested",true).put("stopped",false)
@@ -381,22 +373,24 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             if (remaining <= 0 || !cleanup.awaitTermination(remaining)) return false
         }
         for (job in ordinary) {
-            val handle = job.handle
+            val (completion, handle, reader) = synchronized(job) { Triple(job.completion, job.handle, job.reader) }
+            if (completion != null) continue
             if (handle == null) {
                 val cleanup = job.startupCleanup
                 if (cleanup != null) {
                     val remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
                     if (remaining <= 0 || !cleanup.awaitTermination(remaining.coerceAtMost(30_000))) return false
+                    releaseStartupCleanup(job, cleanup)
                 } else if (job.state !in setOf("start_failed", "cancelled_before_dispatch")) return false
                 continue
             }
             val remaining = deadline - System.nanoTime()
             if (handle.process.isAlive && (remaining <= 0 || !handle.process.waitFor(remaining, TimeUnit.NANOSECONDS))) return false
-            val reader = job.reader
             if (reader == null) return false
             val left = deadline - System.nanoTime()
             if (reader.isAlive && left > 0) TimeUnit.NANOSECONDS.timedJoin(reader, left)
             if (reader.isAlive || !job.outputComplete) return false
+            releaseFinishedResources(job)
         }
         return synchronized(dispatchLifecycle) { activeDispatches == 0 }
     }
@@ -406,14 +400,22 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         require(timeoutMillis in 1..30000)
         if (synchronized(dispatchLifecycle) { !closed || activeDispatches != 0 }) return false
         val job = synchronized(jobs) { jobs[id]?.takeIf { owns(it) && it.scope == scope } } ?: return false
-        val handle = job.handle ?: return job.startupCleanup?.awaitTermination(timeoutMillis)
-            ?: (job.state in setOf("start_failed", "cancelled_before_dispatch"))
+        val (completion, handle, reader) = synchronized(job) { Triple(job.completion, job.handle, job.reader) }
+        if (completion != null) return true
+        if (handle == null) {
+            val cleanup = job.startupCleanup ?: return job.state in setOf("start_failed", "cancelled_before_dispatch")
+            val complete = cleanup.awaitTermination(timeoutMillis)
+            if (complete) releaseStartupCleanup(job, cleanup)
+            return complete
+        }
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
         if (handle.process.isAlive && !handle.process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) return false
-        val reader = job.reader ?: return false
+        if (reader == null) return false
         val remaining = deadline - System.nanoTime()
         if (reader.isAlive && remaining > 0) TimeUnit.NANOSECONDS.timedJoin(reader, remaining)
-        return !reader.isAlive && job.outputComplete
+        val complete = !reader.isAlive && job.outputComplete
+        if (complete) releaseFinishedResources(job)
+        return complete
     }
 
     /** Explicit trusted-host cleanup after run closure; unresolved journals remain intact. */
@@ -425,41 +427,36 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     private fun owns(record:JSONObject)=record.optString("owner")==conversationOwner && (record.optString("mode")=="daemon" || record.optString("scope")==scope)
     private fun listJobs():JSONObject {
         val records=linkedMapOf<String,JSONObject>()
-        var scanned=0
         Files.newDirectoryStream(directory.toPath()).use { stream ->
             for(entry in stream) {
-                if(++scanned>MAX_FILES) return error("job_directory_scan_limit")
                 val file=entry.toFile()
                 if(file.extension!="json") continue
                 try { val record=readRecord(file); if(owns(record)) records[file.nameWithoutExtension]=record.put("job_id",file.nameWithoutExtension).put("state","unknown_without_live_handle").put("execution","unknown") }
                 catch(_:Exception) { }
             }
         }
-        synchronized(jobs) { jobs.values.filter { owns(it) }.forEach { job -> records[job.id]=page(job,0,1) } }
-        return JSONObject().put("ok",true).put("jobs",JSONArray(records.values.toList())).put("limit",MAX_JOBS)
+        synchronized(jobs) { jobs.values.filter { owns(it) }.forEach { job ->
+            records[job.id]=page(job,0,1)
+            releaseFinishedResources(job)
+        } }
+        return JSONObject().put("ok",true).put("jobs",JSONArray(records.values.toList()))
     }
-    private fun hasJobCapacity(): Boolean = jobs.size < MAX_GLOBAL_JOBS &&
-        jobs.values.count { it.log.parentFile.canonicalPath == directory.canonicalPath } < MAX_JOBS && storageAvailable()
-    private fun storageAvailable():Boolean {
-        // Called with jobs locked: reserve the full output allowance before dispatch, including
-        // jobs whose pending metadata save failed. Delayed pumps must not share unused budget.
-        val reserved=jobs.values.filter { it.log.parentFile==directory }.mapTo(mutableSetOf()) { it.id }
-        val logs=mutableMapOf<String,Long>(); var scanned=0
-        Files.newDirectoryStream(directory.toPath()).use { stream ->
-            for(entry in stream) {
-                if(++scanned>MAX_FILES) return false
-                val file=entry.toFile()
-                if(file.extension=="json") reserved.add(file.nameWithoutExtension)
-                if(file.extension=="log") {
-                    val length=file.length(); if(length>MAX_LOG_BYTES) return false
-                    logs[file.nameWithoutExtension]=length
-                }
-            }
-        }
-        // Unknown/orphan logs are retained, not deleted. Metadata (even unreadable metadata)
-        // reserves a whole log; orphan logs consume their actual bytes in addition to that.
-        val orphanBytes=logs.filterKeys { it !in reserved }.values.sum()
-        return reserved.size<MAX_JOBS && orphanBytes+(reserved.size+1L)*MAX_LOG_BYTES<=MAX_TOTAL_LOG_BYTES && scanned+4<=MAX_FILES
+    // Runtime resources can end without expiring their historical records or logs.
+    private fun releaseFinishedResources(job: Job) = synchronized(job) {
+        if (!job.dispatchFinished || job.completion != null || job.startupCleanup != null ||
+            !job.outputComplete || job.reader?.isAlive != false) return@synchronized
+        val process = job.handle?.process ?: return@synchronized
+        if (process.isAlive) return@synchronized
+        val exitCode = if (process is RootScopeCommandProcess) process.exitCodeOrNull() else process.exitValue()
+        job.completion = JobCompletion("exited", exitCode,
+            if (exitCode == null || job.unknown) "unknown" else "executed", process is RootScopeCommandProcess)
+        job.handle = null
+        job.reader = null
+    }
+    private fun releaseStartupCleanup(job: Job, cleanup: PtyStartupCleanup) = synchronized(job) {
+        if (job.startupCleanup !== cleanup) return@synchronized
+        job.completion = JobCompletion(job.state, null, "unknown", true)
+        job.startupCleanup = null
     }
     private fun readRecord(file:File):JSONObject { check(file.length()<=16384); return JSONObject(file.readText()) }
     private fun saveJob(job:Job) {
@@ -480,13 +477,9 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         .put("environment_id",b.environmentId).put("shared_mounts",JSONObject(b.sharedMounts)).put("execution","not_executed")
     companion object {
         val names=setOf("terminal_open","terminal_exec","terminal_poll","terminal_stop","terminal_close","terminal_list")
-        private const val MAX_GLOBAL_JOBS=1024
-        private const val MAX_JOBS=64
-        private const val MAX_FILES=256
         private const val MAX_SCRIPT_BYTES=131072
         private const val MAX_LOG_BYTES=262144
-        private const val MAX_TOTAL_LOG_BYTES=16L*1024*1024
-        private val jobs=mutableMapOf<String,Job>() // bounded, fail closed; no unresolved ledger deletion
+        private val jobs=mutableMapOf<String,Job>() // Completed history holds no Process or Thread.
         private fun processPid(process: Process): Long = try {
             (Process::class.java.getMethod("pid").invoke(process) as? Long)?.takeIf { it > 0L } ?: -1L
         } catch (_: Exception) { -1L } catch (_: LinkageError) { -1L }
@@ -498,10 +491,11 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         private fun schema(name:String,description:String,effect:Boolean,fields:JSONObject,required:List<String>)=JSONObject().put("name",name).put("description",description).put("sideEffect",effect)
             .put("parameters",JSONObject().put("type","object").put("properties",fields).put("required",JSONArray(required)).put("additionalProperties",false))
     }
+    private data class JobCompletion(val state: String, val exitCode: Int?, val execution: String, val scopeDrained: Boolean)
     private data class OwnedProcess(val process: Process, val pid: Long, val start: String?)
     private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val command:String,val backend:SelectedBackend,val log:File,val script:File) {
         @Volatile var dispatchFinished=false
-        @Volatile var outputObserved=false
+        @Volatile var completion: JobCompletion? = null
         @Volatile var cancelRequested=false
         @Volatile var handle:OwnedProcess?=null
         @Volatile var startupCleanup:PtyStartupCleanup?=null

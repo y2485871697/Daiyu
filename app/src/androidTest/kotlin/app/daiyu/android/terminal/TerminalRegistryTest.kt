@@ -301,25 +301,27 @@ class TerminalRegistryTest:InstrumentationTestCase() {
             assertEquals(1,listed.length()); assertEquals(id,listed.getJSONObject(0).getString("job_id"))
         } finally { root.deleteRecursively() }
     }
-    fun testRetentionLimitPreventsLaunchAndDoesNotDeletePendingMetadata() {
+    fun testPersistedMetadataAndFileCountsDoNotBlockLaunchOrDeleteHistory() {
         val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
         try {
-            val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString()); val session=open(registry)
-            val directory=File(root,"terminal-jobs")
-            repeat(64) { File(directory,"$it.json").writeText("{\"state\":\"pending\"}") }
-            registry.startProcess={ throw AssertionError("quota must reject before launch") }
-            val result=registry.execute("terminal_exec",command(session))
-            assertEquals("not_executed",result.getString("execution")); assertEquals("job_or_log_retention_limit",result.getString("error"))
-            assertEquals(64,directory.listFiles()!!.size)
+            val session=open(registry); val directory=File(root,"terminal-jobs")
+            val old=List(64) { File(directory,"$it.json").apply { writeText(JSONObject().put("state","pending").toString()) } }
             repeat(193) { File(directory,"extra$it.other").writeText("") }
-            assertEquals("job_directory_scan_limit",registry.execute("terminal_list",JSONObject()).getString("error"))
-            assertEquals(257,directory.listFiles()!!.size)
-        } finally { root.deleteRecursively() }
+            var starts=0
+            registry.startProcess={ starts++; FakeProcess() }
+            val result=registry.execute("terminal_exec",command(session,mode="sync"))
+            assertEquals(result.toString(),"executed",result.getString("execution"))
+            assertEquals(1,starts)
+            assertTrue(registry.execute("terminal_list",JSONObject()).getBoolean("ok"))
+            old.forEach { assertEquals(JSONObject().put("state","pending").toString(),it.readText()) }
+            assertEquals(259,directory.listFiles()!!.size)
+        } finally { registry.close(); assertTrue(registry.awaitOrdinaryTermination(2000)); root.deleteRecursively() }
     }
-    fun testOrphanLogsAndTwoDelayedDispatchesReserveFutureOutputQuota() {
+    fun testOrphanLogsAndTwoDelayedDispatchesHaveNoAggregateQuota() {
         assertOrphanLogsAndTwoDelayedDispatches(false)
     }
-    fun testOrphanLogsAndConcurrentDelayedDispatchesReserveFutureOutputQuota() {
+    fun testOrphanLogsAndConcurrentDelayedDispatchesHaveNoAggregateQuota() {
         assertOrphanLogsAndTwoDelayedDispatches(true)
     }
     private fun assertOrphanLogsAndTwoDelayedDispatches(concurrent:Boolean) {
@@ -327,6 +329,7 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         val release=CountDownLatch(1); val begin=CountDownLatch(1); val starts=AtomicInteger()
         val results=List(2) { AtomicReference<JSONObject>() }; val workers=mutableListOf<Thread>()
         val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
+        registry.processStartReader={ "fake-start" }
         try {
             val session=open(registry); val directory=File(root,"terminal-jobs")
             val orphanContent=ByteArray(262144) { 79 }
@@ -341,38 +344,33 @@ class TerminalRegistryTest:InstrumentationTestCase() {
                 FakeProcess(delayed,release)
             }
             fun dispatch(index:Int) {
-                // Distinct commands ensure the journal equivalence guard does not mask the quota bug.
                 results[index].set(registry.execute("terminal_exec",command(session,"delayed-$index").put("command","printf delayed-$index")))
             }
             if(concurrent) {
                 repeat(2) { index -> workers.add(Thread { begin.await(); dispatch(index) }.apply { start() }) }
                 begin.countDown(); workers.forEach { it.join(2000); assertFalse(it.isAlive) }
             } else { dispatch(0); dispatch(1) }
-            assertEquals(1,starts.get())
-            val dispatched=results.map { it.get() }.single { it.optString("state")=="dispatched" }
-            val rejected=results.map { it.get() }.single { it.has("error") }
-            assertEquals("unknown",dispatched.getString("execution"))
-            assertEquals("job_or_log_retention_limit",rejected.getString("error"))
-            assertEquals("not_executed",rejected.getString("execution"))
-            // Neither process has emitted output yet: the next log's full allowance is reserved.
+            assertEquals(2,starts.get())
+            val dispatched=results.map { it.get() }
+            dispatched.forEach {
+                assertEquals("dispatched",it.getString("state"))
+                assertEquals("unknown",it.getString("execution"))
+            }
             assertEquals(63L*262144,directory.listFiles()!!.filter { it.extension=="log" }.sumOf { it.length() })
             release.countDown()
-            val id=dispatched.getString("job_id")
-            var page=registry.execute("terminal_poll",JSONObject().put("job_id",id))
-            repeat(100) { if(!page.optBoolean("output_complete")) { Thread.sleep(10); page=registry.execute("terminal_poll",JSONObject().put("job_id",id)) } }
-            assertTrue(page.getBoolean("output_complete")); assertEquals(262144,page.getInt("total_bytes"))
-            assertEquals(16L*1024*1024,directory.listFiles()!!.filter { it.extension=="log" }.sumOf { it.length() })
+            dispatched.forEach { result ->
+                val id=result.getString("job_id")
+                var page=registry.execute("terminal_poll",JSONObject().put("job_id",id))
+                repeat(100) { if(!page.optBoolean("output_complete")) { Thread.sleep(10); page=registry.execute("terminal_poll",JSONObject().put("job_id",id)) } }
+                assertTrue(page.getBoolean("output_complete")); assertEquals(262144,page.getInt("total_bytes"))
+            }
+            assertEquals(65L*262144,directory.listFiles()!!.filter { it.extension=="log" }.sumOf { it.length() })
             orphans.forEach { assertTrue(it.isFile); assertTrue(it.readBytes().contentEquals(orphanContent)) }
             assertEquals(63,orphans.count { !File(directory,"${it.nameWithoutExtension}.json").exists() })
         } finally {
             begin.countDown(); release.countDown(); workers.forEach { it.join(2000) }
-            // Drain fake pumps before removing their private fixtures, even on assertion failure.
-            results.forEach { result ->
-                val id=result.get()?.optString("job_id").orEmpty()
-                if(id.isNotEmpty()) repeat(100) {
-                    if(!registry.execute("terminal_poll",JSONObject().put("job_id",id)).optBoolean("output_complete")) Thread.sleep(10)
-                }
-            }
+            registry.close()
+            assertTrue(registry.awaitOrdinaryTermination(2000))
             root.deleteRecursively()
         }
     }

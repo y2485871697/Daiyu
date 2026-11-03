@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -169,7 +170,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                                 ChatComposer(draft, actions)
                                             },
                                         )
-                                        Box(Modifier.fillMaxWidth().height(32.dp).background(marker))
+                                        Box(Modifier.align(Alignment.Center).fillMaxWidth().height(32.dp).background(marker).testTag("retained-live-marker"))
                                     }
                                 },
                             ) {
@@ -186,7 +187,14 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val answer = ui.onNodeWithText("Retained formatted answer")
             ui.waitUntil(5_000) { ui.onAllNodesWithText("Retained formatted answer").fetchSemanticsNodes().isNotEmpty() }
             answer.assertIsDisplayed()
-            captureScreenNode(ui.onNodeWithTag("page-back-host"))
+            val baselinePixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+            val baselineHost = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
+            val baselineMarker = ui.onNodeWithTag("retained-live-marker").fetchSemanticsNode().boundsInRoot
+            assertTrue("fixed baseline sample is inside the live marker", baselineMarker.contains(Offset(
+                baselineHost.left + (baselinePixels.width * .05f).toInt(), baselineHost.top + baselinePixels.height / 2)))
+            val baseline = baselinePixels[(baselinePixels.width * .05f).toInt(), baselinePixels.height / 2]
+            assertTrue("the baseline probe must actually hit the green live-chat marker: $baseline",
+                baseline.green > .85f && baseline.red < .15f && baseline.blue < .15f)
             ui.waitUntil(5_000) { chatFrame?.ready != null }
             val originalMessage = answer.fetchSemanticsNode().id
             val originalBounds = answer.fetchSemanticsNode().boundsInRoot
@@ -222,7 +230,10 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val hostBounds = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
             assertTrue("sample must be left of the departing settings", advanced.left > hostBounds.left + hostBounds.width * .05f)
             val pixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
-            val sample = pixels[(pixels.width * .05f).toInt(), 8]
+            val returnMarker = ui.onNodeWithTag("retained-live-marker").fetchSemanticsNode().boundsInRoot
+            assertTrue("fixed return sample is inside the live marker", returnMarker.contains(Offset(
+                hostBounds.left + (pixels.width * .05f).toInt(), hostBounds.top + pixels.height / 2)))
+            val sample = pixels[(pixels.width * .05f).toInt(), pixels.height / 2]
             assertTrue("live chat must draw underneath the departure, not an old target bitmap", liveDraws > beforeReturnDraws)
             assertTrue("return must reveal current magenta chat pixels, not old green or white: $sample",
                 sample.red > .35f && sample.blue > .35f && sample.green < .15f)

@@ -222,7 +222,24 @@ class GuiRuntimeScreenshotTest {
         CopyingWindowNodeShadow.refresh = null
     }
 
+    private fun permitGestureWindow(overlay: Boolean = false) {
+        platform.listedWindows = {
+            fun window(id: Int, type: Int, layer: Int, bounds: Rect): AccessibilityWindowInfo = AccessibilityWindowInfo.obtain().apply {
+                ReflectionHelpers.callInstanceMethod<Unit>(this, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, id))
+                ReflectionHelpers.callInstanceMethod<Unit>(this, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, type))
+                ReflectionHelpers.callInstanceMethod<Unit>(this, "setLayer", ClassParameter.from(Int::class.javaPrimitiveType!!, layer))
+                ReflectionHelpers.callInstanceMethod<Unit>(this, "setBoundsInScreen", ClassParameter.from(Rect::class.java, bounds))
+                if (android.os.Build.VERSION.SDK_INT >= 30)
+                    ReflectionHelpers.callInstanceMethod<Unit>(this, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, 0))
+            }
+            buildList {
+                add(window(platform.windowId, AccessibilityWindowInfo.TYPE_APPLICATION, 1, Rect(0, 0, 100, 100)))
+                if (overlay) add(window(99, AccessibilityWindowInfo.TYPE_INPUT_METHOD, 2, Rect(10, 10, 40, 40)))
+            }
+        }
+    }
     @Test fun explicitCoordinateTapWaitsForTerminalGestureReceiptAndRetiresObservation() {
+        permitGestureWindow()
         val observed = observe()
         val action = GuiAction(observed.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(20, 30, 20, 30, 50))
         assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
@@ -231,11 +248,15 @@ class GuiRuntimeScreenshotTest {
         assertEquals(action.gesture, platform.submittedGesture)
         assertFalse(started.value.isDone)
         rejected(GuiRuntime.observe(session.lease), "GESTURE_IN_PROGRESS_NOT_EXECUTED")
+        rejected(GuiRuntime.beginAction(session.lease, action), "GESTURE_IN_PROGRESS_NOT_EXECUTED")
+        rejected(GuiRuntime.launchApp(session.lease, GuiAppLaunch("external.app")), "GESTURE_IN_PROGRESS_NOT_EXECUTED")
+        assertEquals(1, platform.gestures)
         platform.gestureCompleted!!(true)
         assertEquals(GuiResult.Value("PLATFORM_GESTURE_COMPLETED_NOT_VERIFIED"), started.value.completed())
         rejected(GuiRuntime.validateExactTarget(session.lease, action), "OBSERVATION_REQUIRED")
     }
     @Test fun freeSwipeKeepsScreenLeaseUntilCancelledCallbackAndNeverRetries() {
+        permitGestureWindow()
         val observed = observe()
         val action = GuiAction(observed.observationId, GuiOperation.SWIPE, gesture = GuiGesture(50, 90, 50, 10, 800))
         assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
@@ -249,6 +270,7 @@ class GuiRuntimeScreenshotTest {
         assertEquals(1, platform.gestures)
     }
     @Test fun coordinatesOutsideApplicationOrOnChangedTreeNeverDispatch() {
+        permitGestureWindow()
         var observed = observe()
         var action = GuiAction(observed.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(100, 30, 100, 30, 50))
         assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
@@ -258,6 +280,14 @@ class GuiRuntimeScreenshotTest {
         assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
         platform.label = "changed-without-event"
         rejected(GuiRuntime.action(session.lease, action), "GESTURE_TREE_CHANGED_OR_INCOMPLETE_NOT_EXECUTED")
+        assertEquals(0, platform.gestures)
+    }
+    @Test fun keyboardOrOverlayCoveringCoordinateNeverReceivesTheAuthorizedAppGesture() {
+        permitGestureWindow(overlay = true)
+        val observed = observe()
+        val action = GuiAction(observed.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(20, 30, 20, 30, 50))
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        rejected(GuiRuntime.action(session.lease, action), "GESTURE_WINDOW_OCCLUDED_NOT_EXECUTED")
         assertEquals(0, platform.gestures)
     }
     @Test fun imeSubmitRequiresFocusedEditableNodeAndAdvertisedPlatformAction() {

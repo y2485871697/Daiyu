@@ -796,6 +796,7 @@ internal object GuiRuntime {
             val sampled = sampleTree(lease, retain = false, maxNodes = observed.maxNodes)
             if (!binding.verifiable || sampled !is GuiResult.Value || sampled.value != binding)
                 return rejectChangedTarget(lease, "GESTURE_TREE_CHANGED_OR_INCOMPLETE_NOT_EXECUTED")
+            gestureWindowRejection(current, observed, gesture)?.let { return it }
         }
         val consumed = gate.consumeAction(lease, action, generation)
         if (consumed is GuiResult.Rejected) return consumed
@@ -820,6 +821,31 @@ internal object GuiRuntime {
             GuiResult.Value(if (accepted) "PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED" else "PLATFORM_ACTION_REJECTED")
         } catch (_: Exception) { GuiResult.Unknown("ACTION_DELIVERY_UNCONFIRMED") }
         finally { generation++; clearNodes() }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun gestureWindowRejection(current: GuiAccessibilityService, observed: GuiObservation,
+        gesture: GuiGesture): GuiResult.Rejected? {
+        val windows = try { access.windows(current) }
+            catch (_: Exception) { return GuiResult.Rejected("GESTURE_WINDOWS_UNVERIFIABLE_NOT_EXECUTED") }
+        return try {
+            if (windows.size !in 1..64) return GuiResult.Rejected("GESTURE_WINDOWS_UNVERIFIABLE_NOT_EXECUTED")
+            fun onDisplay(window: android.view.accessibility.AccessibilityWindowInfo): Boolean =
+                Build.VERSION.SDK_INT < 30 || window.displayId == Display.DEFAULT_DISPLAY
+            val target = windows.singleOrNull { onDisplay(it) && it.id == observed.windowId &&
+                it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+                ?: return GuiResult.Rejected("GESTURE_WINDOWS_UNVERIFIABLE_NOT_EXECUTED")
+            val targetBounds = Rect().also { target.getBoundsInScreen(it) }
+            if (!targetBounds.contains(gesture.x, gesture.y) || !targetBounds.contains(gesture.endX, gesture.endY))
+                return GuiResult.Rejected("GESTURE_OUTSIDE_OBSERVED_WINDOW_NOT_EXECUTED")
+            val pathBounds = Rect(minOf(gesture.x, gesture.endX), minOf(gesture.y, gesture.endY),
+                maxOf(gesture.x, gesture.endX) + 1, maxOf(gesture.y, gesture.endY) + 1)
+            if (windows.any { window ->
+                onDisplay(window) && window.id != target.id && window.layer >= target.layer &&
+                    Rect.intersects(pathBounds, Rect().also { window.getBoundsInScreen(it) })
+            }) GuiResult.Rejected("GESTURE_WINDOW_OCCLUDED_NOT_EXECUTED") else null
+        } catch (_: Exception) { GuiResult.Rejected("GESTURE_WINDOWS_UNVERIFIABLE_NOT_EXECUTED") }
+        finally { windows.forEach { it.recycle() } }
     }
 
     internal fun beginAction(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<CompletableFuture<GuiResult<String>>> {

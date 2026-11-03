@@ -418,9 +418,12 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('val value = exit.value', self.host)
         self.assertNotIn('departure.progress + (1f - departure.progress) * exit.value', self.host)
 
-    def test_gesture_pins_fresh_pixels_before_motion_and_unlocks_at_rest(self):
+    def test_gesture_pins_prepared_pixels_before_motion_and_unlocks_at_rest(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        self.assertIn('if (!frame.hasFreshImage) return false', layers)
+        begin = layers.split('fun beginGesture(frame: Frame): Boolean {', 1)[1].split('fun resume(', 1)[0]
+        self.assertNotIn('hasFreshImage', begin)
+        self.assertIn('freeze(frame)', begin)
+        self.assertIn('return frame.canDrawPreview', begin)
         self.assertIn('if (frame.frozen) return', layers)
         self.assertIn('gesturePreviewReady = beginPreview()', self.host)
         self.assertIn('beginPreview = { currentTarget != null && layers.beginGesture(frame) }', self.host)

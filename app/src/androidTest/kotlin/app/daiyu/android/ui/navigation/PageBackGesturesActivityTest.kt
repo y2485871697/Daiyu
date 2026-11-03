@@ -650,7 +650,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
 
     private fun prepareCurrentPixels() {
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
-        ui.waitUntil(5_000) { observedFrame?.hasFreshImage == true }
+        ui.waitUntil(5_000) { observedFrame?.let { it.ready != null && it.readySize == it.size } == true }
     }
 
     fun testReleaseVelocityContinuesIntoDeparture() {
@@ -669,9 +669,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             }
             ui.mainClock.advanceTimeBy(32)
             val released = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            assertTrue("the release trajectory starts from a moving page", released.left > initial.left)
             ui.onNodeWithTag("page-back-host").performTouchInput { up() }
-            assertEquals("previous-page", route)
-            assertEquals(1, backCount)
+            ui.runOnIdle {
+                assertEquals("previous-page", route)
+                assertEquals(1, backCount)
+            }
             ui.mainClock.advanceTimeByFrame()
             val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
             assertEquals("release position stays continuous", released.left, start.left, 1.1f)

@@ -115,7 +115,6 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     fun beginGesture(frame: Frame): Boolean {
-        if (!frame.hasFreshImage) return false
         freeze(frame)
         return frame.canDrawPreview
     }

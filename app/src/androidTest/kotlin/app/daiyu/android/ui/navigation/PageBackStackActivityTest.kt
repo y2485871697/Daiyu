@@ -50,6 +50,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     private var disposed = 0
     private var background = Color.Black
     private var drawingWasEnabled = false
+    private var capturedFrame: PageBackPreviewLayers.Frame? = null
 
     override fun setUp() {
         super.setUp()
@@ -76,6 +77,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                         captureFromContent = drawerPreviewSource && rendered == "chat",
                         animateBackEnabled = animateBackEnabled,
+                        previewCapture = { frame -> capturedFrame = frame; frame.layer.toImageBitmap() },
                         backTargetKey = if (rendered == "settings") "chat" else null) {
                         PageBackHandler(enabled = rendered == "settings", previewEnabled = previewEnabled) { backCount++; drawerPainted = false; screen = "chat" }
                         if (drawerPreviewSource && rendered != "settings") {
@@ -217,7 +219,9 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 scheduler.advanceTimeBy(65); scheduler.runCurrent()
                 val first = ImageBitmap(2, 2)
                 copies[0].complete(first); scheduler.runCurrent()
-                assertTrue(layers.beginGesture(frame))
+                frame.recorded(IntSize(2, 2))
+                assertFalse("a same-size redraw invalidates copy freshness, not prepared pixels", frame.hasFreshImage)
+                assertTrue("prepared pixels remain available on the next draw", layers.beginGesture(frame))
                 assertSame(first, frame.image)
                 layers.resume(frame)
                 assertNull(frame.image)
@@ -374,6 +378,13 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
 
     fun testReturnButtonUsesRtlDirection() = assertOrdinaryReturnMotion(rtl = true)
 
+    private fun awaitPreparedCurrentPixels() {
+        ui.waitUntil(timeoutMillis = 5_000) {
+            if (!ui.mainClock.autoAdvance) ui.mainClock.advanceTimeByFrame()
+            capturedFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true
+        }
+    }
+
     fun testNestedReturnButtonsAnimateOneLevelWithoutRemountingController() {
         screen = "settings"
         mount(local = true, gesturesEnabled = false)
@@ -383,9 +394,11 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         mainThread { localPage = 2 }
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        awaitPreparedCurrentPixels()
         ui.mainClock.autoAdvance = false
         try {
             for (expectedPage in listOf<Int?>(1, null)) {
+                awaitPreparedCurrentPixels()
                 val previousCount = backCount
                 ui.onNodeWithTag("page-return-button").performClick()
                 assertEquals(expectedPage, localPage)

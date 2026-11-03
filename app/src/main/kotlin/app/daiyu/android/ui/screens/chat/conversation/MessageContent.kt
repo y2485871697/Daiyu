@@ -47,6 +47,7 @@ internal fun MessageContent(
     reasoningBody: @Composable (app.daiyu.android.domain.ReportedReasoning, Boolean) -> Unit = { _, _ -> },
     imageOffset: Int = 0,
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit = { _, body -> body() },
+    fillWidth: Boolean = true,
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
     val connectors = remember(content, workflowTimeline) { workflowConnectors(content, workflowTimeline) }
@@ -69,12 +70,12 @@ internal fun MessageContent(
                     key(block.step.owner, block.step.toolCallId) {
                         // Keep the dedicated interaction's callsite while a prior thought closes.
                         val dedicated = dedicatedTool(block.step)
-                        if (visible && !dedicated) SpacedMessageEntry(index, content, connectors[index], entryBody) {
+                        if (visible && !dedicated) SpacedMessageEntry(index, content, connectors[index], entryBody, fillWidth) {
                             WorkStepRow(block.step, showConnector = connectors[index].after, toolContent = toolContent, flowRunning = flowRunning)
                         }
                     }
                 } else if (visible && (block !is MessageContentUi.Text || block.text.isNotBlank())) {
-                    SpacedMessageEntry(index, content, connectors[index], entryBody, lastIndex = range.last) {
+                    SpacedMessageEntry(index, content, connectors[index], entryBody, fillWidth, lastIndex = range.last) {
                         when (block) {
                             is MessageContentUi.Text -> textBody(block, Modifier.testTag("message-content-text:$index")
                                 .then(if (workflowTimeline) Modifier.padding(start = 18.dp) else Modifier))
@@ -100,6 +101,7 @@ private fun MessageContentUi.isInlineMedia() = this is MessageContentUi.Image ||
 private fun SpacedMessageEntry(
     index: Int, content: List<MessageContentUi>, connector: WorkflowConnector,
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit,
+    fillWidth: Boolean,
     lastIndex: Int = index,
     body: @Composable () -> Unit,
 ) {
@@ -110,6 +112,7 @@ private fun SpacedMessageEntry(
             trailingConnector = connector.after,
             throughConnector = connector.through,
             spacingAfter = if (lastIndex < content.lastIndex) 10.dp else 0.dp,
+            fillWidth = fillWidth,
             content = body,
         )
     }

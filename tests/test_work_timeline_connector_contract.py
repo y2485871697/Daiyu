@@ -45,6 +45,26 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         renderer = host[host.index('internal fun rememberAssistantTextBody'):host.index('private fun AssistantWorkflow(')]
         self.assertNotIn('padding(start = 18.dp)', renderer)
 
+    def test_only_user_content_opts_out_of_full_width_entries(self):
+        host = (CHAT / 'ChatMessageList.kt').read_text()
+        user = host[host.index('internal fun UserTurn('):host.index('internal fun AssistantTurn(')]
+        self.assertIn('MessageContent(turn.content, actions, imageLoader, markdown = false, fillWidth = false,', user)
+        self.assertIn('Modifier.widthIn(max = bubbleWidth)', user)
+        self.assertIn('val bubbleWidth = maxWidth * 0.9f', user)
+        self.assertEqual(1, host.count('fillWidth = false'))
+        self.assertNotIn('IntrinsicSize', user)
+
+    def test_width_option_reaches_the_wrapper_without_changing_timeline_defaults(self):
+        source = (CHAT / 'MessageContent.kt').read_text()
+        wrapper = (CHAT / 'WorkTimelineEntry.kt').read_text()
+        self.assertIn('fillWidth: Boolean = true', source)
+        self.assertIn('fillWidth: Boolean = true', wrapper)
+        self.assertEqual(2, source.count('SpacedMessageEntry(index, content, connectors[index], entryBody, fillWidth'))
+        self.assertIn('fillWidth = fillWidth,', source)
+        self.assertIn('Modifier.then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).drawBehind', wrapper)
+        self.assertIn('Column {', source)
+        self.assertNotIn('IntrinsicSize', source)
+
     def test_android_regression_samples_every_join_and_rejects_stray_end_segments(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkTimelineConnectorTest.kt').read_text()
         for token in ('verify(legacy = false)', 'verify(legacy = true)', 'listOf(false, true)',

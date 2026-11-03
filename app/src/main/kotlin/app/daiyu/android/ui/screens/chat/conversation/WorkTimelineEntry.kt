@@ -16,10 +16,11 @@ internal fun WorkTimelineEntry(
     trailingConnector: Boolean = false,
     throughConnector: Boolean = false,
     spacingAfter: Dp = 0.dp,
+    fillWidth: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val line = conversationColors().line
-    Box(Modifier.fillMaxWidth().drawBehind {
+    Box(Modifier.then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).drawBehind {
         val x = 5.dp.toPx()
         if (throughConnector) drawLine(line, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())
         if (leadingConnector) drawLine(line, Offset(x, 0f), Offset(x, 17.dp.toPx()), 1.dp.toPx())

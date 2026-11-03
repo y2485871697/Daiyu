@@ -458,13 +458,14 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
             val bubbleWidth = maxWidth * 0.9f
             Box {
             Column(Modifier.widthIn(max = bubbleWidth)
+                .testTag("message-user-bubble:${turn.listKey}")
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 5.dp, bottomStart = 16.dp))
                 .background(conversationColors().bubble)
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     clickFeedback = false, onClick = {}, onLongClick = { if (!turn.pending) showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
                 if (turn.content.isNotEmpty()) {
-                    MessageContent(turn.content, actions, imageLoader, markdown = false,
+                    MessageContent(turn.content, actions, imageLoader, markdown = false, fillWidth = false,
                         textBody = { text, modifier -> UserMessageText(text.text, modifier) })
                 } else {
                     UserMessageText(turn.text)

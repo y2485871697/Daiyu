@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +14,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
@@ -41,7 +43,7 @@ class MessageMediaLayoutGeometryTest : WiredActivityTestCase() {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
                     CompositionLocalProvider(LocalOpenChatMediaPreview provides { key: String -> opened += key }) {
-                        Column(Modifier.width(320.dp).verticalScroll(rememberScrollState())) { content() }
+                        Column(Modifier.width(320.dp).testTag("message-layout-host").verticalScroll(rememberScrollState())) { content() }
                     }
                 }
             }
@@ -69,6 +71,105 @@ class MessageMediaLayoutGeometryTest : WiredActivityTestCase() {
 
     private fun nearDp(expected: Float, actualPixels: Float) = assertTrue(
         "expected ${expected}dp, got ${actualPixels / density}dp", abs(expected * density - actualPixels) <= 2f)
+
+    private fun mountUser(content: List<MessageContentUi>, bitmapWidth: Int = 100, bitmapHeight: Int = 200) {
+        val text = content.filterIsInstance<MessageContentUi.Text>().joinToString("\n") { it.text }
+        val turn = ChatTurnUi.User("layout-user", text, content = content)
+        mount {
+            UserTurn(turn, ChatScreenActions(), MessageImageLoader { _, _, _ -> ImageBitmap(bitmapWidth, bitmapHeight) })
+        }
+    }
+
+    private fun userBubble(): Rect = ui.onNodeWithTag("message-user-bubble:layout-user", useUnmergedTree = true)
+        .unclippedBounds()
+
+    private fun assertBubbleWraps(vararg contentBounds: Rect) {
+        val bubble = userBubble()
+        nearDp(contentBounds.maxOf { it.width } / density + 24f, bubble.width)
+        nearDp(12f, contentBounds.minOf { it.left } - bubble.left)
+        nearDp(12f, bubble.right - contentBounds.maxOf { it.right })
+        val host = ui.onNodeWithTag("message-layout-host", useUnmergedTree = true).unclippedBounds()
+        nearDp(0f, host.right - bubble.right)
+    }
+
+    fun testShortCaptionAndPortraitShrinkActualUserBubble() {
+        mountUser(listOf(MessageContentUi.Text("short", "一张图"), MessageContentUi.Image(image(1))))
+        waitForImages(1)
+        val caption = ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true).unclippedBounds()
+        val photo = bounds(1)
+        assertTrue(caption.width < photo.width)
+        nearDp(180f, photo.width); nearDp(360f, photo.height)
+        assertBubbleWraps(caption, photo)
+        nearDp(204f, userBubble().width)
+        assertTrue(photo.top >= caption.bottom)
+    }
+
+    fun testCaptionWiderThanNarrowPortraitDeterminesActualUserBubbleWidth() {
+        mountUser(listOf(MessageContentUi.Text("caption", "比图片更宽的说明"), MessageContentUi.Image(image(1))),
+            bitmapWidth = 50)
+        waitForImages(1)
+        val caption = ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true).unclippedBounds()
+        val photo = bounds(1)
+        nearDp(90f, photo.width); nearDp(360f, photo.height)
+        assertTrue(caption.width > photo.width)
+        assertBubbleWraps(caption, photo)
+        assertTrue(userBubble().width < 288f * density)
+    }
+
+    fun testImageOnlyShrinksActualUserBubbleWithoutFullWidthBacking() {
+        mountUser(listOf(MessageContentUi.Image(image(1))))
+        waitForImages(1)
+        assertBubbleWraps(bounds(1))
+        nearDp(204f, userBubble().width)
+    }
+
+    fun testLongCaptionUsesNormalUserBubbleLimitWithoutStretchingPortrait() {
+        mountUser(listOf(MessageContentUi.Text("long",
+            "长文字仍按正常气泡上限换行，不要挤成图片一样窄。".repeat(8)), MessageContentUi.Image(image(1))))
+        waitForImages(1)
+        val text = ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true)
+        val caption = text.unclippedBounds()
+        val photo = bounds(1)
+        nearDp(288f, userBubble().width)
+        nearDp(264f, caption.width)
+        nearDp(180f, photo.width); nearDp(360f, photo.height)
+        assertTrue(caption.width > photo.width)
+        assertBubbleWraps(caption, photo)
+        val layouts = mutableListOf<TextLayoutResult>()
+        text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.single().lineCount > 1)
+        assertFalse(layouts.single().hasVisualOverflow)
+        assertTrue(photo.top >= caption.bottom)
+    }
+
+    fun testTwoPortraitUserBubbleWrapsGridAndPreservesItsGap() {
+        mountUser(listOf(MessageContentUi.Image(image(1)), MessageContentUi.Image(image(2))))
+        waitForImages(2)
+        val a = bounds(1); val b = bounds(2)
+        val grid = ui.onNodeWithTag("message-media-group:0", useUnmergedTree = true).unclippedBounds()
+        nearDp(8f, b.left - a.right)
+        assertTrue(abs(a.top - b.top) <= 1f)
+        assertBubbleWraps(grid)
+        nearDp(248f, userBubble().width)
+    }
+
+    fun testDefaultWorkflowAndLegacyTimelineEntriesRemainFullWidth() {
+        mount {
+            for (workflow in listOf(false, true)) {
+                Box(Modifier.testTag("default-entry:$workflow")) {
+                    MessageContent(listOf(MessageContentUi.Text("short", "短")), ChatScreenActions(), null,
+                        markdown = false, workflowTimeline = workflow,
+                        textBody = { text, modifier -> Text(text.text, modifier) })
+                }
+            }
+            Box(Modifier.testTag("legacy-timeline-entry")) {
+                WorkTimelineEntry(leadingConnector = true) { Box(Modifier.size(8.dp)) }
+            }
+        }
+        for (tag in listOf("default-entry:false", "default-entry:true", "legacy-timeline-entry")) {
+            nearDp(320f, ui.onNodeWithTag(tag, useUnmergedTree = true).unclippedBounds().width)
+        }
+    }
 
     fun testLongTextExpandsIndependentlyAndSingleUsesDecodedNotReferenceDimensions() {
         val content = listOf(MessageContentUi.Text("long", "长文字保持正常宽度与完整行数，不受窄图约束。".repeat(12)),

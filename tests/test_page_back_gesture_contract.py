@@ -452,7 +452,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('beginPreview = { currentTarget != null && layers.beginGesture(frame) }', self.host)
         self.assertIn('if (!previewAllowed) frame.animateReturn = false', self.host)
         self.assertIn('state.previewAllowed && (state.active || progress > 0f) -> frame.image', self.host)
-        self.assertIn('departure != null && showDeparture && !departure.forward -> departure.targetImage', self.host)
+        self.assertIn('departure != null && showDeparture && !departure.forward ->', self.host)
+        self.assertIn('if (retainedRootContent != null && retainedRootVisible) null else departure.targetImage', self.host)
         self.assertIn('layers.resume(frame)', self.host)
         self.assertIn('state.restorePreview()', self.host)
 

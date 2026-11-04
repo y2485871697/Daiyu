@@ -24,6 +24,7 @@ internal object GuiScreenToolFactory {
                  else "screenshot requires observation_id from a successful observe in this session. ") +
                 "IDs expire after ${GUI_OBSERVATION_TTL_MILLIS / 1000} seconds, a target window change, or an action. Never retry a stale ID automatically. " +
                 (if (allowImplicitObservation) "For a fresh observe of the current screen omit target_package. Screenshots without a target retain this session target; use a fresh observe to change it. Self-app observation requires target_package=app.daiyu.android. To open another app, use launch_app first; target_package only selects a window, it does not launch an app. " else "") +
+                "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED means no active/focused window was verified, not that the phone is locked. Only SCREEN_LOCKED_NOT_EXECUTED reports a locked or noninteractive screen. Do not infer lock state from a window failure. " +
                 "Window failures are not Android Root permission errors. Never use shell, input, screencap or uiautomator to bypass screen admission, target or location restrictions.",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("operation", ArgumentType.Text(16, setOf("observe", "screenshot"))),

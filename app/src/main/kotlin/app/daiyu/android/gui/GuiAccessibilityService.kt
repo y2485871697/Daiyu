@@ -581,7 +581,39 @@ internal object GuiRuntime {
                 val candidates = local.filter { (it.isActive || it.isFocused) && (systemLayer == null ||
                     it.layer > systemLayer || it.layer == systemLayer &&
                     it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && it.isFocused) }
-                if (candidates.isEmpty()) return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                if (candidates.isEmpty()) {
+                    // OEM window lists can lag rootInActiveWindow. Admit only the same listed
+                    // window with fresh active metadata, never a requested background package.
+                    val node = access.root(current) ?: return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                    val window = try { node.window } catch (_: Exception) { null }
+                    if (window == null) {
+                        node.recycle()
+                        return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED")
+                    }
+                    try {
+                        val listed = local.filter { it.id == window.id }.singleOrNull()?.takeIf {
+                            it.type == window.type && it.layer == window.layer &&
+                                window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION && onDefaultDisplay(window)
+                        }
+                        val bounds = Rect().also { window.getBoundsInScreen(it) }
+                        val blocked = local.any { other ->
+                            if (other.id == window.id || other.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM ||
+                                other.layer < window.layer) false
+                            else {
+                                val otherBounds = Rect().also { other.getBoundsInScreen(it) }
+                                otherBounds.isEmpty || bounds.isEmpty || Rect.intersects(bounds, otherBounds)
+                            }
+                        }
+                        if (listed == null || blocked) {
+                            node.recycle()
+                            return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                        }
+                        return admit(node, window)
+                    } catch (_: Exception) {
+                        node.recycle()
+                        return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED")
+                    } finally { window.recycle() }
+                }
                 fun rank(window: android.view.accessibility.AccessibilityWindowInfo): Int = if (window.isActive) 2 else 1
                 val selected = candidates.maxWithOrNull(compareBy<android.view.accessibility.AccessibilityWindowInfo>({ rank(it) }, { it.layer }))!!
                 if (candidates.count { rank(it) == rank(selected) && it.layer == selected.layer } != 1)

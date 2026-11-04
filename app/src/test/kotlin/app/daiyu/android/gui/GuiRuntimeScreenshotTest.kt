@@ -522,6 +522,78 @@ class GuiRuntimeScreenshotTest {
         assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
+    private fun idleListedWindow(id: Int = 7, type: Int = AccessibilityWindowInfo.TYPE_APPLICATION,
+        layer: Int = 0): AccessibilityWindowInfo = AccessibilityWindowInfo.obtain().apply {
+        shadowOf(this).apply {
+            setId(id); setType(type); setActive(false); setFocused(false); setLayer(layer); setDisplayId(0)
+            setBoundsInScreen(Rect(0, 0, 100, 100))
+        }
+    }
+
+    @Test fun idleListedApplicationUsesOneFreshMatchingActiveRootWithoutRelaxingActionChecks() {
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        val reads = platform.rootReads
+        val observed = observe()
+        assertEquals(reads + 1, platform.rootReads)
+        assertEquals("external.app", observed.packageName)
+        val action = approve(observed)
+        platform.pkg = "changed.app"
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+        assertNoActions()
+    }
+
+    @Test fun idleListAndStillInactiveRootDoNotProduceObservation() {
+        platform.active = false
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun idleListMissingRootAndIdentityConflictsStayRejected() {
+        for (configure in listOf<(Platform) -> Unit>(
+            { it.missing = true }, { it.windowId = 9 }, { it.displayId = 1 },
+            { it.windowType = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY })) {
+            platform.missing = false; platform.windowId = 7; platform.displayId = 0
+            platform.windowType = AccessibilityWindowInfo.TYPE_APPLICATION
+            openTarget(null)
+            platform.listedWindows = { listOf(idleListedWindow()) }
+            configure(platform)
+            assertTrue(session.previewFromUser() is GuiResult.Rejected)
+            assertNull(session.lease.observation)
+        }
+        assertNoActions()
+    }
+
+    @Test fun idleListDoesNotRecoverDuplicateIdsOrALayerMismatchOrSystemRoots() {
+        for (windows in listOf<() -> List<AccessibilityWindowInfo>>(
+            { listOf(idleListedWindow(), idleListedWindow()) },
+            { listOf(idleListedWindow(layer = 1)) },
+            { listOf(idleListedWindow(type = AccessibilityWindowInfo.TYPE_SYSTEM)) })) {
+            openTarget(null)
+            platform.listedWindows = windows
+            rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+            assertNull(session.lease.observation)
+        }
+        assertNoActions()
+    }
+
+    @Test fun idleApplicationCannotBeReadThroughAnOverlappingIdleSystemWindow() {
+        platform.listedWindows = { listOf(idleListedWindow(),
+            idleListedWindow(id = 9, type = AccessibilityWindowInfo.TYPE_SYSTEM, layer = 1)) }
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun idleRecoveryPreservesExplicitTargetAndSelfPackageFences() {
+        openTarget("wanted.app")
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        rejected(session.previewFromUser(), "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED")
+        openTarget(null)
+        platform.pkg = service.packageName
+        rejected(session.previewFromUser(), "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
     @Test fun focusedApplicationWindowCanBeObservedWithoutRootInActiveWindow() {
         platform.listedWindows = { listOf(listedWindow(active = false, focused = true)) }
         assertEquals("external.app", observe().packageName)

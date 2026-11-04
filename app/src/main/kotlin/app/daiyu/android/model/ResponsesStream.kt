@@ -34,6 +34,9 @@ internal object ResponsesStream {
         private val calls=linkedMapOf<String,ToolInvocation>()
         private val parts=mutableMapOf<String,java.util.SortedMap<Int,String>>()
         private val summaries=mutableMapOf<String,java.util.SortedMap<Int,String>>()
+        private val reasoningIds = linkedMapOf<Int, String>()
+        private val reasoningAliases = linkedMapOf<String, String>()
+        private val pendingReasoning = linkedMapOf<String, String>()
         private var chars=0
         private var poisoned = false
         val canResume: Boolean get() = !poisoned && output == null && responseId != null && acknowledgedSequence != null
@@ -43,6 +46,9 @@ internal object ResponsesStream {
                 source.forEach { (id, values) -> put(id, JSONObject().apply { values.forEach { (k,v) -> put(k.toString(),v) } }) }
             }
             put("parts", map(parts)); put("summaries", map(summaries))
+            put("reasoning_ids", JSONObject().apply { reasoningIds.forEach { (index, id) -> put(index.toString(), id) } })
+            put("reasoning_aliases", JSONObject().apply { reasoningAliases.forEach { (raw, id) -> put(raw, id) } })
+            put("pending_reasoning", JSONObject().apply { pendingReasoning.forEach { (id, item) -> put(id, item) } })
             put("calls", org.json.JSONArray(calls.values.map { call -> JSONObject().put("id",call.id.value).put("name",call.name).put("arguments",call.arguments) }))
             output?.let { put("output",org.json.JSONArray(it)) }
         }.toString()
@@ -92,8 +98,22 @@ internal object ResponsesStream {
             checkProtocol(combined.length<=2_000_000)
             sink(ModelEvent.TextFinal(id,combined))
         }
+        fun reasoningId(rawId: String, outputIndex: Int?): String {
+            val known = reasoningAliases[rawId]
+            val indexed = outputIndex?.let(reasoningIds::get)
+            checkProtocol(known == null || indexed == null || known == indexed)
+            val id = indexed ?: known ?: rawId
+            if (outputIndex != null) {
+                checkProtocol(reasoningIds.none { (index, value) -> index != outputIndex && value == id })
+                reasoningIds[outputIndex] = id
+            }
+            reasoningAliases[rawId] = id
+            return id
+        }
+        fun outputIndex(event: JSONObject): Int? =
+            if (!event.has("output_index") || event.isNull("output_index")) null else index(event, "output_index")
         fun summary(event:JSONObject, value:String, final:Boolean) {
-            val id=event.getString("item_id")
+            val id=reasoningId(event.getString("item_id"), outputIndex(event))
             val index=index(event, "summary_index", index(event, "content_index"))
             checkProtocol(index>=0)
             val content=summaries.getOrPut(id) {sortedMapOf()}
@@ -103,11 +123,11 @@ internal object ResponsesStream {
             checkProtocol(combined.length<=2_000_000)
             sink(ModelEvent.ReasoningDelta(id,combined, cumulative = true))
         }
-        fun summaryItem(item:JSONObject) {
+        fun summaryItem(item:JSONObject, outputIndex: Int? = null) {
             if(item.getString("type")!="reasoning") return
+            val id = reasoningId(item.getString("id"), outputIndex)
             val parts = if (!item.has("summary") || item.isNull("summary")) null else item.getJSONArray("summary")
             if (parts == null || parts.length() == 0) {
-                val id = item.optString("id")
                 summaries[id]?.let { sink(ModelEvent.ReasoningFinal(id, it.values.joinToString(""))) }
                 return
             }
@@ -116,7 +136,6 @@ internal object ResponsesStream {
                 val part=parts.getJSONObject(i)
                 if (part.optString("type") == "summary_text") content[i]=part.getString("text")
             }
-            val id=item.getString("id")
             // Empty/redacted terminal metadata closes the item; it is not a text correction.
             val finalContent = if (content.values.none { it.isNotBlank() }) summaries[id] ?: content else content
             val combined=finalContent.values.joinToString("")
@@ -142,6 +161,9 @@ internal object ResponsesStream {
             fun copy(source: Map<String,java.util.SortedMap<Int,String>>) = source.mapValues { java.util.TreeMap(it.value) }
             val savedParts = copy(parts)
             val savedSummaries = copy(summaries)
+            val savedReasoningIds = LinkedHashMap(reasoningIds)
+            val savedReasoningAliases = LinkedHashMap(reasoningAliases)
+            val savedPendingReasoning = LinkedHashMap(pendingReasoning)
             val savedChars = chars
             val savedOutput = output
             val savedUsage = usage
@@ -154,6 +176,12 @@ internal object ResponsesStream {
             }
             try {
             when(event.getString("type")) {
+                "response.output_item.added" -> {
+                    val item = event.getJSONObject("item")
+                    if (item.optString("type") == "reasoning") outputIndex(event)?.let {
+                        reasoningId(item.getString("id"), it)
+                    }
+                }
                 "response.reasoning_summary_text.delta" -> {
                     val delta=event.getString("delta");chars+=delta.length
                     checkProtocol(chars<=2_000_000)
@@ -177,7 +205,11 @@ internal object ResponsesStream {
                 "response.output_item.done" -> {
                     val item=event.getJSONObject("item")
                     checkProtocol(item.optString("type") != "function_call_output")
-                    summaryItem(item)
+                    // Unindexed, renamed summaries need the complete output to prove identity.
+                    if (item.optString("type") != "reasoning" || outputIndex(event) != null ||
+                        item.optString("id") in reasoningAliases || summaries.isEmpty())
+                        summaryItem(item, outputIndex(event))
+                    else pendingReasoning[item.getString("id")] = item.toString()
                     if(item.getString("type")=="function_call") {
                         val value = call(item)
                         val previous = calls.putIfAbsent(value.id.value, value)
@@ -205,9 +237,48 @@ internal object ResponsesStream {
                     checkProtocol(calls.all { (id, value) -> confirmed[id]?.let { sameCall(value, it) } == true })
                     calls.clear(); calls.putAll(confirmed)
                     usage=ProviderUsage.responses(response)
+                    val finalReasoning = (0 until out.length()).map { it to out.getJSONObject(it) }
+                        .filter { it.second.optString("type") == "reasoning" }
+                    checkProtocol(finalReasoning.map { it.second.getString("id") }.let { ids ->
+                        ids.all { it.isNotBlank() } && ids.distinct().size == ids.size
+                    })
+                    // Indexed identities take precedence. For old gateways without indices,
+                    // only a unique exact match among unmatched items in this response is usable.
+                    finalReasoning.filter { (i, item) -> i in reasoningIds || item.optString("id") in reasoningAliases }
+                        .forEach { (i, item) -> reasoningId(item.getString("id"), i) }
+                    val unmatched = finalReasoning.filter { (_, item) -> item.getString("id") !in reasoningAliases }
+                    val claimed = finalReasoning.mapNotNull { (_, item) -> reasoningAliases[item.getString("id")] }.toSet()
+                    val available = summaries.filterKeys { it !in claimed }
+                    fun finalSummary(item: JSONObject): String? {
+                        val values = item.optJSONArray("summary") ?: return null
+                        return (0 until values.length()).mapNotNull { j -> values.optJSONObject(j)?.takeIf {
+                            it.optString("type") == "summary_text"
+                        }?.optString("text") }.joinToString("").takeIf { it.isNotBlank() }
+                    }
+                    if (unmatched.size == available.size) {
+                        val plan = unmatched.map { (i, item) ->
+                            val text = finalSummary(item)
+                            val matches = available.filterValues { it.values.joinToString("") == text }
+                            val candidate = matches.keys.singleOrNull()?.takeIf { oldId ->
+                                text != null && finalReasoning.count { finalSummary(it.second) == text } == 1 &&
+                                    summaries.values.count { it.values.joinToString("") == text } == 1 &&
+                                    finalReasoning.none { it.second.getString("id") == oldId } &&
+                                    reasoningIds.none { (slot, id) -> id == oldId && slot != i }
+                            }
+                            Triple(i, item.getString("id"), candidate)
+                        }
+                        if (plan.all { it.third != null } && plan.map { it.third }.distinct().size == plan.size) {
+                            plan.forEach { (i, rawId, displayId) ->
+                                reasoningAliases[rawId] = checkNotNull(displayId)
+                                reasoningId(rawId, i)
+                            }
+                        }
+                    }
                     for(i in 0 until out.length()) {
                         val item=out.getJSONObject(i)
-                        summaryItem(item)
+                        if (item.optString("type") == "reasoning" && finalSummary(item) == null)
+                            pendingReasoning[item.getString("id")]?.let { summaryItem(JSONObject(it), i) }
+                        summaryItem(item, i)
                         if(item.getString("type")=="message") {
                             val content=item.getJSONArray("content")
                             val full=(0 until content.length()).joinToString("") { j ->
@@ -219,6 +290,9 @@ internal object ResponsesStream {
                             sink(ModelEvent.TextFinal(item.getString("id"),displayed))
                         }
                     }
+                    val terminalIds = finalReasoning.map { it.second.getString("id") }.toSet()
+                    pendingReasoning.filterKeys { it !in terminalIds }.values.forEach { summaryItem(JSONObject(it)) }
+                    pendingReasoning.clear()
                     output=(0 until out.length()).map {
                         val item = out.getJSONObject(it)
                         app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(item)
@@ -249,6 +323,9 @@ internal object ResponsesStream {
                     calls.clear(); calls.putAll(savedCalls)
                     parts.clear(); parts.putAll(savedParts)
                     summaries.clear(); summaries.putAll(savedSummaries)
+                    reasoningIds.clear(); reasoningIds.putAll(savedReasoningIds)
+                    reasoningAliases.clear(); reasoningAliases.putAll(savedReasoningAliases)
+                    pendingReasoning.clear(); pendingReasoning.putAll(savedPendingReasoning)
                     chars = savedChars; output = savedOutput; usage = savedUsage
                 } else {
                     // Unknown/failed consumers cannot be replayed safely. Fail closed.

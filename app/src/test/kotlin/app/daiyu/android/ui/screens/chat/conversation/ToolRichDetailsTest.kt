@@ -7,6 +7,10 @@ class ToolRichDetailsTest {
     @Test fun knownRejectedCallsShowConcreteSafeReasonsInsteadOfGenericFailure() {
         for ((code, reason) in listOf(
             "invalid_arguments" to "调用参数不符合工具要求",
+            "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED" to "未能确认活跃或获得焦点的前台窗口，不代表屏幕已锁定",
+            "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED" to "当前窗口信息不可用，未执行操作",
+            "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED" to "当前窗口不在本次允许的显示器上",
+            "APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED" to "存在多个无法唯一确定的前台窗口",
             "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED" to "当前窗口类型不支持观察",
             "SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED" to "系统窗口仅支持观察和精确节点操作",
             "NO_ACTIVE_EXTERNAL_WINDOW" to "当前没有可读取的前台窗口",

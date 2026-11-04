@@ -26,6 +26,13 @@ class GuiScreenToolFactoryTest {
         assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
     }
 
+    @Test fun windowSelectionFailureDoesNotAdvertiseLockScreenAsItsCause() {
+        val description = GuiScreenToolFactory.readDefinition(allowImplicitObservation = true).description
+        assertTrue(description.contains("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED"))
+        assertTrue(description.contains("not that the phone is locked"))
+        assertTrue(description.contains("Only SCREEN_LOCKED_NOT_EXECUTED"))
+    }
+
     @Test fun readAndWriteHaveSeparateFixedEffectsInExistingCatalogContract() {
         assertEquals(ToolEffect.READ_ONLY, tools.getValue("screen").definition.effect)
         assertEquals(ToolEffect.WRITE, tools.getValue("screen_action").definition.effect)

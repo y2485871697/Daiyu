@@ -44,12 +44,16 @@ object ChatTurnMapper {
         val nextSegment = mutableMapOf<TurnOwner, Int>()
         val nextOffset = mutableMapOf<TurnOwner, Long>()
         val display = mutableListOf<DisplayMessage>()
-        history.forEach { message ->
+        history.forEach { original ->
+            val positionedReconnect = reconnects.any { it.position != null &&
+                it.anchor.conversationId == original.conversationId.value && it.anchor.runId == original.runId.value &&
+                it.anchor.messageId == original.id.value }
+            val message = if (positionedReconnect) original else normalizeCompletedReasoning(original)
             val owner = TurnOwner(message.conversationId.value, message.runId.value, message.id.value)
             val segment = nextSegment[owner] ?: 0
             nextSegment[owner] = segment + 1
             val start = nextOffset[owner] ?: 0L
-            nextOffset[owner] = start + app.daiyu.android.timeline.ReconnectPosition.size(message)
+            nextOffset[owner] = start + app.daiyu.android.timeline.ReconnectPosition.size(original)
             val previous = display.lastOrNull()
             // Protocol snapshots and their raw-free live tail are one visual workflow, not
             // separate model replies. Keep durable history/action targets unchanged.

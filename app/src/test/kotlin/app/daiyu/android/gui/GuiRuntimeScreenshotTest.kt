@@ -143,6 +143,14 @@ class GuiRuntimeScreenshotTest {
         override fun unlocked(current: GuiAccessibilityService) = screenUnlocked
         var listedWindows: (() -> List<AccessibilityWindowInfo>)? = null
         var windowReads = 0
+        var configuration: android.accessibilityservice.AccessibilityServiceInfo? = null
+        var configurationFailure = false
+        var configurationReads = 0
+        override fun configuration(current: GuiAccessibilityService): android.accessibilityservice.AccessibilityServiceInfo? {
+            configurationReads++
+            if (configurationFailure) error("private-config-source-exception")
+            return configuration
+        }
         var cacheClears = 0
         var cacheCleared = false
         var cacheClearAccepted = false
@@ -583,18 +591,34 @@ class GuiRuntimeScreenshotTest {
             eventTypes = AccessibilityEvent.TYPE_WINDOWS_CHANGED
             packageNames = arrayOf("private.filter.one", "private.filter.two")
         }
-        service.serviceInfo = info
+        platform.configuration = info
         platform.pkg = "private.target.app"; platform.rootLabel = "private-root-text"; platform.label = "private-child-text"
         platform.missing = true
         platform.listedWindows = { listOf(idleListedWindow()) }
         org.robolectric.shadows.ShadowLog.clear()
         rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
         val line = windowFailureLog()
-        assertTrue(line.contains("config=[flags=${info.flags},capabilities=${info.capabilities},events=${info.eventTypes},package_filters=2]"))
+        assertTrue(line, line.contains("config=[flags=${info.flags},capabilities=${info.capabilities},events=${info.eventTypes},package_filters=2]"))
+        assertEquals(1, platform.configurationReads)
         listOf("private.filter.one", "private.filter.two", platform.pkg, platform.rootLabel, platform.label)
             .forEach { assertFalse(line.contains(it)) }
         assertTrue(line.length < 1024)
         assertEquals(1, platform.windowReads); assertEquals(1, platform.rootReads); assertNoActions()
+    }
+
+    @Test fun unavailableConfigurationKeepsWindowRejectionAndHidesSourceExceptions() {
+        platform.missing = true
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        for (throws in listOf(false, true)) {
+            platform.configurationFailure = throws
+            org.robolectric.shadows.ShadowLog.clear()
+            rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+            val line = windowFailureLog()
+            assertTrue(line, line.contains("config=[unavailable]"))
+            assertFalse(line.contains("private-config-source-exception"))
+        }
+        assertEquals(2, platform.configurationReads); assertEquals(2, platform.windowReads); assertEquals(2, platform.rootReads)
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
     @Test @Config(sdk = [33]) fun refreshedWindowDiagnosticsDistinguishSystemOnlyAndOffDisplayWindows() {

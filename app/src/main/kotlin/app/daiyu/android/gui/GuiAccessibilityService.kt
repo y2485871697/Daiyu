@@ -99,6 +99,7 @@ internal interface GuiRuntimeAccess {
             current.getSystemService(PowerManager::class.java).isInteractive
     fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? = current.rootInActiveWindow
     fun windows(current: GuiAccessibilityService): List<android.view.accessibility.AccessibilityWindowInfo> = current.windows.orEmpty()
+    fun configuration(current: GuiAccessibilityService): android.accessibilityservice.AccessibilityServiceInfo? = current.serviceInfo
     @androidx.annotation.RequiresApi(33)
     fun clearWindowCache(current: GuiAccessibilityService): Boolean = current.clearCache()
     fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? =
@@ -559,9 +560,10 @@ internal object GuiRuntime {
             }
         } catch (_: Exception) { "unavailable" }
         fun configurationSummary(): String = try {
-            val info = current.serviceInfo
-            "flags=${info.flags},capabilities=${info.capabilities},events=${info.eventTypes}," +
-                "package_filters=${info.packageNames?.size ?: 0}"
+            val info = access.configuration(current)
+            if (info == null) "unavailable" else
+                "flags=${info.flags},capabilities=${info.capabilities},events=${info.eventTypes}," +
+                    "package_filters=${info.packageNames?.size ?: 0}"
         } catch (_: Exception) { "unavailable" }
         fun reject(code: String, detail: String? = null): GuiResult.Rejected {
             runCatching {

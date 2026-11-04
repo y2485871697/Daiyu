@@ -337,7 +337,7 @@ internal object GuiRuntime {
         } else { generation++; clearNodes() }
     }
     private data class NodeContext(val packageName: String, val windowId: Int, val children: Int, val visible: Boolean)
-    private data class TreeSample(val packageName: String, val windowId: Int, val nodes: List<GuiNode>,
+    private data class TreeSample(val packageName: String, val windowId: Int, val windowType: Int, val nodes: List<GuiNode>,
         val contexts: List<NodeContext>, val truncated: Boolean, val maxNodes: Int) {
         // Redacted passwords and incomplete traversals cannot prove tree equality.
         val verifiable: Boolean get() = !truncated && nodes.none { it.password }
@@ -531,10 +531,12 @@ internal object GuiRuntime {
         finishDrain(lease)
     }
 
-    /** Default-display active application only. Self is a lease-local, live-token exception,
-     * never a global allow-own switch. An explicit external target must also match exactly. */
+    private data class AdmittedRoot(val node: AccessibilityNodeInfo, val windowType: Int)
+
+    /** Current default-display application or system dialog. System windows authorize exact
+     * nodes only; self still requires its original application window and live lease token. */
     @Suppress("DEPRECATION")
-    private fun externalRoot(lease: GuiLeaseGate.Lease, current: GuiAccessibilityService): GuiResult<AccessibilityNodeInfo> {
+    private fun externalRoot(lease: GuiLeaseGate.Lease, current: GuiAccessibilityService): GuiResult<AdmittedRoot> {
         targetRejection(lease)?.let { return it }
         val binding = targetBinding!!
         val self = isSelfLease(lease)
@@ -546,12 +548,13 @@ internal object GuiRuntime {
         }
         fun onDefaultDisplay(window: android.view.accessibility.AccessibilityWindowInfo): Boolean =
             Build.VERSION.SDK_INT < 30 || window.displayId == Display.DEFAULT_DISPLAY
-        fun admit(node: AccessibilityNodeInfo, window: android.view.accessibility.AccessibilityWindowInfo): GuiResult<AccessibilityNodeInfo> {
+        fun admit(node: AccessibilityNodeInfo, window: android.view.accessibility.AccessibilityWindowInfo): GuiResult<AdmittedRoot> {
             val failure = try {
                 val pkg = node.packageName?.toString().orEmpty()
                 when {
                     !onDefaultDisplay(window) -> "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED"
-                    window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION -> "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED"
+                    window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION &&
+                        (self || window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM) -> "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED"
                     !window.isActive && !window.isFocused -> "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED"
                     node.windowId != window.id -> "APPLICATION_WINDOW_ID_MISMATCH_NOT_EXECUTED"
                     pkg.isBlank() || pkg.length > 256 -> "APPLICATION_PACKAGE_UNAVAILABLE_NOT_EXECUTED"
@@ -560,7 +563,7 @@ internal object GuiRuntime {
                     else -> null
                 }
             } catch (_: Exception) { "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED" }
-            if (failure == null) return GuiResult.Value(node)
+            if (failure == null) return GuiResult.Value(AdmittedRoot(node, window.type))
             node.recycle()
             return reject(failure)
         }
@@ -568,11 +571,14 @@ internal object GuiRuntime {
         if (windows.isNotEmpty()) {
             try {
                 if (windows.size > 64) return reject("APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED")
-                val applications = windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
-                val local = applications.filter(::onDefaultDisplay)
-                if (local.isEmpty()) return reject(if (applications.isNotEmpty())
+                val supported = windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION ||
+                    !self && it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM }
+                val local = supported.filter(::onDefaultDisplay)
+                if (local.isEmpty()) return reject(if (supported.isNotEmpty())
                     "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED" else "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
-                val candidates = local.filter { it.isActive || it.isFocused }
+                val systemLayer = local.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && it.isFocused }
+                    .maxOfOrNull { it.layer }
+                val candidates = local.filter { (it.isActive || it.isFocused) && (systemLayer == null || it.layer >= systemLayer) }
                 if (candidates.isEmpty()) return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
                 fun rank(window: android.view.accessibility.AccessibilityWindowInfo): Int = if (window.isActive) 2 else 1
                 val selected = candidates.maxWithOrNull(compareBy<android.view.accessibility.AccessibilityWindowInfo>({ rank(it) }, { it.layer }))!!
@@ -600,7 +606,7 @@ internal object GuiRuntime {
         return rejection
     }
 
-    /** Reacquire the admitted application tree; do NOT publish a new observation/clear the approved one.
+    /** Reacquire the admitted application or system tree; do NOT publish a new observation/clear the approved one.
      * A bounded complete traversal must find exactly one matching target. No coordinate fallback. */
     @Suppress("DEPRECATION")
     internal fun validateExactTarget(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<Unit> {
@@ -610,10 +616,12 @@ internal object GuiRuntime {
         val observed = lease.observation!!
         if (contentChanged && action.nodeId == null) return recordObservationRejection(lease,
             action.observationId, "validate_target", GuiResult.Rejected("OBSERVATION_STALE"))
+        if (observed.windowType != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION && action.nodeId == null)
+            return GuiResult.Rejected("SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
         val fetched = externalRoot(lease, service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
-        val root = fetched.value
-        if (root.windowId != observed.windowId || root.packageName?.toString() != observed.packageName) {
+        val root = fetched.value.node
+        if (fetched.value.windowType != observed.windowType || root.windowId != observed.windowId || root.packageName?.toString() != observed.packageName) {
             root.recycle(); return rejectChangedTarget(lease, "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED")
         }
         val original = action.nodeId?.let { id -> observed.nodes.singleOrNull { it.id == id } }
@@ -659,7 +667,8 @@ internal object GuiRuntime {
     private fun sampleTree(lease: GuiLeaseGate.Lease, retain: Boolean, maxNodes: Int = 128): GuiResult<TreeSample> {
         val fetched = externalRoot(lease, service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
-        val source = fetched.value
+        val admitted = fetched.value
+        val source = admitted.node
         val result = mutableListOf<GuiNode>()
         val contexts = mutableListOf<NodeContext>()
         var truncated = false
@@ -700,7 +709,7 @@ internal object GuiRuntime {
         return try {
             visit(source, null, 0)
             val root = contexts.first()
-            GuiResult.Value(TreeSample(root.packageName, root.windowId, result, contexts, truncated, maxNodes))
+            GuiResult.Value(TreeSample(root.packageName, root.windowId, admitted.windowType, result, contexts, truncated, maxNodes))
         } catch (_: Exception) { GuiResult.Rejected("OBSERVATION_UNAVAILABLE") }
     }
 
@@ -718,7 +727,7 @@ internal object GuiRuntime {
         val tree = sampled.value
         if (isSelfLease(lease)) retainSelfTargets(tree)
         val observation = GuiObservation(UUID.randomUUID().toString(), tree.packageName, tree.windowId, startGeneration,
-            SystemClock.elapsedRealtime(), tree.nodes, tree.truncated, maxNodes)
+            SystemClock.elapsedRealtime(), tree.nodes, tree.truncated, maxNodes, tree.windowType)
         val published = gate.publish(lease, observation)
         if (published is GuiResult.Value) screenshotBinding = observation.observationId to tree else clearNodes()
         return published
@@ -778,13 +787,14 @@ internal object GuiRuntime {
         try {
             val fetched = externalRoot(lease, current)
             if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
-            val active = fetched.value
+            val active = fetched.value.node
             val sameWindow = try {
                 if (isSelfLease(lease) && action.nodeId != null) {
                     val checked = validateSelfTarget(lease, action.nodeId, active)
                     if (checked is GuiResult.Rejected) return checked
                 }
-                active.windowId == observed.windowId && active.packageName?.toString().orEmpty() == observed.packageName
+                fetched.value.windowType == observed.windowType && active.windowId == observed.windowId &&
+                    active.packageName?.toString().orEmpty() == observed.packageName
             } finally { active.recycle() }
             if (!sameWindow) return rejectChangedTarget(lease, "OBSERVATION_STALE")
         } catch (_: Exception) { return GuiResult.Rejected("ACTIVE_WINDOW_UNAVAILABLE_NOT_EXECUTED") }
@@ -906,6 +916,8 @@ internal object GuiRuntime {
         validateObservation(lease, observationId, "capture")?.let { return rejected(it.code) }
         if (Build.VERSION.SDK_INT < 30) return rejected("SCREENSHOT_UNSUPPORTED_API")
         val observed = lease.observation!!
+        if (observed.windowType != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION)
+            return rejected("SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
         // A current self-app image is a visual read, never an authorization for old node IDs.
         // Its live content may stream; the original lease, generation, window and display may not change.
         @Suppress("DEPRECATION")
@@ -915,7 +927,7 @@ internal object GuiRuntime {
             validateObservation(lease, observationId, "capture_current_window")?.let { return it }
             val fetched = externalRoot(lease, service!!)
             if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
-            val root = fetched.value
+            val root = fetched.value.node
             return try {
                 if (root.packageName?.toString().orEmpty() != observed.packageName || root.windowId != observed.windowId)
                     rejectChangedTarget(lease, "SCREENSHOT_WINDOW_CHANGED") else null

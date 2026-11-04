@@ -66,12 +66,13 @@ class GuiAppLaunchTest {
         override fun enabled(current: GuiAccessibilityService) = enabled
         override fun unlocked(current: GuiAccessibilityService) = unlocked
         var rootPackage: String? = null
+        var rootWindowType = AccessibilityWindowInfo.TYPE_APPLICATION
         override fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? {
             rootReads++
             val pkg = rootPackage ?: return null
             val window = AccessibilityWindowInfo.obtain()
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, 7 + launches))
-            ReflectionHelpers.callInstanceMethod<Unit>(window, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, AccessibilityWindowInfo.TYPE_APPLICATION))
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, rootWindowType))
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setActive", ClassParameter.from(Boolean::class.javaPrimitiveType!!, true))
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, 0))
             return AccessibilityNodeInfo.obtain().apply {
@@ -235,6 +236,26 @@ class GuiAppLaunchTest {
         assertTrue((f.callTool("screen_action", args, "tap") as DispatchOutcome.Confirmed).replayed)
         assertEquals(1, platform.nodeActions)
         assertEquals(0, platform.captures)
+    }
+
+    @Test fun ordinaryLaunchObservesSystemChooserOnlyAfterReleasingTheExplicitAppTarget() {
+        val f = Fixture()
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        platform.rootPackage = "system.dialog"
+        platform.rootWindowType = AccessibilityWindowInfo.TYPE_SYSTEM
+        val targeted = f.callTool("screen", """{"operation":"observe","target_package":"$target"}""", "targeted")
+        assertEquals(DispatchOutcome.NotExecuted("TARGET_PACKAGE_MISMATCH_NOT_EXECUTED"), targeted)
+        val observed = f.callTool("screen", """{"operation":"observe"}""", "chooser") as DispatchOutcome.Confirmed
+        val payload = JSONObject(observed.payload)
+        assertEquals("system.dialog", payload.getString("package_name"))
+        assertEquals(AccessibilityWindowInfo.TYPE_SYSTEM, payload.getInt("window_type"))
+        val args = JSONObject().put("operation", "tap").put("node_id", 0)
+            .put("observation_id", payload.getString("observation_id")).toString()
+        val delivered = f.callTool("screen_action", args, "choose") as DispatchOutcome.Confirmed
+        assertFalse(delivered.isError)
+        assertEquals(1, platform.nodeActions)
+        assertTrue((f.callTool("screen_action", args, "choose") as DispatchOutcome.Confirmed).replayed)
+        assertEquals(1, platform.nodeActions); assertEquals(0, platform.captures)
     }
 
     @Test fun implicitSelfScreenshotRetainsNarrowTargetAndDoesNotAskForExternalLocation() {

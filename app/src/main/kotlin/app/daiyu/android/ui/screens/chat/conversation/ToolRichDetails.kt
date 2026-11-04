@@ -354,7 +354,19 @@ internal object ToolRichDetails {
         }
         val failed = privacyRestricted || failureStatus != null || receiptStates.any { it.opt("ok") == false } ||
             launchingDelegation && receiptStates.any { (it.opt("error") as? String)?.isNotBlank() == true }
-        val failure = if (privacyRestricted) "结果未获展示授权" else when (failureStatus) {
+        val failureReason = receiptStates.asSequence().flatMap { sequenceOf(it.opt("error"), it.opt("code")) }
+            .mapNotNull { code -> when (code) {
+                "invalid_arguments" -> "调用参数不符合工具要求"
+                "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED" -> "当前窗口类型不支持观察"
+                "SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED" -> "系统窗口仅支持观察和精确节点操作"
+                "NO_ACTIVE_EXTERNAL_WINDOW" -> "当前没有可读取的前台窗口"
+                "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED" -> "当前前台窗口与指定应用不一致"
+                "SCREEN_LOCKED_NOT_EXECUTED" -> "屏幕已锁定，未执行操作"
+                "SERVICE_DISCONNECTED_NOT_EXECUTED" -> "无障碍服务未连接"
+                "OBSERVATION_STALE" -> "观察已失效，请重新查看屏幕"
+                else -> null
+            } }.firstOrNull()
+        val failure = if (privacyRestricted) "结果未获展示授权" else failureReason ?: when (failureStatus) {
             "permission_denied" -> "缺少本次操作所需权限"
             "no_cached_location" -> "没有可用的最近位置缓存"
             "unsupported" -> "设备不支持本次操作"

@@ -87,6 +87,8 @@ jobs:
             :app:compileDebugKotlin :app:testDebugUnitTest \
             --tests 'app.daiyu.android.gui.GuiAppLaunchTest' \
             --tests 'app.daiyu.android.integration.tools.OrdinaryWriteRepeatTest' \
+            --tests 'app.daiyu.android.integration.tools.PlatformCatalogTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest' \
             --tests 'app.daiyu.android.gui.GuiCaptureDisposalTest' \
             --tests 'app.daiyu.android.gui.GuiCaptureRequestTest' \
             --tests 'app.daiyu.android.gui.GuiLeaseGateTest' \
@@ -96,6 +98,7 @@ jobs:
             --tests 'app.daiyu.android.gui.GuiScreenToolFactoryTest' \
             --tests 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest' \
             :core-domain:test --tests 'app.daiyu.android.domain.tools.ToolDispatcherTest' \
+            --tests 'app.daiyu.android.domain.tools.ToolAdvertisementTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee gui-screenshot-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -104,7 +107,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.domain.tools.ToolDispatcherTest', 'app.daiyu.android.integration.tools.OrdinaryWriteRepeatTest', 'app.daiyu.android.gui.GuiAppLaunchTest', 'app.daiyu.android.gui.GuiCaptureRequestTest', 'app.daiyu.android.gui.GuiLeaseGateTest', 'app.daiyu.android.gui.GuiProductionConfirmationTest', 'app.daiyu.android.gui.GuiRuntimeScreenshotTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.gui.GuiProductionEntryContractTest', 'app.daiyu.android.gui.GuiCaptureDisposalTest', 'app.daiyu.android.gui.GuiScreenToolFactoryTest'}
+          expected = {'app.daiyu.android.domain.tools.ToolAdvertisementTest', 'app.daiyu.android.integration.tools.PlatformCatalogTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest', 'app.daiyu.android.domain.tools.ToolDispatcherTest', 'app.daiyu.android.integration.tools.OrdinaryWriteRepeatTest', 'app.daiyu.android.gui.GuiAppLaunchTest', 'app.daiyu.android.gui.GuiCaptureRequestTest', 'app.daiyu.android.gui.GuiLeaseGateTest', 'app.daiyu.android.gui.GuiProductionConfirmationTest', 'app.daiyu.android.gui.GuiRuntimeScreenshotTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.gui.GuiProductionEntryContractTest', 'app.daiyu.android.gui.GuiCaptureDisposalTest', 'app.daiyu.android.gui.GuiScreenToolFactoryTest'}
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest', 'core-domain/build/test-results/test') for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

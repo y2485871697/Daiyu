@@ -18,6 +18,7 @@ internal object GuiScreenToolFactory {
 
     internal fun readDefinition(allowImplicitObservation: Boolean = false): ToolDefinition = ToolDefinition("screen", 1,
             "Bounded accessibility observation or an explicitly requested screenshot. observe forbids observation_id. " +
+                "Active system dialogs support observation and exact node actions, not screenshots or coordinate/global actions. The actual package_name and window_type are returned; omit target_package to inspect an intervening system dialog. " +
                 "If truncated, request a fresh observe with max_nodes up to 512; never act on an incomplete tree. " +
                 (if (allowImplicitObservation) "screenshot accepts a current observation_id for a tree-bound image; omit it for a current visual-only image. Visual-only results have capture_id, not observation_id; run observe before node actions. "
                  else "screenshot requires observation_id from a successful observe in this session. ") +
@@ -104,7 +105,7 @@ internal object GuiScreenToolFactory {
     }
     internal fun observationJson(value: GuiObservation): String = JSONObject()
         .put("observation_id", value.observationId).put("package_name", value.packageName)
-        .put("window_id", value.windowId).put("truncated", value.truncated).put("max_nodes", value.maxNodes)
+        .put("window_id", value.windowId).put("window_type", value.windowType).put("truncated", value.truncated).put("max_nodes", value.maxNodes)
         .put("recovery_hint", if (value.truncated && value.maxNodes < 512) "observe_again_with_max_nodes_512" else JSONObject.NULL)
         .put("captured_elapsed_realtime_ms", value.capturedAt).put("expires_after_ms", GUI_OBSERVATION_TTL_MILLIS)
         .put("nodes", JSONArray().apply {

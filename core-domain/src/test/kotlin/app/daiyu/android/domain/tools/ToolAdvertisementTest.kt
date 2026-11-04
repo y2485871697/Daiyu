@@ -49,6 +49,22 @@ class ToolAdvertisementTest {
     }
 
     @Test
+    fun emptyArgumentToolsAdvertiseEmptyObjectWithoutAcceptingPlaceholderFields() {
+        val definition = ToolDefinition("device_time", 1, "Read device time", "device.time.read",
+            ToolEffect.READ_ONLY, ToolSchema())
+        val advertised = ToolAdvertisement.from(definition)
+        assertTrue(advertised.description.startsWith(definition.description))
+        assertTrue(advertised.description.contains("调用参数必须为 {}"))
+        assertTrue(advertised.description.contains("不要添加 _placeholder"))
+        assertEquals(definition.schema.jsonSchema(), advertised.parameters)
+        assertEquals("{}", definition.schema.parse("{}").canonicalJson())
+        var rejected = false
+        try { definition.schema.parse("{\"_placeholder\":\"x\"}") }
+        catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+    }
+
+    @Test
     fun catalogAdvertisementFiltersCapabilitiesAndDoesNotExecuteBarrierTools() {
         var executed = false
         fun registered(definition: ToolDefinition) = object : RegisteredTool {

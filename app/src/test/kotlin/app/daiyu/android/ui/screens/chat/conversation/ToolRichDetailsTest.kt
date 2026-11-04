@@ -4,6 +4,37 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ToolRichDetailsTest {
+    @Test fun knownRejectedCallsShowConcreteSafeReasonsInsteadOfGenericFailure() {
+        for ((code, reason) in listOf(
+            "invalid_arguments" to "调用参数不符合工具要求",
+            "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED" to "当前窗口类型不支持观察",
+            "SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED" to "系统窗口仅支持观察和精确节点操作",
+            "NO_ACTIVE_EXTERNAL_WINDOW" to "当前没有可读取的前台窗口",
+            "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED" to "当前前台窗口与指定应用不一致",
+            "SCREEN_LOCKED_NOT_EXECUTED" to "屏幕已锁定，未执行操作",
+            "SERVICE_DISCONNECTED_NOT_EXECUTED" to "无障碍服务未连接",
+            "OBSERVATION_STALE" to "观察已失效，请重新查看屏幕")) {
+            val value = ToolRichDetails.project("device_read", "platform_permissions", "{}",
+                """{"ok":false,"executed":false,"error":"$code"}""")
+            assertTrue(value.failed)
+            assertEquals(reason, value.prose!!.text)
+            assertTrue(value.technical.any { it.title == "原始回执" && it.text.contains(code) })
+        }
+    }
+
+    @Test fun knownFailureReasonsHonorNestedCodePrivacyAndUnknownFallback() {
+        val nested = ToolRichDetails.project("device_read", "device_time", "{}",
+            """{"ok":false,"data":{"code":"invalid_arguments"}}""")
+        assertEquals("调用参数不符合工具要求", nested.prose!!.text)
+        val private = ToolRichDetails.project("device_read", "platform_permissions", "{}",
+            """{"ok":false,"privacy_redacted":true,"error":"invalid_arguments"}""")
+        assertEquals("结果未获展示授权", private.prose!!.text)
+        assertFalse(private.technical.any { it.text.contains("invalid_arguments") })
+        val unknown = ToolRichDetails.project("device_read", "device_time", "{}",
+            """{"ok":false,"error":"unrecognized-backend-detail"}""")
+        assertEquals("本次调用未完成", unknown.prose!!.text)
+    }
+
     private fun text(value: ToolRichDetailsUi): String = (value.documents + value.technical + listOfNotNull(value.prose) + value.entries.flatMap { it.documents })
         .joinToString("\n") { it.text } + value.entries.joinToString { it.title } + value.fields.joinToString { it.value } + value.entries.flatMap { it.fields }.joinToString { it.value }
 

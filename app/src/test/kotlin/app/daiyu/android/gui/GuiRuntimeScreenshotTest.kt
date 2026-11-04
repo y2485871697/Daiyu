@@ -380,8 +380,8 @@ class GuiRuntimeScreenshotTest {
     }
 
     private fun listedWindow(pkg: String = "external.app", id: Int = 7, active: Boolean = true,
-        focused: Boolean = false, layer: Int = 0): AccessibilityWindowInfo {
-        platform.pkg = pkg; platform.windowId = id; platform.active = active
+        focused: Boolean = false, layer: Int = 0, type: Int = AccessibilityWindowInfo.TYPE_APPLICATION): AccessibilityWindowInfo {
+        platform.pkg = pkg; platform.windowId = id; platform.active = active; platform.windowType = type
         val root = checkNotNull(platform.root(service))
         return checkNotNull(root.window).also {
             shadowOf(it).setRoot(root); shadowOf(it).setFocused(focused); shadowOf(it).setLayer(layer)
@@ -541,6 +541,96 @@ class GuiRuntimeScreenshotTest {
             listOf(listedWindow(active = false, focused = true, layer = 10), listedWindow("other.app", 8))
         }
         rejected(session.previewFromUser(), "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED")
+        assertNoActions()
+    }
+
+    @Test fun activeSystemRootCanBeObservedAndClickedExactlyOnceWithoutCoordinateFallback() {
+        platform.windowType = AccessibilityWindowInfo.TYPE_SYSTEM
+        val observation = observe()
+        assertEquals(AccessibilityWindowInfo.TYPE_SYSTEM, observation.windowType)
+        assertEquals(AccessibilityWindowInfo.TYPE_SYSTEM,
+            org.json.JSONObject(GuiScreenToolFactory.observationJson(observation)).getInt("window_type"))
+        val action = approve(observation)
+        assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
+        assertEquals(1, platform.nodeActions)
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Rejected)
+        assertEquals(1, platform.nodeActions); assertEquals(0, platform.gestures)
+    }
+
+    @Test fun focusedSystemWindowIsSelectedAheadOfTheApplicationItCovers() {
+        platform.listedWindows = {
+            listOf(listedWindow(pkg = "underlying.app", id = 7, active = true, layer = 1),
+                listedWindow(pkg = "system.dialog", id = 9, active = false, focused = true,
+                    layer = 2, type = AccessibilityWindowInfo.TYPE_SYSTEM))
+        }
+        val observation = observe()
+        assertEquals("system.dialog", observation.packageName)
+        assertEquals(9, observation.windowId)
+        assertEquals(AccessibilityWindowInfo.TYPE_SYSTEM, observation.windowType)
+        val action = approve(observation)
+        assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun explicitApplicationTargetDoesNotReadThroughASystemDialog() {
+        openTarget("underlying.app")
+        platform.listedWindows = {
+            listOf(listedWindow(pkg = "underlying.app", id = 7, active = true, layer = 1),
+                listedWindow(pkg = "system.dialog", id = 9, active = false, focused = true,
+                    layer = 2, type = AccessibilityWindowInfo.TYPE_SYSTEM))
+        }
+        rejected(session.previewFromUser(), "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED")
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun systemWindowListsStillRejectAmbiguityIdleAndOtherDisplays() {
+        platform.listedWindows = {
+            listOf(listedWindow(id = 7, type = AccessibilityWindowInfo.TYPE_SYSTEM),
+                listedWindow(pkg = "other.system", id = 9, type = AccessibilityWindowInfo.TYPE_SYSTEM))
+        }
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED")
+        platform.listedWindows = { listOf(listedWindow(active = false, type = AccessibilityWindowInfo.TYPE_SYSTEM)) }
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+        platform.listedWindows = null
+        platform.active = true; platform.windowType = AccessibilityWindowInfo.TYPE_SYSTEM; platform.displayId = 1
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED")
+        assertNoActions()
+    }
+
+    @Test fun systemObservationDoesNotEnableScreenshotGlobalOrCoordinateActions() {
+        platform.windowType = AccessibilityWindowInfo.TYPE_SYSTEM
+        val observation = observe()
+        rejected(screenshot(observation).completed(), "SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
+        for (action in listOf(GuiAction(observation.observationId, GuiOperation.BACK),
+            GuiAction(observation.observationId, GuiOperation.COORDINATE_TAP,
+                gesture = GuiGesture(20, 20, 20, 20, 50)))) {
+            assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+            rejected(GuiRuntime.action(session.lease, action), "SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
+        }
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+        val action = approve(observation)
+        assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun systemNodeDeliveryRejectsChangedWindowTypeAndLockedScreen() {
+        platform.windowType = AccessibilityWindowInfo.TYPE_SYSTEM
+        val observation = observe(); val action = approve(observation)
+        platform.windowType = AccessibilityWindowInfo.TYPE_APPLICATION
+        rejected(GuiRuntime.action(session.lease, action), "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED")
+        assertNoActions()
+        platform.windowType = AccessibilityWindowInfo.TYPE_SYSTEM
+        val locked = observe(); val lockedAction = approve(locked)
+        platform.screenUnlocked = false
+        rejected(GuiRuntime.action(session.lease, lockedAction), "SCREEN_LOCKED_NOT_EXECUTED")
+        assertNoActions()
+    }
+
+    @Test fun inputMethodsAndAccessibilityOverlaysNeverBecomeSystemDialogTargets() {
+        for (type in listOf(AccessibilityWindowInfo.TYPE_INPUT_METHOD, AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)) {
+            platform.windowType = type
+            rejected(session.previewFromUser(), "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
+        }
         assertNoActions()
     }
 

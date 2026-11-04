@@ -20,6 +20,7 @@ internal data class GuiNode(
 internal class GuiObservation(
     val observationId: String, val packageName: String, val windowId: Int,
     val generation: Long, val capturedAt: Long, nodes: List<GuiNode>, val truncated: Boolean, val maxNodes: Int = 128,
+    val windowType: Int = android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION,
 ) {
     val nodes: List<GuiNode> = Collections.unmodifiableList(nodes.toList())
 }

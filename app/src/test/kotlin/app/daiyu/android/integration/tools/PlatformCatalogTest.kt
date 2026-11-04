@@ -28,6 +28,22 @@ class PlatformCatalogTest {
         override fun close() = resources.close()
     }
 
+    @Test fun emptyArgumentQueriesRejectPlaceholdersBeforeReadingAndRecoverWithEmptyObject() {
+        Fixture().use { f ->
+            for (tool in listOf(PlatformReadTool.TIME, PlatformReadTool.PERMISSIONS)) {
+                val before = f.reads.get()
+                assertEquals(DispatchOutcome.NotExecuted("invalid_arguments"),
+                    f.dispatch(f.call(tool, "{\"_placeholder\":\"x\"}")))
+                assertEquals(before, f.reads.get())
+                val result = f.dispatch(f.call(tool)) as DispatchOutcome.Confirmed
+                assertFalse(result.isError)
+                assertEquals(before + 1, f.reads.get())
+                assertTrue((f.dispatch(f.call(tool)) as DispatchOutcome.Confirmed).replayed)
+                assertEquals(before + 1, f.reads.get())
+            }
+        }
+    }
+
     @Test fun platformLeavesAreExplicitReadOnlyCapabilitiesNotLegacyToggleExpansion() {
         assertEquals(2, AndroidToolRegistry.capabilitiesFor(ReadOnlyTool.entries.toSet()).size)
         assertEquals(PlatformReadTool.entries.size, PlatformReadTool.entries.map { it.capability }.toSet().size)

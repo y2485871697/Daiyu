@@ -44,7 +44,8 @@ data class ToolAdvertisement(
         /** Build only from the canonical definition; no execution or adapter lookup occurs. */
         fun from(definition: ToolDefinition): ToolAdvertisement = ToolAdvertisement(
             name = definition.name,
-            description = definition.description,
+            description = definition.description + if (definition.schema.fields.isEmpty())
+                " 此工具无参数；调用参数必须为 {}，不要添加 _placeholder 或其它占位字段。" else "",
             capability = definition.capability,
             effect = definition.effect,
             parameters = definition.schema.jsonSchema()

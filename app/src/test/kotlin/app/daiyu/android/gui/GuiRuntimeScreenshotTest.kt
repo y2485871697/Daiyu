@@ -142,7 +142,21 @@ class GuiRuntimeScreenshotTest {
         override fun enabled(current: GuiAccessibilityService) = permissionEnabled
         override fun unlocked(current: GuiAccessibilityService) = screenUnlocked
         var listedWindows: (() -> List<AccessibilityWindowInfo>)? = null
-        override fun windows(current: GuiAccessibilityService) = listedWindows?.invoke().orEmpty()
+        var windowReads = 0
+        var cacheClears = 0
+        var cacheCleared = false
+        var cacheClearAccepted = false
+        var cacheClearFailure = false
+        override fun windows(current: GuiAccessibilityService): List<AccessibilityWindowInfo> {
+            windowReads++
+            return listedWindows?.invoke().orEmpty()
+        }
+        override fun clearWindowCache(current: GuiAccessibilityService): Boolean {
+            cacheClears++
+            if (cacheClearFailure) error("cache unavailable")
+            cacheCleared = cacheClearAccepted
+            return cacheCleared
+        }
         override fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? {
             rootReads++
             onRootRead?.invoke()
@@ -530,6 +544,129 @@ class GuiRuntimeScreenshotTest {
             setId(id); setType(type); setActive(false); setFocused(false); setLayer(layer); setDisplayId(0)
             setBoundsInScreen(Rect(0, 0, 100, 100))
         }
+    }
+
+    @Test @Config(sdk = [33]) fun idleCachedWindowsRefreshOnceBeforeSelectingTheActiveApplication() {
+        platform.cacheClearAccepted = true
+        platform.listedWindows = {
+            val app = if (platform.cacheCleared) listedWindow() else idleListedWindow()
+            listOf(app, idleListedWindow(9, AccessibilityWindowInfo.TYPE_SYSTEM, 1).apply {
+                shadowOf(this).setBoundsInScreen(Rect(0, 0, 100, 8))
+            }, idleListedWindow(10, AccessibilityWindowInfo.TYPE_SYSTEM, 2).apply {
+                shadowOf(this).setBoundsInScreen(Rect(0, 94, 100, 100))
+            })
+        }
+        assertEquals("external.app", observe().packageName)
+        assertEquals(1, platform.cacheClears)
+        assertEquals(2, platform.windowReads)
+        assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun idleCacheRefreshCannotSelectTheRequestedBackgroundPackage() {
+        openTarget("wanted.app")
+        platform.cacheClearAccepted = true
+        platform.listedWindows = { if (platform.cacheCleared) listOf(listedWindow("other.app")) else listOf(idleListedWindow()) }
+        rejected(session.previewFromUser(), "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED")
+        assertEquals(1, platform.cacheClears); assertEquals(2, platform.windowReads)
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun cacheRefreshKeepsSystemDialogsExactNodeOnly() {
+        platform.cacheClearAccepted = true
+        platform.listedWindows = { if (platform.cacheCleared)
+            listOf(listedWindow("android", 9, active = true, focused = true, layer = 2, type = AccessibilityWindowInfo.TYPE_SYSTEM))
+            else listOf(idleListedWindow()) }
+        val observed = observe()
+        assertEquals(AccessibilityWindowInfo.TYPE_SYSTEM, observed.windowType)
+        rejected(screenshot(observed).completed(), "SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
+        assertEquals(1, platform.cacheClears); assertTrue(platform.callbacks.isEmpty())
+        assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun stillIdleAfterCacheRefreshIsRejectedWithoutARefreshLoop() {
+        platform.active = false
+        platform.cacheClearAccepted = true
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+        assertEquals(1, platform.cacheClears); assertEquals(2, platform.windowReads)
+        val logs = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui").map { it.msg }
+        assertTrue(logs.any { it.contains("cache_refresh=cleared") && it.contains("reason=root_inactive") })
+        assertTrue(logs.none { it.contains("external.app") || it.contains("before") || it.contains("reasoning") })
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun refreshDoesNotBypassAnIdleSystemOverlapOrIdentityConflict() {
+        platform.cacheClearAccepted = true
+        for (windows in listOf<() -> List<AccessibilityWindowInfo>>(
+            { listOf(idleListedWindow(), idleListedWindow(9, AccessibilityWindowInfo.TYPE_SYSTEM, 1)) },
+            { listOf(idleListedWindow(), idleListedWindow()) },
+            { listOf(idleListedWindow(layer = 1)) })) {
+            openTarget(null); platform.cacheCleared = false
+            platform.listedWindows = windows
+            rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+            assertNull(session.lease.observation)
+        }
+        assertEquals(3, platform.cacheClears); assertEquals(6, platform.windowReads)
+        assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun cacheRefreshFailureDoesNotPublishOrExecuteAnything() {
+        platform.cacheClearFailure = true
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED")
+        assertEquals(1, platform.cacheClears); assertEquals(1, platform.windowReads)
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun refreshedWindowListsStillEnforceDisplayLimitAndIdentity() {
+        platform.cacheClearAccepted = true
+        for ((fresh, code) in listOf<Pair<() -> List<AccessibilityWindowInfo>, String>>(
+            { emptyList<AccessibilityWindowInfo>() } to "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED",
+            { List(65) { idleListedWindow(id = it) } } to "APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED",
+            { listOf(listedWindow().apply { shadowOf(this).setDisplayId(1) }) } to "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED",
+            { listOf(listedWindow(), listedWindow("other.app", 8)) } to "APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED")) {
+            openTarget(null); platform.cacheCleared = false
+            platform.listedWindows = { if (platform.cacheCleared) fresh() else listOf(idleListedWindow()) }
+            rejected(session.previewFromUser(), code)
+            assertNull(session.lease.observation)
+        }
+        assertEquals(4, platform.cacheClears); assertEquals(8, platform.windowReads)
+        assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun cacheRefreshCanSelectAFocusedOnlyWindowAndRejectAReadException() {
+        platform.cacheClearAccepted = true
+        platform.listedWindows = { if (platform.cacheCleared) listOf(listedWindow(active = false, focused = true)) else listOf(idleListedWindow()) }
+        assertEquals("external.app", observe().packageName)
+        assertEquals(1, platform.cacheClears); assertEquals(2, platform.windowReads)
+        openTarget(null); platform.cacheCleared = false
+        platform.listedWindows = { if (platform.cacheCleared) error("private source error") else listOf(idleListedWindow()) }
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED")
+        assertEquals(2, platform.cacheClears); assertEquals(4, platform.windowReads)
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun unavailableCacheRefreshKeepsTheExistingRootCrossCheck() {
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        assertEquals("external.app", observe().packageName)
+        assertEquals(1, platform.cacheClears); assertEquals(1, platform.windowReads)
+        assertNoActions()
+    }
+
+    @Test fun olderApisKeepTheExistingRootCrossCheckWithoutCacheApiCalls() {
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        assertEquals("external.app", observe().packageName)
+        assertEquals(0, platform.cacheClears); assertEquals(1, platform.windowReads)
+        assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun activeWindowListsNeverClearTheCache() {
+        platform.cacheClearAccepted = true
+        platform.listedWindows = { listOf(listedWindow()) }
+        assertEquals("external.app", observe().packageName)
+        assertEquals(0, platform.cacheClears); assertEquals(1, platform.windowReads)
+        assertNoActions()
     }
 
     @Test fun idleListAndFreshRootFixtureHaveExplicitMatchingWindowMetadata() {

@@ -1346,7 +1346,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 known[call.id] = outcome.payload
                             }
                             is DispatchOutcome.NotExecuted -> {
-                                val result = "{\"ok\":false,\"executed\":false,\"error\":" + jsonQuote(outcome.code) + "}"
+                                val result = notExecutedToolResult(call.name, outcome.code)
                                 records[call.id] = ToolRecord(call, ToolDisposition.NOT_EXECUTED, result)
                                 known[call.id] = result
                             }
@@ -1540,6 +1540,32 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     }
 }
 class PersistenceException(cause: Throwable) : RuntimeException("Conversation persistence failed", cause)
+
+private fun notExecutedToolResult(toolName: String, code: String): String {
+    val original = "{\"ok\":false,\"executed\":false,\"error\":" + jsonQuote(code) + "}"
+    if (toolName !in setOf("screen", "screen_action", "launch_app")) return original
+    val hint = when (code) {
+        "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED", "NO_ACTIVE_EXTERNAL_WINDOW" ->
+            "无障碍尚未确认活动窗口；窗口读取失败不等于屏幕关闭或锁屏。" to
+                "停止本次屏幕操作并报告窗口读取异常；不要因此要求用户点亮或解锁屏幕，不要用Shell绕过。"
+        "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED" ->
+            "无障碍窗口元数据读取失败，未执行屏幕操作；这不是锁屏结论。" to
+                "报告窗口读取异常，不要推测锁屏或Root权限不足，不要反复重试。"
+        "SERVICE_DISCONNECTED_NOT_EXECUTED" ->
+            "无障碍服务尚未连接，未执行屏幕操作。" to "报告服务连接异常，不要把服务未连接解释为锁屏。"
+        "SERVICE_PERMISSION_REVOKED_NOT_EXECUTED" ->
+            "系统已撤销本应用的无障碍服务授权。" to "说明缺少无障碍服务授权；不要改用Shell绕过。"
+        "SCREEN_LOCKED_NOT_EXECUTED" ->
+            "检测到屏幕已锁定或不可交互，未执行屏幕操作。" to "请用户点亮并解锁屏幕后重新发起操作。"
+        "SELF_APP_TARGET_LOST" ->
+            "未确认代鱼自身仍是获准的前台窗口；未执行屏幕操作。" to "报告自身目标窗口未确认，不要推测锁屏，也不要将旧节点用于其他应用。"
+        "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED" ->
+            "当前活动窗口与指定应用不一致，未执行屏幕操作。" to "如实说明目标应用未确认；不要穿透弹窗、操作后台窗口或推测锁屏。"
+        else -> return original
+    }
+    return original.dropLast(1) + ",\"reason\":" + jsonQuote(hint.first) +
+        ",\"next_action\":" + jsonQuote(hint.second) + "}"
+}
 
 private fun cancelSession(session: ModelSession?) {
     if (session == null) return

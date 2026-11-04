@@ -99,6 +99,8 @@ internal interface GuiRuntimeAccess {
             current.getSystemService(PowerManager::class.java).isInteractive
     fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? = current.rootInActiveWindow
     fun windows(current: GuiAccessibilityService): List<android.view.accessibility.AccessibilityWindowInfo> = current.windows.orEmpty()
+    @androidx.annotation.RequiresApi(33)
+    fun clearWindowCache(current: GuiAccessibilityService): Boolean = current.clearCache()
     fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? =
         current.packageManager.getLaunchIntentForPackage(packageName)
     fun startActivity(current: GuiAccessibilityService, intent: Intent) { current.startActivity(intent) }
@@ -540,7 +542,11 @@ internal object GuiRuntime {
         targetRejection(lease)?.let { return it }
         val binding = targetBinding!!
         val self = isSelfLease(lease)
-        fun reject(code: String): GuiResult.Rejected {
+        var cacheRefresh = "not_attempted"
+        fun reject(code: String, detail: String? = null): GuiResult.Rejected {
+            if (detail != null) runCatching {
+                android.util.Log.i("DaiyuGui", "window_admission_failed code=$code cache_refresh=$cacheRefresh $detail")
+            }
             if (self) return selfLost(lease)
             gate.retireObservation(lease)
             clearNodes()
@@ -565,15 +571,39 @@ internal object GuiRuntime {
             } catch (_: Exception) { "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED" }
             if (failure == null) return GuiResult.Value(AdmittedRoot(node, window.type))
             node.recycle()
-            return reject(failure)
+            return reject(failure, if (failure == "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED") "reason=root_inactive" else null)
         }
-        val windows = try { access.windows(current) } catch (_: Exception) { emptyList() }
+        var windows = try { access.windows(current) } catch (_: Exception) {
+            return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=window_list_exception")
+        }
         if (windows.isNotEmpty()) {
             try {
                 if (windows.size > 64) return reject("APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED")
-                val supported = windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION ||
+                fun supportedWindows() = windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION ||
                     it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM }
-                val local = supported.filter(::onDefaultDisplay)
+                var supported = supportedWindows()
+                var local = supported.filter(::onDefaultDisplay)
+                if (Build.VERSION.SDK_INT >= 33 && local.isNotEmpty() && local.none { it.isActive || it.isFocused }) {
+                    // getWindows and node.window share the framework cache. Invalidate that one
+                    // snapshot once; all admission and action fences still inspect the new data.
+                    val cleared = try { access.clearWindowCache(current) } catch (_: Exception) {
+                        return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=cache_clear_exception")
+                    }
+                    cacheRefresh = if (cleared) "cleared" else "unavailable"
+                    if (cleared) {
+                        val previous = windows
+                        windows = emptyList()
+                        previous.forEach { runCatching { it.recycle() } }
+                        windows = try { access.windows(current) } catch (_: Exception) {
+                            return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=refreshed_list_exception")
+                        }
+                        targetRejection(lease)?.let { return it }
+                        if (windows.size > 64) return reject("APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED")
+                        if (windows.isEmpty()) return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED", "reason=refreshed_list_empty")
+                        supported = supportedWindows()
+                        local = supported.filter(::onDefaultDisplay)
+                    }
+                }
                 if (local.isEmpty()) return reject(if (supported.isNotEmpty())
                     "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED" else "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
                 val systemLayer = local.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && it.isFocused }
@@ -582,9 +612,8 @@ internal object GuiRuntime {
                     it.layer > systemLayer || it.layer == systemLayer &&
                     it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && it.isFocused) }
                 if (candidates.isEmpty()) {
-                    // OEM window lists can lag rootInActiveWindow. Admit only the same listed
-                    // window with fresh active metadata, never a requested background package.
-                    val node = access.root(current) ?: return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                    // Cross-check the same listed window, never a requested background package.
+                    val node = access.root(current) ?: return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED", "reason=active_root_missing windows=${windows.size} local=${local.size}")
                     val window = try { node.window } catch (_: Exception) { null }
                     if (window == null) {
                         node.recycle()
@@ -606,7 +635,9 @@ internal object GuiRuntime {
                         }
                         if (listed == null || blocked) {
                             node.recycle()
-                            return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                            return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED",
+                                "reason=${if (listed == null) "root_identity_conflict" else "system_overlap"}" +
+                                    " windows=${windows.size} local=${local.size} root_active=${window.isActive} root_focused=${window.isFocused}")
                         }
                         return admit(node, window)
                     } catch (_: Exception) {

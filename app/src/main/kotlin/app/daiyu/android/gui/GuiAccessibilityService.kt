@@ -543,9 +543,30 @@ internal object GuiRuntime {
         val binding = targetBinding!!
         val self = isSelfLease(lease)
         var cacheRefresh = "not_attempted"
+        var initialWindows = "not_read"
+        var finalWindows = "not_read"
+        fun windowSummary(windows: List<android.view.accessibility.AccessibilityWindowInfo>): String = try {
+            if (windows.size > 64) "over_limit" else {
+                val local = windows.filter { Build.VERSION.SDK_INT < 30 || it.displayId == Display.DEFAULT_DISPLAY }
+                fun counts(type: Int): String {
+                    val matching = local.filter { it.type == type }
+                    return "${matching.size}/${matching.count { it.isActive }}/${matching.count { it.isFocused }}"
+                }
+                "app=${counts(android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION)}," +
+                    "system=${counts(android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM)}," +
+                    "other=${local.count { it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION && it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM }}," +
+                    "off_display=${windows.size - local.size}"
+            }
+        } catch (_: Exception) { "unavailable" }
+        fun configurationSummary(): String = try {
+            val info = current.serviceInfo
+            "flags=${info.flags},capabilities=${info.capabilities},events=${info.eventTypes}," +
+                "package_filters=${info.packageNames?.size ?: 0}"
+        } catch (_: Exception) { "unavailable" }
         fun reject(code: String, detail: String? = null): GuiResult.Rejected {
-            if (detail != null) runCatching {
-                android.util.Log.i("DaiyuGui", "window_admission_failed code=$code cache_refresh=$cacheRefresh $detail")
+            runCatching {
+                android.util.Log.i("DaiyuGui", "window_admission_failed code=$code cache_refresh=$cacheRefresh ${detail ?: "reason=window_admission_rejected"}" +
+                    " initial_windows=[$initialWindows] final_windows=[$finalWindows] config=[${configurationSummary()}]")
             }
             if (self) return selfLost(lease)
             gate.retireObservation(lease)
@@ -576,6 +597,8 @@ internal object GuiRuntime {
         var windows = try { access.windows(current) } catch (_: Exception) {
             return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=window_list_exception")
         }
+        initialWindows = windowSummary(windows)
+        finalWindows = initialWindows
         if (windows.isNotEmpty()) {
             try {
                 if (windows.size > 64) return reject("APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED")
@@ -587,6 +610,7 @@ internal object GuiRuntime {
                     // getWindows and node.window share the framework cache. Invalidate that one
                     // snapshot once; all admission and action fences still inspect the new data.
                     val cleared = try { access.clearWindowCache(current) } catch (_: Exception) {
+                        cacheRefresh = "exception"
                         return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=cache_clear_exception")
                     }
                     cacheRefresh = if (cleared) "cleared" else "unavailable"
@@ -594,9 +618,11 @@ internal object GuiRuntime {
                         val previous = windows
                         windows = emptyList()
                         previous.forEach { runCatching { it.recycle() } }
+                        finalWindows = "read_failed"
                         windows = try { access.windows(current) } catch (_: Exception) {
                             return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=refreshed_list_exception")
                         }
+                        finalWindows = windowSummary(windows)
                         targetRejection(lease)?.let { return it }
                         if (windows.size > 64) return reject("APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED")
                         if (windows.isEmpty()) return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED", "reason=refreshed_list_empty")
@@ -613,7 +639,9 @@ internal object GuiRuntime {
                     it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && it.isFocused) }
                 if (candidates.isEmpty()) {
                     // Cross-check the same listed window, never a requested background package.
-                    val node = access.root(current) ?: return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED", "reason=active_root_missing windows=${windows.size} local=${local.size}")
+                    val node = try { access.root(current) } catch (_: Exception) {
+                        return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=active_root_exception")
+                    } ?: return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED", "reason=active_root_missing root_result=null windows=${windows.size} local=${local.size}")
                     val window = try { node.window } catch (_: Exception) { null }
                     if (window == null) {
                         node.recycle()
@@ -649,13 +677,16 @@ internal object GuiRuntime {
                 val selected = candidates.maxWithOrNull(compareBy<android.view.accessibility.AccessibilityWindowInfo>({ rank(it) }, { it.layer }))!!
                 if (candidates.count { rank(it) == rank(selected) && it.layer == selected.layer } != 1)
                     return reject("APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED")
-                val node = selected.root ?: return reject("APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED")
+                val node = try { selected.root } catch (_: Exception) {
+                    return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED", "reason=selected_root_exception")
+                } ?: return reject("APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED", "reason=selected_root_missing")
                 return admit(node, selected)
             } catch (_: Exception) { return reject("APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED") }
             finally { windows.forEach { runCatching { it.recycle() } } }
         }
-        val node = try { access.root(current) } catch (_: Exception) { null }
-            ?: return reject("NO_ACTIVE_EXTERNAL_WINDOW")
+        val node = try { access.root(current) } catch (_: Exception) {
+            return reject("NO_ACTIVE_EXTERNAL_WINDOW", "reason=fallback_root_exception")
+        } ?: return reject("NO_ACTIVE_EXTERNAL_WINDOW", "reason=fallback_root_missing root_result=null")
         val window = try { node.window } catch (_: Exception) { null }
         if (window == null) {
             node.recycle()

@@ -124,7 +124,10 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
             Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
         if (Build.VERSION.SDK_INT >= 34) permissions += Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
         for (permission in permissions) states.put(JSONObject().put("permission", permission).put("granted", hasPermission(app, permission)))
-        return JSONObject().put("permissions", states).put("notification_scope", "own_app_only")
+        return JSONObject().put("permissions", states).put("scope", "current_app_selected_permissions_only")
+            .put("not_checked", JSONArray(listOf("accessibility_service_authorization", "accessibility_service_connection",
+                "active_window_readability", "gui_task_authorization")))
+            .put("notification_scope", "own_app_only")
             .put("package_visibility", "android_filtered").put("file_scope", "explicit_content_uri_grants_only")
             .put("privileged_access", "not_used")
     }

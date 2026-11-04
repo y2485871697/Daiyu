@@ -8,7 +8,7 @@ enum class PlatformReadTool(val toolName: String, val capability: String, val de
     TIME("device_time", "platform.time.read", "Read current device time, timezone and UTC offset without changing system time.", ToolSchema()),
     AUDIO("device_audio", "platform.audio.read", "Read current audio stream volumes, ringer mode and music-active state; never changes audio settings.", ToolSchema()),
     ENVIRONMENT("device_environment", "platform.environment.read", "Read non-identifying Android build, locale, timezone and power environment.", ToolSchema()),
-    PERMISSIONS("platform_permissions", "platform.permissions.read", "Inspect current app permission state; never requests permissions.", ToolSchema()),
+    PERMISSIONS("platform_permissions", "platform.permissions.read", "Inspect selected ordinary Android permissions for this app only; never requests permissions. Does not check accessibility service authorization, connection, active-window readability or GUI task authorization. A successful query is not GUI readiness.", ToolSchema()),
     APPS("search_apps", "platform.apps.read", "Search only packages visible to this app; not a complete installed-app inventory.", ToolSchema(listOf(
         ArgumentField("query", ArgumentType.Text(128), false), limitField()))),
     MEDIA("search_media", "platform.media.read", "List bounded metadata for permitted shared media; never reads media bytes or file paths.", ToolSchema(listOf(

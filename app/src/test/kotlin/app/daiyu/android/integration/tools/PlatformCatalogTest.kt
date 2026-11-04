@@ -44,6 +44,19 @@ class PlatformCatalogTest {
         }
     }
 
+    @Test fun advertisedPermissionQueryDoesNotPromiseAccessibilityDiagnostics() {
+        val description = PlatformReadTool.PERMISSIONS.description
+        assertTrue(description.contains("ordinary Android permissions"))
+        assertTrue(description.contains("Does not check accessibility service authorization"))
+        assertTrue(description.contains("active-window readability"))
+        assertTrue(description.contains("A successful query is not GUI readiness"))
+        Fixture().use { f ->
+            val advertised = f.catalog.available(f.capabilities).single { it.name == "platform_permissions" }
+            assertEquals(description, advertised.description)
+            assertEquals(ToolEffect.READ_ONLY, advertised.effect)
+        }
+    }
+
     @Test fun platformLeavesAreExplicitReadOnlyCapabilitiesNotLegacyToggleExpansion() {
         assertEquals(2, AndroidToolRegistry.capabilitiesFor(ReadOnlyTool.entries.toSet()).size)
         assertEquals(PlatformReadTool.entries.size, PlatformReadTool.entries.map { it.capability }.toSet().size)

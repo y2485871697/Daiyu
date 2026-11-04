@@ -17,9 +17,9 @@ internal object ToolCardPresentations {
         group("background_job", "terminal_job_start" to "启动后台任务", "terminal_job_read" to "读取后台结果")
         group("files", "list_files" to "列目录", "file_metadata" to "读取文件信息", "read_text_file" to "读取文件")
         group("browser", "browser_read" to "读取网页", "browser_write" to "操作网页")
-        group("gui", "screen" to "查看屏幕", "screen_action" to "操作屏幕", "r08_virtual_display_step" to "执行虚拟显示步骤", "r08_virtual_display_read" to "读取虚拟显示状态")
+        group("gui", "launch_app" to "提交应用启动", "screen" to "查看屏幕", "screen_action" to "操作屏幕", "r08_virtual_display_step" to "执行虚拟显示步骤", "r08_virtual_display_read" to "读取虚拟显示状态")
         group("apps", "search_apps" to "查找应用")
-        group("device_read", "get_battery_status" to "查询电池", "device_status" to "查询设备状态", "network_status" to "查询网络", "device_time" to "查询时间", "device_audio" to "查询音频环境", "device_environment" to "查询设备环境", "platform_permissions" to "查询权限", "last_known_location" to "查询位置")
+        group("device_read", "get_battery_status" to "查询电池", "device_status" to "查询设备状态", "network_status" to "查询网络", "device_time" to "查询时间", "device_audio" to "查询音频环境", "device_environment" to "查询设备环境", "platform_permissions" to "查询应用权限", "last_known_location" to "查询位置")
         group("personal_search", "search_media" to "检索媒体元数据", "calendar_events" to "检索日历", "search_contacts" to "检索联系人", "app_notifications" to "读取本应用通知", "current_notifications" to "检索通知", "notification_history" to "检索通知历史")
         group("system_action", "platform_set_alarm" to "设置闹钟", "platform_set_timer" to "设置计时器", "platform_set_volume" to "调整音量", "platform_media_key" to "控制媒体", "platform_set_wifi" to "切换 Wi-Fi")
         group("generation", "generate_images" to "生成图片", "generate_videos" to "生成视频")
@@ -58,6 +58,10 @@ internal object ToolCardPresentations {
         }).filter { it.isNotBlank() }.joinToString(" · ")
         val output = parse(result)
         val returned = when (toolName) {
+            "launch_app" -> if (output?.optString("status") == "PLATFORM_LAUNCH_ACCEPTED_NOT_VERIFIED")
+                listOf("启动请求已受理 · 界面未核实") else emptyList()
+            "platform_permissions" -> if (output?.optJSONObject("data")?.optString("scope") == "current_app_selected_permissions_only")
+                listOf("仅本应用普通权限 · 不含无障碍诊断") else emptyList()
             "terminal_exec", "terminal_read" -> listOf(numbers(output, listOf("exit_code", "offset", "next_offset", "total_bytes")),
                 flags(output, listOf("has_more", "log_truncated", "output_complete", "log_available")),
                 choice(output, "state", terminalStates))
@@ -86,6 +90,7 @@ internal object ToolCardPresentations {
             }))
         }.filter { it.isNotBlank() }.joinToString(" · ")
         val summary = when {
+            toolName in setOf("launch_app", "platform_permissions") && returned.isNotBlank() -> returned
             kind.first == "delegation" -> params.ifBlank { "任务分工" }
             kind.first == "personal_search" -> "仅显示检索范围与数量，私密正文已隐藏"
             params.isNotBlank() -> params
@@ -102,7 +107,7 @@ internal object ToolCardPresentations {
             }
             if (arguments.isNotBlank()) add(ToolDetailSectionUi("参数摘要", params.ifBlank { "自由文本、标识与敏感字段不在卡片中展开" }))
             add(ToolDetailSectionUi(if (kind.first in setOf("terminal", "background_job")) "输出摘要" else "结果摘要", returned.ifBlank { if (result == null) "尚无返回内容" else "已保存返回内容；原始正文不在卡片中展开" }))
-            if (kind.first == "gui") add(ToolDetailSectionUi("操作回执", "动作已派发不等于业务目标已完成；历史观察不授予执行权"))
+            if (kind.first == "gui") add(ToolDetailSectionUi("操作回执", "工具回执不等于界面已显示或业务目标已完成；历史观察不授予执行权"))
         }
         val operationTitle = if (kind.first == "generic" && toolName.matches(Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}"))) {
             "执行其他工具 · $toolName"

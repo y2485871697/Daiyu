@@ -546,6 +546,100 @@ class GuiRuntimeScreenshotTest {
         }
     }
 
+    private fun windowFailureLog(): String = org.robolectric.shadows.ShadowLog.getLogsForTag("DaiyuGui")
+        .map { it.msg }.single { it.startsWith("window_admission_failed ") }
+
+    @Test @Config(sdk = [30, 33]) fun idleWindowNullRootLogsCountsWithoutAnotherPlatformRead() {
+        platform.missing = true
+        platform.listedWindows = { listOf(idleListedWindow(), idleListedWindow(id = 9)) }
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+        val line = windowFailureLog()
+        val summary = "app=2/0/0,system=0/0/0,other=0,off_display=0"
+        assertTrue(line.contains("reason=active_root_missing root_result=null windows=2 local=2"))
+        assertTrue(line.contains("initial_windows=[$summary]")); assertTrue(line.contains("final_windows=[$summary]"))
+        assertEquals(1, platform.windowReads); assertEquals(1, platform.rootReads)
+        assertEquals(if (android.os.Build.VERSION.SDK_INT >= 33) 1 else 0, platform.cacheClears)
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty())
+        assertEquals(0, platform.gestures); assertNoActions()
+    }
+
+    @Test fun idleWindowThrowingRootLogsOnlyFixedReason() {
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        platform.onRootRead = { error("private-root-exception-secret") }
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED")
+        val line = windowFailureLog()
+        assertTrue(line.contains("reason=active_root_exception"))
+        assertFalse(line.contains("private-root-exception-secret")); assertFalse(line.contains(platform.pkg))
+        assertEquals(1, platform.windowReads); assertEquals(1, platform.rootReads)
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun windowFailureLogsNumericConfigurationButNotPackageFiltersOrText() {
+        val info = android.accessibilityservice.AccessibilityServiceInfo().apply {
+            flags = android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+            eventTypes = AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            packageNames = arrayOf("private.filter.one", "private.filter.two")
+        }
+        service.serviceInfo = info
+        platform.pkg = "private.target.app"; platform.rootLabel = "private-root-text"; platform.label = "private-child-text"
+        platform.missing = true
+        platform.listedWindows = { listOf(idleListedWindow()) }
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+        val line = windowFailureLog()
+        assertTrue(line.contains("config=[flags=${info.flags},capabilities=${info.capabilities},events=${info.eventTypes},package_filters=2]"))
+        listOf("private.filter.one", "private.filter.two", platform.pkg, platform.rootLabel, platform.label)
+            .forEach { assertFalse(line.contains(it)) }
+        assertTrue(line.length < 1024)
+        assertEquals(1, platform.windowReads); assertEquals(1, platform.rootReads); assertNoActions()
+    }
+
+    @Test @Config(sdk = [33]) fun refreshedWindowDiagnosticsDistinguishSystemOnlyAndOffDisplayWindows() {
+        platform.missing = true; platform.cacheClearAccepted = true
+        platform.listedWindows = {
+            if (platform.cacheCleared) listOf(idleListedWindow(3, AccessibilityWindowInfo.TYPE_SYSTEM),
+                idleListedWindow(7, AccessibilityWindowInfo.TYPE_SYSTEM),
+                idleListedWindow(9).apply { shadowOf(this).setDisplayId(1) })
+            else listOf(idleListedWindow(), idleListedWindow(9))
+        }
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+        val line = windowFailureLog()
+        assertTrue(line.contains("cache_refresh=cleared"))
+        assertTrue(line.contains("initial_windows=[app=2/0/0,system=0/0/0,other=0,off_display=0]"))
+        assertTrue(line.contains("final_windows=[app=0/0/0,system=2/0/0,other=0,off_display=1]"))
+        assertTrue(line.contains("root_result=null windows=3 local=2"))
+        assertEquals(2, platform.windowReads); assertEquals(1, platform.rootReads); assertEquals(1, platform.cacheClears)
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun emptyWindowRootFailuresKeepTheirCodeAndDistinctPrivateSafeReasons() {
+        platform.missing = true
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "NO_ACTIVE_EXTERNAL_WINDOW")
+        assertTrue(windowFailureLog().contains("reason=fallback_root_missing root_result=null"))
+        platform.onRootRead = { error("private-fallback-secret") }
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "NO_ACTIVE_EXTERNAL_WINDOW")
+        val line = windowFailureLog()
+        assertTrue(line.contains("reason=fallback_root_exception")); assertFalse(line.contains("private-fallback-secret"))
+        assertEquals(2, platform.windowReads); assertEquals(2, platform.rootReads); assertEquals(0, platform.cacheClears)
+        assertNull(session.lease.observation); assertNoActions()
+    }
+
+    @Test fun selectedWindowMissingRootLogsWithoutFallingBackToAnotherWindow() {
+        platform.listedWindows = { listOf(idleListedWindow().apply { shadowOf(this).setActive(true) }) }
+        org.robolectric.shadows.ShadowLog.clear()
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED")
+        assertTrue(windowFailureLog().contains("reason=selected_root_missing"))
+        assertTrue(windowFailureLog().contains("app=1/1/0"))
+        assertEquals(1, platform.windowReads); assertEquals(0, platform.rootReads)
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
     @Test @Config(sdk = [33]) fun idleCachedWindowsRefreshOnceBeforeSelectingTheActiveApplication() {
         platform.cacheClearAccepted = true
         platform.listedWindows = {

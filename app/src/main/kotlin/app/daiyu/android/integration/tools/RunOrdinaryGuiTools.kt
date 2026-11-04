@@ -60,7 +60,10 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                     observation = null
                     encode(session.dynamicLaunch(request, context.authorization, context.cancelled)) { status ->
                         JSONObject().put("package_name", request.packageName).put("status", status)
-                            .put("verified_ui_result", false).toString()
+                            .put("launch_request_accepted", true).put("target_window_state", "NOT_VERIFIED")
+                            .put("verification_required", true).put("verified_ui_result", false)
+                            .put("next_action", "仅确认启动请求已提交，不代表应用界面或目标页面已显示。需要操作时必须取得成功的screen观察；窗口读取失败应停止屏幕操作，不要据此要求点亮、解锁或重授普通应用权限。")
+                            .toString()
                     }
                 }
             }

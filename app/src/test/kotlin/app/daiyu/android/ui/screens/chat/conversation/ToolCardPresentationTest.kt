@@ -28,6 +28,28 @@ class ToolCardPresentationTest {
         assertEquals("child_control", card.category)
     }
 
+    @Test fun launchAndPermissionCardsStateTheExactUnverifiedScope() {
+        val launch = ToolCardPresentations.present("launch_app", "{}",
+            """{"status":"PLATFORM_LAUNCH_ACCEPTED_NOT_VERIFIED","verified_ui_result":false}""")
+        assertEquals("gui", launch.category); assertEquals("提交应用启动", launch.title)
+        assertEquals("启动请求已受理 · 界面未核实", launch.summary)
+        assertFalse(ToolCardPresentations.present("launch_app", "{}", """{"ok":false,"executed":false}""")
+            .summary.contains("已受理"))
+        val permissions = ToolCardPresentations.present("platform_permissions", "{}",
+            """{"ok":true,"data":{"scope":"current_app_selected_permissions_only"}}""")
+        assertEquals("查询应用权限", permissions.title)
+        assertEquals("仅本应用普通权限 · 不含无障碍诊断", permissions.summary)
+        assertFalse(ToolCardPresentations.present("platform_permissions", "{}", """{"ok":false}""")
+            .summary.contains("不含无障碍诊断"))
+        assertFalse(ToolCardPresentations.present("platform_permissions", "{}",
+            """{"ok":true,"scope":"current_app_selected_permissions_only"}""").summary.contains("不含无障碍诊断"))
+        listOf<String?>(null, "not-json", """{"status":"unknown"}""").forEach { result ->
+            val pending = ToolCardPresentations.present("launch_app", "{}", result)
+            assertFalse((pending.summary + pending.sections.joinToString { it.text }).contains("动作已派发"))
+            assertFalse(pending.summary.contains("已受理"))
+        }
+    }
+
     @Test fun taxonomyIncludesAllReservedCategoriesWithoutInventingRecords() {
         assertEquals(21, ToolCardPresentations.categories.size)
         assertTrue(ToolCardPresentations.categories.containsAll(listOf("workspace", "image_read", "speech", "generic")))

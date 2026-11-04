@@ -26,6 +26,22 @@ class PlatformProductionSettingsTest {
         preferences = RuntimeEnvironment.getApplication().getSharedPreferences("platform-test-${UUID.randomUUID()}", Context.MODE_PRIVATE)
     }
 
+    @Test fun productionPermissionReadExplicitlyExcludesAccessibilityAndGuiReadiness() {
+        val tool = PlatformReadTool.PERMISSIONS
+        val result = org.json.JSONObject(AndroidPlatformReads(RuntimeEnvironment.getApplication())
+            .read(tool, tool.schema.parse("{}")) { false })
+        assertTrue(result.toString(), result.getBoolean("ok"))
+        val data = result.getJSONObject("data")
+        assertEquals("current_app_selected_permissions_only", data.getString("scope"))
+        val excluded = data.getJSONArray("not_checked")
+        assertEquals(setOf("accessibility_service_authorization", "accessibility_service_connection",
+            "active_window_readability", "gui_task_authorization"),
+            (0 until excluded.length()).map { excluded.getString(it) }.toSet())
+        assertTrue(data.getJSONArray("permissions").length() > 0)
+        assertEquals("not_used", data.getString("privileged_access"))
+        assertFalse(data.has("gui_ready")); assertFalse(data.has("accessibility_connected"))
+    }
+
     @Test fun defaultsAndLegacyBatteryNeverEnablePlatformOrPrivateDestinations() {
         preferences.edit().putBoolean("battery-enabled", true).putBoolean("device-status-enabled", true).commit()
         val frozen = PlatformToolSettings(preferences).freeze()

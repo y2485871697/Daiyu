@@ -344,6 +344,27 @@ class GuiAppLaunchTest {
             try { GuiAppLaunch(invalid); fail(invalid) } catch (_: IllegalArgumentException) { }
         }
     }
+    @Test fun nativeLaunchReceiptNeverClaimsTheTargetWindowWasVerified() {
+        val f = Fixture()
+        val confirmed = f.call() as DispatchOutcome.Confirmed
+        val payload = JSONObject(confirmed.payload)
+        assertFalse(confirmed.isError)
+        assertEquals("PLATFORM_LAUNCH_ACCEPTED_NOT_VERIFIED", payload.getString("status"))
+        assertTrue(payload.getBoolean("launch_request_accepted"))
+        assertEquals("NOT_VERIFIED", payload.getString("target_window_state"))
+        assertTrue(payload.getBoolean("verification_required")); assertFalse(payload.getBoolean("verified_ui_result"))
+        assertTrue(payload.getString("next_action").contains("不代表应用界面或目标页面已显示"))
+        assertTrue(payload.getString("next_action").contains("窗口读取失败应停止屏幕操作"))
+        val replay = f.call() as DispatchOutcome.Confirmed
+        assertTrue(replay.replayed); assertEquals(confirmed.payload, replay.payload)
+        assertEquals(1, platform.launches); assertEquals(0, platform.rootReads); assertEquals(0, platform.captures)
+        platform.rootPackage = null
+        assertTrue(f.callTool("screen", """{"operation":"observe"}""", "unreadable") is DispatchOutcome.NotExecuted)
+        assertTrue(platform.rootReads > 0); assertEquals(0, platform.nodeActions); assertEquals(0, platform.captures)
+        assertEquals(confirmed.payload, (f.call() as DispatchOutcome.Confirmed).payload)
+        assertEquals(1, platform.launches)
+    }
+
     @Test fun ordinaryLaunchFromAssistantNeedsNoObservationAndUsesCentralLedgerOnce() {
         val f = Fixture()
         assertTrue(f.call() is DispatchOutcome.Confirmed)

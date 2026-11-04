@@ -19,7 +19,10 @@ class GuiScreenToolFactoryTest {
         val ordinary = GuiScreenToolFactory.readDefinition(allowImplicitObservation = true)
         assertNotNull(ordinary.schema.parse("{\"operation\":\"screenshot\"}"))
         assertTrue(ordinary.description.contains("observation"))
-        assertFalse(GuiScreenToolFactory.readDefinition().description.contains("omit"))
+        val explicit = GuiScreenToolFactory.readDefinition()
+        assertTrue(explicit.description.contains("screenshot requires observation_id"))
+        assertFalse(explicit.description.contains("omit it for a current visual-only image"))
+        assertTrue(ordinary.description.contains("omit it for a current visual-only image"))
         assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
     }
 

@@ -94,6 +94,7 @@ class GuiRuntimeScreenshotTest {
         var displayId = 0
         var active = true
         var windowType = AccessibilityWindowInfo.TYPE_APPLICATION
+        var windowLayer = 0
         var gestures = 0
         var gestureAccepted = true
         var gestureCompleted: ((Boolean) -> Unit)? = null
@@ -152,6 +153,7 @@ class GuiRuntimeScreenshotTest {
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, windowId))
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, windowType))
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setActive", ClassParameter.from(Boolean::class.javaPrimitiveType!!, active))
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setLayer", ClassParameter.from(Int::class.javaPrimitiveType!!, windowLayer))
             if (android.os.Build.VERSION.SDK_INT >= 30)
                 ReflectionHelpers.callInstanceMethod<Unit>(window, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, displayId))
             fun node(text: String): AccessibilityNodeInfo = AccessibilityNodeInfo.obtain().apply {
@@ -528,6 +530,22 @@ class GuiRuntimeScreenshotTest {
             setId(id); setType(type); setActive(false); setFocused(false); setLayer(layer); setDisplayId(0)
             setBoundsInScreen(Rect(0, 0, 100, 100))
         }
+    }
+
+    @Test fun idleListAndFreshRootFixtureHaveExplicitMatchingWindowMetadata() {
+        val listed = idleListedWindow()
+        val root = checkNotNull(platform.root(service))
+        val fresh = checkNotNull(root.window)
+        try {
+            assertEquals(listed.id, fresh.id)
+            assertEquals(listed.type, fresh.type)
+            assertEquals(0, listed.layer)
+            assertEquals(listed.layer, fresh.layer)
+            assertEquals(listed.displayId, fresh.displayId)
+            assertFalse(listed.isActive); assertFalse(listed.isFocused)
+            assertTrue(fresh.isActive)
+        } finally { fresh.recycle(); root.recycle(); listed.recycle() }
+        assertNoActions()
     }
 
     @Test fun idleListedApplicationUsesOneFreshMatchingActiveRootWithoutRelaxingActionChecks() {

@@ -572,6 +572,29 @@ class GuiRuntimeScreenshotTest {
         assertEquals(1, platform.nodeActions)
     }
 
+    @Test fun focusedSystemWindowWinsATiedLayerWithoutReadingTheActiveApplication() {
+        platform.listedWindows = {
+            listOf(listedWindow(pkg = "underlying.app", id = 7, active = true, layer = 2),
+                listedWindow(pkg = "system.dialog", id = 9, active = false, focused = true,
+                    layer = 2, type = AccessibilityWindowInfo.TYPE_SYSTEM))
+        }
+        assertEquals("system.dialog", observe().packageName)
+        assertNoActions()
+    }
+
+    @Test fun focusedSystemDialogBlocksSelfObservationAndCaptureWithoutGrantingItsNodes() {
+        openSelf()
+        val observation = observe()
+        platform.listedWindows = {
+            listOf(listedWindow(pkg = service.packageName, id = observation.windowId, active = true, layer = 1),
+                listedWindow(pkg = "system.dialog", id = 9, active = false, focused = true,
+                    layer = 2, type = AccessibilityWindowInfo.TYPE_SYSTEM))
+        }
+        rejected(screenshot(observation).completed(), "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
+        rejected(session.previewFromUser(), "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
+        assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
     @Test fun explicitApplicationTargetDoesNotReadThroughASystemDialog() {
         openTarget("underlying.app")
         platform.listedWindows = {

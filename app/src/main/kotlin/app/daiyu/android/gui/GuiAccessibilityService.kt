@@ -209,7 +209,7 @@ internal object GuiRuntime {
         targetRejection(lease)?.let { return it }
         if (!isSelfLease(lease)) return null
         return when (val fetched = externalRoot(lease, service!!)) {
-            is GuiResult.Value -> { fetched.value.recycle(); null }
+            is GuiResult.Value -> { fetched.value.node.recycle(); null }
             is GuiResult.Rejected -> fetched
             is GuiResult.Unknown -> error("root admission cannot be unknown")
         }
@@ -572,13 +572,15 @@ internal object GuiRuntime {
             try {
                 if (windows.size > 64) return reject("APPLICATION_WINDOW_LIMIT_EXCEEDED_NOT_EXECUTED")
                 val supported = windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION ||
-                    !self && it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM }
+                    it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM }
                 val local = supported.filter(::onDefaultDisplay)
                 if (local.isEmpty()) return reject(if (supported.isNotEmpty())
                     "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED" else "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
                 val systemLayer = local.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && it.isFocused }
                     .maxOfOrNull { it.layer }
-                val candidates = local.filter { (it.isActive || it.isFocused) && (systemLayer == null || it.layer >= systemLayer) }
+                val candidates = local.filter { (it.isActive || it.isFocused) && (systemLayer == null ||
+                    it.layer > systemLayer || it.layer == systemLayer &&
+                    it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && it.isFocused) }
                 if (candidates.isEmpty()) return reject("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
                 fun rank(window: android.view.accessibility.AccessibilityWindowInfo): Int = if (window.isActive) 2 else 1
                 val selected = candidates.maxWithOrNull(compareBy<android.view.accessibility.AccessibilityWindowInfo>({ rank(it) }, { it.layer }))!!

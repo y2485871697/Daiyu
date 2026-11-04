@@ -590,8 +590,8 @@ class GuiRuntimeScreenshotTest {
                 listedWindow(pkg = "system.dialog", id = 9, active = false, focused = true,
                     layer = 2, type = AccessibilityWindowInfo.TYPE_SYSTEM))
         }
-        rejected(screenshot(observation).completed(), "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
-        rejected(session.previewFromUser(), "APPLICATION_WINDOW_REQUIRED_NOT_EXECUTED")
+        rejected(screenshot(observation).completed(), "SELF_APP_TARGET_LOST")
+        rejected(session.previewFromUser(), "SELF_APP_TARGET_LOST")
         assertNull(session.lease.observation); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 

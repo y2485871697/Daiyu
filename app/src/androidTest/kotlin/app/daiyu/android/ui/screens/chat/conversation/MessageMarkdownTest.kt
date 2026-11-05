@@ -209,27 +209,31 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             assertNotSame(android.os.Looper.getMainLooper().thread, Thread.currentThread())
             entered.countDown(); release.await(); MarkdownParser.parse(text)
         }
+        val autoAdvance = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
         try {
             show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
                 ChatMessageList(turns, ChatScreenActions(onVisibleCompleted = { confirmed += it }))
             } }
-            ui.waitUntil(5_000) { entered.count == 0L }
             ui.mainClock.advanceTimeBy(100)
+            ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
             val pending = ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true)
             pending.assertCountEquals(3)
             repeat(3) { pending[it].assertHeightIsAtLeast(52.dp) }
+            turns.forEach { ui.onNodeWithTag("chat-turn:${it.id}").assertDoesNotExist() }
             ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).assertCountEquals(0)
             ui.onAllNodesWithContentDescription("重新生成", useUnmergedTree = true).assertCountEquals(0)
             assertTrue(confirmed.flatten().isEmpty())
             release.countDown()
+            ui.mainClock.autoAdvance = true
             awaitNodes(hasText("你好！我是代鱼，有什么可以帮你？"))
             awaitNodes(hasText("解答问题"))
             awaitNodes(hasText("当前电量 34%，未在充电。"))
             ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
             ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).assertCountEquals(3)
             assertTrue(opened.isEmpty())
-        } finally { release.countDown() }
+        } finally { release.countDown(); ui.mainClock.autoAdvance = autoAdvance }
     }
 
     fun testColdMixedBodyShowsLoadingWithoutPublishingReadOrRawMarkdown() {
@@ -483,6 +487,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val parser: (String) -> List<MarkdownBlock> = { text ->
             entered.countDown(); release.await(); MarkdownParser.parse(text)
         }
+        val autoAdvance = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
         try {
             show {
                 CompositionLocalProvider(LocalMarkdownParser provides parser) {
@@ -490,18 +496,20 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                         ChatScreenActions(onVisibleCompleted = { confirmed += it }))
                 }
             }
-            ui.waitUntil(timeoutMillis = 5_000) { entered.count == 0L }
             ui.mainClock.advanceTimeBy(100)
+            ui.waitUntil(timeoutMillis = 5_000) { entered.count == 0L }
             ui.waitForIdle()
             ui.onNodeWithText("**answer**", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText("answer", useUnmergedTree = true).assertDoesNotExist()
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(52.dp)
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertExists().assertHeightIsAtLeast(52.dp)
+            ui.onNodeWithTag("chat-turn:${turn.id}").assertDoesNotExist()
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             assertTrue(confirmed.none { turn.listKey in it })
             release.countDown()
+            ui.mainClock.autoAdvance = true
             awaitNodes(hasText("answer"))
             ui.waitUntil(timeoutMillis = 5_000) { confirmed.any { turn.listKey in it } }
-        } finally { release.countDown() }
+        } finally { release.countDown(); ui.mainClock.autoAdvance = autoAdvance }
     }
 
     fun testAppendedBodyKeepsMarkdownGeometryThroughPendingParseAndCompletion() {
@@ -688,6 +696,13 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+    }
+
+    private fun advanceTerminalReveal(displaySlots: Int) {
+        // Completed answers keep the production 70-slot/s pace; only the test clock advances.
+        val maxDuration = kotlin.math.ceil(displaySlots * 1000.0 / 70.0).toLong() + 64L
+        ui.mainClock.advanceTimeBy(maxDuration)
+        repeat(4) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
     }
 
     private fun awaitNodes(matcher: SemanticsMatcher, count: Int = 1) {
@@ -1373,10 +1388,10 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             MessageContentUi.Text("after", "*after*"),
         )
         // Same action/owner id, distinct history segment keys: changing listKey to id would fail.
-        val first = ChatTurnUi.Assistant("shared-message", finalText = "**first**", status = RunStatus.RUNNING,
+        val first = ChatTurnUi.Assistant("shared-message", finalText = "**first**", status = RunStatus.COMPLETED,
             listKey = "shared-message:first")
         var second by mutableStateOf(ChatTurnUi.Assistant("shared-message", content = blocks("**before**"),
-            status = RunStatus.RUNNING, listKey = "shared-message:second"))
+            status = RunStatus.COMPLETED, listKey = "shared-message:second"))
         show { ChatMessageList(listOf(first, second), ChatScreenActions(), imageLoader = loader) }
         awaitNodes(hasText("after"))
         ui.onNodeWithTag("work-process-header").performClick()
@@ -1612,8 +1627,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             }
             assertEquals(1, calls.get())
             ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
-            ui.mainClock.advanceTimeBy(400)
-            ui.waitForIdle()
+            advanceTerminalReveal(plain.length)
             body("typing-live", plain).assertTextEquals(plain)
             assertTrue(settled.get())
             assertEquals(1, calls.get())
@@ -1655,6 +1669,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
 
     fun testCompletedReadWaitsForCurrentRevealToDrainEvenWithAnAlreadyCachedProjection() {
         val source = "READ-DRAIN " + "next ".repeat(24)
+        val displayText = markdownBlocksDisplayText(MarkdownParser.parse(source))
         val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
         markdownProjectionCache.put(MarkdownProjection(listOf(""), mapOf("" to emptyList()), parser))
         markdownProjectionCache.put(MarkdownProjection(listOf(source), mapOf(source to parser(source)), parser))
@@ -1672,8 +1687,9 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(80)
             ui.waitForIdle()
             assertTrue(confirmed.none { turn.listKey in it })
-            ui.mainClock.advanceTimeBy(400)
-            repeat(4) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+            ui.onAllNodes(hasText(displayText), useUnmergedTree = true).assertCountEquals(0)
+            advanceTerminalReveal(displayText.length)
+            ui.onNodeWithText(displayText, useUnmergedTree = true).assertTextEquals(displayText)
             assertTrue(confirmed.any { turn.listKey in it })
         } finally { ui.mainClock.autoAdvance = true }
     }

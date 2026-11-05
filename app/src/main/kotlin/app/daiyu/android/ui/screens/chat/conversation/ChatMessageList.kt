@@ -551,7 +551,7 @@ internal fun AssistantTurn(
             Text(identity?.name ?: "助手", color = conversationColors().text,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
-        AssistantTextContent(turn, ordered, bodyVisible, { answerReleased = true }, actions, projection, reveal, generationComplete,
+        AssistantTextContent(turn, ordered, bodyVisible, { answerReleased = true }, actions, bodySources, projection, reveal, generationComplete,
             revealResetEpoch, onVisibleAdvance, handoff, imageLoader, dedicatedTool, toolContent)
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
@@ -571,7 +571,7 @@ internal fun AssistantTurn(
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantWorkflowContent, bodyVisible: Boolean, onAnswerReleased: () -> Unit, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff, imageLoader: MessageImageLoader?, dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit) {
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantWorkflowContent, bodyVisible: Boolean, onAnswerReleased: () -> Unit, actions: ChatScreenActions, bodySources: List<MarkdownTypingSource>, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff, imageLoader: MessageImageLoader?, dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit) {
     val work = ordered.work
     val workReasoning = remember(ordered.steps) { ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported } }
     val reasoningReady = turn.reasoningStopped || handoff.ready(workReasoning)
@@ -580,7 +580,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
         WorkflowEntrances(if (reasoningReady) ordered.body.mapIndexed { index, item -> item.workflowKey(index) } else emptyList())
     }
     val observedLive = remember(turn.listKey) { turn.status == RunStatus.RUNNING }
-    val textBody = rememberAssistantTextBody(emptySet(), projection, reveal, generationComplete)
+    val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete)
     val answerPending = ordered.body.isNotEmpty()
     val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)
     val notifyVisibleAdvance = remember { { currentVisibleAdvance.value() } }
@@ -609,20 +609,25 @@ internal fun UserMessageText(text: String, modifier: Modifier = Modifier) {
 
 /** Projection and reveal updates are consumed only by text leaves, not the workflow host. */
 @Composable
-internal fun rememberAssistantTextBody(plainNarration: Set<String>, projection: MarkdownProjection?,
+internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: List<MarkdownTypingSource>, projection: MarkdownProjection?,
     reveal: MarkdownReveal, generationComplete: Boolean): @Composable (MessageContentUi.Text, Modifier) -> Unit {
+    val currentSources = rememberUpdatedState(sources)
     val currentProjection = rememberUpdatedState(projection)
     val currentReveal = rememberUpdatedState(reveal)
     val currentComplete = rememberUpdatedState(generationComplete)
     return remember(plainNarration) { { text, modifier ->
+        val index = currentSources.value.indexOfFirst { it.id == text.itemId }
+        val accepted = currentProjection.value
+        val displayed = accepted?.sources?.getOrNull(index)?.takeIf { text.text.startsWith(it) } ?: text.text
         if (text.itemId in plainNarration) {
             val visibility = currentReveal.value.visibility(text.itemId)
-            val boundaries = remember(text.text) { MarkdownTextBoundaries(text.text) }
+            val boundaries = remember(displayed) { MarkdownTextBoundaries(displayed) }
             val end by remember(visibility, boundaries) { androidx.compose.runtime.derivedStateOf { boundaries.end(visibility.value) } }
-            Text(text.text.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
+            Text(displayed.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
-        } else RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),
-            currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)
+        } else RevealedMessageMarkdown(displayed, accepted?.blocks?.get(displayed),
+            currentReveal.value, text.itemId, modifier,
+            generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)
     } }
 }
 
@@ -655,7 +660,7 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                 reasoningReady = { stopped || handoff.ready(it) }, onVisibleAdvance = onVisibleAdvance) { narration ->
                 val narrationSettled = narration.reveal.settled
                 SideEffect { if (narrationSettled) settledPhase = textPhase }
-                val textBody = rememberAssistantTextBody(plainNarration, narration.projection, narration.reveal, generationComplete)
+                val textBody = rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)
                 MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
                     workflowTimeline = true,
                     toolContent = toolContent, flowRunning = work.running,

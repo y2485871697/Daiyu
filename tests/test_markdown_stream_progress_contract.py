@@ -30,28 +30,27 @@ class MarkdownStreamProgressContract(unittest.TestCase):
     def test_render_and_typing_use_the_completed_snapshot_but_readiness_stays_exact(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         for token in ['val contentReady = projection?.sources == sources',
-                      'turn.status != RunStatus.RUNNING && contentReady',
-                      'content.copy(text = projection.sources.getOrNull(textIndex++) ?: "")',
-                      'AssistantTextContent(displayedTurn, ordered, bodyVisible, { answerReleased = true }, actions, projection, reveal, generationComplete']:
+                      'turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady',
+                      'AssistantTextContent(turn, ordered, bodyVisible, { answerReleased = true }, actions, bodySources, projection, reveal, generationComplete']:
             self.assertIn(token, chat)
-        self.assertIn('val ordered = rememberAssistantWorkflowContent(displayedTurn)', chat)
+        self.assertIn('val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)', chat)
         assistant = chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
         for token in [
-            'val textBody = rememberAssistantTextBody(ordered.plainNarration, projection, reveal, generationComplete)',
+            'val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete)',
             'work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey,',
             'MessageContent(ordered.body, actions, imageLoader, markdown = true',
         ]:
             self.assertIn(token, assistant)
         leaf = chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ['rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
-                      'rememberUpdatedState(generationComplete)', 'currentProjection.value?.blocks?.get(text.text)',
-                      'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)']:
+                      'rememberUpdatedState(generationComplete)', 'accepted?.blocks?.get(displayed)',
+                      'generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)']:
             self.assertIn(token, leaf)
         workflow = chat.split('private fun AssistantWorkflow(', 1)[1]
         self.assertIn('WorkProcessCard(work, ownerKey,', workflow)
         self.assertIn('MessageContent(steps, actions, imageLoader, markdown = true', workflow)
-        self.assertEqual(2, assistant.count('textBody = textBody'))
+        self.assertEqual(1, assistant.count('textBody = textBody'))
         self.assertNotIn('MessageContent(turn.content', assistant)
         self.assertNotIn('ReportedReasoningCard(', assistant)
         typing = (BASE / 'MarkdownTyping.kt').read_text()
@@ -72,7 +71,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         self.assertIn('remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix)', typing)
         self.assertIn('markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix)', typing)
         self.assertIn('it.sources == baseline || (allowPrefix && isMarkdownAppend(it.sources, baseline))', typing)
-        self.assertIn('projection?.sources == sources.map { it.text } && baselineLength != null', typing)
+        self.assertIn('val exact = exactProjection && baselineLength != null && target != null &&', typing)
         self.assertIn('parsed.sources.sumOf', typing)
 
     def test_real_regressions_cover_bounded_progress_replacement_and_ui_publication(self):

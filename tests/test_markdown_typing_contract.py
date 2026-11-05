@@ -54,11 +54,11 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn('is MessageContentUi.Text -> "text:$itemId"', workflow)
         assistant = self.chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
-        self.assertIn('val textBody = rememberAssistantTextBody(emptySet(), projection, reveal, generationComplete)', assistant)
+        self.assertIn('val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete)', assistant)
         text_body = self.chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
-                      'RevealedMessageMarkdown(text.text, currentProjection.value?.blocks?.get(text.text),',
-                      'currentReveal.value, text.itemId, modifier, generationComplete = currentComplete.value, deferBlockReveal = true)'):
+                      'RevealedMessageMarkdown(displayed, accepted?.blocks?.get(displayed),',
+                      'generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)'):
             self.assertIn(token, text_body)
         self.assertEqual(1, assistant.count('textBody = textBody'))
         self.assertIn('WorkflowNarrationContent(steps, plainText, textSources,', self.chat)

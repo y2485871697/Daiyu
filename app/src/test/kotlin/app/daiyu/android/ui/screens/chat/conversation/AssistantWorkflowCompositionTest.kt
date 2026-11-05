@@ -97,6 +97,7 @@ class AssistantWorkflowCompositionTest {
         val recomposer = Recomposer(coroutineContext + clock)
         val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
         val composition = Composition(NoNodes(), recomposer)
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
         val projection = mutableStateOf<MarkdownProjection?>(null)
         val reveal = MarkdownReveal(null, mutableStateOf(MarkdownTypingFrame(null, 0)), exact = false)
         var renderer: (@Composable (MessageContentUi.Text, Modifier) -> Unit)? = null
@@ -110,11 +111,12 @@ class AssistantWorkflowCompositionTest {
             } while (recomposer.hasPendingWork || clock.hasAwaiters)
         }
         try {
-            composition.setContent { renderer = rememberAssistantTextBody(narration, projection.value, reveal, false) }
+            composition.setContent { renderer = rememberAssistantTextBody(narration, sources.value, projection.value, reveal, false) }
             settle()
             val first = renderer
             repeat(100) { index ->
                 val text = "answer $index"
+                sources.value = listOf(MarkdownTypingSource("answer", text))
                 projection.value = MarkdownProjection(listOf(text), mapOf(text to emptyList()), MarkdownParser::parse)
                 settle()
                 assertSame("Only active text leaves should observe a new AST", first, renderer)

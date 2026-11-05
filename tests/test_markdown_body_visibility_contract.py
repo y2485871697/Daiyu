@@ -22,7 +22,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>()',
                       'blockedSources = blockedSources', 'ordered.body.isNotEmpty() && bodyVisible'):
             self.assertIn(token, chat)
-        for token in ('takeWhile { it.source.id !in blockedSources }', 'target, enabled, advanceLimit',
+        for token in ('takeWhile { it.source.id !in blockedSources }', 'target, canAdvance, advanceLimit',
+                      'val canAdvance = enabled && sourcesCompatible',
                       'var shown = motion.visible(current)', 'if (end < current.total) motion.pause(current)'):
             self.assertIn(token, typing)
 

@@ -110,7 +110,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
             self.assertIn(token, source)
         messages = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertIn('snapshotFlow { Triple(scrollResumed, currentDragging, listState.isScrollInProgress) }', messages)
-        self.assertIn('LazyColumn(state = listState, userScrollEnabled = !initialPositionPending', messages)
+        self.assertIn('LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending', messages)
         self.assertNotIn('readAutomaticCompression', messages)
 
 

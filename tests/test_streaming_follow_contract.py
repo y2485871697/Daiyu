@@ -43,7 +43,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertLess(self.follow.index("if (!canFollowBottom())"), self.follow.index("motion.reset()"))
         self.assertIn("currentScrollSerial == null || currentScrollSerial == consumedScrollSerial", self.guard)
         self.assertIn("if (!canFollowBottom())", self.follow)
-        self.assertIn("!initialPositionPending && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0", self.guard)
+        self.assertIn("!initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0", self.guard)
         self.assertIn("followBottom = false; wasDragged = false", self.source)
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
         self.assertIn("listState.animateScrollToItem(index)", self.source)

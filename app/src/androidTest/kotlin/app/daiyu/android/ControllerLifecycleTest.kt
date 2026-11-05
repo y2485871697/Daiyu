@@ -154,7 +154,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
             assertEquals("unsent",f.db.conversations().single().draft);assertTrue(f.db.messages(c.id).isEmpty())
         } finally {release.countDown()}
         awaitState(f) {!f.controller.dataBusy}
-        assertTrue(f.controller.dataNotice?.startsWith("导入失败")==true)
+        main { assertEquals("备份读取或附件写入失败", f.controller.dataNotice) }
         assertEquals(0L,f.controller.dataRevision);assertEquals(0,threads.get());assertEquals(0,f.calls.get())
         main {f.controller.unobserve(listener)}
         val s=session(f);assertNotNull(f.controller.send(c,"unsent"))

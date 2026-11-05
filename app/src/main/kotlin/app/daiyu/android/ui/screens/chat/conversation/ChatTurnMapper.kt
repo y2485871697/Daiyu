@@ -236,8 +236,12 @@ object ChatTurnMapper {
             dedicatedKey = dedicatedKey, categoryDetails = display.details,
             hasBrowserScreenshot = block.invocation.name in setOf("browser_read", "browser_write") &&
                 runCatching { org.json.JSONObject(block.invocation.arguments).optString("action") == "screenshot" }.getOrDefault(false),
-            hasScreenScreenshot = block.invocation.name == "screen" &&
-                runCatching { org.json.JSONObject(block.invocation.arguments).optString("operation") == "screenshot" }.getOrDefault(false),
+            hasScreenScreenshot = block.invocation.name == "screen" && runCatching {
+                val args = org.json.JSONObject(block.invocation.arguments)
+                args.optString("operation") == "screenshot" ||
+                    (args.optString("operation") == "observe" && !args.has("observation_id") &&
+                        app.daiyu.android.media.NativeScreenImage.isVisualFallback(block.result))
+            }.getOrDefault(false),
             operationGlyph = toolOperationGlyph(block.invocation.name, block.invocation.arguments),
             activity = activity ?: ToolActivityUi.from(receipt ?: when (confirmedError) {
                 true -> WorkStepState.FAILED

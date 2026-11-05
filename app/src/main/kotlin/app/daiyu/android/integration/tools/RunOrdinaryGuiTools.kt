@@ -35,9 +35,17 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                         capture = image.visualPackage?.let { image.observationId to it }
                         GuiScreenToolFactory.screenshotJson(image)
                     }
-                    else encode(session.dynamicObserve(context.cancelled, GuiScreenToolFactory.maxNodes(arguments))) { observed ->
-                        observation = observed
-                        GuiScreenToolFactory.observationJson(observed)
+                    else encode(session.dynamicScreen(context.cancelled, GuiScreenToolFactory.maxNodes(arguments))) { result ->
+                        when (result) {
+                            is GuiScreenRead.Nodes -> {
+                                observation = result.observation
+                                GuiScreenToolFactory.observationJson(result.observation)
+                            }
+                            is GuiScreenRead.Visual -> {
+                                capture = result.image.visualPackage?.let { result.image.observationId to it }
+                                GuiScreenToolFactory.screenshotJson(result.image, result.nodeFailureCode)
+                            }
+                        }
                     }
                 } }
             }
@@ -66,7 +74,7 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                         JSONObject().put("package_name", request.packageName).put("status", status)
                             .put("launch_request_accepted", true).put("target_window_state", "NOT_VERIFIED")
                             .put("verification_required", true).put("verified_ui_result", false)
-                            .put("next_action", "仅确认启动请求已提交，不代表应用界面或目标页面已显示。需要节点操作时必须取得成功的screen观察；节点树不可读时可显式请求无observation_id的screen screenshot，并且仅在返回visual_actions_available=true时按capture_id执行视觉坐标操作。截图或窗口见证仍失败时停止屏幕操作，不要据此要求点亮、解锁或重授普通应用权限。")
+                            .put("next_action", "仅确认启动请求已提交，不代表应用界面或目标页面已显示。需要节点操作时必须取得成功的screen观察；节点树不可读时screen observe会自动尝试一次受保护视觉读取；返回screen_read_mode=visual_fallback时按图像和capture_id继续，仅在visual_actions_available=true时执行其支持的视觉坐标动作，不要重试节点观察或编造节点ID。截图或窗口见证仍失败时停止屏幕操作，不要据此要求点亮、解锁或重授普通应用权限。")
                             .toString()
                     }
                 }

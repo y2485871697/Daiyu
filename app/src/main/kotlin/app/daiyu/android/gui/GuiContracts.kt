@@ -24,6 +24,10 @@ internal class GuiObservation(
 ) {
     val nodes: List<GuiNode> = Collections.unmodifiableList(nodes.toList())
 }
+internal sealed interface GuiScreenRead {
+    data class Nodes(val observation: GuiObservation) : GuiScreenRead
+    data class Visual(val image: GuiScreenshot, val nodeFailureCode: String) : GuiScreenRead
+}
 internal enum class GuiOperation { TAP, LONG_PRESS, SCROLL_FORWARD, SCROLL_BACKWARD, INPUT, IME_SUBMIT,
     COORDINATE_TAP, SWIPE, BACK, HOME, RECENTS, NOTIFICATIONS }
 internal data class GuiGesture(val x: Int, val y: Int, val endX: Int, val endY: Int, val durationMillis: Long) {

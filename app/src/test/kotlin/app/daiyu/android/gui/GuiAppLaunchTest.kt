@@ -65,6 +65,12 @@ class GuiAppLaunchTest {
         var delivered: Intent? = null
         override fun enabled(current: GuiAccessibilityService) = enabled
         override fun unlocked(current: GuiAccessibilityService) = unlocked
+        var windowReads = 0
+        var listedWindows: (() -> List<AccessibilityWindowInfo>)? = null
+        override fun windows(current: GuiAccessibilityService): List<AccessibilityWindowInfo> {
+            windowReads++
+            return listedWindows?.invoke().orEmpty()
+        }
         var rootPackage: String? = null
         var rootWindowType = AccessibilityWindowInfo.TYPE_APPLICATION
         override fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? {
@@ -292,6 +298,70 @@ class GuiAppLaunchTest {
         assertEquals(DispatchOutcome.NotExecuted("CAPTURE_ID_MISMATCH_NOT_EXECUTED"),
             f.callTool("screen_action", changedAction, "different-consumed-visual"))
         assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
+    }
+
+    @Test fun ordinaryObserveAutomaticallyCapturesAllMissingRootCasesWithAndWithoutTarget() {
+        val f = Fixture()
+        platform.visual = GuiVisualWindow("wm-token", target, 10222,
+            GuiBounds(0, 0, 1, 1), GuiBounds(0, 0, 1, 1), 0, emptyList())
+        val cases = listOf(null to "NO_ACTIVE_EXTERNAL_WINDOW", false to "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED",
+            true to "APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED")
+        for ((active, code) in cases) for (targeted in listOf(true, false)) {
+            platform.listedWindows = if (active == null) null else ({ listOf(AccessibilityWindowInfo.obtain().apply {
+                shadowOf(this).setId(7); shadowOf(this).setType(AccessibilityWindowInfo.TYPE_APPLICATION)
+                shadowOf(this).setActive(active); shadowOf(this).setFocused(false); shadowOf(this).setDisplayId(0)
+            }) })
+            val beforeWindows = platform.windowReads; val beforeCapture = platform.captures; val beforeVisual = platform.visualReads
+            val args = JSONObject().put("operation", "observe").apply { if (targeted) put("target_package", target) }
+            val result = f.callTool("screen", args.toString(), "$code-$targeted")
+            assertTrue(result.toString(), result is DispatchOutcome.Confirmed)
+            val json = JSONObject((result as DispatchOutcome.Confirmed).payload)
+            assertEquals("visual_fallback", json.getString("screen_read_mode"))
+            assertEquals(code, json.getString("node_failure_code")); assertFalse(json.getBoolean("node_tree_available"))
+            assertTrue(json.getBoolean("visual_actions_available")); assertTrue(json.getString("capture_id").isNotBlank())
+            assertFalse(json.has("observation_id")); assertFalse(json.has("nodes"))
+            assertEquals(beforeWindows + 1, platform.windowReads); assertEquals(beforeCapture + 1, platform.captures)
+            assertEquals(beforeVisual + 2, platform.visualReads)
+        }
+        assertEquals(0, platform.nodeActions); assertEquals(0, platform.gestures); assertEquals(0, platform.launches)
+    }
+    @Test fun ordinaryObserveVisualFallbackConnectsDirectlyToOneCoordinateAction() {
+        val f = Fixture()
+        platform.visual = GuiVisualWindow("wm-token", target, 10222,
+            GuiBounds(0, 0, 1, 1), GuiBounds(0, 0, 1, 1), 0, emptyList())
+        val result = f.callTool("screen", """{"operation":"observe","target_package":"$target"}""", "observe") as DispatchOutcome.Confirmed
+        val id = JSONObject(result.payload).getString("capture_id")
+        val args = """{"operation":"coordinate_tap","capture_id":"$id","x":0,"y":0}"""
+        val action = f.callTool("screen_action", args, "visual-action") as DispatchOutcome.Confirmed
+        assertEquals(id, JSONObject(action.payload).getString("capture_id")); assertFalse(action.isError)
+        assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
+        assertEquals(action.copy(replayed = true), f.callTool("screen_action", args, "same-effect"))
+        assertEquals(1, platform.gestures); assertEquals(2, platform.captures)
+    }
+    @Test fun ordinaryObserveMissingWitnessStopsAfterOneVisualAttempt() {
+        val f = Fixture()
+        assertEquals(DispatchOutcome.NotExecuted("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED"),
+            f.callTool("screen", """{"operation":"observe"}""", "observe"))
+        assertEquals(1, platform.windowReads); assertEquals(1, platform.visualReads)
+        assertEquals(0, platform.captures); assertEquals(0, platform.gestures)
+    }
+    @Test fun ordinaryObserveDoesNotCaptureForHealthyNodesOrTargetMismatch() {
+        val f = Fixture(); platform.rootPackage = target
+        val nodes = f.callTool("screen", """{"operation":"observe","target_package":"$target"}""", "nodes") as DispatchOutcome.Confirmed
+        val json = JSONObject(nodes.payload)
+        assertTrue(json.has("observation_id")); assertTrue(json.has("nodes")); assertFalse(json.has("capture_id"))
+        platform.rootPackage = "other.app"
+        assertEquals(DispatchOutcome.NotExecuted("TARGET_PACKAGE_MISMATCH_NOT_EXECUTED"),
+            f.callTool("screen", """{"operation":"observe","target_package":"$target"}""", "mismatch"))
+        assertEquals(0, platform.visualReads); assertEquals(0, platform.captures); assertEquals(0, platform.gestures)
+    }
+    @Test fun ordinaryObserveVisualFallbackStillRejectsAWitnessForTheWrongTarget() {
+        val f = Fixture()
+        platform.visual = GuiVisualWindow("wm-token", "other.app", 10222,
+            GuiBounds(0, 0, 1, 1), GuiBounds(0, 0, 1, 1), 0, emptyList())
+        assertEquals(DispatchOutcome.NotExecuted("TARGET_PACKAGE_MISMATCH_NOT_EXECUTED"),
+            f.callTool("screen", """{"operation":"observe","target_package":"$target"}""", "wrong-window"))
+        assertEquals(1, platform.visualReads); assertEquals(0, platform.captures); assertEquals(0, platform.gestures)
     }
 
     @Test fun implicitSelfScreenshotRetainsNarrowTargetAndDoesNotAskForExternalLocation() {

@@ -77,7 +77,7 @@ class ResponsesModel internal constructor(
         history: List<Message>,
         private val connect: (URL) -> HttpsURLConnection,
         private var tools: List<ToolDefinition>,
-        capability: Boolean?,
+        private val capability: Boolean?,
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
         private val videoCapability: OpenRouterVideoCapability? = null,
@@ -309,10 +309,12 @@ class ResponsesModel internal constructor(
                     input.put(row); ownItems.add(row.toString())
                 }
             }
-            val request = ResponsesRequest.withAssistantInstructions(
+            var request = ResponsesRequest.withAssistantInstructions(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
+            request = ScreenToolImageInput.project(request, input, settings, capability,
+                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
             if (java.net.URI(settings.endpoint).host.equals("ark.cn-beijing.volces.com", true)) request.remove("include")
             if (backgroundResume != null) {
                 backgroundResume.requireMatches(settings)

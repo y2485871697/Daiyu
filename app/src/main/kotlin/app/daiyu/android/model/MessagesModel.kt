@@ -43,7 +43,7 @@ class MessagesModel internal constructor(
         history: List<Message>,
         private var tools: List<ToolDefinition>,
         private val connect: (URL) -> HttpsURLConnection,
-        capability: Boolean?,
+        private val capability: Boolean?,
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
         private val sessionContext: SessionGatewayContext?,
@@ -113,6 +113,8 @@ class MessagesModel internal constructor(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
+            request = ScreenToolImageInput.project(request, messages, settings, capability,
+                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
             ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else request.opt("model") as? String)
             settings.requestOptions.sessionGateway.requireExecutable()

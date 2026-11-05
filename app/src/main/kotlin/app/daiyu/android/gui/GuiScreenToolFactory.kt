@@ -20,7 +20,7 @@ internal object GuiScreenToolFactory {
             "Bounded accessibility observation or an explicitly requested screenshot. observe forbids observation_id. " +
                 "Active system dialogs support observation and exact node actions, not screenshots or coordinate/global actions. The actual package_name and window_type are returned; omit target_package to inspect an intervening system dialog. " +
                 "If truncated, request a fresh observe with max_nodes up to 512; never act on an incomplete tree. " +
-                (if (allowImplicitObservation) "screenshot accepts a current observation_id for a tree-bound image; omit it for a current visual-only image. Visual-only results have capture_id, not observation_id; run observe before node actions. "
+                (if (allowImplicitObservation) "If the accessibility root is missing, observe automatically attempts one protected visual capture. A screen_read_mode=visual_fallback result is an image with capture_id, node_tree_available=false and node_failure_code, not a node observation; continue with its supported visual actions instead of retrying observe. screenshot accepts a current observation_id for a tree-bound image; omit it for a current visual-only image. Visual-only results have capture_id, not observation_id; run observe before node actions. "
                  else "screenshot requires observation_id from a successful observe in this session. ") +
                 "IDs expire after ${GUI_OBSERVATION_TTL_MILLIS / 1000} seconds, a target window change, or an action. Never retry a stale ID automatically. " +
                 (if (allowImplicitObservation) "For a fresh observe of the current screen omit target_package. Screenshots without a target retain this session target; use a fresh observe to change it. Self-app observation requires target_package=app.daiyu.android. To open another app, use launch_app first; target_package only selects a window, it does not launch an app. " else "") +
@@ -45,16 +45,23 @@ internal object GuiScreenToolFactory {
             }
         }
     }
-    internal fun screenshotJson(image: GuiScreenshot): String = JSONObject()
+    internal fun screenshotJson(image: GuiScreenshot): String = screenshotJson(image, null)
+    internal fun screenshotJson(image: GuiScreenshot, nodeFailureCode: String?): String = JSONObject()
         .put(if (image.observationBound) "observation_id" else "capture_id", image.observationId)
         .put("width", image.width).put("height", image.height)
         .put("package_name", image.visualPackage ?: JSONObject.NULL)
         .put("visual_actions_available", image.visualPackage != null).put("mime_type", "image/png")
-        .put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).toString()
+        .put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).apply {
+            if (nodeFailureCode != null) {
+                put("screen_read_mode", "visual_fallback")
+                put("node_tree_available", false)
+                put("node_failure_code", nodeFailureCode)
+            }
+        }.toString()
 
     internal fun actionDefinition(allowVisualCapture: Boolean = false): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact authorized accessibility node, coordinate gesture or global action, bound to the same fresh observation_id. " +
-                (if (allowVisualCapture) "When an explicitly requested screenshot returns capture_id, it has no nodes. Use capture_id (not observation_id) only for coordinate_tap, swipe or back; fresh pixels and the real foreground window are checked before delivery. Other actions require observe. " else "") +
+                (if (allowVisualCapture) "When screen returns capture_id, including an observe visual_fallback result, it has no nodes. Use capture_id (not observation_id) only for coordinate_tap, swipe or back; fresh pixels and the real foreground window are checked before delivery. Other actions require observe. " else "") +
                 "coordinate_tap uses x/y; swipe uses x/y/end_x/end_y and optional duration_ms (50-2000, default 500). Coordinates are screen pixels in the observed application window, never screenshot-scaled. " +
                 "ime_submit requires an editable focused node advertising IME_ENTER on API 30+. Explicit gestures are not a fallback for denied or unknown actions. " +
                 "Self-app observations do not authorize HOME/BACK/RECENTS/NOTIFICATIONS; when provided, use launch_app to open another app. No automatic coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",

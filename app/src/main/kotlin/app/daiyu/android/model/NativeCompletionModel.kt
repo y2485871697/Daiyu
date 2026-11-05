@@ -83,7 +83,8 @@ class NativeCompletionModel internal constructor(
             }
             NativeCompletionRequest.groupResults(settings.protocol, resultRows).forEach { row ->
                 val raw = row.toString()
-                require(raw.length <= 1_000_000) { "工具结果超过原生历史存储上限" }
+                require(raw.length <= 1_000_000 || (settings.protocol == ProviderProtocol.CHAT_COMPLETIONS &&
+                    ScreenToolImageInput.boundedNativeReceipt(rows, settings.protocol, row))) { "工具结果超过原生历史存储上限" }
                 rows.put(row); ownItems.add(raw)
             }
             val continuation = retry.continuation
@@ -99,7 +100,9 @@ class NativeCompletionModel internal constructor(
                     rows.put(row); ownItems.add(row.toString())
                 }
             }
-            val request = settings.requestOptions.apply(NativeCompletionRequest.body(settings, rows, tools, instructions), settings.protocol)
+            var request = settings.requestOptions.apply(NativeCompletionRequest.body(settings, rows, tools, instructions), settings.protocol)
+            request = ScreenToolImageInput.project(request, rows, settings, imageInputSupported,
+                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
             if (settings.protocol == ProviderProtocol.CHAT_COMPLETIONS) require(request.opt("model") == settings.model) { "自定义请求体不能替换所选模型" }
             settings.requestOptions.sessionGateway.requireExecutable()
             // Existing session gateway field rules are OpenAI-specific; Gemini uses only owned session headers.

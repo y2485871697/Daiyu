@@ -1004,6 +1004,12 @@ internal object GuiRuntime {
         }
     }
 
+    internal fun supportsVisualFallback(lease: GuiLeaseGate.Lease, code: String): Boolean {
+        onMain()
+        return !isSelfLease(lease) && code in setOf("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED",
+            "APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED", "NO_ACTIVE_EXTERNAL_WINDOW")
+    }
+
     private fun visualRejection(lease: GuiLeaseGate.Lease): GuiResult.Rejected? =
         targetRejection(lease) ?: screenRejection() ?: if (isSelfLease(lease))
             GuiResult.Rejected("SELF_APP_VISUAL_FALLBACK_NOT_EXECUTED") else null

@@ -47,6 +47,22 @@ class ChatTurnMapperTest {
         }
     }
 
+    @Test fun observeVisualFallbackEnablesTheExistingScreenshotContentEntry() {
+        val result = org.json.JSONObject().put("screen_read_mode", "visual_fallback").put("node_tree_available", false)
+            .put("node_failure_code", "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED").put("visual_actions_available", true)
+            .put("capture_id", "capture").put("mime_type", "image/png").put("data_base64", "native-png")
+        fun flag(name: String = "screen", output: String? = result.toString(), args: String = """{"operation":"observe"}""") =
+            mapped(message(MessageBlock.Tool(ToolInvocation(ToolCallId("capture"), name, args), output)))
+                .workProcess!!.segments.single().steps.single().hasScreenScreenshot
+        assertTrue(flag())
+        assertFalse(flag(name = "other")); assertFalse(flag(output = null))
+        assertFalse(flag(output = """{"observation_id":"nodes","nodes":[]}"""))
+        assertFalse(flag(args = """{"operation":"observe","observation_id":"capture"}"""))
+        for (key in listOf("screen_read_mode", "node_tree_available", "node_failure_code", "visual_actions_available", "capture_id", "data_base64")) {
+            assertFalse(flag(output = org.json.JSONObject(result.toString()).apply { remove(key) }.toString()))
+        }
+        assertTrue(flag(output = null, args = """{"operation":"screenshot"}"""))
+    }
     @Test fun textOnlyHasNoWorkCardAndPreservesAllText() {
         val turn = mapped(message(text("a", "Hello"), text("b", "world")))
         assertNull(turn.workProcess)

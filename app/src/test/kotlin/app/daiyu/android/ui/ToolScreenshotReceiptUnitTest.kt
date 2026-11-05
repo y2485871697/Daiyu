@@ -58,4 +58,26 @@ class ToolScreenshotReceiptUnitTest {
         val data = JSONObject(record.result!!).put("capture_id", "")
         assertNull(ToolScreenshotReceipt.decode(record.copy(result = data.toString())))
     }
+    @Test fun automaticObserveFallbackDisplaysItsRealImageWithoutPretendingItHasNodes() {
+        val original = visual()
+        val record = original.copy(invocation = original.invocation.copy(arguments = """{"operation":"observe"}"""),
+            result = JSONObject(original.result!!).put("screen_read_mode", "visual_fallback")
+                .put("node_tree_available", false).put("visual_actions_available", true)
+                .put("node_failure_code", "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED").toString())
+        val image = ToolScreenshotReceipt.decode(record)
+        assertNotNull(image); assertEquals(4, image!!.width); assertEquals(3, image.height); image.recycle()
+        for (key in listOf("screen_read_mode", "node_tree_available", "node_failure_code", "visual_actions_available")) {
+            assertNull(ToolScreenshotReceipt.decode(record.copy(result = JSONObject(record.result!!).apply { remove(key) }.toString())))
+        }
+        assertNull(ToolScreenshotReceipt.decode(record.copy(disposition = ToolDisposition.NOT_EXECUTED)))
+    }
+
+    @Test fun truncatedPngWithAValidHeaderNeverDisplays() {
+        val record = visual()
+        val data = JSONObject(record.result!!)
+        val bytes = Base64.decode(data.getString("data_base64"), Base64.NO_WRAP).copyOf(33)
+        data.put("data_base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+        assertNull(ToolScreenshotReceipt.decode(record.copy(result = data.toString())))
+    }
+
 }

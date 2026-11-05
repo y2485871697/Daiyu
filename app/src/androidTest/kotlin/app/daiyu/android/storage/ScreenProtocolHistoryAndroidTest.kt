@@ -32,6 +32,67 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             .put("width", 4).put("height", 3).put("data_base64", Base64.getEncoder().encodeToString(png)).toString()
     }
 
+    fun testLargeVisualStreamingProjectionAndContextSnapshotDoNotWaitForWriter() {
+        val context = testContext(instrumentation.targetContext, "screen-projection-${UUID.randomUUID()}-")
+        val database = ConversationDatabase(context)
+        var runtime: SQLiteRuntimeStore? = null
+        val release = java.util.concurrent.CountDownLatch(1)
+        val held = java.util.concurrent.CountDownLatch(1)
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val holding = java.util.concurrent.atomic.AtomicBoolean(false)
+        try {
+            val store = SQLiteRuntimeStore.acquire(database).also { runtime = it; it.recoverPending() }
+            val conversation = database.create("default").id
+            val initial = Message(MessageId("projection"), conversation, RunId("run"), "assistant", emptyList(), RunStatus.RUNNING)
+            val model = app.daiyu.android.ui.model.ContextUsageModel("synthetic", "synthetic", 1, 100_000)
+            store.bindContextUsage(initial, model)
+            val assistants = app.daiyu.android.assistants.SqliteAssistantStore(database)
+            val profile = assistants.assistants.value.first()
+            val result = JSONObject(output()).put("screen_read_mode", "visual_fallback")
+                .put("node_tree_available", false).put("node_failure_code", "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                .put("visual_actions_available", true).toString()
+            val tool = MessageBlock.Tool(ToolInvocation(ToolCallId("screen"), "screen", "{\"operation\":\"observe\"}"), result)
+            var builds = 0
+            val cache = app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache({ n, a, r ->
+                builds++; app.daiyu.android.ui.screens.chat.conversation.ToolCardPresentations.present(n, a, r)
+            })
+            val writer = executor.submit {
+                synchronized(store) {
+                    val db = database.writableDatabase
+                    db.beginTransaction()
+                    try {
+                        holding.set(true); held.countDown()
+                        check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                    } finally { holding.set(false); db.endTransaction() }
+                }
+            }
+            assertTrue(held.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val began = android.os.SystemClock.elapsedRealtimeNanos()
+            instrumentation.runOnMainSync {
+                assertSame(model, store.contextUsageModel(conversation))
+                assertNull(store.contextUsageModel(ConversationId("other")))
+                assertEquals(profile.name, assistants.assistants.value.first { it.id == profile.id }.name)
+                repeat(100) { index ->
+                    val message = initial.copy(blocks = listOf(tool, MessageBlock.Text("tail", "stream-$index")))
+                    val turn = app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapper.map(listOf(message), presentations = cache)
+                        .single() as app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.Assistant
+                    assertTrue(turn.workProcess!!.segments.flatMap { it.steps }.single().hasScreenScreenshot)
+                }
+                assertTrue("Main projection waited for the runtime monitor or SQLite writer", holding.get())
+            }
+            assertEquals(1, builds)
+            android.util.Log.i("DaiyuFreezeRegression", "projections=100 builds=$builds elapsed_ns=${android.os.SystemClock.elapsedRealtimeNanos() - began}")
+            release.countDown(); writer.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            cache.clear()
+            store.close(); runtime = null
+            assertTrue(runCatching { store.contextUsageModel(conversation) }.exceptionOrNull() is IllegalStateException)
+        } finally {
+            release.countDown(); executor.shutdownNow()
+            executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
+            runtime?.close(); database.close(); context.deleteDatabase("conversations.db")
+        }
+    }
+
     fun testLargeScreenProtocolCommitsReadsAndRecoversWithoutReplayingAction() {
         val context = testContext(instrumentation.targetContext, "screen-history-${UUID.randomUUID()}-")
         val database = ConversationDatabase(context)

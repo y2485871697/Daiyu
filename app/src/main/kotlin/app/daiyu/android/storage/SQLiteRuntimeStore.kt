@@ -25,14 +25,17 @@ internal class SQLiteRuntimeStore private constructor(
     private val processOwner = UUID.randomUUID().toString()
     private val checkpointReuse = RuntimeCheckpointReuse()
     private val checkpointJsonWriter = CheckpointJsonWriter()
-    private var contextUsageBinding: Pair<Message, app.daiyu.android.ui.model.ContextUsageModel>? = null
+    @Volatile private var contextUsageBinding: Pair<Message, app.daiyu.android.ui.model.ContextUsageModel>? = null
     @Volatile internal var contextUsageRevision = 0L; private set
     @Synchronized internal fun bindContextUsage(initial: Message, model: app.daiyu.android.ui.model.ContextUsageModel) {
         available(); check(recovered)
         contextUsageBinding = initial to model
     }
-    @Synchronized internal fun contextUsageModel(conversation: ConversationId): app.daiyu.android.ui.model.ContextUsageModel? =
-        contextUsageBinding?.takeIf { it.first.conversationId == conversation }?.second
+    internal fun contextUsageModel(conversation: ConversationId): app.daiyu.android.ui.model.ContextUsageModel? {
+        available()
+        val binding = contextUsageBinding
+        return binding?.takeIf { it.first.conversationId == conversation }?.second
+    }
     private val transactions = DatabaseTransactions { database.writableDatabase }
     private val preparations = app.daiyu.android.context.SQLitePreparationRuntime(transactions, processOwner)
 
@@ -84,7 +87,7 @@ internal class SQLiteRuntimeStore private constructor(
         available(); check(recovered); compressionModel = initial to model
     }
     private var recovered = false
-    private var closed = false
+    @Volatile private var closed = false
     private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
 
     private val childUsageStore = SQLiteChildUsageStore(database)

@@ -5,7 +5,7 @@ import org.json.JSONObject
 /** Display taxonomy, not a registry or an execution permission. */
 internal object ToolCardPresentations {
     val categories = setOf("memory", "skills", "delegation", "child_control", "workspace", "terminal", "background_job", "files", "image_read", "browser", "gui", "apps", "device_read", "personal_search", "system_action", "generation", "speech", "mcp", "context", "user_question", "generic")
-    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null)
+    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null, val hasScreenScreenshot: Boolean = false)
     private val tools = buildMap {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }
         group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
@@ -31,6 +31,9 @@ internal object ToolCardPresentations {
 
     fun present(toolName: String, arguments: String, result: String?): Presentation {
         val args = parse(arguments)
+        val screenScreenshot = toolName == "screen" && (args?.optString("operation") == "screenshot" ||
+            (args?.optString("operation") == "observe" && !args.has("observation_id") &&
+                app.daiyu.android.media.NativeScreenImage.isVisualFallback(result)))
         var kind = tools[toolName] ?: if (isMcpToolName(toolName)) "mcp" to "调用 MCP 工具" else "generic" to "执行其他工具"
         val branch = when (toolName) {
             "browser_read", "browser_write" -> browserActions[args?.optString("action")]
@@ -98,7 +101,7 @@ internal object ToolCardPresentations {
             else -> "已收到返回内容，状态以执行回执为准"
         }
         val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromResult(toolName, result, output) else null
-        val details = ToolCategoryDetails.project(kind.first, arguments, result, toolName, target)
+        val details = ToolCategoryDetails.project(kind.first, arguments, result, toolName, target, screenScreenshot)
         val sections = buildList {
             if (kind.first == "delegation") {
                 if (params.isNotBlank()) add(ToolDetailSectionUi("任务", params))
@@ -113,7 +116,7 @@ internal object ToolCardPresentations {
             "执行其他工具 · $toolName"
         } else kind.second
         val title = target?.let { "$operationTitle · ${it.label}" } ?: operationTitle
-        return Presentation(kind.first, title, summary, sections, details, target?.label)
+        return Presentation(kind.first, title, summary, sections, details, target?.label, screenScreenshot)
     }
     private fun arrayCount(value: JSONObject?, key: String, label: String): String =
         value?.optJSONArray(key)?.let { "$label：${it.length()}" }.orEmpty()

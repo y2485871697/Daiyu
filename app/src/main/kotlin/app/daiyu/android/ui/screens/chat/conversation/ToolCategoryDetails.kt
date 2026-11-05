@@ -36,7 +36,7 @@ internal object ToolCategoryDetails {
         "ownerTransportReady" to "宿主通道就绪", "displayInitialized" to "显示已初始化", "hasFrame" to "已有画面",
         "sourceEmpty" to "画面源为空")
 
-    fun project(category: String, arguments: String, result: String?, toolName: String = "", terminalTarget: TerminalToolTarget? = null): ToolCategoryDetailsUi {
+    fun project(category: String, arguments: String, result: String?, toolName: String = "", terminalTarget: TerminalToolTarget? = null, screenScreenshot: Boolean? = null): ToolCategoryDetailsUi {
         val args = parse(arguments)
         val launchingDelegation = category == "delegation" && toolName in setOf("run_child_models", "start_child_tasks")
         val envelope = parse(result)
@@ -133,7 +133,7 @@ internal object ToolCategoryDetails {
             else -> "工具记录" to "未识别的工具使用只读安全回退；不根据返回文本猜测执行成功。"
         }
         if (result == null) fields += ToolFieldUi("返回内容", "尚未收到")
-        return ToolCategoryDetailsUi(heading, fields.distinct(), items, notice, ToolRichDetails.project(category, toolName, arguments, result))
+        return ToolCategoryDetailsUi(heading, fields.distinct(), items, notice, ToolRichDetails.project(category, toolName, arguments, result, screenScreenshot))
     }
     private fun parse(value: String?): JSONObject? = if (value == null || value.length > 65_536 || !value.trimStart().startsWith('{')) null
         else runCatching { JSONObject(value) }.getOrNull()

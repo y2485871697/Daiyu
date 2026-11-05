@@ -17,7 +17,7 @@ internal data class RuntimeCheckpointStamp(
 }
 
 /** One entry per OS lease; SQL must prove exact payload equality inside the writing transaction. */
-internal class RuntimeCheckpointReuse(private val maxChars: Int = 1_048_576) {
+internal class RuntimeCheckpointReuse(private val maxChars: Int = 16 * 1024 * 1024) {
     private class Entry(val stamp: RuntimeCheckpointStamp, val encoded: String, val facts: CheckpointPreservation)
     private var last: Entry? = null
 

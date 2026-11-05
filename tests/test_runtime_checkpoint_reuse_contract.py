@@ -39,7 +39,7 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
 
     def test_cache_is_a_bounded_single_lease_projection_not_an_execution_authority(self):
         cache = (APP / "storage/RuntimeCheckpointReuse.kt").read_text()
-        self.assertIn("maxChars: Int = 1_048_576", cache)
+        self.assertIn("maxChars: Int = 16 * 1024 * 1024", cache)
         self.assertIn("exactPayload && it.stamp == stamp", cache)
         self.assertIn("checkpoint.phase == ExecutionPhase.TERMINAL || encoded.length > maxChars", cache)
         self.assertIn("CheckpointPreservation.capture(checkpoint)", cache)
@@ -99,6 +99,11 @@ class RuntimePayloadProofSql(unittest.TestCase):
         payload = '{"text":"' + "数🙂e\u0301" * 70_000 + '"}'
         self.assertEqual(1, self.proof(payload, payload))
         self.assertEqual(0, self.proof(payload, payload[:-2] + 'x"}'))
+
+    def test_real_screenshot_sized_payload_is_still_proven_byte_for_byte(self):
+        payload = "x" * 13_709_122
+        self.assertEqual(1, self.proof(payload, payload))
+        self.assertEqual(0, self.proof(payload, payload[:-1] + "y"))
 
     def test_text_collation_and_same_hash_are_not_payload_identity(self):
         for stored, expected in [("Aa", "BB"), ("JSON", "json"), ("é", "e\u0301"), ("x\x00a", "x\x00b"), ("x", "x ")]:

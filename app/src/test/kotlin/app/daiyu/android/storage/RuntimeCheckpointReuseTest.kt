@@ -38,6 +38,28 @@ class RuntimeCheckpointReuseTest {
         assertNull(cache.preservation(RuntimeCheckpointStamp.of(previous, "process"), false))
     }
 
+    @Test fun screenshotSizedCheckpointsKeepOneBoundedPreviousPayloadAcrossStreamingCommits() {
+        val cache = RuntimeCheckpointReuse()
+        val encoded = "x".repeat(13_709_122)
+        var previous = checkpoint()
+        repeat(100) {
+            cache.committed(previous, "process", encoded)
+            assertSame(encoded, cache.expectedPayload("m"))
+            val stamp = RuntimeCheckpointStamp.of(previous, "process")
+            val facts = cache.preservation(stamp, true)
+            assertNotNull(facts)
+            assertNull(cache.preservation(stamp, false))
+            previous = previous.copy(revision = previous.revision + 1)
+            facts!!.preserve(previous)
+        }
+        cache.committed(previous, "process", "x".repeat(16 * 1024 * 1024 + 1))
+        assertEquals("", cache.expectedPayload("m"))
+        assertNull(cache.preservation(RuntimeCheckpointStamp.of(previous, "process"), true))
+        cache.committed(previous, "process", encoded)
+        cache.committed(previous.copy(phase = ExecutionPhase.TERMINAL), "process", encoded)
+        assertEquals("", cache.expectedPayload("m"))
+    }
+
     @Test fun everyIdentityAndMetadataFieldMustMatchInsideTheTransaction() {
         val cache = RuntimeCheckpointReuse(); val value = checkpoint()
         cache.committed(value, "process", "encoded")

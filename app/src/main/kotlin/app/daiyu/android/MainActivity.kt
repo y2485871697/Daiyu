@@ -6839,10 +6839,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun currentAssistantLabel(): String = try {
-        val binding=selected?.id?.let(controller.database::assistantId) ?: if(selected==null) assistantStore.selectedId.value else null
-        if(binding==null) "未绑定助手" else assistantStore.read(binding)?.name ?: "助手已删除，请重新绑定"
-    } catch (_:Exception) { "助手不可用" }
+    private fun currentAssistantLabel(): String {
+        val conversation = selected
+        val binding = if (conversation == null) assistantStore.selectedId.value else conversation.assistantId
+        return if (binding == null) "未绑定助手" else assistantStore.assistants.value.firstOrNull { it.id == binding }?.name
+            ?: "助手已删除，请重新绑定"
+    }
     private fun savedModelLabel(): String = controller.retainedDeletedMainModel(selected?.id?.value) ?: confirmedModelLabel
     private fun readLoadedWindow(id: ConversationId, before: Long, count: Int): List<Pair<Long, Message>> {
         val result = mutableListOf<Pair<Long, Message>>()

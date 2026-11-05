@@ -46,7 +46,7 @@ class ToolPresentationCacheTest {
         cache.scope("other"); cache.present(c); assertEquals(6, builds)
         cache.clear(); cache.present(c); assertEquals(7, builds)
         val large = tool("large", 1_000)
-        cache.present(large); cache.present(large); assertEquals(9, builds)
+        cache.present(large); cache.present(large); assertEquals(8, builds)
     }
 
     @Test fun aggregateSourceBudgetEvictsEvenBelowTheEntryLimit() {
@@ -82,6 +82,55 @@ class ToolPresentationCacheTest {
         cache.scope("c"); cache.present(a); val afterScope = builds
         cache.scope("c"); cache.present(a); assertEquals(afterScope, builds)
         cache.scope(null); cache.present(a); assertEquals(afterScope + 1, builds)
+    }
+
+    private fun visual(size: Int = 1_826_000): MessageBlock.Tool {
+        val output = org.json.JSONObject().put("screen_read_mode", "visual_fallback")
+            .put("node_tree_available", false).put("node_failure_code", "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+            .put("visual_actions_available", true).put("mime_type", "image/png").put("capture_id", "synthetic")
+            .put("width", 1216).put("height", 2640).put("data_base64", "SYNTHETIC_IMAGE_SENTINEL" + "A".repeat(size)).toString()
+        return tool("visual", 0).copy(result = output)
+    }
+
+    @Test fun screenshotSizedVisualReceiptIsClassifiedAndProjectedOnlyOnceWhileReceiptsStayLive() {
+        var builds = 0
+        val cache = ToolPresentationCache({ n, a, r -> builds++; ToolCardPresentations.present(n, a, r) })
+        val block = visual()
+        repeat(100) { index ->
+            val input = message(block, MessageBlock.Text("tail", "stream-$index")).copy(status = RunStatus.RUNNING)
+            val turn = ChatTurnMapper.map(listOf(input), presentations = cache,
+                toolState = { _, _ -> if (index < 50) WorkStepState.OK else WorkStepState.UNKNOWN }).single() as ChatTurnUi.Assistant
+            val step = turn.workProcess!!.segments.flatMap { it.steps }.single()
+            assertTrue(step.hasScreenScreenshot)
+            assertEquals(if (index < 50) WorkStepState.OK else WorkStepState.UNKNOWN, step.state)
+        }
+        assertEquals(1, builds)
+        val projection = cache.present(block)
+        val rich = projection.details.rich
+        assertTrue(rich.documents.isEmpty())
+        assertTrue(rich.technical.isEmpty())
+        assertFalse((projection.toString() + rich.fields + rich.entries + rich.prose).contains("SYNTHETIC_IMAGE_SENTINEL"))
+        val differentReference = String(block.result!!.toCharArray())
+        assertNotSame(block.result, differentReference)
+        cache.present(block.copy(result = differentReference)); assertEquals(2, builds)
+        val ordinary = block.copy(result = "{\"nodes\":[]}")
+        assertFalse(cache.present(ordinary).hasScreenScreenshot); assertEquals(3, builds)
+    }
+
+    @Test fun largeIdentityKeysRetainPruneScopeAndEvictWithoutReusingChangedArguments() {
+        var builds = 0
+        val cache = ToolPresentationCache({ n, a, r -> builds++; ToolCardPresentations.present(n, a, r) })
+        val a = visual(262_145); val b = visual(262_146); val c = visual(262_147)
+        cache.present(a); cache.present(b); cache.present(a); assertEquals(2, builds)
+        cache.present(c); cache.present(a); assertEquals(3, builds)
+        cache.present(b); assertEquals(4, builds)
+        cache.retain(listOf(message(a)))
+        cache.present(a); assertEquals(4, builds)
+        val newArgs = String(a.invocation.arguments.toCharArray())
+        cache.present(a.copy(invocation = a.invocation.copy(arguments = newArgs))); assertEquals(5, builds)
+        cache.scope("other"); cache.present(a); assertEquals(6, builds)
+        cache.clear(); cache.present(a); assertEquals(7, builds)
+        cache.retain(emptyList()); cache.present(a); assertEquals(8, builds)
     }
 
     @Test fun argumentsNamesAndNullResultsArePartOfTheExactPresentationKey() {

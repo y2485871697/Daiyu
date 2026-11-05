@@ -323,7 +323,9 @@ class ScreenToolImageInputTest {
                 owner = "owner", revision = 1)
             assertEquals(checkpoint, RunCheckpointCodec.decode(RunCheckpointCodec.encode(checkpoint)))
             val recovered = ProcessRecovery.interrupt(checkpoint)
-            assertEquals(recovered, RunCheckpointCodec.decode(RunCheckpointCodec.encode(recovered)))
+            assertFalse(recovered.messageReconciled)
+            val reconciled = recovered.copy(messageReconciled = true)
+            assertEquals(reconciled, RunCheckpointCodec.decode(RunCheckpointCodec.encode(reconciled)))
             assertEquals(items, rows(protocol, listOf(owner)).let { array ->
                 (0 until array.length()).map { array.getJSONObject(it).toString() }
             })

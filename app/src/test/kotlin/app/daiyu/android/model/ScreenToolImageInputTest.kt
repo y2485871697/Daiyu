@@ -12,6 +12,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.net.URL
@@ -23,6 +24,7 @@ import javax.net.ssl.HttpsURLConnection
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ScreenToolImageInputTest {
     private val protocols = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)
     private val args = """{"operation":"observe"}"""
@@ -176,6 +178,7 @@ class ScreenToolImageInputTest {
             assertNotNull(NativeScreenImage.parse("screen", args, output))
             val failure = runCatching { session.next(listOf(ToolOutput(ToolCallId("call"), output))) {} }.exceptionOrNull()
             assertTrue(failure.toString(), failure is ImageAttachmentException)
+            assertEquals(ImageAttachmentFailure.INVALID_IMAGE, (failure as ImageAttachmentException).failure)
             assertEquals(1, calls.size); session.cancel()
         }
     }

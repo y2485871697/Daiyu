@@ -72,6 +72,14 @@ TASK_SCROLL_MODULES = (
 )
 
 
+GUI_PARSER_PLATFORM_CLASS = "app.daiyu.android.gui.GuiVisualWindowParserAndroidTest"
+GUI_PARSER_MODULES = (
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_gui_parser_smoke_scope",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == SPEECH_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *SPEECH_MODULES, "-v"], "speech-targeted"
@@ -84,6 +92,9 @@ def command_for(python, env):
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(TASK_SCROLL_PLATFORM_CLASSES)):
         return [python, '-B', '-m', 'unittest', *TASK_SCROLL_MODULES, '-v'], 'task-scroll-targeted'
+    if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == GUI_PARSER_PLATFORM_CLASS):
+        return [python, "-B", "-m", "unittest", *GUI_PARSER_MODULES, "-v"], "gui-parser-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

@@ -77,3 +77,64 @@ class ToolReceiptTests(unittest.TestCase):
         self.assertIn("script: bash -c 'set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh;", smoke)
         self.assertIn("name: 上传启动证据\n        if: always()", smoke)
         self.assertNotIn("final_delivery.py", workflow)
+
+
+    def test_exact_gui_parser_scope_keeps_explicit_source_and_receipt_checks(self):
+        modules = ["test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+                   "test_gui_parser_smoke_scope",
+                   "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope"]
+        for python in ("python", "python3"):
+            command, scope = producer.command_for(python, dict(SMOKE_MODE="smoke",
+                SMOKE_TEST_CLASSES="app.daiyu.android.gui.GuiVisualWindowParserAndroidTest"))
+            self.assertEqual(scope, "gui-parser-targeted")
+            self.assertEqual(command, [python, "-B", "-m", "unittest", *modules, "-v"])
+
+    def test_gui_parser_mixed_duplicate_similar_and_other_modes_keep_full_checks(self):
+        cls = "app.daiyu.android.gui.GuiVisualWindowParserAndroidTest"
+        other = "app.daiyu.android.OtherTest"
+        invalid = ("", other, cls + "," + other, other + "," + cls, cls + "," + cls,
+                   " " + cls, cls + " ", cls + "Extra", "prefix." + cls)
+        environments = [dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value) for value in invalid]
+        environments += [dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=cls)
+                         for mode in ("", "build", "compile", "candidate", "daily", "release", "checks")]
+        environments += [dict(SMOKE_TEST_CLASSES=cls), dict(SMOKE_MODE="smoke")]
+        for env in environments:
+            self.assertEqual(producer.command_for("python3", env),
+                (["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"))
+
+    def test_gui_parser_receipt_preserves_raw_bytes_real_exit_and_identity(self):
+        raw = b"synthetic FAIL\r\nraw stderr\x00\n"
+        for python in ("python", "python3"):
+            for code in (0, 1, 7):
+                env = dict(self.env, SMOKE_MODE="smoke",
+                           SMOKE_TEST_CLASSES="app.daiyu.android.gui.GuiVisualWindowParserAndroidTest")
+                expected, _ = producer.command_for(python, env)
+                def child(command, stdout, stderr, env=None):
+                    self.assertEqual(command, expected)
+                    self.assertEqual(stderr, subprocess.STDOUT)
+                    self.assertTrue(env["PYTHONPATH"].startswith(str((ROOT / "tests").resolve())))
+                    stdout.write(raw)
+                    return code
+                console = io.BytesIO()
+                with patch.dict(os.environ, env, clear=True), \
+                        patch.object(producer, "Path", side_effect=lambda value: self.root if value == "tool-evidence" else Path(value)), \
+                        patch.object(producer.subprocess, "call", side_effect=child), \
+                        patch.object(producer.sys, "stdout", SimpleNamespace(buffer=console)):
+                    self.assertEqual(producer.record(python), code)
+                receipt = json.loads((self.root / "receipt.json").read_text())
+                self.assertEqual(receipt, dict(identity=dict(sha="b" * 40, run_id=43, attempt=2),
+                    command=expected, exit_code=code, scope="gui-parser-targeted"))
+                self.assertEqual((self.root / "unittest.log").read_bytes(), raw)
+                self.assertEqual(console.getvalue(), raw)
+
+    def test_gui_parser_interruption_cannot_leave_a_stale_success_receipt(self):
+        for failure in (OSError("fixture"), KeyboardInterrupt()):
+            self.root.mkdir(exist_ok=True)
+            (self.root / "receipt.json").write_text('{"exit_code":0}')
+            env = dict(self.env, SMOKE_MODE="smoke",
+                       SMOKE_TEST_CLASSES="app.daiyu.android.gui.GuiVisualWindowParserAndroidTest")
+            with patch.dict(os.environ, env, clear=True), patch.object(producer, "Path", return_value=self.root), \
+                    patch.object(producer.subprocess, "call", side_effect=failure):
+                with self.assertRaises(type(failure)):
+                    producer.record("python3")
+            self.assertFalse((self.root / "receipt.json").exists())

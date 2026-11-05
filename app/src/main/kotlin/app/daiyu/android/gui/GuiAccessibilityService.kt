@@ -288,6 +288,10 @@ internal object GuiRuntime {
         val content = event.eventType in setOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)
+        // Our reply content is not the external rootless target. Keep both pending reads and
+        // published captures; WM witnesses, occlusion and pixel revalidation still fence actions.
+        if (content && pkg == value.packageName && lease != null && observed == null && !isSelfLease(lease) &&
+            ((captures[lease] ?: 0) > 0 || visualCapture?.lease === lease)) return
         val sameWindow = observed != null && event.windowId == observed.windowId
         val otherWindow = observed != null && event.windowId >= 0 && event.windowId != observed.windowId
         // Scope content evidence to its framework window, not every notification/system UI update.
@@ -1102,12 +1106,22 @@ internal object GuiRuntime {
         }
         var initial: GuiVisualWindow? = null
         request.future.whenComplete { value, error -> completed(value ?: GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), initial, startGeneration) }
-        fun currentRejection(): GuiResult.Rejected? = visualRejection(lease) ?: if (cancelled())
-            GuiResult.Rejected("CANCELLED_NOT_EXECUTED") else if (service !== current || generation != startGeneration ||
-            SystemClock.elapsedRealtime() - startedAt !in 0..GUI_OBSERVATION_TTL_MILLIS)
-            GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED") else null
-        fun windowRejection(window: GuiVisualWindow?): GuiResult.Rejected? {
-            currentRejection()?.let { return it }
+        fun currentRejection(stage: String): GuiResult.Rejected? {
+            visualRejection(lease)?.let { return it }
+            if (cancelled()) return GuiResult.Rejected("CANCELLED_NOT_EXECUTED")
+            val age = SystemClock.elapsedRealtime() - startedAt
+            val reason = when {
+                service !== current -> "service"
+                generation != startGeneration -> "generation"
+                age !in 0..GUI_OBSERVATION_TTL_MILLIS -> "age"
+                else -> return null
+            }
+            if (!request.future.isDone) runCatching { android.util.Log.i("DaiyuGui",
+                "visual_capture_stale stage=$stage reason=$reason age_ms=$age generation=$startGeneration:$generation") }
+            return GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED")
+        }
+        fun windowRejection(window: GuiVisualWindow?, stage: String): GuiResult.Rejected? {
+            currentRejection(stage)?.let { return it }
             if (window == null) return GuiResult.Rejected("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED")
             if (window.packageName == current.packageName) return GuiResult.Rejected("SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
             if (targetBinding?.packageName != null && targetBinding?.packageName != window.packageName)
@@ -1117,12 +1131,12 @@ internal object GuiRuntime {
         // Keep the same reservation while the read-only Root witness and platform callback drain.
         try { access.visualWindow(current) { window ->
             initial = window
-            val denied = windowRejection(window)
+            val denied = windowRejection(window, "initial_witness")
             request.submit {
                 if (denied != null) { request.callbackFailure(denied.code); return@submit }
                 access.capture(current, success = success@ { frame ->
                     fun dispose() { try { frame.dispose(request) } catch (_: Exception) { /* retain drain */ } }
-                    val invalid = currentRejection()
+                    val invalid = currentRejection("platform_callback")
                     if (invalid != null || request.future.isDone) {
                         if (invalid != null) request.future.complete(invalid)
                         dispose(); return@success
@@ -1134,7 +1148,7 @@ internal object GuiRuntime {
                                 try {
                                     access.visualWindow(current) { finalWindow ->
                                         try {
-                                            val rejection = windowRejection(finalWindow) ?: if (finalWindow != initial)
+                                            val rejection = windowRejection(finalWindow, "final_witness") ?: if (finalWindow != initial)
                                                 GuiResult.Rejected("CAPTURE_WINDOW_CHANGED_NOT_EXECUTED") else null
                                             val dimensions = image is GuiResult.Value && (image.value.width != initial?.displayBounds?.right ||
                                                 image.value.height != initial?.displayBounds?.bottom)

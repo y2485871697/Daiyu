@@ -102,6 +102,11 @@ def command_for(python, env):
         return [python, "-B", "-m", "unittest", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
                 "test_screen_history_smoke_scope",
                 "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", "-v"], "screen-history-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.gui.GuiRootlessContentAndroidTest"):
+        return [python, "-B", "-m", "unittest", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+                "test_rootless_content_smoke_scope",
+                "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", "-v"], "rootless-content-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

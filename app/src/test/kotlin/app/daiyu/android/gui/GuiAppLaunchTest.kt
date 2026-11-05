@@ -106,8 +106,14 @@ class GuiAppLaunchTest {
         var visual: GuiVisualWindow? = null
         var visualReads = 0
         var gestures = 0
+        var ownContentBeforeVisual = false
         override fun visualWindow(current: GuiAccessibilityService, completed: (GuiVisualWindow?) -> Unit) {
-            visualReads++; completed(visual)
+            visualReads++
+            if (ownContentBeforeVisual) GuiRuntime.main.post {
+                val event = android.view.accessibility.AccessibilityEvent.obtain(
+                    android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED).apply { packageName = current.packageName }
+                try { current.onAccessibilityEvent(event); completed(visual) } finally { event.recycle() }
+            } else completed(visual)
         }
         override fun gesture(current: GuiAccessibilityService, gesture: GuiGesture, completed: (Boolean) -> Unit): Boolean {
             gestures++; completed(true); return true
@@ -325,6 +331,27 @@ class GuiAppLaunchTest {
         }
         assertEquals(0, platform.nodeActions); assertEquals(0, platform.gestures); assertEquals(0, platform.launches)
     }
+    @Test fun ordinaryLaunchObserveAndVisualActionSurviveOwnWorkflowContentWithOrWithoutTarget() {
+        val f = Fixture()
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        platform.rootPackage = null
+        platform.visual = GuiVisualWindow("wm-token", target, 10222,
+            GuiBounds(0, 0, 1, 1), GuiBounds(0, 0, 1, 1), 0, emptyList())
+        platform.ownContentBeforeVisual = true
+        for (targeted in listOf(false, true)) {
+            val args = JSONObject().put("operation", "observe").apply { if (targeted) put("target_package", target) }
+            val observed = f.callTool("screen", args.toString(), "own-content-observe-$targeted") as DispatchOutcome.Confirmed
+            val json = JSONObject(observed.payload)
+            assertEquals("visual_fallback", json.getString("screen_read_mode"))
+            assertFalse(json.has("nodes")); assertFalse(json.has("observation_id"))
+            val id = json.getString("capture_id")
+            val action = f.callTool("screen_action", """{"operation":"coordinate_tap","capture_id":"$id","x":0,"y":0}""",
+                "own-content-action-$targeted") as DispatchOutcome.Confirmed
+            assertFalse(action.isError)
+        }
+        assertEquals(2, platform.gestures); assertEquals(4, platform.captures); assertEquals(0, platform.nodeActions)
+    }
+
     @Test fun ordinaryObserveVisualFallbackConnectsDirectlyToOneCoordinateAction() {
         val f = Fixture()
         platform.visual = GuiVisualWindow("wm-token", target, 10222,

@@ -49,6 +49,8 @@ gui_parser_only = mode == "smoke" and raw_filter == gui_parser_target
 gui_parser_source = Path("app/src/androidTest/kotlin/app/daiyu/android/gui/GuiVisualWindowParserAndroidTest.kt")
 screen_history_only = mode == "smoke" and raw_filter == "app.daiyu.android.storage.ScreenProtocolHistoryAndroidTest"
 screen_history_source = Path("app/src/androidTest/kotlin/app/daiyu/android/storage/ScreenProtocolHistoryAndroidTest.kt")
+rootless_content_only = mode == "smoke" and raw_filter == "app.daiyu.android.gui.GuiRootlessContentAndroidTest"
+rootless_content_source = Path("app/src/androidTest/kotlin/app/daiyu/android/gui/GuiRootlessContentAndroidTest.kt")
 menu_target = {"app.daiyu.android." + name for name in (
     "BackdropDrawIsolationTest", "ChatGlassMenuSurfaceTest", "ChatGlassBackdropActivityTest",
     "ChatMenuPlacementActivityTest", "ConversationPaneVisualTest", "PreviewDialogStatusBarActivityTest",
@@ -86,6 +88,8 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
         continue
     if screen_history_only and path != screen_history_source:
         continue
+    if rootless_content_only and path != rootless_content_source:
+        continue
     if menu_only and path not in menu_sources:
         continue
     if page_back_only and path not in page_back_sources:
@@ -119,7 +123,7 @@ if mode == "daily" and (shards != 1 or shard != 0):
     raise ValueError("Daily Release requires one complete targeted shard per API")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys
@@ -139,7 +143,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or menu_only or page_back_only or task_scroll_only else "full",
+                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

@@ -68,6 +68,7 @@ class GuiRuntimeScreenshotTest {
     }
 
     private class Frame : GuiCaptureFrame {
+        var pixels = byteArrayOf(1)
         var encoded = 0
         var encodeFailure = false
         var disposalFailure = false
@@ -77,7 +78,7 @@ class GuiRuntimeScreenshotTest {
             check(Looper.myLooper() !== Looper.getMainLooper())
             encoded++
             if (encodeFailure) error("encoding failed")
-            return GuiResult.Value(GuiScreenshot(observationId, 1, 1, byteArrayOf(1)))
+            return GuiResult.Value(GuiScreenshot(observationId, 1, 1, pixels))
         }
         override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) {
             check(Looper.myLooper() === Looper.getMainLooper())
@@ -137,6 +138,11 @@ class GuiRuntimeScreenshotTest {
             node.text = source.text
             node.setBoundsInScreen(targetBounds)
             return true
+        }
+        var visual: GuiVisualWindow? = null
+        var visualReads = 0
+        override fun visualWindow(current: GuiAccessibilityService, completed: (GuiVisualWindow?) -> Unit) {
+            visualReads++; completed(visual)
         }
         val callbacks = mutableListOf<Pair<(GuiCaptureFrame) -> Unit, (Int) -> Unit>>()
         override fun enabled(current: GuiAccessibilityService) = permissionEnabled
@@ -410,6 +416,113 @@ class GuiRuntimeScreenshotTest {
         return checkNotNull(root.window).also {
             shadowOf(it).setRoot(root); shadowOf(it).setFocused(focused); shadowOf(it).setLayer(layer)
         }
+    }
+
+    private fun visualWindow() = GuiVisualWindow("wm-token", "external.app", 10222,
+        GuiBounds(0, 0, 1, 1), GuiBounds(0, 0, 1, 1), 0, emptyList())
+    private fun visualImage(): GuiScreenshot {
+        platform.missing = true; platform.visual = visualWindow()
+        val pending = GuiRuntime.visualScreenshot(session.lease) { false }
+        platform.success(); worker.runAll()
+        return (pending.completed() as GuiResult.Value).value
+    }
+    @Test fun rootlessVisualCapturePublishesNoNodesAndUsesThePlatformCaptureOnlyOnce() {
+        val image = visualImage()
+        assertFalse(image.observationBound); assertEquals("external.app", image.visualPackage)
+        assertNull(session.lease.observation); assertEquals(0, platform.rootReads)
+        assertEquals(2, platform.visualReads); assertEquals(0, platform.nodeActions)
+        val json = org.json.JSONObject(GuiScreenToolFactory.screenshotJson(image))
+        assertEquals(image.observationId, json.getString("capture_id")); assertFalse(json.has("observation_id"))
+        rejected(GuiRuntime.validateExactTarget(session.lease,
+            GuiAction(image.observationId, GuiOperation.TAP, 0)), "OBSERVATION_REQUIRED")
+    }
+    @Test fun visualGestureRequiresTheSamePixelsAndConsumesCaptureBeforeTerminalReceipt() {
+        val image = visualImage()
+        val action = GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+            gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)
+        val pending = GuiRuntime.visualAction(session.lease, action) { false }
+        platform.success(); worker.runAll()
+        assertEquals(1, platform.gestures); assertFalse(pending.isDone)
+        platform.gestureCompleted!!(true)
+        assertTrue(pending.completed() is GuiResult.Value)
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        assertEquals(1, platform.gestures)
+    }
+    @Test fun changedPixelsWithoutAccessibilityEventsNeverDispatchVisualCoordinates() {
+        val image = visualImage()
+        val action = GuiAction(image.observationId, GuiOperation.SWIPE,
+            gesture = GuiGesture(0, 0, 0, 0, 500), visual = true)
+        val pending = GuiRuntime.visualAction(session.lease, action) { false }
+        platform.success(Frame().apply { pixels = byteArrayOf(2) }); worker.runAll()
+        rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"); assertNoActions()
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        assertTrue(platform.callbacks.isEmpty())
+    }
+    @Test fun visualActionExpiresWhileItsVerificationFrameIsBeingEncoded() {
+        val image = visualImage()
+        val action = GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+            gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(GUI_OBSERVATION_TTL_MILLIS - 1))
+        val pending = GuiRuntime.visualAction(session.lease, action) { false }
+        platform.success()
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(2))
+        worker.runAll()
+        rejected(pending.completed(), "CAPTURE_STALE_NOT_EXECUTED"); assertNoActions()
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+    }
+    @Test fun windowChangeFailurePermanentlyRetiresTheVisualCapture() {
+        val image = visualImage()
+        val action = GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+            gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)
+        val pending = GuiRuntime.visualAction(session.lease, action) { false }
+        platform.success(); platform.visual = visualWindow().copy(identity = "other-window"); worker.runAll()
+        rejected(pending.completed(), "CAPTURE_WINDOW_CHANGED_NOT_EXECUTED")
+        platform.visual = visualWindow()
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+    @Test fun abandonedVisualCaptureDisposesLateFrameWithoutPublishingAToken() {
+        platform.visual = visualWindow(); var abandoned = false
+        val pending = GuiRuntime.visualScreenshot(session.lease) { abandoned }
+        abandoned = true
+        val frame = platform.success(); worker.runAll()
+        rejected(pending.completed(), "CANCELLED_NOT_EXECUTED")
+        assertEquals(listOf("software", "hardware", "buffer"), frame.disposed)
+        rejected(GuiRuntime.visualAction(session.lease, GuiAction("late", GuiOperation.BACK, visual = true)) { false }.completed(),
+            "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        assertNoActions()
+    }
+    @Test fun visualCaptureRechecksWindowAfterEncodingAndDisposesOnTargetLoss() {
+        platform.visual = visualWindow()
+        val pending = GuiRuntime.visualScreenshot(session.lease) { false }
+        val frame = platform.success()
+        platform.visual = visualWindow().copy(identity = "changed")
+        worker.runAll()
+        rejected(pending.completed(), "CAPTURE_WINDOW_CHANGED_NOT_EXECUTED")
+        assertEquals(listOf("software", "hardware", "buffer"), frame.disposed)
+        assertNull(session.lease.observation); assertNoActions()
+    }
+    @Test fun missingWindowWitnessOrCancellationNeverStartsTheCapture() {
+        rejected(GuiRuntime.visualScreenshot(session.lease) { false }.completed(), "VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED")
+        session.approveReadsFromUser(GuiReadApproval(0, 1)); platform.visual = visualWindow()
+        rejected(GuiRuntime.visualScreenshot(session.lease) { true }.completed(), "CANCELLED_NOT_EXECUTED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+    @Test fun visualPlatformSecureFailureNeverFallsBackToRootPixels() {
+        platform.visual = visualWindow()
+        val pending = GuiRuntime.visualScreenshot(session.lease) { false }
+        platform.callbacks.removeAt(0).second(6)
+        rejected(pending.completed(), "SCREENSHOT_PLATFORM_ERROR_6")
+        assertEquals(1, platform.visualReads); assertEquals(0, platform.rootReads); assertNoActions()
+    }
+    @Test fun cancelledVisualActionCannotDispatchAfterItsVerificationFrameArrives() {
+        val image = visualImage(); var cancelled = false
+        val pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+            gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { cancelled }
+        cancelled = true
+        val frame = platform.success(); worker.runAll()
+        rejected(pending.completed(), "CANCELLED_NOT_EXECUTED")
+        assertEquals(listOf("software", "hardware", "buffer"), frame.disposed); assertNoActions()
     }
 
     @Test fun ordinaryScreenshotWithoutIdObservesOnceAndExplicitStaleIdNeverReobserves() {

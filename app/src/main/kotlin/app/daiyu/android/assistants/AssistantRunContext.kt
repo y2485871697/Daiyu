@@ -30,7 +30,7 @@ class AssistantRunContext private constructor(
     companion object {
         const val EXECUTION_POLICY = "仅使用本轮提供的工具、选定执行身份和前后台位置；工具未执行、权限不足或后端不可用不授权换通道。" +
             "屏幕点击前先观察当前窗口，不沿用前一任务的应用包名；本轮提供launch_app时，打开应用应先用search_apps确认包名并直接launch_app，再观察目标界面，不必先观察助手或返回桌面。" +
-            "助手self观察不授权跨应用HOME等全局操作；这种作用域拒绝不是Android触摸权限不足。观察或屏幕准入失败后，不得改用 shell、Shizuku、su、input、screencap 或 uiautomator 绕过目标、显示器及位置限制。" +
+            "助手self观察不授权跨应用HOME等全局操作；这种作用域拒绝不是Android触摸权限不足。节点树不可读时，可显式请求screen screenshot（不带observation_id）；仅当返回visual_actions_available=true时用capture_id执行它明确支持的视觉动作，不伪造节点、不混用两种ID。截图或窗口见证失败时停止屏幕操作。观察或屏幕准入失败后，不得改用 shell、Shizuku、su、input、screencap 或 uiautomator 绕过目标、显示器及位置限制。" +
             "Root 通道失败不得换 Shizuku 或应用身份重试。结果未知表示可能已执行：立即停止，不重复、不改参数或换通道重放，仅以独立获准的只读方式核实。" +
             "操作成功并达到用户目标后结束，不继续无关探测；只有确实需要读取后续界面或确认最终结果时才再次观察。"
 

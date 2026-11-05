@@ -24,6 +24,7 @@ internal object GuiScreenToolFactory {
                  else "screenshot requires observation_id from a successful observe in this session. ") +
                 "IDs expire after ${GUI_OBSERVATION_TTL_MILLIS / 1000} seconds, a target window change, or an action. Never retry a stale ID automatically. " +
                 (if (allowImplicitObservation) "For a fresh observe of the current screen omit target_package. Screenshots without a target retain this session target; use a fresh observe to change it. Self-app observation requires target_package=app.daiyu.android. To open another app, use launch_app first; target_package only selects a window, it does not launch an app. " else "") +
+                "If nodes are unavailable, an explicit screenshot without observation_id may use the already-authorized Root window witness plus platform capture. It returns no synthetic nodes; it never changes Root mode, HMA or accessibility settings. " +
                 "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED means no active/focused window was verified, not that the phone is locked. Only SCREEN_LOCKED_NOT_EXECUTED reports a locked or noninteractive screen. Do not infer lock state from a window failure. " +
                 "Window failures are not Android Root permission errors. Never use shell, input, screencap or uiautomator to bypass screen admission, target or location restrictions.",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
@@ -46,17 +47,21 @@ internal object GuiScreenToolFactory {
     }
     internal fun screenshotJson(image: GuiScreenshot): String = JSONObject()
         .put(if (image.observationBound) "observation_id" else "capture_id", image.observationId)
-        .put("width", image.width).put("height", image.height).put("mime_type", "image/png")
+        .put("width", image.width).put("height", image.height)
+        .put("package_name", image.visualPackage ?: JSONObject.NULL)
+        .put("visual_actions_available", image.visualPackage != null).put("mime_type", "image/png")
         .put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).toString()
 
-    internal fun actionDefinition(): ToolDefinition = ToolDefinition("screen_action", 1,
+    internal fun actionDefinition(allowVisualCapture: Boolean = false): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact authorized accessibility node, coordinate gesture or global action, bound to the same fresh observation_id. " +
+                (if (allowVisualCapture) "When an explicitly requested screenshot returns capture_id, it has no nodes. Use capture_id (not observation_id) only for coordinate_tap, swipe or back; fresh pixels and the real foreground window are checked before delivery. Other actions require observe. " else "") +
                 "coordinate_tap uses x/y; swipe uses x/y/end_x/end_y and optional duration_ms (50-2000, default 500). Coordinates are screen pixels in the observed application window, never screenshot-scaled. " +
                 "ime_submit requires an editable focused node advertising IME_ENTER on API 30+. Explicit gestures are not a fallback for denied or unknown actions. " +
                 "Self-app observations do not authorize HOME/BACK/RECENTS/NOTIFICATIONS; when provided, use launch_app to open another app. No automatic coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("operation", ArgumentType.Text(32, GuiOperation.entries.map { it.name.lowercase() }.toSet())),
-                ArgumentField("observation_id", ArgumentType.Text(64, minimumLength = 1)),
+                ArgumentField("observation_id", ArgumentType.Text(64, minimumLength = 1), required = !allowVisualCapture),
+                *if (allowVisualCapture) arrayOf(ArgumentField("capture_id", ArgumentType.Text(64, minimumLength = 1), required = false)) else emptyArray(),
                 ArgumentField("node_id", ArgumentType.Integer(0, 511), required = false),
                 ArgumentField("x", ArgumentType.Integer(0, 100_000), required = false),
                 ArgumentField("y", ArgumentType.Integer(0, 100_000), required = false),
@@ -69,6 +74,8 @@ internal object GuiScreenToolFactory {
     internal fun maxNodes(arguments: ToolArguments): Int =
         if (arguments.contains("max_nodes")) arguments.integer("max_nodes").toInt() else 128
     internal fun parseAction(arguments: ToolArguments): GuiAction {
+        val visual = arguments.contains("capture_id")
+        require(arguments.contains("observation_id") != visual) { "one_screen_identity_required" }
         val operation = GuiOperation.valueOf(arguments.text("operation").uppercase())
         val coordinate = operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE)
         val swipe = operation == GuiOperation.SWIPE
@@ -81,9 +88,9 @@ internal object GuiScreenToolFactory {
                 if (swipe) arguments.integer("end_y").toInt() else y,
                 if (!swipe) 50 else if (arguments.contains("duration_ms")) arguments.integer("duration_ms") else 500)
         } else null
-        return GuiAction(arguments.text("observation_id"), operation,
+        return GuiAction(arguments.text(if (visual) "capture_id" else "observation_id"), operation,
             if (arguments.contains("node_id")) arguments.integer("node_id").toInt() else null,
-            if (arguments.contains("text")) arguments.text("text") else null, gesture)
+            if (arguments.contains("text")) arguments.text("text") else null, gesture, visual)
     }
 
     private class ActionTool(private val session: GuiRunSession) : RegisteredTool {

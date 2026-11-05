@@ -97,6 +97,15 @@ class GuiAppLaunchTest {
             delivered = Intent(intent)
             rootPackage = intent.component!!.packageName
         }
+        var visual: GuiVisualWindow? = null
+        var visualReads = 0
+        var gestures = 0
+        override fun visualWindow(current: GuiAccessibilityService, completed: (GuiVisualWindow?) -> Unit) {
+            visualReads++; completed(visual)
+        }
+        override fun gesture(current: GuiAccessibilityService, gesture: GuiGesture, completed: (Boolean) -> Unit): Boolean {
+            gestures++; completed(true); return true
+        }
         var captures = 0
         var holdCapture = false
         var heldFailure: ((Int) -> Unit)? = null
@@ -258,6 +267,29 @@ class GuiAppLaunchTest {
         assertEquals(1, platform.nodeActions); assertEquals(0, platform.captures)
     }
 
+    @Test fun productionRootlessVisualCaptureAndCoordinateActionKeepTheExactDispatcherReceipt() {
+        val f = Fixture()
+        assertTrue(f.call() is DispatchOutcome.Confirmed)
+        platform.rootPackage = null
+        platform.visual = GuiVisualWindow("wm-token", target, 10222,
+            GuiBounds(0, 0, 1, 1), GuiBounds(0, 0, 1, 1), 0, emptyList())
+        val image = f.callTool("screen", """{"operation":"screenshot"}""", "rootless-image") as DispatchOutcome.Confirmed
+        val json = JSONObject(image.payload)
+        val capture = json.getString("capture_id")
+        assertFalse(json.has("observation_id")); assertTrue(json.getBoolean("visual_actions_available"))
+        assertEquals(1, platform.captures); assertEquals(1, platform.rootReads)
+        assertEquals(DispatchOutcome.NotExecuted("OBSERVATION_TARGET_MISMATCH_NOT_EXECUTED"),
+            f.callTool("screen_action", """{"operation":"coordinate_tap","capture_id":"$capture","x":0,"y":0,"target_package":"other.app"}""", "wrong-visual-target"))
+        val args = """{"operation":"coordinate_tap","capture_id":"$capture","x":0,"y":0}"""
+        val delivered = f.callTool("screen_action", args, "visual-tap") as DispatchOutcome.Confirmed
+        assertEquals(capture, JSONObject(delivered.payload).getString("capture_id"))
+        assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
+        assertTrue((f.callTool("screen_action", args, "visual-tap") as DispatchOutcome.Confirmed).replayed)
+        assertEquals(1, platform.gestures)
+        assertTrue(f.callTool("screen_action", args, "consumed-visual") is DispatchOutcome.NotExecuted)
+        assertEquals(1, platform.gestures)
+    }
+
     @Test fun implicitSelfScreenshotRetainsNarrowTargetAndDoesNotAskForExternalLocation() {
         val f = Fixture(TaskSurfacePreference.ASK)
         platform.rootPackage = service.packageName
@@ -354,7 +386,7 @@ class GuiAppLaunchTest {
         assertEquals("NOT_VERIFIED", payload.getString("target_window_state"))
         assertTrue(payload.getBoolean("verification_required")); assertFalse(payload.getBoolean("verified_ui_result"))
         assertTrue(payload.getString("next_action").contains("不代表应用界面或目标页面已显示"))
-        assertTrue(payload.getString("next_action").contains("窗口读取失败应停止屏幕操作"))
+        assertTrue(payload.getString("next_action").contains("截图或窗口见证仍失败时停止屏幕操作"))
         val replay = f.call() as DispatchOutcome.Confirmed
         assertTrue(replay.replayed); assertEquals(confirmed.payload, replay.payload)
         assertEquals(1, platform.launches); assertEquals(0, platform.rootReads); assertEquals(0, platform.captures)

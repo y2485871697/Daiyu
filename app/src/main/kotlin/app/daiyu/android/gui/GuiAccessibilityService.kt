@@ -89,7 +89,7 @@ class GuiAccessibilityService : AccessibilityService() {
 }
 
 internal data class GuiScreenshot(val observationId: String, val width: Int, val height: Int, val png: ByteArray,
-    val observationBound: Boolean = true)
+    val observationBound: Boolean = true, val visualPackage: String? = null)
 
 /** Narrow platform seam: admission and bounded traversal remain in the runtime. */
 internal interface GuiRuntimeAccess {
@@ -99,6 +99,8 @@ internal interface GuiRuntimeAccess {
             current.getSystemService(PowerManager::class.java).isInteractive
     fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? = current.rootInActiveWindow
     fun windows(current: GuiAccessibilityService): List<android.view.accessibility.AccessibilityWindowInfo> = current.windows.orEmpty()
+    fun visualWindow(current: GuiAccessibilityService, completed: (GuiVisualWindow?) -> Unit) =
+        AndroidGuiVisualWindows.read(current, completed)
     fun configuration(current: GuiAccessibilityService): android.accessibilityservice.AccessibilityServiceInfo? = current.serviceInfo
     @androidx.annotation.RequiresApi(33)
     fun clearWindowCache(current: GuiAccessibilityService): Boolean = current.clearCache()
@@ -346,8 +348,12 @@ internal object GuiRuntime {
         val verifiable: Boolean get() = !truncated && nodes.none { it.password }
     }
     private var screenshotBinding: Pair<String, TreeSample>? = null
+    private data class VisualCapture(val lease: GuiLeaseGate.Lease, val id: String, val generation: Long,
+        val capturedAt: Long, val window: GuiVisualWindow, val digest: List<Byte>)
+    private var visualCapture: VisualCapture? = null
     private var contentChanged = false
     @Suppress("DEPRECATION") private fun clearNodes() {
+        visualCapture = null
         screenshotBinding = null
         contentChanged = false
         retained.values.forEach { it.recycle() }; retained.clear(); identities.clear(); selfTargets.clear()
@@ -996,6 +1002,147 @@ internal object GuiRuntime {
             // Submission may have reached Android; only its terminal callback may release the slot.
             GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED")
         }
+    }
+
+    private fun visualRejection(lease: GuiLeaseGate.Lease): GuiResult.Rejected? =
+        targetRejection(lease) ?: screenRejection() ?: if (isSelfLease(lease))
+            GuiResult.Rejected("SELF_APP_VISUAL_FALLBACK_NOT_EXECUTED") else null
+
+    /** No synthetic tree: a capture token authorizes only a fresh visual gesture, never nodes. */
+    internal fun visualScreenshot(lease: GuiLeaseGate.Lease, cancelled: () -> Boolean): CompletableFuture<GuiResult<GuiScreenshot>> {
+        onMain()
+        gate.retireObservation(lease); clearNodes()
+        visualRejection(lease)?.let { return CompletableFuture.completedFuture(it) }
+        val permit = gate.consumeRead(lease, screenshot = true)
+        if (permit is GuiResult.Rejected) return CompletableFuture.completedFuture(permit)
+        val future = CompletableFuture<GuiResult<GuiScreenshot>>()
+        val id = UUID.randomUUID().toString()
+        val capturedAt = SystemClock.elapsedRealtime()
+        captureVisualFrame(lease, id, cancelled) { image, window, startGeneration ->
+            if (image is GuiResult.Value && window != null) {
+                visualCapture = VisualCapture(lease, id, startGeneration, capturedAt, window,
+                    java.security.MessageDigest.getInstance("SHA-256").digest(image.value.png).toList())
+                future.complete(GuiResult.Value(image.value.copy(observationBound = false, visualPackage = window.packageName)))
+            } else future.complete(image)
+        }
+        return future
+    }
+
+    internal fun visualAction(lease: GuiLeaseGate.Lease, action: GuiAction, cancelled: () -> Boolean): CompletableFuture<GuiResult<String>> {
+        onMain()
+        val future = CompletableFuture<GuiResult<String>>()
+        fun reject(code: String): CompletableFuture<GuiResult<String>> {
+            future.complete(GuiResult.Rejected(code)); return future
+        }
+        visualRejection(lease)?.let { return reject(it.code) }
+        val captured = visualCapture?.takeIf { it.lease === lease && it.id == action.observationId }
+            ?: return reject("CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        if (action.nodeId != null || action.operation !in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE, GuiOperation.BACK))
+            return reject("VISUAL_CAPTURE_COORDINATES_OR_BACK_ONLY_NOT_EXECUTED")
+        fun retire() { if (visualCapture === captured) visualCapture = null }
+        if (captured.generation != generation || SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS) {
+            retire(); return reject("CAPTURE_STALE_NOT_EXECUTED")
+        }
+        if (action.gesture != null && !captured.window.admits(action.gesture))
+            return reject("GESTURE_WINDOW_OCCLUDED_OR_OUTSIDE_NOT_EXECUTED")
+        // Re-capture, not merely re-read the same package. The exact visible pixels must still match.
+        captureVisualFrame(lease, captured.id, cancelled) { image, window, _ ->
+            val rejection = visualRejection(lease) ?: if (cancelled()) GuiResult.Rejected("CANCELLED_NOT_EXECUTED") else null
+            when {
+                future.isDone -> Unit
+                rejection != null -> { retire(); future.complete(rejection) }
+                image is GuiResult.Rejected -> { retire(); future.complete(image) }
+                image is GuiResult.Unknown -> { retire(); future.complete(image) }
+                visualCapture !== captured || window != captured.window || captured.generation != generation ||
+                    SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS -> {
+                    retire(); future.complete(GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED"))
+                }
+                java.security.MessageDigest.getInstance("SHA-256").digest((image as GuiResult.Value).value.png).toList() != captured.digest -> {
+                    retire(); future.complete(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"))
+                }
+                else -> {
+                    visualCapture = null // consume before dispatch, including denied/unknown submission
+                    val current = service
+                    if (current == null) future.complete(GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED"))
+                    else if (action.gesture != null) {
+                        val submitted = dispatchGesture(current, lease, action.gesture)
+                        generation++; clearNodes()
+                        val pending = gestures[lease]
+                        if (pending == null) future.complete(submitted)
+                        else pending.whenComplete { value, error -> future.complete(value ?: GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED")) }
+                    } else {
+                        val result = try { GuiResult.Value(if (current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
+                            "PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED" else "PLATFORM_ACTION_REJECTED") }
+                            catch (_: Exception) { GuiResult.Unknown("ACTION_DELIVERY_UNCONFIRMED") }
+                        generation++; clearNodes(); future.complete(result)
+                    }
+                }
+            }
+        }
+        return future
+    }
+
+    private fun captureVisualFrame(lease: GuiLeaseGate.Lease, id: String, cancelled: () -> Boolean,
+        completed: (GuiResult<GuiScreenshot>, GuiVisualWindow?, Long) -> Unit) {
+        val current = service
+        if (current == null || Build.VERSION.SDK_INT < 30) {
+            completed(GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), null, generation); return
+        }
+        val startGeneration = generation
+        val startedAt = SystemClock.elapsedRealtime()
+        captures[lease] = (captures[lease] ?: 0) + 1
+        val request = GuiCaptureRequest<GuiScreenshot> {
+            if (Looper.myLooper() === Looper.getMainLooper()) captureFinished(lease) else main.post { captureFinished(lease) }
+        }
+        var initial: GuiVisualWindow? = null
+        request.future.whenComplete { value, error -> completed(value ?: GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), initial, startGeneration) }
+        fun currentRejection(): GuiResult.Rejected? = visualRejection(lease) ?: if (cancelled())
+            GuiResult.Rejected("CANCELLED_NOT_EXECUTED") else if (service !== current || generation != startGeneration ||
+            SystemClock.elapsedRealtime() - startedAt !in 0..GUI_OBSERVATION_TTL_MILLIS)
+            GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED") else null
+        fun windowRejection(window: GuiVisualWindow?): GuiResult.Rejected? {
+            currentRejection()?.let { return it }
+            if (window == null) return GuiResult.Rejected("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED")
+            if (window.packageName == current.packageName) return GuiResult.Rejected("SELF_APP_TARGET_REQUIRED_NOT_EXECUTED")
+            if (targetBinding?.packageName != null && targetBinding?.packageName != window.packageName)
+                return GuiResult.Rejected("TARGET_PACKAGE_MISMATCH_NOT_EXECUTED")
+            return null
+        }
+        // Keep the same reservation while the read-only Root witness and platform callback drain.
+        try { access.visualWindow(current) { window ->
+            initial = window
+            val denied = windowRejection(window)
+            request.submit {
+                if (denied != null) { request.callbackFailure(denied.code); return@submit }
+                access.capture(current, success = success@ { frame ->
+                    fun dispose() { try { frame.dispose(request) } catch (_: Exception) { /* retain drain */ } }
+                    val invalid = currentRejection()
+                    if (invalid != null || request.future.isDone) {
+                        if (invalid != null) request.future.complete(invalid)
+                        dispose(); return@success
+                    }
+                    try {
+                        encoder.execute {
+                            val image = try { frame.encode(id) } catch (_: Exception) { GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE") }
+                            if (!main.post {
+                                try {
+                                    access.visualWindow(current) { finalWindow ->
+                                        try {
+                                            val rejection = windowRejection(finalWindow) ?: if (finalWindow != initial)
+                                                GuiResult.Rejected("CAPTURE_WINDOW_CHANGED_NOT_EXECUTED") else null
+                                            val dimensions = image is GuiResult.Value && (image.value.width != initial?.displayBounds?.right ||
+                                                image.value.height != initial?.displayBounds?.bottom)
+                                            request.future.complete(rejection ?: if (dimensions)
+                                                GuiResult.Rejected("CAPTURE_GEOMETRY_CHANGED_NOT_EXECUTED") else image)
+                                        } finally { dispose() }
+                                    }
+                                } catch (_: Exception) { request.future.complete(GuiResult.Rejected("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED")); dispose() }
+                            }) { request.future.complete(GuiResult.Rejected("SCREENSHOT_RESULT_UNAVAILABLE")); dispose() }
+                        }
+                    } catch (_: Exception) { request.future.complete(GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")); dispose() }
+                }, failure = { request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$it") })
+            }
+        } } catch (_: Exception) { request.callbackFailure("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED") }
     }
 
     /** No capture occurs while observing. API 30+ only; secure windows/platform errors stay errors. */

@@ -14,11 +14,12 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
     @Volatile private var current: GuiRunSession? = null
     private var observation: GuiObservation? = null
     private var target: String? = null
+    private var capture: Pair<String, String>? = null
     init { retain(location) }
     private val targetField = ArgumentField("target_package", ArgumentType.Text(256, minimumLength = 1), required = false)
     // Definitions stay identical to the finite GUI leaf, plus an explicit target routing parameter.
     override val tools: List<RegisteredTool> = listOf(false, true).map { action -> object : RegisteredTool {
-        override val definition = (if (action) GuiScreenToolFactory.actionDefinition() else GuiScreenToolFactory.readDefinition(allowImplicitObservation = true))
+        override val definition = (if (action) GuiScreenToolFactory.actionDefinition(allowVisualCapture = true) else GuiScreenToolFactory.readDefinition(allowImplicitObservation = true))
             .let { original -> ToolDefinition(original.name, original.version, original.description,
                 original.capability, original.effect, ToolSchema(original.schema.fields + targetField)) }
         override fun prepare(arguments: ToolArguments): PreparedTool {
@@ -29,8 +30,11 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                 require((screenshot || !arguments.contains("observation_id")) && (!screenshot || !arguments.contains("max_nodes"))) { "observation_id_not_allowed_for_observe" }
                 val observationId = if (arguments.contains("observation_id")) arguments.text("observation_id") else null
                 return read { context -> withSession(if (screenshot && observationId == null) requestedTarget ?: target else requestedTarget, context, observationId) { session ->
-                    if (observationId == null) observation = null
-                    if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled), GuiScreenToolFactory::screenshotJson)
+                    if (observationId == null) { observation = null; capture = null }
+                    if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled)) { image ->
+                        capture = image.visualPackage?.let { image.observationId to it }
+                        GuiScreenToolFactory.screenshotJson(image)
+                    }
                     else encode(session.dynamicObserve(context.cancelled, GuiScreenToolFactory.maxNodes(arguments))) { observed ->
                         observation = observed
                         GuiScreenToolFactory.observationJson(observed)
@@ -39,9 +43,9 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             }
             val command = GuiScreenToolFactory.parseAction(arguments)
             val effect = command.effect(GuiOwner(authorization.sessionId, owner.runId.value))
-            return this@RunOrdinaryGuiTools.write(effect) { context -> withSession(requestedTarget, context, command.observationId) { session ->
+            return this@RunOrdinaryGuiTools.write(effect) { context -> withSession(requestedTarget, context, command.observationId, command.visual) { session ->
                 encode(session.dynamicAction(command, context.authorization, context.cancelled)) { status ->
-                    JSONObject().put("observation_id", command.observationId).put("status", status).put("verified_ui_result", false).toString()
+                    JSONObject().put(if (command.visual) "capture_id" else "observation_id", command.observationId).put("status", status).put("verified_ui_result", false).toString()
                 }
             } }
         }
@@ -57,27 +61,31 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
             val request = GuiAppLaunch(arguments.text("package_name"))
             return write(request.effect(GuiOwner(authorization.sessionId, owner.runId.value)), repeatConfirmed = true) { context ->
                 withSession(request.packageName, context) { session ->
-                    observation = null
+                    observation = null; capture = null
                     encode(session.dynamicLaunch(request, context.authorization, context.cancelled)) { status ->
                         JSONObject().put("package_name", request.packageName).put("status", status)
                             .put("launch_request_accepted", true).put("target_window_state", "NOT_VERIFIED")
                             .put("verification_required", true).put("verified_ui_result", false)
-                            .put("next_action", "仅确认启动请求已提交，不代表应用界面或目标页面已显示。需要操作时必须取得成功的screen观察；窗口读取失败应停止屏幕操作，不要据此要求点亮、解锁或重授普通应用权限。")
+                            .put("next_action", "仅确认启动请求已提交，不代表应用界面或目标页面已显示。需要节点操作时必须取得成功的screen观察；节点树不可读时可显式请求无observation_id的screen screenshot，并且仅在返回visual_actions_available=true时按capture_id执行视觉坐标操作。截图或窗口见证仍失败时停止屏幕操作，不要据此要求点亮、解锁或重授普通应用权限。")
                             .toString()
                     }
                 }
             }
         }
     }
-    private fun withSession(requested: String?, context: ToolExecutionContext, observationId: String? = null,
+    private fun withSession(requested: String?, context: ToolExecutionContext, observationId: String? = null, visual: Boolean = false,
         execute: (GuiRunSession) -> ExecutionReceipt): ExecutionReceipt {
         denial(context, original = false)?.let { return it }
         current?.replacementRejection(owner, authorization)?.let { return ExecutionReceipt.NotExecuted(it.code) }
         val selectedTarget = if (observationId != null) {
             val observed = observation
-            if (observed == null || observed.observationId != observationId)
+            val visualTarget = capture?.takeIf { visual && it.first == observationId }?.second
+            if (visual) {
+                if (visualTarget == null) return ExecutionReceipt.NotExecuted("CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+                if (requested != null && requested != visualTarget) return ExecutionReceipt.NotExecuted("OBSERVATION_TARGET_MISMATCH_NOT_EXECUTED")
+            } else if (observed == null || observed.observationId != observationId)
                 return ExecutionReceipt.NotExecuted("OBSERVATION_ID_MISMATCH")
-            if (requested != null && requested != observed.packageName)
+            if (!visual && requested != null && requested != observed!!.packageName)
                 return ExecutionReceipt.NotExecuted("OBSERVATION_TARGET_MISMATCH_NOT_EXECUTED")
             target
         } else requested
@@ -100,7 +108,7 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                 else if (admission != null && observationId != null) future.complete(admission)
                 else if (session != null && admission == null && selectedTarget == target) future.complete(GuiResult.Value(session))
                 else {
-                    current = null; observation = null
+                    current = null; observation = null; capture = null
                     session?.close()
                     if (session != null && !session.releaseConfirmed) future.complete(GuiResult.Rejected("FOREGROUND_DRAIN_PENDING_NOT_EXECUTED"))
                     else {

@@ -32,12 +32,13 @@ internal data class GuiGesture(val x: Int, val y: Int, val endX: Int, val endY: 
 internal fun guiTreeDepth(maxNodes: Int): Int = if (maxNodes <= 128) 16 else 32
 internal fun guiTreeChildren(maxNodes: Int): Int = if (maxNodes <= 128) 64 else maxNodes
 internal data class GuiAction(val observationId: String, val operation: GuiOperation, val nodeId: Int? = null, val text: String? = null,
-    val gesture: GuiGesture? = null) {
+    val gesture: GuiGesture? = null, val visual: Boolean = false) {
     init {
         require(observationId.isNotBlank())
         val nodeAction = operation in setOf(GuiOperation.TAP, GuiOperation.LONG_PRESS,
             GuiOperation.SCROLL_FORWARD, GuiOperation.SCROLL_BACKWARD, GuiOperation.INPUT, GuiOperation.IME_SUBMIT)
         require(nodeAction == (nodeId != null))
+        require(!visual || operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE, GuiOperation.BACK))
         require(nodeId == null || nodeId >= 0)
         require((operation == GuiOperation.INPUT) == (text != null))
         require(text == null || text.length <= 4096)
@@ -45,7 +46,7 @@ internal data class GuiAction(val observationId: String, val operation: GuiOpera
         if (operation == GuiOperation.COORDINATE_TAP) require(gesture!!.x == gesture.endX && gesture.y == gesture.endY)
     }
     fun effect(owner: GuiOwner): WriteEffect = WriteEffect("gui", operation.name.lowercase(),
-        "${owner.sessionId.length}:${owner.sessionId}:${owner.runId.length}:${owner.runId}:$observationId:${nodeId ?: "global"}",
+        "${owner.sessionId.length}:${owner.sessionId}:${owner.runId.length}:${owner.runId}:${if (visual) "capture:" else ""}$observationId:${nodeId ?: "global"}",
         text?.let { "${it.length}:$it" } ?: gesture?.let { "${it.x},${it.y},${it.endX},${it.endY},${it.durationMillis}" } ?: "invoke")
 }
 internal data class GuiAppLaunch(val packageName: String) {

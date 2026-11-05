@@ -26,6 +26,17 @@ class GuiScreenToolFactoryTest {
         assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
     }
 
+    @Test fun visualActionSchemaIsOrdinaryOnlyAndUsesADistinctExactEffect() {
+        val schema = GuiScreenToolFactory.actionDefinition(allowVisualCapture = true).schema
+        val args = schema.parse("""{"operation":"coordinate_tap","capture_id":"capture","x":10,"y":20}""")
+        val action = GuiScreenToolFactory.parseAction(args)
+        assertTrue(action.visual)
+        assertNotEquals(action.effect(session.identity), action.copy(visual = false).effect(session.identity))
+        invalid { GuiScreenToolFactory.parseAction(schema.parse("""{"operation":"coordinate_tap","capture_id":"capture","observation_id":"old","x":10,"y":20}""")) }
+        invalid { GuiScreenToolFactory.parseAction(schema.parse("""{"operation":"tap","capture_id":"capture","node_id":0}""")) }
+        invalid { GuiScreenToolFactory.actionDefinition().schema.parse("""{"operation":"back","capture_id":"capture"}""") }
+    }
+
     @Test fun windowSelectionFailureDoesNotAdvertiseLockScreenAsItsCause() {
         val description = GuiScreenToolFactory.readDefinition(allowImplicitObservation = true).description
         assertTrue(description.contains("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED"))

@@ -169,6 +169,7 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
         if (!dynamic || authorization.sessionId != identity.sessionId || authorization.taskId != identity.runId ||
             authorization.allowedWrites != setOf(action.effect(identity))) GuiResult.Rejected("EXACT_ACTION_NOT_AUTHORIZED")
+        else if (action.visual) GuiResult.Value(GuiRuntime.visualAction(lease, action) { closed.get() || cancelled() || ioFence.rejection() != null })
         else {
             val target = GuiRuntime.validateExactTarget(lease, action)
             if (target !is GuiResult.Value) target as GuiResult.Rejected
@@ -179,6 +180,8 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         }
     }.let { awaitAction(it, cancelled) }
     internal fun dynamicScreenshot(observationId: String?, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
+        val abandoned = java.util.concurrent.atomic.AtomicBoolean(false)
+        val captureCancelled = { abandoned.get() || closed.get() || cancelled() || ioFence.rejection() != null }
         val started = onWorker(cancelled) {
             check(dynamic)
             val approval = GuiRuntime.approveReads(lease, GuiReadApproval(if (observationId == null) 1 else 0, 1))
@@ -187,7 +190,12 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
                 val selected = if (observationId != null) GuiResult.Value(observationId)
                     else when (val observed = GuiRuntime.observe(lease)) {
                         is GuiResult.Value -> GuiResult.Value(observed.value.observationId)
-                        is GuiResult.Rejected -> observed
+                        is GuiResult.Rejected -> {
+                            if (observed.code in setOf("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED",
+                                    "APPLICATION_WINDOW_ROOT_UNAVAILABLE_NOT_EXECUTED", "NO_ACTIVE_EXTERNAL_WINDOW"))
+                                return@onWorker GuiResult.Value(GuiRuntime.visualScreenshot(lease, captureCancelled))
+                            observed
+                        }
                         is GuiResult.Unknown -> observed
                     }
                 when (selected) {
@@ -198,7 +206,7 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
                 }
             }
         }
-        return awaitScreenshot(started, cancelled)
+        return try { awaitScreenshot(started, cancelled) } finally { abandoned.set(true) }
     }
     fun observe(cancelled: () -> Boolean): GuiResult<GuiObservation> = observe(cancelled, 128)
     fun observe(cancelled: () -> Boolean, maxNodes: Int): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease, maxNodes) }

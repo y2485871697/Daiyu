@@ -101,8 +101,9 @@ class NativeCompletionModel internal constructor(
                 }
             }
             var request = settings.requestOptions.apply(NativeCompletionRequest.body(settings, rows, tools, instructions), settings.protocol)
-            request = ScreenToolImageInput.project(request, rows, settings, imageInputSupported,
+            val screenInput = ScreenToolImageInput.prepare(request, rows, settings, imageInputSupported,
                 imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
+            request = screenInput.request
             if (settings.protocol == ProviderProtocol.CHAT_COMPLETIONS) require(request.opt("model") == settings.model) { "自定义请求体不能替换所选模型" }
             settings.requestOptions.sessionGateway.requireExecutable()
             // Existing session gateway field rules are OpenAI-specific; Gemini uses only owned session headers.
@@ -122,7 +123,7 @@ class NativeCompletionModel internal constructor(
             var configuringRequest = true
             try {
                 checkCancelled()
-                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan)))
+                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes)))
                 checkCancelled()
                 val conn = connect(URL(endpoint)); owned = conn; connection = conn
                 checkCancelled()

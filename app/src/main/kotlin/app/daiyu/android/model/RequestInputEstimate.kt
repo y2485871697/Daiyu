@@ -14,8 +14,9 @@ internal object RequestInputEstimate {
         "image" -> value.optJSONObject("source")?.takeIf { it.optString("type") == "base64" }?.opt("data") as? String
         else -> null
     }
-    fun from(request: JSONObject, images: FrozenMessageImagePlan?): Long {
-        val sizes = images?.estimateImageSizes().orEmpty()
+    fun from(request: JSONObject, images: FrozenMessageImagePlan?,
+        screenImages: Map<String, Pair<Int, Int>> = emptyMap()): Long {
+        val sizes = images?.estimateImageSizes().orEmpty() + screenImages
         var imageTokens = 0L
         val opaque = setOf("signature", "thoughtSignature", "thought_signature", "encrypted_content", "encryptedContent")
         fun clean(value: Any?, wire: Boolean): Any = when (value) {

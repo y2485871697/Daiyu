@@ -113,8 +113,9 @@ class MessagesModel internal constructor(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
-            request = ScreenToolImageInput.project(request, messages, settings, capability,
+            val screenInput = ScreenToolImageInput.prepare(request, messages, settings, capability,
                 imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
+            request = screenInput.request
             ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else request.opt("model") as? String)
             settings.requestOptions.sessionGateway.requireExecutable()
@@ -131,7 +132,7 @@ class MessagesModel internal constructor(
             var configuringRequest = true
             try {
                 checkCancelled()
-                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan)))
+                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes)))
                 checkCancelled()
                 val conn = connect(URL(endpoint))
                 ownedConnection = conn; connection = conn

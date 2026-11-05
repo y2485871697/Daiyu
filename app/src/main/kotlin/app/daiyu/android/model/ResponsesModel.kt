@@ -313,8 +313,9 @@ class ResponsesModel internal constructor(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
-            request = ScreenToolImageInput.project(request, input, settings, capability,
+            val screenInput = ScreenToolImageInput.prepare(request, input, settings, capability,
                 imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
+            request = screenInput.request
             if (java.net.URI(settings.endpoint).host.equals("ark.cn-beijing.volces.com", true)) request.remove("include")
             if (backgroundResume != null) {
                 backgroundResume.requireMatches(settings)
@@ -354,7 +355,7 @@ class ResponsesModel internal constructor(
             var completedPost = false
             try {
                 checkCancelled()
-                try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan))) }
+                try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes))) }
                 catch (failure: Exception) { deliveryFailure = failure; throw failure }
                 checkCancelled()
                 // The payload and all budgets/allowlists are final before asking the UI. Never

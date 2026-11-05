@@ -17,16 +17,22 @@ internal object ScreenToolImageInput {
     private data class Located(val row: Int, val part: Int, val receipt: Receipt)
     private data class Metadata(val location: Located, val value: String)
 
+    data class Projection(val request: JSONObject, val imageSizes: Map<String, Pair<Int, Int>>)
+
     fun project(request: JSONObject, sourceRows: JSONArray, settings: ModelSettings, capability: Boolean?,
-        existingImageBytes: List<Int>, cancelled: () -> Boolean): JSONObject {
+        existingImageBytes: List<Int>, cancelled: () -> Boolean): JSONObject =
+        prepare(request, sourceRows, settings, capability, existingImageBytes, cancelled).request
+
+    fun prepare(request: JSONObject, sourceRows: JSONArray, settings: ModelSettings, capability: Boolean?,
+        existingImageBytes: List<Int>, cancelled: () -> Boolean): Projection {
         val protocol = settings.protocol
         val key = when (protocol) {
             ProviderProtocol.RESPONSES -> "input"
             ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS -> "messages"
             ProviderProtocol.GEMINI -> "contents"
-            else -> return request
+            else -> return Projection(request, emptyMap())
         }
-        val rows = request.optJSONArray(key) ?: return request
+        val rows = request.optJSONArray(key) ?: return Projection(request, emptyMap())
         val sources = collect(sourceRows, protocol).map { it.receipt }.toSet()
         val metadata = mutableListOf<Metadata>()
         var latest: Pair<Located, NativeScreenImage>? = null
@@ -40,7 +46,7 @@ internal object ScreenToolImageInput {
             metadata += Metadata(location, image.metadata)
             latest = location to image
         }
-        if (metadata.isEmpty()) return request
+        if (metadata.isEmpty()) return Projection(request, emptyMap())
         val selected = latest
         val imageBlock = selected?.let { (_, image) ->
             require(protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) {
@@ -94,7 +100,10 @@ internal object ScreenToolImageInput {
                 projected.put(key, inserted)
             }
         }
-        return projected
+        val sizes = if (selected != null && imageBlock != null) mapOf(
+            requireNotNull(RequestInputEstimate.payload(imageBlock)) to (selected.second.width to selected.second.height)
+        ) else emptyMap()
+        return Projection(projected, sizes)
     }
 
     fun boundedNativeReceipt(rows: JSONArray, protocol: ProviderProtocol, result: JSONObject): Boolean {

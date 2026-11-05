@@ -234,7 +234,13 @@ class ScreenToolImageInputTest {
             val message = history(receipt()).copy(blocks = listOf(
                 MessageBlock.Tool(ToolInvocation(ToolCallId("call"), "screen", args), receipt()),
                 MessageBlock.Tool(ToolInvocation(ToolCallId("other"), "other", "{}"), "ok")))
-            val source = rows(protocol, listOf(message))
+            val built = rows(protocol, listOf(message))
+            // Responses legacy blocks serialize call/result pairs; construct one real parallel batch.
+            val source = if (protocol == ProviderProtocol.RESPONSES) JSONArray().also { sorted ->
+                for (kind in listOf("function_call", "function_call_output")) {
+                    for (i in 0 until built.length()) if (built.getJSONObject(i).optString("type") == kind) sorted.put(built.get(i))
+                }
+            } else built
             val request = ScreenToolImageInput.project(body(protocol, source), source, settings(protocol), true, emptyList()) { false }
             val result = request.getJSONArray(if (protocol == ProviderProtocol.RESPONSES) "input" else "messages")
             assertEquals("user", result.getJSONObject(result.length() - 1).optString("role"))
@@ -259,6 +265,15 @@ class ScreenToolImageInputTest {
         assertEquals("text", content.getJSONObject(1).getString("type"))
         assertEquals("image", content.getJSONObject(2).getString("type"))
         assertEquals(1, imageCount(projected)); assertEquals(original, source.toString())
+    }
+    @Test fun onlyTheVerifiedProjectionCanAuthorizeScreenImageEstimation() {
+        protocols.forEach { protocol ->
+            val source = rows(protocol, listOf(history(receipt())))
+            val projection = ScreenToolImageInput.prepare(body(protocol, source), source, settings(protocol), true, emptyList()) { false }
+            assertEquals(listOf(4 to 3), projection.imageSizes.values.toList())
+            assertTrue(RequestInputEstimate.from(projection.request, null, projection.imageSizes) > 0)
+            assertTrue(runCatching { RequestInputEstimate.from(projection.request, null) }.exceptionOrNull() is IllegalArgumentException)
+        }
     }
     @Test fun cancellationAndModelReplacementFailBeforeEncodingAnImage() {
         val protocol = ProviderProtocol.RESPONSES

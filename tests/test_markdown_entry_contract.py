@@ -8,15 +8,35 @@ BASE = APP / 'ui/screens/chat/conversation'
 
 
 class MarkdownEntryContract(unittest.TestCase):
-    def test_recovery_prepares_selected_history_on_worker_before_publishing_ready(self):
+    def test_runtime_recovery_does_not_read_or_format_selected_history(self):
         source = (APP / 'ChatController.kt').read_text().split('init {executor.execute {', 1)[1].split('\n    }}', 1)[0]
-        self.assertIn('preferences.getString("selected", null)', source)
-        self.assertIn('database.messages(ConversationId(selected)).map { it.second }', source)
-        self.assertIn('prepareRestoredMarkdown(messages)', source)
-        self.assertIn('if (synchronized(this) { closed }) throw kotlinx.coroutines.CancellationException', source)
-        self.assertLess(source.index('prepareRestoredMarkdown(messages)'), source.index('ready=true;notifyChanged()'))
+        self.assertIn('runtime.recoverPending', source)
+        self.assertIn('rememberQuestions(history)', source)
+        self.assertIn('recoverDeletedModelBindings()', source)
+        self.assertLess(source.index('runtime.recoverPending'), source.index('ready=true;notifyChanged()'))
+        self.assertNotIn('database.messages(', source)
+        self.assertNotIn('prepareRestoredMarkdown(', source)
         self.assertNotIn('database.save(', source)
         self.assertNotIn('model.open(', source)
+
+    def test_initial_history_uses_the_existing_cancelable_background_selection(self):
+        source = (APP / 'MainActivity.kt').read_text()
+        refresh = source.split('    private fun refresh() {', 1)[1]
+        initial = refresh.split('            if (!selectionReady) {', 1)[1].split('            if (modelDeletionRevision', 1)[0]
+        self.assertIn('if (paneSelectionRequest != null) return@guard', initial)
+        self.assertIn('if (saved == null) select(null) else {', initial)
+        self.assertIn('selectPaneConversation(saved.id.value)', initial)
+        self.assertIn('publishChat()', initial)
+        self.assertIn('controller.ready && selectionReady && controller.problem', source)
+        self.assertNotIn('database.messages(', initial)
+        selection = source.split('    private fun selectPaneConversation(id: String)', 1)[1].split('    private fun retainedConversation', 1)[0]
+        io = selection.split('withContext(Dispatchers.IO) {', 1)[1].split('                    if (paneSelectionRequest', 1)[0]
+        self.assertIn('val snapshot = read(id)', io)
+        self.assertIn('prepareRestoredMarkdown(snapshot.messages.map { it.second })', io)
+        self.assertIn('context.ensureActive()', io)
+        self.assertLess(selection.index('prepareRestoredMarkdown('), selection.index('select(snapshot.conversation, snapshot)'))
+        self.assertIn('if (revision != currentPaneRevision()) continue', selection)
+        self.assertIn('paneSelectionRequest !== request || !activityUsable()', selection)
 
     def test_restoration_preserves_source_syntax_history_and_original_cache_budget(self):
         source = (BASE / 'RestoredMarkdown.kt').read_text()
@@ -56,6 +76,9 @@ class MarkdownEntryContract(unittest.TestCase):
         self.assertIn('beforeController = { database, preferences ->', android)
         self.assertIn('history recovery ready before Activity mounts', android)
         self.assertIn('assertEquals(original, fixture.database.messages(conversation.id))', android)
+        self.assertIn('Ready must not wait for historical formatting', android)
+        self.assertIn('testSlowInitialHistoryReadDoesNotBlockMainOrRestartOnRefresh', android)
+        self.assertIn('assertEquals(1, reads.get())', android)
         self.assertIn('assertEquals(0, fixture.opens.get())', android)
         self.assertIn('catch (failure: Throwable)', android)
         self.assertIn('result.close()', android)

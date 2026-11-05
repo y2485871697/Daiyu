@@ -79,7 +79,12 @@ jobs:
                           'test_markdown_cold_start_contract.py', 'test_markdown_return_contract.py',
                           'test_markdown_body_visibility_contract.py', 'test_markdown_typing_contract.py',
                           'test_large_history_storage_contract.py', 'test_markdown_entry_contract.py',
-                          'test_streaming_follow_contract.py', 'test_chat_menu_scroll_isolation_contract.py')
+                          'test_streaming_follow_contract.py', 'test_chat_menu_scroll_isolation_contract.py',
+                          'test_sidebar_selection_contract.py', 'test_streaming_freeze_contract.py',
+                          'test_markdown_entry_smoke_scope.py', 'test_record_tool_tests_scope.py',
+                          'test_acceptance_tool_receipt.py', 'test_speech_platform_discovery.py',
+                          'test_page_back_smoke_scope.py', 'test_task_scroll_smoke_scope.py',
+                          'test_screen_history_smoke_scope.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               patterns = ('test_reasoning_stream_cost_contract.py', 'test_workflow_render_isolation_contract.py',
                           'test_markdown_typing_contract.py', 'test_chat_resume_scroll_contract.py',

@@ -73,6 +73,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantSelectionOwner
@@ -6249,6 +6250,7 @@ class MainActivity : ComponentActivity() {
         val request = Any()
         val owner = selected?.id
         val editor = editorGeneration
+        val initial = !selectionReady
         val read = paneConversationReader
         paneSelectionRequest = request
         pendingPaneConversationId = id
@@ -6257,9 +6259,22 @@ class MainActivity : ComponentActivity() {
             try {
                 while (paneSelectionRequest === request) {
                     val revision = currentPaneRevision()
-                    val snapshot = withContext(Dispatchers.IO) { read(id) }
+                    val snapshot = withContext(Dispatchers.IO) {
+                        val snapshot = read(id)
+                        val context = coroutineContext
+                        try {
+                            app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.messages.map { it.second }) {
+                                context.ensureActive()
+                            }
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // Optional AST preparation must not hide intact history.
+                        }
+                        snapshot
+                    }
                     if (paneSelectionRequest !== request || !activityUsable() ||
-                        retainedPage != "chat" || selected?.id != owner || editorGeneration != editor) return@launch
+                        (!initial && retainedPage != "chat") || selected?.id != owner || editorGeneration != editor) return@launch
                     if (revision != currentPaneRevision()) continue
                     select(snapshot.conversation, snapshot)
                     break
@@ -6720,8 +6735,14 @@ class MainActivity : ComponentActivity() {
                     }.getOrNull() != (pending.assistant to pending.provider))) cancelTerminalEditor()
             }
             if (!selectionReady) {
+                if (paneSelectionRequest != null) return@guard
                 val id = controller.preferences.getString("selected", null)
-                select(controller.database.conversations().firstOrNull { it.id.value == id }); return@guard
+                val saved = controller.database.conversations().firstOrNull { it.id.value == id }
+                if (saved == null) select(null) else {
+                    selectPaneConversation(saved.id.value)
+                    publishChat()
+                }
+                return@guard
             }
             if (modelDeletionRevision != controller.modelDeletionRevision) {
                 modelDeletionRevision = controller.modelDeletionRevision
@@ -6994,7 +7015,7 @@ class MainActivity : ComponentActivity() {
         }.toMap()
         val state = controlOwner?.let { controller.runState(it) }
         val phase = composerPhaseForRun(state?.pauseRequested)
-        val composerAvailable = !sidebarVisible && controller.ready && controller.problem?.startsWith("会话恢复失败") != true &&
+        val composerAvailable = !sidebarVisible && controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true &&
             controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
             !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
         val allowed = composerAvailable && !controller.dataBusy
@@ -7067,6 +7088,7 @@ class MainActivity : ComponentActivity() {
             statusText = controller.problem ?: when {
                 regeneration != null && regeneration.assistantId == null -> "正在准备重新生成…"
                 controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
+                !selectionReady -> "加载会话中";
                 messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
                     else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
                 imageHost.sending -> "正在核实图片发送结果"; else -> null },

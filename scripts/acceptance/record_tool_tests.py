@@ -72,6 +72,27 @@ TASK_SCROLL_MODULES = (
 )
 
 
+MARKDOWN_ENTRY_PLATFORM_CLASSES = (
+    'app.daiyu.android.ControllerLifecycleTest',
+    'app.daiyu.android.RestoredMarkdownActivityTest',
+    'app.daiyu.android.ConversationPaneSwitchActivityTest',
+    'app.daiyu.android.AcceptedHistoryActivityTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
+)
+MARKDOWN_ENTRY_MODULES = (
+    'test_markdown_entry_contract',
+    'test_markdown_return_contract',
+    'test_markdown_cold_start_contract',
+    'test_sidebar_selection_contract',
+    'test_streaming_freeze_contract',
+    'test_diagnostic_smoke_source',
+    'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt',
+    'test_markdown_entry_smoke_scope',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 GUI_PARSER_PLATFORM_CLASS = "app.daiyu.android.gui.GuiVisualWindowParserAndroidTest"
 GUI_PARSER_MODULES = (
     "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
@@ -107,6 +128,9 @@ def command_for(python, env):
         return [python, "-B", "-m", "unittest", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
                 "test_rootless_content_smoke_scope",
                 "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", "-v"], "rootless-content-targeted"
+    if (env.get('SMOKE_MODE') == 'smoke'
+            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(MARKDOWN_ENTRY_PLATFORM_CLASSES)):
+        return [python, '-B', '-m', 'unittest', *MARKDOWN_ENTRY_MODULES, '-v'], 'markdown-entry-targeted'
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

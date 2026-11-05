@@ -17,7 +17,7 @@ internal fun restoredMarkdownSources(messages: List<Message>): List<String> =
             summaries + texts
         }
 
-/** Called by the recovery worker, before historical turns become visible. Only inert ASTs are kept. */
+/** Called by the history-loading worker, before historical turns become visible. Only inert ASTs are kept. */
 internal fun prepareRestoredMarkdown(
     messages: List<Message>,
     cache: MarkdownProjectionCache = markdownProjectionCache,

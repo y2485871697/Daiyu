@@ -26,7 +26,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
         host = (SRC / 'MainActivity.kt').read_text()
         click = host.split('private fun selectPaneConversation(', 1)[1].split('private fun retainedConversation(', 1)[0]
         self.assertLess(click.index('paneState = paneState.copy(selectedConversationId = id)'),
-                        click.index('withContext(Dispatchers.IO) { read(id) }'))
+                        click.index('withContext(Dispatchers.IO) {'))
         self.assertIn('paneSelectionRequest !== request', click)
         self.assertIn('selected?.id != owner || editorGeneration != editor', click)
         self.assertIn('catch (cancelled: kotlinx.coroutines.CancellationException)', click)

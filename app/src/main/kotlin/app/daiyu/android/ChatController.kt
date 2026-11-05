@@ -2236,16 +2236,6 @@ class ChatController internal constructor(private val application:Application,
             runCatching { recoverDeletedModelBindings() }.onFailure {
                 problem = "已删除模型的绑定清理未完成"
             }
-            try {
-                preferences.getString("selected", null)?.let { selected ->
-                    val messages = database.messages(ConversationId(selected)).map { it.second }
-                    app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(messages) {
-                        if (synchronized(this) { closed }) throw kotlinx.coroutines.CancellationException("Controller closed")
-                    }
-                }
-            } catch (_: Exception) {
-                // Optional formatting must not turn intact history into a recovery failure.
-            }
         }
         synchronized(this) {
             if(!closed) {

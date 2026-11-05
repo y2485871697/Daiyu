@@ -53,7 +53,7 @@ class ChatInitialPositionContract(unittest.TestCase):
 
     def test_hidden_rows_cannot_take_touch_or_send_visibility_receipts(self):
         chat = CHAT.read_text()
-        self.assertIn('userScrollEnabled = !initialPositionPending', chat)
+        self.assertIn('userScrollEnabled = pageActive && !initialPositionPending', chat)
         self.assertIn('if (initialPositionPending) Modifier.clearAndSetSemantics {}', chat)
         gesture = chat.split('awaitEachGesture {', 1)[1].split('contentPadding =', 1)[0]
         hidden, visible = gesture.split('// A down over a child action', 1)

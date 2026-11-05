@@ -2,6 +2,12 @@ package app.daiyu.android.model
 
 import android.graphics.Bitmap
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.*
+import app.daiyu.android.context.ArchiveCodec
+import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.storage.MessageHistoryCodec
+import app.daiyu.android.storage.RunCheckpointCodec
+import app.daiyu.android.storage.SQLiteRuntimeStore
 import app.daiyu.android.media.ImageAttachmentException
 import app.daiyu.android.media.ImageAttachmentFailure
 import app.daiyu.android.media.NativeScreenImage
@@ -12,6 +18,8 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.SQLiteMode
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
@@ -25,6 +33,7 @@ import javax.net.ssl.HttpsURLConnection
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@SQLiteMode(SQLiteMode.Mode.NATIVE)
 class ScreenToolImageInputTest {
     private val protocols = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)
     private val args = """{"operation":"observe"}"""
@@ -283,17 +292,163 @@ class ScreenToolImageInputTest {
         assertTrue(runCatching { ScreenToolImageInput.project(body(protocol, source).put("model", "other"), source, settings(protocol), true, emptyList()) { false } }
             .exceptionOrNull() is IllegalArgumentException)
     }
-    @Test fun nativeChatLargePngUsesOnlyTheBoundedNativeReceiptAllowance() {
-        val image = png(); val data = ByteArray(1_050_000)
+    private fun largePng(): ByteArray {
+        val image = png(); val data = ByteArray(1_280_000)
         val type = "raNd".toByteArray(Charsets.US_ASCII)
         val crc = CRC32().apply { update(type); update(data) }.value.toInt()
         val chunk = ByteArrayOutputStream().apply {
             write(ByteBuffer.allocate(4).putInt(data.size).array()); write(type); write(data)
             write(ByteBuffer.allocate(4).putInt(crc).array())
         }.toByteArray()
-        val large = image.copyOfRange(0, image.size - 12) + chunk + image.copyOfRange(image.size - 12, image.size)
+        return image.copyOfRange(0, image.size - 12) + chunk + image.copyOfRange(image.size - 12, image.size)
+    }
+    @Test fun nativeChatLargePngUsesOnlyTheBoundedNativeReceiptAllowance() {
+        val large = largePng()
         assertNotNull(NativeScreenImage.parse("screen", args, receipt(large)))
         assertTrue(receipt(large).length > 1_000_000)
         live(ProviderProtocol.CHAT_COMPLETIONS, receipt(large))
     }
+    @Test fun largeNativeProtocolSegmentsSurviveHistoryArchiveCheckpointAndRecovery() {
+        val output = receipt(largePng())
+        protocols.forEach { protocol ->
+            val original = history(output)
+            val wire = rows(protocol, listOf(original))
+            val items = (0 until wire.length()).map { wire.getJSONObject(it).toString() }
+            assertTrue(items.any { it.length > 1_000_000 })
+            val segment = MessageHistorySegment(original.id, original.role, original.blocks, items)
+            assertEquals(listOf(segment), MessageHistoryCodec.decode(MessageHistoryCodec.encode(listOf(segment))))
+            val owner = original.copy(protocolItems = items, historySegments = listOf(segment))
+            assertEquals(listOf(owner), ArchiveCodec.decode(ArchiveCodec.encode(listOf(owner))))
+            val checkpoint = RunCheckpoint(owner.copy(status = RunStatus.RUNNING), emptyList(), ExecutionPhase.BOUNDARY,
+                owner = "owner", revision = 1)
+            assertEquals(checkpoint, RunCheckpointCodec.decode(RunCheckpointCodec.encode(checkpoint)))
+            val recovered = ProcessRecovery.interrupt(checkpoint)
+            assertEquals(recovered, RunCheckpointCodec.decode(RunCheckpointCodec.encode(recovered)))
+            assertEquals(items, rows(protocol, listOf(owner)).let { array ->
+                (0 until array.length()).map { array.getJSONObject(it).toString() }
+            })
+        }
+    }
+
+    @Test fun largeHistoryAllowanceRejectsBusinessOrOrphanConflictingAndDuplicateReceipts() {
+        val output = receipt(largePng())
+        val original = history(output)
+        val wire = rows(ProviderProtocol.RESPONSES, listOf(original))
+        val call = wire.getJSONObject(0).toString()
+        val result = wire.getJSONObject(1).toString()
+        fun rejects(items: List<String>, blocks: List<MessageBlock> = original.blocks) {
+            assertFalse(ScreenToolImageInput.boundedHistoryReceipt(items, blocks, items.lastIndex))
+            val segment = MessageHistorySegment(original.id, original.role, blocks, items)
+            assertThrows(IllegalArgumentException::class.java) { MessageHistoryCodec.encode(listOf(segment)) }
+        }
+        rejects(listOf(result))
+        rejects(listOf(call, call, result))
+        rejects(listOf(call, result, result))
+        val suffix = listOf(call, result, call)
+        assertFalse(ScreenToolImageInput.boundedHistoryReceipt(suffix, original.blocks, 1))
+        val messageRows = rows(ProviderProtocol.MESSAGES, listOf(original))
+        val messageResult = messageRows.getJSONObject(1).getJSONArray("content")
+        val good = messageResult.getJSONObject(0)
+        messageRows.getJSONObject(1).put("content", JSONArray()
+            .put(JSONObject(good.toString()).put("is_error", true).put("content", "failed")).put(good))
+        val duplicateError = (0 until messageRows.length()).map { messageRows.getJSONObject(it).toString() }
+        rejects(duplicateError)
+        rejects(listOf(JSONObject(call).put("name", "business").toString(), result))
+        rejects(listOf(call, result), listOf((original.blocks.single() as MessageBlock.Tool).copy(result = "different")))
+        rejects(listOf(call, JSONObject(result).put("call_id", "other").toString()))
+        rejects(listOf("x".repeat(1_000_001)), emptyList())
+        val inflated = history(JSONObject(output).put("unrelated", "x".repeat(1_000_001)).toString())
+        val inflatedRows = rows(ProviderProtocol.RESPONSES, listOf(inflated))
+        rejects((0 until inflatedRows.length()).map { inflatedRows.getJSONObject(it).toString() }, inflated.blocks)
+        val invalid = history(JSONObject(output).put("width", 99).toString())
+        val invalidRows = rows(ProviderProtocol.RESPONSES, listOf(invalid))
+        rejects((0 until invalidRows.length()).map { invalidRows.getJSONObject(it).toString() }, invalid.blocks)
+        val segment = MessageHistorySegment(original.id, original.role, emptyList(), listOf("x".repeat(1_000_000)))
+        assertEquals(listOf(segment), MessageHistoryCodec.decode(MessageHistoryCodec.encode(listOf(segment))))
+    }
+
+    private fun actionEvents(): String {
+        val action = JSONObject().put("type", "function_call").put("id", "fc_action").put("call_id", "action")
+            .put("name", "screen_action").put("arguments", "{}")
+        return "data: ${JSONObject().put("type", "response.output_item.done").put("item", action)}\n\n" +
+            "data: ${JSONObject().put("type", "response.completed").put("response", JSONObject().put("status", "completed")
+                .put("output", JSONArray().put(action)).put("usage", JSONObject().put("input_tokens", 9734).put("output_tokens", 139)))}\n\n"
+    }
+
+    private fun runnerStorage(failProtocolCommit: Boolean) {
+        val context = RuntimeEnvironment.getApplication()
+        context.deleteDatabase("conversations.db")
+        val database = ConversationDatabase(context)
+        var runtime: SQLiteRuntimeStore? = null
+        try {
+            val store = SQLiteRuntimeStore.acquire(database).also { runtime = it; it.recoverPending() }
+            val conversation = database.create("default").id
+            val user = Message(MessageId("user"), conversation, RunId("run"), "user",
+                listOf(MessageBlock.Text("question", "synthetic screen task")), RunStatus.COMPLETED)
+            val assistant = user.copy(id = MessageId("assistant"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
+            database.send(user, assistant)
+            val output = receipt(largePng())
+            var posts = 0; var actions = 0
+            val port = ResponsesModel(settings(ProviderProtocol.RESPONSES), {
+                Connection(when (posts++) {
+                    0 -> events(ProviderProtocol.RESPONSES, true)
+                    1 -> actionEvents()
+                    else -> events(ProviderProtocol.RESPONSES, false)
+                })
+            }, true)
+            val recording = object : AtomicRuntimeStore by store {
+                override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                    if (failProtocolCommit && checkpoint.message.protocolItems.any { it.length > 1_000_000 })
+                        throw IllegalStateException("injected protocol commit failure")
+                    store.commitCheckpoint(checkpoint)
+                }
+            }
+            val runner = ChatRunner(port, database, BatteryTool { call ->
+                when (call.name) {
+                    "screen" -> output
+                    "screen_action" -> {
+                        val committed = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
+                        assertEquals(ExecutionPhase.TOOL_EXECUTING, committed.phase)
+                        assertFalse(committed.requestUnconfirmed)
+                        assertTrue(committed.message.historySegments.any { it.protocolItems.any { raw -> raw.length > 1_000_000 } })
+                        assertEquals(output, (committed.message.blocks.first() as MessageBlock.Tool).result)
+                        assertEquals(ToolDisposition.IN_FLIGHT, committed.tools.single { it.invocation.id == call.id }.disposition)
+                        actions++; "synthetic action confirmed"
+                    }
+                    else -> error("unexpected tool")
+                }
+            }, RunnerOptions(runtimeStore = recording)) {}
+            if (failProtocolCommit) {
+                assertThrows(Exception::class.java) { runner.startSlice(assistant, listOf(user)) }
+                val kept = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
+                assertEquals(ExecutionPhase.STREAMING, kept.phase); assertTrue(kept.requestUnconfirmed)
+                assertEquals(ToolDisposition.READY, kept.tools.single { it.invocation.name == "screen_action" }.disposition)
+                assertTrue(kept.message.protocolItems.all { it.length <= 1_000_000 })
+                assertEquals(139L, kept.usage.last().snapshot.outputTokens)
+                assertEquals(0, actions); assertEquals(2, posts)
+            } else {
+                val completed = runner.startSlice(assistant, listOf(user)) as RunSlice.Completed
+                assertEquals(RunStatus.COMPLETED, completed.message.status)
+                assertEquals(1, actions); assertEquals(3, posts)
+                assertEquals(completed.message, database.messages(conversation).last().second)
+                val saved = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
+                assertEquals(saved, store.readCommittedCheckpoint(saved))
+                assertEquals(output, (saved.message.blocks.first() as MessageBlock.Tool).result)
+                assertTrue(saved.message.historySegments.any { it.protocolItems.any { raw -> raw.length > 1_000_000 } })
+                val backup = database.exportConversationBackup(conversation)
+                store.close(); runtime = null; database.close()
+                context.deleteDatabase("conversations.db")
+                ConversationDatabase(context).use { restored ->
+                    assertEquals(1 to 2, restored.importBackup(backup))
+                    assertEquals(completed.message, restored.messages(conversation).last().second)
+                }
+            }
+        } finally {
+            runtime?.close(); database.close(); context.deleteDatabase("conversations.db")
+        }
+    }
+
+    @Test fun responsesLargeScreenshotCommitsBeforeTheNextSyntheticActionAndRoundTripsBackup() = runnerStorage(false)
+    @Test fun failedTailProtocolCommitPreservesReadyAndUsageWithoutExecutingOrReposting() = runnerStorage(true)
+
 }

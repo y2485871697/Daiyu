@@ -1,5 +1,6 @@
 package app.daiyu.android.model
 
+import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.media.FrozenImageAttachment
 import app.daiyu.android.media.ImageAttachment
 import app.daiyu.android.media.ImageAttachmentOwner
@@ -106,6 +107,43 @@ internal object ScreenToolImageInput {
         return Projection(projected, sizes)
     }
 
+    /** The larger stored row allowance belongs only to an exact native screen call/result. */
+    fun boundedHistoryReceipt(items: List<String>, blocks: List<MessageBlock>, index: Int): Boolean = runCatching {
+        val rows = JSONArray()
+        items.forEach { rows.put(MessagesRequest.jsonObject(it)) }
+        val row = rows.getJSONObject(index)
+        val protocol = when {
+            row.optString("type") == "function_call_output" -> ProviderProtocol.RESPONSES
+            row.optString("role") == "tool" -> ProviderProtocol.CHAT_COMPLETIONS
+            row.optString("role") == "user" && row.optJSONArray("content") != null -> ProviderProtocol.MESSAGES
+            else -> return@runCatching false
+        }
+        val receipts = collect(rows, protocol, strict = true).filter { it.row == index }
+        if (receipts.isEmpty()) return@runCatching false
+        var images = 0
+        for (location in receipts) {
+            val receipt = location.receipt
+            val block = blocks.filterIsInstance<MessageBlock.Tool>().singleOrNull {
+                it.invocation.id.value == receipt.id
+            } ?: return@runCatching false
+            val blockArgs = MessagesRequest.jsonObject(block.invocation.arguments)
+            val callArgs = MessagesRequest.jsonObject(receipt.call.arguments)
+            val keys = blockArgs.keys().asSequence().toSet()
+            if (block.invocation.name != receipt.call.name || block.result != receipt.output ||
+                keys != callArgs.keys().asSequence().toSet() || keys.any { blockArgs.get(it) != callArgs.get(it) })
+                return@runCatching false
+            val image = NativeScreenImage.parse(receipt.call.name, receipt.call.arguments, receipt.output) ?: continue
+            images++
+            when (protocol) {
+                ProviderProtocol.RESPONSES -> row.put("output", image.metadata)
+                ProviderProtocol.CHAT_COMPLETIONS -> row.put("content", image.metadata)
+                ProviderProtocol.MESSAGES -> row.getJSONArray("content").getJSONObject(location.part).put("content", image.metadata)
+                else -> return@runCatching false
+            }
+        }
+        images > 0 && row.toString().length <= 1_000_000
+    }.getOrDefault(false)
+
     fun boundedNativeReceipt(rows: JSONArray, protocol: ProviderProtocol, result: JSONObject): Boolean {
         val joined = JSONArray()
         for (i in 0 until rows.length()) joined.put(rows.get(i))
@@ -124,14 +162,16 @@ internal object ScreenToolImageInput {
         else -> false
     }
 
-    private fun collect(rows: JSONArray, protocol: ProviderProtocol): List<Located> {
+    private fun collect(rows: JSONArray, protocol: ProviderProtocol, strict: Boolean = false): List<Located> {
         val pending = mutableMapOf<String, Call>()
         val found = mutableListOf<Located>()
+        val seen = mutableSetOf<String>()
         fun call(id: String, name: String, arguments: String) {
+            if (strict) require(id.isNotBlank() && seen.add(id))
             if (id.isNotBlank()) pending[id] = Call(name, arguments)
         }
         fun result(row: Int, part: Int, id: String, output: Any?) {
-            val invocation = pending.remove(id) ?: return
+            val invocation = pending.remove(id) ?: run { require(!strict); return }
             if (output is String) found += Located(row, part, Receipt(id, invocation, output))
         }
         for (i in 0 until rows.length()) {
@@ -156,8 +196,10 @@ internal object ScreenToolImageInput {
                         val part = parts.optJSONObject(j) ?: continue
                         if (row.optString("role") == "assistant" && part.optString("type") == "tool_use")
                             call(part.optString("id"), part.optString("name"), part.optJSONObject("input")?.toString().orEmpty())
-                        if (row.optString("role") == "user" && part.optString("type") == "tool_result" && part.opt("is_error") != true)
-                            result(i, j, part.optString("tool_use_id"), part.opt("content"))
+                        if (row.optString("role") == "user" && part.optString("type") == "tool_result") {
+                            if (strict || part.opt("is_error") != true)
+                                result(i, j, part.optString("tool_use_id"), if (part.opt("is_error") == true) null else part.opt("content"))
+                        }
                     }
                 }
                 ProviderProtocol.GEMINI -> row.optJSONArray("parts")?.let { parts ->

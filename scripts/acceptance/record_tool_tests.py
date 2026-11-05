@@ -80,6 +80,8 @@ GUI_PARSER_MODULES = (
 )
 
 
+SCREEN_HISTORY_PLATFORM_CLASS = "app.daiyu.android.storage.ScreenProtocolHistoryAndroidTest"
+
 def command_for(python, env):
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == SPEECH_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *SPEECH_MODULES, "-v"], "speech-targeted"
@@ -95,6 +97,11 @@ def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == GUI_PARSER_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *GUI_PARSER_MODULES, "-v"], "gui-parser-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == SCREEN_HISTORY_PLATFORM_CLASS):
+        return [python, "-B", "-m", "unittest", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+                "test_screen_history_smoke_scope",
+                "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", "-v"], "screen-history-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

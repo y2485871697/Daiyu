@@ -81,7 +81,11 @@ object MessageHistoryCodec {
             is MessageBlock.Image -> Unit // Immutable metadata was validated by core-domain.
             is MessageBlock.Tool -> { field(block.invocation.arguments); block.result?.let(::field) }
         } }
-        segment.protocolItems.forEach { require(it.length <= 1_000_000); field(it) }
+        segment.protocolItems.forEach(::field)
+        segment.protocolItems.forEachIndexed { index, item ->
+            require(item.length <= 1_000_000 || app.daiyu.android.model.ScreenToolImageInput.boundedHistoryReceipt(
+                segment.protocolItems, segment.blocks, index)) { "历史协议项超过大小上限" }
+        }
     }
 
     private fun encodeBlocks(blocks: List<MessageBlock>) = JSONArray().apply {

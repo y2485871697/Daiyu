@@ -60,6 +60,10 @@ jobs:
           mkdir -p gui-screenshot-checks
           python3 scripts/verify_boundaries.py 2>&1 | tee gui-screenshot-checks/boundaries.log
           PYTHONPATH=tests python3 -B -m unittest -v \
+            test_record_tool_tests_scope test_acceptance_tool_receipt test_screen_history_smoke_scope \
+            test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope \
+            2>&1 | tee gui-screenshot-checks/screen-history-scope.log
+          PYTHONPATH=tests python3 -B -m unittest -v \
             test_ordinary_tool_wiring_contract.OrdinaryToolWiringContract.test_normal_run_registers_real_scopes_and_capabilities \
             test_ordinary_tool_wiring_contract.OrdinaryToolWiringContract.test_gui_target_is_validated_before_session_mutation \
             2>&1 | tee gui-screenshot-checks/ordinary-gui-contracts.log
@@ -87,6 +91,9 @@ jobs:
             :app:compileDebugKotlin :app:testDebugUnitTest \
             --tests 'app.daiyu.android.gui.GuiAppLaunchTest' \
             --tests 'app.daiyu.android.model.ScreenToolImageInputTest' \
+            --tests 'app.daiyu.android.backup.StrictHistoryContractTest' \
+            --tests 'app.daiyu.android.backup.RunCheckpointCodecTest' \
+            --tests 'app.daiyu.android.context.ArchiveCheckpointArrayTest' \
             --tests 'app.daiyu.android.model.ResponsesReasoningIdentityTest' \
             --tests 'app.daiyu.android.model.ResponsesReasoningProgressTest' \
             --tests 'app.daiyu.android.model.ResponsesBackgroundResumeTest' \
@@ -120,7 +127,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.model.ScreenToolImageInputTest', 'app.daiyu.android.platform.PlatformProductionSettingsTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolCardPresentationTest', 'app.daiyu.android.domain.runtime.RunnerReceiptBatchTest', 'app.daiyu.android.model.ResponsesReasoningIdentityTest', 'app.daiyu.android.model.ResponsesReasoningProgressTest', 'app.daiyu.android.model.ResponsesBackgroundResumeTest', 'app.daiyu.android.model.ResponsesBoundaryRegressionTest', 'app.daiyu.android.model.ResponsesProtocolCompatibilityTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest', 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowMapperTest', 'app.daiyu.android.ui.screens.chat.conversation.CompletedReasoningProjectionTest', 'app.daiyu.android.domain.tools.ToolAdvertisementTest', 'app.daiyu.android.integration.tools.PlatformCatalogTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest', 'app.daiyu.android.domain.tools.ToolDispatcherTest', 'app.daiyu.android.integration.tools.OrdinaryWriteRepeatTest', 'app.daiyu.android.gui.GuiAppLaunchTest', 'app.daiyu.android.gui.GuiCaptureRequestTest', 'app.daiyu.android.gui.GuiLeaseGateTest', 'app.daiyu.android.gui.GuiProductionConfirmationTest', 'app.daiyu.android.gui.GuiRuntimeScreenshotTest', 'app.daiyu.android.gui.GuiVisualWindowParserTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.gui.GuiProductionEntryContractTest', 'app.daiyu.android.gui.GuiCaptureDisposalTest', 'app.daiyu.android.gui.GuiScreenToolFactoryTest'}
+          expected = {'app.daiyu.android.backup.StrictHistoryContractTest', 'app.daiyu.android.backup.RunCheckpointCodecTest', 'app.daiyu.android.context.ArchiveCheckpointArrayTest', 'app.daiyu.android.model.ScreenToolImageInputTest', 'app.daiyu.android.platform.PlatformProductionSettingsTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolCardPresentationTest', 'app.daiyu.android.domain.runtime.RunnerReceiptBatchTest', 'app.daiyu.android.model.ResponsesReasoningIdentityTest', 'app.daiyu.android.model.ResponsesReasoningProgressTest', 'app.daiyu.android.model.ResponsesBackgroundResumeTest', 'app.daiyu.android.model.ResponsesBoundaryRegressionTest', 'app.daiyu.android.model.ResponsesProtocolCompatibilityTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest', 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowMapperTest', 'app.daiyu.android.ui.screens.chat.conversation.CompletedReasoningProjectionTest', 'app.daiyu.android.domain.tools.ToolAdvertisementTest', 'app.daiyu.android.integration.tools.PlatformCatalogTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest', 'app.daiyu.android.domain.tools.ToolDispatcherTest', 'app.daiyu.android.integration.tools.OrdinaryWriteRepeatTest', 'app.daiyu.android.gui.GuiAppLaunchTest', 'app.daiyu.android.gui.GuiCaptureRequestTest', 'app.daiyu.android.gui.GuiLeaseGateTest', 'app.daiyu.android.gui.GuiProductionConfirmationTest', 'app.daiyu.android.gui.GuiRuntimeScreenshotTest', 'app.daiyu.android.gui.GuiVisualWindowParserTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.gui.GuiProductionEntryContractTest', 'app.daiyu.android.gui.GuiCaptureDisposalTest', 'app.daiyu.android.gui.GuiScreenToolFactoryTest'}
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest', 'core-domain/build/test-results/test') for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

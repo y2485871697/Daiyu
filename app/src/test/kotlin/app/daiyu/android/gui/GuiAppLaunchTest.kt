@@ -286,8 +286,12 @@ class GuiAppLaunchTest {
         assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
         assertTrue((f.callTool("screen_action", args, "visual-tap") as DispatchOutcome.Confirmed).replayed)
         assertEquals(1, platform.gestures)
-        assertTrue(f.callTool("screen_action", args, "consumed-visual") is DispatchOutcome.NotExecuted)
-        assertEquals(1, platform.gestures)
+        assertEquals(delivered.copy(replayed = true), f.callTool("screen_action", args, "consumed-visual"))
+        assertEquals(1, platform.gestures); assertEquals(2, platform.captures)
+        val changedAction = JSONObject(args).put("duration_ms", 80).toString()
+        assertEquals(DispatchOutcome.NotExecuted("CAPTURE_ID_MISMATCH_NOT_EXECUTED"),
+            f.callTool("screen_action", changedAction, "different-consumed-visual"))
+        assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
     }
 
     @Test fun implicitSelfScreenshotRetainsNarrowTargetAndDoesNotAskForExternalLocation() {

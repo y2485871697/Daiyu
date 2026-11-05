@@ -255,7 +255,7 @@ internal class SQLiteRuntimeStore private constructor(
             })
         val encoded = org.json.JSONObject(RunCheckpointCodec.encode(result))
             .put("recovery_source_owner", saved.owner).toString()
-        RunCheckpointCodec.checkEncodedSize(encoded.toByteArray(Charsets.UTF_8).size, false)
+        RunCheckpointCodec.checkEncodedSize(app.daiyu.android.context.Utf8Payload.byteCount(encoded, Long.MAX_VALUE), false)
         if (actual.status == RunStatus.RUNNING) database.writeRuntimeMessage(db, result.message)
         contextService?.publishRunArchive(db, result)
         check(db.update("runtime_checkpoints", values(result, encoded), "message_id=? AND owner=? AND revision=? AND process_owner=?",

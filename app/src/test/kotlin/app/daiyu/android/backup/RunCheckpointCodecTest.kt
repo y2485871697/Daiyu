@@ -111,7 +111,7 @@ class RunCheckpointCodecTest {
     }
 
     @Test fun runningCapacityReservesRecoveryGrowth() {
-        val limit=RunCheckpointCodec.MAX_BYTES
+        val limit=RunCheckpointCodec.MAX_BYTES.toLong()
         RunCheckpointCodec.checkEncodedSize(limit-RunCheckpointCodec.RECOVERY_RESERVE,true)
         reject {RunCheckpointCodec.checkEncodedSize(limit-RunCheckpointCodec.RECOVERY_RESERVE+1,true)}
         RunCheckpointCodec.checkEncodedSize(limit,false)

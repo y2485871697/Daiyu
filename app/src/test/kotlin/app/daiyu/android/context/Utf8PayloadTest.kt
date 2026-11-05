@@ -101,4 +101,11 @@ class Utf8PayloadTest {
         refuse { Utf8Payload.read(ByteArrayInputStream(byteArrayOf()), -1) }
         refuse { Utf8Payload.byteCount("", -1) }
     }
+    @Test fun realCheckpointSizedCountKeepsExactUnicodeAndReplacementBytes() {
+        val ascii = "x".repeat(13_578_756)
+        repeat(8) { assertEquals(13_578_756L, Utf8Payload.byteCount(ascii, Long.MAX_VALUE)) }
+        val split = "a".repeat(4095) + "😼中\uD800b\uDC00"
+        assertEquals(split.toByteArray(Charsets.UTF_8).size.toLong(), Utf8Payload.byteCount(split, Long.MAX_VALUE))
+    }
+
 }

@@ -137,4 +137,24 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             runtime?.close(); database.close(); context.deleteDatabase("conversations.db")
         }
     }
+    fun testRealCheckpointSizedUtf8CountMatchesAndroidAndKeepsRecoveryReserve() {
+        val payload = "x".repeat(13_578_756)
+        repeat(8) {
+            val bytes = app.daiyu.android.context.Utf8Payload.byteCount(payload, Long.MAX_VALUE)
+            assertEquals(13_578_756L, bytes)
+            RunCheckpointCodec.checkEncodedSize(bytes, true)
+        }
+        for (sample in listOf("中😼", "x".repeat(4095) + "😼", "a\uD800b", "\uDC00")) {
+            assertEquals(sample.toByteArray(Charsets.UTF_8).size.toLong(),
+                app.daiyu.android.context.Utf8Payload.byteCount(sample, Long.MAX_VALUE))
+        }
+        val max = RunCheckpointCodec.MAX_BYTES.toLong()
+        RunCheckpointCodec.checkEncodedSize(max - RunCheckpointCodec.RECOVERY_RESERVE, true)
+        assertTrue(runCatching { RunCheckpointCodec.checkEncodedSize(max - RunCheckpointCodec.RECOVERY_RESERVE + 1, true) }.isFailure)
+        RunCheckpointCodec.checkEncodedSize(max, false)
+        assertTrue(runCatching { RunCheckpointCodec.checkEncodedSize(max + 1, false) }.isFailure)
+        assertTrue(runCatching { RunCheckpointCodec.checkEncodedSize(Long.MAX_VALUE, false) }.isFailure)
+        android.util.Log.i("DaiyuFreezeRegression", "utf8_count_chars=13578756 repeats=8 exact=true")
+    }
+
 }

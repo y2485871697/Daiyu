@@ -19,7 +19,7 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         self.assertIn('check(MAX_BYTES.toLong() <= ArchiveCodec.MAX_ARCHIVE_BYTES)', codec)
         self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)', codec)
         self.assertNotIn('JSONArray(String(ArchiveCodec.encode(rows)', codec)
-        self.assertIn('checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)', codec)
+        self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)', codec)
         for gate in ['MessageHistory.validate(messages)', 'validateMessage(message, identities)',
                      'MessageHistoryCodec.validate(message)', 'MessageTimeCodec.write(item, message.createdAt)']:
             self.assertIn(gate, archive)
@@ -34,7 +34,7 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         self.assertLess(encode.index('validate(value)'), encode.index('writer?.write(root)'))
         self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)', encode)
         self.assertIn('.let { root -> writer?.write(root) ?: root.toString() }.also {', encode)
-        self.assertIn('checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)', encode)
+        self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)', encode)
         self.assertIn('require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)', codec)
         self.assertIn('LinkedHashMap<String, String>', writer)
         self.assertIn('JSONObject.quote(source)', writer)

@@ -29,5 +29,31 @@ class StreamingFreezeContract(unittest.TestCase):
         scope = controller.split('    internal fun cloudContextUsage(', 1)[1].split('    private fun idleAvailable()', 1)[0]
         self.assertIn('active?.conversationId == conversation', scope)
 
+    def test_body_projection_does_not_wait_for_durable_receipts(self):
+        source = (APP / 'MainActivity.kt').read_text()
+        remap = source.split('        val remapTurns = ', 1)[1].split('        chatState = ', 1)[0]
+        self.assertNotIn('receiptsReady', remap)
+        self.assertIn('rowsChanged || workflowBoundaries != oldBoundaries', remap)
+        self.assertIn('toolReceiptSnapshot?.takeIf { receiptsReady }?.projectionReader', source)
+        self.assertIn('if (receiptsReady) questionCards = buildMap', source)
+        self.assertIn('question.copy(binding = null, canAnswer = false)', source)
+        selection = source.split('    private fun select(conversation: Conversation?, prepared:', 1)[1].split('    private fun compressionSendBlocked', 1)[0]
+        self.assertIn('questionCards = emptyMap()', selection)
+
+    def test_streaming_size_checks_count_without_full_payload_byte_arrays(self):
+        codec = (APP / 'storage/RunCheckpointCodec.kt').read_text()
+        archive = (APP / 'context/ContextStorage.kt').read_text()
+        store = (APP / 'storage/SQLiteRuntimeStore.kt').read_text()
+        self.assertIn('checkEncodedSize(bytes: Long, running: Boolean)', codec)
+        self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE)', codec)
+        self.assertIn('require(Utf8Payload.byteCount(text, Long.MAX_VALUE) <= MAX_BYTES)', codec)
+        self.assertIn('Utf8Payload.byteCount(value, Long.MAX_VALUE) <= MAX_FIELD_BYTES', archive)
+        self.assertIn('Utf8Payload.byteCount(encoded, Long.MAX_VALUE), false)', store)
+        self.assertNotIn('encoded.toByteArray(Charsets.UTF_8).size', store)
+        self.assertNotIn('it.toByteArray(Charsets.UTF_8).size', codec)
+        self.assertNotIn('value.toByteArray(Charsets.UTF_8).size.toLong()', archive)
+        # The existing JSON/UTF-8 normalization boundary still belongs to decode.
+        self.assertIn('ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))', codec)
+
 if __name__ == '__main__':
     unittest.main()

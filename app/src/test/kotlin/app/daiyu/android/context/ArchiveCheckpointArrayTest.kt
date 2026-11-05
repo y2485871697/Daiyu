@@ -50,9 +50,23 @@ class ArchiveCheckpointArrayTest {
         val restored = RunCheckpointCodec.decode(RunCheckpointCodec.encode(value))
         assertEquals(value, restored)
         assertTrue(runCatching { RunCheckpointCodec.decode(RunCheckpointCodec.encode(value) + "[]") }.isFailure)
-        RunCheckpointCodec.checkEncodedSize(RunCheckpointCodec.MAX_BYTES - RunCheckpointCodec.RECOVERY_RESERVE, true)
+        RunCheckpointCodec.checkEncodedSize(RunCheckpointCodec.MAX_BYTES.toLong() - RunCheckpointCodec.RECOVERY_RESERVE, true)
         assertTrue(runCatching { RunCheckpointCodec.checkEncodedSize(
-            RunCheckpointCodec.MAX_BYTES - RunCheckpointCodec.RECOVERY_RESERVE + 1, true) }.isFailure)
-        RunCheckpointCodec.checkEncodedSize(RunCheckpointCodec.MAX_BYTES, false)
+            RunCheckpointCodec.MAX_BYTES.toLong() - RunCheckpointCodec.RECOVERY_RESERVE + 1, true) }.isFailure)
+        RunCheckpointCodec.checkEncodedSize(RunCheckpointCodec.MAX_BYTES.toLong(), false)
     }
+    @Test fun streamingFieldCounterPreservesExactUtf8LimitAndFieldError() {
+        val limit = ArchiveCodec.MAX_FIELD_BYTES.toInt()
+        val exact = "中".repeat(limit / 3) + "x".repeat(limit % 3)
+        assertEquals(limit.toLong(), Utf8Payload.byteCount(exact, Long.MAX_VALUE))
+        assertEquals(1, ArchiveCodec.checkpointArray(listOf(row(exact))).length())
+        val failure = runCatching { ArchiveCodec.checkpointArray(listOf(row(exact + "x"))) }.exceptionOrNull()
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals("text 超过大小上限", failure!!.message)
+        val fields = listOf("a\uD800b", "x".repeat(4095) + "😼", "\uDC00", "中文")
+        fields.forEach { text ->
+            assertEquals(text.toByteArray(Charsets.UTF_8).size.toLong(), Utf8Payload.byteCount(text, Long.MAX_VALUE))
+        }
+    }
+
 }

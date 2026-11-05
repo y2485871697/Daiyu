@@ -300,7 +300,7 @@ object ArchiveCodec {
         require(value.isNotBlank() && value.length <= MAX_ID_LENGTH) { "$field 身份非法" }
     }
     private fun checkSize(value: String?, field: String) {
-        if (value != null) require(value.toByteArray(Charsets.UTF_8).size.toLong() <= MAX_FIELD_BYTES) { "$field 超过大小上限" }
+        if (value != null) require(Utf8Payload.byteCount(value, Long.MAX_VALUE) <= MAX_FIELD_BYTES) { "$field 超过大小上限" }
     }
     private fun strictUtf8(bytes: ByteArray): String = try {
         Charsets.UTF_8.newDecoder()

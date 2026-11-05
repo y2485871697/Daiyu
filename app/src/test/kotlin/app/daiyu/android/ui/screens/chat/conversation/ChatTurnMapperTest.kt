@@ -306,4 +306,24 @@ class ChatTurnMapperTest {
         assertSame(switched, ChatTurnMapper.withStreamingOwner(switched, next))
     }
 
+    @Test fun outstandingReceiptReadNeverHidesGrowingTextOrInventsToolSuccess() {
+        val completed = tool("completed", "{\"ok\":true}")
+        val pending = tool("pending", null)
+        val cache = ToolPresentationCache()
+        repeat(100) { tick ->
+            val value = message(completed, pending, text("answer", "stream-$tick"), status = RunStatus.RUNNING)
+            val turn = ChatTurnMapper.map(listOf(value), presentations = cache,
+                toolReceipt = { _, _ -> null }).single() as ChatTurnUi.Assistant
+            assertEquals("stream-$tick", turn.finalText)
+            assertEquals(listOf(WorkStepState.UNKNOWN, WorkStepState.PENDING),
+                turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
+        }
+        val value = message(completed, pending, text("answer", "stream-100"), status = RunStatus.RUNNING)
+        val ready = ChatTurnMapper.map(listOf(value), presentations = cache, toolReceipt = { _, block ->
+            if (block.invocation.id == completed.invocation.id) ToolReceiptUi(WorkStepState.NOT_EXECUTED) else null
+        }).single() as ChatTurnUi.Assistant
+        assertEquals("stream-100", ready.finalText)
+        assertEquals(WorkStepState.NOT_EXECUTED, ready.workProcess!!.segments.flatMap { it.steps }.first().state)
+    }
+
 }

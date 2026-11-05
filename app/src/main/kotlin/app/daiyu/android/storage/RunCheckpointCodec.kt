@@ -1,6 +1,7 @@
 package app.daiyu.android.storage
 
 import app.daiyu.android.context.ArchiveCodec
+import app.daiyu.android.context.Utf8Payload
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.question.ASK_USER_TOOL_NAME
@@ -12,7 +13,7 @@ import org.json.JSONTokener
 internal object RunCheckpointCodec {
     internal const val MAX_BYTES = 64 * 1024 * 1024
     internal const val RECOVERY_RESERVE = 4096
-    internal fun checkEncodedSize(bytes: Int, running: Boolean) {
+    internal fun checkEncodedSize(bytes: Long, running: Boolean) {
         require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)
     }
     // An optional lease-owned writer reuses only quoted strings, never this tree or
@@ -70,7 +71,7 @@ internal object RunCheckpointCodec {
                 .apply { if (version >= 8) put("cache_creation_tokens", record.snapshot.cacheCreationTokens ?: JSONObject.NULL) }) } })
             .put("pending", value.pending?.let { JSONObject().put("call_id", it.callId.value) }
                 ?: JSONObject.NULL).let { root -> writer?.write(root) ?: root.toString() }.also {
-                checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)
+                checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)
             }
     }
     internal data class Decoded(val checkpoint: RunCheckpoint, val recoverySourceOwner: String?)
@@ -78,7 +79,7 @@ internal object RunCheckpointCodec {
     fun decode(text: String): RunCheckpoint = decodeWithRecovery(text).checkpoint
 
     internal fun decodeWithRecovery(text: String): Decoded {
-        require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES)
+        require(Utf8Payload.byteCount(text, Long.MAX_VALUE) <= MAX_BYTES)
         val parser = JSONTokener(text)
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')

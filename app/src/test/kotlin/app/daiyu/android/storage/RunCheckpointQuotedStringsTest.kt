@@ -142,7 +142,7 @@ open class RunCheckpointQuotedStringsTest {
     }
 
     @Test fun encodedByteLimitAndRunningRecoveryReserveRemainUnchanged() {
-        val max = RunCheckpointCodec.MAX_BYTES
+        val max = RunCheckpointCodec.MAX_BYTES.toLong()
         val reserve = RunCheckpointCodec.RECOVERY_RESERVE
         RunCheckpointCodec.checkEncodedSize(max - reserve, true)
         reject { RunCheckpointCodec.checkEncodedSize(max - reserve + 1, true) }

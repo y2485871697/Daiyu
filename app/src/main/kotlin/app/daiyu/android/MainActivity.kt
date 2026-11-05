@@ -6481,6 +6481,7 @@ class MainActivity : ComponentActivity() {
         draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
         val restoringSupplement = !selectionReady
         selected = conversation; selectionReady = true; draft = targetDraft
+        questionCards = emptyMap()
         dismissChatModels()
         confirmedModelLabel = "模型"; confirmedReasoningModel = ""; confirmedGptSpeed = null
         paneState = paneState.copy(selectedConversationId = conversation?.id?.value)
@@ -7042,8 +7043,10 @@ class MainActivity : ComponentActivity() {
             else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
         val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
         val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
-        val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries ||
-            reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position })
+        val visibleToolReceipts = toolReceiptSnapshot?.takeIf { receiptsReady }?.projectionReader(controller::runState, controller::runStopping)
+            ?: { _, _ -> null }
+        val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
+            reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             scrollRequest = scrollRequest,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
@@ -7057,7 +7060,7 @@ class MainActivity : ComponentActivity() {
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }, presentations = toolPresentations, toolReceipt = toolReceiptSnapshot?.projectionReader(controller::runState, controller::runStopping) ?: { _, _ -> null }),
+            }, presentations = toolPresentations, toolReceipt = visibleToolReceipts),
                 controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
                 stopRequested = controlOwner?.let(controller::runStopping) == true),
             submissionPreview = submissionPreview,

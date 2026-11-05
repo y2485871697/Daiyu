@@ -24,9 +24,9 @@ internal data class GuiVisualOccluder(val identity: String, val bounds: GuiBound
 
 /** Parses only structural WM fields. Titles, intent data and node text are never retained. */
 internal object GuiVisualWindowParser {
-    private val header = Regex("(?m)^  Window #\\d+ Window\\{([^\\s]+) u(\\d+) [^\\n]*}:")
-    private val focus = Regex("(?m)^\\s*mCurrentFocus=Window\\{([^\\s]+) u(\\d+) [^\\n]*}")
-    private val rectangle = "\\[(-?\\d+),(-?\\d+)]\\[(-?\\d+),(-?\\d+)]"
+    private val header = Regex("(?m)^  Window #\\d+ Window\\{([^\\s]+) u(\\d+) [^\\n]*\\}:")
+    private val focus = Regex("(?m)^\\s*mCurrentFocus=Window\\{([^\\s]+) u(\\d+) [^\\n]*\\}")
+    private val rectangle = "\\[(-?\\d+),(-?\\d+)\\]\\[(-?\\d+),(-?\\d+)\\]"
     private fun rect(match: MatchResult): GuiBounds = GuiBounds(match.groupValues[1].toInt(),
         match.groupValues[2].toInt(), match.groupValues[3].toInt(), match.groupValues[4].toInt())
     fun parse(text: String): GuiVisualWindow? { return try {
@@ -84,11 +84,14 @@ internal object AndroidGuiVisualWindows {
         if (!busy.compareAndSet(false, true)) { completed(null); return }
         val submitted = System.nanoTime()
         worker.execute {
-            val result = try { readBlocking(service) } catch (_: Exception) { null }
-            busy.set(false)
+            val result = try { readSafely { readBlocking(service) } } finally { busy.set(false) }
             GuiRuntime.main.post { completed(if (System.nanoTime() - submitted <= TimeUnit.SECONDS.toNanos(5)) result else null) }
         }
     }
+    internal fun readSafely(read: () -> GuiVisualWindow?): GuiVisualWindow? = try { read() }
+        catch (_: Exception) { null }
+        catch (_: LinkageError) { null } // Includes parser initialization and a previously failed initializer.
+
     private fun readBlocking(service: GuiAccessibilityService): GuiVisualWindow? {
         val mode = AndroidRunningModeStore.get(service)
         if (mode.mode.value != RunningMode.ROOT) return null

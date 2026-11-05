@@ -84,4 +84,21 @@ class GuiVisualWindowParserTest {
         assertNull(GuiVisualWindowParser.parse(text.replace("mHasSurface=true", "mHasSurface=false")))
         assertNull(GuiVisualWindowParser.parse(text.repeat(20_000)))
     }
+    @Test fun initializationAndPreviouslyFailedInitializerBecomeUnavailableReads() {
+        var calls = 0
+        assertNull(AndroidGuiVisualWindows.readSafely {
+            calls++; throw ExceptionInInitializerError(java.util.regex.PatternSyntaxException("fixture", "}", 0))
+        })
+        assertNull(AndroidGuiVisualWindows.readSafely { calls++; throw NoClassDefFoundError("fixture") })
+        assertNull(AndroidGuiVisualWindows.readSafely { calls++; throw IllegalStateException("fixture") })
+        val expected = GuiVisualWindowParser.parse(window() + focused())!!
+        assertEquals(expected, AndroidGuiVisualWindows.readSafely { calls++; expected })
+        assertEquals(4, calls)
+    }
+    @Test fun virtualMachineFailuresAreNotSwallowedAsOrdinaryWindowFailures() {
+        val fatal = OutOfMemoryError("fixture")
+        val actual = try { AndroidGuiVisualWindows.readSafely { throw fatal }; null } catch (failure: OutOfMemoryError) { failure }
+        assertSame(fatal, actual)
+    }
+
 }

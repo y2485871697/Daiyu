@@ -147,6 +147,7 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             val database = ConversationDatabase(context)
             var store: SQLiteRuntimeStore? = null
             var runner: ChatRunner? = null
+            val worker = java.util.concurrent.atomic.AtomicReference<Thread>()
             val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
             try {
                 val runtime = SQLiteRuntimeStore.acquire(database).also { store = it; it.recoverPending() }
@@ -165,10 +166,11 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
                 val call = ToolInvocation(ToolCallId("screen"), "screen", args)
                 assertTrue(TokenTailCompression.textTokens(output) > capacity.sendBudgetTokens)
                 assertTrue(capacity.localTokens(listOf(user, assistant.copy(blocks = listOf(MessageBlock.Tool(call, output)))), emptyList()) < capacity.sendBudgetTokens)
-                var posts = 0; var tools = 0
+                val posts = java.util.concurrent.atomic.AtomicInteger()
+                val tools = java.util.concurrent.atomic.AtomicInteger()
                 val sent = mutableListOf<ByteArrayOutputStream>()
                 val model = ResponsesModel(ModelSettings("https://example.invalid/v1/responses", "synthetic", "synthetic-key", false), {
-                    val turn = posts++
+                    val turn = posts.getAndIncrement()
                     val item = JSONObject().put("type", "function_call").put("id", "fc").put("call_id", "screen")
                         .put("name", "screen").put("arguments", args)
                     val response = JSONObject().put("status", "completed").put("output", org.json.JSONArray().apply { if (turn == 0) put(item) })
@@ -199,11 +201,21 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
                     }
                 }, true)
                 val active = ChatRunner(model, database, BatteryTool { invocation ->
-                    assertEquals(call, invocation); tools++; output
+                    assertEquals(call, invocation); tools.incrementAndGet(); output
                 }, RunnerOptions(runtimeStore = runtime, contextRuntime = capacity)) {}.also { runner = it }
-                val future = executor.submit<Message> { active.run(assistant, listOf(user)) }
-                assertEquals(RunStatus.COMPLETED, future.get(30, java.util.concurrent.TimeUnit.SECONDS).status)
-                assertEquals(2, posts); assertEquals(1, tools)
+                val future = executor.submit<Message> {
+                    worker.set(Thread.currentThread())
+                    active.run(assistant, listOf(user))
+                }
+                val completed = try {
+                    future.get(120, java.util.concurrent.TimeUnit.SECONDS)
+                } catch (error: java.util.concurrent.TimeoutException) {
+                    val thread = worker.get()
+                    throw AssertionError("Native screen continuation timed out: billed=$billed, posts=${posts.get()}, tools=${tools.get()}, worker=${thread?.name}/${thread?.state}\n" +
+                        thread?.stackTrace?.joinToString("\n").orEmpty(), error)
+                }
+                assertEquals(RunStatus.COMPLETED, completed.status)
+                assertEquals(2, posts.get()); assertEquals(1, tools.get())
                 val wire = sent.last().toString("UTF-8")
                 assertFalse(wire.contains("data_base64")); assertTrue(wire.contains("input_image"))
                 val saved = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!

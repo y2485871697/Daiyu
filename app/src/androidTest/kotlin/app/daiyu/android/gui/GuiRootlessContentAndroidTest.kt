@@ -13,7 +13,7 @@ import java.util.concurrent.Executor
 @Suppress("DEPRECATION")
 class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
     private class Platform : GuiRuntimeAccess {
-        val window = GuiVisualWindow("synthetic", "external.app", 10222,
+        var window = GuiVisualWindow("synthetic", "external.app", 10222,
             GuiBounds(0, 0, 1, 1), GuiBounds(0, 0, 1, 1), 0, emptyList())
         val windows = mutableListOf<(GuiVisualWindow?) -> Unit>()
         var captured: ((GuiCaptureFrame) -> Unit)? = null
@@ -28,10 +28,10 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
             gestures++; completedGesture = completed; return true
         }
         fun witness() { windows.removeAt(0)(window) }
-        fun image(pixels: ByteArray = byteArrayOf(1)) {
+        fun image(pixels: ByteArray = byteArrayOf(1), spatial: GuiScreenshot? = null) {
             val success = checkNotNull(captured); captured = null
             success(object : GuiCaptureFrame {
-                override fun encode(observationId: String) = GuiResult.Value(GuiScreenshot(observationId, 1, 1, pixels))
+                override fun encode(observationId: String) = GuiResult.Value(spatial?.copy(observationId = observationId) ?: GuiScreenshot(observationId, 1, 1, pixels))
                 override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) { disposed++; request.resourcesDisposed() }
             })
         }
@@ -71,11 +71,11 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         return true
     }
     private fun capture(service: GuiAccessibilityService, session: GuiRunSession, platform: Platform,
-        pkg: String? = service.packageName): GuiScreenshot {
+        pkg: String? = service.packageName, spatial: GuiScreenshot? = null): GuiScreenshot {
         lateinit var pending: CompletableFuture<GuiResult<GuiScreenshot>>
         controlMain {
             pending = GuiRuntime.visualScreenshot(session.lease) { false }
-            event(service, pkg); platform.witness(); event(service, pkg); platform.image(); event(service, pkg)
+            event(service, pkg); platform.witness(); event(service, pkg); platform.image(spatial = spatial); event(service, pkg)
         }
         instrumentation.waitForIdleSync()
         controlMain { event(service, pkg); platform.witness() }
@@ -169,4 +169,76 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
         assertEquals(2, platform.disposed)
     }
+    private fun spatialImage(change: Pair<Int, Int>? = null): GuiScreenshot {
+        val bitmap = android.graphics.Bitmap.createBitmap(512, 768, android.graphics.Bitmap.Config.ARGB_8888)
+        try {
+            bitmap.eraseColor(0xffeeeeee.toInt())
+            for (x in 392..408) for (y in 642..658)
+                bitmap.setPixel(x, y, if ((x + y) % 2 == 0) 0xff000000.toInt() else 0xffffffff.toInt())
+            change?.let { bitmap.setPixel(it.first, it.second, 0xff123456.toInt()) }
+            val png = java.io.ByteArrayOutputStream().also {
+                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }.toByteArray()
+            return GuiScreenshot("fixture", 512, 768, png, visualPixels = GuiVisualPixels.from(bitmap))
+        } finally { bitmap.recycle() }
+    }
+    fun testStableTargetWithDistantAnimationDispatchesExactlyOnceWithoutReplay() = fixture { service, session, platform ->
+        if (unsupported(session, platform)) return@fixture
+        controlMain { platform.window = platform.window.copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768)) }
+        val original = capture(service, session, platform, "external.app", spatialImage())
+        val changed = spatialImage(10 to 10)
+        assertFalse(original.png.contentEquals(changed.png))
+        val action = GuiAction(original.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(400, 650, 400, 650, 50), visual = true)
+        lateinit var pending: CompletableFuture<GuiResult<String>>
+        controlMain {
+            event(service, "external.app")
+            pending = GuiRuntime.visualAction(session.lease, action) { false }
+            platform.witness(); platform.image(spatial = changed)
+        }
+        instrumentation.waitForIdleSync()
+        controlMain {
+            platform.witness(); assertEquals(1, platform.gestures); assertFalse(pending.isDone)
+            assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
+            platform.completedGesture!!(true)
+            assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
+            assertEquals(1, platform.gestures)
+        }
+        assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Value)
+        assertEquals(2, platform.disposed)
+    }
+    fun testChangedTargetWindowGeometryOrForegroundIdentityNeverDispatches() {
+        for (mode in 0..7) fixture { service, session, platform ->
+            if (unsupported(session, platform)) return@fixture
+            controlMain { platform.window = platform.window.copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768)) }
+            val original = capture(service, session, platform, "external.app", spatialImage())
+            val window = platform.window
+            val changed = spatialImage(if (mode == 0) 400 to 650 else if (mode == 1) 470 to 700 else 10 to 10)
+                .let { if (mode == 2) it.copy(visualPixels = null) else it }
+            val action = GuiAction(original.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(400, 650, 400, 650, 50), visual = true)
+            lateinit var pending: CompletableFuture<GuiResult<String>>
+            controlMain {
+                platform.window = when (mode) {
+                    3 -> window.copy(identity = "replacement")
+                    4 -> window.copy(displayBounds = GuiBounds(0, 0, 513, 768))
+                    5 -> window.copy(packageName = "other.app")
+                    6 -> window.copy(above = listOf(GuiVisualOccluder("overlay", GuiBounds(390, 640, 410, 660))))
+                    7 -> window.copy(rotation = 90)
+                    else -> window
+                }
+                pending = GuiRuntime.visualAction(session.lease, action) { false }
+                platform.witness(); platform.image(spatial = changed)
+            }
+            instrumentation.waitForIdleSync()
+            controlMain {
+                platform.witness(); assertEquals(0, platform.gestures)
+                assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Rejected)
+                if (mode <= 2) assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
+                platform.window = window
+                assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
+                assertEquals(0, platform.gestures); assertTrue(platform.windows.isEmpty()); assertNull(platform.captured)
+            }
+            assertEquals(2, platform.disposed)
+        }
+    }
+
 }

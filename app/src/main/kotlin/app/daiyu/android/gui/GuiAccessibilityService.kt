@@ -89,7 +89,8 @@ class GuiAccessibilityService : AccessibilityService() {
 }
 
 internal data class GuiScreenshot(val observationId: String, val width: Int, val height: Int, val png: ByteArray,
-    val observationBound: Boolean = true, val visualPackage: String? = null)
+    val observationBound: Boolean = true, val visualPackage: String? = null,
+    val visualPixels: GuiVisualPixels? = null)
 
 /** Narrow platform seam: admission and bounded traversal remain in the runtime. */
 internal interface GuiRuntimeAccess {
@@ -160,7 +161,8 @@ private class AndroidGuiCaptureFrame(screenshot: AccessibilityService.Screenshot
         }
         if (!image.compress(Bitmap.CompressFormat.PNG, 100, bytes))
             return GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")
-        return GuiResult.Value(GuiScreenshot(observationId, image.width, image.height, bytes.toByteArray()))
+        return GuiResult.Value(GuiScreenshot(observationId, image.width, image.height, bytes.toByteArray(),
+            visualPixels = GuiVisualPixels.from(image)))
     }
     override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) {
         request.disposeSuccessResources(
@@ -361,7 +363,7 @@ internal object GuiRuntime {
     }
     private var screenshotBinding: Pair<String, TreeSample>? = null
     private data class VisualCapture(val lease: GuiLeaseGate.Lease, val id: String, val visualGeneration: Long,
-        val capturedAt: Long, val window: GuiVisualWindow, val digest: List<Byte>)
+        val capturedAt: Long, val window: GuiVisualWindow, val digest: List<Byte>, val pixels: GuiVisualPixels?)
     private var visualCapture: VisualCapture? = null
     private var contentChanged = false
     @Suppress("DEPRECATION") private fun clearNodes(invalidateVisual: Boolean = true) {
@@ -1039,11 +1041,17 @@ internal object GuiRuntime {
         captureVisualFrame(lease, id, cancelled) { image, window, startVisualGeneration ->
             if (image is GuiResult.Value && window != null) {
                 visualCapture = VisualCapture(lease, id, startVisualGeneration, capturedAt, window,
-                    java.security.MessageDigest.getInstance("SHA-256").digest(image.value.png).toList())
+                    java.security.MessageDigest.getInstance("SHA-256").digest(image.value.png).toList(), image.value.visualPixels)
                 future.complete(GuiResult.Value(image.value.copy(observationBound = false, visualPackage = window.packageName)))
             } else future.complete(image)
         }
         return future
+    }
+
+    private fun matchesVisualContent(captured: VisualCapture, image: GuiScreenshot, action: GuiAction): Boolean {
+        if (java.security.MessageDigest.getInstance("SHA-256").digest(image.png).toList() == captured.digest) return true
+        return action.operation == GuiOperation.COORDINATE_TAP && action.gesture != null &&
+            captured.pixels?.matchesTap(image.visualPixels, action.gesture, captured.window) == true
     }
 
     internal fun visualAction(lease: GuiLeaseGate.Lease, action: GuiAction, cancelled: () -> Boolean): CompletableFuture<GuiResult<String>> {
@@ -1063,7 +1071,7 @@ internal object GuiRuntime {
         }
         if (action.gesture != null && !captured.window.admits(action.gesture))
             return reject("GESTURE_WINDOW_OCCLUDED_OR_OUTSIDE_NOT_EXECUTED")
-        // Re-capture, not merely re-read the same package. The exact visible pixels must still match.
+        // Re-capture the same window. Taps require exact target-neighborhood pixels; other actions require the full frame.
         captureVisualFrame(lease, captured.id, cancelled) { image, window, _ ->
             val rejection = visualRejection(lease) ?: if (cancelled()) GuiResult.Rejected("CANCELLED_NOT_EXECUTED") else null
             when {
@@ -1075,7 +1083,7 @@ internal object GuiRuntime {
                     SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS -> {
                     retire(); future.complete(GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED"))
                 }
-                java.security.MessageDigest.getInstance("SHA-256").digest((image as GuiResult.Value).value.png).toList() != captured.digest -> {
+                !matchesVisualContent(captured, (image as GuiResult.Value).value, action) -> {
                     retire(); future.complete(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"))
                 }
                 else -> {

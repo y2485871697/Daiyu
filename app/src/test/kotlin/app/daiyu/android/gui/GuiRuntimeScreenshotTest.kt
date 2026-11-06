@@ -69,6 +69,7 @@ class GuiRuntimeScreenshotTest {
 
     private class Frame : GuiCaptureFrame {
         var pixels = byteArrayOf(1)
+        var image: GuiScreenshot? = null
         var encoded = 0
         var encodeFailure = false
         var disposalFailure = false
@@ -78,7 +79,7 @@ class GuiRuntimeScreenshotTest {
             check(Looper.myLooper() !== Looper.getMainLooper())
             encoded++
             if (encodeFailure) error("encoding failed")
-            return GuiResult.Value(GuiScreenshot(observationId, 1, 1, pixels))
+            return GuiResult.Value(image?.copy(observationId = observationId) ?: GuiScreenshot(observationId, 1, 1, pixels))
         }
         override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) {
             check(Looper.myLooper() === Looper.getMainLooper())
@@ -430,6 +431,91 @@ class GuiRuntimeScreenshotTest {
         platform.success(); worker.runAll()
         return (pending.completed() as GuiResult.Value).value
     }
+    private fun spatialFrame(change: Pair<Int, Int>? = null, blank: Boolean = false): Frame {
+        val bitmap = android.graphics.Bitmap.createBitmap(512, 768, android.graphics.Bitmap.Config.ARGB_8888)
+        try {
+            bitmap.eraseColor(0xffeeeeee.toInt())
+            if (!blank) for (x in 392..408) for (y in 642..658)
+                bitmap.setPixel(x, y, if ((x + y) % 2 == 0) 0xff000000.toInt() else 0xffffffff.toInt())
+            change?.let { bitmap.setPixel(it.first, it.second, 0xff123456.toInt()) }
+            val png = java.io.ByteArrayOutputStream().also {
+                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }.toByteArray()
+            return Frame().apply { image = GuiScreenshot("fixture", 512, 768, png, visualPixels = GuiVisualPixels.from(bitmap)) }
+        } finally { bitmap.recycle() }
+    }
+    private fun spatialImage(frame: Frame = spatialFrame()): GuiScreenshot {
+        session.approveReadsFromUser(GuiReadApproval(0, 1))
+        platform.missing = true
+        platform.visual = visualWindow().copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768))
+        val pending = GuiRuntime.visualScreenshot(session.lease) { false }
+        platform.success(frame); worker.runAll()
+        return (pending.completed() as GuiResult.Value).value
+    }
+    private fun spatialAction(image: GuiScreenshot, operation: GuiOperation = GuiOperation.COORDINATE_TAP) =
+        GuiAction(image.observationId, operation, visual = true,
+            gesture = if (operation == GuiOperation.BACK) null else GuiGesture(400, 650, 400, 650, 50))
+
+    @Test fun visualTapAllowsDistantAnimationWithExactTargetPixelsAndNeverReplays() {
+        val original = spatialImage(); val action = spatialAction(original)
+        val changed = spatialFrame(10 to 10)
+        assertFalse(original.png.contentEquals(changed.image!!.png))
+        contentEvent("external.app")
+        val pending = GuiRuntime.visualAction(session.lease, action) { false }
+        platform.success(changed); worker.runAll()
+        assertEquals(1, platform.gestures); assertEquals(action.gesture, platform.submittedGesture)
+        assertFalse(pending.isDone)
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        platform.gestureCompleted!!(true); assertTrue(pending.completed() is GuiResult.Value)
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        assertEquals(1, platform.gestures); assertDisposed(changed)
+    }
+    @Test fun visualTapRejectsOneChangedTargetOrContextPixelAndMissingEvidence() {
+        for (mode in 0..2) {
+            val original = spatialImage(); val action = spatialAction(original)
+            val changed = spatialFrame(if (mode == 0) 400 to 650 else if (mode == 1) 470 to 700 else 10 to 10)
+            if (mode == 2) changed.image = changed.image!!.copy(visualPixels = null)
+            val pending = GuiRuntime.visualAction(session.lease, action) { false }
+            platform.success(changed); worker.runAll()
+            rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED")
+            assertEquals(0, platform.gestures); assertDisposed(changed)
+            rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+            assertEquals(0, platform.gestures); assertTrue(platform.callbacks.isEmpty())
+        }
+    }
+    @Test fun localTapEvidenceNeverBypassesWindowIdentityGeometryOrForegroundChanges() {
+        for (mode in 0..4) {
+            val original = spatialImage(); val action = spatialAction(original)
+            val window = platform.visual!!
+            platform.visual = when (mode) {
+                0 -> window.copy(identity = "replacement")
+                1 -> window.copy(packageName = "other.app")
+                2 -> window.copy(uid = 10223)
+                3 -> window.copy(rotation = 90)
+                else -> window.copy(displayBounds = GuiBounds(0, 0, 513, 768))
+            }
+            val pending = GuiRuntime.visualAction(session.lease, action) { false }
+            platform.success(spatialFrame(10 to 10)); worker.runAll()
+            assertTrue(pending.completed() is GuiResult.Rejected); assertEquals(0, platform.gestures)
+            platform.visual = window
+            rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+            assertEquals(0, platform.gestures); assertTrue(platform.callbacks.isEmpty())
+        }
+    }
+    @Test fun distantPixelChangesStillRejectSwipeBackAndBlankTapRegions() {
+        for (operation in listOf(GuiOperation.SWIPE, GuiOperation.BACK, GuiOperation.COORDINATE_TAP)) {
+            val blank = operation == GuiOperation.COORDINATE_TAP
+            val original = spatialImage(spatialFrame(blank = blank)); val action = spatialAction(original, operation)
+            val pending = GuiRuntime.visualAction(session.lease, action) { false }
+            platform.success(spatialFrame(10 to 10, blank)); worker.runAll()
+            rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"); assertEquals(0, platform.gestures)
+        }
+        val first = spatialFrame().image!!.visualPixels!!; val second = spatialFrame(10 to 10).image!!.visualPixels
+        val window = platform.visual!!
+        assertFalse(first.matchesTap(second, GuiGesture(400, 650, 400, 650, 50), window.copy(
+            above = listOf(GuiVisualOccluder("overlay", GuiBounds(330, 590, 350, 610))))))
+    }
+
     @Test fun rootlessVisualCapturePublishesNoNodesAndUsesThePlatformCaptureOnlyOnce() {
         val image = visualImage()
         assertFalse(image.observationBound); assertEquals("external.app", image.visualPackage)

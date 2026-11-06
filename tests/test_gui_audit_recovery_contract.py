@@ -38,9 +38,26 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         self.assertIn('!isSelfLease(lease) && retained.isNotEmpty()', scoped)
         self.assertIn('contentChanged = true', scoped)
         self.assertNotIn('generation++', scoped)
-        self.assertIn('else changed(value, contentOnly = localContent)', scoped)
+        self.assertIn('changed(value, contentOnly = localContent,', scoped)
+        self.assertIn('invalidateVisual = !content || lease == null || isSelfLease(lease)', scoped)
         self.assertIn('if (contentChanged && action.nodeId == null)', runtime)
         self.assertIn('if (contentChanged) return recordObservationRejection', runtime)
+
+    def test_visual_freshness_is_separate_from_node_content_but_hard_clears_still_fence(self):
+        runtime = (K / 'gui/GuiAccessibilityService.kt').read_text()
+        self.assertIn('private var visualGeneration = 0L', runtime)
+        self.assertIn('changed(value, contentOnly, invalidateVisual = true)', runtime)
+        self.assertIn('generation++; clearNodes(invalidateVisual)', runtime)
+        self.assertIn('if (invalidateVisual) { visualGeneration++; visualCapture = null }', runtime)
+        self.assertIn('gate.validateObservation(lease, id, generation)', runtime)
+        visual = runtime[runtime.index('internal fun visualScreenshot('):runtime.index('internal fun screenshot(')]
+        self.assertIn('captured.visualGeneration != visualGeneration', visual)
+        self.assertIn('val startVisualGeneration = visualGeneration', visual)
+        self.assertIn('visualGeneration != startVisualGeneration', visual)
+        self.assertNotIn('captured.generation', visual)
+        self.assertIn('finalWindow != initial', visual)
+        self.assertIn('CAPTURE_CONTENT_CHANGED_NOT_EXECUTED', visual)
+        self.assertIn('GUI_OBSERVATION_TTL_MILLIS', visual)
 
     def test_repeatable_flag_is_opt_in_and_durably_saved(self):
         scope = (K / 'integration/tools/RunOrdinaryPlatformTools.kt').read_text()

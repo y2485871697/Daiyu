@@ -102,8 +102,18 @@ GUI_PARSER_MODULES = (
 
 
 SCREEN_HISTORY_PLATFORM_CLASS = "app.daiyu.android.storage.ScreenProtocolHistoryAndroidTest"
+SQLITE_TEXT_PLATFORM_CLASS = "app.daiyu.android.storage.SQLiteTextReadDatabaseTest"
+SQLITE_TEXT_MODULES = (
+    "test_large_history_storage_contract", "test_checkpoint_encoding_hotpath_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_sqlite_text_smoke_scope", "test_diagnostic_smoke_source",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == SQLITE_TEXT_PLATFORM_CLASS):
+        return [python, "-B", "-m", "unittest", *SQLITE_TEXT_MODULES, "-v"], "sqlite-text-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == SPEECH_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *SPEECH_MODULES, "-v"], "speech-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

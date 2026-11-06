@@ -431,17 +431,18 @@ class GuiRuntimeScreenshotTest {
         platform.success(); worker.runAll()
         return (pending.completed() as GuiResult.Value).value
     }
-    private fun spatialFrame(change: Pair<Int, Int>? = null, blank: Boolean = false): Frame {
-        val bitmap = android.graphics.Bitmap.createBitmap(512, 768, android.graphics.Bitmap.Config.ARGB_8888)
+    private fun spatialFrame(change: Pair<Int, Int>? = null, blank: Boolean = false,
+        width: Int = 512, height: Int = 768, targetX: Int = 400, targetY: Int = 650): Frame {
+        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
         try {
             bitmap.eraseColor(0xffeeeeee.toInt())
-            if (!blank) for (x in 392..408) for (y in 642..658)
+            if (!blank) for (x in (targetX - 8)..(targetX + 8)) for (y in (targetY - 8)..(targetY + 8))
                 bitmap.setPixel(x, y, if ((x + y) % 2 == 0) 0xff000000.toInt() else 0xffffffff.toInt())
             change?.let { bitmap.setPixel(it.first, it.second, 0xff123456.toInt()) }
             val png = java.io.ByteArrayOutputStream().also {
                 check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
             }.toByteArray()
-            return Frame().apply { image = GuiScreenshot("fixture", 512, 768, png, visualPixels = GuiVisualPixels.from(bitmap)) }
+            return Frame().apply { image = GuiScreenshot("fixture", width, height, png, visualPixels = GuiVisualPixels.from(bitmap)) }
         } finally { bitmap.recycle() }
     }
     private fun spatialImage(frame: Frame = spatialFrame()): GuiScreenshot {
@@ -463,10 +464,12 @@ class GuiRuntimeScreenshotTest {
         contentEvent("external.app")
         val pending = GuiRuntime.visualAction(session.lease, action) { false }
         platform.success(changed); worker.runAll()
-        assertEquals(1, platform.gestures); assertEquals(action.gesture, platform.submittedGesture)
-        assertFalse(pending.isDone)
-        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
-        platform.gestureCompleted!!(true); assertTrue(pending.completed() is GuiResult.Value)
+        try {
+            assertEquals(1, platform.gestures); assertEquals(action.gesture, platform.submittedGesture)
+            assertFalse(pending.isDone)
+            rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "GESTURE_IN_PROGRESS_NOT_EXECUTED")
+        } finally { platform.gestureCompleted?.invoke(true); platform.gestureCompleted = null }
+        assertTrue(pending.completed() is GuiResult.Value)
         rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
         assertEquals(1, platform.gestures); assertDisposed(changed)
     }
@@ -513,7 +516,24 @@ class GuiRuntimeScreenshotTest {
         val first = spatialFrame().image!!.visualPixels!!; val second = spatialFrame(10 to 10).image!!.visualPixels
         val window = platform.visual!!
         assertFalse(first.matchesTap(second, GuiGesture(400, 650, 400, 650, 50), window.copy(
-            above = listOf(GuiVisualOccluder("overlay", GuiBounds(330, 590, 350, 610))))))
+            above = listOf(GuiVisualOccluder("overlay", GuiBounds(390, 640, 410, 660))))))
+    }
+
+    @Test fun localPixelsAtBottomNavigationKeepTheWholeNeighborhoodAndOnlyAdmitTheTap() {
+        fun pixels(change: Pair<Int, Int>? = null) = spatialFrame(change, width = 1216, height = 2640,
+            targetX = 1092, targetY = 2549).image!!.visualPixels!!
+        val original = pixels(); val distant = pixels(10 to 10)
+        val gesture = GuiGesture(1092, 2549, 1092, 2549, 50)
+        val window = visualWindow().copy(bounds = GuiBounds(0, 0, 1216, 2640), displayBounds = GuiBounds(0, 0, 1216, 2640))
+        val cropped = window.copy(bounds = GuiBounds(0, 0, 1216, 2560))
+        val navigation = window.copy(above = listOf(GuiVisualOccluder("navigation", GuiBounds(0, 2560, 1216, 2640))))
+        assertTrue(original.matchesTap(distant, gesture, cropped))
+        assertTrue(original.matchesTap(distant, gesture, navigation))
+        assertFalse(original.matchesTap(pixels(1092 to 2549), gesture, navigation))
+        assertFalse(original.matchesTap(pixels(1190 to 2600), gesture, navigation))
+        assertFalse(original.matchesTap(distant, gesture, window.copy(bounds = GuiBounds(0, 0, 1216, 2549))))
+        assertFalse(original.matchesTap(distant, gesture, window.copy(
+            above = listOf(GuiVisualOccluder("overlay", GuiBounds(1080, 2540, 1110, 2560))))))
     }
 
     @Test fun rootlessVisualCapturePublishesNoNodesAndUsesThePlatformCaptureOnlyOnce() {

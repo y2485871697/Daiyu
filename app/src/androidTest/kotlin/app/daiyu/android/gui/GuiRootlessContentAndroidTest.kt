@@ -169,42 +169,52 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
         assertEquals(2, platform.disposed)
     }
-    private fun spatialImage(change: Pair<Int, Int>? = null): GuiScreenshot {
-        val bitmap = android.graphics.Bitmap.createBitmap(512, 768, android.graphics.Bitmap.Config.ARGB_8888)
+    private fun spatialImage(change: Pair<Int, Int>? = null, width: Int = 512, height: Int = 768,
+        targetX: Int = 400, targetY: Int = 650): GuiScreenshot {
+        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
         try {
             bitmap.eraseColor(0xffeeeeee.toInt())
-            for (x in 392..408) for (y in 642..658)
+            for (x in (targetX - 8)..(targetX + 8)) for (y in (targetY - 8)..(targetY + 8))
                 bitmap.setPixel(x, y, if ((x + y) % 2 == 0) 0xff000000.toInt() else 0xffffffff.toInt())
             change?.let { bitmap.setPixel(it.first, it.second, 0xff123456.toInt()) }
             val png = java.io.ByteArrayOutputStream().also {
                 check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
             }.toByteArray()
-            return GuiScreenshot("fixture", 512, 768, png, visualPixels = GuiVisualPixels.from(bitmap))
+            return GuiScreenshot("fixture", width, height, png, visualPixels = GuiVisualPixels.from(bitmap))
         } finally { bitmap.recycle() }
     }
-    fun testStableTargetWithDistantAnimationDispatchesExactlyOnceWithoutReplay() = fixture { service, session, platform ->
-        if (unsupported(session, platform)) return@fixture
-        controlMain { platform.window = platform.window.copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768)) }
-        val original = capture(service, session, platform, "external.app", spatialImage())
-        val changed = spatialImage(10 to 10)
-        assertFalse(original.png.contentEquals(changed.png))
-        val action = GuiAction(original.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(400, 650, 400, 650, 50), visual = true)
-        lateinit var pending: CompletableFuture<GuiResult<String>>
-        controlMain {
-            event(service, "external.app")
-            pending = GuiRuntime.visualAction(session.lease, action) { false }
-            platform.witness(); platform.image(spatial = changed)
+    fun testStableTargetWithDistantAnimationDispatchesExactlyOnceWithoutReplay() {
+        for (edge in 0..2) fixture { service, session, platform ->
+            if (unsupported(session, platform)) return@fixture
+            val width = if (edge == 0) 512 else 1216; val height = if (edge == 0) 768 else 2640
+            val x = if (edge == 0) 400 else 1092; val y = if (edge == 0) 650 else 2549
+            controlMain {
+                platform.window = platform.window.copy(bounds = GuiBounds(0, 0, width, if (edge == 1) 2560 else height),
+                    displayBounds = GuiBounds(0, 0, width, height), above = if (edge == 2)
+                        listOf(GuiVisualOccluder("navigation", GuiBounds(0, 2560, width, height))) else emptyList())
+            }
+            val original = capture(service, session, platform, "external.app", spatialImage(width = width, height = height, targetX = x, targetY = y))
+            val changed = spatialImage(10 to 10, width, height, x, y)
+            assertFalse(original.png.contentEquals(changed.png))
+            val action = GuiAction(original.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(x, y, x, y, 50), visual = true)
+            lateinit var pending: CompletableFuture<GuiResult<String>>
+            controlMain {
+                event(service, "external.app")
+                pending = GuiRuntime.visualAction(session.lease, action) { false }
+                platform.witness(); platform.image(spatial = changed)
+            }
+            instrumentation.waitForIdleSync()
+            controlMain {
+                try {
+                    platform.witness(); assertEquals(1, platform.gestures); assertFalse(pending.isDone)
+                    assertEquals(GuiResult.Rejected("GESTURE_IN_PROGRESS_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
+                } finally { platform.completedGesture?.invoke(true); platform.completedGesture = null }
+                assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
+                assertEquals(1, platform.gestures)
+            }
+            assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Value)
+            assertEquals(2, platform.disposed)
         }
-        instrumentation.waitForIdleSync()
-        controlMain {
-            platform.witness(); assertEquals(1, platform.gestures); assertFalse(pending.isDone)
-            assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
-            platform.completedGesture!!(true)
-            assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
-            assertEquals(1, platform.gestures)
-        }
-        assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Value)
-        assertEquals(2, platform.disposed)
     }
     fun testChangedTargetWindowGeometryOrForegroundIdentityNeverDispatches() {
         for (mode in 0..7) fixture { service, session, platform ->

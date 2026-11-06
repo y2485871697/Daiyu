@@ -20,11 +20,8 @@ internal class GuiVisualPixels private constructor(
         val right = (minOf(width, gesture.x + radius + 1) + TILE - 1) / TILE
         val bottom = (minOf(height, gesture.y + radius + 1) + TILE - 1) / TILE
         val region = GuiBounds(left * TILE, top * TILE, minOf(width, right * TILE), minOf(height, bottom * TILE))
-        if (region.left < window.bounds.left || region.top < window.bounds.top ||
-            region.right > window.bounds.right || region.bottom > window.bounds.bottom ||
-            region.right - region.left < radius || region.bottom - region.top < radius ||
-            window.above.any { it.bounds.left < region.right && region.left < it.bounds.right &&
-                it.bounds.top < region.bottom && region.top < it.bounds.bottom }) return false
+        if (!window.admits(gesture) || region.right - region.left < radius ||
+            region.bottom - region.top < radius) return false
         var hasDetail = false
         for (row in top until bottom) for (column in left until right) {
             val tile = row * columns + column

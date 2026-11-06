@@ -120,6 +120,7 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
                 MessageHistorySegment(assistant.id, "assistant", blocks, items)))
             val first = RunCheckpoint(message, listOf(user), ExecutionPhase.BOUNDARY,
                 tools = listOf(ToolRecord(call, ToolDisposition.SUCCEEDED, result)), owner = "owner", revision = 1)
+            assertDurableJournal(database)
             store.commitCheckpoint(first)
             assertTextCheckpoint(database, first.message.id.value, result.length.toLong() * 3)
             assertEquals(first, store.readCommittedCheckpoint(first))
@@ -249,6 +250,60 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
         }
     }
 
+    private fun assertDurableJournal(database: ConversationDatabase) {
+        val db = database.writableDatabase
+        db.beginTransactionNonExclusive()
+        try {
+            val journal = db.rawQuery("PRAGMA journal_mode", null).use {
+                assertTrue(it.moveToFirst()); it.getString(0).lowercase(java.util.Locale.ROOT)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 28) assertEquals("wal", journal)
+            else assertTrue(journal in setOf("delete", "truncate", "persist"))
+            assertEquals(2, db.rawQuery("PRAGMA synchronous", null).use {
+                assertTrue(it.moveToFirst()); it.getInt(0)
+            })
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    private fun verifyJournalReopenAndExport() {
+        val context = testContext(instrumentation.targetContext, "journal-policy-${UUID.randomUUID()}-")
+        val marker = "committed-wal-${UUID.randomUUID()}"
+        try {
+            val conversation = ConversationDatabase(context).use { legacy ->
+                legacy.setWriteAheadLoggingEnabled(false)
+                legacy.writableDatabase.rawQuery("PRAGMA journal_mode=DELETE", null).use {
+                    assertTrue(it.moveToFirst()); assertEquals("delete", it.getString(0))
+                }
+                legacy.create("default").id
+            }
+            ConversationDatabase(context).use { database ->
+                assertDurableJournal(database)
+                ConversationDatabase(context).use { other ->
+                    assertDurableJournal(other)
+                    assertEquals(conversation, other.conversations().single().id)
+                    val wal = android.os.Build.VERSION.SDK_INT >= 28
+                    if (wal) database.writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use {
+                        assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+                    }
+                    database.writableDatabase.execSQL("UPDATE conversations SET title=? WHERE id=?", arrayOf(marker, conversation.value))
+                    assertEquals(marker, other.conversations().single().title)
+                    if (wal) {
+                        assertTrue(java.io.File(context.getDatabasePath("conversations.db").path + "-wal").length() > 32)
+                        assertFalse(String(context.getDatabasePath("conversations.db").readBytes(), Charsets.ISO_8859_1).contains(marker))
+                    }
+                    assertTrue(database.exportBackup().contains(marker))
+                    assertTrue(other.exportBackup().contains(marker))
+                }
+            }
+            ConversationDatabase(context).use { reopened ->
+                assertDurableJournal(reopened)
+                assertEquals(conversation, reopened.conversations().single().id)
+                assertEquals(marker, reopened.conversations().single().title)
+            }
+        } finally { context.deleteDatabase("conversations.db") }
+    }
+
     private fun assertTextCheckpoint(database: ConversationDatabase, messageId: String, minimumBytes: Long) {
         database.readableDatabase.rawQuery("SELECT typeof(payload),length(CAST(payload AS BLOB)) FROM runtime_checkpoints WHERE message_id=?",
             arrayOf(messageId)).use { cursor ->
@@ -259,6 +314,7 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
     }
 
     fun testRealCheckpointSizedUtf8CountMatchesAndroidAndKeepsRecoveryReserve() {
+        verifyJournalReopenAndExport()
         val payload = "x".repeat(13_578_756)
         repeat(8) {
             val bytes = app.daiyu.android.context.Utf8Payload.byteCount(payload, Long.MAX_VALUE)

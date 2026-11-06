@@ -5,6 +5,7 @@ import android.content.Context
 import app.daiyu.android.ControllerVideoManifestWitness
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.os.Build
 import app.daiyu.android.domain.*
 import app.daiyu.android.context.Utf8Payload
 import app.daiyu.android.context.ContextStorage
@@ -15,6 +16,14 @@ import java.util.UUID
 
 class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 32), ConversationStore {
     constructor(context: Context) : this(context, {})
+    init {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            setOpenParams(SQLiteDatabase.OpenParams.Builder()
+                .addOpenFlags(SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)
+                .setSynchronousMode("FULL")
+                .build())
+        }
+    }
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -27,7 +36,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
     private val historyColumn = "history_segments"
     override fun onConfigure(db: SQLiteDatabase) {
         db.setForeignKeyConstraintsEnabled(true)
-        db.execSQL("PRAGMA synchronous=FULL")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            db.execSQL("PRAGMA synchronous=FULL")
+        }
     }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT,workspace_binding TEXT)")

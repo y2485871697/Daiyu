@@ -5724,7 +5724,7 @@ class MainActivity : ComponentActivity() {
         browserVisualEpoch++
         controller.providerBalances.onResume(lifecycleScope, android.os.SystemClock.uptimeMillis())
         if (retainedPage == "chat") refreshConfirmedModelLabel()
-        if (selectionReady) publishChat() // Re-arm foreground read confirmation; never acknowledge on background refresh.
+        if (selectionReady) publishChat() else refresh() // Resume an initial read cancelled by onPause.
         prepareMessageActionSnapshot()
         if (retainedPage == "platform-settings") platformSettingsRevision++
         controller.attachVideoUi(videoUi)
@@ -6735,7 +6735,7 @@ class MainActivity : ComponentActivity() {
                     }.getOrNull() != (pending.assistant to pending.provider))) cancelTerminalEditor()
             }
             if (!selectionReady) {
-                if (paneSelectionRequest != null) return@guard
+                if (!voiceForeground || paneSelectionRequest != null) return@guard
                 val id = controller.preferences.getString("selected", null)
                 val saved = controller.database.conversations().firstOrNull { it.id.value == id }
                 if (saved == null) select(null) else {

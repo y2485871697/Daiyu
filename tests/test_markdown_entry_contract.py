@@ -23,7 +23,7 @@ class MarkdownEntryContract(unittest.TestCase):
         source = (APP / 'MainActivity.kt').read_text()
         refresh = source.split('    private fun refresh() {', 1)[1]
         initial = refresh.split('            if (!selectionReady) {', 1)[1].split('            if (modelDeletionRevision', 1)[0]
-        self.assertIn('if (paneSelectionRequest != null) return@guard', initial)
+        self.assertIn('if (!voiceForeground || paneSelectionRequest != null) return@guard', initial)
         self.assertIn('if (saved == null) select(null) else {', initial)
         self.assertIn('selectPaneConversation(saved.id.value)', initial)
         self.assertIn('publishChat()', initial)
@@ -37,6 +37,23 @@ class MarkdownEntryContract(unittest.TestCase):
         self.assertLess(selection.index('prepareRestoredMarkdown('), selection.index('select(snapshot.conversation, snapshot)'))
         self.assertIn('if (revision != currentPaneRevision()) continue', selection)
         self.assertIn('paneSelectionRequest !== request || !activityUsable()', selection)
+
+    def test_cancelled_initial_selection_resumes_and_background_notifications_do_not_restart_it(self):
+        source = (APP / 'MainActivity.kt').read_text()
+        resume = source.split('    override fun onResume() {', 1)[1].split('    private fun applyPreferredRefreshRate()', 1)[0]
+        self.assertIn('if (selectionReady) publishChat() else refresh()', resume)
+        self.assertLess(resume.index('voiceForeground = true'), resume.index('else refresh()'))
+        pause = source.split('    override fun onPause() {', 1)[1].split('    override fun onStop()', 1)[0]
+        self.assertIn('cancelPaneConversationSelection()', pause)
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/RestoredMarkdownActivityTest.kt').read_text()
+        self.assertIn('testPausedInitialReadRestartsOnResumeWithoutAnotherControllerEvent', tests)
+        self.assertIn('testFreshActivityRestoresStoppedLargeScreenHistoryWithoutReplay', tests)
+        self.assertIn('realPauseResume(activity, atPause = {', tests)
+        self.assertIn('assertTrue(job.isCancelled)', tests)
+        self.assertIn('assertEquals(1_814_960, encoded.length)', tests)
+        self.assertIn('RunStatus.STOPPED', tests)
+        self.assertIn('assertEquals(before, rawFields())', tests)
+        self.assertIn('assertEquals(stopped.historySegments, restored.historySegments)', tests)
 
     def test_restoration_preserves_source_syntax_history_and_original_cache_budget(self):
         source = (BASE / 'RestoredMarkdown.kt').read_text()

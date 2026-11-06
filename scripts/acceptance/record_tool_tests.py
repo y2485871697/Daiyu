@@ -110,7 +110,21 @@ SQLITE_TEXT_MODULES = (
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )
 
+
+COLD_DISPLAY_PLATFORM_CLASSES = MARKDOWN_ENTRY_PLATFORM_CLASSES + (
+    SQLITE_TEXT_PLATFORM_CLASS,
+    "app.daiyu.android.ChatContextUsageRestoreTest",
+    "app.daiyu.android.storage.CloudContextUsageStoreTest",
+)
+COLD_DISPLAY_MODULES = tuple(dict.fromkeys(MARKDOWN_ENTRY_MODULES + SQLITE_TEXT_MODULES + (
+    "test_message_display_contract", "test_context_usage_wiring_contract",
+)))
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(COLD_DISPLAY_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *COLD_DISPLAY_MODULES, "-v"], "cold-display-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == SQLITE_TEXT_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *SQLITE_TEXT_MODULES, "-v"], "sqlite-text-targeted"

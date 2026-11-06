@@ -101,3 +101,99 @@ class RecordToolTestsScopeTest(unittest.TestCase):
                 self.assertFalse(receipt.exists())
             finally:
                 os.chdir(old)
+
+
+class ColdDisplaySmokeScopeTest(unittest.TestCase):
+    def test_exact_display_scope_keeps_union_of_history_storage_context_and_guards(self):
+        classes = recorder.COLD_DISPLAY_PLATFORM_CLASSES
+        self.assertEqual(8, len(classes))
+        self.assertEqual(len(classes), len(set(classes)))
+        required = set(recorder.MARKDOWN_ENTRY_MODULES) | set(recorder.SQLITE_TEXT_MODULES) | {
+            "test_message_display_contract", "test_context_usage_wiring_contract"}
+        self.assertTrue({"test_message_display_contract", "test_context_usage_wiring_contract",
+                         "test_markdown_entry_contract", "test_large_history_storage_contract",
+                         "test_checkpoint_encoding_hotpath_contract", "test_sqlite_text_smoke_scope"} <= required)
+        self.assertEqual(required, set(recorder.COLD_DISPLAY_MODULES))
+        self.assertEqual(len(required), len(recorder.COLD_DISPLAY_MODULES))
+        for names in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(names)))
+            self.assertEqual("cold-display-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.COLD_DISPLAY_MODULES, "-v"], command)
+        raw = ",".join(classes)
+        for value in (raw + "," + classes[0], raw + ",app.daiyu.android.OtherTest", ",".join(classes[:-1]), " " + raw):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value))[1])
+        for mode in ("candidate", "daily", "release", "compile", "build", ""):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+    def fixture(self, root):
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        helper = SpeechPlatformDiscoveryTest()
+        helper.fixture(root)
+        for index, name in enumerate(recorder.COLD_DISPLAY_PLATFORM_CLASSES):
+            package, _, short = name.rpartition(".")
+            path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("package " + package + "\nclass " + short + " : TestCase() {\n" +
+                            "".join(" fun testCase" + str(i) + "() {}\n" for i in range(index + 1)) + "}\n")
+        return helper
+
+    def test_display_inventory_covers_all_eight_classes_once_and_detects_new_methods(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            selected = []
+            classes = recorder.COLD_DISPLAY_PLATFORM_CLASSES
+            for shard in range(4):
+                result = helper.select(root, shard, classes=",".join(reversed(classes)))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertEqual({name: i + 1 for i, name in enumerate(classes)}, inventory["all_classes"])
+                self.assertEqual(sum(inventory["all_classes"][name] for name in selection["selected_classes"]), selection["expected_tests"])
+                selected.extend(selection["selected_classes"])
+            self.assertCountEqual(classes, selected)
+            path = root / "app/src/androidTest/kotlin" / (classes[0].replace(".", "/") + ".kt")
+            path.write_text(path.read_text().replace(" fun testCase0() {}", " fun testCase0() {}\n fun testAdded() {}"))
+            result = helper.select(root, classes=",".join(classes))
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(2, json.loads((root / "smoke/instrumentation-shards.json").read_text())["all_classes"][classes[0]])
+
+    def test_requested_display_source_ambiguity_missing_and_unapproved_combinations_stay_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            classes = recorder.COLD_DISPLAY_PLATFORM_CLASSES
+            raw = ",".join(classes)
+            for value in (raw + "," + classes[0], raw + ",app.daiyu.android.OtherTest", ",".join(classes[:-1])):
+                result = helper.select(root, classes=value)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            path = root / "app/src/androidTest/kotlin" / (classes[0].replace(".", "/") + ".kt")
+            with path.open("a") as output:
+                output.write("class OtherTest : TestCase() {}\n")
+            result = helper.select(root, classes=raw)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            path.unlink()
+            result = helper.select(root, classes=raw)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Unknown instrumentation test class", result.stderr)
+
+    def test_display_receipt_keeps_real_failure_identity_command_and_pythonpath(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA="d" * 40, GITHUB_RUN_ID="18", GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke",
+                           SMOKE_TEST_CLASSES=",".join(recorder.COLD_DISPLAY_PLATFORM_CLASSES))
+                with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess, "call", return_value=9) as call, patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(9, recorder.record("python3"))
+                    result = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual("cold-display-targeted", result["scope"])
+                    self.assertEqual(9, result["exit_code"])
+                    self.assertEqual(dict(sha="d" * 40, run_id=18, attempt=1), result["identity"])
+                    self.assertEqual(call.call_args.args[0], result["command"])
+                    self.assertTrue(call.call_args.kwargs["env"]["PYTHONPATH"].startswith(str(Path("tests").resolve())))
+            finally:
+                os.chdir(old)

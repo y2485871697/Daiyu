@@ -48,7 +48,11 @@ class StreamingFreezeContract(unittest.TestCase):
         self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE)', codec)
         self.assertIn('require(Utf8Payload.byteCount(text, Long.MAX_VALUE) <= MAX_BYTES)', codec)
         self.assertIn('Utf8Payload.byteCount(value, Long.MAX_VALUE) <= MAX_FIELD_BYTES', archive)
-        self.assertIn('Utf8Payload.byteCount(encoded, Long.MAX_VALUE), false)', store)
+        self.assertIn('RunCheckpointCodec.encodeUtf8(result, checkpointJsonWriter, saved.owner)', store)
+        self.assertIn('writer.writeUtf8(root, MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0)', codec)
+        writer = (APP / 'storage/CheckpointJsonWriter.kt').read_text()
+        self.assertLess(writer.index('require(length <= maxBytes - size)'),
+                        writer.index('val result = ByteArray(size)'))
         self.assertNotIn('encoded.toByteArray(Charsets.UTF_8).size', store)
         self.assertNotIn('it.toByteArray(Charsets.UTF_8).size', codec)
         self.assertNotIn('value.toByteArray(Charsets.UTF_8).size.toLong()', archive)

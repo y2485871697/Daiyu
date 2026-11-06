@@ -6,11 +6,13 @@ import app.daiyu.android.domain.context.ContextRevision
 import java.security.MessageDigest
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.DatabaseTransactions
+import app.daiyu.android.storage.SQLiteText
 import app.daiyu.android.storage.RecordedUsageReader
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.ui.model.*
 import app.daiyu.android.data.repository.UsageStatsSnapshot
+import org.json.JSONArray
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -32,11 +34,10 @@ internal class RetainedConversationData(private val database: ConversationDataba
     private fun summaryRows(activeConversationId: ConversationId?): List<ConversationSummaryUi> {
         val today = LocalDate.now()
         return database.conversations().map { conversation ->
-            val latest = database.messages(conversation.id, limit = 1).lastOrNull()?.second
             val date = Instant.ofEpochMilli(conversation.updatedAt).atZone(ZoneId.systemDefault())
             ConversationSummaryUi(
                 id = conversation.id.value, title = conversation.title,
-                preview = latest?.blocks?.filterIsInstance<MessageBlock.Text>()?.joinToString(" ") { it.text }?.take(160).orEmpty(),
+                preview = latestPreview(conversation.id),
                 timeLabel = date.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)),
                 updatedAtMillis = conversation.updatedAt, mode = ConversationModeUi.Chat,
                 isPinned = conversation.pinned, isActiveRun = activeConversationId == conversation.id,
@@ -44,6 +45,25 @@ internal class RetainedConversationData(private val database: ConversationDataba
                     database.readableDatabase, conversation.id) != null,
                 folderId = conversation.folder.takeIf { it.isNotEmpty() }, isToday = date.toLocalDate() == today,
             )
+        }
+    }
+
+    // Sidebar display needs only text blocks, not provider protocol, receipts or expanded history.
+    private fun latestPreview(id: ConversationId): String = DatabaseTransactions { database.readableDatabase }.run { db ->
+        val messageId = db.rawQuery("SELECT id FROM messages WHERE conversation_id=? ORDER BY seq DESC LIMIT 1",
+            arrayOf(id.value)).use { if (it.moveToFirst()) it.getString(0) else null } ?: return@run ""
+        val blocks = JSONArray(checkNotNull(SQLiteText.read(db, "messages", "blocks", "id", messageId)))
+        buildString {
+            var first = true
+            for (index in 0 until blocks.length()) {
+                val block = blocks.getJSONObject(index)
+                if (block.getString("type") != "text") continue
+                if (!first) append(' ')
+                first = false
+                val text = block.getString("text")
+                append(text, 0, minOf(text.length, 160 - length))
+                if (length == 160) break
+            }
         }
     }
 

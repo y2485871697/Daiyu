@@ -49,14 +49,14 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
 
     def test_text_reader_reuses_the_first_chunk_and_keeps_strict_decoder(self):
         reader = (APP / 'storage/SQLiteText.kt').read_text()
-        self.assertIn('SELECT length(CAST($column AS BLOB)),substr(CAST($column AS BLOB),1,65536)', reader)
+        self.assertIn('SELECT length(CAST($column AS BLOB)),substr(CAST($column AS BLOB),1,$CHUNK_BYTES)', reader)
         self.assertIn('require(length in 0..maxBytes)', reader)
-        self.assertIn('first.size.toLong() == minOf(length, 65536L)', reader)
+        self.assertIn('first.size.toLong() == minOf(length, CHUNK_BYTES.toLong())', reader)
         self.assertIn('private var consumed = 0L', reader)
         self.assertIn('private var part = first', reader)
         self.assertIn('part = load(consumed)', reader)
         self.assertIn('(consumed + 1).toString()', reader)
-        self.assertIn('if (length <= 65536) return decoder.decode(java.nio.ByteBuffer.wrap(first)).toString()', reader)
+        self.assertIn('if (length <= CHUNK_BYTES) return decoder.decode(java.nio.ByteBuffer.wrap(first)).toString()', reader)
         self.assertIn('CodingErrorAction.REPORT', reader)
         self.assertNotIn('getString(', reader)
         self.assertIn('java.io.InputStreamReader(source, decoder)', reader)
@@ -65,11 +65,13 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
 
     def test_actual_initial_query_is_bounded_and_preserves_raw_bytes(self):
         reader = (APP / 'storage/SQLiteText.kt').read_text()
-        template = re.search(r'"(SELECT length\(CAST\(\$column AS BLOB\)\),substr\(CAST\(\$column AS BLOB\),1,65536\) FROM \$table WHERE \$key=\?)"', reader).group(1)
-        sql = template.replace('$column', 'payload').replace('$table', 'messages').replace('$key', 'id')
+        template = re.search(r'"(SELECT length\(CAST\(\$column AS BLOB\)\),substr\(CAST\(\$column AS BLOB\),1,\$CHUNK_BYTES\) FROM \$table WHERE \$key=\?)"', reader).group(1)
+        self.assertIn('const val CHUNK_BYTES = 1024 * 1024', reader)
+        chunk = 1024 * 1024
+        sql = template.replace('$column', 'payload').replace('$table', 'messages').replace('$key', 'id').replace('$CHUNK_BYTES', str(chunk))
         with sqlite3.connect(':memory:') as db:
             db.execute('CREATE TABLE messages(id TEXT PRIMARY KEY, payload TEXT)')
-            for text in [None, '', 'a', 'a' * 65535, 'a' * 65536, 'a' * 65537, 'a' * 65535 + '🙂\x00中' * 30000]:
+            for text in [None, '', 'a', 'a' * 65535, 'a' * 65536, 'a' * 65537, 'a' * 65535 + '🙂\x00中' * 30000, 'a' * (chunk - 1) + '🙂\x00中' * 30000]:
                 db.execute('DELETE FROM messages')
                 db.execute('INSERT INTO messages VALUES(?,?)', ('m', text))
                 length, first = db.execute(sql, ('m',)).fetchone()
@@ -79,8 +81,8 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
                 else:
                     raw = text.encode('utf-8')
                     self.assertEqual(len(raw), length)
-                    self.assertEqual(raw[:65536], b'' if length == 0 else first)
-                    self.assertLessEqual(len(first or b''), 65536)
+                    self.assertEqual(raw[:chunk], b'' if length == 0 else first)
+                    self.assertLessEqual(len(first or b''), chunk)
             self.assertIsNone(db.execute(sql, ('missing',)).fetchone())
             db.execute("UPDATE messages SET payload=CAST(X'FF' AS TEXT) WHERE id='m'")
             self.assertEqual((1, b'\xff'), db.execute(sql, ('m',)).fetchone())

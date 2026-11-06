@@ -81,6 +81,7 @@ jobs:
                           'test_markdown_stream_progress_contract.py', 'test_markdown_code_block_contract.py',
                           'test_workflow_render_isolation_contract.py',
                           'test_large_history_storage_contract.py', 'test_markdown_entry_contract.py',
+                          'test_checkpoint_encoding_hotpath_contract.py',
                           'test_streaming_follow_contract.py', 'test_chat_menu_scroll_isolation_contract.py',
                           'test_sidebar_selection_contract.py', 'test_streaming_freeze_contract.py',
                           'test_markdown_entry_smoke_scope.py', 'test_record_tool_tests_scope.py',
@@ -125,7 +126,10 @@ jobs:
             classes=(RestoredMarkdownTest MarkdownProjectionCacheTest MarkdownProjectionTest
                      MarkdownPreparationCompositionTest MarkdownRevealTest ChatTurnMapperTest ChatInitialPositionPolicyTest
                      AssistantWorkflowCompositionTest)
-            filters+=(--tests app.daiyu.android.context.ContextTimelineColdStartTest)
+            filters+=(--tests app.daiyu.android.context.ContextTimelineColdStartTest
+                      --tests app.daiyu.android.storage.SQLiteTextTest
+                      --tests app.daiyu.android.storage.SQLiteTextChunksTest
+                      --tests app.daiyu.android.ui.ConversationPreviewTest)
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then
             classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest
@@ -162,7 +166,8 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'cold-start':
               expected = {'RestoredMarkdownTest', 'MarkdownProjectionCacheTest', 'MarkdownProjectionTest',
                           'MarkdownPreparationCompositionTest', 'MarkdownRevealTest', 'ChatTurnMapperTest',
-                          'ChatInitialPositionPolicyTest', 'ContextTimelineColdStartTest', 'AssistantWorkflowCompositionTest'}
+                          'ChatInitialPositionPolicyTest', 'ContextTimelineColdStartTest', 'AssistantWorkflowCompositionTest',
+                          'SQLiteTextTest', 'SQLiteTextChunksTest', 'ConversationPreviewTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
                           'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest'}

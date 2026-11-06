@@ -5,6 +5,9 @@ import android.os.CancellationSignal
 
 /** Avoid the API26 CursorWindow row limit without truncating a persisted JSON field. */
 internal object SQLiteText {
+    // Leave room for row overhead in the default API26 2 MiB CursorWindow.
+    internal const val CHUNK_BYTES = 1024 * 1024
+
     fun read(db: SQLiteDatabase, table: String, column: String, key: String, id: String,
         maxBytes: Long = 64L * 1024 * 1024, cancellationSignal: CancellationSignal? = null): String? {
         cancellationSignal?.throwIfCanceled()
@@ -13,7 +16,7 @@ internal object SQLiteText {
             table == "message_video_inputs" && key == "message_id" && column == "payload" ||
             table in setOf("composer", "conversations") && key == "id" && column == "draft")
         require(maxBytes in 1..(64L * 1024 * 1024))
-        val initial = db.rawQuery("SELECT length(CAST($column AS BLOB)),substr(CAST($column AS BLOB),1,65536) FROM $table WHERE $key=?",
+        val initial = db.rawQuery("SELECT length(CAST($column AS BLOB)),substr(CAST($column AS BLOB),1,$CHUNK_BYTES) FROM $table WHERE $key=?",
             arrayOf(id), cancellationSignal).use {
             check(it.moveToFirst())
             if (it.isNull(0)) null else {
@@ -23,7 +26,7 @@ internal object SQLiteText {
             }
         } ?: return null
         return decodeChunks(initial.first, initial.second, { cancellationSignal?.throwIfCanceled() }) { consumed ->
-            db.rawQuery("SELECT substr(CAST($column AS BLOB),?,65536) FROM $table WHERE $key=?",
+            db.rawQuery("SELECT substr(CAST($column AS BLOB),?,$CHUNK_BYTES) FROM $table WHERE $key=?",
                 arrayOf((consumed + 1).toString(), id), cancellationSignal).use {
                 check(it.moveToFirst()); it.getBlob(0)
             }
@@ -32,11 +35,11 @@ internal object SQLiteText {
 
     internal fun decodeChunks(length: Long, first: ByteArray, checkCancelled: () -> Unit,
         load: (Long) -> ByteArray): String {
-        check(first.size.toLong() == minOf(length, 65536L))
+        check(first.size.toLong() == minOf(length, CHUNK_BYTES.toLong()))
         val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
         checkCancelled()
-        if (length <= 65536) return decoder.decode(java.nio.ByteBuffer.wrap(first)).toString().also {
+        if (length <= CHUNK_BYTES) return decoder.decode(java.nio.ByteBuffer.wrap(first)).toString().also {
             checkCancelled()
         }
         val source = object : java.io.InputStream() {
@@ -54,7 +57,7 @@ internal object SQLiteText {
                 if (consumed == length) return -1
                 if (offset == part.size) {
                     part = load(consumed)
-                    check(part.isNotEmpty() && part.size.toLong() <= length - consumed)
+                    check(part.size.toLong() == minOf(length - consumed, CHUNK_BYTES.toLong()))
                     offset = 0
                 }
                 val count = minOf(len, part.size - offset)

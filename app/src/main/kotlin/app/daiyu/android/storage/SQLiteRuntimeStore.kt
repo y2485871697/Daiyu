@@ -149,7 +149,7 @@ internal class SQLiteRuntimeStore private constructor(
                         query.bindString(2, m.id.value)
                         SQLiteCursor(driver, table, query)
                     }, "SELECT owner,revision,phase,process_owner,conversation_id,run_id,CAST(payload AS BLOB)=CAST(? AS BLOB) FROM runtime_checkpoints WHERE message_id=?",
-                        null, null).use { c -> if (!c.moveToFirst()) null else {
+                        null, "runtime_checkpoints").use { c -> if (!c.moveToFirst()) null else {
                         require(c.getType(1) == android.database.Cursor.FIELD_TYPE_INTEGER)
                         check(c.getString(0) == checkpoint.owner && c.getLong(1) == checkpoint.revision - 1 &&
                             c.getString(2) != ExecutionPhase.TERMINAL.name && c.getString(3) == processOwner &&

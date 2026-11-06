@@ -270,16 +270,19 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
         val context = testContext(instrumentation.targetContext, "journal-policy-${UUID.randomUUID()}-")
         val marker = "committed-wal-${UUID.randomUUID()}"
         try {
-            val conversation = ConversationDatabase(context).use { legacy ->
+            val legacy = ConversationDatabase(context)
+            val conversation = try {
                 legacy.setWriteAheadLoggingEnabled(false)
                 legacy.writableDatabase.rawQuery("PRAGMA journal_mode=DELETE", null).use {
                     assertTrue(it.moveToFirst()); assertEquals("delete", it.getString(0))
                 }
                 legacy.create("default").id
-            }
-            ConversationDatabase(context).use { database ->
+            } finally { legacy.close() }
+            val database = ConversationDatabase(context)
+            try {
                 assertDurableJournal(database)
-                ConversationDatabase(context).use { other ->
+                val other = ConversationDatabase(context)
+                try {
                     assertDurableJournal(other)
                     assertEquals(conversation, other.conversations().single().id)
                     val wal = android.os.Build.VERSION.SDK_INT >= 28
@@ -294,13 +297,14 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
                     }
                     assertTrue(database.exportBackup().contains(marker))
                     assertTrue(other.exportBackup().contains(marker))
-                }
-            }
-            ConversationDatabase(context).use { reopened ->
+                } finally { other.close() }
+            } finally { database.close() }
+            val reopened = ConversationDatabase(context)
+            try {
                 assertDurableJournal(reopened)
                 assertEquals(conversation, reopened.conversations().single().id)
                 assertEquals(marker, reopened.conversations().single().title)
-            }
+            } finally { reopened.close() }
         } finally { context.deleteDatabase("conversations.db") }
     }
 

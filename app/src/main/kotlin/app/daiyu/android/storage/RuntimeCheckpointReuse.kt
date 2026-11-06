@@ -17,20 +17,22 @@ internal data class RuntimeCheckpointStamp(
 }
 
 /** One entry per OS lease; SQL must prove exact payload equality inside the writing transaction. */
-internal class RuntimeCheckpointReuse(private val maxChars: Int = 16 * 1024 * 1024) {
-    private class Entry(val stamp: RuntimeCheckpointStamp, val encoded: String, val facts: CheckpointPreservation)
+internal class RuntimeCheckpointReuse(private val maxBytes: Int = 16 * 1024 * 1024) {
+    private class Entry(val stamp: RuntimeCheckpointStamp, val encoded: ByteArray, val facts: CheckpointPreservation)
     private var last: Entry? = null
 
-    fun expectedPayload(message: String): String = last?.takeIf { it.stamp.message == message }?.encoded.orEmpty()
+    fun expectedPayload(message: String): ByteArray = last?.takeIf { it.stamp.message == message }?.encoded ?: EMPTY
 
     fun preservation(stamp: RuntimeCheckpointStamp, exactPayload: Boolean): CheckpointPreservation? =
         last?.takeIf { exactPayload && it.stamp == stamp }?.facts
 
     /** Called only after the complete transaction has returned successfully. */
-    fun committed(checkpoint: RunCheckpoint, process: String, encoded: String) {
-        last = if (checkpoint.phase == ExecutionPhase.TERMINAL || encoded.length > maxChars) null else
+    fun committed(checkpoint: RunCheckpoint, process: String, encoded: ByteArray) {
+        last = if (checkpoint.phase == ExecutionPhase.TERMINAL || encoded.size > maxBytes) null else
             Entry(RuntimeCheckpointStamp.of(checkpoint, process), encoded, CheckpointPreservation.capture(checkpoint))
     }
 
     fun clear() { last = null }
+
+    companion object { private val EMPTY = ByteArray(0) }
 }

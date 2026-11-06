@@ -30,11 +30,13 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
     def test_optional_quote_writer_only_replaces_the_final_tree_serialization(self):
         codec = (APP / 'storage/RunCheckpointCodec.kt').read_text()
         writer = (APP / 'storage/CheckpointJsonWriter.kt').read_text()
-        encode = codec.split('    fun encode(value: RunCheckpoint, writer: CheckpointJsonWriter? = null): String {', 1)[1].split('    internal data class Decoded', 1)[0]
-        self.assertLess(encode.index('validate(value)'), encode.index('writer?.write(root)'))
+        encode = codec.split('    private fun buildRoot(value: RunCheckpoint): JSONObject {', 1)[1].split('    internal data class Decoded', 1)[0]
+        self.assertIn('validate(value)', encode)
         self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)', encode)
-        self.assertIn('.let { root -> writer?.write(root) ?: root.toString() }.also {', encode)
-        self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)', encode)
+        self.assertIn('buildRoot(value).let { root -> writer?.write(root) ?: root.toString() }.also {', codec)
+        self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)', codec)
+        self.assertIn('fun encodeUtf8(value: RunCheckpoint, writer: CheckpointJsonWriter,', codec)
+        self.assertIn('writer.writeUtf8(root, MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0)', codec)
         self.assertIn('require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)', codec)
         self.assertIn('LinkedHashMap<String, String>', writer)
         self.assertIn('JSONObject.quote(source)', writer)
@@ -46,6 +48,23 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         self.assertIn('source.length >= minCacheChars', writer)
         self.assertIn('fun clear()', writer)
         self.assertIn('quoted.clear()', writer)
+
+    def test_utf8_sqlite_path_has_exact_output_and_bounded_platform_quoting(self):
+        writer = (APP / 'storage/CheckpointJsonWriter.kt').read_text()
+        utf8 = writer.split('fun writeUtf8(root: JSONObject, maxBytes: Int)', 1)[1].split('private fun appendValue', 1)[0]
+        self.assertIn('require(length <= maxBytes - size)', utf8)
+        self.assertIn('val result = ByteArray(size)', utf8)
+        self.assertIn('check(offset == result.size)', utf8)
+        self.assertIn('JSONObject.quote(source.substring(offset, end))', utf8)
+        self.assertIn('UTF8_CHUNK_CHARS = 4096', utf8)
+        self.assertIn('Character.isHighSurrogate(source[end - 1])', utf8)
+        self.assertIn("source[end - 1] == '<' && source[end] == '/'", utf8)
+        self.assertNotIn('StringBuilder', utf8)
+        self.assertNotIn('ByteArrayOutputStream', utf8)
+        store = (APP / 'storage/SQLiteRuntimeStore.kt').read_text()
+        self.assertIn('RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)', store)
+        self.assertIn('RunCheckpointCodec.encodeUtf8(result, checkpointJsonWriter, saved.owner)', store)
+        self.assertNotIn('org.json.JSONObject(RunCheckpointCodec.encode(result))', store)
 
     def test_text_reader_reuses_the_first_chunk_and_keeps_strict_decoder(self):
         reader = (APP / 'storage/SQLiteText.kt').read_text()

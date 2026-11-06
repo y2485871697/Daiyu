@@ -26,6 +26,7 @@ open class RunCheckpointQuotedStringsTest {
     private fun assertEquivalent(value: RunCheckpoint, writer: CheckpointJsonWriter): String {
         val legacy = RunCheckpointCodec.encode(value)
         val actual = RunCheckpointCodec.encode(value, writer)
+        assertArrayEquals(legacy.toByteArray(Charsets.UTF_8), RunCheckpointCodec.encodeUtf8(value, writer))
         assertEquals(legacy, actual)
         assertArrayEquals(legacy.toByteArray(Charsets.UTF_8), actual.toByteArray(Charsets.UTF_8))
         assertEquals(RunCheckpointCodec.decode(legacy), RunCheckpointCodec.decode(actual))
@@ -124,6 +125,7 @@ open class RunCheckpointQuotedStringsTest {
         for (value in invalid) {
             reject { RunCheckpointCodec.encode(value) }
             reject { RunCheckpointCodec.encode(value, writer) }
+            reject { RunCheckpointCodec.encodeUtf8(value, writer) }
         }
         // CheckpointPreservation does not freeze these lists. Even the same object
         // graph must be rebuilt and revalidated after its caller changes a collection.

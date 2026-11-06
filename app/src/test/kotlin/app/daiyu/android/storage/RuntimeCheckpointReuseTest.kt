@@ -20,7 +20,7 @@ class RuntimeCheckpointReuseTest {
     @Test fun aThousandCommittedAppendsReuseOnlyTheProvenPreviousFacts() {
         val cache = RuntimeCheckpointReuse()
         var previous = checkpoint()
-        var encoded = "数🙂".repeat(120_000)
+        var encoded = "数🙂".repeat(120_000).toByteArray(Charsets.UTF_8)
         cache.committed(previous, "process", encoded)
         var misses = 0
         repeat(1_000) { index ->
@@ -30,7 +30,7 @@ class RuntimeCheckpointReuseTest {
             val next = previous.copy(revision = previous.revision + 1,
                 message = previous.message.copy(blocks = listOf(MessageBlock.Text("text", "append-$index"))))
             facts?.preserve(next)
-            encoded = encoded + index.toString()
+            encoded = encoded + index.toString().toByteArray(Charsets.UTF_8)
             cache.committed(next, "process", encoded)
             previous = next
         }
@@ -40,7 +40,7 @@ class RuntimeCheckpointReuseTest {
 
     @Test fun screenshotSizedCheckpointsKeepOneBoundedPreviousPayloadAcrossStreamingCommits() {
         val cache = RuntimeCheckpointReuse()
-        val encoded = "x".repeat(13_709_122)
+        val encoded = ByteArray(13_709_122) { 'x'.code.toByte() }
         var previous = checkpoint()
         repeat(100) {
             cache.committed(previous, "process", encoded)
@@ -52,38 +52,38 @@ class RuntimeCheckpointReuseTest {
             previous = previous.copy(revision = previous.revision + 1)
             facts!!.preserve(previous)
         }
-        cache.committed(previous, "process", "x".repeat(16 * 1024 * 1024 + 1))
-        assertEquals("", cache.expectedPayload("m"))
+        cache.committed(previous, "process", ByteArray(16 * 1024 * 1024 + 1))
+        assertArrayEquals(ByteArray(0), cache.expectedPayload("m"))
         assertNull(cache.preservation(RuntimeCheckpointStamp.of(previous, "process"), true))
         cache.committed(previous, "process", encoded)
         cache.committed(previous.copy(phase = ExecutionPhase.TERMINAL), "process", encoded)
-        assertEquals("", cache.expectedPayload("m"))
+        assertArrayEquals(ByteArray(0), cache.expectedPayload("m"))
     }
 
     @Test fun everyIdentityAndMetadataFieldMustMatchInsideTheTransaction() {
         val cache = RuntimeCheckpointReuse(); val value = checkpoint()
-        cache.committed(value, "process", "encoded")
+        cache.committed(value, "process", "encoded".toByteArray(Charsets.UTF_8))
         val stamp = RuntimeCheckpointStamp.of(value, "process")
         for (different in listOf(stamp.copy(message = "other"), stamp.copy(conversation = "other"),
             stamp.copy(run = "other"), stamp.copy(owner = "other"), stamp.copy(process = "other"),
             stamp.copy(revision = 2), stamp.copy(phase = ExecutionPhase.BOUNDARY.name))) {
             assertNull(cache.preservation(different, true))
         }
-        assertEquals("", cache.expectedPayload("other"))
+        assertArrayEquals(ByteArray(0), cache.expectedPayload("other"))
         assertNotNull(cache.preservation(stamp, true))
         assertNull(cache.preservation(stamp, false))
     }
 
     @Test fun clearTerminalOversizeAndNewLeaseCannotReuseOldFacts() {
         val value = checkpoint(); val stamp = RuntimeCheckpointStamp.of(value, "process")
-        val cache = RuntimeCheckpointReuse(maxChars = 3)
-        cache.committed(value, "process", "123"); assertNotNull(cache.preservation(stamp, true))
-        cache.committed(value, "process", "1234"); assertNull(cache.preservation(stamp, true))
-        assertEquals("", cache.expectedPayload("m"))
-        cache.committed(value, "process", "123"); cache.clear(); assertNull(cache.preservation(stamp, true))
+        val cache = RuntimeCheckpointReuse(maxBytes = 3)
+        cache.committed(value, "process", "123".toByteArray(Charsets.UTF_8)); assertNotNull(cache.preservation(stamp, true))
+        cache.committed(value, "process", "1234".toByteArray(Charsets.UTF_8)); assertNull(cache.preservation(stamp, true))
+        assertArrayEquals(ByteArray(0), cache.expectedPayload("m"))
+        cache.committed(value, "process", "123".toByteArray(Charsets.UTF_8)); cache.clear(); assertNull(cache.preservation(stamp, true))
         assertNull(RuntimeCheckpointReuse().preservation(stamp, true))
-        cache.committed(value.copy(phase = ExecutionPhase.TERMINAL), "process", "123")
-        assertEquals("", cache.expectedPayload("m"))
+        cache.committed(value.copy(phase = ExecutionPhase.TERMINAL), "process", "123".toByteArray(Charsets.UTF_8))
+        assertArrayEquals(ByteArray(0), cache.expectedPayload("m"))
     }
 
     @Test fun preservationKeepsAllFiveOriginalFailureConditions() {
@@ -132,7 +132,7 @@ class RuntimeCheckpointReuseTest {
         requests.clear(); usage.clear(); summaries.clear()
         assertEquals(base, frozen)
         val cache = RuntimeCheckpointReuse()
-        cache.committed(frozen, "process", "encoded-from-frozen")
+        cache.committed(frozen, "process", "encoded-from-frozen".toByteArray(Charsets.UTF_8))
         val facts = cache.preservation(RuntimeCheckpointStamp.of(frozen, "process"), true)!!
         facts.preserve(base)
         assertEquals("summary_usage_changed_after_handoff",

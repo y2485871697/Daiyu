@@ -16,9 +16,19 @@ internal object RunCheckpointCodec {
     internal fun checkEncodedSize(bytes: Long, running: Boolean) {
         require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)
     }
-    // An optional lease-owned writer reuses only quoted strings, never this tree or
-    // validation. Archive normalization and the final UTF-8 limit apply on every call.
-    fun encode(value: RunCheckpoint, writer: CheckpointJsonWriter? = null): String {
+    fun encode(value: RunCheckpoint, writer: CheckpointJsonWriter? = null): String =
+        buildRoot(value).let { root -> writer?.write(root) ?: root.toString() }.also {
+            checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)
+        }
+
+    fun encodeUtf8(value: RunCheckpoint, writer: CheckpointJsonWriter,
+        recoverySourceOwner: String? = null): ByteArray {
+        val root = buildRoot(value)
+        if (recoverySourceOwner != null) root.put("recovery_source_owner", recoverySourceOwner)
+        return writer.writeUtf8(root, MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0)
+    }
+
+    private fun buildRoot(value: RunCheckpoint): JSONObject {
         validate(value)
         check(MAX_BYTES.toLong() <= ArchiveCodec.MAX_ARCHIVE_BYTES)
         fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)
@@ -70,9 +80,7 @@ internal object RunCheckpointCodec {
                 .put("cached_tokens", record.snapshot.cachedTokens ?: JSONObject.NULL)
                 .apply { if (version >= 8) put("cache_creation_tokens", record.snapshot.cacheCreationTokens ?: JSONObject.NULL) }) } })
             .put("pending", value.pending?.let { JSONObject().put("call_id", it.callId.value) }
-                ?: JSONObject.NULL).let { root -> writer?.write(root) ?: root.toString() }.also {
-                checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)
-            }
+                ?: JSONObject.NULL)
     }
     internal data class Decoded(val checkpoint: RunCheckpoint, val recoverySourceOwner: String?)
 

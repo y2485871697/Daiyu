@@ -1,6 +1,6 @@
 package app.daiyu.android.storage
 
-import android.content.ContentValues
+import android.database.sqlite.SQLiteCursor
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.context.CheckpointPreservation
 import app.daiyu.android.context.DatabaseTransactions
@@ -140,12 +140,16 @@ internal class SQLiteRuntimeStore private constructor(
         }
         var contextChanged = false
         try {
-            val encoded = RunCheckpointCodec.encode(checkpoint, checkpointJsonWriter)
+            val encoded = RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)
             transactions.run { db ->
                 CommitMessageDecodeReuse().use { decodeReuse ->
                     val m = checkpoint.message
-                    val prior = db.rawQuery("SELECT owner,revision,phase,process_owner,conversation_id,run_id,CAST(payload AS BLOB)=CAST(? AS BLOB) FROM runtime_checkpoints WHERE message_id=?",
-                        arrayOf(checkpointReuse.expectedPayload(m.id.value), m.id.value)).use { c -> if (!c.moveToFirst()) null else {
+                    val prior = db.rawQueryWithFactory({ _, driver, table, query ->
+                        query.bindBlob(1, checkpointReuse.expectedPayload(m.id.value))
+                        query.bindString(2, m.id.value)
+                        SQLiteCursor(driver, table, query)
+                    }, "SELECT owner,revision,phase,process_owner,conversation_id,run_id,CAST(payload AS BLOB)=CAST(? AS BLOB) FROM runtime_checkpoints WHERE message_id=?",
+                        null, null).use { c -> if (!c.moveToFirst()) null else {
                         require(c.getType(1) == android.database.Cursor.FIELD_TYPE_INTEGER)
                         check(c.getString(0) == checkpoint.owner && c.getLong(1) == checkpoint.revision - 1 &&
                             c.getString(2) != ExecutionPhase.TERMINAL.name && c.getString(3) == processOwner &&
@@ -165,11 +169,7 @@ internal class SQLiteRuntimeStore private constructor(
                     val persisted = database.runtimeMessage(db, m, decodeReuse)
                     check(persisted.status == RunStatus.RUNNING) { "消息已终结，不允许接管运行" }
                     if (supplement != null) database.insertRuntimeSupplement(db, m, supplement)
-                    val values = values(checkpoint, encoded)
-                    if (prior == null) db.insertOrThrow("runtime_checkpoints", null, values)
-                    else check(db.update("runtime_checkpoints", values,
-                        "message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?",
-                        arrayOf(m.id.value, checkpoint.owner, prior.first.revision.toString(), processOwner)) == 1)
+                    writeCheckpoint(db, checkpoint, encoded, prior?.first)
                     database.writeRuntimeMessage(db, m, decodeReuse)
                     app.daiyu.android.timeline.ChatTimelineStore.contextLimit(checkpoint)?.let {
                         app.daiyu.android.timeline.ChatTimelineStore.write(db, it)
@@ -253,22 +253,39 @@ internal class SQLiteRuntimeStore private constructor(
             tools = saved.tools.map {
                 if (it.disposition == ToolDisposition.IN_FLIGHT) it.copy(disposition = ToolDisposition.UNKNOWN) else it
             })
-        val encoded = org.json.JSONObject(RunCheckpointCodec.encode(result))
-            .put("recovery_source_owner", saved.owner).toString()
-        RunCheckpointCodec.checkEncodedSize(app.daiyu.android.context.Utf8Payload.byteCount(encoded, Long.MAX_VALUE), false)
+        val encoded = RunCheckpointCodec.encodeUtf8(result, checkpointJsonWriter, saved.owner)
         if (actual.status == RunStatus.RUNNING) database.writeRuntimeMessage(db, result.message)
         contextService?.publishRunArchive(db, result)
-        check(db.update("runtime_checkpoints", values(result, encoded), "message_id=? AND owner=? AND revision=? AND process_owner=?",
-            arrayOf(saved.message.id.value, saved.owner, saved.revision.toString(), prior.processOwner)) == 1)
+        writeCheckpoint(db, result, encoded, RuntimeCheckpointStamp.of(saved, prior.processOwner))
         return result
     }
     private fun sameIdentity(a: Message, b: Message) {
         require(a.id == b.id && a.conversationId == b.conversationId && a.runId == b.runId)
     }
-    private fun values(checkpoint: RunCheckpoint, encoded: String) = ContentValues().apply {
-        put("message_id", checkpoint.message.id.value); put("conversation_id", checkpoint.message.conversationId.value)
-        put("run_id", checkpoint.message.runId.value); put("owner", checkpoint.owner); put("revision", checkpoint.revision)
-        put("phase", checkpoint.phase.name); put("process_owner", processOwner); put("payload", encoded)
+    private fun writeCheckpoint(db: SQLiteDatabase, checkpoint: RunCheckpoint, encoded: ByteArray,
+        prior: RuntimeCheckpointStamp?) {
+        val columns = "message_id,conversation_id,run_id,owner,revision,phase,process_owner,payload"
+        val sql = if (prior == null) "INSERT INTO runtime_checkpoints($columns) VALUES(?,?,?,?,?,?,?,CAST(? AS TEXT))"
+            else "UPDATE runtime_checkpoints SET message_id=?,conversation_id=?,run_id=?,owner=?,revision=?,phase=?,process_owner=?,payload=CAST(? AS TEXT) " +
+                "WHERE message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?"
+        db.compileStatement(sql).use { statement ->
+            statement.bindString(1, checkpoint.message.id.value)
+            statement.bindString(2, checkpoint.message.conversationId.value)
+            statement.bindString(3, checkpoint.message.runId.value)
+            statement.bindString(4, checkpoint.owner)
+            statement.bindLong(5, checkpoint.revision)
+            statement.bindString(6, checkpoint.phase.name)
+            statement.bindString(7, processOwner)
+            statement.bindBlob(8, encoded)
+            if (prior == null) check(statement.executeInsert() != -1L)
+            else {
+                statement.bindString(9, prior.message)
+                statement.bindString(10, prior.owner)
+                statement.bindLong(11, prior.revision)
+                statement.bindString(12, prior.process)
+                check(statement.executeUpdateDelete() == 1)
+            }
+        }
     }
     @Synchronized override fun close() {
         if (!closed) {

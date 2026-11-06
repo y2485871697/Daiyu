@@ -40,6 +40,90 @@ internal class CheckpointJsonWriter(
 
     fun write(root: JSONObject): String = StringBuilder().also { appendValue(it, root) }.toString()
 
+    // The SQLite path owns one exact UTF-8 buffer, not a growing UTF-16 copy.
+    // Platform quoting stays bounded and preserves each runtime's JSON rules.
+    internal var utf8FragmentBytes: Int = 0
+        private set
+    internal var utf8PayloadBytes: Int = 0
+        private set
+
+    fun writeUtf8(root: JSONObject, maxBytes: Int): ByteArray {
+        require(maxBytes >= 0)
+        utf8FragmentBytes = 0
+        utf8PayloadBytes = 0
+        var size = 0
+        appendUtf8(root) { bytes, _, length ->
+            utf8FragmentBytes = maxOf(utf8FragmentBytes, bytes.size)
+            require(length <= maxBytes - size) { "检查点超过字节上限" }
+            size += length
+        }
+        val result = ByteArray(size)
+        var offset = 0
+        appendUtf8(root) { bytes, start, length ->
+            check(length <= result.size - offset)
+            bytes.copyInto(result, offset, start, start + length)
+            offset += length
+        }
+        check(offset == result.size)
+        utf8PayloadBytes = offset
+        return result
+    }
+
+    private fun appendUtf8(value: Any?, emit: (ByteArray, Int, Int) -> Unit) {
+        fun token(text: String) {
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            emit(bytes, 0, bytes.size)
+        }
+        fun string(source: String) {
+            token("\"")
+            var offset = 0
+            while (offset < source.length) {
+                var end = minOf(offset + UTF8_CHUNK_CHARS, source.length)
+                if (end < source.length) {
+                    if (Character.isHighSurrogate(source[end - 1]) && Character.isLowSurrogate(source[end])) end--
+                    // JSON-java only escapes a slash after '<'; Android escapes all.
+                    if (source[end - 1] == '<' && source[end] == '/') end--
+                }
+                val bytes = JSONObject.quote(source.substring(offset, end)).toByteArray(Charsets.UTF_8)
+                emit(bytes, 1, bytes.size - 2)
+                offset = end
+            }
+            token("\"")
+        }
+        when {
+            value == null || value === JSONObject.NULL -> token("null")
+            value is JSONObject -> {
+                token("{")
+                val keys = value.keys()
+                var first = true
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (!first) token(",")
+                    first = false
+                    string(key); token(":")
+                    appendUtf8(value.opt(key), emit)
+                }
+                token("}")
+            }
+            value is JSONArray -> {
+                token("[")
+                for (index in 0 until value.length()) {
+                    if (index != 0) token(",")
+                    appendUtf8(value.opt(index), emit)
+                }
+                token("]")
+            }
+            value is String -> string(value)
+            value is Number -> token(JSONObject.numberToString(value))
+            value is Boolean -> token(value.toString())
+            else -> error("Unsupported checkpoint JSON value")
+        }
+    }
+
+    companion object {
+        internal const val UTF8_CHUNK_CHARS = 4096
+    }
+
     private fun appendValue(out: StringBuilder, value: Any?) {
         when {
             value == null || value === JSONObject.NULL -> out.append("null")

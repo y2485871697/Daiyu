@@ -14,7 +14,9 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
         commit = STORE.split("private fun commit(input: RunCheckpoint", 1)[1].split(
             "if (contextChanged) contextUsageRevision++", 1)[0]
         self.assertLess(commit.index("transactions.run { db ->"), commit.index("CAST(payload AS BLOB)=CAST(? AS BLOB)"))
-        self.assertIn("arrayOf(checkpointReuse.expectedPayload(m.id.value), m.id.value)", commit)
+        self.assertIn("query.bindBlob(1, checkpointReuse.expectedPayload(m.id.value))", commit)
+        self.assertIn("query.bindString(2, m.id.value)", commit)
+        self.assertIn("SQLiteCursor(driver, table, query)", commit)
         self.assertIn("checkpointReuse.preservation(stamp, c.getInt(6) == 1)", commit)
         self.assertIn("else preparations.preserve(requireNotNull(read(db, m.id.value)).value, checkpoint)", commit)
         self.assertIn("c.getType(1) == android.database.Cursor.FIELD_TYPE_INTEGER", commit)
@@ -30,8 +32,12 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
         for call in ["database.insertRuntimeSupplement", "database.writeRuntimeMessage", "ConversationUsageStore.record",
                      "CloudContextUsageStore.record", "publishRunCompression", "publishRunArchive"]:
             self.assertLess(commit.index(call), publish)
-        self.assertIn("message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?", commit)
-        self.assertIn("prior.first.revision.toString()", commit)
+        self.assertIn("writeCheckpoint(db, checkpoint, encoded, prior?.first)", commit)
+        write = STORE.split("private fun writeCheckpoint(", 1)[1].split("@Synchronized override fun close()", 1)[0]
+        self.assertIn("message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?", write)
+        self.assertIn("statement.bindLong(11, prior.revision)", write)
+        self.assertIn("payload=CAST(? AS TEXT)", write)
+        self.assertIn("statement.bindBlob(8, encoded)", write)
         self.assertIn("} catch (failure: Throwable) {\n            checkpointReuse.clear()\n            checkpointJsonWriter.clear()\n            throw failure", commit)
         self.assertRegex(commit, r"publishRunArchive\(db, checkpoint\)(?:\s*}){2}\s*checkpointReuse.committed")
         close = STORE.split("@Synchronized override fun close()", 1)[1].split("companion object", 1)[0]
@@ -39,9 +45,9 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
 
     def test_cache_is_a_bounded_single_lease_projection_not_an_execution_authority(self):
         cache = (APP / "storage/RuntimeCheckpointReuse.kt").read_text()
-        self.assertIn("maxChars: Int = 16 * 1024 * 1024", cache)
+        self.assertIn("maxBytes: Int = 16 * 1024 * 1024", cache)
         self.assertIn("exactPayload && it.stamp == stamp", cache)
-        self.assertIn("checkpoint.phase == ExecutionPhase.TERMINAL || encoded.length > maxChars", cache)
+        self.assertIn("checkpoint.phase == ExecutionPhase.TERMINAL || encoded.size > maxBytes", cache)
         self.assertIn("CheckpointPreservation.capture(checkpoint)", cache)
         for forbidden in ["hashCode(", "reconcileCheckpoint(", "readCommittedCheckpoint(", "mutableStateOf", "RunCheckpointCodec.decode"]:
             self.assertNotIn(forbidden, cache)
@@ -63,7 +69,7 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
         commit = STORE.split("private fun commit(input: RunCheckpoint", 1)[1].split(
             "if (contextChanged) contextUsageRevision++", 1)[0]
         self.assertLess(commit.index("val checkpoint = CheckpointPreservation.freeze(input)"),
-                        commit.index("RunCheckpointCodec.encode(checkpoint, checkpointJsonWriter)"))
+                        commit.index("RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)"))
         self.assertIn("checkpointReuse.committed(checkpoint, processOwner, encoded)", commit)
         facts = (APP / "context/CheckpointPreservation.kt").read_text()
         for token in ["usageRequests = value.usageRequests.toList()", "usage = value.usage.toList()",
@@ -88,12 +94,12 @@ class RuntimePayloadProofSql(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.db.execute("CREATE TABLE runtime_checkpoints(message_id TEXT PRIMARY KEY, owner TEXT, revision INTEGER, "
                         "phase TEXT, process_owner TEXT, conversation_id TEXT, run_id TEXT, payload TEXT)")
-        self.query = re.search(r'rawQuery\("(SELECT owner,revision,phase,process_owner,conversation_id,run_id,CAST\(payload AS BLOB\).*?)"', STORE).group(1)
+        self.query = re.search(r'"(SELECT owner,revision,phase,process_owner,conversation_id,run_id,CAST\(payload AS BLOB\).*?)"', STORE).group(1)
 
     def proof(self, stored, expected):
         self.db.execute("DELETE FROM runtime_checkpoints")
         self.db.execute("INSERT INTO runtime_checkpoints VALUES ('m','o',7,'STREAMING','p','c','r',?)", (stored,))
-        return self.db.execute(self.query, (expected, "m")).fetchone()[6]
+        return self.db.execute(self.query, (expected.encode("utf-8"), "m")).fetchone()[6]
 
     def test_exact_large_unicode_payload_matches(self):
         payload = '{"text":"' + "数🙂e\u0301" * 70_000 + '"}'
@@ -109,6 +115,19 @@ class RuntimePayloadProofSql(unittest.TestCase):
         for stored, expected in [("Aa", "BB"), ("JSON", "json"), ("é", "e\u0301"), ("x\x00a", "x\x00b"), ("x", "x ")]:
             with self.subTest(stored=stored, expected=expected):
                 self.assertEqual(0, self.proof(stored, expected))
+
+    def test_blob_binding_persists_text_without_changing_bytes_and_rollback_is_atomic(self):
+        columns = re.search(r'val columns = "([^"]+)"', STORE).group(1)
+        insert = re.search(r'"(INSERT INTO runtime_checkpoints[^"\n]+)"', STORE).group(1).replace('$columns', columns)
+        raw = '{"value":"中🙂\\u0000"}'.encode('utf-8')
+        args = ('m', 'c', 'r', 'o', 1, 'STREAMING', 'p', raw)
+        self.db.execute(insert, args)
+        self.db.commit()
+        self.assertEqual(('text', raw), self.db.execute('SELECT typeof(payload),CAST(payload AS BLOB) FROM runtime_checkpoints').fetchone())
+        self.db.execute('BEGIN')
+        self.db.execute('UPDATE runtime_checkpoints SET payload=CAST(? AS TEXT)', (b'changed',))
+        self.db.rollback()
+        self.assertEqual(('text', raw), self.db.execute('SELECT typeof(payload),CAST(payload AS BLOB) FROM runtime_checkpoints').fetchone())
 
     def test_null_and_missing_rows_cannot_prove_identity(self):
         self.assertIsNone(self.proof(None, ""))

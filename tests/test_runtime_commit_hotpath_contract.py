@@ -20,10 +20,10 @@ class RuntimeCommitHotpathContract(unittest.TestCase):
                         self.commit.index('CommitMessageDecodeReuse().use'))
         self.assertNotIn('private val decodeReuse', self.source)
 
-    def test_string_writer_is_reused_but_cleared_at_failure_terminal_and_close(self):
+    def test_utf8_writer_is_reused_but_cleared_at_failure_terminal_and_close(self):
         self.assertIn('private val checkpointJsonWriter = CheckpointJsonWriter()', self.source)
-        self.assertIn('RunCheckpointCodec.encode(checkpoint, checkpointJsonWriter)', self.commit)
-        self.assertLess(self.commit.index('try {'), self.commit.index('RunCheckpointCodec.encode('))
+        self.assertIn('RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)', self.commit)
+        self.assertLess(self.commit.index('try {'), self.commit.index('RunCheckpointCodec.encodeUtf8('))
         self.assertIn('if (checkpoint.phase == ExecutionPhase.TERMINAL) checkpointJsonWriter.clear()', self.commit)
         failure = self.commit.split('catch (failure: Throwable)', 1)[1]
         self.assertIn('checkpointJsonWriter.clear()', failure)
@@ -35,8 +35,17 @@ class RuntimeCommitHotpathContract(unittest.TestCase):
         self.assertIn('CheckpointPreservation.freeze(input)', self.commit)
         self.assertIn('c.getLong(1) == checkpoint.revision - 1', self.commit)
         self.assertIn('CAST(payload AS BLOB)=CAST(? AS BLOB)', self.commit)
-        self.assertIn('db.insertOrThrow("runtime_checkpoints", null, values)', self.commit)
-        self.assertIn('db.update("runtime_checkpoints", values,', self.commit)
+        self.assertIn('writeCheckpoint(db, checkpoint, encoded, prior?.first)', self.commit)
+        writer = self.source.split('private fun writeCheckpoint(', 1)[1].split(
+            '@Synchronized override fun close()', 1)[0]
+        self.assertIn('INSERT INTO runtime_checkpoints($columns) VALUES(?,?,?,?,?,?,?,CAST(? AS TEXT))', writer)
+        self.assertIn('payload=CAST(? AS TEXT)', writer)
+        self.assertIn("WHERE message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?", writer)
+        self.assertIn('statement.bindBlob(8, encoded)', writer)
+        self.assertIn('check(statement.executeInsert() != -1L)', writer)
+        self.assertIn('check(statement.executeUpdateDelete() == 1)', writer)
+        self.assertLess(self.commit.index('writeCheckpoint(db, checkpoint, encoded, prior?.first)'),
+                        self.commit.index('database.writeRuntimeMessage(db, m, decodeReuse)'))
         self.assertLess(self.commit.index('database.writeRuntimeMessage(db, m, decodeReuse)'),
                         self.commit.index('checkpointReuse.committed(checkpoint, processOwner, encoded)'))
         self.assertNotIn('runCatching', self.commit)

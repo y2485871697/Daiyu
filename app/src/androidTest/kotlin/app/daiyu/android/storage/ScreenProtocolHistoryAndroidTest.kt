@@ -121,13 +121,24 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             val first = RunCheckpoint(message, listOf(user), ExecutionPhase.BOUNDARY,
                 tools = listOf(ToolRecord(call, ToolDisposition.SUCCEEDED, result)), owner = "owner", revision = 1)
             store.commitCheckpoint(first)
+            assertTextCheckpoint(database, first.message.id.value, result.length.toLong() * 3)
             assertEquals(first, store.readCommittedCheckpoint(first))
             val action = ToolInvocation(ToolCallId("action"), "screen_action", "{}")
             val nextBlocks = blocks + MessageBlock.Tool(action)
             val next = first.copy(revision = 2, phase = ExecutionPhase.TOOL_EXECUTING,
                 tools = first.tools + ToolRecord(action, ToolDisposition.IN_FLIGHT), message = message.copy(blocks = nextBlocks,
                     historySegments = listOf(MessageHistorySegment(message.id, "assistant", nextBlocks, items))))
+            database.writableDatabase.execSQL("CREATE TEMP TRIGGER checkpoint_write_failure BEFORE UPDATE ON messages WHEN OLD.id='assistant' " +
+                "BEGIN SELECT RAISE(ABORT, 'synthetic_checkpoint_failure'); END")
+            try {
+                assertTrue(runCatching { store.commitCheckpoint(next) }.exceptionOrNull() is android.database.sqlite.SQLiteException)
+                assertEquals(first, store.readCommittedCheckpoint(first))
+                assertEquals(first.message, database.messages(conversation).last().second)
+            } finally {
+                database.writableDatabase.execSQL("DROP TRIGGER checkpoint_write_failure")
+            }
             store.commitCheckpoint(next)
+            assertTextCheckpoint(database, next.message.id.value, result.length.toLong() * 3)
             assertEquals(next, store.readCommittedCheckpoint(next))
             assertEquals(next.message, database.messages(conversation).last().second)
             store.close(); runtime = null
@@ -173,9 +184,14 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
                     val turn = posts.getAndIncrement()
                     val item = JSONObject().put("type", "function_call").put("id", "fc").put("call_id", "screen")
                         .put("name", "screen").put("arguments", args)
-                    val response = JSONObject().put("status", "completed").put("output", org.json.JSONArray().apply { if (turn == 0) put(item) })
+                    val answer = JSONObject().put("id", "answer").put("type", "message").put("role", "assistant")
+                        .put("content", org.json.JSONArray().put(JSONObject().put("type", "output_text").put("text", "已完成截图续答")))
+                    val response = JSONObject().put("status", "completed").put("output", org.json.JSONArray().put(if (turn == 0) item else answer))
                     if (billed) response.put("usage", JSONObject().put("input_tokens", 12508).put("output_tokens", 22))
-                    val events = (if (turn == 0) "data: ${JSONObject().put("type", "response.output_item.done").put("item", item)}\n\n" else "") +
+                    val deltas = if (turn == 0) "" else listOf("已", "完成", "截图续答").joinToString("") { text ->
+                        "data: ${JSONObject().put("type", "response.output_text.delta").put("item_id", "answer").put("content_index", 0).put("delta", text)}\n\n"
+                    }
+                    val events = (if (turn == 0) "data: ${JSONObject().put("type", "response.output_item.done").put("item", item)}\n\n" else deltas) +
                         "data: ${JSONObject().put("type", "response.completed").put("response", response)}\n\n"
                     val buffer = ByteArrayOutputStream().also(sent::add)
                     object : javax.net.ssl.HttpsURLConnection(java.net.URL("https://example.invalid/fixture")) {
@@ -220,12 +236,25 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
                 assertFalse(wire.contains("data_base64")); assertTrue(wire.contains("input_image"))
                 val saved = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
                 assertNull(saved.context!!.capacity)
-                assertEquals(output, (database.messages(conversation).last().second.blocks.single() as MessageBlock.Tool).result)
+                assertEquals(output, database.messages(conversation).last().second.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
                 assertEquals(output, saved.tools.single().result)
+                assertEquals("已完成截图续答", saved.message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text })
+                assertEquals(ExecutionPhase.TERMINAL, saved.phase)
+                assertFalse(saved.requestUnconfirmed)
+                assertTextCheckpoint(database, assistant.id.value, output.length.toLong() * 3)
             } finally {
                 runner?.stop(); executor.shutdownNow(); executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)
                 store?.close(); database.close(); context.deleteDatabase("conversations.db")
             }
+        }
+    }
+
+    private fun assertTextCheckpoint(database: ConversationDatabase, messageId: String, minimumBytes: Long) {
+        database.readableDatabase.rawQuery("SELECT typeof(payload),length(CAST(payload AS BLOB)) FROM runtime_checkpoints WHERE message_id=?",
+            arrayOf(messageId)).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("text", cursor.getString(0))
+            assertTrue(cursor.getLong(1) >= minimumBytes)
         }
     }
 
@@ -239,6 +268,30 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
         for (sample in listOf("中😼", "x".repeat(4095) + "😼", "a\uD800b", "\uDC00")) {
             assertEquals(sample.toByteArray(Charsets.UTF_8).size.toLong(),
                 app.daiyu.android.context.Utf8Payload.byteCount(sample, Long.MAX_VALUE))
+        }
+        android.database.sqlite.SQLiteDatabase.create(null).use { sqlite ->
+            sqlite.execSQL("CREATE TABLE encoding_probe(id INTEGER PRIMARY KEY,payload TEXT)")
+            val writer = CheckpointJsonWriter()
+            for (sample in listOf("中🙂\u0000\"\\/", "x".repeat(4095) + "</🙂", "a\ud800b\udfff")) {
+                val root = JSONObject().put("value", sample)
+                val legacy = root.toString()
+                val encoded = writer.writeUtf8(root, 64 * 1024)
+                sqlite.execSQL("DELETE FROM encoding_probe")
+                sqlite.compileStatement("INSERT INTO encoding_probe VALUES(1,?)").use { statement ->
+                    statement.bindString(1, legacy); statement.executeInsert()
+                }
+                sqlite.compileStatement("INSERT INTO encoding_probe VALUES(2,CAST(? AS TEXT))").use { statement ->
+                    statement.bindBlob(1, encoded); statement.executeInsert()
+                }
+                val rows = sqlite.rawQuery("SELECT typeof(payload),CAST(payload AS BLOB) FROM encoding_probe ORDER BY id", null).use { cursor ->
+                    buildList { while (cursor.moveToNext()) {
+                        assertEquals("text", cursor.getString(0)); add(cursor.getBlob(1))
+                    } }
+                }
+                assertTrue(java.util.Arrays.equals(legacy.toByteArray(Charsets.UTF_8), rows[1]))
+                if (!sample.contains('\ud800')) assertTrue(java.util.Arrays.equals(rows[0], rows[1]))
+                assertTrue(JSONObject(String(rows[1], Charsets.UTF_8)).has("value"))
+            }
         }
         val max = RunCheckpointCodec.MAX_BYTES.toLong()
         RunCheckpointCodec.checkEncodedSize(max - RunCheckpointCodec.RECOVERY_RESERVE, true)

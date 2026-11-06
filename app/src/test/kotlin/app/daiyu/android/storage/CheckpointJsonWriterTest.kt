@@ -16,6 +16,10 @@ open class CheckpointJsonWriterTest {
         val actual = writer.write(root)
         assertEquals(legacy, actual)
         assertArrayEquals(legacy.toByteArray(Charsets.UTF_8), actual.toByteArray(Charsets.UTF_8))
+        val bytes = writer.writeUtf8(root, Int.MAX_VALUE)
+        assertArrayEquals(legacy.toByteArray(Charsets.UTF_8), bytes)
+        assertEquals(bytes.size, writer.utf8PayloadBytes)
+        assertTrue(writer.utf8FragmentBytes <= CheckpointJsonWriter.UTF8_CHUNK_CHARS * 6 + 2)
         return actual
     }
 
@@ -117,6 +121,55 @@ open class CheckpointJsonWriterTest {
         repeat(2) { assertLegacy(JSONObject().put("values", JSONArray().put(a).put(b)), writer) }
         assertEquals(2L, writer.largeStringQuoteCalls)
         assertEquals(2, writer.cachedEntryCount)
+    }
+
+    @Test fun utf8ChunkEdgesPreserveSlashContextSurrogatePairsAndPlatformReplacement() {
+        val edge = CheckpointJsonWriter.UTF8_CHUNK_CHARS
+        val values = listOf(
+            "x".repeat(edge - 1) + "</script>",
+            "x".repeat(edge - 1) + "\ud83d\ude42/中",
+            "x".repeat(edge - 1) + "\ud800z\udfff",
+            "\u0000".repeat(edge + 1),
+            "x".repeat(edge - 2) + "<\ud83d\ude42/",
+        )
+        val root = JSONObject().put("values", JSONArray(values))
+        values.forEach { root.put(it, it) }
+        assertLegacy(root, CheckpointJsonWriter())
+    }
+
+    @Test fun screenshotSizedUtf8OutputHasOnlyBoundedQuotedFragmentsAndOneExactBuffer() {
+        val image = "x".repeat(1_800_000) + "中"
+        val imageBytes = image.toByteArray(Charsets.UTF_8)
+        val root = JSONObject().put("images", JSONArray().apply { repeat(8) { put(image) } })
+        val expected = java.security.MessageDigest.getInstance("SHA-256")
+        expected.update("{\"images\":[".toByteArray())
+        repeat(8) { index ->
+            if (index != 0) expected.update(','.code.toByte())
+            expected.update('"'.code.toByte()); expected.update(imageBytes); expected.update('"'.code.toByte())
+        }
+        expected.update("]}".toByteArray())
+        val digest = expected.digest()
+        val writer = CheckpointJsonWriter()
+        repeat(3) {
+            val encoded = writer.writeUtf8(root, 16 * 1024 * 1024)
+            assertTrue(encoded.size > 14_000_000)
+            assertEquals(encoded.size, writer.utf8PayloadBytes)
+            assertArrayEquals(digest, java.security.MessageDigest.getInstance("SHA-256").digest(encoded))
+            assertTrue(writer.utf8FragmentBytes <= CheckpointJsonWriter.UTF8_CHUNK_CHARS * 6 + 2)
+            assertEquals(0, writer.cachedEntryCount)
+            assertEquals(0L, writer.retainedChars)
+        }
+    }
+
+    @Test fun utf8BudgetIsExactAndFailureDoesNotPublishAPartialBuffer() {
+        val root = JSONObject().put("unicode", "中🙂\u0000/".repeat(1024))
+        val expected = root.toString().toByteArray(Charsets.UTF_8)
+        val writer = CheckpointJsonWriter()
+        assertArrayEquals(expected, writer.writeUtf8(root, expected.size))
+        assertTrue(runCatching { writer.writeUtf8(root, expected.size - 1) }.exceptionOrNull() is IllegalArgumentException)
+        assertEquals(0, writer.utf8PayloadBytes)
+        assertTrue(runCatching { writer.writeUtf8(root, -1) }.exceptionOrNull() is IllegalArgumentException)
+        assertArrayEquals(expected, writer.writeUtf8(root, expected.size))
     }
 
     private fun fresh(value: String) = String(value.toCharArray())

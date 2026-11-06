@@ -70,14 +70,15 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         }
         return true
     }
-    private fun capture(service: GuiAccessibilityService, session: GuiRunSession, platform: Platform): GuiScreenshot {
+    private fun capture(service: GuiAccessibilityService, session: GuiRunSession, platform: Platform,
+        pkg: String? = service.packageName): GuiScreenshot {
         lateinit var pending: CompletableFuture<GuiResult<GuiScreenshot>>
         controlMain {
             pending = GuiRuntime.visualScreenshot(session.lease) { false }
-            event(service); platform.witness(); event(service); platform.image(); event(service)
+            event(service, pkg); platform.witness(); event(service, pkg); platform.image(); event(service, pkg)
         }
         instrumentation.waitForIdleSync()
-        controlMain { event(service); platform.witness() }
+        controlMain { event(service, pkg); platform.witness() }
         return (pending.get() as GuiResult.Value).value
     }
     fun testOwnContentAcrossAsyncWitnessesKeepsPixelVerifiedSingleUseAction() = fixture { service, session, platform ->
@@ -101,9 +102,9 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         }
         assertTrue(pending.get() is GuiResult.Value); assertEquals(2, platform.disposed)
     }
-    fun testTargetUnknownAndHardEventsRejectBeforePlatformCapture() {
-        for ((pkg, type) in listOf("external.app" to AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-            null to AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+    fun testHardEventsStillRejectBeforePlatformCapture() {
+        for ((pkg, type) in listOf("external.app" to AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            null to AccessibilityEvent.TYPE_WINDOWS_CHANGED,
             "app.daiyu.android" to AccessibilityEvent.TYPE_WINDOWS_CHANGED)) fixture { service, session, platform ->
             if (unsupported(session, platform)) return@fixture
             controlMain {
@@ -126,6 +127,45 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         }
         instrumentation.waitForIdleSync()
         controlMain { event(service); platform.witness(); assertEquals(0, platform.gestures) }
+        assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
+        assertEquals(2, platform.disposed)
+    }
+    fun testTargetAndUnknownContentAcrossCaptureAndVerificationKeepsSingleUseGestures() {
+        for (pkg in listOf("external.app", null, "")) fixture { service, session, platform ->
+            if (unsupported(session, platform)) return@fixture
+            val image = capture(service, session, platform, pkg)
+            lateinit var pending: CompletableFuture<GuiResult<String>>
+            controlMain {
+                for (type in listOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
+                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)) event(service, pkg, type)
+                pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+                    gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { false }
+                event(service, pkg); platform.witness(); event(service, pkg); platform.image()
+            }
+            instrumentation.waitForIdleSync()
+            controlMain {
+                event(service, pkg); platform.witness()
+                assertEquals(1, platform.gestures); platform.completedGesture!!(true)
+                assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease,
+                    GuiAction(image.observationId, GuiOperation.BACK, visual = true)) { false }.get())
+                assertNull(session.lease.observation)
+            }
+            assertTrue(pending.get() is GuiResult.Value); assertEquals(2, platform.disposed)
+        }
+    }
+
+    fun testTargetContentStillRejectsChangedPixelsWithoutDispatching() = fixture { service, session, platform ->
+        if (unsupported(session, platform)) return@fixture
+        val image = capture(service, session, platform, "external.app")
+        lateinit var pending: CompletableFuture<GuiResult<String>>
+        controlMain {
+            event(service, "external.app")
+            pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+                gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { false }
+            platform.witness(); event(service, null); platform.image(byteArrayOf(2))
+        }
+        instrumentation.waitForIdleSync()
+        controlMain { event(service, "external.app"); platform.witness(); assertEquals(0, platform.gestures) }
         assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
         assertEquals(2, platform.disposed)
     }

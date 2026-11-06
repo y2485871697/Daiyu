@@ -179,6 +179,7 @@ internal object GuiRuntime {
     private val gate = GuiLeaseGate(SystemClock::elapsedRealtime)
     @Volatile private var service: GuiAccessibilityService? = null
     private var generation = 0L
+    private var visualGeneration = 0L
     private var confirmation: GuiConfirmationOverlay? = null
     // Narrow parameters belong to the original gate lease, never to the process or a later owner.
     private data class TargetBinding(val lease: GuiLeaseGate.Lease, val packageName: String?,
@@ -305,7 +306,11 @@ internal object GuiRuntime {
             // Other-window content cannot prove this external target changed. Retain exact nodes
             // for live revalidation, while screenshots and actions without a node stay dirty.
             contentChanged = true
-        } else changed(value, contentOnly = localContent)
+        } else {
+            // Content retires node handles, not visual evidence. Visual actions re-read WM and pixels.
+            changed(value, contentOnly = localContent,
+                invalidateVisual = !content || lease == null || isSelfLease(lease))
+        }
         if (observed != null && observed.generation == previousGeneration &&
             (generation != previousGeneration || staleEvent == null)) {
             staleEvent = StaleEvent(observed.observationId, event.eventType, event.windowId,
@@ -335,7 +340,10 @@ internal object GuiRuntime {
         return rejection
     }
 
-    fun changed(value: GuiAccessibilityService, contentOnly: Boolean = false) {
+    fun changed(value: GuiAccessibilityService, contentOnly: Boolean = false) =
+        changed(value, contentOnly, invalidateVisual = true)
+
+    private fun changed(value: GuiAccessibilityService, contentOnly: Boolean, invalidateVisual: Boolean) {
         onMain()
         if (service !== value) return
         val binding = targetBinding
@@ -343,7 +351,7 @@ internal object GuiRuntime {
             // Streaming the assistant's own reply must not replace the selected node identity.
             // Screenshots/global actions still reject this dirty tree; node actions refresh the original handle.
             contentChanged = true
-        } else { generation++; clearNodes() }
+        } else { generation++; clearNodes(invalidateVisual) }
     }
     private data class NodeContext(val packageName: String, val windowId: Int, val children: Int, val visible: Boolean)
     private data class TreeSample(val packageName: String, val windowId: Int, val windowType: Int, val nodes: List<GuiNode>,
@@ -352,12 +360,12 @@ internal object GuiRuntime {
         val verifiable: Boolean get() = !truncated && nodes.none { it.password }
     }
     private var screenshotBinding: Pair<String, TreeSample>? = null
-    private data class VisualCapture(val lease: GuiLeaseGate.Lease, val id: String, val generation: Long,
+    private data class VisualCapture(val lease: GuiLeaseGate.Lease, val id: String, val visualGeneration: Long,
         val capturedAt: Long, val window: GuiVisualWindow, val digest: List<Byte>)
     private var visualCapture: VisualCapture? = null
     private var contentChanged = false
-    @Suppress("DEPRECATION") private fun clearNodes() {
-        visualCapture = null
+    @Suppress("DEPRECATION") private fun clearNodes(invalidateVisual: Boolean = true) {
+        if (invalidateVisual) { visualGeneration++; visualCapture = null }
         screenshotBinding = null
         contentChanged = false
         retained.values.forEach { it.recycle() }; retained.clear(); identities.clear(); selfTargets.clear()
@@ -1028,9 +1036,9 @@ internal object GuiRuntime {
         val future = CompletableFuture<GuiResult<GuiScreenshot>>()
         val id = UUID.randomUUID().toString()
         val capturedAt = SystemClock.elapsedRealtime()
-        captureVisualFrame(lease, id, cancelled) { image, window, startGeneration ->
+        captureVisualFrame(lease, id, cancelled) { image, window, startVisualGeneration ->
             if (image is GuiResult.Value && window != null) {
-                visualCapture = VisualCapture(lease, id, startGeneration, capturedAt, window,
+                visualCapture = VisualCapture(lease, id, startVisualGeneration, capturedAt, window,
                     java.security.MessageDigest.getInstance("SHA-256").digest(image.value.png).toList())
                 future.complete(GuiResult.Value(image.value.copy(observationBound = false, visualPackage = window.packageName)))
             } else future.complete(image)
@@ -1050,7 +1058,7 @@ internal object GuiRuntime {
         if (action.nodeId != null || action.operation !in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE, GuiOperation.BACK))
             return reject("VISUAL_CAPTURE_COORDINATES_OR_BACK_ONLY_NOT_EXECUTED")
         fun retire() { if (visualCapture === captured) visualCapture = null }
-        if (captured.generation != generation || SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS) {
+        if (captured.visualGeneration != visualGeneration || SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS) {
             retire(); return reject("CAPTURE_STALE_NOT_EXECUTED")
         }
         if (action.gesture != null && !captured.window.admits(action.gesture))
@@ -1063,7 +1071,7 @@ internal object GuiRuntime {
                 rejection != null -> { retire(); future.complete(rejection) }
                 image is GuiResult.Rejected -> { retire(); future.complete(image) }
                 image is GuiResult.Unknown -> { retire(); future.complete(image) }
-                visualCapture !== captured || window != captured.window || captured.generation != generation ||
+                visualCapture !== captured || window != captured.window || captured.visualGeneration != visualGeneration ||
                     SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS -> {
                     retire(); future.complete(GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED"))
                 }
@@ -1096,28 +1104,28 @@ internal object GuiRuntime {
         completed: (GuiResult<GuiScreenshot>, GuiVisualWindow?, Long) -> Unit) {
         val current = service
         if (current == null || Build.VERSION.SDK_INT < 30) {
-            completed(GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), null, generation); return
+            completed(GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), null, visualGeneration); return
         }
-        val startGeneration = generation
+        val startVisualGeneration = visualGeneration
         val startedAt = SystemClock.elapsedRealtime()
         captures[lease] = (captures[lease] ?: 0) + 1
         val request = GuiCaptureRequest<GuiScreenshot> {
             if (Looper.myLooper() === Looper.getMainLooper()) captureFinished(lease) else main.post { captureFinished(lease) }
         }
         var initial: GuiVisualWindow? = null
-        request.future.whenComplete { value, error -> completed(value ?: GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), initial, startGeneration) }
+        request.future.whenComplete { value, error -> completed(value ?: GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), initial, startVisualGeneration) }
         fun currentRejection(stage: String): GuiResult.Rejected? {
             visualRejection(lease)?.let { return it }
             if (cancelled()) return GuiResult.Rejected("CANCELLED_NOT_EXECUTED")
             val age = SystemClock.elapsedRealtime() - startedAt
             val reason = when {
                 service !== current -> "service"
-                generation != startGeneration -> "generation"
+                visualGeneration != startVisualGeneration -> "generation"
                 age !in 0..GUI_OBSERVATION_TTL_MILLIS -> "age"
                 else -> return null
             }
             if (!request.future.isDone) runCatching { android.util.Log.i("DaiyuGui",
-                "visual_capture_stale stage=$stage reason=$reason age_ms=$age generation=$startGeneration:$generation") }
+                "visual_capture_stale stage=$stage reason=$reason age_ms=$age generation=$startVisualGeneration:$visualGeneration") }
             return GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED")
         }
         fun windowRejection(window: GuiVisualWindow?, stage: String): GuiResult.Rejected? {

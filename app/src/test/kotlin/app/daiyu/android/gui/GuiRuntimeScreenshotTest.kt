@@ -575,27 +575,90 @@ class GuiRuntimeScreenshotTest {
         rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"); assertNoActions()
     }
 
-    @Test fun targetAndUnknownContentDuringCaptureStillRejectAndDispose() {
-        for (pkg in listOf("external.app", null, "")) {
-            session.approveReadsFromUser(GuiReadApproval(0, 1)); platform.visual = visualWindow()
+    @Test fun targetAndUnknownContentDuringCaptureKeepsFreshWindowWitnessedImages() {
+        for (pkg in listOf("external.app", null, "", "unrelated.app")) {
+            session.approveReadsFromUser(GuiReadApproval(0, 1)); platform.visual = visualWindow(); platform.deferVisual = true
             val pending = GuiRuntime.visualScreenshot(session.lease) { false }
-            contentEvent(pkg)
-            val frame = platform.success(); worker.runAll()
-            rejected(pending.completed(), "CAPTURE_STALE_NOT_EXECUTED")
-            assertEquals(listOf("software", "hardware", "buffer"), frame.disposed)
-            assertNull(session.lease.observation); assertNoActions()
+            contentEvent(pkg); platform.completeVisual()
+            contentEvent(pkg, AccessibilityEvent.TYPE_VIEW_SCROLLED)
+            val frame = platform.success()
+            contentEvent(pkg, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED); worker.runAll()
+            contentEvent(pkg, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED); platform.completeVisual()
+            assertTrue(pending.completed() is GuiResult.Value)
+            assertDisposed(frame); assertNull(session.lease.observation); assertNoActions()
         }
     }
 
-    @Test fun targetAndUnknownContentAfterPublicationStillRetireVisualTokens() {
-        for (pkg in listOf("external.app", null, "")) {
+    @Test fun targetAndUnknownContentAfterPublicationStillRequiresPixelVerifiedSingleUseAction() {
+        for (pkg in listOf("external.app", null, "", "unrelated.app")) {
             session.approveReadsFromUser(GuiReadApproval(0, 1))
             val image = visualImage()
             contentEvent(pkg)
-            rejected(GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.BACK, visual = true)) { false }
-                .completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
-            assertNoActions()
+            val action = GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+                gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)
+            val pending = GuiRuntime.visualAction(session.lease, action) { false }
+            contentEvent(pkg, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED)
+            val frame = platform.success(); worker.runAll()
+            platform.gestureCompleted!!(true)
+            assertTrue(pending.completed() is GuiResult.Value); assertDisposed(frame)
+            rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
         }
+        assertEquals(4, platform.gestures); assertEquals(0, platform.nodeActions)
+    }
+
+    @Test fun targetContentWithDifferentPixelsRetiresTokenWithoutDispatching() {
+        val image = visualImage(); contentEvent("external.app")
+        val action = GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+            gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)
+        val pending = GuiRuntime.visualAction(session.lease, action) { false }
+        contentEvent(null)
+        val frame = platform.success(Frame().apply { pixels = byteArrayOf(2) }); worker.runAll()
+        rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"); assertDisposed(frame); assertNoActions()
+        assertEquals(0, platform.gestures)
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+    }
+
+    @Test fun ordinaryObserveAndScreenshotRecoverRootlessReadsDespiteTargetContentAtEveryStage() {
+        for (screenshot in listOf(false, true)) for (pkg in listOf("external.app", null)) {
+            session.close()
+            session = (GuiRuntime.openForUser(GuiOwner("session", "run")) as GuiResult.Value).value
+            val owner = app.daiyu.android.integration.tools.runnerOwner(app.daiyu.android.domain.Message(
+                app.daiyu.android.domain.MessageId("m"), app.daiyu.android.domain.ConversationId("c"),
+                app.daiyu.android.domain.RunId("run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
+                emptyList(), app.daiyu.android.domain.RunStatus.RUNNING))
+            session.bindDynamic(owner, app.daiyu.android.domain.tools.TaskAuthorization("session", "run"))
+            platform.missing = true; platform.visual = visualWindow(); platform.deferVisual = true
+            val future = java.util.concurrent.FutureTask<GuiResult<*>> {
+                if (screenshot) session.dynamicScreenshot(null) { false } else session.dynamicScreen({ false }, 512)
+            }
+            Thread(future).start()
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
+            while (platform.visualCallbacks.isEmpty() && !future.isDone && System.nanoTime() < deadline) {
+                shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5)
+            }
+            assertEquals(1, platform.visualCallbacks.size)
+            contentEvent(pkg); platform.completeVisual()
+            assertEquals(1, platform.callbacks.size)
+            contentEvent(pkg, AccessibilityEvent.TYPE_VIEW_SCROLLED)
+            val frame = platform.success()
+            contentEvent(pkg, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED); worker.runAll()
+            contentEvent(pkg, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED); platform.completeVisual()
+            val value = future.get(3, java.util.concurrent.TimeUnit.SECONDS) as GuiResult.Value
+            val image = if (screenshot) value.value as GuiScreenshot else (value.value as GuiScreenRead.Visual).image
+            assertFalse(image.observationBound); assertTrue(image.observationId.isNotBlank())
+            assertNull(session.lease.observation); assertDisposed(frame); assertNoActions()
+            assertTrue(platform.callbacks.isEmpty()); assertTrue(platform.visualCallbacks.isEmpty())
+        }
+    }
+
+    @Test fun newerNodeObservationStillFencesAnOlderRootlessCapture() {
+        platform.visual = visualWindow()
+        val pending = GuiRuntime.visualScreenshot(session.lease) { false }
+        val frame = platform.success()
+        val newer = observe()
+        worker.runAll()
+        rejected(pending.completed(), "CAPTURE_STALE_NOT_EXECUTED")
+        assertEquals(newer, session.lease.observation); assertDisposed(frame); assertNoActions()
     }
 
     @Test fun rootlessCaptureAgeStillExpiresAndLogsOnlyBoundedMetadata() {

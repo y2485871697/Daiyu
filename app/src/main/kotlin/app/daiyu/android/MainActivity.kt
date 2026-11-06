@@ -2265,7 +2265,7 @@ class MainActivity : ComponentActivity() {
                             }
                             val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
                                 controller, selected?.id, contextReceiptRevision, controller.dataRevision,
-                                contextModelRevision, chatState.composer.phase, ready = controller.ready, active = routeActive && !sidebarVisible)
+                                contextModelRevision, chatState.composer.phase, ready = controller.ready, active = routeActive && !sidebarVisible && displayWindow == null)
                             val usageConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
                             val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
                             val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)

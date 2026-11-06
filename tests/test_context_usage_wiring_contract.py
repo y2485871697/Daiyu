@@ -68,7 +68,7 @@ class ContextUsageWiringContractTest(unittest.TestCase):
         self.assertIn('phase, ready, active)', helper)
         self.assertIn('active: Boolean = true', helper)
         self.assertIn('if (!ready || !active) return@LaunchedEffect', helper)
-        self.assertIn('active = displayWindow == null', text('MainActivity.kt'))
+        self.assertIn('active = routeActive && !sidebarVisible && displayWindow == null', text('MainActivity.kt'))
         self.assertIn('ready = controller.ready', text('MainActivity.kt'))
         for forbidden in ('delay(', '.save(', 'while (', 'NonCancellable'):
             self.assertNotIn(forbidden, helper)

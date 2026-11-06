@@ -18,14 +18,14 @@ internal object MessageDisplayStore {
         db.execSQL("CREATE TRIGGER IF NOT EXISTS message_display_delete BEFORE DELETE ON messages BEGIN DELETE FROM message_display WHERE message_id=OLD.id; END")
     }
 
-    fun read(db: SQLiteDatabase, conversation: ConversationId, before: Long, limit: Int): MessageDisplayWindow {
+    fun read(db: SQLiteDatabase, conversation: ConversationId, before: Long, limit: Int, rebuildWindow: Boolean = true): MessageDisplayWindow {
         check(db.inTransaction())
         val ids = db.rawQuery("SELECT seq,id,run_id,role,status,created_at FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",
             arrayOf(conversation.value, before.toString(), limit.toString())).use { c ->
             buildList { while (c.moveToNext()) add(Metadata(c.getLong(0), c.getString(1), c.getString(2),
                 c.getString(3), c.getString(4), if (c.isNull(5)) null else c.getLong(5))) }.reversed()
         }
-        return MessageDisplayWindow(ids.map { row ->
+        val rows = ids.map { row ->
             fun decodePayload(payload: String): MessageDisplayRow {
                 val value = JSONObject(payload)
                 require(value.keys().asSequence().toSet() == setOf("version", "id", "conversation", "run", "blocks", "history"))
@@ -56,7 +56,12 @@ internal object MessageDisplayStore {
                 }) != -1L)
                 projection
             })
-        })
+        }
+        return try { MessageDisplayWindow(rows) } catch (invalid: IllegalArgumentException) {
+            if (!rebuildWindow) throw invalid
+            ids.forEach { db.delete("message_display", "message_id=?", arrayOf(it.id)) }
+            read(db, conversation, before, limit, rebuildWindow = false)
+        }
     }
 
     private fun envelope(id: String, conversation: String, run: String, blocks: JSONArray, history: JSONArray) =

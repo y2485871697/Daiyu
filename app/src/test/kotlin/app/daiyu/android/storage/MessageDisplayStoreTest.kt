@@ -121,4 +121,19 @@ class MessageDisplayStoreTest {
         assertEquals("trigger", (database.messages(user.conversationId).last().second.blocks.single() as MessageBlock.Text).text)
     }
 
+    @Test fun corruptSupplementCacheRebuildsWindowWithoutChangingCanonicalHistory() {
+        val (user, answer) = seed()
+        val saved = answer.copy(status = RunStatus.STOPPED, historySegments = listOf(
+            MessageHistorySegment(user.id, Message.USER_ROLE, user.blocks),
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, answer.blocks)))
+        database.save(saved)
+        val expected = database.displayMessages(user.conversationId)
+        val db = database.writableDatabase
+        val value = org.json.JSONObject(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", answer.id.value)))
+        value.getJSONArray("history").getJSONObject(0).getJSONArray("blocks").getJSONObject(0).put("text", "cache corruption")
+        db.execSQL("UPDATE message_display SET payload=? WHERE message_id=?", arrayOf(value.toString(), answer.id.value))
+        assertEquals(expected, database.displayMessages(user.conversationId))
+        assertEquals(saved, database.messages(user.conversationId).last().second)
+    }
+
 }

@@ -24,6 +24,11 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
     private fun setField(name: String, value: Any?) = MainActivity::class.java.getDeclaredField(name)
         .apply { isAccessible = true }.set(activity, value)
 
+    private fun invalidateHistoryAndRefresh() {
+        (field("streamingHistoryRefresh") as app.daiyu.android.ui.screens.chat.conversation.StreamingHistoryRefresh).invalidate()
+        call("refresh")
+    }
+
     private fun awaitShown(predicate: (List<Pair<Long, Message>>) -> Boolean) {
         ui.waitUntil(timeoutMillis = 5_000) {
             var matches = false
@@ -126,7 +131,7 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
             snapshot
         }
         try {
-            mainThread { setField("loadedWindowReader", reader); call("refresh") }
+            mainThread { setField("loadedWindowReader", reader); invalidateHistoryAndRefresh() }
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             assertFalse(onMain.get())
             var expanded = emptyList<MessageId>()
@@ -135,10 +140,11 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
                 retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER)
                 expanded = shown().map { it.second.id }
             }
-            assertEquals("pending refreshes must not launch parallel readers", 1, calls.get())
             val tail = fixture.database.messages(conversation.id).last().second
             fixture.database.save(tail.copy(status = RunStatus.COMPLETED,
                 blocks = listOf(MessageBlock.Text("body", "refresh final"))))
+            mainThread { invalidateHistoryAndRefresh() }
+            assertEquals("pending refreshes must not launch parallel readers", 1, calls.get())
             release.countDown()
             awaitShown { rows -> rows.map { it.second.id } == expanded && rows.last().second.status == RunStatus.COMPLETED &&
                 rows.last().second.blocks.filterIsInstance<MessageBlock.Text>().single().text == "refresh final" }
@@ -164,7 +170,7 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
                 snapshot
             }
             try {
-                mainThread { setField("loadedWindowReader", reader); call("refresh") }
+                mainThread { setField("loadedWindowReader", reader); invalidateHistoryAndRefresh() }
                 assertTrue(entered.await(5, TimeUnit.SECONDS))
                 mainThread {
                     activity.select(current)
@@ -175,6 +181,7 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
                 val tail = fixture.database.messages(current.id).last().second
                 fixture.database.save(tail.copy(status = RunStatus.COMPLETED,
                     blocks = listOf(MessageBlock.Text("body", finalText))))
+                mainThread { invalidateHistoryAndRefresh() }
                 release.countDown()
                 awaitShown { rows -> rows.isNotEmpty() && rows.all { it.second.conversationId == current.id } &&
                     rows.last().second.blocks.filterIsInstance<MessageBlock.Text>().single().text == finalText }

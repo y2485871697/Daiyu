@@ -33,4 +33,44 @@ class ProductionRunContextCapacityTest {
             assertEquals("压缩后仍超出发送预算", error.message)
         }
     }
+    @Test fun realLongToolTextStillPausesBeforeContinuationDespiteSmallPreviousCloudUsage() {
+        val parent = Message(MessageId("assistant"), ConversationId("c"), RunId("r"), "assistant", emptyList(), RunStatus.RUNNING)
+        val runtime = ProductionRunContext(CompressionPolicy(true, 272000, reserveTokens = 4096), parent, null, automatic = false)
+        val paused = java.util.concurrent.CountDownLatch(1)
+        val snapshots = java.util.concurrent.CopyOnWriteArrayList<RunCheckpoint>()
+        val store = object : AtomicRuntimeStore {
+            override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                snapshots += checkpoint
+                if (checkpoint.context?.capacity != null) paused.countDown()
+            }
+            override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no recovery")
+        }
+        var turns = 0; var tools = 0
+        val port = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                turns++
+                check(turns == 1) { "over-budget continuation was admitted" }
+                sink(ModelEvent.InputEstimate(12508)); sink(ModelEvent.Usage(12508, 22))
+                sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
+            }
+            override fun cancel() {}
+        } }
+        val output = "x".repeat(1_800_000)
+        val runner = ChatRunner(port, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { tools++; output }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val future = executor.submit<Message> { runner.run(parent, emptyList()) }
+            assertTrue(paused.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            val checkpoint = snapshots.last { it.context?.capacity != null }
+            assertEquals(ExecutionPhase.PAUSED, checkpoint.phase)
+            assertTrue(checkpoint.context!!.capacity!!.estimatedTokens > runtime.sendBudgetTokens)
+            assertEquals(1, turns); assertEquals(1, tools)
+            assertEquals(output, (checkpoint.message.blocks.single() as MessageBlock.Tool).result)
+            runner.stop(); future.get(10, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            runner.stop(); executor.shutdownNow(); executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
+
 }

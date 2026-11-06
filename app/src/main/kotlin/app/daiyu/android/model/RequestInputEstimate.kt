@@ -4,7 +4,6 @@ import app.daiyu.android.context.TokenTailCompression
 import app.daiyu.android.model.images.FrozenMessageImagePlan
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.math.ceil
 
 /** Measures the final request in local units, never bills base64 or opaque signatures as text. */
 internal object RequestInputEstimate {
@@ -25,8 +24,7 @@ internal object RequestInputEstimate {
                 val type = value.optString("type")
                 if (wire && type in setOf("input_image", "image_url", "image")) {
                     val size = requireNotNull(payload(value)?.let(sizes::get)) { "Unrecognized frozen image estimate" }
-                    val scale = minOf(1.0, 2048.0 / maxOf(size.first, size.second))
-                    imageTokens += maxOf(85L, (ceil(size.first * scale / 32) * ceil(size.second * scale / 32)).toLong())
+                    imageTokens += TokenTailCompression.imageTokens(size.first, size.second)
                     JSONObject()
                 } else if (wire && type in setOf("redacted_thinking", "video", "input_video", "video_url")) JSONObject()
                 else JSONObject().also { out -> value.keys().forEach { key ->

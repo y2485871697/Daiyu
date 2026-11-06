@@ -36,7 +36,7 @@ internal class ProductionRunContext(
     }
     override fun cancel() { cancellation?.cancel() }
     override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long =
-        MessageHistory.expand(history).sumOf(TokenTailCompression::messageTokens) +
+        TokenTailCompression.historyTokens(MessageHistory.expand(history)) +
             tools.sumOf { TokenTailCompression.textTokens(it.name + it.description + it.parameters) }
 
     override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,

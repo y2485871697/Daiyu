@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.context.ArchiveCodec
+import app.daiyu.android.context.ProductionRunContext
+import app.daiyu.android.context.TokenTailCompression
+import app.daiyu.android.domain.context.CompressionPolicy
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.MessageHistoryCodec
 import app.daiyu.android.storage.RunCheckpointCodec
@@ -293,7 +296,7 @@ class ScreenToolImageInputTest {
             .exceptionOrNull() is IllegalArgumentException)
     }
     private fun largePng(): ByteArray {
-        val image = png(); val data = ByteArray(1_280_000)
+        val image = png(); val data = ByteArray(1_360_000)
         val type = "raNd".toByteArray(Charsets.US_ASCII)
         val crc = CRC32().apply { update(type); update(data) }.value.toInt()
         val chunk = ByteArrayOutputStream().apply {
@@ -302,6 +305,60 @@ class ScreenToolImageInputTest {
         }.toByteArray()
         return image.copyOfRange(0, image.size - 12) + chunk + image.copyOfRange(image.size - 12, image.size)
     }
+    @Test fun capacityAndWireEstimatesPricePixelsNotTheScreenshotEncoding() {
+        val small = receipt(); val large = receipt(largePng())
+        assertTrue(JSONObject(large).getString("data_base64").length >= 1_800_000)
+        assertTrue(TokenTailCompression.textTokens(large) > 267904)
+        assertEquals(TokenTailCompression.messageTokens(history(small)), TokenTailCompression.messageTokens(history(large)))
+        protocols.forEach { protocol ->
+            fun estimate(output: String): Long {
+                val source = rows(protocol, listOf(history(output)))
+                val projected = ScreenToolImageInput.prepare(body(protocol, source), source, settings(protocol), true, emptyList()) { false }
+                assertEquals(1, imageCount(projected.request))
+                assertFalse(projected.request.toString().contains("data_base64"))
+                return RequestInputEstimate.from(projected.request, null, projected.imageSizes)
+            }
+            assertEquals(estimate(small), estimate(large))
+        }
+        assertTrue(TokenTailCompression.imageTokens(1216, 2640) > TokenTailCompression.imageTokens(4, 3))
+    }
+
+    @Test fun localCapacityMatchesLatestScreenSelectionWithoutChangingOriginalReceipts() {
+        val output = receipt(largePng())
+        val older = history(output, id = "old"); val newest = history(output, id = "new")
+        fun metadata(message: Message, attached: Boolean): Message {
+            val block = message.blocks.single() as MessageBlock.Tool
+            val image = NativeScreenImage.parse("screen", args, block.result!!)!!
+            val value = JSONObject(image.metadata).apply {
+                if (attached) put("image_attached", true) else put("image_omitted", "superseded_screen")
+            }.toString()
+            return message.copy(blocks = listOf(block.copy(result = value)))
+        }
+        assertEquals(TokenTailCompression.historyTokens(listOf(metadata(older, false), metadata(newest, true))) +
+            TokenTailCompression.imageTokens(4, 3) + TokenTailCompression.textTokens(
+                NativeScreenImage.parse("screen", args, output)!!.inputLabel("new")),
+            TokenTailCompression.historyTokens(listOf(older, newest)))
+        val nodeOnly = history("{\"observation_id\":\"new-node\",\"nodes\":[]}", id = "node")
+        assertEquals(TokenTailCompression.historyTokens(listOf(metadata(older, false), nodeOnly)),
+            TokenTailCompression.historyTokens(listOf(older, nodeOnly)))
+        assertEquals(output, (older.blocks.single() as MessageBlock.Tool).result)
+        assertEquals(output, (newest.blocks.single() as MessageBlock.Tool).result)
+    }
+
+    @Test fun wrongToolsMalformedScreensAndRealMetadataStillConsumeTextCapacity() {
+        val output = receipt(largePng())
+        val invalid = listOf(
+            history(output, name = "business"),
+            history(output, arguments = "{\"operation\":\"tap\"}"),
+            history(JSONObject(output).put("visual_actions_available", false).toString()),
+            history(JSONObject(output).put("width", 5).toString()),
+            history(JSONObject(output).put("data_base64", "x".repeat(1_800_000)).toString()),
+            history(JSONObject(output).put("extra", "x".repeat(1_200_000)).toString())
+        )
+        invalid.forEach { assertTrue(TokenTailCompression.messageTokens(it) > 267904) }
+        assertTrue(TokenTailCompression.messageTokens(history("x".repeat(1_200_000), name = "read")) > 267904)
+    }
+
     @Test fun nativeChatLargePngUsesOnlyTheBoundedNativeReceiptAllowance() {
         val large = largePng()
         assertNotNull(NativeScreenImage.parse("screen", args, receipt(large)))
@@ -390,6 +447,9 @@ class ScreenToolImageInputTest {
             val assistant = user.copy(id = MessageId("assistant"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
             database.send(user, assistant)
             val output = receipt(largePng())
+            val capacity = ProductionRunContext(CompressionPolicy(true, 272000, reserveTokens = 4096),
+                assistant, null, automatic = false)
+            assertTrue(capacity.localTokens(listOf(user, assistant.copy(blocks = history(output).blocks)), emptyList()) < capacity.sendBudgetTokens)
             var posts = 0; var actions = 0
             val port = ResponsesModel(settings(ProviderProtocol.RESPONSES), {
                 Connection(when (posts++) {
@@ -419,7 +479,7 @@ class ScreenToolImageInputTest {
                     }
                     else -> error("unexpected tool")
                 }
-            }, RunnerOptions(runtimeStore = recording)) {}
+            }, RunnerOptions(runtimeStore = recording, contextRuntime = capacity)) {}
             if (failProtocolCommit) {
                 assertThrows(Exception::class.java) { runner.startSlice(assistant, listOf(user)) }
                 val kept = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
@@ -435,6 +495,7 @@ class ScreenToolImageInputTest {
                 assertEquals(completed.message, database.messages(conversation).last().second)
                 val saved = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
                 assertEquals(saved, store.readCommittedCheckpoint(saved))
+                assertNull(saved.context!!.capacity)
                 assertEquals(output, (saved.message.blocks.first() as MessageBlock.Tool).result)
                 assertTrue(saved.message.historySegments.any { it.protocolItems.any { raw -> raw.length > 1_000_000 } })
                 val backup = database.exportConversationBackup(conversation)

@@ -1,12 +1,13 @@
 package app.daiyu.android.context
 
 import app.daiyu.android.domain.*
+import app.daiyu.android.media.NativeScreenImage
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.ceil
 import kotlin.math.roundToLong
 
-/** Compression-only pricing and logical boundaries; send-capacity accounting remains independent. */
+/** Local input units for token-tail selection and send-capacity checks, not billed usage. */
 internal object TokenTailCompression {
     fun textTokens(text: String): Long {
         if (text.isEmpty()) return 0
@@ -23,26 +24,42 @@ internal object TokenTailCompression {
         return (cjk * 1.5 + other * 0.25).roundToLong().coerceAtLeast(1)
     }
 
-    fun messageTokens(message: Message): Long {
-        var total = 3L
-        message.blocks.forEach { block -> total += when (block) {
-            is MessageBlock.Text -> textTokens(block.text)
-            is MessageBlock.Image -> {
-                val image = block.reference
-                val scale = minOf(1.0, 2048.0 / maxOf(image.width, image.height))
-                maxOf(85L, (ceil(image.width * scale / 32) * ceil(image.height * scale / 32)).toLong())
-            }
-            is MessageBlock.Tool -> {
-                val call = JSONArray().put(JSONObject().put("id", block.invocation.id.value)
-                    .put("type", "function").put("function", JSONObject().put("name", block.invocation.name)
-                        .put("arguments", block.invocation.arguments)))
-                textTokens(call.toString()) + (block.result?.let { result ->
-                    3 + textTokens(block.invocation.id.value) + textTokens(result)
-                } ?: 0L)
-            }
-        } }
-        // Encrypted/signature protocol state is deliberately not priced as ordinary text.
-        return total
+    fun imageTokens(width: Int, height: Int): Long {
+        val scale = minOf(1.0, 2048.0 / maxOf(width, height))
+        return maxOf(85L, (ceil(width * scale / 32) * ceil(height * scale / 32)).toLong())
+    }
+
+    fun messageTokens(message: Message): Long = historyTokens(listOf(message))
+
+    fun historyTokens(history: List<Message>): Long = messageWeights(history).sum()
+
+    private fun messageWeights(history: List<Message>): List<Long> {
+        // The wire projection attaches only the latest screen result. Even a newer node-only
+        // result retires the older image, while every receipt remains in canonical history.
+        val latestScreen = history.asReversed().firstNotNullOfOrNull { message ->
+            message.blocks.lastOrNull { it is MessageBlock.Tool && it.invocation.name == "screen" && it.result != null }
+        }
+        return history.map { message ->
+            3L + message.blocks.sumOf { block -> when (block) {
+                is MessageBlock.Text -> textTokens(block.text)
+                is MessageBlock.Image -> imageTokens(block.reference.width, block.reference.height)
+                is MessageBlock.Tool -> {
+                    val call = JSONArray().put(JSONObject().put("id", block.invocation.id.value)
+                        .put("type", "function").put("function", JSONObject().put("name", block.invocation.name)
+                            .put("arguments", block.invocation.arguments)))
+                    textTokens(call.toString()) + (block.result?.let { result ->
+                        val image = NativeScreenImage.parse(block.invocation.name, block.invocation.arguments, result)
+                        val attached = image != null && block === latestScreen
+                        val output = if (image == null) result else JSONObject(image.metadata).apply {
+                            if (attached) put("image_attached", true) else put("image_omitted", "superseded_screen")
+                        }.toString()
+                        val pixels = if (image != null && attached)
+                            imageTokens(image.width, image.height) + textTokens(image.inputLabel(block.invocation.id.value)) else 0L
+                        3 + textTokens(block.invocation.id.value) + textTokens(output) + pixels
+                    } ?: 0L)
+                }
+            } }
+        }
     }
 
     fun localBudget(budget: Long, billed: Long?, local: Long?): Long {
@@ -67,11 +84,12 @@ internal object TokenTailCompression {
         local: Long? = null, overflow: Boolean = false): Int {
         if (history.size < 2 || window == null || window <= 0) return 0
         val cuts = availableCuts(history)
+        val weights = messageWeights(history)
         fun start(budget: Long): Int {
             var total = 0L
             var from = history.lastIndex
             for (index in history.indices.reversed()) {
-                total += messageTokens(history[index]); from = index
+                total += weights[index]; from = index
                 if (total >= budget.coerceAtLeast(1)) break
             }
             return cuts.lastOrNull { it <= from && it < history.size } ?: 0
@@ -79,7 +97,7 @@ internal object TokenTailCompression {
         val budget = localBudget(if (overflow) 1 else maxOf(1, window * 16 / 100), billed, local)
         var cut = start(budget)
         if (cut <= 0) cut = if (overflow) start(1) else {
-            val half = history.sumOf(::messageTokens) / 2
+            val half = weights.sum() / 2
             start(half.coerceAtLeast(1)).takeIf { it > 0 } ?: start(1)
         }
         if (history.any(::hasOpaque)) {

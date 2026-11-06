@@ -11,6 +11,9 @@ internal class NativeScreenImage private constructor(
     val height: Int,
     val metadata: String,
 ) {
+    fun inputLabel(callId: String): String =
+        "screen工具图像（call_id=$callId），坐标使用原始${width}×${height}像素。"
+
     companion object {
         const val MAX_BYTES = 8 * 1024 * 1024
         const val MAX_RESULT_CHARS = MAX_BYTES * 4 / 3 + 4096

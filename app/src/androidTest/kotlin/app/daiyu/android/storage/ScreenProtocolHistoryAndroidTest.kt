@@ -3,6 +3,10 @@ package app.daiyu.android.storage
 import android.graphics.Bitmap
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.context.CompressionPolicy
+import app.daiyu.android.context.ProductionRunContext
+import app.daiyu.android.context.TokenTailCompression
+import app.daiyu.android.model.ResponsesModel
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.testContext
 import org.json.JSONObject
@@ -20,7 +24,7 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
         val image = ByteArrayOutputStream().use { stream ->
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)); bitmap.recycle(); stream.toByteArray()
         }
-        val data = ByteArray(1_280_000)
+        val data = ByteArray(1_360_000)
         val type = "raNd".toByteArray(Charsets.US_ASCII)
         val crc = CRC32().apply { update(type); update(data) }.value.toInt()
         val chunk = ByteArrayOutputStream().apply {
@@ -137,6 +141,82 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             runtime?.close(); database.close(); context.deleteDatabase("conversations.db")
         }
     }
+    fun testLargeObserveReceiptPassesProductionCapacityBeforeNativeContinuationAdmission() {
+        for (billed in listOf(false, true)) {
+            val context = testContext(instrumentation.targetContext, "screen-capacity-${UUID.randomUUID()}-")
+            val database = ConversationDatabase(context)
+            var store: SQLiteRuntimeStore? = null
+            var runner: ChatRunner? = null
+            val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {
+                val runtime = SQLiteRuntimeStore.acquire(database).also { store = it; it.recoverPending() }
+                val conversation = database.create("default").id
+                val user = Message(MessageId("user"), conversation, RunId("run"), "user",
+                    listOf(MessageBlock.Text("question", "synthetic screen task")), RunStatus.COMPLETED)
+                val assistant = user.copy(id = MessageId("assistant"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
+                database.send(user, assistant)
+                val args = "{\"operation\":\"observe\"}"
+                val output = JSONObject(output()).put("screen_read_mode", "visual_fallback")
+                    .put("node_tree_available", false).put("node_failure_code", "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")
+                    .put("visual_actions_available", true).toString()
+                assertTrue(JSONObject(output).getString("data_base64").length >= 1_800_000)
+                val capacity = ProductionRunContext(CompressionPolicy(true, 272000, reserveTokens = 4096),
+                    assistant, null, automatic = false)
+                val call = ToolInvocation(ToolCallId("screen"), "screen", args)
+                assertTrue(TokenTailCompression.textTokens(output) > capacity.sendBudgetTokens)
+                assertTrue(capacity.localTokens(listOf(user, assistant.copy(blocks = listOf(MessageBlock.Tool(call, output)))), emptyList()) < capacity.sendBudgetTokens)
+                var posts = 0; var tools = 0
+                val sent = mutableListOf<ByteArrayOutputStream>()
+                val model = ResponsesModel(ModelSettings("https://example.invalid/v1/responses", "synthetic", "synthetic-key", false), {
+                    val turn = posts++
+                    val item = JSONObject().put("type", "function_call").put("id", "fc").put("call_id", "screen")
+                        .put("name", "screen").put("arguments", args)
+                    val response = JSONObject().put("status", "completed").put("output", org.json.JSONArray().apply { if (turn == 0) put(item) })
+                    if (billed) response.put("usage", JSONObject().put("input_tokens", 12508).put("output_tokens", 22))
+                    val events = (if (turn == 0) "data: ${JSONObject().put("type", "response.output_item.done").put("item", item)}\n\n" else "") +
+                        "data: ${JSONObject().put("type", "response.completed").put("response", response)}\n\n"
+                    val buffer = ByteArrayOutputStream().also(sent::add)
+                    object : javax.net.ssl.HttpsURLConnection(java.net.URL("https://example.invalid/fixture")) {
+                        override fun connect() {}
+                        override fun disconnect() {}
+                        override fun usingProxy() = false
+                        override fun getCipherSuite() = "fixture"
+                        override fun getLocalCertificates(): Array<java.security.cert.Certificate>? = null
+                        override fun getServerCertificates(): Array<java.security.cert.Certificate> = emptyArray()
+                        override fun getOutputStream(): java.io.OutputStream {
+                            if (turn == 1) {
+                                val committed = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
+                                assertTrue(committed.requestUnconfirmed)
+                                assertNull(committed.context!!.capacity)
+                                assertEquals(output, (committed.message.blocks.single() as MessageBlock.Tool).result)
+                                assertEquals(ToolDisposition.SUCCEEDED, committed.tools.single().disposition)
+                            }
+                            return buffer
+                        }
+                        override fun getInputStream() = events.byteInputStream()
+                        override fun getResponseCode() = 200
+                        override fun getContentType() = "text/event-stream"
+                    }
+                }, true)
+                val active = ChatRunner(model, database, BatteryTool { invocation ->
+                    assertEquals(call, invocation); tools++; output
+                }, RunnerOptions(runtimeStore = runtime, contextRuntime = capacity)) {}.also { runner = it }
+                val future = executor.submit<Message> { active.run(assistant, listOf(user)) }
+                assertEquals(RunStatus.COMPLETED, future.get(30, java.util.concurrent.TimeUnit.SECONDS).status)
+                assertEquals(2, posts); assertEquals(1, tools)
+                val wire = sent.last().toString("UTF-8")
+                assertFalse(wire.contains("data_base64")); assertTrue(wire.contains("input_image"))
+                val saved = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)!!
+                assertNull(saved.context!!.capacity)
+                assertEquals(output, (database.messages(conversation).last().second.blocks.single() as MessageBlock.Tool).result)
+                assertEquals(output, saved.tools.single().result)
+            } finally {
+                runner?.stop(); executor.shutdownNow(); executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)
+                store?.close(); database.close(); context.deleteDatabase("conversations.db")
+            }
+        }
+    }
+
     fun testRealCheckpointSizedUtf8CountMatchesAndroidAndKeepsRecoveryReserve() {
         val payload = "x".repeat(13_578_756)
         repeat(8) {

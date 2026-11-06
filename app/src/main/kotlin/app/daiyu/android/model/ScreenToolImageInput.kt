@@ -83,7 +83,7 @@ internal object ScreenToolImageInput {
         }
         if (selected != null && imageBlock != null) {
             val location = selected.first
-            val label = "screen工具图像（call_id=${location.receipt.id}），坐标使用原始${selected.second.width}×${selected.second.height}像素。"
+            val label = selected.second.inputLabel(location.receipt.id)
             val textType = if (protocol == ProviderProtocol.RESPONSES) "input_text" else "text"
             val blocks = JSONArray().put(JSONObject().put("type", textType).put("text", label)).put(imageBlock)
             // Complete the whole adjacent tool-result batch before adding the image.

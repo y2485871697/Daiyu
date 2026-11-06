@@ -83,4 +83,16 @@ class StreamingHistoryRefreshTest {
         assertFalse(canOverlayLiveHistory(before, listOf(1L to historical, 2L to active.copy(runId = RunId("other"))), active))
     }
 
+    @Test fun idleWindowIsReadOncePerDataOrEditorRevisionAndRetriesAfterFailure() {
+        val refresh = StreamingHistoryRefresh()
+        assertTrue(refresh.needsRead(null, false, 1, 1, false))
+        repeat(10) { assertFalse(refresh.needsRead(null, false, 1, 1, false)) }
+        assertTrue(refresh.needsRead(null, true, 2, 1, false))
+        assertFalse(refresh.needsRead(null, true, 2, 1, false))
+        assertTrue(refresh.needsRead(null, true, 2, 2, false))
+        assertTrue(refresh.needsRead(null, true, 2, 2, true))
+        refresh.invalidate()
+        assertTrue(refresh.needsRead(null, true, 2, 2, false))
+    }
+
 }

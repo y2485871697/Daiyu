@@ -16,8 +16,12 @@ object MessageTimestampFormatter {
         enabled: Boolean = true,
         zone: ZoneId = ZoneId.systemDefault(),
     ): String {
+        return timestamp(message.createdAt, enabled, zone)
+    }
+
+    internal fun timestamp(createdAt: Long?, enabled: Boolean, zone: ZoneId = ZoneId.systemDefault()): String {
         if (!enabled) return ""
-        val time = message.createdAt ?: return ""
+        val time = createdAt ?: return ""
         return format.format(Instant.ofEpochMilli(time).atZone(zone))
     }
 }

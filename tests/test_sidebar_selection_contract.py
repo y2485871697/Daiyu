@@ -40,7 +40,9 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('selectedConversationId = pendingPaneConversationId ?: selected?.id?.value', host)
         selected = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('private fun sendDraft(', 1)[0]
         self.assertIn('prepared?.conversations ?: controller.database.conversations()', selected)
-        self.assertIn('prepared?.messages ?: controller.database.messages(conversation.id)', selected)
+        self.assertIn('shown = prepared?.messages.orEmpty().toMutableList()', selected)
+        self.assertIn('displayWindow = prepared?.display', selected)
+        self.assertNotIn('database.messages(', selected)
         self.assertLess(selected.index('paneState = paneState.copy(selectedConversationId = conversation?.id?.value)'),
                         selected.index('publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()'))
         pane = (SRC / 'ui/components/ConversationSidePaneScaffold.kt').read_text()

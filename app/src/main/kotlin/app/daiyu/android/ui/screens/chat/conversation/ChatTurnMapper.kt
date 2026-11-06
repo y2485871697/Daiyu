@@ -41,6 +41,64 @@ object ChatTurnMapper {
         val databaseOwners = messages.flatMap { owner -> owner.historySegments.map { segment ->
             TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
         } }.toMap()
+        return mapRows(history.map(::renderMessage), databaseOwners,
+            { message, block -> errors(requireNotNull(message.authoritative), block) },
+            { message, block -> states(requireNotNull(message.authoritative), block) },
+            { message, block -> dedicated(requireNotNull(message.authoritative), block) },
+            { message, block -> activity(requireNotNull(message.authoritative), block) },
+            { timestamp(requireNotNull(it.authoritative)) }, boundariesAfter,
+            { message, owner -> assistantIdentity(requireNotNull(message.authoritative), owner) }, presentations,
+            { messageVideos(requireNotNull(it.authoritative)) }, reconnects)
+    }
+
+    internal fun mapDisplay(window: app.daiyu.android.storage.MessageDisplayWindow,
+        timestamp: (Long?) -> String = { "" },
+        boundariesAfter: Set<String> = emptySet(),
+        reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect> = emptyList(),
+    ): List<ChatTurnUi> {
+        val rows = window.rows.map { it.second }
+        val supplements = rows.flatMap { owner -> owner.segments.filter { it.role == Message.USER_ROLE }.map {
+            Triple(owner.conversationId, owner.runId, it.messageId)
+        } }.toSet()
+        val originals = rows.associateBy { Triple(it.conversationId, it.runId, it.id) }
+        val owners = mutableMapOf<TurnOwner, String>()
+        val history = rows.flatMap { row ->
+            if (row.segments.isNotEmpty()) row.segments.map { segment ->
+                owners[TurnOwner(row.conversationId.value, row.runId.value, segment.messageId.value)] = row.id.value
+                RenderMessage(segment.messageId, row.conversationId, row.runId, segment.role, segment.blocks,
+                    if (segment.role == Message.USER_ROLE) RunStatus.COMPLETED else row.status,
+                    if (segment.role == Message.USER_ROLE) null else row.error,
+                    segment.createdAt ?: originals[Triple(row.conversationId, row.runId, segment.messageId)]?.createdAt,
+                    segment.reportedReasoning)
+            } else if (Triple(row.conversationId, row.runId, row.id) in supplements) emptyList()
+            else listOf(RenderMessage(row.id, row.conversationId, row.runId, row.role, row.blocks, row.status,
+                row.error, row.createdAt, emptyList()))
+        }
+        return mapRows(history, owners, { _, _ -> null }, { _, _ -> null }, { _, _ -> null },
+            { _, _ -> null }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, null,
+            { emptyList() }, reconnects)
+    }
+
+    private data class RenderMessage(val id: app.daiyu.android.domain.MessageId,
+        val conversationId: app.daiyu.android.domain.ConversationId, val runId: app.daiyu.android.domain.RunId,
+        val role: String, val blocks: List<MessageBlock>, val status: RunStatus, val error: String?,
+        val createdAt: Long?, val reportedReasoning: List<app.daiyu.android.domain.ReportedReasoning>,
+        val authoritative: Message? = null)
+
+    private fun renderMessage(message: Message) = RenderMessage(message.id, message.conversationId,
+        message.runId, message.role, message.blocks, message.status, message.error, message.createdAt,
+        message.reportedReasoning, message)
+
+    private fun mapRows(history: List<RenderMessage>, databaseOwners: Map<TurnOwner, String>,
+        errors: (RenderMessage, MessageBlock.Tool) -> Boolean?,
+        states: (RenderMessage, MessageBlock.Tool) -> WorkStepState?,
+        dedicated: (RenderMessage, MessageBlock.Tool) -> String?,
+        activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi?,
+        timestamp: (RenderMessage) -> String, boundariesAfter: Set<String>,
+        assistantIdentity: (RenderMessage, String) -> app.daiyu.android.assistants.AssistantReplyIdentity?,
+        presentations: ToolPresentationCache?, messageVideos: (RenderMessage) -> List<MessageVideoUi>,
+        reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>,
+    ): List<ChatTurnUi> {
         val nextSegment = mutableMapOf<TurnOwner, Int>()
         val nextOffset = mutableMapOf<TurnOwner, Long>()
         val display = mutableListOf<DisplayMessage>()
@@ -48,12 +106,16 @@ object ChatTurnMapper {
             val positionedReconnect = reconnects.any { it.position != null &&
                 it.anchor.conversationId == original.conversationId.value && it.anchor.runId == original.runId.value &&
                 it.anchor.messageId == original.id.value }
-            val message = if (positionedReconnect) original else normalizeCompletedReasoning(original)
+            val message = if (positionedReconnect) original else original.authoritative?.let(::normalizeCompletedReasoning)?.let(::renderMessage) ?: original
             val owner = TurnOwner(message.conversationId.value, message.runId.value, message.id.value)
             val segment = nextSegment[owner] ?: 0
             nextSegment[owner] = segment + 1
             val start = nextOffset[owner] ?: 0L
-            nextOffset[owner] = start + app.daiyu.android.timeline.ReconnectPosition.size(original)
+            nextOffset[owner] = start + original.blocks.sumOf { block -> when (block) {
+                is MessageBlock.Text -> block.text.length.toLong()
+                is MessageBlock.Tool -> 1L
+                is MessageBlock.Image -> 1L
+            } } + original.reportedReasoning.sumOf { it.text.length.toLong() }
             val previous = display.lastOrNull()
             // Protocol snapshots and their raw-free live tail are one visual workflow, not
             // separate model replies. Keep durable history/action targets unchanged.
@@ -68,7 +130,11 @@ object ChatTurnMapper {
                     message = prior.message.copy(blocks = prior.message.blocks + message.blocks,
                         reportedReasoning = prior.message.reportedReasoning + message.reportedReasoning.map {
                             it.copy(blockOffset = (it.blockOffset ?: 0) + offset)
-                        }),
+                        }, authoritative = prior.message.authoritative?.let { original -> original.copy(
+                            blocks = prior.message.blocks + message.blocks,
+                            reportedReasoning = prior.message.reportedReasoning + message.reportedReasoning.map {
+                                it.copy(blockOffset = (it.blockOffset ?: 0) + offset)
+                            }) }),
                     segments = prior.segments + segment, keys = prior.keys + owner.listKey(segment))
             } else display += DisplayMessage(message, owner, listOf(segment), listOf(owner.listKey(segment)), start)
         }
@@ -160,7 +226,7 @@ object ChatTurnMapper {
         }
     }
 
-    private data class DisplayMessage(val message: Message, val owner: TurnOwner,
+    private data class DisplayMessage(val message: RenderMessage, val owner: TurnOwner,
         val segments: List<Int>, val keys: List<String>, val start: Long)
 
     /**
@@ -177,11 +243,11 @@ object ChatTurnMapper {
     }
 
     /** Legacy text-only layout remains unchanged; mixed content is authoritative when set. */
-    private fun mixedContent(message: Message,
-        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
-        toolState: (Message, MessageBlock.Tool) -> WorkStepState?,
-        dedicatedTool: (Message, MessageBlock.Tool) -> String?,
-        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
+    private fun mixedContent(message: RenderMessage,
+        confirmedToolError: (RenderMessage, MessageBlock.Tool) -> Boolean?,
+        toolState: (RenderMessage, MessageBlock.Tool) -> WorkStepState?,
+        dedicatedTool: (RenderMessage, MessageBlock.Tool) -> String?,
+        activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi?,
         integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool },
         presentations: ToolPresentationCache? = null,
         videos: List<MessageVideoUi> = emptyList(),
@@ -208,7 +274,7 @@ object ChatTurnMapper {
         }
     }
 
-    private fun workflowFinalTextIndex(message: Message): Int {
+    private fun workflowFinalTextIndex(message: RenderMessage): Int {
         val lastTool = message.blocks.indexOfLast { it is MessageBlock.Tool }
         val lastReasoning = message.reportedReasoning.filter {
             hasReportedReasoningText(it.text) || it.activeSinceNanos != null
@@ -217,11 +283,11 @@ object ChatTurnMapper {
         return (start until message.blocks.size).firstOrNull { message.blocks[it] is MessageBlock.Text } ?: -1
     }
 
-    private fun reasoningAtBoundaries(message: Message) = message.reportedReasoning
+    private fun reasoningAtBoundaries(message: RenderMessage) = message.reportedReasoning
         .filter { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
         .groupBy { it.blockOffset ?: 0 }
 
-    private fun workStep(message: Message, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?): WorkStepUi {
+    private fun workStep(message: RenderMessage, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?): WorkStepUi {
         val display = presentations?.present(block) ?: ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
         return WorkStepUi(
             id = block.invocation.id.value, name = display.title, detail = display.summary,
@@ -246,11 +312,11 @@ object ChatTurnMapper {
         )
     }
 
-    private fun mapAssistant(message: Message, timestamp: String,
-        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
-        toolState: (Message, MessageBlock.Tool) -> WorkStepState?,
-        dedicatedTool: (Message, MessageBlock.Tool) -> String?,
-        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?,
+    private fun mapAssistant(message: RenderMessage, timestamp: String,
+        confirmedToolError: (RenderMessage, MessageBlock.Tool) -> Boolean?,
+        toolState: (RenderMessage, MessageBlock.Tool) -> WorkStepState?,
+        dedicatedTool: (RenderMessage, MessageBlock.Tool) -> String?,
+        activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi?,
         presentations: ToolPresentationCache?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val hasWorkflow = hasTools || message.reportedReasoning.any { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }

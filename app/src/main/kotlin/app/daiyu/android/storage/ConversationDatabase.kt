@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 31), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 32), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -53,6 +53,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         AssistantReplyIdentities.install(db)
         app.daiyu.android.timeline.ChatTimelineStore.install(db)
         UsageStatisticsStore.install(db)
+        MessageDisplayStore.install(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
         SQLiteGenerationAttemptStore.installSchema(db)
@@ -63,7 +64,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..30 && newVersion == 31) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..31 && newVersion == 32) { "不支持此数据库版本，保留原数据" }
         // Preserve installed receipts, including an authoritative empty v8 import.
         val needsUsageReceiptBackfill = !db.rawQuery(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -122,6 +123,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         UsageStatisticsStore.install(db)
         installWorkspaceBindings(db)
         ConversationModelSelections.install(db)
+        MessageDisplayStore.install(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
@@ -899,6 +901,16 @@ class ConversationDatabase internal constructor(context: Context, private val af
         put("created_at", message.createdAt)
     }
     private fun transaction(block:(SQLiteDatabase)->Unit) { val db=writableDatabase;db.beginTransaction();try {block(db);db.setTransactionSuccessful()} finally {db.endTransaction()} }
+    internal fun displayMessages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50): MessageDisplayWindow {
+        require(limit in 1..200)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val result = MessageDisplayStore.read(db, id, before, limit)
+            db.setTransactionSuccessful()
+            return result
+        } finally { db.endTransaction() }
+    }
     fun messages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50): List<Pair<Long,Message>> {
         require(limit in 1..200) {"分页数量须为1至200"}
         val db=readableDatabase

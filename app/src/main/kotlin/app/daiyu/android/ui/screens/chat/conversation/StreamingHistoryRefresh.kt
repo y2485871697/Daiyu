@@ -5,19 +5,20 @@ import app.daiyu.android.domain.RunStatus
 
 /** Text/tool/reasoning updates already arrive through the live owner, not a DB reload. */
 internal class StreamingHistoryRefresh {
-    private data class Key(val conversation: String, val run: String, val message: String,
+    private data class Key(val conversation: String?, val run: String?, val message: String?, val status: RunStatus?,
         val data: Long, val editor: Long, val userSegments: List<String>)
     private var previous: Key? = null
 
     fun invalidate() { previous = null }
 
     fun needsRead(active: Message?, loaded: Boolean, data: Long, editor: Long, force: Boolean): Boolean {
-        val key = active?.takeIf { it.status == RunStatus.RUNNING && it.role == Message.ASSISTANT_ROLE }?.let {
-            Key(it.conversationId.value, it.runId.value, it.id.value, data, editor,
+        val key = active?.let {
+            Key(it.conversationId.value, it.runId.value, it.id.value, it.status, data, editor,
                 it.historySegments.filter { segment -> segment.role == Message.USER_ROLE }.map { segment -> segment.messageId.value })
         }
-        val read = force || !loaded || key == null || key != previous
-        previous = key
+        val current = key ?: Key(null, null, null, null, data, editor, emptyList())
+        val read = force || active != null && !loaded || current != previous
+        previous = current
         return read
     }
 }

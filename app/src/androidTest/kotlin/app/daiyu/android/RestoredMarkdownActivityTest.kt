@@ -214,6 +214,58 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testDisplayPublishesRealBodyAndDraftWhileAuthorityReadIsBlocked() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val readerField = MainActivity::class.java.getDeclaredField("loadedWindowReader").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val reader = readerField.get(activity) as (ConversationId, Long, Int) -> List<Pair<Long, Message>>
+        val ready = MainActivity::class.java.getDeclaredField("selectionReady").apply { isAccessible = true }
+        val shown = MainActivity::class.java.getDeclaredField("shown").apply { isAccessible = true }
+        val display = MainActivity::class.java.getDeclaredField("displayWindow\$delegate").apply { isAccessible = true }
+        val stateField = MainActivity::class.java.getDeclaredField("chatState\$delegate").apply { isAccessible = true }
+        fun state() = (stateField.get(activity) as androidx.compose.runtime.MutableState<*>).value as
+            app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+        mainThread {
+            val blocked: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, limit ->
+                entered.countDown()
+                check(release.await(60, TimeUnit.SECONDS))
+                reader(id, before, limit)
+            }
+            readerField.set(activity, blocked)
+            ready.setBoolean(activity, false)
+            MainActivity::class.java.getDeclaredMethod("refresh").apply { isAccessible = true }.invoke(activity)
+        }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            ui.waitUntil(5_000) { ui.onAllNodesWithText(rendered, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            ui.onNodeWithText(rendered, useUnmergedTree = true).assertIsDisplayed()
+            ui.onAllNodesWithText("加载会话中", useUnmergedTree = true).assertCountEquals(0)
+            lateinit var keys: List<String>
+            var scroll = 0L
+            mainThread {
+                assertTrue(ready.getBoolean(activity))
+                assertNotNull((display.get(activity) as androidx.compose.runtime.MutableState<*>).value)
+                assertTrue((shown.get(activity) as List<*>).isEmpty())
+                keys = state().turns.map { it.listKey }
+                scroll = state().scrollRequest!!.serial
+            }
+            node("chat-draft").performTextReplacement("edited while history is loading")
+            release.countDown()
+            awaitControl("authoritative window takes over") { (display.get(activity) as androidx.compose.runtime.MutableState<*>).value == null }
+            mainThread {
+                assertEquals(keys, state().turns.map { it.listKey })
+                assertEquals(scroll, state().scrollRequest!!.serial)
+                assertEquals("edited while history is loading", state().composer.text)
+            }
+            assertEquals(original, fixture.database.messages(conversation.id))
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            release.countDown()
+            mainThread { readerField.set(activity, reader) }
+        }
+    }
+
     private fun largeScreenOutput(): String {
         val bitmap = android.graphics.Bitmap.createBitmap(1216, 2640, android.graphics.Bitmap.Config.ARGB_8888)
         val image = java.io.ByteArrayOutputStream().use { stream ->

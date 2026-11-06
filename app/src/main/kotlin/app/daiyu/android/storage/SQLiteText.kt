@@ -14,6 +14,7 @@ internal object SQLiteText {
         require(table == "messages" && key == "id" && column in setOf("blocks", "protocol", "history_segments", "error") ||
             table == "runtime_checkpoints" && key == "message_id" && column == "payload" ||
             table == "message_video_inputs" && key == "message_id" && column == "payload" ||
+            table == "message_display" && key == "message_id" && column == "payload" ||
             table in setOf("composer", "conversations") && key == "id" && column == "draft")
         require(maxBytes in 1..(64L * 1024 * 1024))
         val initial = db.rawQuery("SELECT length(CAST($column AS BLOB)),substr(CAST($column AS BLOB),1,$CHUNK_BYTES) FROM $table WHERE $key=?",

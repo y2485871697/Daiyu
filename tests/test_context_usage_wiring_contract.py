@@ -65,8 +65,10 @@ class ContextUsageWiringContractTest(unittest.TestCase):
     def test_recovery_read_is_rearmed_by_ready_without_polling_or_writes(self):
         helper = text('ui/screens/chat/conversation/ChatContextUsage.kt')
         self.assertIn('phase: ComposerPhase, ready: Boolean', helper)
-        self.assertIn('phase, ready)', helper)
-        self.assertIn('if (!ready) return@LaunchedEffect', helper)
+        self.assertIn('phase, ready, active)', helper)
+        self.assertIn('active: Boolean = true', helper)
+        self.assertIn('if (!ready || !active) return@LaunchedEffect', helper)
+        self.assertIn('active = displayWindow == null', text('MainActivity.kt'))
         self.assertIn('ready = controller.ready', text('MainActivity.kt'))
         for forbidden in ('delay(', '.save(', 'while (', 'NonCancellable'):
             self.assertNotIn(forbidden, helper)

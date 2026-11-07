@@ -11,7 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
-/** Wire-only projection: keep exact receipts in history, but send pixels as native image input. */
+/** Wire-only pixels: a consumed tool image never becomes a new history attachment. */
 internal object ScreenToolImageInput {
     private data class Call(val name: String, val arguments: String)
     private data class Receipt(val id: String, val call: Call, val output: String)
@@ -25,7 +25,12 @@ internal object ScreenToolImageInput {
         prepare(request, sourceRows, settings, capability, existingImageBytes, cancelled).request
 
     fun prepare(request: JSONObject, sourceRows: JSONArray, settings: ModelSettings, capability: Boolean?,
-        existingImageBytes: List<Int>, cancelled: () -> Boolean): Projection {
+        existingImageBytes: List<Int>, cancelled: () -> Boolean): Projection =
+        prepare(request, sourceRows, settings, capability, existingImageBytes, cancelled, null, null)
+
+    fun prepare(request: JSONObject, sourceRows: JSONArray, settings: ModelSettings, capability: Boolean?,
+        existingImageBytes: List<Int>, cancelled: () -> Boolean,
+        readAsset: ((String, String) -> ByteArray?)?, pendingCallIds: Set<String>?): Projection {
         val protocol = settings.protocol
         val key = when (protocol) {
             ProviderProtocol.RESPONSES -> "input"
@@ -36,19 +41,32 @@ internal object ScreenToolImageInput {
         val rows = request.optJSONArray(key) ?: return Projection(request, emptyMap())
         val sources = collect(sourceRows, protocol).map { it.receipt }.toSet()
         val metadata = mutableListOf<Metadata>()
-        var latest: Pair<Located, NativeScreenImage>? = null
+        var latest: Located? = null
         for (location in collect(rows, protocol)) {
             if (cancelled()) throw app.daiyu.android.media.ImageAttachmentException(
                 app.daiyu.android.media.ImageAttachmentFailure.CANCELLED)
             if (location.receipt.call.name != "screen") continue
             latest = null
             if (location.receipt !in sources) continue // Custom body cannot manufacture an image authority.
-            val image = NativeScreenImage.parse("screen", location.receipt.call.arguments, location.receipt.output) ?: continue
-            metadata += Metadata(location, image.metadata)
-            latest = location to image
+            val output = location.receipt.output
+            val value = if (runCatching { JSONObject(output).has("image_asset") }.getOrDefault(false))
+                NativeScreenImage.metadata("screen", location.receipt.call.arguments, output)
+            else NativeScreenImage.parse("screen", location.receipt.call.arguments, output)?.metadata
+            if (value == null) continue
+            metadata += Metadata(location, value)
+            latest = location
         }
         if (metadata.isEmpty()) return Projection(request, emptyMap())
-        val selected = latest
+        val candidate = latest?.takeIf { location ->
+            (pendingCallIds == null || location.receipt.id in pendingCallIds) &&
+            (location.row + 1 until rows.length()).all { isResultRow(rows.getJSONObject(it), protocol) }
+        }
+        val selected = candidate?.let { location ->
+            NativeScreenImage.parse("screen", location.receipt.call.arguments, location.receipt.output) { receipt ->
+                readAsset?.invoke(location.receipt.id, receipt)
+            }?.let { image -> location to image }
+                ?: throw IllegalStateException("屏幕图片读取失败，请重新观察屏幕")
+        }
         val imageBlock = selected?.let { (_, image) ->
             require(protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) {
                 "当前协议尚不支持屏幕图片输入"
@@ -70,7 +88,7 @@ internal object ScreenToolImageInput {
             val row = projectedRows.getJSONObject(item.location.row)
             val content = JSONObject(item.value).apply {
                 if (item.location == selected?.first) put("image_attached", true)
-                else put("image_omitted", "superseded_screen")
+                else put("image_omitted", if (candidate == null) "consumed_screen" else "superseded_screen")
             }.toString()
             when (protocol) {
                 ProviderProtocol.RESPONSES -> row.put("output", content)

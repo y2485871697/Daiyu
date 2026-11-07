@@ -67,6 +67,7 @@ internal class RunCatalogTools(
     // and only after the parent Runner's durable admission. Text-only tools are unchanged.
     private val onCatalogReady: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> Unit)? = null,
     private val gui: GuiRunSession? = null,
+    private val screenImages: app.daiyu.android.media.ScreenToolImageStore? = null,
     private val observeGuiClose: (GuiRunSession, (RunCatalogCloseResult) -> Unit) -> Unit = ::observeGuiDrain,
     private val mcp: app.daiyu.android.mcp.McpRunScope? = null,
     private val liveMcp: app.daiyu.android.mcp.McpLiveScope? = null,
@@ -287,7 +288,7 @@ internal class RunCatalogTools(
                 commands?.tools()?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
                 ordinary.flatMap { it.tools }.forEach { registry.register(it) }
-                gui?.let { GuiScreenToolFactory.create(it).forEach { tool -> registry.register(tool) } }
+                gui?.let { GuiScreenToolFactory.create(it, screenImages).forEach { tool -> registry.register(tool) } }
                 mcp?.registeredTools()?.forEach { registry.register(it) }
                 generation?.registeredTools?.forEach { registry.register(it) }
                 virtualDisplay?.registeredTools?.forEach { registry.register(it) }

@@ -114,7 +114,7 @@ class MessagesModel internal constructor(
                 assistantInstructions,
             )
             val screenInput = ScreenToolImageInput.prepare(request, messages, settings, capability,
-                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
+                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get, sessionContext?.screenImageReader, outputs.map { it.callId.value }.toSet())
             request = screenInput.request
             ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else request.opt("model") as? String)
@@ -124,10 +124,11 @@ class MessagesModel internal constructor(
             request = DaiyuPromptCaching.apply(request, settings.requestOptions.promptCacheRetention)
             val requestBytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
-            val deliver: (ModelEvent) -> Unit = { event ->
+            val eventBuffer = StreamEventBuffer({ event ->
                 checkCancelled()
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
-            }
+            })
+            val deliver: (ModelEvent) -> Unit = eventBuffer::accept
             var ownedConnection: HttpsURLConnection? = null
             var configuringRequest = true
             try {
@@ -171,7 +172,14 @@ class MessagesModel internal constructor(
                     pending = calls
                 }
                 checkCancelled()
-            } catch (failure: Exception) {
+            } catch (original: Exception) {
+                var failure = original
+                if (failure !== deliveryFailure && failure !is ModelDeliveryRejectedException && !cancelled.get()) {
+                    try { eventBuffer.flush() } catch (delivery: Exception) {
+                        if (delivery !== original) delivery.addSuppressed(original)
+                        failure = delivery
+                    }
+                } else eventBuffer.discard()
                 // Caller failures retain identity even when the sink also cancels the session.
                 if (failure === deliveryFailure) {
                     if (failure is ModelDeliveryRejectedException) retry.failed(failure) else retry.completed()

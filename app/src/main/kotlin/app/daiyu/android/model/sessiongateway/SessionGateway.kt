@@ -7,7 +7,8 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /** Captured only AFTER the durable conversation is resolved. Never a run or ModelSession ID. */
-data class SessionGatewayContext(val conversationId: ConversationId) {
+data class SessionGatewayContext(val conversationId: ConversationId,
+    val screenImageReader: ((callId: String, receipt: String) -> ByteArray?)? = null) {
     /** No trusted project identity is currently available. Do not synthesize one from the app name. */
     val project: String? get() = null
     override fun toString(): String = "SessionGatewayContext(conversationId=<redacted>, project=null)"

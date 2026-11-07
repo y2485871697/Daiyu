@@ -157,14 +157,14 @@ class ScreenToolImageInputTest {
             assertEquals(1, imageCount(projected)); assertFalse(projected.toString().contains("data_base64"))
         }
     }
-    @Test fun completedScreenshotHistoryReplaysPixelsWithoutPersistingProjectedImages() {
+    @Test fun completedScreenshotHistoryDoesNotReplayPixels() {
         protocols.forEach { protocol ->
             val output = receipt()
             val calls = mutableListOf<Connection>()
             val session = model(protocol, true) { Connection(events(protocol, false)).also(calls::add) }
                 .open(listOf(history(output)), listOf(definition))
             session.next(emptyList()) {}
-            assertEquals(1, imageCount(JSONObject(calls.single().sent.toString("UTF-8"))))
+            assertEquals(0, imageCount(JSONObject(calls.single().sent.toString("UTF-8"))))
             assertTrue(output.contains("data_base64")); session.cancel()
         }
     }
@@ -566,5 +566,68 @@ class ScreenToolImageInputTest {
 
     @Test fun responsesLargeScreenshotCommitsBeforeTheNextSyntheticActionAndRoundTripsBackup() = runnerStorage(false)
     @Test fun failedTailProtocolCommitPreservesReadyAndUsageWithoutExecutingOrReposting() = runnerStorage(true)
+
+    private fun modelWithImages(protocol: ProviderProtocol,
+        context: app.daiyu.android.model.sessiongateway.SessionGatewayContext,
+        connect: (URL) -> HttpsURLConnection): ModelPort = when (protocol) {
+        ProviderProtocol.RESPONSES -> ResponsesModel(settings(protocol), connect, true, sessionContext = context)
+        ProviderProtocol.MESSAGES -> MessagesModel(settings(protocol), 4096, connect, true, sessionContext = context)
+        else -> NativeCompletionModel(settings(protocol), connect, sessionContext = context, imageInputSupported = true)
+    }
+
+    @Test fun compactReceiptsUseThePrivateReaderInAllThreeProductionModels() {
+        val root = java.nio.file.Files.createTempDirectory("screen-assets").toFile()
+        try {
+            val store = app.daiyu.android.media.ScreenToolImageStore(root)
+            val bytes = png()
+            val output = store.receipt("c", "r", "call", app.daiyu.android.gui.GuiScreenshot("capture", 4, 3, bytes,
+                observationBound = false, visualPackage = "sample.app"), receipt(bytes))
+            protocols.forEach { protocol ->
+                var reads = 0
+                val context = app.daiyu.android.model.sessiongateway.SessionGatewayContext(ConversationId("c")) { call, value ->
+                    reads++; store.read("c", call, value, "r")
+                }
+                val calls = mutableListOf<Connection>()
+                val session = modelWithImages(protocol, context) {
+                    Connection(events(protocol, calls.isEmpty())).also(calls::add)
+                }.open(emptyList(), listOf(definition))
+                session.next(emptyList()) {}
+                val delivered = mutableListOf<ModelEvent>()
+                session.next(listOf(ToolOutput(ToolCallId("call"), output)), delivered::add)
+                assertEquals(1, reads)
+                val wire = JSONObject(calls.last().sent.toString("UTF-8"))
+                assertEquals(1, imageCount(wire)); assertFalse(wire.toString().contains("image_asset"))
+                val persisted = delivered.filterIsInstance<ModelEvent.ProtocolOutput>().last().items.joinToString()
+                assertTrue(persisted.contains("image_asset")); assertFalse(persisted.contains("data_base64"))
+                assertFalse(persisted.contains(Base64.getEncoder().encodeToString(bytes)))
+                session.cancel()
+                val historical = modelWithImages(protocol, context) { Connection(events(protocol, false)) }
+                    .open(listOf(history(output)), listOf(definition))
+                historical.next(emptyList()) {}; assertEquals(1, reads); historical.cancel()
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun historicalPixelsAreRemovedOnceFromEveryNewRunCopyWithoutEditingTheOriginal() {
+        val output = receipt(largePng())
+        protocols.forEach { protocol ->
+            val original = history(output)
+            val wire = rows(protocol, listOf(original))
+            val items = (0 until wire.length()).map { wire.getJSONObject(it).toString() }
+            val segment = MessageHistorySegment(original.id, original.role, original.blocks, items)
+            val source = original.copy(protocolItems = items, historySegments = listOf(segment))
+            val projected = app.daiyu.android.media.ScreenHistoryProjection.messages(listOf(source)).single()
+            assertTrue((source.blocks.single() as MessageBlock.Tool).result!!.contains("data_base64"))
+            assertFalse(projected.toString().contains("data_base64"))
+            assertTrue(projected.toString().contains("consumed_screen"))
+            MessageHistoryCodec.validate(projected)
+            assertEquals(listOf(projected), app.daiyu.android.media.ScreenHistoryProjection.messages(listOf(projected)))
+            val current = Message(MessageId("new"), ConversationId("c"), RunId("new-run"), "assistant", emptyList(), RunStatus.RUNNING)
+            val checkpoint = RunCheckpoint(current, listOf(projected), ExecutionPhase.STREAMING, owner = "owner", revision = 1)
+            val encoded = RunCheckpointCodec.encodeUtf8(checkpoint, app.daiyu.android.storage.CheckpointJsonWriter())
+            assertTrue(encoded.size < 8192); assertFalse(String(encoded, Charsets.UTF_8).contains("data_base64"))
+            assertEquals(checkpoint, RunCheckpointCodec.decode(String(encoded, Charsets.UTF_8)))
+        }
+    }
 
 }

@@ -23,8 +23,20 @@ internal object ResponsesStream {
     private fun decode(reader:BufferedReader, cancelled:()->Boolean, sink:(ModelEvent)->Unit):List<String> =
         State().read(reader, cancelled, sink)
 
-    /** Retained by one original request across POST/GET. State advances only after ACK. */
-    class State {
+    fun readBuffered(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit): List<String> {
+        var deliveryFailure: Exception? = null
+        try {
+            return State(bufferDeltas = true).read(reader, cancelled, { event ->
+                try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
+            })
+        } catch (failure: org.json.JSONException) {
+            if (failure === deliveryFailure) throw failure
+            throw ModelRequestException(ModelFailure.PROTOCOL)
+        }
+    }
+
+    /** Working deltas are bounded; only an accepted batch advances the resumable cursor. */
+    class State(private val bufferDeltas: Boolean = false, private val nanoTime: () -> Long = System::nanoTime) {
         var responseId: String? = null
             private set
         var acknowledgedSequence: Long? = null
@@ -53,12 +65,75 @@ internal object ResponsesStream {
             output?.let { put("output",org.json.JSONArray(it)) }
         }.toString()
 
+        private data class Memory(val id: String?, val sequence: Long?, val output: List<String>?,
+            val usage: ModelEvent.Usage?, val calls: Map<String, ToolInvocation>,
+            val parts: Map<String, java.util.SortedMap<Int, String>>,
+            val summaries: Map<String, java.util.SortedMap<Int, String>>,
+            val reasoningIds: Map<Int, String>, val aliases: Map<String, String>,
+            val pendingReasoning: Map<String, String>, val chars: Int)
+        private fun capture(): Memory {
+            fun copy(values: Map<String, java.util.SortedMap<Int, String>>) = values.mapValues { java.util.TreeMap(it.value) }
+            return Memory(responseId, acknowledgedSequence, output, usage, LinkedHashMap(calls), copy(parts), copy(summaries),
+                LinkedHashMap(reasoningIds), LinkedHashMap(reasoningAliases), LinkedHashMap(pendingReasoning), chars)
+        }
+        private fun restore(saved: Memory) {
+            responseId = saved.id; acknowledgedSequence = saved.sequence; output = saved.output; usage = saved.usage
+            calls.clear(); calls.putAll(saved.calls)
+            parts.clear(); parts.putAll(saved.parts)
+            summaries.clear(); summaries.putAll(saved.summaries)
+            reasoningIds.clear(); reasoningIds.putAll(saved.reasoningIds)
+            reasoningAliases.clear(); reasoningAliases.putAll(saved.aliases)
+            pendingReasoning.clear(); pendingReasoning.putAll(saved.pendingReasoning)
+            chars = saved.chars
+        }
+
         fun read(reader:BufferedReader, cancelled:()->Boolean, legacySink:(ModelEvent)->Unit = {},
                  prefix: List<String>? = null,
                  acknowledgedSink: ((ModelEventBatch)->ModelDeliveryAck)? = null):List<String> {
         check(!poisoned && output == null)
         val batch = mutableListOf<ModelEvent>()
-        val sink: (ModelEvent)->Unit = { event -> if (acknowledgedSink == null) legacySink(event) else batch.add(event) }
+        val sink: (ModelEvent)->Unit = batch::add
+        val pending = mutableListOf<ModelEvent>()
+        var base: Memory? = null
+        var tail: Long? = null
+        var pendingKey: String? = null
+        var pendingCharacters = 0
+        var pendingFrames = 0
+        var startedNanos = 0L
+        var deliveryFailure: Exception? = null
+        fun clearPending() { pending.clear(); base = null; tail = null; pendingKey = null; pendingCharacters = 0; pendingFrames = 0 }
+        fun discardPending() { base?.let(::restore); clearPending() }
+        fun flushPending() {
+            val saved = base ?: return
+            if (cancelled()) { discardPending(); throw InterruptedException() }
+            try {
+                if (acknowledgedSink != null) {
+                    val sequence = checkNotNull(tail)
+                    val checkpoint = TransportCheckpoint(responseId ?: throw ModelRequestException(ModelFailure.PROTOCOL),
+                        sequence, snapshot(sequence))
+                    if (acknowledgedSink(ModelEventBatch(pending.toList(), checkpoint)) != ModelDeliveryAck.ACCEPTED)
+                        throw ModelDeliveryRejectedException()
+                } else pending.forEach(legacySink)
+                acknowledgedSequence = tail ?: acknowledgedSequence
+                clearPending()
+            } catch (failure: Exception) {
+                deliveryFailure = failure
+                if (failure is ModelDeliveryRejectedException) restore(saved) else poisoned = true
+                clearPending()
+                throw failure
+            }
+        }
+        fun appendPending(event: ModelEvent) {
+            val last = pending.lastOrNull()
+            val replacement = when {
+                event is ModelEvent.TextFinal && last is ModelEvent.TextFinal && event.itemId == last.itemId &&
+                    event.text.startsWith(last.text) -> event
+                event is ModelEvent.ReasoningDelta && last is ModelEvent.ReasoningDelta && event.cumulative &&
+                    last.cumulative && event.itemId == last.itemId && event.text.startsWith(last.text) -> event
+                else -> null
+            }
+            if (replacement == null) pending.add(event) else pending[pending.lastIndex] = replacement
+        }
         fun index(event: JSONObject, key: String, fallback: Int = 0): Int {
             val value = event.opt(key)
             if (value == null || value === JSONObject.NULL) return fallback
@@ -143,9 +218,10 @@ internal object ResponsesStream {
             summaries[id]=finalContent
             sink(ModelEvent.ReasoningFinal(id,combined))
         }
+        try {
         SseReader.read(reader) { data ->
             if(cancelled()) throw InterruptedException()
-            if(data=="[DONE]") return@read false
+            if(data=="[DONE]") { flushPending(); return@read false }
             val event=try {JSONObject(data)} catch (_:org.json.JSONException) {throw ModelRequestException(ModelFailure.PROTOCOL)}
             if(!event.has("type")) throw ModelRequestException(ModelFailure.PROTOCOL)
             val seq = if(event.has("sequence_number")) {
@@ -153,20 +229,15 @@ internal object ResponsesStream {
                 checkProtocol(raw is Int || raw is Long)
                 (raw as Number).toLong()
             } else null
-            if (seq != null && acknowledgedSequence != null && seq <= acknowledgedSequence!!) return@read true
+            val seen = tail ?: acknowledgedSequence
+            if (seq != null && seen != null && seq <= seen) return@read true
             if (acknowledgedSink != null) checkProtocol(seq != null && seq >= 0)
+            val type = event.getString("type")
+            val deltaFrame = bufferDeltas && type in setOf("response.output_text.delta", "response.refusal.delta", "response.reasoning_summary_text.delta")
+            val key = if (deltaFrame) "$type:${event.optString("item_id")}:${event.optInt("content_index", 0)}:${event.optInt("summary_index", 0)}" else null
+            if (!deltaFrame || key != pendingKey) flushPending()
             batch.clear()
-            val savedId = responseId
-            val savedCalls = LinkedHashMap(calls)
-            fun copy(source: Map<String,java.util.SortedMap<Int,String>>) = source.mapValues { java.util.TreeMap(it.value) }
-            val savedParts = copy(parts)
-            val savedSummaries = copy(summaries)
-            val savedReasoningIds = LinkedHashMap(reasoningIds)
-            val savedReasoningAliases = LinkedHashMap(reasoningAliases)
-            val savedPendingReasoning = LinkedHashMap(pendingReasoning)
-            val savedChars = chars
-            val savedOutput = output
-            val savedUsage = usage
+            val saved = capture()
             val response = event.optJSONObject("response")
             if (acknowledgedSink != null && response != null && response.has("id")) {
                 val id = response.getString("id")
@@ -308,32 +379,40 @@ internal object ResponsesStream {
                     event.optJSONObject("response")?.optJSONObject("error") ?: event.optJSONObject("error") ?: event)
                 "response.incomplete" -> throw ModelRequestException(ModelFailure.INCOMPLETE)
             }
-            if (acknowledgedSink != null) {
-                val id = responseId ?: throw ModelRequestException(ModelFailure.PROTOCOL)
-                val checkpoint = TransportCheckpoint(id, checkNotNull(seq), snapshot(seq))
-                if (acknowledgedSink(ModelEventBatch(batch.toList(), checkpoint)) != ModelDeliveryAck.ACCEPTED)
-                    throw ModelDeliveryRejectedException()
-            }
-            acknowledgedSequence = seq ?: acknowledgedSequence
+            if (base == null) { base = saved; startedNanos = nanoTime() }
+            tail = seq
+            pendingKey = key
+            batch.forEach(::appendPending)
+            pendingFrames++
+            if (deltaFrame) pendingCharacters += event.getString("delta").length
+            if (!deltaFrame || pendingCharacters >= 512 || pendingFrames >= 512 || nanoTime() - startedNanos >= 250_000_000L)
+                flushPending()
             } catch (failure: Exception) {
-                if (failure is ModelDeliveryRejectedException) {
-                    // Explicit rejection is NOT an unknown commit. A paused/expired gate may
-                    // reject a decoded wire event; restore the last ACKed decoder state.
-                    responseId = savedId
-                    calls.clear(); calls.putAll(savedCalls)
-                    parts.clear(); parts.putAll(savedParts)
-                    summaries.clear(); summaries.putAll(savedSummaries)
-                    reasoningIds.clear(); reasoningIds.putAll(savedReasoningIds)
-                    reasoningAliases.clear(); reasoningAliases.putAll(savedReasoningAliases)
-                    pendingReasoning.clear(); pendingReasoning.putAll(savedPendingReasoning)
-                    chars = savedChars; output = savedOutput; usage = savedUsage
-                } else {
-                    // Unknown/failed consumers cannot be replayed safely. Fail closed.
-                    poisoned = true
+                if (failure !== deliveryFailure) {
+                    restore(saved)
+                    if (cancelled() || failure is InterruptedException || failure is java.util.concurrent.CancellationException) discardPending()
+                    else {
+                        try { flushPending() } catch (delivery: Exception) {
+                            if (delivery !== failure) delivery.addSuppressed(failure)
+                            throw delivery
+                        }
+                        poisoned = true
+                    }
                 }
                 throw failure
             }
             output==null
+        }
+        flushPending()
+        } catch (failure: Exception) {
+            if (failure !== deliveryFailure) {
+                if (cancelled() || failure is InterruptedException || failure is java.util.concurrent.CancellationException) discardPending()
+                else try { flushPending() } catch (delivery: Exception) {
+                    if (delivery !== failure) delivery.addSuppressed(failure)
+                    throw delivery
+                }
+            }
+            throw failure
         }
         if(cancelled()) throw InterruptedException()
         return output ?: throw ModelRequestException(if (acknowledgedSink != null) ModelFailure.NETWORK else ModelFailure.INCOMPLETE, transportInterrupted = true)

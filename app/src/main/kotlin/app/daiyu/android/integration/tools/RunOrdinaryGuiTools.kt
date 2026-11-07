@@ -10,7 +10,8 @@ import org.json.JSONObject
 import java.util.concurrent.CompletableFuture
 
 internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: TaskAuthorization,
-    private val location: RunScreenLocation) : RunOwnedToolScope(owner, authorization) {
+    private val location: RunScreenLocation,
+    private val screenImages: app.daiyu.android.media.ScreenToolImageStore? = null) : RunOwnedToolScope(owner, authorization) {
     @Volatile private var current: GuiRunSession? = null
     private var observation: GuiObservation? = null
     private var target: String? = null
@@ -33,7 +34,7 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                     if (observationId == null) { observation = null; capture = null }
                     if (screenshot) encode(session.dynamicScreenshot(observationId, context.cancelled)) { image ->
                         capture = image.visualPackage?.let { image.observationId to it }
-                        GuiScreenToolFactory.screenshotJson(image)
+                        GuiScreenToolFactory.screenshotReceipt(image, null, context, screenImages)
                     }
                     else encode(session.dynamicScreen(context.cancelled, GuiScreenToolFactory.maxNodes(arguments))) { result ->
                         when (result) {
@@ -43,7 +44,7 @@ internal class RunOrdinaryGuiTools(owner: RunExecutionOwner, authorization: Task
                             }
                             is GuiScreenRead.Visual -> {
                                 capture = result.image.visualPackage?.let { result.image.observationId to it }
-                                GuiScreenToolFactory.screenshotJson(result.image, result.nodeFailureCode)
+                                GuiScreenToolFactory.screenshotReceipt(result.image, result.nodeFailureCode, context, screenImages)
                             }
                         }
                     }

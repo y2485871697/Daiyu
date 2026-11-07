@@ -7,12 +7,12 @@ import app.daiyu.android.domain.runtime.ToolRecord
 
 /** Exact native screen protocol only. Paths, URLs and external tool bodies are never assets. */
 internal object ToolScreenshotReceipt {
-    fun decode(record: ToolRecord): Bitmap? = runCatching { decodePng(record) }.getOrNull()
+    fun decode(record: ToolRecord, readAsset: ((String) -> ByteArray?)? = null): Bitmap? = runCatching { decodePng(record, readAsset) }.getOrNull()
 
-    private fun decodePng(record: ToolRecord): Bitmap? {
+    private fun decodePng(record: ToolRecord, readAsset: ((String) -> ByteArray?)?): Bitmap? {
         if (record.disposition != ToolDisposition.SUCCEEDED) return null
         val image = app.daiyu.android.media.NativeScreenImage.parse(record.invocation.name,
-            record.invocation.arguments, record.result ?: return null) ?: return null
+            record.invocation.arguments, record.result ?: return null, readAsset) ?: return null
         val bytes = image.bytes
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)

@@ -48,13 +48,17 @@ internal object TokenTailCompression {
                         .put("type", "function").put("function", JSONObject().put("name", block.invocation.name)
                             .put("arguments", block.invocation.arguments)))
                     textTokens(call.toString()) + (block.result?.let { result ->
-                        val image = NativeScreenImage.parse(block.invocation.name, block.invocation.arguments, result)
+                        val metadata = if (result.contains("\"image_asset\""))
+                            NativeScreenImage.metadata(block.invocation.name, block.invocation.arguments, result)
+                        else NativeScreenImage.parse(block.invocation.name, block.invocation.arguments, result)?.metadata
+                        val image = metadata?.let(::JSONObject)
                         val attached = image != null && block === latestScreen
-                        val output = if (image == null) result else JSONObject(image.metadata).apply {
+                        val output = if (image == null) result else JSONObject(metadata).apply {
                             if (attached) put("image_attached", true) else put("image_omitted", "superseded_screen")
                         }.toString()
                         val pixels = if (image != null && attached)
-                            imageTokens(image.width, image.height) + textTokens(image.inputLabel(block.invocation.id.value)) else 0L
+                            imageTokens(image.getInt("width"), image.getInt("height")) + textTokens(
+                                "screen工具图像（call_id=${block.invocation.id.value}），坐标使用原始${image.getInt("width")}×${image.getInt("height")}像素。") else 0L
                         3 + textTokens(block.invocation.id.value) + textTokens(output) + pixels
                     } ?: 0L)
                 }

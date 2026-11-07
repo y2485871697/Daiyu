@@ -89,7 +89,7 @@ class ResponsesModel internal constructor(
         private val oauthRefresh: (app.daiyu.android.model.oauth.CodexAuth, String) -> Map<String, String>,
         private val summaryRequest: Boolean = false,
     ) : CheckpointedResumableModelSession, RequestRetryModelSession {
-        private var decoder = ResponsesStream.State()
+        private var decoder = ResponsesStream.State(bufferDeltas = true)
         private var resumeAllowed = false
         private var localSink: ((ModelEvent) -> Unit)? = null
         private var consumerFailure = false
@@ -264,7 +264,7 @@ class ResponsesModel internal constructor(
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkCancelled()
             if (backgroundResume != null) check(acknowledgedSink != null) { "Background streaming requires an explicit checkpoint consumer" }
-            decoder = ResponsesStream.State()
+            decoder = ResponsesStream.State(bufferDeltas = true)
             resumeAllowed = false
             consumerFailure = false
             check(usable && (!started || pending.isNotEmpty())) { "Responses session cannot be replayed" }
@@ -314,7 +314,7 @@ class ResponsesModel internal constructor(
                 assistantInstructions,
             )
             val screenInput = ScreenToolImageInput.prepare(request, input, settings, capability,
-                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
+                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get, sessionContext?.screenImageReader, outputs.map { it.callId.value }.toSet())
             request = screenInput.request
             if (java.net.URI(settings.endpoint).host.equals("ark.cn-beijing.volces.com", true)) request.remove("include")
             if (backgroundResume != null) {
@@ -339,10 +339,11 @@ class ResponsesModel internal constructor(
             val uploaded = if (backgroundResume == null) imageFiles.resolve(wireRequest, imagePlan) else emptySet()
             val requestBytes = ImageRequestPreflight.prepare(wireRequest, settings, imagePlan, cancelled::get, videoPlan, uploaded)
             var deliveryFailure: Exception? = null
-            val deliver: (ModelEvent) -> Unit = { event ->
+            val eventBuffer = StreamEventBuffer({ event ->
                 checkCancelled()
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
-            }
+            })
+            val deliver: (ModelEvent) -> Unit = eventBuffer::accept
             val deliverAcknowledged = acknowledgedSink?.let { target ->
                 { batch: ModelEventBatch ->
                     try { target(batch) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
@@ -439,7 +440,7 @@ class ResponsesModel internal constructor(
                     resumeAllowed = backgroundResume != null
                     val items = if (backgroundResume != null) decoder.read(reader, cancelled::get,
                         prefix = ownItems.toList(), acknowledgedSink = requireNotNull(deliverAcknowledged))
-                    else ResponsesStream.read(reader, cancelled::get, deliver)
+                    else ResponsesStream.readBuffered(reader, cancelled::get, deliver)
                     checkCancelled()
                     acceptItems(items)
                     completedPost = true
@@ -448,7 +449,14 @@ class ResponsesModel internal constructor(
                     checkCancelled()
                 }
                 checkCancelled()
-            } catch (failure: Exception) {
+            } catch (original: Exception) {
+                var failure = original
+                if (failure !== deliveryFailure && failure !is ModelDeliveryRejectedException && !cancelled.get()) {
+                    try { eventBuffer.flush() } catch (delivery: Exception) {
+                        if (delivery !== original) delivery.addSuppressed(original)
+                        failure = delivery
+                    }
+                } else eventBuffer.discard()
                 if (failure === deliveryFailure) {
                     if (failure !is ModelDeliveryRejectedException) {
                         consumerFailure = true

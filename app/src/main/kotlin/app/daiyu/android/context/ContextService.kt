@@ -321,7 +321,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         val logical = expanded.map { it.message }
         val tail = effective.drop(1)
         val cut = logical.size - tail.size
-        fun normalized(message: Message) = message.copy(status = RunStatus.COMPLETED, error = null, reportedReasoning = emptyList())
+        fun normalized(message: Message) = app.daiyu.android.media.ScreenHistoryProjection.messages(listOf(
+            message.copy(status = RunStatus.COMPLETED, error = null, reportedReasoning = emptyList()))).single()
         // A stopped partial batch may not be a replayable suffix; it leaves the prior archive intact.
         if (tail.isEmpty() || cut <= 0 || !TokenTailCompression.isSafeCut(logical, cut) ||
             logical.drop(cut).map(::normalized) != tail.map(::normalized)) return

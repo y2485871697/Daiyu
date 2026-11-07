@@ -880,6 +880,10 @@ class ChatController internal constructor(private val application:Application,
         }
         return true
     }
+    private val screenToolImages by lazy { app.daiyu.android.media.ScreenToolImageStore(File(application.filesDir, "media-screen-images")) }
+    private fun screenSessionContext(conversation: ConversationId, run: String? = null) = SessionGatewayContext(conversation) { call, receipt ->
+        screenToolImages.read(conversation.value, call, receipt, run)
+    }
     private val messageImageAssets by lazy { MessageImageAssetStore(File(application.filesDir,"media-message-images")) }
     private val messageImages by lazy { ControllerMessageImages(database,messageImageAssets) }
     private val imageJournal by lazy { application.getSharedPreferences("image-send-identities",0) }
@@ -2030,7 +2034,7 @@ class ChatController internal constructor(private val application:Application,
                 replyIdentity = AssistantReplyIdentity.capture(assistantContext, assistantAssets)
                 check(assistantStore.read(assistantId) == profile) { "assistant_profile_changed" }
                 freezeSavedChildModels(key) { provider ->
-                    val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversation))
+                    val delegate = sessionModel?.invoke(provider, assistantContext, screenSessionContext(conversation))
                         ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                     app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
                 }
@@ -3096,7 +3100,9 @@ class ChatController internal constructor(private val application:Application,
         try { screenshotExecutor.execute {
             val image = runCatching {
                 val record = committedScreenshotOnWorker(owner, callId) ?: return@runCatching null
-                if (record.invocation.name == "screen") app.daiyu.android.ui.ToolScreenshotReceipt.decode(record)
+                if (record.invocation.name == "screen") app.daiyu.android.ui.ToolScreenshotReceipt.decode(record) { receipt ->
+                    screenToolImages.read(owner.conversationId, callId, receipt, owner.runId)
+                }
                 else {
                     check(record.disposition == app.daiyu.android.domain.runtime.ToolDisposition.SUCCEEDED &&
                         org.json.JSONObject(record.invocation.arguments).optString("action") == "screenshot")
@@ -3771,7 +3777,7 @@ class ChatController internal constructor(private val application:Application,
         val childPreparation = if (!withChildren) null else try {
             val key = SubAgentConfigKey.Conversation(conversationId.value)
             freezeSavedChildModels(key) { provider ->
-                val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversationId))
+                val delegate = sessionModel?.invoke(provider, assistantContext, screenSessionContext(conversationId))
                     ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                 app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
             }
@@ -3990,7 +3996,7 @@ class ChatController internal constructor(private val application:Application,
                 preparationCancelled(token) || !auxiliaryCurrent() ||
                     imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true
             }
-            val assembledDelegate=sessionModel?.invoke(requestProvider,assistantContext,SessionGatewayContext(conversationId))
+            val assembledDelegate=sessionModel?.invoke(requestProvider,assistantContext,screenSessionContext(conversationId, run.value))
                 ?: assistantModel?.invoke(requestProvider,assistantContext)
                 ?: if(plan.hasImages && auxiliaryFrozen == null) imageModel(requestProvider) else model(requestConfig)
             // Auxiliary vision owns a Unit-sink lifecycle and cannot acknowledge background batches.
@@ -4132,7 +4138,7 @@ class ChatController internal constructor(private val application:Application,
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope, liveMcp=liveMcp,
-                workspacePin = workspace, referenceReader = referenceReader,
+                workspacePin = workspace, referenceReader = referenceReader, screenImages = screenToolImages,
                 ordinaryFactory = if (!ordinaryRun) null else { realOwner, grants, task ->
                     val location = RunScreenLocation(realOwner, taskSurfaceStore, application.packageName,
                         current = { isRunUnfenced(assistant) }, present = ::presentToolLocation)
@@ -4164,7 +4170,7 @@ class ChatController internal constructor(private val application:Application,
                         if (ordinaryBrowserSettings?.access != app.daiyu.android.browser.session.BrowserAccess.DISABLED)
                             scopes.add(RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,
                                 checkNotNull(ordinaryBrowserSettings)) { binding -> ordinaryBrowserOpened(assistant, binding) })
-                        scopes.add(RunOrdinaryGuiTools(realOwner, task, location))
+                        scopes.add(RunOrdinaryGuiTools(realOwner, task, location, screenToolImages))
                         ordinaryShizuku?.uid?.let { uid ->
                             val scope = RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid, runMode)
                             ordinaryShizukuScope = scope
@@ -4210,7 +4216,7 @@ class ChatController internal constructor(private val application:Application,
                     plan.launch(application, realOwner, grants, task, toolLedger,
                         checkNotNull(runtimeStore).childTasks, browserChildCapacity,
                         model = {
-                            sessionModel?.invoke(childProvider, assistantContext, SessionGatewayContext(conversationId))
+                            sessionModel?.invoke(childProvider, assistantContext, screenSessionContext(conversationId))
                                 ?: assistantModel?.invoke(childProvider, assistantContext) ?: model(childProvider.asModelSettings())
                         },
                         onChanged = ::browserChildrenChanged,
@@ -4540,7 +4546,7 @@ class ChatController internal constructor(private val application:Application,
                         val interrupted=assistant.copy(status=RunStatus.INTERRUPTED)
                         database.save(interrupted)
                         RunSlice.Completed(interrupted)
-                    } else owned.startSlice(assistant,preparedContext.messages)
+                    } else owned.startSlice(assistant, app.daiyu.android.media.ScreenHistoryProjection.messages(preparedContext.messages))
                 }
                 notifyChanged();true
             }
@@ -5490,7 +5496,7 @@ class ChatController internal constructor(private val application:Application,
                 database.readableDatabase.rawQuery("SELECT 1 FROM messages WHERE conversation_id=? LIMIT 1", arrayOf(id)).use {
                     check(!it.moveToFirst()) { "消息删除未确认，保留截图" }
                 }
-                try { screenshots.deleteConversation(id) } catch (_: Exception) { screenshotsCleaned = false }
+                try { screenToolImages.deleteConversation(id); screenshots.deleteConversation(id) } catch (_: Exception) { screenshotsCleaned = false }
             }
             if (selected == null && screenshotsCleaned) {
                 // Also recover originals left by an earlier delete whose filesystem cleanup failed.
@@ -5498,7 +5504,7 @@ class ChatController internal constructor(private val application:Application,
                 database.readableDatabase.rawQuery("SELECT DISTINCT conversation_id FROM messages", null).use {
                     while (it.moveToNext()) retained.add(it.getString(0))
                 }
-                try { screenshots.deleteOrphanConversations(retained) } catch (_: Exception) { screenshotsCleaned = false }
+                try { screenToolImages.deleteOrphanConversations(retained); screenshots.deleteOrphanConversations(retained) } catch (_: Exception) { screenshotsCleaned = false }
             }
             if (screenshotsCleaned) "删除已完成" else "会话已删除；部分截图清理未完成"
         })

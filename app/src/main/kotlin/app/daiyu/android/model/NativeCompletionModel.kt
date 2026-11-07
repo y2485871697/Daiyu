@@ -102,7 +102,7 @@ class NativeCompletionModel internal constructor(
             }
             var request = settings.requestOptions.apply(NativeCompletionRequest.body(settings, rows, tools, instructions), settings.protocol)
             val screenInput = ScreenToolImageInput.prepare(request, rows, settings, imageInputSupported,
-                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get)
+                imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get, sessionContext?.screenImageReader, outputs.map { it.callId.value }.toSet())
             request = screenInput.request
             if (settings.protocol == ProviderProtocol.CHAT_COMPLETIONS) require(request.opt("model") == settings.model) { "自定义请求体不能替换所选模型" }
             settings.requestOptions.sessionGateway.requireExecutable()
@@ -115,10 +115,11 @@ class NativeCompletionModel internal constructor(
             val headers = SessionGateway.headers(endpoint, sessionContext, settings.requestOptions.sessionGateway)
             val bytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
-            val deliver: (ModelEvent) -> Unit = { event ->
+            val eventBuffer = StreamEventBuffer({ event ->
                 checkCancelled()
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
-            }
+            })
+            val deliver: (ModelEvent) -> Unit = eventBuffer::accept
             var owned: HttpsURLConnection? = null
             var configuringRequest = true
             try {
@@ -154,7 +155,14 @@ class NativeCompletionModel internal constructor(
                     checkCancelled(); pending = calls
                 }
                 checkCancelled()
-            } catch (failure: Exception) {
+            } catch (original: Exception) {
+                var failure = original
+                if (failure !== deliveryFailure && failure !is ModelDeliveryRejectedException && !cancelled.get()) {
+                    try { eventBuffer.flush() } catch (delivery: Exception) {
+                        if (delivery !== original) delivery.addSuppressed(original)
+                        failure = delivery
+                    }
+                } else eventBuffer.discard()
                 if (failure === deliveryFailure) {
                     if (failure is ModelDeliveryRejectedException) retry.failed(failure) else retry.completed()
                     throw failure

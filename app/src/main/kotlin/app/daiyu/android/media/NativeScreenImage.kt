@@ -29,10 +29,9 @@ internal class NativeScreenImage private constructor(
                 data.opt("node_failure_code") in missingRoots && data.opt("visual_actions_available") == true &&
                 data.opt("mime_type") == "image/png" && !data.has("nodes") && !data.has("observation_id") &&
                 (data.opt("capture_id") as? String)?.isNotBlank() == true &&
-                (data.opt("data_base64") as? String)?.isNotEmpty() == true
+                ((data.opt("data_base64") as? String)?.isNotEmpty() == true || data.optJSONObject("image_asset") != null)
 
-        fun parse(name: String, arguments: String, output: String): NativeScreenImage? {
-            return runCatching {
+        fun metadata(name: String, arguments: String, output: String): String? = runCatching {
                 if (name != "screen" || output.length > MAX_RESULT_CHARS) return@runCatching null
                 val args = JSONObject(arguments)
                 val data = JSONObject(output)
@@ -51,16 +50,30 @@ internal class NativeScreenImage private constructor(
                 val width = data.opt("width").let { if (it is Int || it is Long) (it as Number).toLong() else return@runCatching null }
                 val height = data.opt("height").let { if (it is Int || it is Long) (it as Number).toLong() else return@runCatching null }
                 if (width !in 1..8192 || height !in 1..8192 || width * height > 32_000_000L) return@runCatching null
-                val encoded = data.opt("data_base64") as? String ?: return@runCatching null
-                if (encoded.isEmpty() || encoded.length > MAX_BYTES * 4 / 3 + 4) return@runCatching null
-                val bytes = Base64.getDecoder().decode(encoded)
+                if (!data.has("image_asset") && !data.has("data_base64")) return@runCatching null
+                data.remove("data_base64")
+                data.remove("image_asset")
+                data.toString()
+        }.getOrNull()
+
+        fun parse(name: String, arguments: String, output: String, readAsset: ((String) -> ByteArray?)? = null): NativeScreenImage? = runCatching {
+                val metadata = metadata(name, arguments, output) ?: return@runCatching null
+                val data = JSONObject(output)
+                val width = data.getLong("width")
+                val height = data.getLong("height")
+                val bytes = if (data.has("image_asset")) {
+                    if (data.has("data_base64")) return@runCatching null
+                    readAsset?.invoke(output) ?: return@runCatching null
+                } else {
+                    val encoded = data.opt("data_base64") as? String ?: return@runCatching null
+                    if (encoded.isEmpty() || encoded.length > MAX_BYTES * 4 / 3 + 4) return@runCatching null
+                    Base64.getDecoder().decode(encoded)
+                }
                 if (bytes.size !in 33..MAX_BYTES || !bytes.copyOfRange(0, 8).contentEquals(signature)) return@runCatching null
                 val header = ByteBuffer.wrap(bytes)
                 if (header.getInt(8) != 13 || header.getInt(12) != 0x49484452 ||
                     header.getInt(16).toLong() != width || header.getInt(20).toLong() != height) return@runCatching null
-                data.remove("data_base64")
-                NativeScreenImage(bytes, width.toInt(), height.toInt(), data.toString())
-            }.getOrNull()
-        }
+                NativeScreenImage(bytes, width.toInt(), height.toInt(), metadata)
+        }.getOrNull()
     }
 }

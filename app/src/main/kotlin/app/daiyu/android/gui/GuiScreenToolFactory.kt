@@ -1,6 +1,7 @@
 package app.daiyu.android.gui
 
 import android.util.Base64
+import app.daiyu.android.media.ScreenToolImageStore
 import app.daiyu.android.domain.tools.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,7 +16,7 @@ internal object GuiScreenToolFactory {
         "Do not end an otherwise authorized task solely for these recoverable results: first call screen operation=observe without observation_id or capture_id, inspect the fresh nodes or image, and select the target again using its new ID and current coordinates. " +
         "This is a new decision after a read, never an automatic retry of the old ID or coordinates. If a fresh read fails or the target cannot be verified, report that obstacle; do not bypass it. " +
         "UNKNOWN, unconfirmed delivery, cancellation and authorization denial do not authorize retry. "
-    fun create(session: GuiRunSession): List<RegisteredTool> = listOf(ReadTool(session), ActionTool(session))
+    fun create(session: GuiRunSession, images: ScreenToolImageStore? = null): List<RegisteredTool> = listOf(ReadTool(session, images), ActionTool(session))
 
     private fun admission(session: GuiRunSession, context: ToolExecutionContext): ExecutionReceipt.NotExecuted? =
         session.admission(context.owner, context.authorization)?.let { ExecutionReceipt.NotExecuted(it.code) }
@@ -38,7 +39,7 @@ internal object GuiScreenToolFactory {
                 ArgumentField("max_nodes", ArgumentType.Integer(128, 512), required = false),
             )))
 
-    private class ReadTool(private val session: GuiRunSession) : RegisteredTool {
+    private class ReadTool(private val session: GuiRunSession, private val images: ScreenToolImageStore?) : RegisteredTool {
         override val definition = readDefinition()
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val screenshot = arguments.text("operation") == "screenshot"
@@ -46,23 +47,31 @@ internal object GuiScreenToolFactory {
             val id = if (screenshot) arguments.text("observation_id") else null
             return PreparedTool.contextual(admit = { admission(session, it) }) { context ->
                 admission(session, context)?.let { return@contextual it }
-                if (screenshot) result(session.screenshot(id!!, context.cancelled), ::screenshotJson) else result(session.observe(context.cancelled, maxNodes(arguments)), ::observationJson)
+                if (screenshot) result(session.screenshot(id!!, context.cancelled)) { image -> screenshotReceipt(image, null, context, images) } else result(session.observe(context.cancelled, maxNodes(arguments)), ::observationJson)
             }
         }
     }
     internal fun screenshotJson(image: GuiScreenshot): String = screenshotJson(image, null)
-    internal fun screenshotJson(image: GuiScreenshot, nodeFailureCode: String?): String = JSONObject()
+    internal fun screenshotJson(image: GuiScreenshot, nodeFailureCode: String?): String = screenshotMetadata(image, nodeFailureCode)
+        .put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).toString()
+
+    internal fun screenshotReceipt(image: GuiScreenshot, nodeFailureCode: String?, context: ToolExecutionContext,
+        images: ScreenToolImageStore?): String = if (images == null) screenshotJson(image, nodeFailureCode) else
+        images.receipt(context.owner.conversationId.value, context.owner.runId.value, context.invocation.id.value,
+            image, screenshotMetadata(image, nodeFailureCode).toString())
+
+    private fun screenshotMetadata(image: GuiScreenshot, nodeFailureCode: String?): JSONObject = JSONObject()
         .put(if (image.observationBound) "observation_id" else "capture_id", image.observationId)
         .put("width", image.width).put("height", image.height)
         .put("package_name", image.visualPackage ?: JSONObject.NULL)
         .put("visual_actions_available", image.visualPackage != null).put("mime_type", "image/png")
-        .put("data_base64", Base64.encodeToString(image.png, Base64.NO_WRAP)).apply {
+        .apply {
             if (nodeFailureCode != null) {
                 put("screen_read_mode", "visual_fallback")
                 put("node_tree_available", false)
                 put("node_failure_code", nodeFailureCode)
             }
-        }.toString()
+        }
 
     internal fun actionDefinition(allowVisualCapture: Boolean = false): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact authorized accessibility node, coordinate gesture or global action, bound to the same fresh observation_id. " +

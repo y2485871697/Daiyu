@@ -112,6 +112,8 @@ class GuiRuntimeScreenshotTest {
         var active = true
         var windowType = AccessibilityWindowInfo.TYPE_APPLICATION
         var windowLayer = 0
+        var windowBounds = Rect(0, 0, 100, 100)
+        var rootBounds = Rect(0, 0, 100, 100)
         var gestures = 0
         var gestureAccepted = true
         var gestureCompleted: ((Boolean) -> Unit)? = null
@@ -204,6 +206,7 @@ class GuiRuntimeScreenshotTest {
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setLayer", ClassParameter.from(Int::class.javaPrimitiveType!!, windowLayer))
             if (android.os.Build.VERSION.SDK_INT >= 30)
                 ReflectionHelpers.callInstanceMethod<Unit>(window, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, displayId))
+            shadowOf(window).setBoundsInScreen(windowBounds)
             fun node(text: String): AccessibilityNodeInfo = AccessibilityNodeInfo.obtain().apply {
                 packageName = pkg; className = "View"; this.text = text
                 isEnabled = true; isVisibleToUser = true; isClickable = true
@@ -217,6 +220,7 @@ class GuiRuntimeScreenshotTest {
             }
             val root = if (stableNodes) savedRoot ?: node(rootLabel).also { savedRoot = it } else node(rootLabel)
             root.text = rootLabel; root.isClickable = rootClickable; root.packageName = pkg
+            root.setBoundsInScreen(rootBounds)
             ReflectionHelpers.setField(root, "mWindowId", windowId)
             shadowOf(root).setAccessibilityWindowInfo(window)
             if (!stableNodes || savedTarget == null) {
@@ -967,7 +971,7 @@ class GuiRuntimeScreenshotTest {
     }
 
     @Test fun currentWindowScreenshotKeepsContentIndependentButFencesANewerReadAndWindowChanges() {
-        for (mode in 0..3) {
+        for (mode in 0..5) {
             CopyingWindowNodeShadow.childReads = 0
             session.approveReadsFromUser(GuiReadApproval(3, 1))
             val pending = GuiRuntime.currentWindowScreenshot(session.lease) { false }
@@ -977,12 +981,14 @@ class GuiRuntimeScreenshotTest {
                 1 -> contentEvent(type = AccessibilityEvent.TYPE_WINDOWS_CHANGED)
                 2 -> observe()
                 3 -> platform.windowId++
+                4 -> { platform.rootBounds = Rect(0, 0, 100, 80); contentEvent("external.app") }
+                5 -> platform.windowBounds = Rect(0, 0, 100, 90)
             }
             val frame = platform.success(); worker.runAll()
-            if (mode == 0) {
+            if (mode == 0 || mode == 4) {
                 val image = pending.completed() as GuiResult.Value
                 assertFalse(image.value.observationBound); assertNull(image.value.visualPackage)
-            } else rejected(pending.completed(), if (mode == 3) "SCREENSHOT_WINDOW_CHANGED" else "CAPTURE_STALE_NOT_EXECUTED")
+            } else rejected(pending.completed(), if (mode == 3 || mode == 5) "SCREENSHOT_WINDOW_CHANGED" else "CAPTURE_STALE_NOT_EXECUTED")
             assertDisposed(frame); assertNoActions()
         }
     }

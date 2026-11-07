@@ -25,10 +25,12 @@ class GuiDirectScreenshotContractTest(unittest.TestCase):
         body = section(text, "internal fun currentWindowScreenshot(", "    private fun captureScreenshot(")
         for forbidden in ("sampleTree(", "observe(", "gate.publish(", "getChild(", "GuiObservation("):
             self.assertNotIn(forbidden, body)
+        self.assertNotIn("admitted.node.getBoundsInScreen", body)
         for required in ("externalRoot(", "gate.retireObservation(lease); clearNodes()",
                          "supportsVisualFallback(lease, denied.code)", "visualScreenshot(lease, cancelled)",
                          "gate.consumeRead(lease, screenshot = true)", "validateCallback = ::validateWindow",
-                         "validateResult = ::validateWindow", "cancelled()", "windowReadGeneration != version"):
+                         "validateResult = ::validateWindow", "cancelled()", "windowReadGeneration != version",
+                         "admitted.windowBounds"):
             self.assertIn(required, body)
 
     def test_default_observation_stays_node_first(self):

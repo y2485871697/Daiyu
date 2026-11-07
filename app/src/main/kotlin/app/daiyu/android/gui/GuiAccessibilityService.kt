@@ -567,7 +567,7 @@ internal object GuiRuntime {
         finishDrain(lease)
     }
 
-    private data class AdmittedRoot(val node: AccessibilityNodeInfo, val windowType: Int)
+    private data class AdmittedRoot(val node: AccessibilityNodeInfo, val windowType: Int, val windowBounds: GuiBounds)
 
     /** Current default-display application or system dialog. System windows authorize exact
      * nodes only; self still requires its original application window and live lease token. */
@@ -622,10 +622,13 @@ internal object GuiRuntime {
                     pkg.isBlank() || pkg.length > 256 -> "APPLICATION_PACKAGE_UNAVAILABLE_NOT_EXECUTED"
                     pkg == current.packageName && !self -> "SELF_APP_TARGET_REQUIRED_NOT_EXECUTED"
                     binding.packageName != null && pkg != binding.packageName -> "TARGET_PACKAGE_MISMATCH_NOT_EXECUTED"
-                    else -> null
+                    else -> {
+                        val bounds = Rect().also { window.getBoundsInScreen(it) }
+                        return GuiResult.Value(AdmittedRoot(node, window.type,
+                            GuiBounds(bounds.left, bounds.top, bounds.right, bounds.bottom)))
+                    }
                 }
             } catch (_: Exception) { "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED" }
-            if (failure == null) return GuiResult.Value(AdmittedRoot(node, window.type))
             node.recycle()
             return reject(failure, if (failure == "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED") "reason=root_inactive" else null)
         }
@@ -1334,9 +1337,8 @@ internal object GuiRuntime {
             return if (supportsVisualFallback(lease, denied.code)) visualScreenshot(lease, cancelled) else rejected(denied.code)
         }
         fun identity(admitted: AdmittedRoot): CaptureWindow = try {
-            val bounds = Rect().also { admitted.node.getBoundsInScreen(it) }
             CaptureWindow(admitted.node.packageName?.toString().orEmpty(), admitted.node.windowId, admitted.windowType,
-                GuiBounds(bounds.left, bounds.top, bounds.right, bounds.bottom))
+                admitted.windowBounds)
         } finally { admitted.node.recycle() }
         val window = identity(fetched.value)
         if (window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION)

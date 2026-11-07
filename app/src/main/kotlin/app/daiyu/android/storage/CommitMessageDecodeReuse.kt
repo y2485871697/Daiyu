@@ -1,6 +1,7 @@
 package app.daiyu.android.storage
 
 import app.daiyu.android.domain.Message
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import java.io.Closeable
 import java.util.Collections
 
@@ -26,18 +27,19 @@ internal data class StoredMessageColumns(
 /**
  * Bounded parsing reuse, confined to one runtime store lease. Cleared on failed
  * writes, terminal commits and lease release; never shares mutable caller graphs.
- * Every lookup receives freshly read, complete SQL columns. Only parsing/graph
+ * Every lookup receives complete, freshly SQL-proven columns. Only parsing/graph
  * construction is reused: validation (including external video witnesses) runs again.
  * Linear exact comparisons deliberately avoid hashes and content/version surrogates.
  */
 internal class CommitMessageDecodeReuse(
-    private val maxCharacters: Long = 8L * 1024 * 1024,
+    private val maxCharacters: Long = 20L * 1024 * 1024,
     private val maxEntries: Int = 8,
 ) : Closeable {
     init { require(maxCharacters >= 0 && maxEntries >= 0) }
     private data class Entry(val columns: StoredMessageColumns, val message: Message)
     private val entries = ArrayList<Entry>()
     internal val historyReceipts = ScreenHistoryReceiptReuse()
+    internal val textReads = SQLiteVerifiedTextReuse()
     private var characters = 0L
     private var closed = false
     internal var decodeCount: Int = 0
@@ -53,22 +55,34 @@ internal class CommitMessageDecodeReuse(
                 entries.remove(hit)
                 characters -= hit.columns.characterCount
                 historyReceipts.clear()
+                textReads.clear()
                 throw failure
             }
+            textReads.remember(columns)
+            RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.MESSAGE_DECODE, RuntimeDiagnostics.Code.CACHE_HIT)
             return hit.message
         }
-        decodeCount++
-        val message = try {
-            snapshot(decode()).also(validate)
-        } catch (failure: Throwable) {
-            historyReceipts.clear()
-            throw failure
-        } // Never retain a partially decoded or unverified database read.
         val size = columns.characterCount
+        // Release entries that cannot coexist with the next graph before constructing it.
         if (maxEntries > 0 && size <= maxCharacters) {
             while (entries.isNotEmpty() && (entries.size >= maxEntries || characters > maxCharacters - size)) {
                 characters -= entries.removeAt(0).columns.characterCount
             }
+        }
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.MESSAGE_DECODE,
+            if (size <= maxCharacters) RuntimeDiagnostics.Code.CACHE_MISS else RuntimeDiagnostics.Code.CACHE_BYPASS, size = size)
+        decodeCount++
+        val message = try {
+            RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.MESSAGE_DECODE, size = size) {
+                snapshot(decode()).also(validate)
+            }
+        } catch (failure: Throwable) {
+            historyReceipts.clear()
+            textReads.clear()
+            throw failure
+        } // Never retain a partially decoded or unverified database read.
+        textReads.remember(columns)
+        if (maxEntries > 0 && size <= maxCharacters) {
             entries.add(Entry(columns, message))
             characters += size
         }
@@ -76,6 +90,7 @@ internal class CommitMessageDecodeReuse(
     }
 
     fun clear() {
+        textReads.clear()
         historyReceipts.clear()
         entries.clear()
         characters = 0

@@ -130,4 +130,18 @@ class CommitMessageDecodeReuseTest {
         }
     }
 
+    @Test fun budgetEvictsPreviousLargeGraphBeforeConstructingTheNextOne() {
+        val limit = raw.characterCount
+        CommitMessageDecodeReuse(maxCharacters = limit, maxEntries = 1).use { reuse ->
+            reuse.read(raw, ::message) {}
+            assertEquals(1, reuse.retainedEntries)
+            reuse.read(raw.copy(blocks = raw.blocks.reversed()), {
+                assertEquals(0, reuse.retainedEntries)
+                assertEquals(0L, reuse.retainedCharacters)
+                message()
+            }) {}
+            assertEquals(1, reuse.retainedEntries)
+        }
+    }
+
 }

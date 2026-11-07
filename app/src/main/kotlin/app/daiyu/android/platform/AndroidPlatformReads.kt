@@ -1,6 +1,7 @@
 package app.daiyu.android.platform
 
 import app.daiyu.android.attachments.OpenedFileStore
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -27,6 +28,7 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
     private val locationCache = lastKnownLocationSource ?: AndroidLastKnownLocationSource(app)
     private class Rejected(val code: String, val permission: String? = null) : RuntimeException()
 
+    private val appLabels = AppLabelCache()
     private val notificationAdmissionGate = Any()
     private var notificationEpoch: Long? = null
     override fun admission(tool: PlatformReadTool): String? = when (tool) {
@@ -137,15 +139,24 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
         val query = if (arguments.contains("query")) arguments.text("query").trim() else ""
         val limit = if (arguments.contains("limit")) arguments.integer("limit").toInt() else 20
         val rows = JSONArray()
-        val packages = app.packageManager.getInstalledApplications(0)
+        val packages = RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.APPS_QUERY) {
+            app.packageManager.getInstalledApplications(0)
+        }
         var scanned = 0
         var truncated = false
         var fieldsTruncated = false
         for (info in packages) {
             checkReadCancellation(cancelled)
             if (scanned++ >= MAX_APP_SCAN) { truncated = true; break }
-            val label = app.packageManager.getApplicationLabel(info).toString()
-            if (!info.packageName.contains(query, true) && !label.contains(query, true)) continue
+            val packageMatch = info.packageName.contains(query, true)
+            if (packageMatch && rows.length() == limit) { truncated = true; break }
+            val label = RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.APPS_LABELS) {
+                appLabels.label(info, app.resources.configuration.toString()) {
+                    app.packageManager.getApplicationLabel(info).toString()
+                }
+            }
+            checkReadCancellation(cancelled)
+            if (!packageMatch && !label.contains(query, true)) continue
             if (rows.length() == limit) { truncated = true; break }
             fieldsTruncated = fieldsTruncated || clippedText(info.packageName) || clippedText(label)
             rows.put(JSONObject().put("package", bounded(info.packageName)).put("label", bounded(label)).put("enabled", info.enabled))

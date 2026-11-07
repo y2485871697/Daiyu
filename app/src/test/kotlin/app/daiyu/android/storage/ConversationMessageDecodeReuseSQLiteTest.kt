@@ -309,4 +309,34 @@ class ConversationMessageDecodeReuseSQLiteTest {
         }
         writer.clear()
     }
+    @Test fun twoNativeReceiptsShareTheContextBudgetAndStillRequireBothProofs() {
+        val one = nativeHistoryMessage()
+        val first = one.blocks.single() as MessageBlock.Tool
+        val second = first.copy(invocation = first.invocation.copy(id = ToolCallId("second-screen")))
+        val protocol = one.protocolItems + one.protocolItems.map {
+            org.json.JSONObject(it).put("call_id", "second-screen").toString()
+        }
+        val blocks = listOf(first, second)
+        val message = one.copy(blocks = blocks, protocolItems = protocol, historySegments = listOf(
+            MessageHistorySegment(one.id, "assistant", blocks, protocol, createdAt = one.createdAt)))
+        database.save(message)
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            CommitMessageDecodeReuse().use { reuse ->
+                repeat(3) {
+                    assertEquals(message, database.runtimeMessage(db, message, reuse))
+                    database.writeRuntimeMessage(db, message, reuse)
+                }
+                assertEquals(2L, reuse.historyReceipts.validationCalls)
+                assertEquals(2, reuse.decodeCount) // The >8Mi-character row plus the standalone user.
+                assertTrue(reuse.textReads.hits > 0)
+                assertTrue(reuse.textReads.retainedCharacters <= 14L * 1024 * 1024)
+                reuse.clear()
+                assertEquals(0L, reuse.textReads.retainedCharacters)
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
 }

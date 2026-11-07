@@ -98,4 +98,20 @@ class ScreenHistoryReceiptReuseTest {
         assertEquals(0, reuse.historyReceipts.retainedEntries)
         assertEquals(0L, reuse.historyReceipts.retainedCharacters)
     }
+    @Test fun allIndicesOfOneExactContextShareOneBudgetButNotOneProof() {
+        val cache = ScreenHistoryReceiptReuse(maxCharacters = 6, maxEntries = 2, maxIndices = 2)
+        val items = listOf("aaa", "bbb")
+        var calls = 0
+        repeat(10) {
+            for (index in 0..1) assertTrue(cache.validate(items, emptyList(), index) { calls++; true })
+        }
+        assertEquals(2, calls)
+        assertEquals(1, cache.retainedEntries)
+        assertEquals(6L, cache.retainedCharacters)
+        repeat(2) { assertTrue(cache.validate(items, emptyList(), 2) { calls++; true }) }
+        assertEquals(4, calls) // Additional indices fall back, never grow without bound.
+        assertFalse(cache.validate(items, emptyList(), 3) { false })
+        assertTrue(cache.validate(items, emptyList(), 0) { error("old proof retained") })
+    }
+
 }

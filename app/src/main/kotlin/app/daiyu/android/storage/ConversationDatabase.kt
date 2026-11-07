@@ -372,8 +372,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
         val createdAt = db.rawQuery("SELECT created_at FROM messages WHERE id=?", arrayOf(messageId)).use {
             check(it.moveToFirst()); if (it.isNull(0)) null else it.getLong(0)
         }
-        fun text(column: String) = SQLiteText.read(db, "messages", column, "id", messageId)
-        // Read all original columns at EVERY validation point, even on a reuse hit.
+        fun text(column: String) = if (decodeReuse == null) SQLiteText.read(db, "messages", column, "id", messageId)
+            else decodeReuse.textReads.read(db, messageId, column)
+        // Prove all original SQL bytes at EVERY validation point, even on a reuse hit.
         // In particular, checkpoint/message SQL triggers can change a row between reads.
         val columns = StoredMessageColumns(messageId, conversation.value, metadata.first, metadata.second,
             metadata.third, createdAt, requireNotNull(text("blocks")), text("error"),

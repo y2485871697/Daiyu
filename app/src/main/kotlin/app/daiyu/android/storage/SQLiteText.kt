@@ -2,6 +2,7 @@ package app.daiyu.android.storage
 
 import android.database.sqlite.SQLiteDatabase
 import android.os.CancellationSignal
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 
 /** Avoid the API26 CursorWindow row limit without truncating a persisted JSON field. */
 internal object SQLiteText {
@@ -9,7 +10,13 @@ internal object SQLiteText {
     internal const val CHUNK_BYTES = 1024 * 1024
 
     fun read(db: SQLiteDatabase, table: String, column: String, key: String, id: String,
-        maxBytes: Long = 64L * 1024 * 1024, cancellationSignal: CancellationSignal? = null): String? {
+        maxBytes: Long = 64L * 1024 * 1024, cancellationSignal: CancellationSignal? = null): String? =
+        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.SQL_TEXT_READ) {
+            readInternal(db, table, column, key, id, maxBytes, cancellationSignal)
+        }
+
+    private fun readInternal(db: SQLiteDatabase, table: String, column: String, key: String, id: String,
+        maxBytes: Long, cancellationSignal: CancellationSignal?): String? {
         cancellationSignal?.throwIfCanceled()
         require(table == "messages" && key == "id" && column in setOf("blocks", "protocol", "history_segments", "error") ||
             table == "runtime_checkpoints" && key == "message_id" && column == "payload" ||

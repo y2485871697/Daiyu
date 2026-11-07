@@ -197,3 +197,71 @@ class ColdDisplaySmokeScopeTest(unittest.TestCase):
                     self.assertTrue(call.call_args.kwargs["env"]["PYTHONPATH"].startswith(str(Path("tests").resolve())))
             finally:
                 os.chdir(old)
+
+
+class RootlessCommitScopeTest(unittest.TestCase):
+    def test_exact_pair_uses_union_and_keeps_existing_single_class_scope(self):
+        for classes in (recorder.ROOTLESS_COMMIT_PLATFORM_CLASSES,
+                        tuple(reversed(recorder.ROOTLESS_COMMIT_PLATFORM_CLASSES))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(classes)))
+            self.assertEqual("rootless-commit-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.ROOTLESS_COMMIT_MODULES, "-v"], command)
+            self.assertNotIn("discover", command)
+        self.assertEqual(len(recorder.ROOTLESS_COMMIT_MODULES), len(set(recorder.ROOTLESS_COMMIT_MODULES)))
+        self.assertTrue(set(recorder.RUNTIME_SCREENSHOT_MODULES) <= set(recorder.ROOTLESS_COMMIT_MODULES))
+        self.assertIn("test_rootless_content_smoke_scope", recorder.ROOTLESS_COMMIT_MODULES)
+        gui, storage = recorder.ROOTLESS_COMMIT_PLATFORM_CLASSES
+        self.assertEqual("rootless-content-targeted", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=gui))[1])
+        raw = ",".join(recorder.ROOTLESS_COMMIT_PLATFORM_CLASSES)
+        for invalid in (storage, raw + "," + gui, raw + ",unknown", " " + raw, raw + ","):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=invalid))[1])
+        for mode in ("compile", "candidate", "daily", "release", ""):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+    def test_exact_source_pair_is_discovered_once_and_keeps_two_empty_shards(self):
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = SpeechPlatformDiscoveryTest()
+            helper.fixture(root)  # Includes unrelated ambiguous declarations: they must not be scanned.
+            counts = {}
+            for n, name in enumerate(recorder.ROOTLESS_COMMIT_PLATFORM_CLASSES):
+                package, _, short = name.rpartition(".")
+                path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("package " + package + "\nclass " + short + " : TestCase() {\n" +
+                    "".join(" fun testCase" + str(i) + "() {}\n" for i in range(n + 1)) + "}\n")
+                counts[name] = n + 1
+            selected, empty = [], 0
+            raw = ",".join(reversed(recorder.ROOTLESS_COMMIT_PLATFORM_CLASSES))
+            for shard in range(4):
+                result = helper.select(root, shard, classes=raw)
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertEqual(counts, inventory["all_classes"])
+                self.assertEqual(sum(counts[n] for n in selection["selected_classes"]), selection["expected_tests"])
+                selected.extend(selection["selected_classes"])
+                empty += selection["status"] == "filtered-empty-shard"
+            self.assertCountEqual(counts, selected)
+            self.assertEqual(2, empty)
+            path.unlink()
+            self.assertNotEqual(0, helper.select(root, classes=raw).returncode)
+
+    def test_pair_receipt_preserves_real_failure_and_check_identity(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA="f" * 40, GITHUB_RUN_ID="23", GITHUB_RUN_ATTEMPT="1",
+                    SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(recorder.ROOTLESS_COMMIT_PLATFORM_CLASSES))
+                with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess, "call", return_value=9) as call, patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(9, recorder.record("python3"))
+                    result = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual("rootless-commit-targeted", result["scope"])
+                    self.assertEqual(9, result["exit_code"])
+                    self.assertEqual(dict(sha="f" * 40, run_id=23, attempt=1), result["identity"])
+                    self.assertEqual(call.call_args.args[0], result["command"])
+            finally:
+                os.chdir(old)

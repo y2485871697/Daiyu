@@ -135,7 +135,19 @@ RUNTIME_SCREENSHOT_MODULES = (
 )
 
 
+ROOTLESS_COMMIT_PLATFORM_CLASSES = (
+    "app.daiyu.android.gui.GuiRootlessContentAndroidTest",
+    "app.daiyu.android.storage.CommitMessageDecodeDatabaseTest",
+)
+ROOTLESS_COMMIT_MODULES = tuple(dict.fromkeys(RUNTIME_SCREENSHOT_MODULES + (
+    "test_rootless_content_smoke_scope", "test_gui_audit_recovery_contract",
+)))
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(ROOTLESS_COMMIT_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *ROOTLESS_COMMIT_MODULES, "-v"], "rootless-commit-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(RUNTIME_SCREENSHOT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *RUNTIME_SCREENSHOT_MODULES, "-v"], "runtime-screenshot-targeted"

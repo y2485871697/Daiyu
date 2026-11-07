@@ -36,7 +36,14 @@ class GuiRuntimeScreenshotTest {
     @Implements(AccessibilityNodeInfo::class)
     class CopyingWindowNodeShadow : ShadowAccessibilityNodeInfo() {
         @RealObject private lateinit var actual: AccessibilityNodeInfo
-        companion object { var refresh: ((AccessibilityNodeInfo) -> Boolean)? = null }
+        companion object {
+            var refresh: ((AccessibilityNodeInfo) -> Boolean)? = null
+            var childReads = 0
+        }
+        @Implementation public override fun getChild(index: Int): AccessibilityNodeInfo? {
+            childReads++
+            return super.getChild(index)
+        }
         @Implementation public override fun refresh(): Boolean =
             super.refresh() && (refresh?.invoke(actual) ?: true)
         @Implementation
@@ -249,6 +256,7 @@ class GuiRuntimeScreenshotTest {
         originalAccess = GuiRuntime.access; originalEncoder = GuiRuntime.encoder
         platform = Platform(); worker = QueuedWorker()
         CopyingWindowNodeShadow.refresh = platform::refresh
+        CopyingWindowNodeShadow.childReads = 0
         GuiRuntime.access = platform; GuiRuntime.encoder = worker
         service = Robolectric.buildService(GuiAccessibilityService::class.java).create().get()
         GuiRuntime.connected(service)
@@ -923,18 +931,21 @@ class GuiRuntimeScreenshotTest {
         }
     }
 
-    @Test fun ordinaryScreenshotWithoutIdObservesOnceAndExplicitStaleIdNeverReobserves() {
+    @Test fun ordinaryScreenshotWithoutIdNeverTraversesNodesAndExplicitStaleIdNeverReobserves() {
         val owner = app.daiyu.android.integration.tools.runnerOwner(app.daiyu.android.domain.Message(
             app.daiyu.android.domain.MessageId("m"), app.daiyu.android.domain.ConversationId("c"),
             app.daiyu.android.domain.RunId("run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
             emptyList(), app.daiyu.android.domain.RunStatus.RUNNING))
         session.bindDynamic(owner, app.daiyu.android.domain.tools.TaskAuthorization("session", "run"))
+        platform.descendants = 140
         val future = java.util.concurrent.FutureTask { session.dynamicScreenshot(null) { false } }
         val thread = Thread(future); thread.start()
         val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
         while (platform.callbacks.isEmpty() && !future.isDone && System.nanoTime() < deadline) {
             shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5)
         }
+        assertEquals(0, CopyingWindowNodeShadow.childReads)
+        assertNull(session.lease.observation)
         assertEquals(1, platform.callbacks.size)
         platform.success(); worker.runAll()
         val image = future.get(3, java.util.concurrent.TimeUnit.SECONDS) as GuiResult.Value
@@ -953,6 +964,39 @@ class GuiRuntimeScreenshotTest {
         }
         rejected(stale.get(3, java.util.concurrent.TimeUnit.SECONDS), "OBSERVATION_REQUIRED")
         assertEquals(reads, platform.rootReads); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun currentWindowScreenshotKeepsContentIndependentButFencesANewerReadAndWindowChanges() {
+        for (mode in 0..3) {
+            CopyingWindowNodeShadow.childReads = 0
+            session.approveReadsFromUser(GuiReadApproval(3, 1))
+            val pending = GuiRuntime.currentWindowScreenshot(session.lease) { false }
+            assertEquals(0, CopyingWindowNodeShadow.childReads)
+            when (mode) {
+                0 -> contentEvent("external.app")
+                1 -> contentEvent(type = AccessibilityEvent.TYPE_WINDOWS_CHANGED)
+                2 -> observe()
+                3 -> platform.windowId++
+            }
+            val frame = platform.success(); worker.runAll()
+            if (mode == 0) {
+                val image = pending.completed() as GuiResult.Value
+                assertFalse(image.value.observationBound); assertNull(image.value.visualPackage)
+            } else rejected(pending.completed(), if (mode == 3) "SCREENSHOT_WINDOW_CHANGED" else "CAPTURE_STALE_NOT_EXECUTED")
+            assertDisposed(frame); assertNoActions()
+        }
+    }
+
+    @Test fun currentWindowScreenshotCancellationAndSystemWindowNeverPublishANodeOrSubmitAnAction() {
+        var cancelled = false
+        val pending = GuiRuntime.currentWindowScreenshot(session.lease) { cancelled }
+        cancelled = true
+        val frame = platform.success(); worker.runAll()
+        rejected(pending.completed(), "CANCELLED_NOT_EXECUTED"); assertDisposed(frame)
+        assertNull(session.lease.observation); assertEquals(0, CopyingWindowNodeShadow.childReads)
+        session.approveReadsFromUser(GuiReadApproval(0, 1)); platform.windowType = AccessibilityWindowInfo.TYPE_SYSTEM
+        rejected(GuiRuntime.currentWindowScreenshot(session.lease) { false }.completed(), "SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
     @Test fun implicitScreenshotSubmitsInTheSameMainTurnBeforeQueuedSelfContent() {
@@ -980,6 +1024,7 @@ class GuiRuntimeScreenshotTest {
             shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5)
         }
         assertTrue(queuedEventRan); assertTrue(capturePrecededEvent)
+        assertEquals(0, CopyingWindowNodeShadow.childReads)
         assertEquals(1, platform.callbacks.size)
         platform.success(); worker.runAll()
         val image = future.get(3, java.util.concurrent.TimeUnit.SECONDS) as GuiResult.Value

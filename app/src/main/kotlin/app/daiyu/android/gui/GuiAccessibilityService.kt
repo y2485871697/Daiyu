@@ -189,6 +189,7 @@ internal object GuiRuntime {
     @Volatile private var service: GuiAccessibilityService? = null
     private var generation = 0L
     private var visualGeneration = 0L
+    private var windowReadGeneration = 0L
     private var confirmation: GuiConfirmationOverlay? = null
     // Narrow parameters belong to the original gate lease, never to the process or a later owner.
     private data class TargetBinding(val lease: GuiLeaseGate.Lease, val packageName: String?,
@@ -298,6 +299,7 @@ internal object GuiRuntime {
         val content = event.eventType in setOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)
+        if (!content) windowReadGeneration++
         // Our reply content is not the external rootless target. Keep both pending reads and
         // published captures; WM witnesses, occlusion and pixel revalidation still fence actions.
         if (content && pkg == value.packageName && lease != null && observed == null && !isSelfLease(lease) &&
@@ -349,8 +351,12 @@ internal object GuiRuntime {
         return rejection
     }
 
-    fun changed(value: GuiAccessibilityService, contentOnly: Boolean = false) =
+    fun changed(value: GuiAccessibilityService, contentOnly: Boolean = false) {
+        onMain()
+        if (service !== value) return
+        if (!contentOnly) windowReadGeneration++
         changed(value, contentOnly, invalidateVisual = true)
+    }
 
     private fun changed(value: GuiAccessibilityService, contentOnly: Boolean, invalidateVisual: Boolean) {
         onMain()
@@ -848,6 +854,7 @@ internal object GuiRuntime {
         require(maxNodes in 128..512)
         onMain(); targetRejection(lease)?.let { return it }
         staleEvent = null; staleLoggedFor = null
+        windowReadGeneration++
         gate.retireObservation(lease); clearNodes()
         screenRejection()?.let { return it }
         val permit = gate.consumeRead(lease, screenshot = false)
@@ -1062,6 +1069,7 @@ internal object GuiRuntime {
     /** No synthetic tree: a capture token authorizes only a fresh visual gesture, never nodes. */
     internal fun visualScreenshot(lease: GuiLeaseGate.Lease, cancelled: () -> Boolean): CompletableFuture<GuiResult<GuiScreenshot>> {
         onMain()
+        windowReadGeneration++
         gate.retireObservation(lease); clearNodes()
         visualRejection(lease)?.let { return CompletableFuture.completedFuture(it) }
         val permit = gate.consumeRead(lease, screenshot = true)
@@ -1300,7 +1308,64 @@ internal object GuiRuntime {
         validateCapture()?.let { return rejected(it.code) }
         val permit = gate.consumeRead(lease, screenshot = true)
         if (permit is GuiResult.Rejected) return rejected(permit.code)
+        return captureScreenshot(lease, observationId, visualOnly,
+            validateCallback = { targetRejection(lease) ?: screenRejection() ?: selfRootRejection(lease) ?:
+                if (visualOnly) validateCapture() else validateObservation(lease, observationId, "capture_callback") },
+            validateResult = ::validateCapture, retireObservation = ::retireVisualObservation)
+    }
+
+    private data class CaptureWindow(val packageName: String, val windowId: Int, val type: Int, val bounds: GuiBounds)
+
+    /** Current-window image only: window metadata is checked, but no UI tree is sampled or published. */
+    @Suppress("DEPRECATION")
+    internal fun currentWindowScreenshot(lease: GuiLeaseGate.Lease,
+        cancelled: () -> Boolean): CompletableFuture<GuiResult<GuiScreenshot>> {
+        onMain()
+        windowReadGeneration++
+        gate.retireObservation(lease); clearNodes()
+        fun rejected(code: String) = CompletableFuture.completedFuture<GuiResult<GuiScreenshot>>(GuiResult.Rejected(code))
+        targetRejection(lease)?.let { return rejected(it.code) }
+        screenRejection()?.let { return rejected(it.code) }
+        if (cancelled()) return rejected("CANCELLED_NOT_EXECUTED")
         val current = service ?: return rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
+        val fetched = externalRoot(lease, current)
+        if (fetched !is GuiResult.Value) {
+            val denied = fetched as GuiResult.Rejected
+            return if (supportsVisualFallback(lease, denied.code)) visualScreenshot(lease, cancelled) else rejected(denied.code)
+        }
+        fun identity(admitted: AdmittedRoot): CaptureWindow = try {
+            val bounds = Rect().also { admitted.node.getBoundsInScreen(it) }
+            CaptureWindow(admitted.node.packageName?.toString().orEmpty(), admitted.node.windowId, admitted.windowType,
+                GuiBounds(bounds.left, bounds.top, bounds.right, bounds.bottom))
+        } finally { admitted.node.recycle() }
+        val window = identity(fetched.value)
+        if (window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION)
+            return rejected("SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
+        if (Build.VERSION.SDK_INT < 30) return rejected("SCREENSHOT_UNSUPPORTED_API")
+        val version = windowReadGeneration
+        val started = SystemClock.elapsedRealtime()
+        fun validateWindow(): GuiResult.Rejected? {
+            targetRejection(lease)?.let { return it }
+            screenRejection()?.let { return it }
+            if (cancelled()) return GuiResult.Rejected("CANCELLED_NOT_EXECUTED")
+            if (service !== current || windowReadGeneration != version ||
+                SystemClock.elapsedRealtime() - started !in 0..GUI_OBSERVATION_TTL_MILLIS)
+                return GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED")
+            val latest = externalRoot(lease, current)
+            if (latest !is GuiResult.Value) return latest as GuiResult.Rejected
+            return if (identity(latest.value) != window) GuiResult.Rejected("SCREENSHOT_WINDOW_CHANGED") else null
+        }
+        validateWindow()?.let { return rejected(it.code) }
+        val permit = gate.consumeRead(lease, screenshot = true)
+        if (permit is GuiResult.Rejected) return rejected(permit.code)
+        return captureScreenshot(lease, UUID.randomUUID().toString(), visualOnly = true,
+            validateCallback = ::validateWindow, validateResult = ::validateWindow)
+    }
+
+    private fun captureScreenshot(lease: GuiLeaseGate.Lease, observationId: String, visualOnly: Boolean,
+        validateCallback: () -> GuiResult.Rejected?, validateResult: () -> GuiResult.Rejected?,
+        retireObservation: () -> Unit = {}): CompletableFuture<GuiResult<GuiScreenshot>> {
+        val current = service ?: return CompletableFuture.completedFuture(GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED"))
         captures[lease] = (captures[lease] ?: 0) + 1
         val request = GuiCaptureRequest<GuiScreenshot> {
             if (Looper.myLooper() === Looper.getMainLooper()) captureFinished(lease)
@@ -1312,9 +1377,8 @@ internal object GuiRuntime {
             captureSpan.end(error)
             if (value is GuiResult.Rejected) RuntimeDiagnostics.guiResult(value.code, RuntimeDiagnostics.Stage.GUI_CAPTURE)
         }
-        if (visualOnly) future.whenComplete { _, _ ->
-            // Never publish the capture's private observation as a clickable tree.
-            val retire = Runnable { retireVisualObservation() }
+        future.whenComplete { _, _ ->
+            val retire = Runnable { retireObservation() }
             if (Looper.myLooper() === Looper.getMainLooper()) retire.run() else main.post(retire)
         }
         request.submit {
@@ -1328,8 +1392,7 @@ internal object GuiRuntime {
                     try { frame.dispose(request) } catch (_: Exception) { /* reservation retained */ }
                 }
                 try {
-                    val rejection = targetRejection(lease) ?: screenRejection() ?: selfRootRejection(lease) ?:
-                        (if (visualOnly) validateCapture() else validateObservation(lease, observationId, "capture_callback"))
+                    val rejection = validateCallback()
                     if (future.isDone || rejection != null) {
                         if (rejection != null) future.complete(rejection)
                         dispose(); return@success
@@ -1343,7 +1406,7 @@ internal object GuiRuntime {
                             main.post {
                                 try {
                                     if (!future.isDone) {
-                                        val invalid = validateCapture()
+                                        val invalid = validateResult()
                                         val result = if (visualOnly && encoded is GuiResult.Value)
                                             GuiResult.Value(encoded.value.copy(observationBound = false)) else encoded
                                         future.complete(invalid ?: result)

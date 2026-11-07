@@ -213,26 +213,10 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         val captureCancelled = { abandoned.get() || closed.get() || cancelled() || ioFence.rejection() != null }
         val started = onWorker(cancelled) {
             check(dynamic)
-            val approval = GuiRuntime.approveReads(lease, GuiReadApproval(if (observationId == null) 1 else 0, 1))
+            val approval = GuiRuntime.approveReads(lease, GuiReadApproval(0, 1))
             if (approval !is GuiResult.Value) approval as GuiResult.Rejected
-            else {
-                val selected = if (observationId != null) GuiResult.Value(observationId)
-                    else when (val observed = GuiRuntime.observe(lease)) {
-                        is GuiResult.Value -> GuiResult.Value(observed.value.observationId)
-                        is GuiResult.Rejected -> {
-                            if (GuiRuntime.supportsVisualFallback(lease, observed.code))
-                                return@onWorker GuiResult.Value(GuiRuntime.visualScreenshot(lease, captureCancelled))
-                            observed
-                        }
-                        is GuiResult.Unknown -> observed
-                    }
-                when (selected) {
-                    is GuiResult.Value -> GuiResult.Value(GuiRuntime.screenshot(lease, selected.value,
-                        visualOnly = observationId == null))
-                    is GuiResult.Rejected -> selected
-                    is GuiResult.Unknown -> selected
-                }
-            }
+            else GuiResult.Value(if (observationId == null) GuiRuntime.currentWindowScreenshot(lease, captureCancelled)
+                else GuiRuntime.screenshot(lease, observationId))
         }
         return try { awaitScreenshot(started, cancelled) } finally { abandoned.set(true) }
     }

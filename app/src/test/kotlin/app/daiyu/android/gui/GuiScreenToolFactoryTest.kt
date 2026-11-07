@@ -15,7 +15,7 @@ class GuiScreenToolFactoryTest {
             "APPLICATION_WINDOW_AMBIGUOUS_NOT_EXECUTED").forEach { assertFalse(session.canClarifyWindow(it)) }
     }
 
-    @Test fun onlyOrdinaryScreenshotDefinitionAllowsOneImplicitObservation() {
+    @Test fun onlyOrdinaryScreenshotDefinitionAllowsDirectWindowCapture() {
         val ordinary = GuiScreenToolFactory.readDefinition(allowImplicitObservation = true)
         assertNotNull(ordinary.schema.parse("{\"operation\":\"screenshot\"}"))
         assertTrue(ordinary.description.contains("observation"))
@@ -23,6 +23,8 @@ class GuiScreenToolFactoryTest {
         assertTrue(explicit.description.contains("screenshot requires observation_id"))
         assertFalse(explicit.description.contains("omit it for a current visual-only image"))
         assertTrue(ordinary.description.contains("omit it for a current visual-only image"))
+        assertTrue(ordinary.description.contains("without reading the UI node tree"))
+        assertTrue(ordinary.description.contains("does not require Root when the accessibility window is verifiable"))
         assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
     }
 

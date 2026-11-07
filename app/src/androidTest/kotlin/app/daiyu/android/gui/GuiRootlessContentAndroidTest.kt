@@ -22,6 +22,11 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         var completedGesture: ((Boolean) -> Unit)? = null
         var gestures = 0
         var disposed = 0
+        var rootReads = 0
+        override fun root(current: GuiAccessibilityService): android.view.accessibility.AccessibilityNodeInfo? {
+            rootReads++; return null
+        }
+        override fun windows(current: GuiAccessibilityService): List<android.view.accessibility.AccessibilityWindowInfo> = emptyList()
         override fun enabled(current: GuiAccessibilityService) = true
         override fun unlocked(current: GuiAccessibilityService) = true
         override fun visualWindow(current: GuiAccessibilityService, completed: (GuiVisualWindow?) -> Unit) { windows += completed }
@@ -73,16 +78,30 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         return true
     }
     private fun capture(service: GuiAccessibilityService, session: GuiRunSession, platform: Platform,
-        pkg: String? = service.packageName, spatial: GuiScreenshot? = null): GuiScreenshot {
+        pkg: String? = service.packageName, spatial: GuiScreenshot? = null, direct: Boolean = false): GuiScreenshot {
         lateinit var pending: CompletableFuture<GuiResult<GuiScreenshot>>
         controlMain {
-            pending = GuiRuntime.visualScreenshot(session.lease) { false }
+            pending = if (direct) GuiRuntime.currentWindowScreenshot(session.lease) { false }
+                else GuiRuntime.visualScreenshot(session.lease) { false }
             event(service, pkg); platform.witness(); event(service, pkg); platform.image(spatial = spatial); event(service, pkg)
         }
         instrumentation.waitForIdleSync()
         controlMain { event(service, pkg); platform.witness() }
         return (pending.get() as GuiResult.Value).value
     }
+    fun testCurrentWindowScreenshotWithoutNodesUsesOneCaptureAndPublishesNoObservation() = fixture { service, session, platform ->
+        if (unsupported(session, platform)) return@fixture
+        val image = capture(service, session, platform, direct = true)
+        assertFalse(image.observationBound); assertEquals("external.app", image.visualPackage)
+        assertEquals(1, platform.rootReads)
+        controlMain {
+            assertNull(session.lease.observation)
+            assertEquals(0, session.lease.reads)
+            assertTrue(platform.windows.isEmpty()); assertNull(platform.captured)
+        }
+        assertEquals(1, platform.disposed); assertEquals(0, platform.gestures)
+    }
+
     fun testOwnContentAcrossAsyncWitnessesKeepsPixelVerifiedSingleUseAction() = fixture { service, session, platform ->
         if (unsupported(session, platform)) return@fixture
         val image = capture(service, session, platform)

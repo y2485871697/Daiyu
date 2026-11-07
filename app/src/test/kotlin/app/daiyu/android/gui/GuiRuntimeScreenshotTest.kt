@@ -959,7 +959,10 @@ class GuiRuntimeScreenshotTest {
         val json = org.json.JSONObject(GuiScreenToolFactory.screenshotJson(image.value))
         assertEquals(image.value.observationId, json.getString("capture_id"))
         assertFalse(json.has("observation_id"))
-        assertEquals(0, session.lease.reads)
+        assertEquals(0, session.lease.reads); assertEquals(0, session.lease.screenshots)
+        assertEquals(0, CopyingWindowNodeShadow.childReads)
+        rejected(GuiRuntime.visualAction(session.lease, spatialAction(image.value)) { false }.completed(),
+            "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
         val reads = platform.rootReads
         val stale = java.util.concurrent.FutureTask { session.dynamicScreenshot("stale") { false } }
         Thread(stale).start()
@@ -976,6 +979,7 @@ class GuiRuntimeScreenshotTest {
             session.approveReadsFromUser(GuiReadApproval(3, 1))
             val pending = GuiRuntime.currentWindowScreenshot(session.lease) { false }
             assertEquals(0, CopyingWindowNodeShadow.childReads)
+            assertEquals(3, session.lease.reads); assertEquals(0, session.lease.screenshots)
             when (mode) {
                 0 -> contentEvent("external.app")
                 1 -> contentEvent(type = AccessibilityEvent.TYPE_WINDOWS_CHANGED)
@@ -989,6 +993,8 @@ class GuiRuntimeScreenshotTest {
                 val image = pending.completed() as GuiResult.Value
                 assertFalse(image.value.observationBound); assertNull(image.value.visualPackage)
             } else rejected(pending.completed(), if (mode == 3 || mode == 5) "SCREENSHOT_WINDOW_CHANGED" else "CAPTURE_STALE_NOT_EXECUTED")
+            if (mode == 2) assertTrue(CopyingWindowNodeShadow.childReads > 0)
+            else assertEquals(0, CopyingWindowNodeShadow.childReads)
             assertDisposed(frame); assertNoActions()
         }
     }

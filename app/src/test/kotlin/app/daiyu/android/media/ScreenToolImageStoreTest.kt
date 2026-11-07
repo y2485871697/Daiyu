@@ -23,8 +23,8 @@ class ScreenToolImageStoreTest {
         bitmap.recycle()
         return GuiScreenshot("capture", 4, 3, bytes, observationBound = false, visualPackage = "sample.app")
     }
-    private fun write(store: ScreenToolImageStore, image: GuiScreenshot, conversation: String = "c", call: String = "call") =
-        store.receipt(conversation, "r", call, image, GuiScreenToolFactory.screenshotJson(image))
+    private fun write(store: ScreenToolImageStore, image: GuiScreenshot, conversation: String = "c", call: String = "call", run: String = "r") =
+        store.receipt(conversation, run, call, image, GuiScreenToolFactory.screenshotJson(image))
 
     @Test fun onePrivatePngAndSmallReceiptAreIdempotentAndBoundToOwner() {
         val root = folder.newFolder(); val store = ScreenToolImageStore(root); val image = image()
@@ -63,4 +63,76 @@ class ScreenToolImageStoreTest {
         Files.createSymbolicLink(asset.toPath(), outside.toPath())
         assertNull(store.read("c", "call", receipt)); assertTrue(outside.exists())
     }
+    @Test fun finishRunDeletesOnlyOwnedOperationCapturesAndKeepsOtherRunsAndSavedPreviews() {
+        val root = folder.newFolder(); val oldStore = ScreenToolImageStore(root); val image = image()
+        val saved = write(oldStore, image, call = "saved")
+        val store = ScreenToolImageStore(root)
+        val reused = write(store, image, call = "saved")
+        assertFalse(JSONObject(reused).getJSONObject("image_asset").getBoolean("temporary"))
+        val receipt = write(store, image)
+        val otherRun = write(store, image, run = "other")
+        val otherConversation = write(store, image, conversation = "other")
+        val parsed = NativeScreenImage.parse("screen", """{"operation":"screenshot"}""", receipt) { store.read("c", "call", it) }!!
+        assertEquals(1, store.finishRun("c", "r"))
+        assertNull(store.read("c", "call", receipt))
+        assertArrayEquals(image.png, parsed.bytes)
+        assertArrayEquals(image.png, store.read("c", "saved", saved))
+        assertArrayEquals(image.png, store.read("c", "call", otherRun))
+        assertArrayEquals(image.png, store.read("other", "call", otherConversation))
+        assertEquals(3, root.walkTopDown().count { it.extension == "png" })
+    }
+
+    @Test fun clearedMarkerSurvivesReopenAndRunCannotPublishLateCaptures() {
+        val root = folder.newFolder(); val store = ScreenToolImageStore(root); val image = image()
+        val receipt = write(store, image)
+        assertTrue(JSONObject(receipt).getJSONObject("image_asset").getBoolean("temporary"))
+        assertFalse(store.wasCleared("c", "r")); assertEquals(1, store.finishRun("c", "r"))
+        assertEquals(0, store.finishRun("c", "r"))
+        val reopened = ScreenToolImageStore(root)
+        assertTrue(reopened.wasCleared("c", "r")); assertFalse(reopened.wasCleared("other", "r"))
+        assertNull(reopened.read("c", "call", receipt))
+        assertThrows(IllegalStateException::class.java) { write(reopened, image) }
+        assertEquals(0, root.walkTopDown().count { it.extension == "png" })
+    }
+
+    @Test fun invalidMetadataDoesNotWriteAndUncommittedReceiptStillBelongsToRunCleanup() {
+        val root = folder.newFolder(); val store = ScreenToolImageStore(root); val image = image()
+        assertThrows(org.json.JSONException::class.java) { store.receipt("c", "r", "bad", image, "not json") }
+        assertEquals(0, root.walkTopDown().count { it.extension == "png" || it.extension == "pending" })
+        write(store, image)
+        assertEquals(1, store.finishRun("c", "r"))
+        assertEquals(0, root.walkTopDown().count { it.extension == "png" || it.extension == "pending" })
+    }
+
+    @Test fun cleanupRefusesSymlinkAndCanRetryWithoutTouchingExternalFile() {
+        val root = folder.newFolder(); val store = ScreenToolImageStore(root); write(store, image())
+        val asset = root.walkTopDown().single { it.extension == "png" }
+        val outside = folder.newFile(); outside.writeBytes(asset.readBytes()); assertTrue(asset.delete())
+        Files.createSymbolicLink(asset.toPath(), outside.toPath())
+        assertThrows(ImageAttachmentException::class.java) { store.finishRun("c", "r") }
+        assertFalse(store.wasCleared("c", "r")); assertTrue(outside.isFile)
+        Files.delete(asset.toPath())
+        assertEquals(1, store.finishRun("c", "r")); assertTrue(store.wasCleared("c", "r")); assertTrue(outside.isFile)
+    }
+
+    @Test fun corruptMarkerDoesNotClaimCleanupAndMissingImageAloneIsNotCleared() {
+        val root = folder.newFolder(); val store = ScreenToolImageStore(root); val receipt = write(store, image())
+        assertTrue(root.walkTopDown().single { it.extension == "png" }.delete())
+        assertNull(store.read("c", "call", receipt)); assertFalse(store.wasCleared("c", "r"))
+        store.finishRun("c", "r")
+        root.walkTopDown().single { it.extension == "cleared" }.writeText("corrupt")
+        assertFalse(store.wasCleared("c", "r"))
+        assertThrows(IllegalStateException::class.java) { write(store, image(), call = "late") }
+    }
+
+    @Test fun reusedSavedPreviewRemainsReadableButFinishedRunCannotCreateAnotherImage() {
+        val root = folder.newFolder(); val oldStore = ScreenToolImageStore(root); val image = image()
+        val saved = write(oldStore, image)
+        val store = ScreenToolImageStore(root); val reused = write(store, image)
+        assertFalse(JSONObject(reused).getJSONObject("image_asset").getBoolean("temporary"))
+        assertEquals(0, store.finishRun("c", "r"))
+        assertTrue(store.wasCleared("c", "r")); assertArrayEquals(image.png, store.read("c", "call", saved))
+        assertThrows(IllegalStateException::class.java) { write(store, image, call = "late") }
+    }
+
 }

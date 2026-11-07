@@ -144,7 +144,25 @@ ROOTLESS_COMMIT_MODULES = tuple(dict.fromkeys(RUNTIME_SCREENSHOT_MODULES + (
 )))
 
 
+SCREEN_CLEANUP_PLATFORM_CLASSES = (
+    "app.daiyu.android.ControllerGuiStorageRetentionTest",
+    "app.daiyu.android.gui.GuiCaptureDisposalProductionTest",
+    "app.daiyu.android.gui.GuiRootlessContentAndroidTest",
+    "app.daiyu.android.ui.ToolScreenshotReceiptTest",
+)
+SCREEN_CLEANUP_MODULES = (
+    "test_gui_temporary_screenshot_cleanup_contract", "test_gui_direct_screenshot_contract",
+    "test_project_identity_contract", "test_gui_audit_recovery_contract",
+    "test_rootless_content_smoke_scope", "test_screen_cleanup_smoke_scope",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SCREEN_CLEANUP_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *SCREEN_CLEANUP_MODULES, "-v"], "screen-cleanup-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(ROOTLESS_COMMIT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *ROOTLESS_COMMIT_MODULES, "-v"], "rootless-commit-targeted"

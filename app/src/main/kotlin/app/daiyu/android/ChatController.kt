@@ -880,6 +880,8 @@ class ChatController internal constructor(private val application:Application,
         }
         return true
     }
+    internal var screenScreenshotRevision by mutableStateOf(0L)
+        private set
     private val screenToolImages by lazy { app.daiyu.android.media.ScreenToolImageStore(File(application.filesDir, "media-screen-images")) }
     private fun screenSessionContext(conversation: ConversationId, run: String? = null) = SessionGatewayContext(conversation) { call, receipt ->
         screenToolImages.read(conversation.value, call, receipt, run)
@@ -1677,6 +1679,9 @@ class ChatController internal constructor(private val application:Application,
         var cleanupConfirmed=false
         var cleanupFailed=false
         var devicesClosing=false
+        var screenImagesCleaning=false
+        var screenImagesCleaned=false
+        var screenImagesCleanupFailed=false
         val deviceCleanup=ControllerShizukuCleanup()
         var result:Message?=null
     }
@@ -3092,18 +3097,22 @@ class ChatController internal constructor(private val application:Application,
     }
 
     internal fun loadToolScreenshot(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
-        callId: String, complete: (android.graphics.Bitmap?) -> Unit): Boolean {
+        callId: String, complete: (android.graphics.Bitmap?, Boolean) -> Unit): Boolean {
         val revision = synchronized(this) {
             if (closed || !ready || dataBusy) return false
             generationReaders++; dataRevision
         }
         try { screenshotExecutor.execute {
+            var cleared = false
             val image = runCatching {
                 val record = committedScreenshotOnWorker(owner, callId) ?: return@runCatching null
-                if (record.invocation.name == "screen") app.daiyu.android.ui.ToolScreenshotReceipt.decode(record) { receipt ->
-                    screenToolImages.read(owner.conversationId, callId, receipt, owner.runId)
-                }
-                else {
+                if (record.invocation.name == "screen") {
+                    val asset = record.result?.let { org.json.JSONObject(it).optJSONObject("image_asset") }
+                    cleared = asset?.optBoolean("temporary") == true && screenToolImages.wasCleared(owner.conversationId, owner.runId)
+                    if (cleared) null else app.daiyu.android.ui.ToolScreenshotReceipt.decode(record) { receipt ->
+                        screenToolImages.read(owner.conversationId, callId, receipt, owner.runId)
+                    }
+                } else {
                     check(record.disposition == app.daiyu.android.domain.runtime.ToolDisposition.SUCCEEDED &&
                         org.json.JSONObject(record.invocation.arguments).optString("action") == "screenshot")
                     val receipt = org.json.JSONObject(checkNotNull(record.result)).getJSONObject("screenshot_receipt")
@@ -3117,7 +3126,7 @@ class ChatController internal constructor(private val application:Application,
                     generationReaders--; if (closed) closeStorageWhenIdle(); !closed && !dataBusy && dataRevision == revision
                 }
                 if (!valid) image?.recycle()
-                complete(if (valid) image else null)
+                complete(if (valid) image else null, valid && cleared)
             }
         } } catch (_: java.util.concurrent.RejectedExecutionException) {
             synchronized(this) { generationReaders-- }; return false
@@ -4733,6 +4742,32 @@ class ChatController internal constructor(private val application:Application,
             }
         }
         if(!lifetime.deviceCleanup.drained) return
+        if (!lifetime.screenImagesCleaned) {
+            if (!lifetime.screenImagesCleaning) {
+                lifetime.screenImagesCleaning = true
+                lifetime.screenImagesCleanupFailed = false
+                screenshotExecutor.execute {
+                    val cleaned = runCatching { screenToolImages.finishRun(
+                        lifetime.initial.conversationId.value, lifetime.initial.runId.value) }
+                    handler.post { synchronized(this) {
+                        lifetime.screenImagesCleaning = false
+                        cleaned.fold(onSuccess = {
+                            lifetime.screenImagesCleaned = true
+                            if (it > 0) screenScreenshotRevision++
+                            if (problem == "操作临时截图清理失败；请重试停止") problem = null
+                            cleanupRun(lifetime)
+                        }, onFailure = {
+                            lifetime.screenImagesCleanupFailed = true
+                            problem = "操作临时截图清理失败；请重试停止"
+                            android.util.Log.e("DaiyuMedia", "temporary_screen_capture_cleanup_failed", it)
+                            if (!closed) active = (active ?: lifetime.initial).copy(status = RunStatus.INTERRUPTED, error = problem)
+                            notifyChanged()
+                        })
+                    } }
+                }
+            }
+            return
+        }
         lifetime.writer.shutdown();lifetime.waiter.shutdown()
         if (videoSession?.assistant?.runId == lifetime.initial.runId) videoSession = null
         resources=null;runner=null;runTools=null
@@ -4761,7 +4796,8 @@ class ChatController internal constructor(private val application:Application,
     }
     @Synchronized internal fun canRetryQuestionCleanup(message:Message):Boolean = resources?.let {
         it.initial.id==message.id && it.initial.runId==message.runId &&
-            it.initial.conversationId==message.conversationId && it.cleanupFailed && !it.cleaning
+            it.initial.conversationId==message.conversationId &&
+            ((it.cleanupFailed && !it.cleaning) || (it.screenImagesCleanupFailed && !it.screenImagesCleaning))
     }==true
     private fun closeStorageWhenIdle() {
         browserChildren.removeAll { it.drained }

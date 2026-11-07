@@ -12,9 +12,9 @@ on:
         type: string
         required: true
       check_scope:
-        description: 截图通道检查或仅独立截图路由
+        description: 截图通道、独立截图路由或操作临时截图清理
         type: choice
-        options: [screenshot, direct-read]
+        options: [screenshot, direct-read, temporary-cleanup]
         default: screenshot
 permissions:
   contents: read
@@ -61,7 +61,7 @@ jobs:
           packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
           log-accepted-android-sdk-licenses: false
       - name: 检查源码边界
-        if: inputs.check_scope != 'direct-read'
+        if: inputs.check_scope == 'screenshot'
         run: |
           set -o pipefail
           mkdir -p gui-screenshot-checks
@@ -81,7 +81,7 @@ jobs:
       - name: 准备既有离线语音依赖（不打包）
         run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
       - name: 截图通道定向单测及Compose源码编译（不打包）
-        if: inputs.check_scope != 'direct-read'
+        if: inputs.check_scope == 'screenshot'
         shell: bash
         run: |
           set -o pipefail
@@ -157,21 +157,35 @@ jobs:
             --tests 'app.daiyu.android.domain.runtime.RunnerContextRuntimeTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee gui-screenshot-checks/gradle.log
       - name: 独立截图路由及资源生命周期定向检查（不打包）
-        if: inputs.check_scope == 'direct-read'
+        if: inputs.check_scope != 'screenshot'
         shell: bash
         run: |
           set -o pipefail
           mkdir -p gui-screenshot-checks
+          python3 - <<'PYRESET'
+          import shutil
+          from pathlib import Path
+          for folder in ('app/build/test-results/testDebugUnitTest', 'core-domain/build/test-results/test'):
+              shutil.rmtree(folder, ignore_errors=True)
+          for name in ('task-graph.json', 'record.json'):
+              Path('gui-screenshot-checks', name).unlink(missing_ok=True)
+          PYRESET
           python3 scripts/verify_boundaries.py 2>&1 | tee gui-screenshot-checks/boundaries.log
           PYTHONPATH=tests python3 -B -m unittest -v \
             test_project_identity_contract test_gui_direct_screenshot_contract test_gui_audit_recovery_contract \
             test_ordinary_tool_wiring_contract.OrdinaryToolWiringContract.test_gui_target_is_validated_before_session_mutation \
-            test_rootless_content_smoke_scope \
+            test_rootless_content_smoke_scope test_gui_temporary_screenshot_cleanup_contract test_screen_cleanup_smoke_scope \
             2>&1 | tee gui-screenshot-checks/direct-read-contracts.log
+          extra_tests=()
+          if [[ "$GUI_CHECK_SCOPE" == temporary-cleanup ]]; then
+            extra_tests+=(--tests app.daiyu.android.media.ScreenToolImageStoreTest
+              --tests app.daiyu.android.model.ScreenToolImageInputTest
+              --tests app.daiyu.android.ui.ToolScreenshotReceiptUnitTest)
+          fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=gui-screenshot-checks/task-graph.json \
-            :app:compileDebugKotlin :app:testDebugUnitTest \
+            :app:compileDebugKotlin :app:testDebugUnitTest "${extra_tests[@]}" \
             --tests 'app.daiyu.android.gui.GuiRuntimeScreenshotTest' \
             --tests 'app.daiyu.android.gui.GuiAppLaunchTest' \
             --tests 'app.daiyu.android.gui.GuiScreenToolFactoryTest' \
@@ -187,9 +201,11 @@ jobs:
           import xml.etree.ElementTree as ET
           root = Path.cwd()
           expected = {'app.daiyu.android.model.StreamEventBufferTest', 'app.daiyu.android.model.ResponsesDeltaBatchTest', 'app.daiyu.android.model.AllProtocolRequestRetryTest', 'app.daiyu.android.media.ScreenToolImageStoreTest', 'app.daiyu.android.storage.SQLiteVerifiedTextReuseTest', 'app.daiyu.android.storage.SQLiteTextTest', 'app.daiyu.android.storage.SQLiteTextChunksTest', 'app.daiyu.android.storage.ScreenHistoryReceiptReuseTest', 'app.daiyu.android.storage.CommitMessageDecodeReuseTest', 'app.daiyu.android.storage.ConversationMessageDecodeReuseSQLiteTest', 'app.daiyu.android.platform.AppLabelCacheTest', 'app.daiyu.android.context.ModelContextSummarizerContractTest', 'app.daiyu.android.context.ProviderSummaryModelTest', 'app.daiyu.android.context.ContextManagementControllerAdapterTest', 'app.daiyu.android.context.ContextTimelineColdStartTest', 'app.daiyu.android.diagnostics.DiagnosticLogStoreTest', 'app.daiyu.android.diagnostics.RuntimeDiagnosticsTest', 'app.daiyu.android.storage.CheckpointJsonWriterTest', 'app.daiyu.android.storage.AndroidCheckpointJsonWriterTest', 'app.daiyu.android.model.RequestInputEstimateTest', 'app.daiyu.android.context.ProductionRunContextCapacityTest', 'app.daiyu.android.domain.runtime.RunnerContextRuntimeTest', 'app.daiyu.android.context.Utf8PayloadTest', 'app.daiyu.android.ui.ToolReceiptSourceTest', 'app.daiyu.android.storage.RunCheckpointQuotedStringsTest', 'app.daiyu.android.storage.AndroidRunCheckpointQuotedStringsTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCacheTest', 'app.daiyu.android.storage.RuntimeCheckpointReuseTest', 'app.daiyu.android.backup.StrictHistoryContractTest', 'app.daiyu.android.backup.RunCheckpointCodecTest', 'app.daiyu.android.context.ArchiveCheckpointArrayTest', 'app.daiyu.android.model.ScreenToolImageInputTest', 'app.daiyu.android.platform.PlatformProductionSettingsTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolCardPresentationTest', 'app.daiyu.android.domain.runtime.RunnerReceiptBatchTest', 'app.daiyu.android.model.ResponsesReasoningIdentityTest', 'app.daiyu.android.model.ResponsesReasoningProgressTest', 'app.daiyu.android.model.ResponsesBackgroundResumeTest', 'app.daiyu.android.model.ResponsesBoundaryRegressionTest', 'app.daiyu.android.model.ResponsesProtocolCompatibilityTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest', 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowMapperTest', 'app.daiyu.android.ui.screens.chat.conversation.CompletedReasoningProjectionTest', 'app.daiyu.android.domain.tools.ToolAdvertisementTest', 'app.daiyu.android.integration.tools.PlatformCatalogTest', 'app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest', 'app.daiyu.android.domain.tools.ToolDispatcherTest', 'app.daiyu.android.integration.tools.OrdinaryWriteRepeatTest', 'app.daiyu.android.gui.GuiAppLaunchTest', 'app.daiyu.android.gui.GuiCaptureRequestTest', 'app.daiyu.android.gui.GuiLeaseGateTest', 'app.daiyu.android.gui.GuiProductionConfirmationTest', 'app.daiyu.android.gui.GuiRuntimeScreenshotTest', 'app.daiyu.android.gui.GuiVisualWindowParserTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.gui.GuiProductionEntryContractTest', 'app.daiyu.android.gui.GuiCaptureDisposalTest', 'app.daiyu.android.gui.GuiScreenToolFactoryTest'}
-          if os.environ.get('GUI_CHECK_SCOPE') == 'direct-read':
+          if os.environ.get('GUI_CHECK_SCOPE') in ('direct-read', 'temporary-cleanup'):
               expected = {'app.daiyu.android.gui.' + name for name in ('GuiRuntimeScreenshotTest', 'GuiAppLaunchTest',
                   'GuiScreenToolFactoryTest', 'GuiLeaseGateTest', 'GuiCaptureRequestTest', 'GuiCaptureDisposalTest')}
+          if os.environ.get('GUI_CHECK_SCOPE') == 'temporary-cleanup':
+              expected.update({'app.daiyu.android.media.ScreenToolImageStoreTest', 'app.daiyu.android.model.ScreenToolImageInputTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest'})
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest', 'core-domain/build/test-results/test') for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

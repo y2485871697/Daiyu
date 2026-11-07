@@ -67,4 +67,30 @@ class ToolScreenshotReceiptTest : InstrumentationTestCase() {
             assertNull(ToolScreenshotReceipt.decode(record.copy(result = data.toString())))
         }
     }
+    fun testOperationCaptureIsReadableUntilFinishAndThenPermanentlyCleared() {
+        val root = java.io.File(instrumentation.targetContext.cacheDir, "screen-cleanup-${System.nanoTime()}")
+        try {
+            val store = app.daiyu.android.media.ScreenToolImageStore(root)
+            val original = receipt()
+            val png = Base64.decode(JSONObject(original.result!!).getString("data_base64"), Base64.NO_WRAP)
+            val output = store.receipt("conversation", "run", "capture",
+                app.daiyu.android.gui.GuiScreenshot("obs", 4, 3, png), original.result!!)
+            val record = original.copy(result = output)
+            val native = app.daiyu.android.media.NativeScreenImage.parse("screen", original.invocation.arguments, output) {
+                store.read("conversation", "capture", it, "run")
+            }
+            assertNotNull(native)
+            val bitmap = ToolScreenshotReceipt.decode(record) { store.read("conversation", "capture", it, "run") }
+            assertNotNull(bitmap); bitmap!!.recycle()
+            assertFalse(store.wasCleared("conversation", "run"))
+            assertEquals(1, store.finishRun("conversation", "run"))
+            assertTrue(png.contentEquals(native!!.bytes))
+            assertNull(ToolScreenshotReceipt.decode(record) { store.read("conversation", "capture", it, "run") })
+            assertTrue(app.daiyu.android.media.ScreenToolImageStore(root).wasCleared("conversation", "run"))
+            val legacy = ToolScreenshotReceipt.decode(original)
+            assertNotNull(legacy); legacy!!.recycle()
+            assertEquals(0, root.walkTopDown().count { it.extension == "png" || it.extension == "pending" })
+        } finally { root.deleteRecursively() }
+    }
+
 }

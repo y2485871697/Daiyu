@@ -29,20 +29,22 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
     val owner = step.owner ?: return
     var image by remember(owner, step.toolCallId) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var expanded by remember(owner, step.toolCallId) { mutableStateOf(false) }
+    var cleared by remember(owner, step.toolCallId) { mutableStateOf(false) }
     var loading by remember(owner, step.toolCallId) { mutableStateOf(true) }
     var revision by remember(owner, step.toolCallId) { mutableStateOf(0) }
-    DisposableEffect(controller, owner, step.toolCallId, step.state, controller.ready, controller.dataBusy, revision) {
+    DisposableEffect(controller, owner, step.toolCallId, step.state, controller.ready, controller.dataBusy, controller.screenScreenshotRevision, revision) {
         var visible = true
-        image = null; loading = true
-        if (!controller.loadToolScreenshot(owner, step.toolCallId) {
-            if (visible) { image = it; loading = false } else it?.recycle()
+        image = null; loading = true; cleared = false
+        if (!controller.loadToolScreenshot(owner, step.toolCallId) { bitmap, cleaned ->
+            if (visible) { image = bitmap; loading = false; cleared = cleaned; if (cleaned) expanded = false }
+            else bitmap?.recycle()
         }) loading = false
         onDispose { visible = false }
     }
     if (image == null) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(if (loading) "正在加载…" else "读取失败", color = conversationColors().muted,
+        Text(if (cleared) "临时截图已清理" else if (loading) "正在加载…" else "读取失败", color = conversationColors().muted,
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 21.sp))
-        if (!loading) TextButton(text = "重新读取", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { revision++ })
+        if (!loading && !cleared) TextButton(text = "重新读取", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { revision++ })
     }
     image?.let { bitmap ->
         Column(Modifier.fillMaxWidth().testTag("tool-screenshot:${step.toolCallId}")) {

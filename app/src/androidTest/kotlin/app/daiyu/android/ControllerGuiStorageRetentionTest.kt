@@ -694,6 +694,65 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         } finally { f.dispose() }
     }
 
+    private fun operationCapture(f: Fixture, entry: ControllerGuiEntry): Pair<app.daiyu.android.media.ScreenToolImageStore, String> {
+        val store = (field(f.controller, "screenToolImages\$delegate") as Lazy<*>).value as app.daiyu.android.media.ScreenToolImageStore
+        val bitmap = android.graphics.Bitmap.createBitmap(4, 3, android.graphics.Bitmap.Config.ARGB_8888)
+        val png = ByteArrayOutputStream().also { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        bitmap.recycle()
+        val image = GuiScreenshot("capture", 4, 3, png, observationBound = false, visualPackage = "sample.app")
+        return store to store.receipt(entry.conversationId.value, entry.runId.value, "capture", image,
+            GuiScreenToolFactory.screenshotJson(image))
+    }
+
+    fun testCompletedRunCleansPrivateCaptureOnlyAfterRealRunnerAndCatalogDrain() {
+        val f = Fixture()
+        try {
+            val entry = f.submit(); assertTrue(f.modelEntered.await(5, TimeUnit.SECONDS))
+            val (store, output) = operationCapture(f, entry)
+            assertNotNull(store.read(entry.conversationId.value, "capture", output, entry.runId.value))
+            assertFalse(store.wasCleared(entry.conversationId.value, entry.runId.value))
+            f.modelRelease.countDown()
+            awaitControl("terminal Runner, catalog and operation images drained") {
+                field(f.controller, "resources") == null && f.controller.active == null
+            }
+            assertCatalogDrained(entry)
+            assertNull(store.read(entry.conversationId.value, "capture", output, entry.runId.value))
+            assertTrue(store.wasCleared(entry.conversationId.value, entry.runId.value))
+            assertNull(f.controller.problem)
+        } finally { f.dispose() }
+    }
+
+    fun testFailedCaptureCleanupRetainsOwnerUntilExplicitStopRetriesSuccessfully() {
+        val f = Fixture()
+        var blocked: File? = null
+        try {
+            val entry = f.submit(); assertTrue(f.modelEntered.await(5, TimeUnit.SECONDS))
+            val (store, output) = operationCapture(f, entry)
+            val file = File(f.app.filesDir, "media-screen-images").walkTopDown().single { it.extension == "png" }
+            blocked = file
+            assertTrue(file.delete()); assertTrue(file.mkdir())
+            val owner = field(f.controller, "resources")
+            controlMain { f.controller.stop() }
+            awaitControl("cleanup failure is visible without discarding original owner") {
+                f.controller.problem == "操作临时截图清理失败；请重试停止"
+            }
+            controlMain {
+                assertSame(owner, field(f.controller, "resources"))
+                assertTrue(f.controller.canRetryQuestionCleanup(checkNotNull(f.controller.active)))
+            }
+            assertFalse(store.wasCleared(entry.conversationId.value, entry.runId.value))
+            assertNull(store.read(entry.conversationId.value, "capture", output, entry.runId.value))
+            assertTrue(file.delete())
+            controlMain { f.controller.stop() }
+            awaitControl("explicit retry completes original operation image cleanup") {
+                field(f.controller, "resources") == null && f.controller.active == null
+            }
+            assertTrue(store.wasCleared(entry.conversationId.value, entry.runId.value))
+            assertNull(f.controller.problem)
+            assertCatalogDrained(entry)
+        } finally { blocked?.takeIf { it.isDirectory }?.delete(); f.dispose() }
+    }
+
     fun testConfirmedAcceptanceAndPhysicalGuiDrainAllowControllerStorageClose() {
         val f = Fixture()
         try {
@@ -705,8 +764,12 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             assertTrue(entry.accepted)
             assertFalse(entry.persistenceUnknown)
             assertTrue(f.modelEntered.await(5, TimeUnit.SECONDS))
+            val (store, output) = operationCapture(f, entry)
+            assertNotNull(store.read(entry.conversationId.value, "capture", output, entry.runId.value))
             controlMain { assertSame(entry, f.controller.guiEntry()); f.controller.close() }
             assertTrue("confirmed drain must acknowledge close", f.closeDone.await(10, TimeUnit.SECONDS))
+            assertNull(store.read(entry.conversationId.value, "capture", output, entry.runId.value))
+            assertTrue(store.wasCleared(entry.conversationId.value, entry.runId.value))
             assertCatalogDrained(entry)
             controlMain {
                 assertNull(f.controller.guiEntry())

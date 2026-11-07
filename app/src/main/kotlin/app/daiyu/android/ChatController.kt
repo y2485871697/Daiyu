@@ -1,5 +1,8 @@
 package app.daiyu.android
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.setValue
 import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import android.app.Application
 import android.content.SharedPreferences
@@ -880,7 +883,7 @@ class ChatController internal constructor(private val application:Application,
         }
         return true
     }
-    internal var screenScreenshotRevision by mutableStateOf(0L)
+    internal var screenScreenshotRevision by mutableLongStateOf(0L)
         private set
     private val screenToolImages by lazy { app.daiyu.android.media.ScreenToolImageStore(File(application.filesDir, "media-screen-images")) }
     private fun screenSessionContext(conversation: ConversationId, run: String? = null) = SessionGatewayContext(conversation) { call, receipt ->

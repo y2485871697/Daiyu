@@ -14,7 +14,8 @@ internal class GuiVisualPixels private constructor(
 
     internal data class Check(val reason: RuntimeDiagnostics.Code,
         val beforeWidth: Int, val beforeHeight: Int, val afterWidth: Int, val afterHeight: Int,
-        val comparedTiles: Int? = null, val changedTiles: Int? = null) {
+        val comparedTiles: Int? = null, val changedTiles: Int? = null,
+        val region: GuiBounds? = null, val changedTileBounds: List<GuiBounds> = emptyList()) {
         val accepted get() = reason == RuntimeDiagnostics.Code.LOCAL_EQUAL
     }
 
@@ -22,8 +23,9 @@ internal class GuiVisualPixels private constructor(
         compareTap(other, gesture, window).accepted
 
     fun compareTap(other: GuiVisualPixels?, gesture: GuiGesture, window: GuiVisualWindow): Check {
-        fun result(reason: RuntimeDiagnostics.Code, compared: Int? = null, changed: Int? = null) =
-            Check(reason, width, height, other?.width ?: -1, other?.height ?: -1, compared, changed)
+        fun result(reason: RuntimeDiagnostics.Code, compared: Int? = null, changed: Int? = null,
+            region: GuiBounds? = null, changes: List<GuiBounds> = emptyList()) =
+            Check(reason, width, height, other?.width ?: -1, other?.height ?: -1, compared, changed, region, changes)
         if (other == null) return result(Code.PIXELS_MISSING)
         if (width != other.width || height != other.height) return result(Code.DIMENSIONS_CHANGED)
         if (gesture.x != gesture.endX || gesture.y != gesture.endY) return result(Code.NOT_A_TAP)
@@ -37,20 +39,21 @@ internal class GuiVisualPixels private constructor(
         if (!window.admits(gesture)) return result(Code.TARGET_OUTSIDE)
         if (region.right - region.left < radius || region.bottom - region.top < radius) return result(Code.REGION_TOO_SMALL)
         var hasDetail = false
-        var changed = 0
+        val changes = ArrayList<GuiBounds>()
         var compared = 0
         for (row in top until bottom) for (column in left until right) {
             val tile = row * columns + column
             hasDetail = hasDetail || detail[tile]
             val offset = tile * HASH
             compared++
-            if ((0 until HASH).any { hashes[offset + it] != other.hashes[offset + it] }) changed++
+            if ((0 until HASH).any { hashes[offset + it] != other.hashes[offset + it] })
+                changes.add(GuiBounds(column * TILE, row * TILE, minOf(width, (column + 1) * TILE), minOf(height, (row + 1) * TILE)))
         }
         return result(when {
-            changed > 0 -> Code.LOCAL_PIXELS_CHANGED
+            changes.isNotEmpty() -> Code.LOCAL_PIXELS_CHANGED
             !hasDetail -> Code.BLANK_TARGET
             else -> Code.LOCAL_EQUAL
-        }, compared, changed)
+        }, compared, changes.size, region, changes.toList())
     }
 
     companion object {

@@ -233,7 +233,7 @@ internal object RuntimeDiagnostics {
     fun pixels(check: app.daiyu.android.gui.GuiVisualPixels.Check) {
         try {
         emit(Stage.GUI_VALIDATE, check.reason, 0, 0, check.changedTiles?.toLong() ?: -1, check.comparedTiles?.toLong() ?: -1,
-            numbers = intArrayOf(check.beforeWidth, check.beforeHeight, check.afterWidth, check.afterHeight))
+            pixels = check)
         } catch (_: Throwable) { }
     }
 
@@ -258,11 +258,11 @@ internal object RuntimeDiagnostics {
     }
 
     private fun emit(stage: Stage, code: Code, id: Long, elapsed: Long, revision: Long, size: Long,
-        failure: Throwable? = null, owner: Thread = Thread.currentThread(), critical: Boolean = false, stack: Boolean = false, numbers: IntArray? = null, sourceEpoch: Long = generation.get()) {
+        failure: Throwable? = null, owner: Thread = Thread.currentThread(), critical: Boolean = false, stack: Boolean = false, pixels: app.daiyu.android.gui.GuiVisualPixels.Check? = null, sourceEpoch: Long = generation.get()) {
         val epoch = sourceEpoch
         if (directory == null || !enabled || epoch != generation.get()) return
         try {
-            val row = row(stage, code, id, elapsed, revision, size, failure, owner, stack, numbers)
+            val row = row(stage, code, id, elapsed, revision, size, failure, owner, stack, pixels)
             executor.execute {
                 try { lock.withLock {
                     if (generation.get() != epoch) return@withLock
@@ -275,13 +275,19 @@ internal object RuntimeDiagnostics {
     }
 
     private fun row(stage: Stage, code: Code, id: Long, elapsed: Long, revision: Long, size: Long,
-        failure: Throwable?, owner: Thread, stack: Boolean, numbers: IntArray? = null): String {
+        failure: Throwable?, owner: Thread, stack: Boolean, pixels: app.daiyu.android.gui.GuiVisualPixels.Check? = null): String {
         val runtime = Runtime.getRuntime()
         val value = JSONObject().put("time_ms", System.currentTimeMillis()).put("stage", stage.name).put("code", code.name)
             .put("span", id).put("elapsed_ms", elapsed).put("revision_or_count", revision).put("bytes_or_size", size)
             .put("thread_id", owner.id).put("heap_used", runtime.totalMemory() - runtime.freeMemory())
             .put("heap_max", runtime.maxMemory()).put("active_spans", active.size)
-        if (numbers != null) value.put("dimensions", JSONArray(numbers.toList()))
+        if (pixels != null) {
+            fun bounds(region: app.daiyu.android.gui.GuiBounds) =
+                JSONArray(listOf(region.left, region.top, region.right, region.bottom))
+            value.put("dimensions", JSONArray(listOf(pixels.beforeWidth, pixels.beforeHeight, pixels.afterWidth, pixels.afterHeight)))
+            pixels.region?.let { value.put("compared_region", bounds(it)) }
+            value.put("changed_tile_bounds", JSONArray().apply { pixels.changedTileBounds.forEach { put(bounds(it)) } })
+        }
         val request = failure as? app.daiyu.android.domain.ModelRequestException
         request?.let { problem ->
             value.put("model_failure", problem.failure.name)

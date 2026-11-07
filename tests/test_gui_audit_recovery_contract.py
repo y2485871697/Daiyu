@@ -7,6 +7,22 @@ K = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 
 
 class GuiAuditRecoveryContract(unittest.TestCase):
+    def test_visual_change_recovery_is_a_new_read_not_a_replayed_write(self):
+        factory = (K / 'gui/GuiScreenToolFactory.kt').read_text()
+        ordinary = (K / 'integration/tools/RunOrdinaryGuiTools.kt').read_text()
+        runtime = (K / 'gui/GuiAccessibilityService.kt').read_text()
+        self.assertIn('readDefinition(allowImplicitObservation = true)', ordinary)
+        self.assertIn('actionDefinition(allowVisualCapture = true)', ordinary)
+        self.assertIn('(if (allowImplicitObservation) VISUAL_RECOVERY else "")', factory)
+        self.assertIn('(if (allowVisualCapture) VISUAL_RECOVERY else "")', factory)
+        self.assertIn('first call screen operation=observe without observation_id or capture_id', factory)
+        self.assertIn('never an automatic retry of the old ID or coordinates', factory)
+        self.assertIn('UNKNOWN, unconfirmed delivery, cancellation and authorization denial do not authorize retry', factory)
+        self.assertIn('is GuiResult.Rejected -> ExecutionReceipt.NotExecuted(result.code)', ordinary)
+        branch = runtime[runtime.index('!matchesVisualContent(captured,'):runtime.index('visualCapture = null // consume before dispatch')]
+        self.assertIn('retire(); future.complete(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"))', branch)
+        self.assertNotIn('dispatchGesture(', branch)
+
     def test_gestures_use_accessibility_and_keep_lease_until_callback(self):
         service = ET.parse(ROOT / 'app/src/main/res/xml/gui_accessibility_service.xml').getroot()
         self.assertEqual('true', service.get('{http://schemas.android.com/apk/res/android}canPerformGestures'))

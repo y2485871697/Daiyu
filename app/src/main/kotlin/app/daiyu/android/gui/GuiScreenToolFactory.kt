@@ -11,6 +11,10 @@ import org.json.JSONObject
  */
 internal object GuiScreenToolFactory {
     const val CAPABILITY = "gui.accessibility"
+    private const val VISUAL_RECOVERY = "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED and CAPTURE_STALE_NOT_EXECUTED mean the requested action was not delivered and the old capture is retired. " +
+        "Do not end an otherwise authorized task solely for these recoverable results: first call screen operation=observe without observation_id or capture_id, inspect the fresh nodes or image, and select the target again using its new ID and current coordinates. " +
+        "This is a new decision after a read, never an automatic retry of the old ID or coordinates. If a fresh read fails or the target cannot be verified, report that obstacle; do not bypass it. " +
+        "UNKNOWN, unconfirmed delivery, cancellation and authorization denial do not authorize retry. "
     fun create(session: GuiRunSession): List<RegisteredTool> = listOf(ReadTool(session), ActionTool(session))
 
     private fun admission(session: GuiRunSession, context: ToolExecutionContext): ExecutionReceipt.NotExecuted? =
@@ -24,6 +28,7 @@ internal object GuiScreenToolFactory {
                  else "screenshot requires observation_id from a successful observe in this session. ") +
                 "IDs expire after ${GUI_OBSERVATION_TTL_MILLIS / 1000} seconds, a target window change, or an action. Never retry a stale ID automatically. " +
                 (if (allowImplicitObservation) "For a fresh observe of the current screen omit target_package. Screenshots without a target retain this session target; use a fresh observe to change it. Self-app observation requires target_package=app.daiyu.android. To open another app, use launch_app first; target_package only selects a window, it does not launch an app. " else "") +
+                (if (allowImplicitObservation) VISUAL_RECOVERY else "") +
                 "If nodes are unavailable, an explicit screenshot without observation_id may use the already-authorized Root window witness plus platform capture. It returns no synthetic nodes; it never changes Root mode, HMA or accessibility settings. " +
                 "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED means no active/focused window was verified, not that the phone is locked. Only SCREEN_LOCKED_NOT_EXECUTED reports a locked or noninteractive screen. Do not infer lock state from a window failure. " +
                 "Window failures are not Android Root permission errors. Never use shell, input, screencap or uiautomator to bypass screen admission, target or location restrictions.",
@@ -62,6 +67,7 @@ internal object GuiScreenToolFactory {
     internal fun actionDefinition(allowVisualCapture: Boolean = false): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact authorized accessibility node, coordinate gesture or global action, bound to the same fresh observation_id. " +
                 (if (allowVisualCapture) "When screen returns capture_id, including an observe visual_fallback result, it has no nodes. Use capture_id (not observation_id) only for coordinate_tap, swipe or back; fresh pixels and the real foreground window are checked before delivery. Other actions require observe. " else "") +
+                (if (allowVisualCapture) VISUAL_RECOVERY else "") +
                 "coordinate_tap uses x/y; swipe uses x/y/end_x/end_y and optional duration_ms (50-2000, default 500). Coordinates are screen pixels in the observed application window, never screenshot-scaled. " +
                 "ime_submit requires an editable focused node advertising IME_ENTER on API 30+. Explicit gestures are not a fallback for denied or unknown actions. " +
                 "Self-app observations do not authorize HOME/BACK/RECENTS/NOTIFICATIONS; when provided, use launch_app to open another app. No automatic coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",

@@ -26,6 +26,23 @@ class GuiScreenToolFactoryTest {
         assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
     }
 
+    @Test fun ordinaryVisualRecoveryRequiresANewObservationDecisionAndNeverReplaysUnknownActions() {
+        val definitions = listOf(GuiScreenToolFactory.readDefinition(allowImplicitObservation = true),
+            GuiScreenToolFactory.actionDefinition(allowVisualCapture = true))
+        definitions.forEach { definition ->
+            val text = definition.description
+            assertTrue(text.contains("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED and CAPTURE_STALE_NOT_EXECUTED"))
+            assertTrue(text.contains("first call screen operation=observe without observation_id or capture_id"))
+            assertTrue(text.contains("inspect the fresh nodes or image"))
+            assertTrue(text.contains("new ID and current coordinates"))
+            assertTrue(text.contains("never an automatic retry of the old ID or coordinates"))
+            assertTrue(text.contains("UNKNOWN, unconfirmed delivery, cancellation and authorization denial do not authorize retry"))
+            assertTrue(text.contains("do not bypass"))
+        }
+        assertFalse(GuiScreenToolFactory.actionDefinition().description.contains("Do not end an otherwise authorized task"))
+        assertFalse(GuiScreenToolFactory.readDefinition().description.contains("Do not end an otherwise authorized task"))
+    }
+
     @Test fun visualActionSchemaIsOrdinaryOnlyAndUsesADistinctExactEffect() {
         val schema = GuiScreenToolFactory.actionDefinition(allowVisualCapture = true).schema
         val args = schema.parse("""{"operation":"coordinate_tap","capture_id":"capture","x":10,"y":20}""")

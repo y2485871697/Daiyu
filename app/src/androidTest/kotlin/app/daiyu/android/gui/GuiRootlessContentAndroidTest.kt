@@ -1,5 +1,7 @@
 package app.daiyu.android.gui
 
+import android.graphics.Bitmap
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import android.content.Context
 import android.content.ContextWrapper
 import android.test.InstrumentationTestCase
@@ -251,4 +253,45 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         }
     }
 
+    private val fixturePixelGesture = GuiGesture(1093, 2541, 1093, 2541, 50)
+    private val fixturePixelWindow = GuiVisualWindow("fixture", "external.app", 10222,
+        GuiBounds(0, 0, 1216, 2640), GuiBounds(0, 0, 1216, 2640), 0, emptyList())
+
+    private fun fixturePixels(changes: List<Pair<Int, Int>> = emptyList()): GuiVisualPixels {
+        val bitmap = Bitmap.createBitmap(1216, 2640, Bitmap.Config.ARGB_8888)
+        try {
+            bitmap.eraseColor(0xffeeeeee.toInt())
+            bitmap.setPixel(1093, 2541, 0xff000000.toInt())
+            changes.forEach { (x, y) -> bitmap.setPixel(x, y, 0xff123456.toInt()) }
+            return GuiVisualPixels.from(bitmap)
+        } finally { bitmap.recycle() }
+    }
+
+    fun testExact49TileRegionReportsSixSyntheticChangesAndRejectsTheOldTarget() {
+        val before = fixturePixels()
+        val points = listOf(1000 to 2440, 1032 to 2440, 1064 to 2472, 1096 to 2504, 1128 to 2536, 1200 to 2639)
+        val check = before.compareTap(fixturePixels(points), fixturePixelGesture, fixturePixelWindow)
+        assertEquals(RuntimeDiagnostics.Code.LOCAL_PIXELS_CHANGED, check.reason)
+        assertFalse(check.accepted)
+        assertEquals(49, check.comparedTiles); assertEquals(6, check.changedTiles)
+        assertEquals(GuiBounds(992, 2432, 1216, 2640), check.region)
+        assertEquals(points.map { (x, y) -> GuiBounds(x / 32 * 32, y / 32 * 32,
+            minOf(1216, x / 32 * 32 + 32), minOf(2640, y / 32 * 32 + 32)) }, check.changedTileBounds)
+    }
+
+    fun testFreshStablePixelsCanMatchButDistantAnimationCannotHideTargetChanges() {
+        val before = fixturePixels(); val changed = fixturePixels(listOf(1093 to 2541))
+        assertFalse(before.compareTap(changed, fixturePixelGesture, fixturePixelWindow).accepted)
+        val fresh = changed.compareTap(fixturePixels(listOf(1093 to 2541)), fixturePixelGesture, fixturePixelWindow)
+        assertTrue(fresh.accepted); assertEquals(0, fresh.changedTiles); assertTrue(fresh.changedTileBounds.isEmpty())
+        assertTrue(before.compareTap(fixturePixels(listOf(10 to 10)), fixturePixelGesture, fixturePixelWindow).accepted)
+    }
+
+    fun testMissingPixelsAndOccludedOrChangedDisplaysRemainRejected() {
+        val before = fixturePixels()
+        assertFalse(before.compareTap(null, fixturePixelGesture, fixturePixelWindow).accepted)
+        assertFalse(before.compareTap(before, fixturePixelGesture, fixturePixelWindow.copy(displayBounds = GuiBounds(0, 0, 1216, 2639))).accepted)
+        assertFalse(before.compareTap(before, fixturePixelGesture, fixturePixelWindow.copy(above = listOf(
+            GuiVisualOccluder("overlay", GuiBounds(1080, 2530, 1110, 2560))))).accepted)
+    }
 }

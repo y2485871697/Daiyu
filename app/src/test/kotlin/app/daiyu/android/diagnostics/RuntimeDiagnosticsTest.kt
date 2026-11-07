@@ -38,6 +38,26 @@ class RuntimeDiagnosticsTest {
         assertEquals(0, RuntimeDiagnostics.export().length())
         RuntimeDiagnostics.enabled = false
     }
+    @Test fun pixelTraceRetainsOnlyDimensionsRegionAndExactChangedTileBounds() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("runtime-pixel-trace").toFile())
+        RuntimeDiagnostics.awaitWrites(); RuntimeDiagnostics.clear(); RuntimeDiagnostics.enabled = true
+        try {
+            val region = app.daiyu.android.gui.GuiBounds(992, 2432, 1216, 2640)
+            val tile = app.daiyu.android.gui.GuiBounds(1184, 2624, 1216, 2640)
+            RuntimeDiagnostics.pixels(app.daiyu.android.gui.GuiVisualPixels.Check(RuntimeDiagnostics.Code.LOCAL_PIXELS_CHANGED,
+                1216, 2640, 1216, 2640, 49, 1, region, listOf(tile)))
+            RuntimeDiagnostics.awaitWrites()
+            val row = RuntimeDiagnostics.export().getJSONObject(0)
+            assertEquals("GUI_VALIDATE", row.getString("stage"))
+            assertEquals("LOCAL_PIXELS_CHANGED", row.getString("code"))
+            assertEquals(49, row.getInt("bytes_or_size")); assertEquals(1, row.getInt("revision_or_count"))
+            assertEquals("[1216,2640,1216,2640]", row.getJSONArray("dimensions").toString())
+            assertEquals("[992,2432,1216,2640]", row.getJSONArray("compared_region").toString())
+            assertEquals("[[1184,2624,1216,2640]]", row.getJSONArray("changed_tile_bounds").toString())
+            assertFalse(row.has("data_base64")); assertFalse(row.has("png")); assertFalse(row.has("text"))
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+
     @Test fun spanRegistrationNeverWaitsForDiagnosticDiskLock() {
         RuntimeDiagnostics.install(Files.createTempDirectory("runtime-lock").toFile())
         RuntimeDiagnostics.awaitWrites()

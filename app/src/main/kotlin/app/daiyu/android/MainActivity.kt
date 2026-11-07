@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
@@ -6920,7 +6921,7 @@ class MainActivity : ComponentActivity() {
         val generation = editorGeneration
         timelineRead = lifecycleScope.launch {
             try {
-                val entries = try { withContext(Dispatchers.IO) { controller.timelineHistory(id) } }
+                val entries = try { withContext(Dispatchers.IO) { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { controller.timelineHistory(id) } } }
                     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                     catch (_: Exception) { return@launch }
                 if (!activityUsable() || selected?.id != id || editorGeneration != generation) return@launch
@@ -6959,7 +6960,7 @@ class MainActivity : ComponentActivity() {
             val context = kotlinx.coroutines.currentCoroutineContext()
             try {
                 val snapshot = try {
-                    withContext(Dispatchers.IO) { controller.messageMediaProjection(id) { !context.isActive } }
+                    withContext(Dispatchers.IO) { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { controller.messageMediaProjection(id) { !context.isActive } } }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                   catch (_: Exception) { null } // Damaged/missing witnesses never become grants.
                 if (!activityUsable() || currentMessageMediaKey() != key || messageMediaRequested != key) return@launch
@@ -7001,7 +7002,7 @@ class MainActivity : ComponentActivity() {
         toolReceiptRead = lifecycleScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
-                    app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows)
+                    RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows) }
                 }
                 if (!activityUsable() || toolReceiptRequest !== request || toolReceiptRequested != key ||
                     currentToolReceiptKey() != key) return@launch
@@ -7019,141 +7020,143 @@ class MainActivity : ComponentActivity() {
     private fun publishChat() = publishChat(rowsChanged = true)
 
     private fun publishChat(rowsChanged: Boolean, scrollRequest: ChatScrollRequest? = chatState.scrollRequest) {
-        if (rowsChanged) refreshTimeline()
-        contextReceiptRevision = controller.contextUsageRevision
-        conversationUsageRevision = controller.usageRevision
-        taskLocationVisit?.takeIf { !taskLocationCurrent(it) }?.let(::cancelTaskLocation)
-        guiEditor?.let { entry ->
-            if (controller.guiEntry() !== entry) guiEditor = null
-            else if (!entry.submitted && !guiOwnerCurrent(entry)) cancelGuiEditor(entry)
-        }
-        refreshUniversalAdmission()
-        cascadeVoice.update(controller.active, shown.map { it.second }, selected?.id?.value)
-        syncHaptics()
-        // Also catches new-chat -> persisted conversation after sending, without auto-playing.
-        speechHost.syncConversation(selected?.id?.value)
-        imageHost.syncConversation(selected?.id?.value)
-        if (rowsChanged) refreshReplyIdentities()
-        if (rowsChanged) questionRows = shown.mapNotNull { (_, message) ->
-            val retryCleanup = controller.canRetryQuestionCleanup(message)
-            if (!retryCleanup) null else message.id.value to QuestionRowUi(message, retryCleanup)
-        }.toMap()
-        val state = controlOwner?.let { controller.runState(it) }
-        val phase = composerPhaseForRun(state?.pauseRequested)
-        val composerAvailable = !sidebarVisible && controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true &&
-            controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
-            !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
-        val allowed = composerAvailable && !controller.dataBusy
-        val messageEditBlocked = inlineMessageEditor?.let { !messageEditTargetCurrent(it) } == true
-        val visibleTimeline = if (displayWindow != null) emptyList() else app.daiyu.android.timeline.withStoppedRuns(
-            shown.map { it.second }, timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty())
-        val visibleCompressions = controller.compressionActivities.filter { it.conversationId == selected?.id?.value }
-        val workflowBoundaries = visibleTimeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped ||
-            it is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && it.position != null }
-            .map { it.anchor.listKey }.toSet() +
-            app.daiyu.android.timeline.compressionActivitiesByAnchor(visibleCompressions, visibleTimeline).keys.filterNotNull()
-        val oldBoundaries = chatState.timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped ||
-            it is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && it.position != null }
-            .map { it.anchor.listKey }.toSet() +
-            app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
-        val sendPreview = pendingTextSend?.takeIf {
-            it.editorOwner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
-        }?.let { pending ->
-            val receipt = controller.textSendState()?.takeIf { it.ticket === pending.ticket }?.result
-                as? ChatController.TextSendResult.Accepted
-            app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(pending.ticket.previewKey,
-                pending.text, settledAssistantId = receipt?.assistant?.id?.value, settledUserId = receipt?.userId)
-        } ?: acceptedTextPreview?.takeIf { it.first == selected?.id }?.second
-        val regeneration = controller.regenerationPreview()?.takeIf { it.target.conversationId == selected?.id }
-        val submissionPreview = regeneration?.let { preview ->
-            val target = preview.target
-            val key = app.daiyu.android.timeline.TimelineAnchor(target.conversationId.value, target.runId.value,
-                target.messageId.value, target.segmentIndex).listKey
-            app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview("pending-regeneration:$key",
-                replaceFromKey = key, settledAssistantId = preview.assistantId)
-        } ?: sendPreview
-        toolPresentations.scope(selected?.id?.value)
-        val receiptsReady = prepareToolReceipts()
-        prepareMessageMedia()
-        if (receiptsReady) questionCards = buildMap {
-            MessageHistory.expand(shown.map { it.second }).forEach { message ->
-                val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
-                message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
-                    controller.questionProjection(message, block.invocation, toolReceiptSnapshot?.questionEvidence(message))?.let { question ->
-                        put(owner to block.invocation.id.value, question)
+        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PUBLISH) {
+            if (rowsChanged) refreshTimeline()
+            contextReceiptRevision = controller.contextUsageRevision
+            conversationUsageRevision = controller.usageRevision
+            taskLocationVisit?.takeIf { !taskLocationCurrent(it) }?.let(::cancelTaskLocation)
+            guiEditor?.let { entry ->
+                if (controller.guiEntry() !== entry) guiEditor = null
+                else if (!entry.submitted && !guiOwnerCurrent(entry)) cancelGuiEditor(entry)
+            }
+            refreshUniversalAdmission()
+            cascadeVoice.update(controller.active, shown.map { it.second }, selected?.id?.value)
+            syncHaptics()
+            // Also catches new-chat -> persisted conversation after sending, without auto-playing.
+            speechHost.syncConversation(selected?.id?.value)
+            imageHost.syncConversation(selected?.id?.value)
+            if (rowsChanged) refreshReplyIdentities()
+            if (rowsChanged) questionRows = shown.mapNotNull { (_, message) ->
+                val retryCleanup = controller.canRetryQuestionCleanup(message)
+                if (!retryCleanup) null else message.id.value to QuestionRowUi(message, retryCleanup)
+            }.toMap()
+            val state = controlOwner?.let { controller.runState(it) }
+            val phase = composerPhaseForRun(state?.pauseRequested)
+            val composerAvailable = !sidebarVisible && controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true &&
+                controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
+                !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
+            val allowed = composerAvailable && !controller.dataBusy
+            val messageEditBlocked = inlineMessageEditor?.let { !messageEditTargetCurrent(it) } == true
+            val visibleTimeline = if (displayWindow != null) emptyList() else app.daiyu.android.timeline.withStoppedRuns(
+                shown.map { it.second }, timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty())
+            val visibleCompressions = controller.compressionActivities.filter { it.conversationId == selected?.id?.value }
+            val workflowBoundaries = visibleTimeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped ||
+                it is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && it.position != null }
+                .map { it.anchor.listKey }.toSet() +
+                app.daiyu.android.timeline.compressionActivitiesByAnchor(visibleCompressions, visibleTimeline).keys.filterNotNull()
+            val oldBoundaries = chatState.timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped ||
+                it is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && it.position != null }
+                .map { it.anchor.listKey }.toSet() +
+                app.daiyu.android.timeline.compressionActivitiesByAnchor(chatState.compressionActivities, chatState.timeline).keys.filterNotNull()
+            val sendPreview = pendingTextSend?.takeIf {
+                it.editorOwner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+            }?.let { pending ->
+                val receipt = controller.textSendState()?.takeIf { it.ticket === pending.ticket }?.result
+                    as? ChatController.TextSendResult.Accepted
+                app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(pending.ticket.previewKey,
+                    pending.text, settledAssistantId = receipt?.assistant?.id?.value, settledUserId = receipt?.userId)
+            } ?: acceptedTextPreview?.takeIf { it.first == selected?.id }?.second
+            val regeneration = controller.regenerationPreview()?.takeIf { it.target.conversationId == selected?.id }
+            val submissionPreview = regeneration?.let { preview ->
+                val target = preview.target
+                val key = app.daiyu.android.timeline.TimelineAnchor(target.conversationId.value, target.runId.value,
+                    target.messageId.value, target.segmentIndex).listKey
+                app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview("pending-regeneration:$key",
+                    replaceFromKey = key, settledAssistantId = preview.assistantId)
+            } ?: sendPreview
+            toolPresentations.scope(selected?.id?.value)
+            val receiptsReady = prepareToolReceipts()
+            prepareMessageMedia()
+            if (receiptsReady) questionCards = buildMap {
+                MessageHistory.expand(shown.map { it.second }).forEach { message ->
+                    val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
+                    message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
+                        controller.questionProjection(message, block.invocation, toolReceiptSnapshot?.questionEvidence(message))?.let { question ->
+                            put(owner to block.invocation.id.value, question)
+                        }
                     }
                 }
             }
+            else questionCards = if (toolReceiptKey?.conversation != selected?.id) emptyMap()
+                else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
+            val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
+            val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
+            val visibleToolReceipts = toolReceiptSnapshot?.takeIf { receiptsReady }?.projectionReader(controller::runState, controller::runStopping)
+                ?: { _, _ -> null }
+            val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
+                reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
+            chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
+                scrollRequest = scrollRequest,
+                contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
+                timeline = visibleTimeline,
+                compressionActivity = null,
+                compressionActivities = visibleCompressions,
+                turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,
+                    timestamp = { time -> MessageTimestampFormatter.timestamp(time, appearance.messageTimestampsEnabled) },
+                    reconnects = reconnects, boundariesAfter = workflowBoundaries) } ?: ChatTurnMapper.map(shown.map { it.second },
+                    messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },
+                    reconnects = reconnects, boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
+                    val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
+                    questionCards[owner to block.invocation.id.value]?.identity?.storageKey
+                }, timestamp = { message ->
+                    MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
+                }, presentations = toolPresentations, toolReceipt = visibleToolReceipts),
+                    controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
+                    stopRequested = controlOwner?.let(controller::runStopping) == true),
+                submissionPreview = submissionPreview,
+                statusText = controller.problem ?: when {
+                    regeneration != null && regeneration.assistantId == null -> "正在准备重新生成…"
+                    controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
+                    !selectionReady -> "加载会话中";
+                    messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
+                        else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
+                    imageHost.sending -> "正在核实图片发送结果"; else -> null },
+                composer = ComposerUi(text = inlineMessageEditor?.text ?: draft,
+                    selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart,
+                    selectionEnd = inlineMessageEditor?.selectionEnd ?: selectionEnd,
+                    editingMessageCanSubmit = inlineMessageEditor?.let { it.canSubmit && !editReferencePending(it) } == true,
+                    editingMessageBlocked = messageEditBlocked,
+                    mainContextCompressing = controller.isMainContextCompressing(selected?.id),
+                    preparingSendKey = pendingTextSend?.takeIf { pending ->
+                        controller.textSendState()?.let { it.ticket === pending.ticket } == true
+                    }?.ticket?.previewKey,
+                    editorGeneration = editorGeneration,
+                    phase = phase, controlOwnerKey = controlOwner?.id?.value,
+                    imageSendAvailable = inlineMessageEditor == null && imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&
+                        videoHost.state.items.isEmpty() && !videoSending && controller.active == null,
+                    imageSendBlocked = inlineMessageEditor?.let { it.uncertain || it.additions.blocked || editReferencePending(it) } ?: (imageHost.busy || imageHost.hasAttachments &&
+                        (!imageHost.session.attachments.state.value.canSubmit || state != null)),
+                    modelLabel = savedModelLabel(),
+                    reasoningLabel = try { ReasoningEffort.textPreference(reasoningPreference.snapshot(selected?.id?.value), model = confirmedReasoningModel).displayName } catch (_: Exception) { "配置无效，需重存" },
+                    gptSpeedMode = confirmedGptSpeed?.mode,
+                    gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null,
+                    gptSpeedEnabled = allowed && controller.active == null && !controller.hasLiveChildTasks() &&
+                        gptSpeedSaveOwner == null && pendingTextSend == null &&
+                        !imageHost.sending && !videoSending && inlineMessageEditor == null,
+                    assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed,
+                    supplementAvailable = controlOwner?.let(controller::canSupplement) == true &&
+                        supplementDraft.pending == null && !supplementMediaBlocked(),
+                    supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
+                        supplementDraft.pending != null,
+                    executionPhase = state?.phase,
+                ))
+            regeneration?.takeIf { preview -> preview.assistantId?.let { id -> chatState.turns.any { it.id == id } } == true }
+                ?.let(controller::acknowledgeRegenerationPreview)
+            acceptedTextPreview?.takeIf { preview ->
+                preview.first == selected?.id && (preview.second.settledUserId ?: preview.second.settledAssistantId)
+                    ?.let { id -> chatState.turns.any { it.id == id } } == true
+            }?.let { acceptedTextPreview = null }
         }
-        else questionCards = if (toolReceiptKey?.conversation != selected?.id) emptyMap()
-            else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
-        val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
-        val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
-        val visibleToolReceipts = toolReceiptSnapshot?.takeIf { receiptsReady }?.projectionReader(controller::runState, controller::runStopping)
-            ?: { _, _ -> null }
-        val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
-            reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
-        chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
-            scrollRequest = scrollRequest,
-            contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
-            timeline = visibleTimeline,
-            compressionActivity = null,
-            compressionActivities = visibleCompressions,
-            turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,
-                timestamp = { time -> MessageTimestampFormatter.timestamp(time, appearance.messageTimestampsEnabled) },
-                reconnects = reconnects, boundariesAfter = workflowBoundaries) } ?: ChatTurnMapper.map(shown.map { it.second },
-                messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },
-                reconnects = reconnects, boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
-                val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
-                questionCards[owner to block.invocation.id.value]?.identity?.storageKey
-            }, timestamp = { message ->
-                MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }, presentations = toolPresentations, toolReceipt = visibleToolReceipts),
-                controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
-                stopRequested = controlOwner?.let(controller::runStopping) == true),
-            submissionPreview = submissionPreview,
-            statusText = controller.problem ?: when {
-                regeneration != null && regeneration.assistantId == null -> "正在准备重新生成…"
-                controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
-                !selectionReady -> "加载会话中";
-                messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
-                    else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
-                imageHost.sending -> "正在核实图片发送结果"; else -> null },
-            composer = ComposerUi(text = inlineMessageEditor?.text ?: draft,
-                selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart,
-                selectionEnd = inlineMessageEditor?.selectionEnd ?: selectionEnd,
-                editingMessageCanSubmit = inlineMessageEditor?.let { it.canSubmit && !editReferencePending(it) } == true,
-                editingMessageBlocked = messageEditBlocked,
-                mainContextCompressing = controller.isMainContextCompressing(selected?.id),
-                preparingSendKey = pendingTextSend?.takeIf { pending ->
-                    controller.textSendState()?.let { it.ticket === pending.ticket } == true
-                }?.ticket?.previewKey,
-                editorGeneration = editorGeneration,
-                phase = phase, controlOwnerKey = controlOwner?.id?.value,
-                imageSendAvailable = inlineMessageEditor == null && imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&
-                    videoHost.state.items.isEmpty() && !videoSending && controller.active == null,
-                imageSendBlocked = inlineMessageEditor?.let { it.uncertain || it.additions.blocked || editReferencePending(it) } ?: (imageHost.busy || imageHost.hasAttachments &&
-                    (!imageHost.session.attachments.state.value.canSubmit || state != null)),
-                modelLabel = savedModelLabel(),
-                reasoningLabel = try { ReasoningEffort.textPreference(reasoningPreference.snapshot(selected?.id?.value), model = confirmedReasoningModel).displayName } catch (_: Exception) { "配置无效，需重存" },
-                gptSpeedMode = confirmedGptSpeed?.mode,
-                gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null,
-                gptSpeedEnabled = allowed && controller.active == null && !controller.hasLiveChildTasks() &&
-                    gptSpeedSaveOwner == null && pendingTextSend == null &&
-                    !imageHost.sending && !videoSending && inlineMessageEditor == null,
-                assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed,
-                supplementAvailable = controlOwner?.let(controller::canSupplement) == true &&
-                    supplementDraft.pending == null && !supplementMediaBlocked(),
-                supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
-                    supplementDraft.pending != null,
-                executionPhase = state?.phase,
-            ))
-        regeneration?.takeIf { preview -> preview.assistantId?.let { id -> chatState.turns.any { it.id == id } } == true }
-            ?.let(controller::acknowledgeRegenerationPreview)
-        acceptedTextPreview?.takeIf { preview ->
-            preview.first == selected?.id && (preview.second.settledUserId ?: preview.second.settledAssistantId)
-                ?.let { id -> chatState.turns.any { it.id == id } } == true
-        }?.let { acceptedTextPreview = null }
     }
     private fun requestScroll(id: String? = null, follow: Boolean = true, segmentIndex: Int? = null) {
         chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow, segmentIndex))

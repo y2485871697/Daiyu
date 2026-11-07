@@ -36,7 +36,7 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         self.assertIn('buildRoot(value).let { root -> writer?.write(root) ?: root.toString() }.also {', codec)
         self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)', codec)
         self.assertIn('fun encodeUtf8(value: RunCheckpoint, writer: CheckpointJsonWriter,', codec)
-        self.assertIn('writer.writeUtf8(root, MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0)', codec)
+        self.assertIn('writer.writeUtf8(CheckpointStringPool.pack(root, writer, limit), limit)', codec)
         self.assertIn('require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)', codec)
         self.assertIn('LinkedHashMap<String, String>', writer)
         self.assertIn('JSONObject.quote(source)', writer)

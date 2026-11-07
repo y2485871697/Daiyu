@@ -25,7 +25,8 @@ internal object RunCheckpointCodec {
         recoverySourceOwner: String? = null): ByteArray {
         val root = buildRoot(value)
         if (recoverySourceOwner != null) root.put("recovery_source_owner", recoverySourceOwner)
-        return writer.writeUtf8(root, MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0)
+        val limit = MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0
+        return writer.writeUtf8(CheckpointStringPool.pack(root, writer, limit), limit)
     }
 
     private fun buildRoot(value: RunCheckpoint): JSONObject {
@@ -89,8 +90,9 @@ internal object RunCheckpointCodec {
     internal fun decodeWithRecovery(text: String): Decoded {
         require(Utf8Payload.byteCount(text, Long.MAX_VALUE) <= MAX_BYTES)
         val parser = JSONTokener(text)
-        val value = parser.nextValue()
-        require(value is JSONObject && parser.nextClean() == '\u0000')
+        val parsed = parser.nextValue()
+        require(parsed is JSONObject && parser.nextClean() == '\u0000')
+        val value = CheckpointStringPool.unpack(parsed, MAX_BYTES)
         val version = integer(value, "version")
         require(version in 1L..10L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
@@ -153,12 +155,13 @@ internal object RunCheckpointCodec {
                     if (version < 5L) UsageRequestSource.MAIN else UsageRequestSource.valueOf(string(row, "source")))
             }
         }
-        fun messages(key: String) = ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))
+        fun messages(key: String) = ArchiveCodec.decodeCheckpointArray(value.getJSONArray(key))
         fun projectedHistory(): List<Message> {
             val rows = value.getJSONArray("history")
             require(rows.length() <= ArchiveCodec.MAX_MESSAGES)
             return (0 until rows.length()).map { index ->
-                val item = JSONObject(rows.getJSONObject(index).toString())
+                val original = rows.getJSONObject(index)
+                val item = JSONObject().apply { original.keys().forEach { put(it, original.get(it)) } }
                 val reported = if (!item.has("reported_reasoning")) emptyList() else {
                     val parts = item.getJSONArray("reported_reasoning")
                     require(parts.length() in 1..1024)
@@ -167,7 +170,7 @@ internal object RunCheckpointCodec {
                     }
                 }
                 item.remove("reported_reasoning")
-                ArchiveCodec.decode(JSONArray().put(item).toString().toByteArray(Charsets.UTF_8))
+                ArchiveCodec.decodeCheckpointArray(JSONArray().put(item))
                     .single().copy(reportedReasoning = reported).also(::validateReportedReasoning)
             }
         }

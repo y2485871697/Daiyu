@@ -300,4 +300,18 @@ class DiagnosticLogStoreTest {
         assertEquals("SPEECH_HTTP_COMPLETED", rows.getJSONObject(1).getString("event"))
     }
 
+    @Test fun diagnosticOutOfMemoryCannotBlockCallerWorkOrReplaceItsFailure() = fixture { file, _ ->
+        val failure = OutOfMemoryError("private-clock-canary")
+        val store = DiagnosticLogStore(file, clock = { throw failure })
+        store.record(DiagnosticEvent.RUN_SLICE_STARTED)
+        var work = 0
+        val original = IllegalStateException("business-canary")
+        val result = runCatching { work++; throw original }
+        store.record(DiagnosticEvent.RUN_FAILED)
+        store.recordAsync(DiagnosticEvent.RUN_FAILED)
+        assertEquals(1, work)
+        assertSame(original, result.exceptionOrNull())
+        assertFalse(file.exists())
+    }
+
 }

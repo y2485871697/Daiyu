@@ -1,5 +1,6 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import app.daiyu.android.ControllerVirtualDisplaySession
 import app.daiyu.android.vdapproval.R08CleanupApprovalRequest
 import app.daiyu.android.gui.GuiRunSession
@@ -421,6 +422,14 @@ internal class RunCatalogTools(
         }
     }
     private fun observeOutcomes(results: List<ToolDispatchResult>) {
+        results.forEach { result ->
+            RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.TOOL_EXECUTION,
+                when (result.outcome) {
+                    is DispatchOutcome.Confirmed -> RuntimeDiagnostics.Code.END
+                    is DispatchOutcome.NotExecuted -> RuntimeDiagnostics.Code.REJECTED
+                    is DispatchOutcome.Unknown -> RuntimeDiagnostics.Code.UNKNOWN
+                })
+        }
         // Includes ledger reservation conflicts and persistence failure AFTER a confirmed adapter reply.
         // Use the entire central result, never a second leaf dispatcher or adapter-only receipts.
         val unknown = results.firstNotNullOfOrNull { it.outcome as? DispatchOutcome.Unknown }

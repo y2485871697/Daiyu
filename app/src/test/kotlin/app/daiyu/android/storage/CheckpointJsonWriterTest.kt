@@ -206,6 +206,53 @@ open class CheckpointJsonWriterTest {
         assertEquals(5L, writer.largeStringQuoteCalls)
         assertTrue(writer.retainedChars <= cost)
     }
+    @Test fun pooledLargeStringsStaySelfContainedAndLogicalBudgetStillApplies() {
+        val text = "screen 中文🙂\"\\/\n".repeat(100_000)
+        val writer = CheckpointJsonWriter()
+        val root = JSONObject().put("rows", JSONArray().apply { repeat(7) { put(String(text.toCharArray())) } })
+        val logical = writer.measureUtf8(root, RunCheckpointCodec.MAX_BYTES)
+        assertThrows(IllegalArgumentException::class.java) { CheckpointStringPool.pack(root, writer, logical - 1) }
+        val packed = CheckpointStringPool.pack(root, writer, RunCheckpointCodec.MAX_BYTES)
+        val bytes = writer.writeUtf8(packed, RunCheckpointCodec.MAX_BYTES)
+        assertTrue(bytes.size < logical / 4)
+        assertEquals(1, packed.getJSONArray("strings").length())
+        val restored = CheckpointStringPool.unpack(JSONObject(String(bytes, Charsets.UTF_8)), logical)
+        repeat(7) { assertEquals(text, restored.getJSONArray("rows").getString(it)) }
+        assertSame(restored.getJSONArray("rows").getString(0), restored.getJSONArray("rows").getString(6))
+        assertThrows(IllegalArgumentException::class.java) {
+            CheckpointStringPool.unpack(JSONObject(String(bytes, Charsets.UTF_8)), logical - 1)
+        }
+        val before = writer.measuredLargeStrings
+        writer.measureUtf8(restored, logical)
+        assertEquals(before, writer.measuredLargeStrings)
+    }
+
+    @Test fun poolReferencesRejectDuplicatesWrongTypesAndDifferentContentHashCollisions() {
+        val a = "Aa".repeat(40_000)
+        val b = "BB".repeat(40_000)
+        assertEquals(a.hashCode(), b.hashCode())
+        val writer = CheckpointJsonWriter()
+        val root = JSONObject().put("rows", JSONArray(listOf(a, b, a, b)))
+        val packed = CheckpointStringPool.pack(root, writer, RunCheckpointCodec.MAX_BYTES)
+        assertEquals(2, packed.getJSONArray("strings").length())
+        val bytes = writer.writeUtf8(packed, RunCheckpointCodec.MAX_BYTES)
+        val restored = CheckpointStringPool.unpack(JSONObject(String(bytes, Charsets.UTF_8)), RunCheckpointCodec.MAX_BYTES)
+        assertEquals(listOf(a, b, a, b), (0..3).map { restored.getJSONArray("rows").getString(it) })
+        for (mode in 0..3) {
+            val invalid = JSONObject(String(bytes, Charsets.UTF_8))
+            val refs = invalid.getJSONArray("references")
+            when (mode) {
+                0 -> refs.put(1, refs.get(0))
+                1 -> refs.getJSONArray(0).put(1, 9000)
+                2 -> refs.getJSONArray(0).put(1, "0")
+                3 -> invalid.put("checkpoint_storage", 2)
+            }
+            assertThrows(RuntimeException::class.java) { CheckpointStringPool.unpack(invalid, RunCheckpointCodec.MAX_BYTES) }
+        }
+        val plain = JSONObject().put("small", "unchanged").put("null", JSONObject.NULL)
+        assertSame(plain, CheckpointStringPool.pack(plain, writer, 1000))
+    }
+
 }
 
 // Exercise Android's own org.json rules too, not just the host org.json dependency.

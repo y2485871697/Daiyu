@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
@@ -91,6 +92,7 @@ class ChatApplication:Application() {
     private var touchHaptics: AutoCloseable? = null
     override fun onCreate() {
         super.onCreate()
+        try { RuntimeDiagnostics.install(java.io.File(noBackupFilesDir, "diagnostics-v1/runtime-trace")) } catch (_: Throwable) { }
         // One store/runtime for the entire process, shared by UI, streams and settings.
         hapticsRuntime = app.daiyu.android.haptics.HapticsRuntime(
             app.daiyu.android.haptics.LocalHapticSettingsStore(this))
@@ -2293,10 +2295,12 @@ class ChatController internal constructor(private val application:Application,
     }
     @Synchronized fun unobserve(listener:()->Unit) {listeners.remove(listener)}
     private fun dispatchChanged() {
-        val snapshot=synchronized(this) {if(closed) emptyList() else listeners.map {it.key to it.value}}
-        snapshot.forEach {(listener,registration)->
-            val current=synchronized(this) {!closed && listeners[listener]===registration}
-            if(current) try {listener()} catch (_:Exception) { /* One observer cannot suppress the others. */ }
+        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_DISPATCH) {
+            val snapshot=synchronized(this) {if(closed) emptyList() else listeners.map {it.key to it.value}}
+            snapshot.forEach {(listener,registration)->
+                val current=synchronized(this) {!closed && listeners[listener]===registration}
+                if(current) try { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_DISPATCH) { listener() } } catch (_:Exception) { /* One observer cannot suppress the others. */ }
+            }
         }
     }
     private var changedDispatchPending = false
@@ -4290,7 +4294,7 @@ class ChatController internal constructor(private val application:Application,
                 frozenProvider.contextReceiptIdentity))
             checkNotNull(runtimeStore).bindCompressionModel(assistant, preparedContext.frozen.summaryIdentity)
             val owned = ChatRunner(observedModel, database, tools,
-                RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics { event ->
+                RunnerOptions(diagnostics = app.daiyu.android.diagnostics.RuntimeDiagnosticBridge, reconnect=frozenReconnect.runnerPolicyWithDiagnostics { event ->
                     // Capture before enqueueing UI work so a later fence cannot erase an emitted terminal.
                     synchronized(this) {
                         val original = reconnectResources
@@ -4536,10 +4540,12 @@ class ChatController internal constructor(private val application:Application,
         lifetime.busy=true
         executor.execute {
             val allowed=synchronized(this) {resources===lifetime && (allowStopped || !lifetime.fenced)}
-            if (allowed) diagnostics?.record(app.daiyu.android.diagnostics.DiagnosticEvent.RUN_SLICE_STARTED)
-            val result=if(allowed) runCatching(work) else null
+            if (allowed) diagnostics?.recordAsync(app.daiyu.android.diagnostics.DiagnosticEvent.RUN_SLICE_STARTED)
+            val result=if(allowed) runCatching {
+                RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.RUN, work = work)
+            } else null
             result?.fold(onSuccess = { slice ->
-                diagnostics?.record(when (slice) {
+                diagnostics?.recordAsync(when (slice) {
                     is RunSlice.Suspended -> app.daiyu.android.diagnostics.DiagnosticEvent.RUN_WAITING_USER
                     is RunSlice.Completed -> when (slice.message.status) {
                         RunStatus.COMPLETED -> app.daiyu.android.diagnostics.DiagnosticEvent.RUN_COMPLETED
@@ -4547,7 +4553,7 @@ class ChatController internal constructor(private val application:Application,
                         else -> app.daiyu.android.diagnostics.DiagnosticEvent.RUN_FAILED
                     }
                 })
-            }, onFailure = { diagnostics?.record(app.daiyu.android.diagnostics.DiagnosticEvent.RUN_FAILED) })
+            }, onFailure = { diagnostics?.recordAsync(app.daiyu.android.diagnostics.DiagnosticEvent.RUN_FAILED) })
             handler.post {synchronized(this) {
                 if(resources!==lifetime) return@synchronized
                 lifetime.busy=false

@@ -175,4 +175,29 @@ class RunnerReceiptBatchTest {
             fail("ambiguous execution routes accepted")
         } catch (_: IllegalArgumentException) {}
     }
+    @Test fun diagnosticObserverIsNonAuthoritativeAndAllAcceptedModelEventsClose() {
+        val observed = mutableListOf<RunDiagnosticStage>()
+        var ended = 0
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                sink(ModelEvent.TextDelta("text", "done"))
+                sink(ModelEvent.TextFinal("text", "done"))
+            }
+            override fun cancel() {}
+        } }
+        for (throwOnBegin in listOf(false, true)) {
+            val runner = ChatRunner(model, object : ConversationStore {
+                override fun save(message: Message) {}
+            }, BatteryTool { error("unused") }, RunnerOptions(diagnostics = RunDiagnostics { stage ->
+                if (throwOnBegin) throw IllegalStateException("observer-only")
+                observed += stage
+                RunDiagnosticSpan { ended++; throw IllegalStateException("observer-only") }
+            })) {}
+            assertEquals(RunStatus.COMPLETED, runner.run(initial, emptyList()).status)
+        }
+        assertTrue(observed.contains(RunDiagnosticStage.MODEL_REQUEST))
+        assertEquals(2, observed.count { it == RunDiagnosticStage.MODEL_EVENT })
+        assertEquals(observed.size, ended)
+    }
+
 }

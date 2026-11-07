@@ -519,6 +519,26 @@ class GuiRuntimeScreenshotTest {
             above = listOf(GuiVisualOccluder("overlay", GuiBounds(390, 640, 410, 660))))))
     }
 
+    @Test fun exactPixelDiagnosticReasonsAndChangedTileCountsDoNotAlterAdmission() {
+        val before = spatialFrame().image!!.visualPixels!!
+        val gesture = GuiGesture(400, 650, 400, 650, 50)
+        val window = visualWindow().copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768))
+        val missing = before.compareTap(null, gesture, window)
+        assertEquals(app.daiyu.android.diagnostics.RuntimeDiagnostics.Code.PIXELS_MISSING, missing.reason)
+        assertNull(missing.comparedTiles)
+        val changed = before.compareTap(spatialFrame(400 to 650).image!!.visualPixels, gesture, window)
+        assertEquals(app.daiyu.android.diagnostics.RuntimeDiagnostics.Code.LOCAL_PIXELS_CHANGED, changed.reason)
+        assertEquals(1, changed.changedTiles)
+        assertEquals(25, changed.comparedTiles)
+        assertFalse(changed.accepted)
+        val distant = before.compareTap(spatialFrame(10 to 10).image!!.visualPixels, gesture, window)
+        assertTrue(distant.accepted)
+        assertEquals(0, distant.changedTiles)
+        val blank = spatialFrame(blank = true).image!!.visualPixels!!
+        assertEquals(app.daiyu.android.diagnostics.RuntimeDiagnostics.Code.BLANK_TARGET,
+            blank.compareTap(spatialFrame(10 to 10, blank = true).image!!.visualPixels, gesture, window).reason)
+    }
+
     @Test fun localPixelsAtBottomNavigationKeepTheWholeNeighborhoodAndOnlyAdmitTheTap() {
         fun pixels(change: Pair<Int, Int>? = null) = spatialFrame(change, width = 1216, height = 2640,
             targetX = 1092, targetY = 2549).image!!.visualPixels!!
@@ -527,6 +547,7 @@ class GuiRuntimeScreenshotTest {
         val window = visualWindow().copy(bounds = GuiBounds(0, 0, 1216, 2640), displayBounds = GuiBounds(0, 0, 1216, 2640))
         val cropped = window.copy(bounds = GuiBounds(0, 0, 1216, 2560))
         val navigation = window.copy(above = listOf(GuiVisualOccluder("navigation", GuiBounds(0, 2560, 1216, 2640))))
+        assertEquals(56, original.compareTap(distant, gesture, cropped).comparedTiles)
         assertTrue(original.matchesTap(distant, gesture, cropped))
         assertTrue(original.matchesTap(distant, gesture, navigation))
         assertFalse(original.matchesTap(pixels(1092 to 2549), gesture, navigation))

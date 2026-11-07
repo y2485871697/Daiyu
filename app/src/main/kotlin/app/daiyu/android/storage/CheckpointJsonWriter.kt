@@ -31,7 +31,15 @@ internal class CheckpointJsonWriter(
     internal var largeStringQuoteCalls: Long = 0
         private set
 
+    private val utf8Lengths = LinkedHashMap<String, Int>(16, 0.75f, true)
+    private var utf8LengthChars = 0L
+    internal var measuredLargeStrings = 0L
+        private set
+
     fun clear() {
+        utf8Lengths.clear()
+        utf8LengthChars = 0
+        measuredLargeStrings = 0
         quoted.clear()
         retainedChars = 0
         quoteCalls = 0
@@ -47,19 +55,17 @@ internal class CheckpointJsonWriter(
     internal var utf8PayloadBytes: Int = 0
         private set
 
-    fun writeUtf8(root: JSONObject, maxBytes: Int): ByteArray {
+    fun writeUtf8(root: JSONObject, maxBytes: Int): ByteArray = writeJsonUtf8(root, maxBytes)
+
+    fun writeJsonUtf8(root: Any, maxBytes: Int): ByteArray {
         require(maxBytes >= 0)
         utf8FragmentBytes = 0
         utf8PayloadBytes = 0
-        var size = 0
-        appendUtf8(root) { bytes, _, length ->
-            utf8FragmentBytes = maxOf(utf8FragmentBytes, bytes.size)
-            require(length <= maxBytes - size) { "检查点超过字节上限" }
-            size += length
-        }
+        val size = measureUtf8(root, maxBytes)
         val result = ByteArray(size)
         var offset = 0
         appendUtf8(root) { bytes, start, length ->
+            utf8FragmentBytes = maxOf(utf8FragmentBytes, bytes.size)
             check(length <= result.size - offset)
             bytes.copyInto(result, offset, start, start + length)
             offset += length
@@ -69,12 +75,23 @@ internal class CheckpointJsonWriter(
         return result
     }
 
-    private fun appendUtf8(value: Any?, emit: (ByteArray, Int, Int) -> Unit) {
+    fun measureUtf8(root: Any, maxBytes: Int): Int {
+        require(maxBytes >= 0)
+        var size = 0
+        appendUtf8(root, countOnly = true) { _, _, length ->
+            require(length <= maxBytes - size) { "检查点超过字节上限" }
+            size += length
+        }
+        return size
+    }
+
+    private fun appendUtf8(value: Any?, countOnly: Boolean = false, emit: (ByteArray, Int, Int) -> Unit) {
         fun token(text: String) {
             val bytes = text.toByteArray(Charsets.UTF_8)
             emit(bytes, 0, bytes.size)
         }
         fun string(source: String) {
+            if (countOnly) { emit(EMPTY_BYTES, 0, stringByteCount(source)); return }
             token("\"")
             var offset = 0
             while (offset < source.length) {
@@ -101,7 +118,7 @@ internal class CheckpointJsonWriter(
                     if (!first) token(",")
                     first = false
                     string(key); token(":")
-                    appendUtf8(value.opt(key), emit)
+                    appendUtf8(value.opt(key), countOnly, emit)
                 }
                 token("}")
             }
@@ -109,7 +126,7 @@ internal class CheckpointJsonWriter(
                 token("[")
                 for (index in 0 until value.length()) {
                     if (index != 0) token(",")
-                    appendUtf8(value.opt(index), emit)
+                    appendUtf8(value.opt(index), countOnly, emit)
                 }
                 token("]")
             }
@@ -120,7 +137,36 @@ internal class CheckpointJsonWriter(
         }
     }
 
+    private fun stringByteCount(source: String): Int {
+        val large = source.length >= minCacheChars
+        if (large) utf8Lengths[source]?.let { return it }
+        if (large) measuredLargeStrings++
+        var size = 2L
+        var offset = 0
+        while (offset < source.length) {
+            var end = minOf(offset + UTF8_CHUNK_CHARS, source.length)
+            if (end < source.length) {
+                if (Character.isHighSurrogate(source[end - 1]) && Character.isLowSurrogate(source[end])) end--
+                if (source[end - 1] == '<' && source[end] == '/') end--
+            }
+            size += JSONObject.quote(source.substring(offset, end)).toByteArray(Charsets.UTF_8).size - 2
+            require(size <= Int.MAX_VALUE)
+            offset = end
+        }
+        if (large && maxEntries > 0 && source.length <= maxRetainedChars) {
+            while (utf8Lengths.size >= maxEntries || utf8LengthChars + source.length > maxRetainedChars) {
+                val entries = utf8Lengths.entries.iterator()
+                utf8LengthChars -= entries.next().key.length
+                entries.remove()
+            }
+            utf8Lengths[source] = size.toInt()
+            utf8LengthChars += source.length
+        }
+        return size.toInt()
+    }
+
     companion object {
+        private val EMPTY_BYTES = ByteArray(0)
         internal const val UTF8_CHUNK_CHARS = 4096
     }
 

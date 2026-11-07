@@ -107,7 +107,6 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             val user = Message(MessageId("user"), conversation, RunId("run"), "user",
                 listOf(MessageBlock.Text("question", "synthetic")), RunStatus.COMPLETED)
             val assistant = user.copy(id = MessageId("assistant"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
-            database.send(user, assistant)
             val args = """{"operation":"screenshot"}"""
             val call = ToolInvocation(ToolCallId("screen"), "screen", args)
             val result = output()
@@ -118,12 +117,35 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             val items = listOf(rawCall, rawResult)
             val message = assistant.copy(blocks = blocks, protocolItems = items, historySegments = listOf(
                 MessageHistorySegment(assistant.id, "assistant", blocks, items)))
-            val first = RunCheckpoint(message, listOf(user), ExecutionPhase.BOUNDARY,
-                tools = listOf(ToolRecord(call, ToolDisposition.SUCCEEDED, result)), owner = "owner", revision = 1)
+            val historical = message.copy(id = MessageId("historical"), runId = RunId("previous"), status = RunStatus.COMPLETED, historySegments = emptyList())
+            database.save(historical)
+            database.send(user, assistant)
+            val first = RunCheckpoint(message, listOf(user, historical), ExecutionPhase.BOUNDARY,
+                tools = listOf(ToolRecord(call, ToolDisposition.SUCCEEDED, result)), outputs = listOf(ToolOutput(call.id, result)),
+                owner = "owner", revision = 1)
+            assertEquals(result, (first.message.blocks.single() as MessageBlock.Tool).result)
+            assertEquals(result, first.tools.single().result)
+            assertEquals(result, first.outputs.single().output)
+            assertEquals(result, (first.history.last().blocks.single() as MessageBlock.Tool).result)
+            assertEquals(result, (first.message.historySegments.single().blocks.single() as MessageBlock.Tool).result)
+            assertEquals(rawResult, first.message.protocolItems.last())
+            assertEquals(rawResult, first.message.historySegments.single().protocolItems.last())
             assertDurableJournal(database)
             store.commitCheckpoint(first)
             assertTextCheckpoint(database, first.message.id.value, result.length.toLong() * 3)
             assertEquals(first, store.readCommittedCheckpoint(first))
+            database.readableDatabase.rawQuery("SELECT typeof(blocks),typeof(protocol),typeof(history_segments),created_at FROM messages WHERE id='assistant'", null).use { row ->
+                assertTrue(row.moveToFirst())
+                repeat(3) { assertEquals("text", row.getString(it)) }
+                assertTrue(row.isNull(3))
+            }
+            database.writableDatabase.execSQL("CREATE TEMP TRIGGER unchanged_protocol_write BEFORE UPDATE OF protocol ON messages " +
+                "WHEN OLD.id='assistant' BEGIN SELECT RAISE(ABORT, 'unchanged_protocol_was_reencoded'); END")
+            for (invalid in listOf(first.copy(owner = "other", revision = 2), first.copy(revision = 3))) {
+                assertTrue(runCatching { store.commitCheckpoint(invalid) }.isFailure)
+                assertEquals(first, store.readCommittedCheckpoint(first))
+                assertEquals(first.message, database.messages(conversation).last().second)
+            }
             val action = ToolInvocation(ToolCallId("action"), "screen_action", "{}")
             val nextBlocks = blocks + MessageBlock.Tool(action)
             val next = first.copy(revision = 2, phase = ExecutionPhase.TOOL_EXECUTING,
@@ -139,6 +161,7 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
                 database.writableDatabase.execSQL("DROP TRIGGER checkpoint_write_failure")
             }
             store.commitCheckpoint(next)
+            database.writableDatabase.execSQL("DROP TRIGGER unchanged_protocol_write")
             assertTextCheckpoint(database, next.message.id.value, result.length.toLong() * 3)
             assertEquals(next, store.readCommittedCheckpoint(next))
             assertEquals(next.message, database.messages(conversation).last().second)
@@ -313,7 +336,8 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             arrayOf(messageId)).use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals("text", cursor.getString(0))
-            assertTrue(cursor.getLong(1) >= minimumBytes)
+            assertTrue(cursor.getLong(1) >= minimumBytes / 3)
+            assertTrue("pooled checkpoint still repeats large screenshot strings", cursor.getLong(1) < minimumBytes)
         }
     }
 

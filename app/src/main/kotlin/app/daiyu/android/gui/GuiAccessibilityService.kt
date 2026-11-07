@@ -1,5 +1,6 @@
 package app.daiyu.android.gui
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
@@ -1048,15 +1049,34 @@ internal object GuiRuntime {
         return future
     }
 
-    private fun matchesVisualContent(captured: VisualCapture, image: GuiScreenshot, action: GuiAction): Boolean {
-        if (java.security.MessageDigest.getInstance("SHA-256").digest(image.png).toList() == captured.digest) return true
-        return action.operation == GuiOperation.COORDINATE_TAP && action.gesture != null &&
-            captured.pixels?.matchesTap(image.visualPixels, action.gesture, captured.window) == true
-    }
+    private fun matchesVisualContent(captured: VisualCapture, image: GuiScreenshot, action: GuiAction): Boolean =
+        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_VALIDATE) {
+            if (java.security.MessageDigest.getInstance("SHA-256").digest(image.png).toList() == captured.digest) {
+                RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.FRAME_EQUAL)
+                true
+            } else if (action.operation == GuiOperation.COORDINATE_TAP && action.gesture != null) {
+                val check = captured.pixels?.compareTap(image.visualPixels, action.gesture, captured.window)
+                if (check == null) RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.PIXELS_MISSING)
+                else RuntimeDiagnostics.pixels(check)
+                check?.accepted == true
+            } else {
+                RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.FRAME_CHANGED)
+                false
+            }
+        }
 
     internal fun visualAction(lease: GuiLeaseGate.Lease, action: GuiAction, cancelled: () -> Boolean): CompletableFuture<GuiResult<String>> {
         onMain()
         val future = CompletableFuture<GuiResult<String>>()
+        val actionSpan = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_ACTION)
+        future.whenComplete { result, error ->
+            actionSpan.end(error)
+            when (result) {
+                is GuiResult.Rejected -> RuntimeDiagnostics.guiResult(result.code)
+                is GuiResult.Unknown -> RuntimeDiagnostics.guiResult(result.code)
+                else -> Unit
+            }
+        }
         fun reject(code: String): CompletableFuture<GuiResult<String>> {
             future.complete(GuiResult.Rejected(code)); return future
         }
@@ -1114,6 +1134,7 @@ internal object GuiRuntime {
         if (current == null || Build.VERSION.SDK_INT < 30) {
             completed(GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), null, visualGeneration); return
         }
+        val captureSpan = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_CAPTURE)
         val startVisualGeneration = visualGeneration
         val startedAt = SystemClock.elapsedRealtime()
         captures[lease] = (captures[lease] ?: 0) + 1
@@ -1121,7 +1142,15 @@ internal object GuiRuntime {
             if (Looper.myLooper() === Looper.getMainLooper()) captureFinished(lease) else main.post { captureFinished(lease) }
         }
         var initial: GuiVisualWindow? = null
-        request.future.whenComplete { value, error -> completed(value ?: GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), initial, startVisualGeneration) }
+        request.future.whenComplete { value, error ->
+            captureSpan.end(error)
+            when (value) {
+                is GuiResult.Rejected -> RuntimeDiagnostics.guiResult(value.code, RuntimeDiagnostics.Stage.GUI_CAPTURE)
+                is GuiResult.Unknown -> RuntimeDiagnostics.guiResult(value.code, RuntimeDiagnostics.Stage.GUI_CAPTURE)
+                else -> Unit
+            }
+            completed(value ?: GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), initial, startVisualGeneration)
+        }
         fun currentRejection(stage: String): GuiResult.Rejected? {
             visualRejection(lease)?.let { return it }
             if (cancelled()) return GuiResult.Rejected("CANCELLED_NOT_EXECUTED")
@@ -1159,7 +1188,7 @@ internal object GuiRuntime {
                     }
                     try {
                         encoder.execute {
-                            val image = try { frame.encode(id) } catch (_: Exception) { GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE") }
+                            val image = try { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_ENCODE) { frame.encode(id) } } catch (_: Exception) { GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE") }
                             if (!main.post {
                                 try {
                                     access.visualWindow(current) { finalWindow ->
@@ -1246,7 +1275,7 @@ internal object GuiRuntime {
                     encoder.execute {
                         // No lease/tree/service access on this worker. Cancellation does not release resources.
                         val encoded = try {
-                            if (future.isDone) GuiResult.Rejected("SCREENSHOT_CANCELLED") else frame.encode(observationId)
+                            if (future.isDone) GuiResult.Rejected("SCREENSHOT_CANCELLED") else RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_ENCODE) { frame.encode(observationId) }
                         } catch (_: Exception) { GuiResult.Rejected("SCREENSHOT_UNAVAILABLE") }
                         val posted = try {
                             main.post {

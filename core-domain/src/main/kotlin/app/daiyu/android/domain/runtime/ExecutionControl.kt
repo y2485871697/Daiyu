@@ -157,7 +157,8 @@ class RunnerOptions(
     /** Only accepted ReasoningDelta/ReasoningFinal events, after repetition checks.
      * Runs outside the control lock; observer exceptions do not fail the run. */
     val onReasoning: (ModelEvent) -> Unit = {},
-    val contextRuntime: RunContextRuntime? = null
+    val contextRuntime: RunContextRuntime? = null,
+    val diagnostics: RunDiagnostics? = null
 ) {
     init {
         require(batchExecutor == null || receiptBatchExecutor == null)

@@ -99,8 +99,13 @@ object ArchiveCodec {
             JSONArray(String(archiveBytes(value), Charsets.UTF_8)) else value
     }
 
-    private fun archiveBytes(value: JSONArray): ByteArray = value.toString().toByteArray(Charsets.UTF_8).also {
-        require(it.size.toLong() <= MAX_ARCHIVE_BYTES) { "归档超过大小上限" }
+    private fun archiveBytes(value: JSONArray): ByteArray =
+        app.daiyu.android.storage.CheckpointJsonWriter().writeJsonUtf8(value, MAX_ARCHIVE_BYTES.toInt())
+
+    internal fun decodeCheckpointArray(value: JSONArray): List<Message> {
+        // Legacy checkpoints enforced canonical size separately for each message array.
+        app.daiyu.android.storage.CheckpointJsonWriter().measureUtf8(value, MAX_ARCHIVE_BYTES.toInt())
+        return if (hasUnpairedSurrogate(value)) decode(archiveBytes(value)) else decodeArray(value)
     }
 
     private fun buildArray(messages: List<Message>): JSONArray {
@@ -160,9 +165,10 @@ object ArchiveCodec {
     fun encodeDocument(messages: List<Message>, logicalPrefixCount: Int): ByteArray {
         val expanded = MessageHistory.expand(messages)
         require(logicalPrefixCount in 1..expanded.size)
-        return JSONObject().put("format", "daiyu-context-archive").put("version", 2)
+        val root = JSONObject().put("format", "daiyu-context-archive").put("version", 2)
             .put("logical_prefix_count", logicalPrefixCount)
-            .put("messages", JSONArray(strictUtf8(encode(messages)))).toString().toByteArray(Charsets.UTF_8).also {
+            .put("messages", checkpointArray(messages))
+        return app.daiyu.android.storage.CheckpointJsonWriter().writeJsonUtf8(root, MAX_ARCHIVE_BYTES.toInt()).also {
                 require(it.size.toLong() <= MAX_ARCHIVE_BYTES) { "归档超过大小上限" }
             }
     }

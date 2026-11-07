@@ -1,5 +1,6 @@
 package app.daiyu.android.storage
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import android.content.ContentValues
 import android.content.Context
 import app.daiyu.android.ControllerVideoManifestWitness
@@ -542,13 +543,31 @@ class ConversationDatabase internal constructor(context: Context, private val af
     }
     internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message,
         decodeReuse: CommitMessageDecodeReuse? = null) {
-        check(storedMessage(db, message.conversationId, message.id.value, decodeReuse = decodeReuse).createdAt == message.createdAt) {
-            "消息创建时间不可更改"
+        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.MESSAGE_WRITE) {
+            val prior = storedMessage(db, message.conversationId, message.id.value, decodeReuse = decodeReuse)
+            check(prior.createdAt == message.createdAt) { "消息创建时间不可更改" }
+            MessageHistoryCodec.validate(message)
+            MessageImages.validate(message)
+            val writer = CheckpointJsonWriter()
+            val changed = ArrayList<Pair<String, ByteArray>>(3)
+            if (prior.blocks != message.blocks) changed += "blocks" to writer.writeJsonUtf8(encode(message.blocks), RunCheckpointCodec.MAX_BYTES)
+            if (prior.protocolItems != message.protocolItems) changed += "protocol" to writer.writeJsonUtf8(JSONArray(message.protocolItems), RunCheckpointCodec.MAX_BYTES)
+            if (prior.historySegments != message.historySegments) changed += historyColumn to writer.writeJsonUtf8(
+                MessageHistoryCodec.encode(message.historySegments), RunCheckpointCodec.MAX_BYTES)
+            val columns = changed.joinToString("") { ",${it.first}=CAST(? AS TEXT)" }
+            db.compileStatement("UPDATE messages SET status=?,error=?$columns " +
+                "WHERE id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'").use { statement ->
+                statement.bindString(1, message.status.name)
+                if (message.error == null) statement.bindNull(2) else statement.bindString(2, message.error)
+                changed.forEachIndexed { index, (_, bytes) -> statement.bindBlob(index + 3, bytes) }
+                statement.bindString(changed.size + 3, message.id.value)
+                statement.bindString(changed.size + 4, message.conversationId.value)
+                statement.bindString(changed.size + 5, message.runId.value)
+                check(statement.executeUpdateDelete() == 1) { "运行消息已结束，拒绝迟到检查点" }
+            }
+            SQLiteMessageVideoStore.readVerified(db, message)
+            validateRunHistory(db, message.conversationId, message.runId, decodeReuse)
         }
-        check(db.update("messages", values(message), "id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'",
-            arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }
-        SQLiteMessageVideoStore.readVerified(db, message)
-        validateRunHistory(db, message.conversationId, message.runId, decodeReuse)
     }
     fun exportBackup():String = exportBackup(null)
     fun exportConversationBackup(conversationId:ConversationId):String = exportBackup(conversationId)

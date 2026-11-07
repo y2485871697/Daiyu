@@ -68,7 +68,7 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
     def test_encoding_and_published_facts_use_the_same_frozen_input(self):
         commit = STORE.split("private fun commit(input: RunCheckpoint", 1)[1].split(
             "if (contextChanged) contextUsageRevision++", 1)[0]
-        self.assertLess(commit.index("val checkpoint = CheckpointPreservation.freeze(input)"),
+        self.assertLess(commit.index("CheckpointPreservation.freeze(input)"),
                         commit.index("RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)"))
         self.assertIn("checkpointReuse.committed(checkpoint, processOwner, encoded)", commit)
         facts = (APP / "context/CheckpointPreservation.kt").read_text()

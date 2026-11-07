@@ -162,6 +162,18 @@ open class RunCheckpointQuotedStringsTest {
     private fun reject(block: () -> Unit) {
         try { block(); fail("invalid checkpoint accepted") } catch (_: Exception) { }
     }
+    @Test fun actualCheckpointLargePoolRestoresLegacyAndNewFormatsWithoutChangingTools() {
+        val value = checkpoint(output = "screenshot 中文🙂".repeat(100_000))
+        val writer = CheckpointJsonWriter()
+        val encoded = RunCheckpointCodec.encodeUtf8(value, writer)
+        val envelope = JSONObject(String(encoded, Charsets.UTF_8))
+        assertEquals(1, envelope.getInt("checkpoint_storage"))
+        assertTrue(encoded.size < RunCheckpointCodec.encode(value).toByteArray(Charsets.UTF_8).size / 2)
+        assertEquals(value, RunCheckpointCodec.decode(String(encoded, Charsets.UTF_8)))
+        assertEquals(value, RunCheckpointCodec.decode(RunCheckpointCodec.encode(value)))
+        assertEquals(value.tools, RunCheckpointCodec.decode(String(encoded, Charsets.UTF_8)).tools)
+    }
+
 }
 
 @RunWith(RobolectricTestRunner::class)

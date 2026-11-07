@@ -30,6 +30,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         this(model, store, tool, publish, RunnerOptions())
     constructor(model: ModelPort, store: ConversationStore, tool: BatteryTool, options: RunnerOptions,
         publish: (Message) -> Unit) : this(model, store, tool, publish, options)
+    private inline fun <T> diagnostic(stage: RunDiagnosticStage, work: () -> T): T {
+        val span = try { options.diagnostics?.begin(stage) } catch (_: Throwable) { null }
+        var failure: Throwable? = null
+        try { return work() }
+        catch (caught: Throwable) { failure = caught; throw caught }
+        finally { try { span?.end(failure) } catch (_: Throwable) { } }
+    }
+
     private val stopped = AtomicBoolean(false)
     /** Control state only. No I/O, callbacks, cancellation, or waits may run under this lock. */
     private val terminalLock = Object()
@@ -664,8 +672,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     }
                     if (!admitted) continue
                     val opened = try {
-                        val projected = ModelHistory.requireResolvedTools(modelHistory)
-                        if (tool is CatalogTool) model.open(projected, requestDefinitions) else model.open(projected)
+                        diagnostic(RunDiagnosticStage.MODEL_OPEN) {
+                            val projected = ModelHistory.requireResolvedTools(modelHistory)
+                            if (tool is CatalogTool) model.open(projected, requestDefinitions) else model.open(projected)
+                        }
                     } catch (failure: Exception) {
                         val invalidated = synchronized(terminalLock) {
                             if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
@@ -1050,7 +1060,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 binding = reconnectBudget?.attach(interrupt)
                                 reconnectBudget?.check()
                                 val attemptSink: (ModelEvent) -> Unit = { event ->
-                                    val ack = delivery.deliverAcknowledged { sink(event); ModelDeliveryAck.ACCEPTED }
+                                    val ack = delivery.deliverAcknowledged {
+                                        diagnostic(RunDiagnosticStage.MODEL_EVENT) { sink(event) }
+                                        ModelDeliveryAck.ACCEPTED
+                                    }
                                     if (ack == ModelDeliveryAck.REJECTED && providerInFlight.get() &&
                                         (active is RequestRetryModelSession || active is CheckpointedResumableModelSession))
                                         throw ModelDeliveryRejectedException()
@@ -1101,17 +1114,19 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     active.updateToolDefinitions(requestDefinitions)
                                 }
                                 providerInFlight.set(true)
+                                diagnostic(RunDiagnosticStage.MODEL_REQUEST) {
                                 if (checkpointed != null) {
                                     check(options.runtimeStore is AtomicRuntimeStore && options.runtimeStore.durable) {
                                         "Background resume requires an atomic durable checkpoint store"
                                     }
                                     val batchSink: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
-                                        delivery.deliverAcknowledged { acknowledgedSink(batch) }
+                                        delivery.deliverAcknowledged { diagnostic(RunDiagnosticStage.MODEL_ACK) { acknowledgedSink(batch) } }
                                     }
                                     if (attempt == 0) checkpointed.nextAcknowledged(outputs, attemptSink, batchSink)
                                     else checkpointed.resumeAcknowledged(batchSink)
                                 } else if (attempt == 0) active.next(outputs, attemptSink)
                                 else (active as ResumableModelSession).resume(attemptSink)
+                                }
                                 reconnectBudget?.check()
                             } finally {
                                 providerInFlight.set(false)
@@ -1297,9 +1312,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     if (stopped.get() || terminalReserved) throw InterruptedException()
                     val receipts = try {
                         val start = if (allowBarrier) {
-                            receiptBatch.start(current, pending.toList(), stopped::get)
+                            diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { receiptBatch.start(current, pending.toList(), stopped::get) }
                         } else {
-                            ReceiptBatchStart.Completed(receiptBatch.execute(current, pending.toList(), stopped::get))
+                            ReceiptBatchStart.Completed(diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { receiptBatch.execute(current, pending.toList(), stopped::get) })
                         }
                         val completed = when (start) {
                             is ReceiptBatchStart.Completed -> start.receipts
@@ -1369,7 +1384,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
                     if (stopped.get() || terminalReserved) throw InterruptedException()
-                    val batchOutputs = try { batch.execute(current, pending.toList()) } catch (_: Exception) {
+                    val batchOutputs = try { diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { batch.execute(current, pending.toList()) } } catch (_: Exception) {
                         execution = execution.copy(activeToolCalls = emptySet())
                         pending.forEach {
                             records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
@@ -1413,7 +1428,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 checkpoint() // Must commit before crossing the tool boundary.
                                 try {
                                     if (stopped.get()) throw InterruptedException()
-                                    val value = tool.execute(call)
+                                    val value = diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { tool.execute(call) }
                                     options.toolJournal?.complete(current, call, value)
                                     value
                                 } catch (failure: Exception) {

@@ -1,5 +1,6 @@
 package app.daiyu.android.storage
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import android.database.sqlite.SQLiteCursor
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.context.CheckpointPreservation
@@ -134,13 +135,16 @@ internal class SQLiteRuntimeStore private constructor(
     }
     private fun commit(input: RunCheckpoint, supplement: Message?) {
         available(); check(recovered)
-        val checkpoint = CheckpointPreservation.freeze(input)
+        val checkpoint = RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.CHECKPOINT_FREEZE, input.revision) { CheckpointPreservation.freeze(input) }
         require(checkpoint.usage.all { it.source == UsageRequestSource.MAIN || it.source == UsageRequestSource.SUMMARY }) {
             "additional_usage_must_not_modify_parent_checkpoint"
         }
         var contextChanged = false
         try {
-            val encoded = RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)
+            val encoded = RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.CHECKPOINT_ENCODE, checkpoint.revision) {
+                RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)
+            }
+            RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.CHECKPOINT_TRANSACTION, checkpoint.revision, encoded.size.toLong()) {
             transactions.run { db ->
                 CommitMessageDecodeReuse().use { decodeReuse ->
                     val m = checkpoint.message
@@ -185,6 +189,7 @@ internal class SQLiteRuntimeStore private constructor(
                     contextService?.publishRunCompression(db, checkpoint, summaryIdentity)
                     if (checkpoint.phase == ExecutionPhase.TERMINAL) contextService?.publishRunArchive(db, checkpoint)
                 }
+            }
             }
             checkpointReuse.committed(checkpoint, processOwner, encoded)
             if (checkpoint.phase == ExecutionPhase.TERMINAL) checkpointJsonWriter.clear()

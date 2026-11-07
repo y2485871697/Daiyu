@@ -69,12 +69,13 @@ internal class DiagnosticLogStore(
         persist(enabled, entries)
         asyncGeneration = AsyncGeneration()
         frames.setEnabled(enabled)
+        RuntimeDiagnostics.enabled = enabled
     }
 
     /** Worker-only. Diagnostics failure does not determine a request or persistence outcome. */
     fun record(event: DiagnosticEvent) {
         try { recordEntry(DiagnosticEntry(clock(), event)) }
-        catch (_: Exception) { synchronized(lock) { markUnavailable() } }
+        catch (_: Throwable) { try { synchronized(lock) { markUnavailable() } } catch (_: Throwable) { } }
     }
 
     /** Capture occurrence time before the ordered, bounded worker queue; never perform UI-thread I/O. */
@@ -91,7 +92,7 @@ internal class DiagnosticLogStore(
                     }
                 }
             }
-        } catch (_: Exception) { generation.dropped.set(true) }
+        } catch (_: Throwable) { generation.dropped.set(true) }
     }
 
     private fun recordEntry(entry: DiagnosticEntry, generation: AsyncGeneration? = null) = synchronized(lock) {
@@ -100,7 +101,7 @@ internal class DiagnosticLogStore(
             requireReadable()
             require(entry.timeMs >= 0)
             if (mutableState.value.enabled) persist(true, (entries + entry).takeLast(MAX_ENTRIES))
-        } catch (_: Exception) { markUnavailable() }
+        } catch (_: Throwable) { try { markUnavailable() } catch (_: Throwable) { } }
     }
 
     fun clear() = synchronized(lock) {
@@ -108,6 +109,7 @@ internal class DiagnosticLogStore(
         val enabled = try { readOnce(); if (readable) mutableState.value.enabled else false }
             catch (_: Exception) { false }
         frames.clear()
+        RuntimeDiagnostics.clear()
         persist(enabled, emptyList())
         asyncGeneration = AsyncGeneration()
     }
@@ -117,7 +119,8 @@ internal class DiagnosticLogStore(
         JSONObject().put("format", "daiyu-diagnostics").put("version", 2)
             .put("enabled", mutableState.value.enabled).put("events", encodeEntries(entries))
             .put("frame_performance", frames.export())
-            .put("privacy", "Only fixed page/window categories, frame timings and event timestamps; no chat, keys, paths or device identifiers.")
+            .put("runtime_trace", RuntimeDiagnostics.export())
+            .put("privacy", "Only fixed stages, outcomes, numeric timings/sizes/memory and code stack locations; no chat, keys, paths or device identifiers.")
             .toString().toByteArray(Charsets.UTF_8)
     }
 
@@ -130,6 +133,7 @@ internal class DiagnosticLogStore(
         if (!file.exists()) {
             initialized = true
             mutableState.value = DiagnosticLogState(loaded = true)
+            RuntimeDiagnostics.enabled = false
             return
         }
         val bytes = file.inputStream().use { input ->
@@ -167,6 +171,7 @@ internal class DiagnosticLogStore(
         entries = loaded; initialized = true; readable = true
         mutableState.value = DiagnosticLogState(true, enabled, loaded.size)
         frames.setEnabled(enabled)
+        RuntimeDiagnostics.enabled = enabled
     }
     private fun persist(enabled: Boolean, next: List<DiagnosticEntry>) {
         val bytes = JSONObject().put("version", 1).put("enabled", enabled)
@@ -179,6 +184,7 @@ internal class DiagnosticLogStore(
     }
     private fun markUnavailable() {
         frames.setEnabled(false)
+        RuntimeDiagnostics.enabled = false
         readable = false
         mutableState.value = mutableState.value.copy(loaded = true, unavailable = true)
     }

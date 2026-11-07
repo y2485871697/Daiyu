@@ -24,8 +24,8 @@ internal data class StoredMessageColumns(
 }
 
 /**
- * Owned by ONE commit's transaction body and closed in its finally/use block.
- * Never store this on a database/store or carry it into the next transaction.
+ * Bounded parsing reuse, confined to one runtime store lease. Cleared on failed
+ * writes, terminal commits and lease release; never shares mutable caller graphs.
  * Every lookup receives freshly read, complete SQL columns. Only parsing/graph
  * construction is reused: validation (including external video witnesses) runs again.
  * Linear exact comparisons deliberately avoid hashes and content/version surrogates.
@@ -69,9 +69,13 @@ internal class CommitMessageDecodeReuse(
         return message
     }
 
-    override fun close() {
+    fun clear() {
         entries.clear()
         characters = 0
+    }
+
+    override fun close() {
+        clear()
         closed = true
     }
 

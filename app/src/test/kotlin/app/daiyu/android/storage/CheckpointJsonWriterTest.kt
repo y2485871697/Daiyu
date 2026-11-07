@@ -137,7 +137,7 @@ open class CheckpointJsonWriterTest {
         assertLegacy(root, CheckpointJsonWriter())
     }
 
-    @Test fun screenshotSizedUtf8OutputHasOnlyBoundedQuotedFragmentsAndOneExactBuffer() {
+    @Test fun screenshotSizedUtf8OutputReusesBoundedFragmentsAndOneExactBuffer() {
         val image = "x".repeat(1_800_000) + "中"
         val imageBytes = image.toByteArray(Charsets.UTF_8)
         val root = JSONObject().put("images", JSONArray().apply { repeat(8) { put(image) } })
@@ -158,6 +158,8 @@ open class CheckpointJsonWriterTest {
             assertTrue(writer.utf8FragmentBytes <= CheckpointJsonWriter.UTF8_CHUNK_CHARS * 6 + 2)
             assertEquals(0, writer.cachedEntryCount)
             assertEquals(0L, writer.retainedChars)
+            assertEquals(imageBytes.size.toLong(), writer.retainedUtf8Bytes)
+            assertEquals(1L, writer.utf8StringQuoteCalls)
         }
     }
 
@@ -251,6 +253,39 @@ open class CheckpointJsonWriterTest {
         }
         val plain = JSONObject().put("small", "unchanged").put("null", JSONObject.NULL)
         assertSame(plain, CheckpointStringPool.pack(plain, writer, 1000))
+    }
+
+    @Test fun screenshotReceiptsReuseExactUtf8ChunksAcrossStreamingWrites() {
+        val first = "a/\\\"中🙂".repeat(150_000)
+        val second = "b/".repeat(580_000)
+        val writer = CheckpointJsonWriter()
+        var baselineQuotes = 0L
+        repeat(20) { index ->
+            val root = JSONObject().put("first", first).put("second", second).put("delta", "文字$index")
+            val encoded = writer.writeUtf8(root, 16 * 1024 * 1024)
+            assertArrayEquals(root.toString().toByteArray(Charsets.UTF_8), encoded)
+            if (index == 0) baselineQuotes = writer.utf8StringQuoteCalls
+            else assertEquals(baselineQuotes, writer.utf8StringQuoteCalls)
+            assertTrue(writer.retainedUtf8Bytes <= CheckpointJsonWriter.MAX_UTF8_CACHE_BYTES)
+            assertTrue(writer.utf8FragmentBytes <= CheckpointJsonWriter.UTF8_CHUNK_CHARS * 6 + 2)
+        }
+        writer.clear()
+        assertEquals(0L, writer.retainedUtf8Bytes)
+        assertEquals(0L, writer.utf8StringQuoteCalls)
+    }
+
+    @Test fun utf8ChunkCacheIsBoundedAndChangedStringsNeverReuseAnOldFragment() {
+        val writer = CheckpointJsonWriter(maxEntries = 2)
+        val values = listOf("x".repeat(3_000_000), "y".repeat(3_000_000), "z".repeat(3_000_000))
+        values.forEach { value ->
+            val root = JSONObject().put("value", value)
+            assertArrayEquals(root.toString().toByteArray(Charsets.UTF_8), writer.writeUtf8(root, 4 * 1024 * 1024))
+            assertTrue(writer.retainedUtf8Bytes <= CheckpointJsonWriter.MAX_UTF8_CACHE_BYTES)
+        }
+        val quotes = writer.utf8StringQuoteCalls
+        val root = JSONObject().put("value", values.first())
+        assertArrayEquals(root.toString().toByteArray(Charsets.UTF_8), writer.writeUtf8(root, 4 * 1024 * 1024))
+        assertEquals(quotes + 1, writer.utf8StringQuoteCalls)
     }
 
 }

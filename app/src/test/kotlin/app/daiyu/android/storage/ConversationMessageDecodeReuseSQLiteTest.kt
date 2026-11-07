@@ -56,6 +56,36 @@ class ConversationMessageDecodeReuseSQLiteTest {
     private fun checkpoint(message: Message = assistant, revision: Long = 1) =
         RunCheckpoint(message, listOf(user), ExecutionPhase.BOUNDARY, owner = "decode-owner", revision = revision)
 
+
+    @Test fun crossTransactionReuseStillReadsChangedWitnessAndExactColumns() {
+        val reuse = CommitMessageDecodeReuse()
+        fun <T> sql(work: (SQLiteDatabase) -> T): T {
+            val db = database.writableDatabase
+            db.beginTransaction()
+            try { return work(db).also { db.setTransactionSuccessful() } }
+            finally { db.endTransaction() }
+        }
+        try {
+            val first = sql { database.runtimeMessage(it, assistant, reuse) }
+            sql { db ->
+                assertSame(first, database.runtimeMessage(db, assistant, reuse))
+                assertEquals(1, reuse.decodeCount)
+                db.execSQL("UPDATE message_video_witnesses SET manifest_sha256=? WHERE message_id='assistant'",
+                    arrayOf("0".repeat(64)))
+            }
+            rejected { sql { database.runtimeMessage(it, assistant, reuse) } }
+            assertEquals(0, reuse.retainedEntries)
+            sql { db ->
+                db.execSQL("DELETE FROM message_video_witnesses WHERE message_id='assistant'")
+                app.daiyu.android.ControllerVideoManifestWitness.insert(db, assistant, emptyList())
+                database.runtimeMessage(db, assistant, reuse)
+            }
+            sql { it.execSQL("UPDATE messages SET blocks='[ ]' WHERE id='assistant'") }
+            sql { database.runtimeMessage(it, assistant, reuse) }
+            assertEquals(3, reuse.decodeCount)
+        } finally { reuse.close() }
+    }
+
     @Test fun allThreeValidationPointsReadSqlButUnchangedRowsDecodeOnlyOnce() {
         transaction { db, reuse ->
             assertEquals(assistant, database.runtimeMessage(db, assistant, reuse)) // first proof

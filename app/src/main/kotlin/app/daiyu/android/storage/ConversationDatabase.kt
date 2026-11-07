@@ -542,13 +542,12 @@ class ConversationDatabase internal constructor(context: Context, private val af
         SQLiteMessageVideoStore.insert(db, supplement, emptyList())
     }
     internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message,
-        decodeReuse: CommitMessageDecodeReuse? = null) {
+        decodeReuse: CommitMessageDecodeReuse? = null, writer: CheckpointJsonWriter = CheckpointJsonWriter()) {
         RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.MESSAGE_WRITE) {
             val prior = storedMessage(db, message.conversationId, message.id.value, decodeReuse = decodeReuse)
             check(prior.createdAt == message.createdAt) { "消息创建时间不可更改" }
             MessageHistoryCodec.validate(message)
             MessageImages.validate(message)
-            val writer = CheckpointJsonWriter()
             val changed = ArrayList<Pair<String, ByteArray>>(3)
             if (prior.blocks != message.blocks) changed += "blocks" to writer.writeJsonUtf8(encode(message.blocks), RunCheckpointCodec.MAX_BYTES)
             if (prior.protocolItems != message.protocolItems) changed += "protocol" to writer.writeJsonUtf8(JSONArray(message.protocolItems), RunCheckpointCodec.MAX_BYTES)

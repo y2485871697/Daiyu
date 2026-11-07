@@ -384,6 +384,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private val executor=Executors.newSingleThreadExecutor()
+    private val screenshotExecutor=Executors.newSingleThreadExecutor()
     private val conversationConfigurationExecutor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
     private val imageReceiptHandler=Handler(Looper.getMainLooper())
@@ -3074,7 +3075,7 @@ class ChatController internal constructor(private val application:Application,
             if (closed || !ready || dataBusy) return false
             generationReaders++; dataRevision
         }
-        try { executor.execute {
+        try { screenshotExecutor.execute {
             val image = runCatching {
                 val record = committedScreenshotOnWorker(owner, callId) ?: return@runCatching null
                 if (record.invocation.name == "screen") app.daiyu.android.ui.ToolScreenshotReceipt.decode(record)
@@ -4765,7 +4766,7 @@ class ChatController internal constructor(private val application:Application,
         closingStorage=true
         executor.execute {
             try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
-            finally {conversationConfigurationExecutor.shutdown();modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
+            finally {conversationConfigurationExecutor.shutdown();modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();screenshotExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
     private val staticGenerationAssets by lazy { app.daiyu.android.media.StaticGenerationAssets(

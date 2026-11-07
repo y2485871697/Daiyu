@@ -42,7 +42,7 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
     if (image == null) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(if (loading) "正在加载…" else "读取失败", color = conversationColors().muted,
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 21.sp))
-        TextButton(text = "重新读取", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { revision++ })
+        if (!loading) TextButton(text = "重新读取", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { revision++ })
     }
     image?.let { bitmap ->
         Column(Modifier.fillMaxWidth().testTag("tool-screenshot:${step.toolCallId}")) {

@@ -116,4 +116,18 @@ class CommitMessageDecodeReuseTest {
             rejected { MessageHistoryCodec.encode(listOf(segment(text))) }
         }
     }
+    @Test fun leaseReuseCanBeClearedWithoutClosingAndStillRevalidatesEveryHit() {
+        CommitMessageDecodeReuse().use { reuse ->
+            var validations = 0
+            val first = reuse.read(raw, ::message) { validations++ }
+            assertSame(first, reuse.read(raw.copy(), { error("must reuse exact SQL columns") }) { validations++ })
+            assertEquals(2, validations)
+            reuse.clear()
+            assertEquals(0, reuse.retainedEntries)
+            assertEquals(0L, reuse.retainedCharacters)
+            assertNotSame(first, reuse.read(raw, ::message) { validations++ })
+            assertEquals(3, validations)
+        }
+    }
+
 }

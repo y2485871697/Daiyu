@@ -31,12 +31,21 @@ internal class CheckpointJsonWriter(
     internal var largeStringQuoteCalls: Long = 0
         private set
 
+    private data class Utf8String(val chunks: List<ByteArray>, val bytes: Int)
+    private val utf8Strings = LinkedHashMap<String, Utf8String>(16, 0.75f, true)
+    internal var retainedUtf8Bytes = 0L
+        private set
+    internal var utf8StringQuoteCalls = 0L
+        private set
     private val utf8Lengths = LinkedHashMap<String, Int>(16, 0.75f, true)
     private var utf8LengthChars = 0L
     internal var measuredLargeStrings = 0L
         private set
 
     fun clear() {
+        utf8Strings.clear()
+        retainedUtf8Bytes = 0
+        utf8StringQuoteCalls = 0
         utf8Lengths.clear()
         utf8LengthChars = 0
         measuredLargeStrings = 0
@@ -93,6 +102,17 @@ internal class CheckpointJsonWriter(
         fun string(source: String) {
             if (countOnly) { emit(EMPTY_BYTES, 0, stringByteCount(source)); return }
             token("\"")
+            val cached = utf8Strings[source]
+            if (cached != null) {
+                cached.chunks.forEach { emit(it, 0, it.size) }
+                token("\"")
+                return
+            }
+            val chunks = if (source.length >= minCacheChars && maxEntries > 0 &&
+                source.length <= maxRetainedChars && stringByteCount(source) <= MAX_UTF8_CACHE_BYTES)
+                ArrayList<ByteArray>() else null
+            if (source.length >= minCacheChars) utf8StringQuoteCalls++
+            var bytesTotal = 0
             var offset = 0
             while (offset < source.length) {
                 var end = minOf(offset + UTF8_CHUNK_CHARS, source.length)
@@ -103,7 +123,19 @@ internal class CheckpointJsonWriter(
                 }
                 val bytes = JSONObject.quote(source.substring(offset, end)).toByteArray(Charsets.UTF_8)
                 emit(bytes, 1, bytes.size - 2)
+                chunks?.add(bytes.copyOfRange(1, bytes.size - 1))
+                bytesTotal += bytes.size - 2
                 offset = end
+            }
+            if (chunks != null) {
+                while (utf8Strings.isNotEmpty() && (utf8Strings.size >= maxEntries ||
+                    retainedUtf8Bytes + bytesTotal > MAX_UTF8_CACHE_BYTES)) {
+                    val entries = utf8Strings.entries.iterator()
+                    retainedUtf8Bytes -= entries.next().value.bytes
+                    entries.remove()
+                }
+                utf8Strings[source] = Utf8String(chunks, bytesTotal)
+                retainedUtf8Bytes += bytesTotal
             }
             token("\"")
         }
@@ -138,6 +170,7 @@ internal class CheckpointJsonWriter(
     }
 
     private fun stringByteCount(source: String): Int {
+        utf8Strings[source]?.let { return it.bytes + 2 }
         val large = source.length >= minCacheChars
         if (large) utf8Lengths[source]?.let { return it }
         if (large) measuredLargeStrings++
@@ -168,6 +201,7 @@ internal class CheckpointJsonWriter(
     companion object {
         private val EMPTY_BYTES = ByteArray(0)
         internal const val UTF8_CHUNK_CHARS = 4096
+        internal const val MAX_UTF8_CACHE_BYTES = 8 * 1024 * 1024
     }
 
     private fun appendValue(out: StringBuilder, value: Any?) {

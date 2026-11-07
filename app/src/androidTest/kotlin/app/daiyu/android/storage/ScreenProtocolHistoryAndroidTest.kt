@@ -118,15 +118,17 @@ class ScreenProtocolHistoryAndroidTest : InstrumentationTestCase() {
             val message = assistant.copy(blocks = blocks, protocolItems = items, historySegments = listOf(
                 MessageHistorySegment(assistant.id, "assistant", blocks, items)))
             val historical = message.copy(id = MessageId("historical"), runId = RunId("previous"), status = RunStatus.COMPLETED, historySegments = emptyList())
+            val previousUser = user.copy(id = MessageId("historical-user"), runId = historical.runId)
+            database.send(previousUser, historical.copy(status = RunStatus.RUNNING, blocks = emptyList(), protocolItems = emptyList()))
             database.save(historical)
             database.send(user, assistant)
-            val first = RunCheckpoint(message, listOf(user, historical), ExecutionPhase.BOUNDARY,
+            val first = RunCheckpoint(message, listOf(previousUser, historical, user), ExecutionPhase.BOUNDARY,
                 tools = listOf(ToolRecord(call, ToolDisposition.SUCCEEDED, result)), outputs = listOf(ToolOutput(call.id, result)),
                 owner = "owner", revision = 1)
             assertEquals(result, (first.message.blocks.single() as MessageBlock.Tool).result)
             assertEquals(result, first.tools.single().result)
             assertEquals(result, first.outputs.single().output)
-            assertEquals(result, (first.history.last().blocks.single() as MessageBlock.Tool).result)
+            assertEquals(result, (first.history.single { it.id == historical.id }.blocks.single() as MessageBlock.Tool).result)
             assertEquals(result, (first.message.historySegments.single().blocks.single() as MessageBlock.Tool).result)
             assertEquals(rawResult, first.message.protocolItems.last())
             assertEquals(rawResult, first.message.historySegments.single().protocolItems.last())

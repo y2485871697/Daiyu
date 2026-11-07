@@ -62,8 +62,10 @@ class SQLiteRuntimeSnapshotTest {
     private fun concurrentRead(interruptAt: String) {
         var hook: ((String) -> Unit)? = null
         database(afterQuery = { hook?.invoke(it) }) { db ->
-            val before = checkpoint(1, "数🙂".repeat(30000))
-            val after = checkpoint(2, "新🙂".repeat(40000))
+            val before = checkpoint(1, "数🙂".repeat(400000))
+            val after = checkpoint(2, "新🙂".repeat(450000))
+            assertTrue(RunCheckpointCodec.encode(before).toByteArray(Charsets.UTF_8).size > SQLiteText.CHUNK_BYTES * 2)
+            assertTrue(RunCheckpointCodec.encode(after).toByteArray(Charsets.UTF_8).size > SQLiteText.CHUNK_BYTES * 2)
             write(db, before)
             val done = CountDownLatch(1)
             val failure = AtomicReference<Throwable?>()
@@ -84,6 +86,7 @@ class SQLiteRuntimeSnapshotTest {
             } finally {
                 hook = null
                 writer?.join(10_000)
+                assertNotNull("concurrent writer hook must be reached", writer)
                 assertEquals(0L, done.count)
                 failure.get()?.let { throw AssertionError(it) }
             }

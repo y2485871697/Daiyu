@@ -9,7 +9,7 @@ class GuiAppLaunchContract(unittest.TestCase):
     def test_native_launch_is_in_the_production_ordinary_gui_scope(self):
         scope = (K / 'integration/tools/RunOrdinaryGuiTools.kt').read_text()
         controller = (K / 'ChatController.kt').read_text()
-        self.assertIn('scopes.add(RunOrdinaryGuiTools(realOwner, task, location))', controller)
+        self.assertIn('scopes.add(RunOrdinaryGuiTools(realOwner, task, location, screenToolImages))', controller)
         self.assertIn('ToolDefinition("launch_app", 1,', scope)
         self.assertIn('GuiScreenToolFactory.CAPABILITY, ToolEffect.WRITE', scope)
         self.assertIn('write(request.effect(GuiOwner(', scope)

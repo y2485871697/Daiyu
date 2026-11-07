@@ -31,12 +31,13 @@ internal object TokenTailCompression {
 
     fun messageTokens(message: Message): Long = historyTokens(listOf(message))
 
-    fun historyTokens(history: List<Message>): Long = messageWeights(history).sum()
+    fun historyTokens(history: List<Message>, includeLatestScreen: Boolean = true): Long =
+        messageWeights(history, includeLatestScreen).sum()
 
-    private fun messageWeights(history: List<Message>): List<Long> {
+    private fun messageWeights(history: List<Message>, includeLatestScreen: Boolean = true): List<Long> {
         // The wire projection attaches only the latest screen result. Even a newer node-only
         // result retires the older image, while every receipt remains in canonical history.
-        val latestScreen = history.asReversed().firstNotNullOfOrNull { message ->
+        val latestScreen = if (!includeLatestScreen) null else history.asReversed().firstNotNullOfOrNull { message ->
             message.blocks.lastOrNull { it is MessageBlock.Tool && it.invocation.name == "screen" && it.result != null }
         }
         return history.map { message ->

@@ -46,7 +46,7 @@ internal object ScreenHistoryProjection {
                             is JSONArray -> for (i in 0 until node.length()) rewrite(node.opt(i))
                         }
                     }
-                    val node = JSONObject(raw).also(::rewrite)
+                    val node = app.daiyu.android.model.MessagesRequest.jsonObject(raw).also(::rewrite)
                     if (changed) node.toString() else raw
                 }
             } }

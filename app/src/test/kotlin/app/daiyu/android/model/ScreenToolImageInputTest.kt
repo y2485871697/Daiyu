@@ -630,4 +630,24 @@ class ScreenToolImageInputTest {
         }
     }
 
+    @Test fun historyProjectionCannotRepairInvalidProtocolJson() {
+        val output = receipt()
+        val source = history(output)
+        val protocol = rows(ProviderProtocol.MESSAGES, listOf(source))
+        val items = (0 until protocol.length()).map { protocol.getJSONObject(it).toString().replace("\"role\"", "'role'") }
+        assertThrows(org.json.JSONException::class.java) {
+            app.daiyu.android.media.ScreenHistoryProjection.messages(listOf(source.copy(protocolItems = items)))
+        }
+    }
+
+    @Test fun aNewRunBudgetDoesNotIncludeAnyConsumedScreenPixels() {
+        val first = history(receipt(), id = "first")
+        val second = history(receipt(), id = "second")
+        val both = listOf(first, second)
+        assertEquals(TokenTailCompression.historyTokens(listOf(first), includeLatestScreen = false) +
+            TokenTailCompression.historyTokens(listOf(second), includeLatestScreen = false),
+            TokenTailCompression.historyTokens(both, includeLatestScreen = false))
+        assertTrue(TokenTailCompression.historyTokens(both, includeLatestScreen = false) < TokenTailCompression.historyTokens(both))
+    }
+
 }

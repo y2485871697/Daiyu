@@ -103,7 +103,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         checkCancellation(cancelled)
         // Empty history (including a not-yet-created conversation) has no compressible
         // evidence. Still enforce the pending budget below, without ensureIdle/nonexistent owner.
-        if (before.messages.isNotEmpty() && summarizer != null && (if (policy.tokenTail) policy.enabled && !policy.fitsSendBudget(MessageHistory.expand(before.messages + pending).sumOf(TokenTailCompression::messageTokens))
+        if (before.messages.isNotEmpty() && summarizer != null && (if (policy.tokenTail) policy.enabled && !policy.fitsSendBudget(TokenTailCompression.historyTokens(MessageHistory.expand(before.messages + pending), includeLatestScreen = false))
                 else policy.shouldCompress(estimateTokens(before.messages + pending))))
             compress(id, policy, summarizer, pending, cancelled)
         val prepared = RuntimeDiagnostics.measure(Stage.CONTEXT_READ) { transactions.run { effective(it, id) } }
@@ -114,8 +114,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     private fun requireCapacity(policy: CompressionPolicy, messages: List<Message>) {
         val budget = policy.sendBudgetTokens ?: return
         RuntimeDiagnostics.measure(Stage.CONTEXT_PREFLIGHT, size = messages.size.toLong()) {
-            val estimate = if (policy.tokenTail) MessageHistory.expand(ModelHistory.project(messages))
-                .sumOf(TokenTailCompression::messageTokens) else estimateTokens(messages)
+            val estimate = if (policy.tokenTail) TokenTailCompression.historyTokens(MessageHistory.expand(ModelHistory.project(messages)), includeLatestScreen = false) else estimateTokens(messages)
             if (!policy.fitsSendBudget(estimate))
                 throw ContextCapacityExceededException(estimate, budget)
         }
@@ -233,7 +232,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             val summary = summarizer.summarize(CompressionInput(summaryInput, revision)).trim()
             checkCancellation(cancelled)
             val reduced = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary)) <
-                summaryInput.sumOf(TokenTailCompression::messageTokens) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)
+                TokenTailCompression.historyTokens(summaryInput, includeLatestScreen = false) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)
             require(summary.isNotEmpty() && reduced) { "压缩未缩小；保留原文" }
             val archive = activity.id
             // Validate the actual wrapped summary plus retained tail and new input BEFORE publishing.

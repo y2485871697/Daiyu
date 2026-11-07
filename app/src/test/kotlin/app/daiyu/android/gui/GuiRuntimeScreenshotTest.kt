@@ -2556,6 +2556,28 @@ class GuiRuntimeScreenshotTest {
         assertDisposed(frame)
     }
 
+    @Test fun currentWindowScreenshotCloseCleansLateFrameOnlyAfterPhysicalDrain() {
+        val future = GuiRuntime.currentWindowScreenshot(session.lease) { false }
+        session.close(); assertFalse(session.releaseConfirmed)
+        rejected(GuiRuntime.openForUser(GuiOwner("next", "run")), "FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
+        val frame = platform.success()
+        rejected(future.completed(), "GUI_AUTHORIZATION_REVOKED")
+        assertEquals(0, frame.encoded); assertTrue(worker.tasks.isEmpty())
+        assertDisposed(frame); assertTrue(session.releaseConfirmed)
+        assertEquals(0, CopyingWindowNodeShadow.childReads); assertNoActions()
+    }
+
+    @Test fun currentWindowScreenshotCloseDuringEncodingWaitsForFrameCleanup() {
+        val future = GuiRuntime.currentWindowScreenshot(session.lease) { false }
+        val frame = platform.success()
+        assertEquals(1, worker.tasks.size)
+        session.close(); assertFalse(session.releaseConfirmed)
+        worker.runAll()
+        rejected(future.completed(), "GUI_AUTHORIZATION_REVOKED")
+        assertDisposed(frame); assertTrue(session.releaseConfirmed)
+        assertEquals(0, CopyingWindowNodeShadow.childReads); assertNoActions()
+    }
+
     @Test fun closeBeforeLateCallbackKeepsDrainUntilAllResourcesAreDisposed() {
         val observation = observe(); val future = screenshot(observation)
         session.close(); assertFalse(session.releaseConfirmed)

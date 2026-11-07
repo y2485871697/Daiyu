@@ -1,5 +1,9 @@
 package app.daiyu.android.context
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Stage
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderSnapshot
@@ -127,36 +131,46 @@ internal class ProviderSummaryModelPort(
         openWithoutTools(history, deadline, app.daiyu.android.model.SummaryReasoningLevel.OFF)
 
     override fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
-        reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession {
-        deadline.check()
+        reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession =
+        openSession(history, deadline, reasoning) { deadline.check() }
+
+    override fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
+        reasoning: app.daiyu.android.model.SummaryReasoningLevel,
+        cancellation: ContextPreparationCancellation): ModelSession =
+        openSession(history, deadline, reasoning) { cancellation.check(); deadline.check() }
+
+    private fun openSession(history: List<Message>, deadline: SummaryRequestDeadline,
+        reasoning: app.daiyu.android.model.SummaryReasoningLevel, checkLive: () -> Unit): ModelSession {
+        checkLive()
         // Do not let callers replay protocol/tool history or use the summary adapter for images.
         require(history.isNotEmpty() && history.all { message ->
             message.role == "user" && message.protocolItems.isEmpty() && message.historySegments.isEmpty() &&
                 message.blocks.all { it is MessageBlock.Text }
         }) { "摘要输入必须为纯文本证据" }
-        deadline.check()
+        checkLive()
         val frozen = freezeContextMessages(history)
-        deadline.check()
+        checkLive()
         usagePort?.let { port ->
             require(frozen.all { it.conversationId.value == port.conversationId }) {
                 "summary_usage_parent_conversation_mismatch"
             }
             port.claim() // A bound host request/attempt cannot silently open another POST.
         }
+        checkLive()
         val provider = SummaryProviderFactory.create(configuration.provider, configuration.maxOutputTokens,
             INSTRUCTIONS, connect = { url ->
             // Provider serialization also consumes preparation time. Never connect after it expires,
             // even if the timer thread is delayed; close a connection returned too late as well.
-            deadline.check()
+            checkLive()
             val connection = connect(url)
-            try { deadline.check(); connection }
+            try { checkLive(); connection }
             catch (failure: Exception) { runCatching { connection.disconnect() }; throw failure }
         }, oauthHeaders = oauthHeaders, reasoning = reasoning)
-        deadline.check()
+        checkLive()
         val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
             usagePort?.conversationId ?: frozen.first().conversationId.value).open(frozen, emptyList<ToolDefinition>())
         try {
-            deadline.check()
+            checkLive()
             return TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort,
                 if (configuration.provider.oauth != null) SummaryOutputBudget(configuration.maxOutputTokens) else null)
         } catch (failure: Exception) {
@@ -198,23 +212,38 @@ private class TerminalSession(
             deadline.check()
         }
         var timer: AutoCloseable? = null
+        val trace = RuntimeDiagnostics.begin(Stage.SUMMARY_REQUEST)
+        var failure: Throwable? = null
         try {
             checkLive()
             timer = deadlines.schedule(deadline.remainingMillis()) {
                 val abort = synchronized(lock) {
                     if (active) { expired.set(true); true } else false
                 }
-                if (abort) runCatching { delegate.cancel() }
+                if (abort) {
+                    trace.mark(Code.DEADLINE_EXPIRED)
+                    runCatching { delegate.cancel() }
+                }
             }
             checkLive()
             var terminal: List<String>? = null
+            var firstEvent = true
+            var firstText = true
+            var firstReasoning = true
             delegate.next(emptyList()) { event ->
                 checkLive()
+                if (firstEvent) { firstEvent = false; trace.mark(Code.FIRST_EVENT) }
+                if (firstText && (event is ModelEvent.TextDelta || event is ModelEvent.TextFinal)) {
+                    firstText = false; trace.mark(Code.FIRST_TEXT)
+                }
+                if (firstReasoning && (event is ModelEvent.ReasoningDelta || event is ModelEvent.ReasoningFinal)) {
+                    firstReasoning = false; trace.mark(Code.FIRST_REASONING)
+                }
                 if (event is ModelEvent.Usage) usagePort?.observe(event)
                 outputBudget?.observe(event)
                 when (event) {
                     is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
-                    is ModelEvent.ProtocolOutput -> terminal = event.items.toList()
+                    is ModelEvent.ProtocolOutput -> { terminal = event.items.toList(); trace.mark(Code.PROTOCOL_TERMINAL) }
                     // Usage is not summary prose. An explicitly host-bound port can persist it
                     // under the admitted parent request/attempt, including corrections to null.
                     is ModelEvent.Usage -> Unit
@@ -229,11 +258,16 @@ private class TerminalSession(
                 sink(ModelEvent.TextFinal("summary-$index", text))
             }
             synchronized(lock) { checkLive(); active = false }
-        } catch (failure: Exception) {
+        } catch (caught: Exception) {
+            failure = caught
             // Preserve cancellation; otherwise expiry wins over a disconnect-induced I/O error.
-            checkLive()
-            throw failure
+            try { checkLive() } catch (classified: Exception) { failure = classified; throw classified }
+            throw caught
+        } catch (caught: Throwable) {
+            failure = caught
+            throw caught
         } finally {
+            trace.end(failure)
             synchronized(lock) { active = false }
             runCatching { timer?.close() }
             runCatching { delegate.cancel() }

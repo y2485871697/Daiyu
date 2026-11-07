@@ -128,6 +128,7 @@ internal interface GuiRuntimeAccess {
 /** A frame owns its resources until disposal is confirmed, including time queued for encoding. */
 internal interface GuiCaptureFrame {
     @WorkerThread fun encode(observationId: String): GuiResult<GuiScreenshot>
+    @WorkerThread fun validation(observationId: String): GuiResult<GuiScreenshot> = encode(observationId)
     fun dispose(request: GuiCaptureRequest<GuiScreenshot>)
 }
 
@@ -148,12 +149,17 @@ private class AndroidGuiCaptureFrame(screenshot: AccessibilityService.Screenshot
     private val colorSpace = screenshot.colorSpace
     private var hardware: Bitmap? = null
     private var software: Bitmap? = null
-    @WorkerThread override fun encode(observationId: String): GuiResult<GuiScreenshot> {
+    @WorkerThread override fun encode(observationId: String): GuiResult<GuiScreenshot> = encode(observationId, true)
+    @WorkerThread override fun validation(observationId: String): GuiResult<GuiScreenshot> = encode(observationId, false)
+    @WorkerThread private fun encode(observationId: String, includePng: Boolean): GuiResult<GuiScreenshot> {
         if (buffer.width > 2048 || buffer.height > 4096 || buffer.width.toLong() * buffer.height > 8_388_608)
             return GuiResult.Rejected("SCREENSHOT_DIMENSIONS_EXCEED_LIMIT")
         hardware = Bitmap.wrapHardwareBuffer(buffer, colorSpace)
         software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
         val image = software ?: return GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")
+        val pixels = RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_PIXEL_EXTRACT) { GuiVisualPixels.from(image) }
+        if (!includePng) return GuiResult.Value(GuiScreenshot(observationId, image.width, image.height, ByteArray(0),
+            visualPixels = pixels))
         val bytes = object : ByteArrayOutputStream() {
             override fun write(b: ByteArray, off: Int, len: Int) {
                 check(count.toLong() + len <= 2_097_152) { "screenshot_size_limit" }; super.write(b, off, len)
@@ -163,7 +169,7 @@ private class AndroidGuiCaptureFrame(screenshot: AccessibilityService.Screenshot
         if (!image.compress(Bitmap.CompressFormat.PNG, 100, bytes))
             return GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")
         return GuiResult.Value(GuiScreenshot(observationId, image.width, image.height, bytes.toByteArray(),
-            visualPixels = GuiVisualPixels.from(image)))
+            visualPixels = pixels))
     }
     override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) {
         request.disposeSuccessResources(
@@ -832,7 +838,13 @@ internal object GuiRuntime {
         } catch (_: Exception) { GuiResult.Rejected("OBSERVATION_UNAVAILABLE") }
     }
 
-    internal fun observe(lease: GuiLeaseGate.Lease, maxNodes: Int = 128): GuiResult<GuiObservation> {
+    internal fun observe(lease: GuiLeaseGate.Lease, maxNodes: Int = 128): GuiResult<GuiObservation> =
+        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_OBSERVE, size = maxNodes.toLong()) {
+            observeInternal(lease, maxNodes).also { if (it is GuiResult.Rejected)
+                RuntimeDiagnostics.guiResult(it.code, RuntimeDiagnostics.Stage.GUI_OBSERVE) }
+        }
+
+    private fun observeInternal(lease: GuiLeaseGate.Lease, maxNodes: Int): GuiResult<GuiObservation> {
         require(maxNodes in 128..512)
         onMain(); targetRejection(lease)?.let { return it }
         staleEvent = null; staleLoggedFor = null
@@ -878,7 +890,18 @@ internal object GuiRuntime {
     }
 
     @Suppress("DEPRECATION")
-    internal fun action(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<String> {
+    internal fun action(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<String> =
+        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_ACTION) {
+            actionInternal(lease, action).also {
+                when (it) {
+                    is GuiResult.Rejected -> RuntimeDiagnostics.guiResult(it.code)
+                    is GuiResult.Unknown -> RuntimeDiagnostics.guiResult(it.code)
+                    else -> Unit
+                }
+            }
+        }
+
+    private fun actionInternal(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<String> {
         onMain(); operationRejection(lease, action.operation)?.let { return it }; screenRejection()?.let { return it }
         val current = service ?: return GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
         val verified = validateExactTarget(lease, action)
@@ -997,9 +1020,13 @@ internal object GuiRuntime {
         gesture: GuiGesture): GuiResult<String> {
         val future = CompletableFuture<GuiResult<String>>()
         gestures[lease] = future
+        val submission = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_GESTURE_SUBMIT)
+        val callback = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_GESTURE_WAIT)
+        future.whenComplete { _, error -> callback.end(error) }
         return try {
             val accepted = access.gesture(current, gesture) { completed ->
                 onMain()
+                callback.mark(RuntimeDiagnostics.Code.GESTURE_CALLBACK, count = if (completed) 1 else 0)
                 if (gestures[lease] === future) {
                     gestures.remove(lease)
                     future.complete(if (completed) GuiResult.Value("PLATFORM_GESTURE_COMPLETED_NOT_VERIFIED")
@@ -1007,13 +1034,16 @@ internal object GuiRuntime {
                     finishDrain(lease)
                 }
             }
+            submission.mark(RuntimeDiagnostics.Code.GESTURE_SUBMITTED, count = if (accepted) 1 else 0)
+            submission.end()
             if (!accepted) {
                 gestures.remove(lease)
                 future.complete(GuiResult.Value("PLATFORM_GESTURE_REJECTED"))
                 GuiResult.Value("PLATFORM_GESTURE_REJECTED")
             } else if (future.isDone) future.getNow(GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED"))
             else GuiResult.Value("PLATFORM_GESTURE_ACCEPTED_NOT_VERIFIED")
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            submission.end(failure)
             // Submission may have reached Android; only its terminal callback may release the slot.
             GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED")
         }
@@ -1051,14 +1081,13 @@ internal object GuiRuntime {
 
     private fun matchesVisualContent(captured: VisualCapture, image: GuiScreenshot, action: GuiAction): Boolean =
         RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_VALIDATE) {
-            if (java.security.MessageDigest.getInstance("SHA-256").digest(image.png).toList() == captured.digest) {
+            if (action.operation == GuiOperation.COORDINATE_TAP && action.gesture != null && captured.pixels != null) {
+                val check = captured.pixels.compareTap(image.visualPixels, action.gesture, captured.window)
+                RuntimeDiagnostics.pixels(check)
+                check.accepted
+            } else if (java.security.MessageDigest.getInstance("SHA-256").digest(image.png).toList() == captured.digest) {
                 RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.FRAME_EQUAL)
                 true
-            } else if (action.operation == GuiOperation.COORDINATE_TAP && action.gesture != null) {
-                val check = captured.pixels?.compareTap(image.visualPixels, action.gesture, captured.window)
-                if (check == null) RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.PIXELS_MISSING)
-                else RuntimeDiagnostics.pixels(check)
-                check?.accepted == true
             } else {
                 RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.FRAME_CHANGED)
                 false
@@ -1091,8 +1120,10 @@ internal object GuiRuntime {
         }
         if (action.gesture != null && !captured.window.admits(action.gesture))
             return reject("GESTURE_WINDOW_OCCLUDED_OR_OUTSIDE_NOT_EXECUTED")
-        // Re-capture the same window. Taps require exact target-neighborhood pixels; other actions require the full frame.
-        captureVisualFrame(lease, captured.id, cancelled) { image, window, _ ->
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.CAPTURE_AGE,
+            size = GUI_OBSERVATION_TTL_MILLIS, count = SystemClock.elapsedRealtime() - captured.capturedAt)
+        // Recheck the window and geometry; changing tap pixels are recorded, not a reason to block.
+        captureVisualFrame(lease, captured.id, cancelled, validationOnly = action.operation == GuiOperation.COORDINATE_TAP && captured.pixels != null) { image, window, _ ->
             val rejection = visualRejection(lease) ?: if (cancelled()) GuiResult.Rejected("CANCELLED_NOT_EXECUTED") else null
             when {
                 future.isDone -> Unit
@@ -1129,7 +1160,7 @@ internal object GuiRuntime {
     }
 
     private fun captureVisualFrame(lease: GuiLeaseGate.Lease, id: String, cancelled: () -> Boolean,
-        completed: (GuiResult<GuiScreenshot>, GuiVisualWindow?, Long) -> Unit) {
+        validationOnly: Boolean = false, completed: (GuiResult<GuiScreenshot>, GuiVisualWindow?, Long) -> Unit) {
         val current = service
         if (current == null || Build.VERSION.SDK_INT < 30) {
             completed(GuiResult.Rejected("VISUAL_CAPTURE_UNAVAILABLE_NOT_EXECUTED"), null, visualGeneration); return
@@ -1174,12 +1205,20 @@ internal object GuiRuntime {
             return null
         }
         // Keep the same reservation while the read-only Root witness and platform callback drain.
+        val initialWitness = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_WINDOW_WITNESS)
+        request.future.whenComplete { _, error -> initialWitness.end(error) }
         try { access.visualWindow(current) { window ->
+            initialWitness.mark(RuntimeDiagnostics.Code.INITIAL_WITNESS)
+            initialWitness.end()
             initial = window
             val denied = windowRejection(window, "initial_witness")
             request.submit {
                 if (denied != null) { request.callbackFailure(denied.code); return@submit }
-                access.capture(current, success = success@ { frame ->
+                val platformCapture = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_PLATFORM_CAPTURE)
+                request.future.whenComplete { _, error -> platformCapture.end(error) }
+                try { access.capture(current, success = success@ { frame ->
+                    platformCapture.mark(RuntimeDiagnostics.Code.CAPTURE_CALLBACK)
+                    platformCapture.end()
                     fun dispose() { try { frame.dispose(request) } catch (_: Exception) { /* retain drain */ } }
                     val invalid = currentRejection("platform_callback")
                     if (invalid != null || request.future.isDone) {
@@ -1188,10 +1227,18 @@ internal object GuiRuntime {
                     }
                     try {
                         encoder.execute {
-                            val image = try { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_ENCODE) { frame.encode(id) } } catch (_: Exception) { GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE") }
+                            if (validationOnly) RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_ENCODE,
+                                RuntimeDiagnostics.Code.VALIDATION_PIXELS_ONLY)
+                            val image = try { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_ENCODE) {
+                                if (validationOnly) frame.validation(id) else frame.encode(id)
+                            } } catch (_: Exception) { GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE") }
                             if (!main.post {
                                 try {
+                                    val finalWitness = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_WINDOW_WITNESS)
+                                    request.future.whenComplete { _, error -> finalWitness.end(error) }
                                     access.visualWindow(current) { finalWindow ->
+                                        finalWitness.mark(RuntimeDiagnostics.Code.FINAL_WITNESS)
+                                        finalWitness.end()
                                         try {
                                             val rejection = windowRejection(finalWindow, "final_witness") ?: if (finalWindow != initial)
                                                 GuiResult.Rejected("CAPTURE_WINDOW_CHANGED_NOT_EXECUTED") else null
@@ -1201,13 +1248,20 @@ internal object GuiRuntime {
                                                 GuiResult.Rejected("CAPTURE_GEOMETRY_CHANGED_NOT_EXECUTED") else image)
                                         } finally { dispose() }
                                     }
-                                } catch (_: Exception) { request.future.complete(GuiResult.Rejected("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED")); dispose() }
+                                } catch (failure: Exception) {
+                                    request.future.complete(GuiResult.Rejected("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED")); dispose()
+                                }
                             }) { request.future.complete(GuiResult.Rejected("SCREENSHOT_RESULT_UNAVAILABLE")); dispose() }
                         }
                     } catch (_: Exception) { request.future.complete(GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")); dispose() }
-                }, failure = { request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$it") })
+                }, failure = { error ->
+                    platformCapture.mark(RuntimeDiagnostics.Code.CAPTURE_CALLBACK_FAILED, size = error.toLong())
+                    platformCapture.end()
+                    request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$error")
+                })
+                } catch (failure: Exception) { platformCapture.end(failure); request.callbackFailure("SCREENSHOT_PLATFORM_ERROR") }
             }
-        } } catch (_: Exception) { request.callbackFailure("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED") }
+        } } catch (failure: Exception) { initialWitness.end(failure); request.callbackFailure("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED") }
     }
 
     /** No capture occurs while observing. API 30+ only; secure windows/platform errors stay errors. */
@@ -1253,13 +1307,21 @@ internal object GuiRuntime {
             else main.post { captureFinished(lease) } // no main receipt means no manufactured slot release
         }
         val future = request.future
+        val captureSpan = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_CAPTURE)
+        future.whenComplete { value, error ->
+            captureSpan.end(error)
+            if (value is GuiResult.Rejected) RuntimeDiagnostics.guiResult(value.code, RuntimeDiagnostics.Stage.GUI_CAPTURE)
+        }
         if (visualOnly) future.whenComplete { _, _ ->
             // Never publish the capture's private observation as a clickable tree.
             val retire = Runnable { retireVisualObservation() }
             if (Looper.myLooper() === Looper.getMainLooper()) retire.run() else main.post(retire)
         }
         request.submit {
+            val platformCapture = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_PLATFORM_CAPTURE)
+            future.whenComplete { _, error -> platformCapture.end(error) }
             access.capture(current, success = success@ { frame ->
+                platformCapture.mark(RuntimeDiagnostics.Code.CAPTURE_CALLBACK); platformCapture.end()
                 onMain()
                 fun dispose() {
                     // Unconfirmed disposal must NOT manufacture a drain receipt.
@@ -1300,6 +1362,7 @@ internal object GuiRuntime {
                     dispose()
                 }
             }, failure = { code ->
+                platformCapture.mark(RuntimeDiagnostics.Code.CAPTURE_CALLBACK_FAILED, size = code.toLong()); platformCapture.end()
                 onMain(); request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$code")
             })
         }

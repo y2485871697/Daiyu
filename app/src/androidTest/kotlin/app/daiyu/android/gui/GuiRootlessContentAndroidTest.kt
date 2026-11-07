@@ -117,7 +117,7 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
             }
         }
     }
-    fun testChangedPixelsAfterOwnContentNeverDispatch() = fixture { service, session, platform ->
+    fun testChangedPngWithoutSpatialEvidenceAfterOwnContentDoesNotDispatch() = fixture { service, session, platform ->
         if (unsupported(session, platform)) return@fixture
         val image = capture(service, session, platform)
         lateinit var pending: CompletableFuture<GuiResult<String>>
@@ -156,7 +156,7 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         }
     }
 
-    fun testTargetContentStillRejectsChangedPixelsWithoutDispatching() = fixture { service, session, platform ->
+    fun testTargetContentWithoutSpatialEvidenceStillRejectsChangedPng() = fixture { service, session, platform ->
         if (unsupported(session, platform)) return@fixture
         val image = capture(service, session, platform, "external.app")
         lateinit var pending: CompletableFuture<GuiResult<String>>
@@ -218,7 +218,7 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
             assertEquals(2, platform.disposed)
         }
     }
-    fun testChangedTargetWindowGeometryOrForegroundIdentityNeverDispatches() {
+    fun testPixelChangesDispatchButMissingEvidenceWindowGeometryAndIdentityStillReject() {
         for (mode in 0..7) fixture { service, session, platform ->
             if (unsupported(session, platform)) return@fixture
             controlMain { platform.window = platform.window.copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768)) }
@@ -242,12 +242,19 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
             }
             instrumentation.waitForIdleSync()
             controlMain {
-                platform.witness(); assertEquals(0, platform.gestures)
-                assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Rejected)
-                if (mode <= 2) assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
+                platform.witness()
+                if (mode <= 1) {
+                    assertEquals(1, platform.gestures); assertFalse(pending.isDone)
+                    platform.completedGesture!!(true); platform.completedGesture = null
+                    assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Value)
+                } else {
+                    assertEquals(0, platform.gestures)
+                    assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Rejected)
+                    if (mode == 2) assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
+                }
                 platform.window = window
                 assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
-                assertEquals(0, platform.gestures); assertTrue(platform.windows.isEmpty()); assertNull(platform.captured)
+                assertEquals(if (mode <= 1) 1 else 0, platform.gestures); assertTrue(platform.windows.isEmpty()); assertNull(platform.captured)
             }
             assertEquals(2, platform.disposed)
         }
@@ -267,21 +274,22 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         } finally { bitmap.recycle() }
     }
 
-    fun testExact49TileRegionReportsSixSyntheticChangesAndRejectsTheOldTarget() {
+    fun testExact49TileRegionReportsSixSyntheticChangesWithoutBlockingAuthorizedTap() {
         val before = fixturePixels()
         val points = listOf(1000 to 2440, 1032 to 2440, 1064 to 2472, 1096 to 2504, 1128 to 2536, 1200 to 2639)
         val check = before.compareTap(fixturePixels(points), fixturePixelGesture, fixturePixelWindow)
         assertEquals(RuntimeDiagnostics.Code.LOCAL_PIXELS_CHANGED, check.reason)
-        assertFalse(check.accepted)
+        assertTrue(check.accepted); assertEquals(false, check.targetTileChanged)
         assertEquals(49, check.comparedTiles); assertEquals(6, check.changedTiles)
         assertEquals(GuiBounds(992, 2432, 1216, 2640), check.region)
         assertEquals(points.map { (x, y) -> GuiBounds(x / 32 * 32, y / 32 * 32,
             minOf(1216, x / 32 * 32 + 32), minOf(2640, y / 32 * 32 + 32)) }, check.changedTileBounds)
     }
 
-    fun testFreshStablePixelsCanMatchButDistantAnimationCannotHideTargetChanges() {
+    fun testChangedTargetPixelsAreAdmittedAndRemainDiagnosable() {
         val before = fixturePixels(); val changed = fixturePixels(listOf(1093 to 2541))
-        assertFalse(before.compareTap(changed, fixturePixelGesture, fixturePixelWindow).accepted)
+        val target = before.compareTap(changed, fixturePixelGesture, fixturePixelWindow)
+        assertTrue(target.accepted); assertEquals(true, target.targetTileChanged)
         val fresh = changed.compareTap(fixturePixels(listOf(1093 to 2541)), fixturePixelGesture, fixturePixelWindow)
         assertTrue(fresh.accepted); assertEquals(0, fresh.changedTiles); assertTrue(fresh.changedTileBounds.isEmpty())
         assertTrue(before.compareTap(fixturePixels(listOf(10 to 10)), fixturePixelGesture, fixturePixelWindow).accepted)

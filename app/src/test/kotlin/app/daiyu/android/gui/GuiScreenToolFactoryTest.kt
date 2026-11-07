@@ -26,6 +26,13 @@ class GuiScreenToolFactoryTest {
         assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
     }
 
+    @Test fun visualActionsDescribeDiagnosticOnlyTapPixelsWithoutRelaxingOtherActions() {
+        val text = GuiScreenToolFactory.actionDefinition(allowVisualCapture = true).description
+        assertTrue(text.contains("pixel changes (including target-tile changes) are diagnostic only"))
+        assertTrue(text.contains("swipe and back still require a stable frame"))
+        assertTrue(text.contains("display geometry and target bounds"))
+    }
+
     @Test fun ordinaryVisualRecoveryRequiresANewObservationDecisionAndNeverReplaysUnknownActions() {
         val definitions = listOf(GuiScreenToolFactory.readDefinition(allowImplicitObservation = true),
             GuiScreenToolFactory.actionDefinition(allowVisualCapture = true))

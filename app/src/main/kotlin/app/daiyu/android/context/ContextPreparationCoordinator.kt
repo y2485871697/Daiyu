@@ -4,6 +4,9 @@ import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.Message
 import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.domain.context.CompressionPolicy
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Stage
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code
 import app.daiyu.android.domain.context.ContextRevision
 import java.util.Collections
 import java.util.concurrent.CancellationException
@@ -38,6 +41,7 @@ class ContextPreparationCancellation {
             if (!cancelled.compareAndSet(false, true)) return
             callbacks.toList().also { callbacks.clear() }
         }
+        RuntimeDiagnostics.event(Stage.SUMMARY_REQUEST, Code.CANCEL_REQUESTED)
         pending.forEach { runCatching(it) }
     }
 
@@ -137,12 +141,17 @@ class ContextPreparationCoordinator(
             }) }, cancellation, bound?.rebind, bound?.displayIdentity)
     }
 
-    fun prepare(frozen: FrozenContextPreparation): PreparedSendContext {
+    fun prepare(frozen: FrozenContextPreparation): PreparedSendContext =
+        RuntimeDiagnostics.measure(Stage.CONTEXT_PREPARE) { prepareInternal(frozen) }
+
+    private fun prepareInternal(frozen: FrozenContextPreparation): PreparedSendContext {
         require(frozen.issuer === this) { "准备快照不属于当前协调器" }
         check(frozen.consumed.compareAndSet(false, true)) { "准备快照只能消费一次；不得自动重发" }
         frozen.cancellation.check()
         // The parent reservation must cover both this read and the later send CAS.
-        val revision = ContextRevision.digest(service.displayHistory(frozen.conversationId))
+        val revision = RuntimeDiagnostics.measure(Stage.CONTEXT_REVISION) {
+            ContextRevision.digest(service.displayHistory(frozen.conversationId))
+        }
         val history = service.prepareSend(frozen.conversationId, frozen.policy, frozen.summarizer,
             pendingMessages = frozen.pendingMessages, cancelled = { frozen.cancellation.isCancelled })
         // Do not add a fallible post-publication phase: cancellation/commit fencing belongs to

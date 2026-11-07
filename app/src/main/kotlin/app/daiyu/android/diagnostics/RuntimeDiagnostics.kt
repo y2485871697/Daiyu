@@ -16,9 +16,30 @@ import kotlin.concurrent.withLock
 internal object RuntimeDiagnostics {
     enum class Stage { RUN, MODEL_OPEN, MODEL_REQUEST, MODEL_EVENT, MODEL_ACK, TOOL_EXECUTION,
         CHECKPOINT_FREEZE, CHECKPOINT_ENCODE, CHECKPOINT_TRANSACTION, MESSAGE_WRITE, ARCHIVE_ENCODE,
-        GUI_CAPTURE, GUI_ENCODE, GUI_VALIDATE, GUI_ACTION, UI_PREPARE, UI_DISPATCH, UI_PUBLISH }
+        CONTEXT_PREPARE, CONTEXT_READ, CONTEXT_REVISION, CONTEXT_PREFLIGHT,
+        SUMMARY_WAIT, SUMMARY_TOTAL, SUMMARY_SNAPSHOT, SUMMARY_SELECT, SUMMARY_SUMMARIZE, SUMMARY_PREPARE,
+        SUMMARY_OPEN, SUMMARY_SESSION, SUMMARY_REQUEST, SUMMARY_REPAIR,
+        SUMMARY_MERGE, SUMMARY_ARCHIVE, SUMMARY_COMMIT,
+        GUI_OBSERVE, GUI_CAPTURE, GUI_WINDOW_WITNESS, GUI_PLATFORM_CAPTURE, GUI_ENCODE, GUI_PIXEL_EXTRACT, GUI_VALIDATE,
+        GUI_ACTION, GUI_GESTURE_SUBMIT, GUI_GESTURE_WAIT, UI_PREPARE, UI_DISPATCH, UI_PUBLISH }
     enum class Code {
         BEGIN,
+        FIRST_EVENT,
+        FIRST_TEXT,
+        FIRST_REASONING,
+        PROTOCOL_TERMINAL,
+        SOURCE_CHUNKS,
+        FORMAT_REPAIR,
+        DEADLINE_EXPIRED,
+        CANCEL_REQUESTED,
+        GESTURE_SUBMITTED,
+        GESTURE_CALLBACK,
+        CAPTURE_AGE,
+        INITIAL_WITNESS,
+        FINAL_WITNESS,
+        CAPTURE_CALLBACK,
+        CAPTURE_CALLBACK_FAILED,
+        VALIDATION_PIXELS_ONLY,
         END,
         FAILURE,
         OOM,
@@ -194,6 +215,10 @@ internal object RuntimeDiagnostics {
                 id, elapsed(), revision, size, failure, thread, critical = failure != null, sourceEpoch = epoch)
             } catch (_: Throwable) { }
         }
+        fun mark(code: Code, size: Long = -1, count: Long = -1) {
+            if (id == 0L || epoch != generation.get() || ended.get()) return
+            emit(stage, code, id, elapsed(), count, size, sourceEpoch = epoch)
+        }
         internal fun elapsed() = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
     }
 
@@ -285,6 +310,8 @@ internal object RuntimeDiagnostics {
             fun bounds(region: app.daiyu.android.gui.GuiBounds) =
                 JSONArray(listOf(region.left, region.top, region.right, region.bottom))
             value.put("dimensions", JSONArray(listOf(pixels.beforeWidth, pixels.beforeHeight, pixels.afterWidth, pixels.afterHeight)))
+            value.put("admitted", pixels.accepted).put("pixel_policy", "DIAGNOSTIC_ONLY")
+            pixels.targetTileChanged?.let { value.put("target_tile_changed", it) }
             pixels.region?.let { value.put("compared_region", bounds(it)) }
             value.put("changed_tile_bounds", JSONArray().apply { pixels.changedTileBounds.forEach { put(bounds(it)) } })
         }

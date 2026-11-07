@@ -23,6 +23,20 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         self.assertIn('retire(); future.complete(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"))', branch)
         self.assertNotIn('dispatchGesture(', branch)
 
+    def test_tap_pixel_changes_are_diagnostics_but_geometry_and_identity_still_gate(self):
+        pixels = (K / 'gui/GuiVisualPixels.kt').read_text()
+        runtime = (K / 'gui/GuiAccessibilityService.kt').read_text()
+        diagnostics = (K / 'diagnostics/RuntimeDiagnostics.kt').read_text()
+        self.assertIn('Code.LOCAL_EQUAL, Code.LOCAL_PIXELS_CHANGED, Code.BLANK_TARGET', pixels)
+        self.assertIn('if (!window.admits(gesture)) return result(Code.TARGET_OUTSIDE)', pixels)
+        self.assertIn('if (width != other.width || height != other.height)', pixels)
+        self.assertIn('RuntimeDiagnostics.pixels(check)', runtime)
+        self.assertIn('check.accepted', runtime)
+        self.assertIn('frame.validation(id)', runtime)
+        self.assertIn('window != captured.window', runtime)
+        self.assertIn('"DIAGNOSTIC_ONLY"', diagnostics)
+        self.assertIn('"target_tile_changed"', diagnostics)
+
     def test_gestures_use_accessibility_and_keep_lease_until_callback(self):
         service = ET.parse(ROOT / 'app/src/main/res/xml/gui_accessibility_service.xml').getroot()
         self.assertEqual('true', service.get('{http://schemas.android.com/apk/res/android}canPerformGestures'))

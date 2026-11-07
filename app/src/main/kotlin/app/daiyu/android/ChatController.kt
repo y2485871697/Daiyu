@@ -231,6 +231,7 @@ class ChatController internal constructor(private val application:Application,
     }
 
     private val contextService by lazy { ContextService(application, database).also { it.onCompression = ::postCompressionActivity } }
+    private val compressionWaitSpans = linkedMapOf<String, RuntimeDiagnostics.Span>()
     private val compressionActivitiesById = linkedMapOf<String, app.daiyu.android.timeline.CompressionActivity>()
     internal val compressionActivities: List<app.daiyu.android.timeline.CompressionActivity>
         get() = synchronized(this) { compressionActivitiesById.values.toList() }
@@ -256,6 +257,10 @@ class ChatController internal constructor(private val application:Application,
     private fun postCompressionActivity(value: app.daiyu.android.timeline.CompressionActivity) {
         synchronized(this) {
             if (closed) return
+            if (value.waiting && value.running) {
+                if (value.id !in compressionWaitSpans)
+                    compressionWaitSpans[value.id] = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.SUMMARY_WAIT)
+            } else compressionWaitSpans.remove(value.id)?.end()
             if (value.running) compressionActivitiesById[value.id] = value
             else compressionActivitiesById.remove(value.id)
             value.failure?.let { failure ->
@@ -561,6 +566,8 @@ class ChatController internal constructor(private val application:Application,
                 }
                 override fun finish() = Unit
             }
+            // Publish the queued state first: the runner can reach its boundary immediately.
+            postCompressionActivity(waiting)
             val accepted = running.requestCompaction(create = { capacity ->
                 postCompressionActivity(waiting.copy(running = false))
                 contextManagementBackend(owner.conversationId).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider) { activity ->
@@ -573,7 +580,7 @@ class ChatController internal constructor(private val application:Application,
                     if (!closed && runner === running) { problem = reason ?: "暂无可安全压缩的内容，原始上下文保留"; notifyChanged() }
                 } }
             })
-            if (accepted) postCompressionActivity(waiting)
+            if (!accepted) postCompressionActivity(waiting.copy(running = false))
             return accepted
         }
         if (!idleAvailable() || hasLiveChildTasks(owner.conversationId)) return false
@@ -673,7 +680,14 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             guiEntry?.let { it.revoked = true; it.session?.close() }
             virtualDisplayEntry?.let { it.revoked = true; it.session?.close() }
-            preparation?.also { it.revoked = true; it.video?.revoke() }
+            preparation?.also { token ->
+                token.revoked = true; token.video?.revoke()
+                compressionActivitiesById.entries.removeAll {
+                    val remove = it.value.waiting && it.value.conversationId == token.conversationOwner?.value && it.value.taskId == null
+                    if (remove) compressionWaitSpans.remove(it.key)?.end()
+                    remove
+                }
+            }
         }
         token?.cancellation?.cancel()
         token?.browser?.cancel()
@@ -2365,7 +2379,11 @@ class ChatController internal constructor(private val application:Application,
             reconnectTimeline[previous.id] = stopped
             persistReconnect(stopped)
         }
-        compressionActivitiesById.entries.removeAll { it.value.runId == lifetime.initial.runId.value && it.value.taskId == null }
+        compressionActivitiesById.entries.removeAll {
+            val remove = it.value.runId == lifetime.initial.runId.value && it.value.taskId == null
+            if (remove) compressionWaitSpans.remove(it.key)?.end()
+            remove
+        }
         timelineRevision.incrementAndGet()
         commandApprovals.revoke()
         lifetime.browserVisual?.revoke()
@@ -5713,6 +5731,8 @@ class ChatController internal constructor(private val application:Application,
                 imageProvider=null; imageProviderConfiguration=null
                 configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear()
             }
+            compressionWaitSpans.values.forEach { it.end() }
+            compressionWaitSpans.clear()
             resources?.also {fenceRun(it)}.also {runRevocationListeners.clear()}
         }
         invalidateCurrentContextManagement()

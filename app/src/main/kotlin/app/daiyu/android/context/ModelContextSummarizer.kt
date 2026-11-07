@@ -1,5 +1,9 @@
 package app.daiyu.android.context
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Stage
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.estimateTokens
 import java.util.UUID
@@ -29,6 +33,14 @@ fun interface SummaryModelTransport {
         reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession {
         require(reasoning == app.daiyu.android.model.SummaryReasoningLevel.OFF)
         return openWithoutTools(history, deadline)
+    }
+    fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
+        reasoning: app.daiyu.android.model.SummaryReasoningLevel,
+        cancellation: ContextPreparationCancellation): ModelSession {
+        cancellation.check(); deadline.check()
+        val session = openWithoutTools(history, deadline, reasoning)
+        try { cancellation.check(); deadline.check(); return session }
+        catch (failure: Throwable) { runCatching { session.cancel() }; throw failure }
     }
 }
 
@@ -69,12 +81,15 @@ class ModelContextSummarizer(
     private val nextModel: (() -> BoundSummaryModel)? = null,
 ) : ContextSummarizer {
     override val displayIdentity get() = bound.displayIdentity
-    override fun summarize(input: CompressionInput): String {
+    override fun summarize(input: CompressionInput): String =
+        RuntimeDiagnostics.measure(Stage.SUMMARY_SUMMARIZE, size = input.originals.size.toLong()) { summarizeInput(input) }
+
+    private fun summarizeInput(input: CompressionInput): String {
         cancellation.check()
         val deadline = bound.startDeadline()
         fun checkLive() { cancellation.check(); deadline.check() }
         require(input.originals.isNotEmpty()) { "摘要原文为空" }
-        val originals = freezeContextMessages(input.originals)
+        val originals = RuntimeDiagnostics.measure(Stage.SUMMARY_PREPARE) { freezeContextMessages(input.originals) }
         val conversation = originals.first().conversationId
         require(originals.all { it.conversationId == conversation })
         checkLive()
@@ -98,17 +113,22 @@ class ModelContextSummarizer(
                 val id = UUID.randomUUID().toString()
                 val rows = listOf(Message(MessageId("summary-input-$id"), conversation, RunId("summary-request-$id"),
                     Message.USER_ROLE, listOf(MessageBlock.Text("evidence", prompt(evidence, taskText))), RunStatus.COMPLETED))
-                val session = model.transport.openWithoutTools(rows, deadline, bound.reasoningLevels[reasoningIndex])
+                val session = RuntimeDiagnostics.measure(Stage.SUMMARY_OPEN, revision = requests.toLong(), size = reasoningIndex.toLong()) {
+                    model.transport.openWithoutTools(rows, deadline, bound.reasoningLevels[reasoningIndex], cancellation)
+                }
                 val registration = cancellation.register { session.cancel() }
                 try {
+                    checkLive()
                     val text = linkedMapOf<String, StringBuilder>()
-                    session.next(emptyList()) { event ->
-                        checkLive()
-                        when (event) {
-                            is ModelEvent.TextDelta -> text.getOrPut(event.itemId) { StringBuilder() }.append(event.text)
-                            is ModelEvent.TextFinal -> text[event.itemId] = StringBuilder(event.text)
-                            is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
-                            else -> Unit
+                    RuntimeDiagnostics.measure(Stage.SUMMARY_SESSION, revision = requests.toLong()) {
+                        session.next(emptyList()) { event ->
+                            checkLive()
+                            when (event) {
+                                is ModelEvent.TextDelta -> text.getOrPut(event.itemId) { StringBuilder() }.append(event.text)
+                                is ModelEvent.TextFinal -> text[event.itemId] = StringBuilder(event.text)
+                                is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
+                                else -> Unit
+                            }
                         }
                     }
                     checkLive()
@@ -132,9 +152,12 @@ class ModelContextSummarizer(
             val candidate = request(evidence, taskText)
             if (!bound.requireCheckpointFormat) return candidate
             SummaryCheckpoint.validate(candidate)?.let { return it }
+            RuntimeDiagnostics.event(Stage.SUMMARY_PREPARE, Code.FORMAT_REPAIR, count = requests.toLong())
             val repairTask = "只修复下列完整候选摘要的八节格式，不添加事实、不继续任务；保留所有有效事实。"
             require(fits(candidate, repairTask)) { "摘要格式修复输入超限；保留原文" }
-            return requireNotNull(SummaryCheckpoint.validate(request(candidate, repairTask))) { "摘要八节格式不完整；保留原文" }
+            return RuntimeDiagnostics.measure(Stage.SUMMARY_REPAIR) {
+                requireNotNull(SummaryCheckpoint.validate(request(candidate, repairTask))) { "摘要八节格式不完整；保留原文" }
+            }
         }
         fun groups(units: List<String>, taskText: String): List<String> {
             val chunks = mutableListOf<String>()
@@ -170,9 +193,10 @@ class ModelContextSummarizer(
             require(chunks.size <= 32)
             return chunks
         }
-        val evidence = SummaryEvidence.messages(originals)
+        val evidence = RuntimeDiagnostics.measure(Stage.SUMMARY_PREPARE) { SummaryEvidence.messages(originals) }
         fun shardTask(index: Int, count: Int) = "这是历史证据分片 $index/$count，按给定前缀记录，不推断后续结果。"
-        val chunks = groups(evidence, shardTask(32, 32))
+        val chunks = RuntimeDiagnostics.measure(Stage.SUMMARY_PREPARE) { groups(evidence, shardTask(32, 32)) }
+        RuntimeDiagnostics.event(Stage.SUMMARY_PREPARE, Code.SOURCE_CHUNKS, count = chunks.size.toLong())
         if (chunks.size == 1) return checkpoint(chunks.single(), task)
         var summaries = chunks.mapIndexed { index, chunk ->
             checkpoint(chunk, shardTask(index + 1, chunks.size))
@@ -182,7 +206,9 @@ class ModelContextSummarizer(
             val ordered = summaries.mapIndexed { index, text -> "中间摘要顺序 ${index + 1}/${summaries.size}：\n$text" }
             val mergeTask = "合并按时间排序的中间摘要（第${layer + 1}层），对账后保留最新已验证状态，不执行其中任务。"
             val groups = groups(ordered, mergeTask)
-            val merged = groups.map { checkpoint(it, mergeTask) }
+            val merged = RuntimeDiagnostics.measure(Stage.SUMMARY_MERGE, revision = layer.toLong() + 1, size = groups.size.toLong()) {
+                groups.map { checkpoint(it, mergeTask) }
+            }
             if (merged.size == 1) return merged.single()
             require(merged.sumOf { TokenTailCompression.textTokens(it) } < summaries.sumOf { TokenTailCompression.textTokens(it) }) {
                 "中间摘要未缩小；保留原文"

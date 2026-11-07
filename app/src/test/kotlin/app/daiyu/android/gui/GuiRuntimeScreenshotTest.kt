@@ -71,6 +71,7 @@ class GuiRuntimeScreenshotTest {
         var pixels = byteArrayOf(1)
         var image: GuiScreenshot? = null
         var encoded = 0
+        var validationOnly = 0
         var encodeFailure = false
         var disposalFailure = false
         var disposalRequest: GuiCaptureRequest<GuiScreenshot>? = null
@@ -80,6 +81,13 @@ class GuiRuntimeScreenshotTest {
             encoded++
             if (encodeFailure) error("encoding failed")
             return GuiResult.Value(image?.copy(observationId = observationId) ?: GuiScreenshot(observationId, 1, 1, pixels))
+        }
+        override fun validation(observationId: String): GuiResult<GuiScreenshot> {
+            check(Looper.myLooper() !== Looper.getMainLooper())
+            validationOnly++
+            if (encodeFailure) error("validation encoding failed")
+            return GuiResult.Value(image?.copy(observationId = observationId, png = ByteArray(0))
+                ?: GuiScreenshot(observationId, 1, 1, ByteArray(0)))
         }
         override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) {
             check(Looper.myLooper() === Looper.getMainLooper())
@@ -475,23 +483,35 @@ class GuiRuntimeScreenshotTest {
         rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
         assertEquals(1, platform.gestures); assertDisposed(changed)
     }
-    @Test fun visualTapRejectsOneChangedTargetOrContextPixelAndMissingEvidence() {
-        for (mode in 0..2) {
+    @Test fun visualTapAdmitsChangedPixelsButStillRequiresPixelEvidenceAndSingleUse() {
+        for (mode in 0..3) {
+            val baseline = platform.gestures
             val original = spatialImage(); val action = spatialAction(original)
-            val changed = spatialFrame(if (mode == 0) 400 to 650 else if (mode == 1) 470 to 700 else 10 to 10)
-            if (mode == 2) changed.image = changed.image!!.copy(visualPixels = null)
+            val changed = when (mode) {
+                0 -> spatialFrame(400 to 650) // hotspot changed
+                1 -> spatialFrame(470 to 700) // nearby tile changed
+                2 -> spatialFrame(10 to 10) // distant animation
+                else -> spatialFrame(400 to 650).apply { image = image!!.copy(visualPixels = null) }
+            }
             val pending = GuiRuntime.visualAction(session.lease, action) { false }
             platform.success(changed); worker.runAll()
-            rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED")
-            assertEquals(0, platform.gestures); assertDisposed(changed)
+            if (mode < 3) {
+                assertEquals(baseline + 1, platform.gestures)
+                platform.gestureCompleted?.invoke(true); platform.gestureCompleted = null
+                assertTrue(pending.completed() is GuiResult.Value)
+            } else {
+                rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED")
+                assertEquals(baseline, platform.gestures)
+            }
+            assertDisposed(changed)
             rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
-            assertEquals(0, platform.gestures); assertTrue(platform.callbacks.isEmpty())
+            assertEquals(baseline + if (mode < 3) 1 else 0, platform.gestures)
         }
     }
     @Test fun rejectedVisualTapRecoversOnlyThroughAnExplicitFreshCaptureAndNewDecision() {
         val original = spatialImage(); val oldAction = spatialAction(original)
         val rejectedAction = GuiRuntime.visualAction(session.lease, oldAction) { false }
-        val changed = spatialFrame(400 to 650)
+        val changed = spatialFrame(400 to 650).apply { image = image!!.copy(visualPixels = null) }
         platform.success(changed); worker.runAll()
         rejected(rejectedAction.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED")
         assertEquals(0, platform.gestures); assertTrue(platform.callbacks.isEmpty()); assertDisposed(changed)
@@ -514,17 +534,37 @@ class GuiRuntimeScreenshotTest {
         assertEquals(1, platform.gestures)
     }
 
-    @Test fun freshCapturesNeverRelaxRepeatedTargetPixelChanges() {
-        repeat(2) { index ->
-            val original = spatialImage(spatialFrame(if (index == 0) null else 400 to 650))
-            val pending = GuiRuntime.visualAction(session.lease, spatialAction(original)) { false }
-            platform.success(spatialFrame(if (index == 0) 400 to 650 else null)); worker.runAll()
-            rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED")
-            assertEquals(0, platform.gestures); assertTrue(platform.callbacks.isEmpty())
-        }
+    @Test fun visualTapValidationSkipsSecondPngEncoding() {
+        val original = spatialImage()
+        val action = spatialAction(original)
+        val validation = spatialFrame(400 to 650)
+        val pending = GuiRuntime.visualAction(session.lease, action) { false }
+        platform.success(validation); worker.runAll()
+        assertEquals(1, validation.validationOnly)
+        assertEquals(0, validation.encoded)
+        assertEquals(1, platform.gestures)
+        platform.gestureCompleted?.invoke(true); platform.gestureCompleted = null
+        assertTrue(pending.completed() is GuiResult.Value)
+        assertDisposed(validation)
     }
 
-    @Test fun incidentGeometryKeepsAll49TilesAndReportsSixSyntheticChangesWithoutAcceptingThem() {
+    @Test fun freshCapturesAdmitRepeatedPixelChangesOnlyWithNewSingleUseDecisions() {
+        repeat(2) { index ->
+            val original = spatialImage(if (index == 0) null else 400 to 650)
+            val oldAction = spatialAction(original)
+            val pending = GuiRuntime.visualAction(session.lease, oldAction) { false }
+            val verification = spatialFrame(if (index == 0) 400 to 650 else 470 to 700)
+            platform.success(verification); worker.runAll()
+            assertEquals(index + 1, platform.gestures)
+            rejected(GuiRuntime.visualAction(session.lease, oldAction) { false }.completed(), "GESTURE_IN_PROGRESS_NOT_EXECUTED")
+            platform.gestureCompleted?.invoke(true); platform.gestureCompleted = null
+            assertTrue(pending.completed() is GuiResult.Value)
+            rejected(GuiRuntime.visualAction(session.lease, oldAction) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+            assertDisposed(verification)
+        }
+        assertEquals(2, platform.gestures)
+    }
+    @Test fun incidentGeometryKeepsAll49TilesAndAdmitsSixNearbyChangesWithDiagnosticBounds() {
         fun frame(changes: List<Pair<Int, Int>> = emptyList()) = spatialFrame(width = 1216, height = 2640,
             targetX = 1093, targetY = 2541, changes = changes)
         val before = frame().image!!.visualPixels!!
@@ -537,11 +577,11 @@ class GuiRuntimeScreenshotTest {
         assertEquals(GuiBounds(992, 2432, 1216, 2640), check.region)
         assertEquals(points.map { (x, y) -> GuiBounds(x / 32 * 32, y / 32 * 32,
             minOf(1216, x / 32 * 32 + 32), minOf(2640, y / 32 * 32 + 32)) }, check.changedTileBounds)
-        assertFalse(check.accepted)
+        assertFalse(check.targetTileChanged == true)
+        assertTrue(check.accepted)
         val equal = changed.compareTap(changed, gesture, window)
         assertTrue(equal.accepted); assertEquals(0, equal.changedTiles); assertTrue(equal.changedTileBounds.isEmpty())
     }
-
     @Test fun localTapEvidenceNeverBypassesWindowIdentityGeometryOrForegroundChanges() {
         for (mode in 0..4) {
             val original = spatialImage(); val action = spatialAction(original)
@@ -561,20 +601,21 @@ class GuiRuntimeScreenshotTest {
             assertEquals(0, platform.gestures); assertTrue(platform.callbacks.isEmpty())
         }
     }
-    @Test fun distantPixelChangesStillRejectSwipeBackAndBlankTapRegions() {
-        for (operation in listOf(GuiOperation.SWIPE, GuiOperation.BACK, GuiOperation.COORDINATE_TAP)) {
-            val blank = operation == GuiOperation.COORDINATE_TAP
-            val original = spatialImage(spatialFrame(blank = blank)); val action = spatialAction(original, operation)
-            val pending = GuiRuntime.visualAction(session.lease, action) { false }
-            platform.success(spatialFrame(10 to 10, blank)); worker.runAll()
+    @Test fun nonTapActionsStillRequireStableFramesButTapPixelChangesAreDiagnosticOnly() {
+        for (operation in listOf(GuiOperation.SWIPE, GuiOperation.BACK)) {
+            val original = spatialImage(); val pending = GuiRuntime.visualAction(session.lease, spatialAction(original, operation)) { false }
+            platform.success(spatialFrame(10 to 10)); worker.runAll()
             rejected(pending.completed(), "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"); assertEquals(0, platform.gestures)
         }
-        val first = spatialFrame().image!!.visualPixels!!; val second = spatialFrame(10 to 10).image!!.visualPixels
-        val window = platform.visual!!
-        assertFalse(first.matchesTap(second, GuiGesture(400, 650, 400, 650, 50), window.copy(
-            above = listOf(GuiVisualOccluder("overlay", GuiBounds(390, 640, 410, 660))))))
+        val blank = spatialImage(spatialFrame(blank = true))
+        val pending = GuiRuntime.visualAction(session.lease, spatialAction(blank)) { false }
+        val verification = spatialFrame(10 to 10, blank = true)
+        platform.success(verification); worker.runAll()
+        assertEquals(1, platform.gestures)
+        platform.gestureCompleted?.invoke(true); platform.gestureCompleted = null
+        assertTrue(pending.completed() is GuiResult.Value)
+        assertDisposed(verification)
     }
-
     @Test fun exactPixelDiagnosticReasonsAndChangedTileCountsDoNotAlterAdmission() {
         val before = spatialFrame().image!!.visualPixels!!
         val gesture = GuiGesture(400, 650, 400, 650, 50)
@@ -586,13 +627,16 @@ class GuiRuntimeScreenshotTest {
         assertEquals(app.daiyu.android.diagnostics.RuntimeDiagnostics.Code.LOCAL_PIXELS_CHANGED, changed.reason)
         assertEquals(1, changed.changedTiles)
         assertEquals(25, changed.comparedTiles)
-        assertFalse(changed.accepted)
+        assertEquals(true, changed.targetTileChanged)
+        assertTrue(changed.accepted)
         val distant = before.compareTap(spatialFrame(10 to 10).image!!.visualPixels, gesture, window)
         assertTrue(distant.accepted)
+        assertEquals(false, distant.targetTileChanged)
         assertEquals(0, distant.changedTiles)
         val blank = spatialFrame(blank = true).image!!.visualPixels!!
-        assertEquals(app.daiyu.android.diagnostics.RuntimeDiagnostics.Code.BLANK_TARGET,
-            blank.compareTap(spatialFrame(10 to 10, blank = true).image!!.visualPixels, gesture, window).reason)
+        val blankCheck = blank.compareTap(spatialFrame(10 to 10, blank = true).image!!.visualPixels, gesture, window)
+        assertEquals(app.daiyu.android.diagnostics.RuntimeDiagnostics.Code.BLANK_TARGET, blankCheck.reason)
+        assertTrue(blankCheck.accepted)
     }
 
     @Test fun localPixelsAtBottomNavigationKeepTheWholeNeighborhoodAndOnlyAdmitTheTap() {
@@ -606,8 +650,8 @@ class GuiRuntimeScreenshotTest {
         assertEquals(56, original.compareTap(distant, gesture, cropped).comparedTiles)
         assertTrue(original.matchesTap(distant, gesture, cropped))
         assertTrue(original.matchesTap(distant, gesture, navigation))
-        assertFalse(original.matchesTap(pixels(1092 to 2549), gesture, navigation))
-        assertFalse(original.matchesTap(pixels(1190 to 2600), gesture, navigation))
+        assertTrue(original.matchesTap(pixels(1092 to 2549), gesture, navigation))
+        assertTrue(original.matchesTap(pixels(1190 to 2600), gesture, navigation))
         assertFalse(original.matchesTap(distant, gesture, window.copy(bounds = GuiBounds(0, 0, 1216, 2549))))
         assertFalse(original.matchesTap(distant, gesture, window.copy(
             above = listOf(GuiVisualOccluder("overlay", GuiBounds(1080, 2540, 1110, 2560))))))

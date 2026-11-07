@@ -15,8 +15,10 @@ internal class GuiVisualPixels private constructor(
     internal data class Check(val reason: RuntimeDiagnostics.Code,
         val beforeWidth: Int, val beforeHeight: Int, val afterWidth: Int, val afterHeight: Int,
         val comparedTiles: Int? = null, val changedTiles: Int? = null,
-        val region: GuiBounds? = null, val changedTileBounds: List<GuiBounds> = emptyList()) {
-        val accepted get() = reason == RuntimeDiagnostics.Code.LOCAL_EQUAL
+        val region: GuiBounds? = null, val changedTileBounds: List<GuiBounds> = emptyList(),
+        val targetTileChanged: Boolean? = null) {
+        // Pixel changes are diagnostic evidence, not proof that an authorized target moved.
+        val accepted get() = reason in setOf(Code.LOCAL_EQUAL, Code.LOCAL_PIXELS_CHANGED, Code.BLANK_TARGET)
     }
 
     fun matchesTap(other: GuiVisualPixels?, gesture: GuiGesture, window: GuiVisualWindow): Boolean =
@@ -24,8 +26,8 @@ internal class GuiVisualPixels private constructor(
 
     fun compareTap(other: GuiVisualPixels?, gesture: GuiGesture, window: GuiVisualWindow): Check {
         fun result(reason: RuntimeDiagnostics.Code, compared: Int? = null, changed: Int? = null,
-            region: GuiBounds? = null, changes: List<GuiBounds> = emptyList()) =
-            Check(reason, width, height, other?.width ?: -1, other?.height ?: -1, compared, changed, region, changes)
+            region: GuiBounds? = null, changes: List<GuiBounds> = emptyList(), targetChanged: Boolean? = null) =
+            Check(reason, width, height, other?.width ?: -1, other?.height ?: -1, compared, changed, region, changes, targetChanged)
         if (other == null) return result(Code.PIXELS_MISSING)
         if (width != other.width || height != other.height) return result(Code.DIMENSIONS_CHANGED)
         if (gesture.x != gesture.endX || gesture.y != gesture.endY) return result(Code.NOT_A_TAP)
@@ -49,11 +51,12 @@ internal class GuiVisualPixels private constructor(
             if ((0 until HASH).any { hashes[offset + it] != other.hashes[offset + it] })
                 changes.add(GuiBounds(column * TILE, row * TILE, minOf(width, (column + 1) * TILE), minOf(height, (row + 1) * TILE)))
         }
+        val targetChanged = changes.any { gesture.x in it.left until it.right && gesture.y in it.top until it.bottom }
         return result(when {
             changes.isNotEmpty() -> Code.LOCAL_PIXELS_CHANGED
             !hasDetail -> Code.BLANK_TARGET
             else -> Code.LOCAL_EQUAL
-        }, compared, changes.size, region, changes.toList())
+        }, compared, changes.size, region, changes.toList(), targetChanged)
     }
 
     companion object {

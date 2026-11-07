@@ -66,7 +66,7 @@ internal object GuiScreenToolFactory {
 
     internal fun actionDefinition(allowVisualCapture: Boolean = false): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact authorized accessibility node, coordinate gesture or global action, bound to the same fresh observation_id. " +
-                (if (allowVisualCapture) "When screen returns capture_id, including an observe visual_fallback result, it has no nodes. Use capture_id (not observation_id) only for coordinate_tap, swipe or back; fresh pixels and the real foreground window are checked before delivery. Other actions require observe. " else "") +
+                (if (allowVisualCapture) "When screen returns capture_id, including an observe visual_fallback result, it has no nodes. Use capture_id (not observation_id) only for coordinate_tap, swipe or back; the real foreground window, display geometry and target bounds are checked before delivery. For coordinate_tap, pixel changes (including target-tile changes) are diagnostic only and do not block an authorized tap; swipe and back still require a stable frame. Other actions require observe. " else "") +
                 (if (allowVisualCapture) VISUAL_RECOVERY else "") +
                 "coordinate_tap uses x/y; swipe uses x/y/end_x/end_y and optional duration_ms (50-2000, default 500). Coordinates are screen pixels in the observed application window, never screenshot-scaled. " +
                 "ime_submit requires an editable focused node advertising IME_ENTER on API 30+. Explicit gestures are not a fallback for denied or unknown actions. " +

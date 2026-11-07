@@ -30,6 +30,35 @@ class ModelContextSummarizerContractTest {
             }, 4000, 2500, { SummaryRequestDeadline(120000) }, requireCheckpointFormat = true)
         }
     }
+    @Test fun cancellationDuringOpenCancelsReturnedSessionWithoutStartingNext() {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val cancellation = ContextPreparationCancellation()
+        val cancels = java.util.concurrent.atomic.AtomicInteger()
+        val next = java.util.concurrent.atomic.AtomicInteger()
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val model = BoundSummaryModel(binding, SummaryModelTransport { _, _ ->
+            entered.countDown()
+            check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            object : ModelSession {
+                override fun cancel() { cancels.incrementAndGet() }
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { next.incrementAndGet() }
+            }
+        }, 4000, 2500, { SummaryRequestDeadline(120000) })
+        val worker = Thread {
+            try { ModelContextSummarizer(model, cancellation).summarize(input("facts")) }
+            catch (caught: Throwable) { failure.set(caught) }
+        }
+        worker.start()
+        try {
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            cancellation.cancel(); release.countDown(); worker.join(5000)
+            assertFalse(worker.isAlive)
+            assertTrue(failure.get() is java.util.concurrent.CancellationException)
+            assertEquals(0, next.get()); assertEquals(1, cancels.get())
+        } finally { cancellation.cancel(); release.countDown(); worker.join(5000) }
+    }
+
     @Test fun validCheckpointUsesOneRequestAndNoTools() {
         val f = Fixture { checkpoint() }
         assertEquals(checkpoint(), ModelContextSummarizer(f.model(), ContextPreparationCancellation(), f::model).summarize(input("facts")))

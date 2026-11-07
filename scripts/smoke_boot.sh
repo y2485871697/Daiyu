@@ -98,6 +98,14 @@ cold_display_target = markdown_entry_target | {
 cold_display_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(cold_display_target)
 cold_display_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                         for name in cold_display_target}
+runtime_screenshot_target = {
+    'app.daiyu.android.storage.CommitMessageDecodeDatabaseTest',
+    'app.daiyu.android.storage.SQLiteRuntimeStoreDatabaseTest',
+    'app.daiyu.android.ui.ToolScreenshotReceiptTest',
+}
+runtime_screenshot_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(runtime_screenshot_target)
+runtime_screenshot_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
+                              for name in runtime_screenshot_target}
 classes = {}
 for path in sorted(Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
@@ -121,6 +129,8 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
     if markdown_entry_only and path not in markdown_entry_sources:
         continue
     if cold_display_only and path not in cold_display_sources:
+        continue
+    if runtime_screenshot_only and path not in runtime_screenshot_sources:
         continue
     source = path.read_text()
     if path.suffix == ".kt":
@@ -149,7 +159,7 @@ if mode == "daily" and (shards != 1 or shard != 0):
     raise ValueError("Daily Release requires one complete targeted shard per API")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys
@@ -169,7 +179,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or markdown_entry_only or sqlite_text_only or cold_display_only else "full",
+                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

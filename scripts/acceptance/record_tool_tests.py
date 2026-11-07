@@ -120,8 +120,25 @@ COLD_DISPLAY_MODULES = tuple(dict.fromkeys(MARKDOWN_ENTRY_MODULES + SQLITE_TEXT_
     "test_message_display_contract", "test_context_usage_wiring_contract",
 )))
 
+RUNTIME_SCREENSHOT_PLATFORM_CLASSES = (
+    "app.daiyu.android.storage.CommitMessageDecodeDatabaseTest",
+    "app.daiyu.android.storage.SQLiteRuntimeStoreDatabaseTest",
+    "app.daiyu.android.ui.ToolScreenshotReceiptTest",
+)
+RUNTIME_SCREENSHOT_MODULES = (
+    "test_checkpoint_encoding_hotpath_contract", "test_runtime_checkpoint_reuse_contract",
+    "test_large_history_storage_contract", "test_runtime_commit_hotpath_contract",
+    "test_context_usage_wiring_contract", "test_record_tool_tests_scope",
+    "test_acceptance_tool_receipt", "test_runtime_screenshot_smoke_scope",
+    "test_diagnostic_smoke_source",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(RUNTIME_SCREENSHOT_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *RUNTIME_SCREENSHOT_MODULES, "-v"], "runtime-screenshot-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(COLD_DISPLAY_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *COLD_DISPLAY_MODULES, "-v"], "cold-display-targeted"

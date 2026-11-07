@@ -1259,7 +1259,7 @@ internal object GuiRuntime {
                     platformCapture.end()
                     request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$error")
                 })
-                } catch (failure: Exception) { platformCapture.end(failure); request.callbackFailure("SCREENSHOT_PLATFORM_ERROR") }
+                } catch (failure: Exception) { platformCapture.end(failure); throw failure }
             }
         } } catch (failure: Exception) { initialWitness.end(failure); request.callbackFailure("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED") }
     }

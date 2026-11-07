@@ -550,7 +550,7 @@ class GuiRuntimeScreenshotTest {
 
     @Test fun freshCapturesAdmitRepeatedPixelChangesOnlyWithNewSingleUseDecisions() {
         repeat(2) { index ->
-            val original = spatialImage(if (index == 0) null else 400 to 650)
+            val original = spatialImage(spatialFrame(if (index == 0) null else 400 to 650))
             val oldAction = spatialAction(original)
             val pending = GuiRuntime.visualAction(session.lease, oldAction) { false }
             val verification = spatialFrame(if (index == 0) 400 to 650 else 470 to 700)

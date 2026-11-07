@@ -108,8 +108,9 @@ class DiagnosticLogStoreTest {
     @Test fun exportUsesOnlyTheFixedMetadataContract() = fixture { _, store ->
         store.setEnabled(true); store.record(DiagnosticEvent.RUN_WAITING_USER)
         val json = JSONObject(String(store.exportSnapshot(), Charsets.UTF_8))
-        assertEquals(setOf("format", "version", "enabled", "events", "privacy", "frame_performance"), json.keys().asSequence().toSet())
+        assertEquals(setOf("format", "version", "enabled", "events", "privacy", "frame_performance", "runtime_trace"), json.keys().asSequence().toSet())
         assertEquals("daiyu-diagnostics", json.getString("format")); assertEquals(2, json.getInt("version"))
+        assertTrue(json.getJSONArray("runtime_trace").length() <= 256)
         val row = json.getJSONArray("events").getJSONObject(0)
         assertEquals(setOf("time_ms", "event"), row.keys().asSequence().toSet())
         assertEquals(123L, row.getLong("time_ms")); assertEquals("RUN_WAITING_USER", row.getString("event"))

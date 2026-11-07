@@ -51,8 +51,9 @@ internal object ScreenHistoryProjection {
                 }
             } }
             fun blocks(items: List<MessageBlock>) = items.map { block ->
-                if (block !is MessageBlock.Tool || block.invocation.name != "screen" || block.result == null) block else
-                    receipts[block.invocation.id.value to block.result]?.let { block.copy(result = it) } ?: block
+                val output = (block as? MessageBlock.Tool)?.result
+                if (block !is MessageBlock.Tool || block.invocation.name != "screen" || output == null) block else
+                    receipts[block.invocation.id.value to output]?.let { block.copy(result = it) } ?: block
             }
             message.copy(blocks = blocks(message.blocks), protocolItems = protocol(message.protocolItems),
                 historySegments = message.historySegments.map { segment ->

@@ -16,23 +16,24 @@ internal object RunCheckpointCodec {
     internal fun checkEncodedSize(bytes: Long, running: Boolean) {
         require(bytes <= MAX_BYTES - if (running) RECOVERY_RESERVE else 0)
     }
-    fun encode(value: RunCheckpoint, writer: CheckpointJsonWriter? = null): String =
-        buildRoot(value).let { root -> writer?.write(root) ?: root.toString() }.also {
+    fun encode(value: RunCheckpoint, writer: CheckpointJsonWriter? = null,
+        historyReceipts: ScreenHistoryReceiptReuse? = null): String =
+        buildRoot(value, historyReceipts).let { root -> writer?.write(root) ?: root.toString() }.also {
             checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)
         }
 
     fun encodeUtf8(value: RunCheckpoint, writer: CheckpointJsonWriter,
-        recoverySourceOwner: String? = null): ByteArray {
-        val root = buildRoot(value)
+        recoverySourceOwner: String? = null, historyReceipts: ScreenHistoryReceiptReuse? = null): ByteArray {
+        val root = buildRoot(value, historyReceipts)
         if (recoverySourceOwner != null) root.put("recovery_source_owner", recoverySourceOwner)
         val limit = MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0
         return writer.writeUtf8(CheckpointStringPool.pack(root, writer, limit), limit)
     }
 
-    private fun buildRoot(value: RunCheckpoint): JSONObject {
+    private fun buildRoot(value: RunCheckpoint, historyReceipts: ScreenHistoryReceiptReuse?): JSONObject {
         validate(value)
         check(MAX_BYTES.toLong() <= ArchiveCodec.MAX_ARCHIVE_BYTES)
-        fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)
+        fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows, historyReceipts)
         fun projectedHistory(rows: List<Message>): JSONArray {
             require(rows.size <= ArchiveCodec.MAX_MESSAGES)
             return JSONArray().apply { rows.forEach { row ->

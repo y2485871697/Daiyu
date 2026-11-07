@@ -13,15 +13,16 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         archive = (APP / 'context/ContextStorage.kt').read_text()
         codec = (APP / 'storage/RunCheckpointCodec.kt').read_text()
         self.assertIn('fun encode(messages: List<Message>): ByteArray = archiveBytes(buildArray(messages))', archive)
-        self.assertIn('internal fun checkpointArray(messages: List<Message>): JSONArray', archive)
+        self.assertRegex(archive, r'internal fun checkpointArray\(messages: List<Message>,\s*'
+                         r'historyReceipts: app\.daiyu\.android\.storage\.ScreenHistoryReceiptReuse\? = null\): JSONArray')
         self.assertIn('if (hasUnpairedSurrogate(value))', archive)
         self.assertIn('JSONArray(String(archiveBytes(value), Charsets.UTF_8)) else value', archive)
         self.assertIn('check(MAX_BYTES.toLong() <= ArchiveCodec.MAX_ARCHIVE_BYTES)', codec)
-        self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)', codec)
+        self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows, historyReceipts)', codec)
         self.assertNotIn('JSONArray(String(ArchiveCodec.encode(rows)', codec)
         self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)', codec)
         for gate in ['MessageHistory.validate(messages)', 'validateMessage(message, identities)',
-                     'MessageHistoryCodec.validate(message)', 'MessageTimeCodec.write(item, message.createdAt)']:
+                     'MessageHistoryCodec.validate(message, historyReceipts)', 'MessageTimeCodec.write(item, message.createdAt)']:
             self.assertIn(gate, archive)
         projection = codec.split('fun projectedHistory(rows: List<Message>)', 1)[1].split('val version', 1)[0]
         self.assertIn('messages(listOf(row)).getJSONObject(0)', projection)
@@ -30,10 +31,10 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
     def test_optional_quote_writer_only_replaces_the_final_tree_serialization(self):
         codec = (APP / 'storage/RunCheckpointCodec.kt').read_text()
         writer = (APP / 'storage/CheckpointJsonWriter.kt').read_text()
-        encode = codec.split('    private fun buildRoot(value: RunCheckpoint): JSONObject {', 1)[1].split('    internal data class Decoded', 1)[0]
+        encode = codec.split('    private fun buildRoot(value: RunCheckpoint, historyReceipts: ScreenHistoryReceiptReuse?): JSONObject {', 1)[1].split('    internal data class Decoded', 1)[0]
         self.assertIn('validate(value)', encode)
-        self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows)', encode)
-        self.assertIn('buildRoot(value).let { root -> writer?.write(root) ?: root.toString() }.also {', codec)
+        self.assertIn('fun messages(rows: List<Message>) = ArchiveCodec.checkpointArray(rows, historyReceipts)', encode)
+        self.assertIn('buildRoot(value, historyReceipts).let { root -> writer?.write(root) ?: root.toString() }.also {', codec)
         self.assertIn('checkEncodedSize(Utf8Payload.byteCount(it, Long.MAX_VALUE), value.message.status == RunStatus.RUNNING)', codec)
         self.assertIn('fun encodeUtf8(value: RunCheckpoint, writer: CheckpointJsonWriter,', codec)
         self.assertIn('writer.writeUtf8(CheckpointStringPool.pack(root, writer, limit), limit)', codec)
@@ -62,7 +63,8 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         self.assertNotIn('StringBuilder', utf8)
         self.assertNotIn('ByteArrayOutputStream', utf8)
         store = (APP / 'storage/SQLiteRuntimeStore.kt').read_text()
-        self.assertIn('RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)', store)
+        self.assertRegex(store, r'RunCheckpointCodec\.encodeUtf8\(checkpoint, checkpointJsonWriter,\s*'
+                         r'historyReceipts = messageDecodeReuse\.historyReceipts\)')
         self.assertIn('RunCheckpointCodec.encodeUtf8(result, checkpointJsonWriter, saved.owner)', store)
         self.assertNotIn('org.json.JSONObject(RunCheckpointCodec.encode(result))', store)
 

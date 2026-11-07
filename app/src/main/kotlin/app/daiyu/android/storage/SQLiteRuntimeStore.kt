@@ -143,7 +143,8 @@ internal class SQLiteRuntimeStore private constructor(
         var contextChanged = false
         try {
             val encoded = RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.CHECKPOINT_ENCODE, checkpoint.revision) {
-                RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)
+                RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter,
+                    historyReceipts = messageDecodeReuse.historyReceipts)
             }
             RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.CHECKPOINT_TRANSACTION, checkpoint.revision, encoded.size.toLong()) {
             transactions.run { db ->

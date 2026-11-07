@@ -252,4 +252,61 @@ class ConversationMessageDecodeReuseSQLiteTest {
         assertEquals(next, SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value))
         assertEquals(listOf(user, next.message, extra), rows())
     }
+
+    private fun nativeHistoryMessage(): Message {
+        val png = java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE6sAAAAASUVORK5CYII=")
+        val padding = ByteArray(1_000_000)
+        val type = "raNd".toByteArray(Charsets.US_ASCII)
+        val crc = java.util.zip.CRC32().apply { update(type); update(padding) }.value.toInt()
+        val chunk = java.io.ByteArrayOutputStream().apply {
+            write(java.nio.ByteBuffer.allocate(4).putInt(padding.size).array()); write(type); write(padding)
+            write(java.nio.ByteBuffer.allocate(4).putInt(crc).array())
+        }.toByteArray()
+        val bytes = png.copyOfRange(0, png.size - 12) + chunk + png.copyOfRange(png.size - 12, png.size)
+        val args = "{\"operation\":\"screenshot\"}"
+        val result = org.json.JSONObject().put("observation_id", "native-fixture").put("width", 1).put("height", 1)
+            .put("mime_type", "image/png").put("data_base64", java.util.Base64.getEncoder().encodeToString(bytes)).toString()
+        val block = MessageBlock.Tool(ToolInvocation(ToolCallId("large-screen"), "screen", args), result)
+        val protocol = listOf(org.json.JSONObject().put("type", "function_call").put("call_id", "large-screen")
+            .put("name", "screen").put("arguments", args).toString(), org.json.JSONObject()
+            .put("type", "function_call_output").put("call_id", "large-screen").put("output", result).toString())
+        assertTrue(protocol.last().length > 1_000_000)
+        return assistant.copy(blocks = listOf(block), protocolItems = protocol, historySegments = listOf(
+            MessageHistorySegment(assistant.id, "assistant", listOf(block), protocol, createdAt = assistant.createdAt)))
+    }
+
+    @Test fun largeNativeReceiptProofIsSharedButEverySqlAndVideoWitnessStillRuns() {
+        val original = nativeHistoryMessage()
+        database.save(original)
+        val db = database.writableDatabase
+        val writer = CheckpointJsonWriter()
+        CommitMessageDecodeReuse().use { reuse ->
+            repeat(4) { n ->
+                val next = original.copy(blocks = original.blocks + MessageBlock.Text("body", "append-$n"))
+                val cp = RunCheckpoint(next, listOf(user), ExecutionPhase.BOUNDARY, owner = "owner", revision = n + 1L)
+                val bytes = RunCheckpointCodec.encodeUtf8(cp, writer, historyReceipts = reuse.historyReceipts)
+                assertTrue(bytes.size > 1_000_000)
+                db.beginTransaction()
+                try {
+                    database.runtimeMessage(db, next, reuse)
+                    database.writeRuntimeMessage(db, next, reuse, writer)
+                    db.setTransactionSuccessful()
+                } finally { db.endTransaction() }
+            }
+            assertEquals(1L, reuse.historyReceipts.validationCalls)
+            assertTrue(reuse.historyReceipts.hits >= 8)
+            // A pure receipt hit cannot authorize changed external video or SQL evidence.
+            for (change in listOf(
+                "UPDATE message_video_witnesses SET manifest_sha256='0000000000000000000000000000000000000000000000000000000000000000' WHERE message_id='assistant'",
+                "UPDATE messages SET history_segments=replace(history_segments,'mime_type','mime_typf') WHERE id='assistant'")) {
+                db.beginTransaction()
+                try {
+                    database.runtimeMessage(db, original, reuse)
+                    db.execSQL(change)
+                    rejected { database.runtimeMessage(db, original, reuse) }
+                } finally { db.endTransaction() }
+            }
+        }
+        writer.clear()
+    }
 }

@@ -305,6 +305,59 @@ class ScreenToolImageInputTest {
         }.toByteArray()
         return image.copyOfRange(0, image.size - 12) + chunk + image.copyOfRange(image.size - 12, image.size)
     }
+    @Test fun nativeHistoryProofIsSharedByCodecArchiveAndCheckpointAcrossTextDeltas() {
+        val output = receipt(largePng())
+        protocols.forEach { protocol ->
+            val original = history(output)
+            val wire = rows(protocol, listOf(original))
+            val items = (0 until wire.length()).map { wire.getJSONObject(it).toString() }
+            val reuse = app.daiyu.android.storage.ScreenHistoryReceiptReuse()
+            val writer = app.daiyu.android.storage.CheckpointJsonWriter()
+            var last: RunCheckpoint? = null
+            var encoded: ByteArray? = null
+            repeat(4) { n ->
+                val blocks = original.blocks + MessageBlock.Text("body", "append-$n")
+                val segment = MessageHistorySegment(original.id, original.role, blocks, items)
+                val owner = original.copy(status = RunStatus.RUNNING, blocks = blocks,
+                    protocolItems = items, historySegments = listOf(segment))
+                MessageHistoryCodec.validate(owner, reuse)
+                assertEquals(listOf(segment), MessageHistoryCodec.decode(MessageHistoryCodec.encode(listOf(segment), reuse), reuse))
+                last = RunCheckpoint(owner, emptyList(), ExecutionPhase.BOUNDARY, owner = "owner", revision = n + 1L)
+                encoded = RunCheckpointCodec.encodeUtf8(last!!, writer, historyReceipts = reuse)
+            }
+            assertEquals("The real bounded history receipt predicate must execute only once per exact receipt", 1L, reuse.validationCalls)
+            assertTrue(reuse.hits >= 12)
+            assertEquals(last, RunCheckpointCodec.decode(String(encoded!!, Charsets.UTF_8)))
+            assertArrayEquals(RunCheckpointCodec.encodeUtf8(last!!, app.daiyu.android.storage.CheckpointJsonWriter()), encoded)
+        }
+    }
+
+    @Test fun aChangedNativePngOrProtocolCannotBorrowAnOldSuccessfulProof() {
+        val output = receipt(largePng())
+        val original = history(output)
+        val wire = rows(ProviderProtocol.RESPONSES, listOf(original))
+        val items = (0 until wire.length()).map { wire.getJSONObject(it).toString() }
+        val reuse = app.daiyu.android.storage.ScreenHistoryReceiptReuse()
+        val segment = MessageHistorySegment(original.id, original.role, original.blocks, items)
+        MessageHistoryCodec.encode(listOf(segment), reuse)
+        val badOutput = JSONObject(output).apply {
+            val bytes = getString("data_base64")
+            put("data_base64", "A" + bytes.substring(1))
+        }.toString()
+        val badItems = items.toMutableList().apply {
+            this[lastIndex] = JSONObject(last()).put("output", badOutput).toString()
+        }
+        val badTool = (original.blocks.single() as MessageBlock.Tool).copy(result = badOutput)
+        listOf(segment.copy(blocks = listOf(badTool), protocolItems = badItems),
+            segment.copy(protocolItems = listOf(items.first(), items.first(), items.last())),
+            segment.copy(protocolItems = items.reversed()),
+            segment.copy(blocks = listOf((original.blocks.single() as MessageBlock.Tool).copy(
+                invocation = (original.blocks.single() as MessageBlock.Tool).invocation.copy(arguments = "{}")))))
+            .forEach { bad -> assertThrows(IllegalArgumentException::class.java) { MessageHistoryCodec.encode(listOf(bad), reuse) } }
+        assertEquals(5L, reuse.validationCalls)
+        assertEquals(1, reuse.retainedEntries)
+    }
+
     @Test fun capacityAndWireEstimatesPricePixelsNotTheScreenshotEncoding() {
         val small = receipt(); val large = receipt(largePng())
         assertTrue(JSONObject(large).getString("data_base64").length >= 1_800_000)

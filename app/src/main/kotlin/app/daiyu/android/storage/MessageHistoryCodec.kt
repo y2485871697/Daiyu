@@ -17,8 +17,10 @@ import org.json.JSONObject
  * Reported text is display data, never synthesized provider protocol or body content.
  */
 object MessageHistoryCodec {
-    fun encode(segments: List<MessageHistorySegment>): JSONArray {
-        segments.forEach { validateSegment(it) }
+    fun encode(segments: List<MessageHistorySegment>): JSONArray = encode(segments, null)
+
+    internal fun encode(segments: List<MessageHistorySegment>, reuse: ScreenHistoryReceiptReuse?): JSONArray {
+        segments.forEach { validateSegment(it, reuse) }
         return JSONArray().apply {
             segments.forEach { segment ->
                 put(JSONObject()
@@ -37,7 +39,9 @@ object MessageHistoryCodec {
         }
     }
 
-    fun decode(array: JSONArray): List<MessageHistorySegment> {
+    fun decode(array: JSONArray): List<MessageHistorySegment> = decode(array, null)
+
+    internal fun decode(array: JSONArray, reuse: ScreenHistoryReceiptReuse?): List<MessageHistorySegment> {
         val result = (0 until array.length()).map {
             val value = array.getJSONObject(it)
             require(value.keys().asSequence().toSet() - MessageTimeCodec.FIELD - "reported_reasoning" == setOf("message_id", "role", "blocks", "protocol"))
@@ -58,21 +62,23 @@ object MessageHistoryCodec {
                     }
                 })
         }
-        result.forEach { validateSegment(it) }
+        result.forEach { validateSegment(it, reuse) }
         return result
     }
 
     /** Validate both the regular message identity and its optional history projection. */
-    fun validate(message: Message) {
+    fun validate(message: Message) = validate(message, null)
+
+    internal fun validate(message: Message, reuse: ScreenHistoryReceiptReuse?) {
         require(message.id.value.isNotBlank() && message.id.value.length <= 200)
         require(message.conversationId.value.isNotBlank() && message.conversationId.value.length <= 200)
         require(message.runId.value.isNotBlank() && message.runId.value.length <= 200)
         require(message.role == "user" || message.role == "assistant")
         MessageHistory.validateOwner(message)
-        message.historySegments.forEach(::validateSegment)
+        message.historySegments.forEach { validateSegment(it, reuse) }
     }
 
-    private fun validateSegment(segment: MessageHistorySegment) {
+    private fun validateSegment(segment: MessageHistorySegment, reuse: ScreenHistoryReceiptReuse?) {
         MessageHistory.validateSegment(segment)
         require(segment.blocks.size <= 10_000 && segment.protocolItems.size <= 10_000)
         fun field(value: String) { app.daiyu.android.context.Utf8Payload.byteCount(value, 4L * 1024 * 1024) }
@@ -83,8 +89,13 @@ object MessageHistoryCodec {
         } }
         segment.protocolItems.forEach(::field)
         segment.protocolItems.forEachIndexed { index, item ->
-            require(item.length <= 1_000_000 || app.daiyu.android.model.ScreenToolImageInput.boundedHistoryReceipt(
-                segment.protocolItems, segment.blocks, index)) { "历史协议项超过大小上限" }
+            if (item.length > 1_000_000) {
+                fun proof() = app.daiyu.android.model.ScreenToolImageInput.boundedHistoryReceipt(
+                    segment.protocolItems, segment.blocks, index)
+                require(reuse?.validate(segment.protocolItems, segment.blocks, index, ::proof) ?: proof()) {
+                    "历史协议项超过大小上限"
+                }
+            }
         }
     }
 

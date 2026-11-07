@@ -380,10 +380,10 @@ class ConversationDatabase internal constructor(context: Context, private val af
             requireNotNull(text("protocol")), requireNotNull(text(historyColumn)))
         fun decodeColumns() = Message(MessageId(messageId), conversation, RunId(columns.runId), columns.role,
             decode(JSONArray(columns.blocks)), RunStatus.valueOf(columns.status), columns.error,
-            jsonStrings(JSONArray(columns.protocol)), MessageHistoryCodec.decode(JSONArray(columns.history)),
+            jsonStrings(JSONArray(columns.protocol)), MessageHistoryCodec.decode(JSONArray(columns.history), decodeReuse?.historyReceipts),
             createdAt = columns.createdAt)
         fun validateRead(message: Message) {
-            MessageHistoryCodec.validate(message)
+            MessageHistoryCodec.validate(message, decodeReuse?.historyReceipts)
             MessageImages.validate(message)
             if (verifyVideoWitness) SQLiteMessageVideoStore.readVerified(db, message)
             else SQLiteMessageVideoStore.read(db, message)
@@ -546,13 +546,13 @@ class ConversationDatabase internal constructor(context: Context, private val af
         RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.MESSAGE_WRITE) {
             val prior = storedMessage(db, message.conversationId, message.id.value, decodeReuse = decodeReuse)
             check(prior.createdAt == message.createdAt) { "消息创建时间不可更改" }
-            MessageHistoryCodec.validate(message)
+            MessageHistoryCodec.validate(message, decodeReuse?.historyReceipts)
             MessageImages.validate(message)
             val changed = ArrayList<Pair<String, ByteArray>>(3)
             if (prior.blocks != message.blocks) changed += "blocks" to writer.writeJsonUtf8(encode(message.blocks), RunCheckpointCodec.MAX_BYTES)
             if (prior.protocolItems != message.protocolItems) changed += "protocol" to writer.writeJsonUtf8(JSONArray(message.protocolItems), RunCheckpointCodec.MAX_BYTES)
             if (prior.historySegments != message.historySegments) changed += historyColumn to writer.writeJsonUtf8(
-                MessageHistoryCodec.encode(message.historySegments), RunCheckpointCodec.MAX_BYTES)
+                MessageHistoryCodec.encode(message.historySegments, decodeReuse?.historyReceipts), RunCheckpointCodec.MAX_BYTES)
             val columns = changed.joinToString("") { ",${it.first}=CAST(? AS TEXT)" }
             db.compileStatement("UPDATE messages SET status=?,error=?$columns " +
                 "WHERE id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'").use { statement ->

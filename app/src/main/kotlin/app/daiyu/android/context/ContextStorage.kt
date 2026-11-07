@@ -93,8 +93,9 @@ object ArchiveCodec {
     fun encode(messages: List<Message>): ByteArray = archiveBytes(buildArray(messages))
 
     // The complete checkpoint enforces the same or a smaller byte ceiling before returning.
-    internal fun checkpointArray(messages: List<Message>): JSONArray {
-        val value = buildArray(messages)
+    internal fun checkpointArray(messages: List<Message>,
+        historyReceipts: app.daiyu.android.storage.ScreenHistoryReceiptReuse? = null): JSONArray {
+        val value = buildArray(messages, historyReceipts)
         return if (hasUnpairedSurrogate(value))
             JSONArray(String(archiveBytes(value), Charsets.UTF_8)) else value
     }
@@ -108,7 +109,8 @@ object ArchiveCodec {
         return if (hasUnpairedSurrogate(value)) decode(archiveBytes(value)) else decodeArray(value)
     }
 
-    private fun buildArray(messages: List<Message>): JSONArray {
+    private fun buildArray(messages: List<Message>,
+        historyReceipts: app.daiyu.android.storage.ScreenHistoryReceiptReuse? = null): JSONArray {
         require(messages.size <= MAX_MESSAGES) { "归档消息数量超限" }
         MessageHistory.validate(messages)
         val value = JSONArray()
@@ -122,8 +124,8 @@ object ArchiveCodec {
             if (message.historySegments.isNotEmpty()) {
                 // Validate before writing so a bad segment can never become a blob
                 // which only fails much later during a branch or a replay.
-                MessageHistoryCodec.validate(message)
-                item.put("history_segments", MessageHistoryCodec.encode(message.historySegments))
+                MessageHistoryCodec.validate(message, historyReceipts)
+                item.put("history_segments", MessageHistoryCodec.encode(message.historySegments, historyReceipts))
             }
             MessageTimeCodec.write(item, message.createdAt)
             value.put(item)

@@ -28,7 +28,8 @@ class RuntimeCommitHotpathContract(unittest.TestCase):
 
     def test_utf8_writer_is_reused_but_cleared_at_failure_terminal_and_close(self):
         self.assertIn('private val checkpointJsonWriter = CheckpointJsonWriter()', self.source)
-        self.assertIn('RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)', self.commit)
+        self.assertRegex(self.commit, r'RunCheckpointCodec\.encodeUtf8\(checkpoint, checkpointJsonWriter,\s*'
+                         r'historyReceipts = messageDecodeReuse\.historyReceipts\)')
         self.assertLess(self.commit.index('try {'), self.commit.index('RunCheckpointCodec.encodeUtf8('))
         self.assertIn('if (checkpoint.phase == ExecutionPhase.TERMINAL) {', self.commit)
         failure = self.commit.split('catch (failure: Throwable)', 1)[1]

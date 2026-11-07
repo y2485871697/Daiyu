@@ -37,6 +37,7 @@ internal class CommitMessageDecodeReuse(
     init { require(maxCharacters >= 0 && maxEntries >= 0) }
     private data class Entry(val columns: StoredMessageColumns, val message: Message)
     private val entries = ArrayList<Entry>()
+    internal val historyReceipts = ScreenHistoryReceiptReuse()
     private var characters = 0L
     private var closed = false
     internal var decodeCount: Int = 0
@@ -51,13 +52,18 @@ internal class CommitMessageDecodeReuse(
             try { validate(hit.message) } catch (failure: Throwable) {
                 entries.remove(hit)
                 characters -= hit.columns.characterCount
+                historyReceipts.clear()
                 throw failure
             }
             return hit.message
         }
         decodeCount++
-        val message = snapshot(decode())
-        validate(message) // Never retain a partially decoded or unverified database read.
+        val message = try {
+            snapshot(decode()).also(validate)
+        } catch (failure: Throwable) {
+            historyReceipts.clear()
+            throw failure
+        } // Never retain a partially decoded or unverified database read.
         val size = columns.characterCount
         if (maxEntries > 0 && size <= maxCharacters) {
             while (entries.isNotEmpty() && (entries.size >= maxEntries || characters > maxCharacters - size)) {
@@ -70,6 +76,7 @@ internal class CommitMessageDecodeReuse(
     }
 
     fun clear() {
+        historyReceipts.clear()
         entries.clear()
         characters = 0
     }

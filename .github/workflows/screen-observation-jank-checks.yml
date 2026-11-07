@@ -106,6 +106,8 @@ jobs:
           set -o pipefail
           classes=(
             app.daiyu.android.storage.CommitMessageDecodeReuseTest
+            app.daiyu.android.storage.ScreenHistoryReceiptReuseTest
+            app.daiyu.android.model.ScreenToolImageInputTest
             app.daiyu.android.storage.ConversationMessageDecodeReuseSQLiteTest
             app.daiyu.android.storage.CheckpointJsonWriterTest
             app.daiyu.android.storage.RunCheckpointQuotedStringsTest
@@ -146,6 +148,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           expected = {'CommitMessageDecodeReuseTest', 'ConversationMessageDecodeReuseSQLiteTest',
+                      'ScreenHistoryReceiptReuseTest', 'ScreenToolImageInputTest',
                       'CheckpointJsonWriterTest', 'RunCheckpointQuotedStringsTest',
                       'AndroidCheckpointJsonWriterTest', 'AndroidRunCheckpointQuotedStringsTest', 'RuntimeCheckpointReuseTest',
                       'SQLiteRuntimeSnapshotTest', 'SQLiteTextTest', 'SQLiteTextChunksTest',

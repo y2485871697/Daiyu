@@ -65,11 +65,35 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
                       "value.revision.toString() == metadata[3]", "value.phase.name == metadata[4]"]:
             self.assertIn(field, read)
 
+    def test_native_history_receipt_reuse_is_the_same_lease_on_all_write_paths(self):
+        history = (APP / "storage/MessageHistoryCodec.kt").read_text()
+        database = (APP / "storage/ConversationDatabase.kt").read_text()
+        archive = (APP / "context/ContextStorage.kt").read_text()
+        codec = (APP / "storage/RunCheckpointCodec.kt").read_text()
+        reuse = (APP / "storage/CommitMessageDecodeReuse.kt").read_text()
+        self.assertIn("internal val historyReceipts = ScreenHistoryReceiptReuse()", reuse)
+        self.assertIn("historyReceipts.clear()", reuse.split("fun clear()", 1)[1])
+        for call in ["MessageHistoryCodec.decode(JSONArray(columns.history), decodeReuse?.historyReceipts)",
+                     "MessageHistoryCodec.validate(message, decodeReuse?.historyReceipts)",
+                     "MessageHistoryCodec.encode(message.historySegments, decodeReuse?.historyReceipts)"]:
+            self.assertIn(call, database)
+        for call in ["buildArray(messages, historyReceipts)", "MessageHistoryCodec.validate(message, historyReceipts)",
+                     "MessageHistoryCodec.encode(message.historySegments, historyReceipts)"]:
+            self.assertIn(call, archive)
+        self.assertIn("ArchiveCodec.checkpointArray(rows, historyReceipts)", codec)
+        self.assertIn("val root = buildRoot(value, historyReceipts)", codec)
+        self.assertLess(history.index("MessageHistory.validateSegment(segment)"),
+                        history.index("reuse?.validate(segment.protocolItems, segment.blocks, index, ::proof)"))
+        self.assertIn("if (verifyVideoWitness) SQLiteMessageVideoStore.readVerified(db, message)", database)
+
     def test_encoding_and_published_facts_use_the_same_frozen_input(self):
         commit = STORE.split("private fun commit(input: RunCheckpoint", 1)[1].split(
             "if (contextChanged) contextUsageRevision++", 1)[0]
-        self.assertLess(commit.index("CheckpointPreservation.freeze(input)"),
-                        commit.index("RunCheckpointCodec.encodeUtf8(checkpoint, checkpointJsonWriter)"))
+        encoded = re.search(
+            r"RunCheckpointCodec\.encodeUtf8\(\s*checkpoint,\s*checkpointJsonWriter,"
+            r"\s*historyReceipts\s*=\s*messageDecodeReuse\.historyReceipts\s*\)", commit)
+        self.assertIsNotNone(encoded)
+        self.assertLess(commit.index("CheckpointPreservation.freeze(input)"), encoded.start())
         self.assertIn("checkpointReuse.committed(checkpoint, processOwner, encoded)", commit)
         facts = (APP / "context/CheckpointPreservation.kt").read_text()
         for token in ["usageRequests = value.usageRequests.toList()", "usage = value.usage.toList()",

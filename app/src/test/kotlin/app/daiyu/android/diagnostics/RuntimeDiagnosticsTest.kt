@@ -38,4 +38,45 @@ class RuntimeDiagnosticsTest {
         assertEquals(0, RuntimeDiagnostics.export().length())
         RuntimeDiagnostics.enabled = false
     }
+    @Test fun spanRegistrationNeverWaitsForDiagnosticDiskLock() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("runtime-lock").toFile())
+        RuntimeDiagnostics.awaitWrites()
+        RuntimeDiagnostics.clear()
+        RuntimeDiagnostics.enabled = true
+        val field = RuntimeDiagnostics::class.java.getDeclaredField("lock").apply { isAccessible = true }
+        val lock = field.get(RuntimeDiagnostics) as java.util.concurrent.locks.ReentrantLock
+        val done = java.util.concurrent.CountDownLatch(1)
+        val worker = Thread {
+            try { RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.UI_PUBLISH).end() }
+            finally { done.countDown() }
+        }
+        lock.lock()
+        try {
+            worker.start()
+            assertTrue("diagnostic registration waited for file I/O", done.await(1, java.util.concurrent.TimeUnit.SECONDS))
+        } finally { lock.unlock(); worker.join(1000) }
+        RuntimeDiagnostics.awaitWrites()
+        assertEquals(0, RuntimeDiagnostics.export().length())
+        RuntimeDiagnostics.enabled = false
+    }
+
+    @Test fun fatalWriteCannotRestoreClearedOrDisabledGeneration() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("runtime-fatal").toFile())
+        RuntimeDiagnostics.awaitWrites()
+        RuntimeDiagnostics.clear()
+        RuntimeDiagnostics.enabled = true
+        val field = RuntimeDiagnostics::class.java.getDeclaredField("generation").apply { isAccessible = true }
+        val generation = field.get(RuntimeDiagnostics) as java.util.concurrent.atomic.AtomicLong
+        val write = RuntimeDiagnostics::class.java.getDeclaredMethod("writeFatalAtEpoch",
+            Throwable::class.java, Thread::class.java, java.lang.Long.TYPE).apply { isAccessible = true }
+        val oldEpoch = generation.get()
+        RuntimeDiagnostics.clear()
+        write.invoke(RuntimeDiagnostics, IllegalStateException("private-fatal-canary"), Thread.currentThread(), oldEpoch)
+        assertEquals(0, RuntimeDiagnostics.export().length())
+        val currentEpoch = generation.get()
+        RuntimeDiagnostics.enabled = false
+        write.invoke(RuntimeDiagnostics, OutOfMemoryError("private-fatal-canary"), Thread.currentThread(), currentEpoch)
+        assertEquals(0, RuntimeDiagnostics.export().length())
+    }
+
 }

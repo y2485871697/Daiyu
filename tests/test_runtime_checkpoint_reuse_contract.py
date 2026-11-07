@@ -39,7 +39,7 @@ class RuntimeCheckpointReuseContract(unittest.TestCase):
         self.assertIn("payload=CAST(? AS TEXT)", write)
         self.assertIn("statement.bindBlob(8, encoded)", write)
         self.assertIn("} catch (failure: Throwable) {\n            checkpointReuse.clear()\n            checkpointJsonWriter.clear()\n            throw failure", commit)
-        self.assertRegex(commit, r"publishRunArchive\(db, checkpoint\)(?:\s*}){2}\s*checkpointReuse.committed")
+        self.assertRegex(commit, r"publishRunArchive\(db, checkpoint\)(?:\s*}){3}\s*checkpointReuse.committed")
         close = STORE.split("@Synchronized override fun close()", 1)[1].split("companion object", 1)[0]
         self.assertLess(close.index("checkpointReuse.clear()"), close.index("lock.release()"))
 

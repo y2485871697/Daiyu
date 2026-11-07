@@ -49,15 +49,29 @@ class StreamingFreezeContract(unittest.TestCase):
         self.assertIn('require(Utf8Payload.byteCount(text, Long.MAX_VALUE) <= MAX_BYTES)', codec)
         self.assertIn('Utf8Payload.byteCount(value, Long.MAX_VALUE) <= MAX_FIELD_BYTES', archive)
         self.assertIn('RunCheckpointCodec.encodeUtf8(result, checkpointJsonWriter, saved.owner)', store)
-        self.assertIn('writer.writeUtf8(root, MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0)', codec)
+        self.assertIn('val limit = MAX_BYTES - if (value.message.status == RunStatus.RUNNING) RECOVERY_RESERVE else 0', codec)
+        self.assertIn('writer.writeUtf8(CheckpointStringPool.pack(root, writer, limit), limit)', codec)
+        pool = (APP / 'storage/CheckpointStringPool.kt').read_text()
+        self.assertIn('writer.measureUtf8(root, limit)', pool)
+        self.assertIn('CheckpointJsonWriter().measureUtf8(root, limit)', pool)
         writer = (APP / 'storage/CheckpointJsonWriter.kt').read_text()
-        self.assertLess(writer.index('require(length <= maxBytes - size)'),
-                        writer.index('val result = ByteArray(size)'))
+        encode = writer.split('fun writeJsonUtf8(root: Any, maxBytes: Int)', 1)[1].split('fun measureUtf8', 1)[0]
+        self.assertLess(encode.index('val size = measureUtf8(root, maxBytes)'),
+                        encode.index('val result = ByteArray(size)'))
+        measure = writer.split('fun measureUtf8(root: Any, maxBytes: Int)', 1)[1].split('private fun appendUtf8', 1)[0]
+        self.assertIn('require(length <= maxBytes - size)', measure)
+        self.assertIn('appendUtf8(root, countOnly = true)', measure)
+        self.assertLess(measure.index('require(length <= maxBytes - size)'), measure.index('size += length'))
+        self.assertIn('return size', measure)
         self.assertNotIn('encoded.toByteArray(Charsets.UTF_8).size', store)
         self.assertNotIn('it.toByteArray(Charsets.UTF_8).size', codec)
         self.assertNotIn('value.toByteArray(Charsets.UTF_8).size.toLong()', archive)
-        # The existing JSON/UTF-8 normalization boundary still belongs to decode.
-        self.assertIn('ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))', codec)
+        # Decode keeps its array budget and malformed UTF-16 normalization without a full stringify.
+        self.assertIn('ArchiveCodec.decodeCheckpointArray(value.getJSONArray(key))', codec)
+        decoder = archive.split('internal fun decodeCheckpointArray(value: JSONArray)', 1)[1].split('private fun buildArray', 1)[0]
+        self.assertIn('measureUtf8(value, MAX_ARCHIVE_BYTES.toInt())', decoder)
+        self.assertIn('if (hasUnpairedSurrogate(value)) decode(archiveBytes(value)) else decodeArray(value)', decoder)
+        self.assertNotIn('value.toString()', decoder)
 
 if __name__ == '__main__':
     unittest.main()

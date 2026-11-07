@@ -199,14 +199,18 @@ internal object RuntimeDiagnostics {
 
     private val noop = Span(Stage.RUN, 0, -1, -1)
 
-    fun begin(stage: Stage, revision: Long = -1, size: Long = -1): Span = try {
-        val span = Span(stage, sequence.incrementAndGet(), revision, size)
-        lock.withLock {
-            if (directory != null && enabled && span.epoch == generation.get() && active.size < 128) active[span.id] = span
-        }
-        emit(stage, Code.BEGIN, span.id, 0, revision, size, sourceEpoch = span.epoch)
-        span
-    } catch (_: Throwable) { noop }
+    fun begin(stage: Stage, revision: Long = -1, size: Long = -1): Span {
+        try {
+            if (directory == null || !enabled) return noop
+            if (!lock.tryLock()) { dropped.incrementAndGet(); return noop }
+            val span = try {
+                if (!enabled || active.size >= 128) return noop
+                Span(stage, sequence.incrementAndGet(), revision, size).also { active[it.id] = it }
+            } finally { lock.unlock() }
+            emit(stage, Code.BEGIN, span.id, 0, revision, size, sourceEpoch = span.epoch)
+            return span
+        } catch (_: Throwable) { return noop }
+    }
 
     inline fun <T> measure(stage: Stage, revision: Long = -1, size: Long = -1, work: () -> T): T {
         val span = begin(stage, revision, size)
@@ -310,20 +314,25 @@ internal object RuntimeDiagnostics {
 
     private fun fatal(failure: Throwable, thread: Thread) {
         if (failure is OutOfMemoryError) reserve = null
+        val epoch = generation.get()
         if (!enabled) return
         try {
-            val emergency = Thread({
-                if (!lock.tryLock()) return@Thread
-                try {
-                    active.values.take(32).forEach { span -> append(row(span.stage, Code.STALL, span.id,
-                        span.elapsed(), span.revision, span.size, null, span.thread, false)) }
-                    append(row(Stage.RUN, if (failure is OutOfMemoryError) Code.OOM else Code.FAILURE,
-                        0, 0, -1, -1, failure, thread, true))
-                } catch (_: Throwable) { } finally { lock.unlock() }
-            }, "daiyu-fatal-diagnostic").apply { isDaemon = true }
+            val emergency = Thread({ writeFatalAtEpoch(failure, thread, epoch) },
+                "daiyu-fatal-diagnostic").apply { isDaemon = true }
             emergency.start()
             emergency.join(150) // Never hold up Android's original fatal handler on a stalled writer.
         } catch (_: Throwable) { }
+    }
+
+    private fun writeFatalAtEpoch(failure: Throwable, thread: Thread, epoch: Long) {
+        if (!lock.tryLock()) return
+        try {
+            if (!enabled || generation.get() != epoch) return
+            active.values.take(32).forEach { span -> append(row(span.stage, Code.STALL, span.id,
+                span.elapsed(), span.revision, span.size, null, span.thread, false)) }
+            append(row(Stage.RUN, if (failure is OutOfMemoryError) Code.OOM else Code.FAILURE,
+                0, 0, -1, -1, failure, thread, true))
+        } catch (_: Throwable) { } finally { lock.unlock() }
     }
 
     private fun append(text: String) {

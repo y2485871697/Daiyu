@@ -68,7 +68,7 @@ page_back_target = {
     'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
 }
-page_back_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(page_back_target)
+page_back_only = mode in ('smoke', 'candidate') and sorted(raw_filter.split(',')) == sorted(page_back_target)
 page_back_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                      for name in page_back_target}
 task_scroll_target = {

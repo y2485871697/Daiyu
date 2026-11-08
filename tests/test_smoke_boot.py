@@ -938,6 +938,44 @@ exit 0
             self.assertEqual(inventory['shard_count'], 1)
             self.assertEqual(inventory['total_tests'], 5)
 
+    def test_candidate_page_back_filter_skips_ambiguous_unrelated_source(self):
+        targets = (
+            'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',
+            'app.daiyu.android.ui.navigation.PageBackStackActivityTest',
+            'app.daiyu.android.ui.navigation.PageEnterActivityTest',
+            'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
+            'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
+        )
+        sources = {
+            'kotlin/' + name.replace('.', '/') + '.kt': (
+                'package ' + name.rsplit('.', 1)[0] + '\n'
+                'class ' + name.rsplit('.', 1)[1] +
+                ' : android.test.InstrumentationTestCase() {\n'
+                ' fun testOne() {}\n}\n')
+            for name in targets
+        }
+        unrelated = 'kotlin/app/daiyu/android/ui/screens/chat/conversation/DoubaoCallOverlayTest.kt'
+        sources[unrelated] = (
+            'package app.daiyu.android.ui.screens.chat.conversation\n'
+            'class DoubaoCallOverlayTest : android.test.InstrumentationTestCase() {\n'
+            ' fun testOne() {}\n}\n'
+            'class DoubaoCallOverlaySecondaryTest : android.test.InstrumentationTestCase() {\n'
+            ' fun testTwo() {}\n}\n')
+        selected = ','.join(sorted(targets))
+        result = self.smoke(api=26, mode='candidate', extra_sources=sources,
+                            test_classes=selected, expected_classes=selected,
+                            reported_count=len(targets))
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        selection = self.selection()
+        self.assertEqual(selection['mode'], 'candidate')
+        self.assertEqual(selection['selected_classes'], list(sorted(targets)))
+        self.assertEqual(selection['expected_tests'], len(targets))
+        inventory = json.loads((self.root / 'smoke/instrumentation-shards.json').read_text())
+        self.assertEqual(inventory['discovery_scope'], 'targeted')
+        self.assertEqual(inventory['all_classes'], {name: 1 for name in targets})
+        self.assertNotIn('app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest',
+                         inventory['all_classes'])
+
     def test_candidate_rejects_empty_invalid_filter_before_adb(self):
         for value in (None, '', ' ', 'app.daiyu.android.MissingTest',
                       'app.daiyu.android.FirstTest#testOne', '$(touch bad)'):

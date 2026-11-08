@@ -159,7 +159,24 @@ SCREEN_CLEANUP_MODULES = (
 )
 
 
+PAUSE_RECEIPT_PLATFORM_CLASSES = (
+    "app.daiyu.android.ToolReceiptPauseActivityTest",
+    "app.daiyu.android.RetainedToolOutcomesTest",
+    "app.daiyu.android.ControllerRunControlTest",
+    "app.daiyu.android.QuestionBarrierIntegrationTest",
+)
+PAUSE_RECEIPT_MODULES = (
+    "test_tool_receipt_pause_contract", "test_tool_receipt_snapshot_contract",
+    "test_reasoning_flow_stability_contract", "test_pause_receipt_smoke_scope",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PAUSE_RECEIPT_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *PAUSE_RECEIPT_MODULES, "-v"], "pause-receipts-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SCREEN_CLEANUP_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *SCREEN_CLEANUP_MODULES, "-v"], "screen-cleanup-targeted"

@@ -134,4 +134,35 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
             .workProcess!!.segments.flatMap { it.steps }.map { it.state })
     }
 
+    fun testReusedSnapshotReadsCurrentActivityAtEveryPauseFrameWithoutPromotingUnknown() {
+        val conversation = database.create("default")
+        val user = Message(MessageId("live-user"), conversation.id, RunId("live-run"), Message.USER_ROLE,
+            listOf(MessageBlock.Text("question", "read")), RunStatus.COMPLETED)
+        val tools = listOf(ToolDisposition.SUCCEEDED, ToolDisposition.IN_FLIGHT, ToolDisposition.UNKNOWN)
+            .mapIndexed { index, disposition -> ToolRecord(ToolInvocation(ToolCallId("live-$index"), "read", "{}"),
+                disposition, if (disposition == ToolDisposition.IN_FLIGHT) null else "receipt-$index") }
+        val assistant = user.copy(id = MessageId("live-assistant"), role = Message.ASSISTANT_ROLE,
+            status = RunStatus.RUNNING, blocks = tools.map { MessageBlock.Tool(it.invocation, it.result) })
+        SQLiteRuntimeStore.acquire(database).use { runtime ->
+            runtime.recoverPending(); database.send(user, assistant)
+            runtime.commitCheckpoint(RunCheckpoint(assistant, listOf(user), ExecutionPhase.TOOL_EXECUTING,
+                tools, owner = "live-owner", revision = 1))
+            val snapshot = RetainedToolOutcomes.Snapshot.read(database, listOf(assistant))
+            var live = ExecutionState(ExecutionPhase.TOOL_EXECUTING, activeToolCalls = tools.map { it.invocation.id }.toSet())
+            val reader = snapshot.projectionReader(liveState = { live })
+            for ((state, activities) in listOf(
+                live to listOf(ToolActivityUi.SUCCESS, ToolActivityUi.RUNNING, ToolActivityUi.RUNNING),
+                live.copy(pauseRequested = true) to listOf(ToolActivityUi.SUCCESS, ToolActivityUi.PAUSING, ToolActivityUi.PAUSING),
+                live.copy(phase = ExecutionPhase.PAUSED, pauseRequested = true) to
+                    listOf(ToolActivityUi.SUCCESS, ToolActivityUi.PAUSED, ToolActivityUi.UNKNOWN),
+                live to listOf(ToolActivityUi.SUCCESS, ToolActivityUi.RUNNING, ToolActivityUi.RUNNING))) {
+                live = state
+                val receipts = assistant.blocks.filterIsInstance<MessageBlock.Tool>().map { checkNotNull(reader(assistant, it)) }
+                assertEquals(listOf(WorkStepState.OK, WorkStepState.PENDING, WorkStepState.UNKNOWN), receipts.map { it.state })
+                assertEquals(activities, receipts.map { it.activity })
+            }
+            assertEquals(tools, checkNotNull(SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)).tools)
+        }
+    }
+
 }

@@ -27,6 +27,12 @@ internal object RetainedToolOutcomes {
             if (tools.isEmpty()) null else Source(message.conversationId.value, message.runId.value, message.id.value, message.status, tools)
         }
 
+    internal data class ReadKey(val conversation: app.daiyu.android.domain.ConversationId?, val data: Long,
+        val generation: Long, val sources: List<Source>, val execution: ExecutionState?) {
+        // Live activity is reprojected; the durable evidence remains valid for exactly the same source.
+        fun canDisplayFor(current: ReadKey): Boolean = copy(execution = current.execution) == current
+    }
+
     internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>,
         private val questions: Map<Owner, QuestionCheckpointEvidence>) {
         fun questionEvidence(message: Message): QuestionCheckpointEvidence? =

@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.ui.RetainedToolOutcomes.ReadKey as ToolReceiptKey
+
 import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
@@ -6973,8 +6975,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private data class ToolReceiptKey(val conversation: ConversationId?, val data: Long, val generation: Long,
-        val sources: List<app.daiyu.android.ui.RetainedToolOutcomes.Source>, val execution: app.daiyu.android.domain.runtime.ExecutionState?)
     private val toolPresentations = app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache()
     private var toolReceiptKey: ToolReceiptKey? = null
     private var toolReceiptSnapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null
@@ -7091,7 +7091,9 @@ class MainActivity : ComponentActivity() {
                 else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
             val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
-            val visibleToolReceipts = toolReceiptSnapshot?.takeIf { receiptsReady }?.projectionReader(controller::runState, controller::runStopping)
+            val visibleToolReceipts = toolReceiptSnapshot?.takeIf {
+                receiptsReady || toolReceiptKey?.canDisplayFor(currentToolReceiptKey()) == true
+            }?.projectionReader(controller::runState, controller::runStopping)
                 ?: { _, _ -> null }
             val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
                 reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }

@@ -61,7 +61,7 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_timeline_and_compression_async_changes_reproject_exact_aliases(self):
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
-        for requirement in ('val remapTurns = receiptsReady && (rowsChanged || workflowBoundaries != oldBoundaries ||',
+        for requirement in ('val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||',
                             'reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }',
                             'boundariesAfter = workflowBoundaries',
                             'compressionActivitiesByAnchor(visibleCompressions, visibleTimeline)'):

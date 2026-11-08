@@ -129,7 +129,7 @@ class BuildRevisionWorkflowTests(unittest.TestCase):
         self.assertIn('run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only', steps[1])
         self.assertNotIn('if:', steps[1])
         self.assertNotIn('continue-on-error:', steps[1])
-        self.assertTrue(steps[2].startswith('uses: actions/setup-java@'))
+        self.assertTrue(steps[2].startswith('uses: ./.github/actions/setup-temurin'))
 
     def test_build_run_name_includes_dispatch_check_id(self):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')

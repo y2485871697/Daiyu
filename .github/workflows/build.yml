@@ -90,13 +90,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: |
-            21
-            27
-          check-latest: false
+      - uses: ./.github/actions/setup-temurin
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - name: 安装检查 SDK
@@ -111,6 +105,7 @@ jobs:
           CHECK_SCOPE: ${{ inputs.check_scope }}
         run: |
           python -B -m unittest discover -s tests -p 'test_prepare_speech_runtime.py' -v
+          python -B -m unittest discover -s tests -p 'test_setup_temurin_contract.py' -v
           if [[ "$CHECK_SCOPE" == "delegation" ]]; then
             python -B -m unittest discover -s tests -p 'test_delegation*.py' -v
             python -B -m unittest discover -s tests -p 'test_cooperation*.py' -v
@@ -187,13 +182,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: |
-            21
-            27
-          check-latest: false
+      - uses: ./.github/actions/setup-temurin
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
@@ -284,13 +273,7 @@ jobs:
       - name: 规划日常Release并拦截核心或未知变更
         if: inputs.mode == 'daily'
         run: python3 scripts/daily_release.py plan
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: |
-            21
-            27
-          check-latest: false
+      - uses: ./.github/actions/setup-temurin
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
@@ -399,13 +382,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: |
-            21
-            27
-          check-latest: false
+      - uses: ./.github/actions/setup-temurin
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
@@ -504,13 +481,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
-        with:
-          distribution: temurin
-          java-version: |
-            21
-            27
-          check-latest: false
+      - uses: ./.github/actions/setup-temurin
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd

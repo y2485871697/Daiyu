@@ -1,0 +1,44 @@
+name: Setup pinned Temurin toolchains with bounded retries
+description: Set up the project JDK versions and retry transient upstream download failures.
+inputs:
+  java-version:
+    description: Newline-separated JDK versions required by the build.
+    required: false
+    default: |
+      21
+      27
+runs:
+  using: composite
+  steps:
+    - name: Set up Temurin (attempt 1 of 3)
+      id: temurin1
+      continue-on-error: true
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+        check-latest: false
+    - name: Set up Temurin (attempt 2 of 3)
+      id: temurin2
+      if: always() && steps.temurin1.outcome != 'success'
+      continue-on-error: true
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+        check-latest: false
+    - name: Set up Temurin (attempt 3 of 3)
+      id: temurin3
+      if: always() && steps.temurin1.outcome != 'success' && steps.temurin2.outcome != 'success'
+      continue-on-error: true
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+        check-latest: false
+    - name: Fail if Temurin could not be prepared
+      if: always() && steps.temurin1.outcome != 'success' && steps.temurin2.outcome != 'success' && steps.temurin3.outcome != 'success'
+      shell: bash
+      run: |
+        echo "::error::Temurin setup failed after three attempts"
+        exit 1

@@ -264,6 +264,11 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             assertNull(f.c.questionProjection(shown, call.copy(arguments = ARGS.replace("Route choice", "Changed question")), evidence))
             assertNull(f.c.questionProjection(shown.copy(runId = RunId("different-run")), call, evidence))
         }
+        // The fresh-answer projection can briefly disable an otherwise valid card row;
+        // wait for the real UI admission state before selecting the option.
+        ui.waitUntil(timeoutMillis=8_000) {
+            ui.onAllNodes(hasTestTag("question-option:0") and isEnabled()).fetchSemanticsNodes().size==1
+        }
         node("question-option:0").performClick().assertIsSelected()
         val originalCardId=node("question-card").fetchSemanticsNode().id
         main {MainActivity::class.java.getDeclaredMethod("refresh").apply {isAccessible=true}.invoke(checkNotNull(activity))}

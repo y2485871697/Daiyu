@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -530,6 +531,7 @@ internal fun PageBackGestureHost(
                     val value = state.visualProgress
                     translationX = -state.direction * size.width * 0.25f * (1f - value)
                     alpha = 1f - 0.1f * (1f - value)
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
                 }.drawBehind {
                     drawPreview(target)
                 }.testTag("page-back-target"))

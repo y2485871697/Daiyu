@@ -452,6 +452,15 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertNotIn('key(routeKey)', stack)
         self.assertIn('stack.freezeCurrent = { layers.freezeCurrent() }', self.host)
 
+    def test_drag_preview_alpha_avoids_a_fullscreen_offscreen_buffer(self):
+        start = self.host.index('if (target != null && state.previewAllowed && state.gestureVisualActive)')
+        end = self.host.index('.testTag("page-back-scrim")', start)
+        target_layer = self.host[start:end]
+        self.assertIn('alpha = 1f - 0.1f * (1f - value)', target_layer)
+        self.assertIn('compositingStrategy = CompositingStrategy.ModulateAlpha', target_layer)
+        self.assertIn('drawPreview(target)', target_layer)
+        self.assertNotIn('drawContent()', target_layer)
+
     def test_original_miuix_motion_is_full_width_with_parallax_and_independent_dimming(self):
         for token in ('kotlin.math.round(state.direction * size.width * visibleProgress)',
                       'size.width * 0.25f * (1f - value)', 'alpha = 1f - 0.1f * (1f - value)',

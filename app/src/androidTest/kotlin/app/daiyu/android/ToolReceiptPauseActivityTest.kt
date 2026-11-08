@@ -1,7 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.runtime.State
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.storage.*
@@ -85,13 +85,24 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
     }
 
     fun testPauseRequestPausedAndResumeKeepSettledReceiptsWhileReadIsPending() {
-        mainThread { activity.select(fixture.database.conversations().single()) }
+        val conversation = fixture.database.conversations().single()
+        val binding = checkNotNull(fixture.database.modelBinding(null))
+        assertTrue(fixture.database.bindModel(conversation.id, fixture.database.modelBinding(conversation.id), binding))
+        mainThread { activity.select(conversation) }
         awaitReceipts()
         val first = fixture.session("cancelled", holdSeconds = 120, releaseOnCancel = false)
         val second = fixture.session("resumed", holdSeconds = 120)
-        setDraft("continue reading"); node("chat-send").performClick(); awaitTextSendResult(activity)
+        setDraft("continue reading")
+        ui.waitUntil(timeoutMillis = 8_000) {
+            ui.onAllNodes(hasTestTag("chat-send") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        node("chat-send").assertIsDisplayed().assertIsEnabled().performClick()
+        awaitTextSendResult(activity)
+        assertTrue("initial model session entered: ${fixture.controller.problem}", first.entered.await(5, TimeUnit.SECONDS))
+        assertNull(fixture.controller.problem)
+        assertDraft("")
         val owner = checkNotNull(fixture.controller.active)
-        assertTrue(first.entered.await(5, TimeUnit.SECONDS))
+        assertEquals(1, fixture.opens.get())
         awaitReceipts()
         lateinit var key: RetainedToolOutcomes.ReadKey
         lateinit var snapshot: Any
@@ -103,6 +114,12 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             assertFalse(key == currentKey())
             assertTrue(key.canDisplayFor(currentKey()))
             pendingFrame(key, snapshot, expected)
+        }
+        awaitReceipts()
+        mainThread {
+            assertTrue(checkNotNull(fixture.controller.runState(owner)).pauseRequested)
+            key = checkNotNull(loadedKey())
+            snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
         }
         first.release.countDown()
         awaitControl("durable pause boundary") { fixture.controller.runState(owner)?.phase == ExecutionPhase.PAUSED }

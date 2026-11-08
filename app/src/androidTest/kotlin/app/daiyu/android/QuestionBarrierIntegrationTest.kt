@@ -138,6 +138,10 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         }
         node("chat-send").assertIsEnabled().performClick()
         awaitTextSendResult(checkNotNull(activity))
+        ui.waitUntil(timeoutMillis = 8_000) {
+            ui.onAllNodesWithTag("chat-draft").fetchSemanticsNodes().singleOrNull()
+                ?.config?.getOrNull(SemanticsProperties.EditableText)?.text == ""
+        }
         assertDraft("")
         return checkNotNull(f.c.active)
     }

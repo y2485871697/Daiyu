@@ -49,8 +49,22 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             turn.workProcess?.segments.orEmpty().flatMap { it.steps }
         }.filter { it.owner?.messageId == historical.id.value }
     }
-    private fun awaitReceipts() = awaitControl("exact durable receipt projection") {
-        loadedKey() == currentKey() && steps().map { it.state } == expected
+    private fun awaitReceipts() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8)
+        var ready = false
+        var diagnostic = ""
+        while (!ready && System.nanoTime() < deadline) {
+            mainThread {
+                val current = currentKey()
+                val loaded = loadedKey()
+                val projected = steps()
+                ready = loaded == current && projected.map { it.state } == expected
+                diagnostic = "current=$current loaded=$loaded states=${projected.map { it.state }} " +
+                    "activities=${projected.map { it.activity }} active=${fixture.controller.active?.id}"
+            }
+            if (!ready) Thread.sleep(10)
+        }
+        assertTrue("exact durable receipt projection: $diagnostic", ready)
     }
 
     /** Model an IO job that has not returned, then inspect the synchronous published frame. */

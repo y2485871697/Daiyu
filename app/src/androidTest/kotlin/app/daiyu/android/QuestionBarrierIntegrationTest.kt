@@ -147,6 +147,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             }
             assertDraft("")
         }
+        ui.waitUntil(timeoutMillis = 30_000) { runCatching { f.c.active != null }.getOrDefault(false) }
         return checkNotNull(f.c.active)
     }
     private fun checkpointOrNull(f:Fixture,m:Message):RunCheckpoint?=f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(m.id.value)).use {

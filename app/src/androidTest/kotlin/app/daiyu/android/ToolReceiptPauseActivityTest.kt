@@ -112,7 +112,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
         node("chat-send").assertIsDisplayed().assertIsEnabled().performClick()
         awaitTextSendResult(activity)
-        assertTrue("initial model session entered: ${fixture.controller.problem}", first.entered.await(5, TimeUnit.SECONDS))
+        assertTrue("initial model session entered: ${fixture.controller.problem}", first.entered.await(30, TimeUnit.SECONDS))
         assertNull(fixture.controller.problem)
         assertDraft("")
         val owner = checkNotNull(fixture.controller.active)

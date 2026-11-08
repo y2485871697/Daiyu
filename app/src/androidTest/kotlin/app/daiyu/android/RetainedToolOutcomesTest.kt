@@ -140,7 +140,7 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
             listOf(MessageBlock.Text("question", "read")), RunStatus.COMPLETED)
         val tools = listOf(ToolDisposition.SUCCEEDED, ToolDisposition.IN_FLIGHT, ToolDisposition.UNKNOWN)
             .mapIndexed { index, disposition -> ToolRecord(ToolInvocation(ToolCallId("live-$index"), "read", "{}"),
-                disposition, if (disposition == ToolDisposition.IN_FLIGHT) null else "receipt-$index") }
+                disposition, if (disposition in setOf(ToolDisposition.IN_FLIGHT, ToolDisposition.UNKNOWN)) null else "receipt-$index") }
         val assistant = user.copy(id = MessageId("live-assistant"), role = Message.ASSISTANT_ROLE,
             status = RunStatus.RUNNING, blocks = tools.map { MessageBlock.Tool(it.invocation, it.result) })
         SQLiteRuntimeStore.acquire(database).use { runtime ->

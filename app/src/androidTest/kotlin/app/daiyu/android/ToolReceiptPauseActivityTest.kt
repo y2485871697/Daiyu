@@ -24,7 +24,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 Message.USER_ROLE, listOf(MessageBlock.Text("user", "read")), RunStatus.COMPLETED)
             val tools = listOf(ToolDisposition.SUCCEEDED, ToolDisposition.FAILED,
                 ToolDisposition.NOT_EXECUTED, ToolDisposition.UNKNOWN).mapIndexed { index, disposition ->
-                ToolRecord(ToolInvocation(ToolCallId("receipt-$index"), "screen", "{}"), disposition, "receipt-$index")
+                ToolRecord(ToolInvocation(ToolCallId("receipt-$index"), "screen", "{}"), disposition, if (disposition == ToolDisposition.UNKNOWN) null else "receipt-$index")
             }
             val initial = user.copy(id = MessageId("receipt-assistant"), role = Message.ASSISTANT_ROLE,
                 status = RunStatus.RUNNING, blocks = tools.map { MessageBlock.Tool(it.invocation, it.result) })

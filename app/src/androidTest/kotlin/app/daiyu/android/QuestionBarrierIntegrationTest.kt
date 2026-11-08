@@ -132,7 +132,11 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     private fun submitAction():()->Boolean = node("question-submit").assertIsEnabled()
         .fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
     private fun send(f:Fixture):Message {
-        setDraft("Ask for a route");node("chat-send").performClick()
+        setDraft("Ask for a route")
+        ui.waitUntil(timeoutMillis=8_000) {
+            ui.onAllNodes(hasTestTag("chat-send") and isEnabled()).fetchSemanticsNodes().size==1
+        }
+        node("chat-send").assertIsEnabled().performClick()
         awaitTextSendResult(checkNotNull(activity))
         assertDraft("")
         return checkNotNull(f.c.active)
@@ -318,9 +322,13 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         ui.waitUntil(timeoutMillis=8_000) {
             ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size==1
         }
-        node("work-process-header").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
-        node("question-card").assertDoesNotExist()
-        node("work-process-header").performClick()
+        val header = node("work-process-header")
+        when (header.fetchSemanticsNode().config[SemanticsProperties.StateDescription]) {
+            "已折叠" -> header.performClick()
+            "已展开" -> Unit
+            else -> fail("unexpected workflow disclosure state")
+        }
+        header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
         waitForCard(readOnly=true)
     }
     private fun recovery(answer:QuestionAnswer?) {

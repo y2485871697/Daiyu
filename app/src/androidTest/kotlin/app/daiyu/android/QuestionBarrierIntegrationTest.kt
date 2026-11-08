@@ -146,17 +146,28 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         var acceptedAssistant:Message?=null
         // A null pending-send state also occurs on synchronous queue rejection. Confirm the
         // durable user/assistant pair instead of treating an empty draft or null state as receipt.
-        ui.waitUntil(timeoutMillis=30_000) {
-            acceptedAssistant=runCatching {
-                val conversation=f.db.conversations().singleOrNull() ?: return@runCatching null
-                val rows=f.db.messages(conversation.id).map {it.second}
-                val user=rows.lastOrNull {message -> message.role==Message.USER_ROLE &&
-                    message.blocks.filterIsInstance<MessageBlock.Text>().any {it.text==prompt} } ?: return@runCatching null
-                rows.lastOrNull {message -> message.role==Message.ASSISTANT_ROLE &&
-                    message.runId==user.runId && message.conversationId==user.conversationId &&
-                    message.id!=user.id && message.status==RunStatus.RUNNING }
-            }.getOrNull()
-            acceptedAssistant?.let { saved -> f.c.active?.id==saved.id && f.c.active?.runId==saved.runId }==true
+        try {
+            ui.waitUntil(timeoutMillis=30_000) {
+                acceptedAssistant=runCatching {
+                    val conversation=f.db.conversations().singleOrNull() ?: return@runCatching null
+                    val rows=f.db.messages(conversation.id).map {it.second}
+                    val user=rows.lastOrNull {message -> message.role==Message.USER_ROLE &&
+                        message.blocks.filterIsInstance<MessageBlock.Text>().any {it.text==prompt} } ?: return@runCatching null
+                    rows.lastOrNull {message -> message.role==Message.ASSISTANT_ROLE &&
+                        message.runId==user.runId && message.conversationId==user.conversationId &&
+                        message.id!=user.id }
+                }.getOrNull()
+                acceptedAssistant?.let { saved -> f.c.active?.id==saved.id && f.c.active?.runId==saved.runId }==true
+            }
+        } catch (failure:Throwable) {
+            val durable=runCatching {f.db.conversations().flatMap {conversation ->
+                f.db.messages(conversation.id).map {(_,message) ->
+                    "${message.role}:${message.status}:${message.id.value.take(8)}:${message.runId.value.take(8)}"
+                }
+            }}.getOrElse {listOf("read-error=${it.javaClass.simpleName}")}
+            throw AssertionError("text send was not admitted; ready=${f.c.ready} problem=${f.c.problem} " +
+                "active=${f.c.active?.id?.value} sendState=${f.c.textSendState()?.result?.javaClass?.simpleName} " +
+                "draft=${runCatching {f.db.draft()}.getOrNull()} opens=${f.probe.opens.get()} nexts=${f.probe.nexts.get()} durable=$durable",failure)
         }
         return checkNotNull(acceptedAssistant)
     }

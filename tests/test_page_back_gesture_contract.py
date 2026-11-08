@@ -92,8 +92,21 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey)', self.host)
         self.assertIn('onDispose { state.alive = false; state.reset() }', self.host)
         self.assertIn('if (owner != null && this.owner !== owner) return', self.host)
-        self.assertIn('val progress by key(state)', self.host)
+        self.assertNotIn('animateFloatAsState', self.host)
+        self.assertIn('var visualProgress by mutableFloatStateOf(0f)', self.host)
+        self.assertIn('var gestureVisualActive by mutableStateOf(false)', self.host)
+        self.assertIn('val value = state.visualProgress', self.host)
+        self.assertIn('settle.animateTo(0f, spring', self.host)
         self.assertNotIn('key(predictiveBackEnabled)', self.host)
+
+    def test_drag_motion_stays_in_layer_properties_and_cancel_keeps_a_settle_spring(self):
+        self.assertNotIn('animateFloatAsState', self.host)
+        self.assertIn('visualProgress = nextProgress', self.host)
+        self.assertIn('val value = state.visualProgress', self.host)
+        self.assertIn('drawRect(Color.Black, alpha = 0.5f * (1f - state.visualProgress))', self.host)
+        self.assertIn('state.gestureVisualActive', self.host)
+        self.assertIn('settle.animateTo(0f, spring', self.host)
+        self.assertIn('if (settleJob === kotlinx.coroutines.currentCoroutineContext()[Job])', self.host)
 
     def test_swipe_is_full_page_and_lets_children_arbitrate_before_claiming(self):
         for guard in ('canNavigateBack && swipeDismissEnabled && resumed && !imeVisible',
@@ -204,7 +217,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', self.host)
         self.assertIn('drawPreview(target)', self.host)
         self.assertIn('drawPreview(departure.frame)', self.host)
-        self.assertIn('if (target != null && state.previewAllowed) progress else 0f', self.host)
+        self.assertIn('if (target != null && state.previewAllowed) state.visualProgress else 0f', self.host)
         self.assertIn('it.size == size', layers)
         self.assertIn('it.canDrawPreview', layers)
         self.assertIn('frame.layer.toImageBitmap()', layers)
@@ -419,7 +432,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         for guard in ('state.previewOwners.add(previewOwner)', 'state.previewOwners.remove(previewOwner)',
                       'previewOwners.none { it.enabled && !it.previewEnabled }',
                       'if (!alive || (transitionBlocked && swipeCommit == null) || committing) return', 'committing = true',
-                      'activeDeparture || (state.previewAllowed && !state.active && progress > 0f)'):
+                      'activeDeparture || (state.previewAllowed && !state.active && state.gestureVisualActive)'):
             self.assertIn(guard, self.host)
         for file in ('VoiceSettingsPanel.kt', 'VoiceAccountPanel.kt', 'ui/SubAgentSettingsScreen.kt',
                      'ui/screens/settings/SettingsHomeScreen.kt',
@@ -441,8 +454,8 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_original_miuix_motion_is_full_width_with_parallax_and_independent_dimming(self):
         for token in ('kotlin.math.round(state.direction * size.width * visibleProgress)',
-                      'size.width * 0.25f * (1f - progress)', 'alpha = 1f - 0.1f * (1f - progress)',
-                      'drawRect(Color.Black, alpha = 0.5f * (1f - progress))', 'absoluteSquircleClip',
+                      'size.width * 0.25f * (1f - value)', 'alpha = 1f - 0.1f * (1f - value)',
+                      'drawRect(Color.Black, alpha = 0.5f * (1f - state.visualProgress))', 'absoluteSquircleClip',
                       'POSITION_BOTTOM_LEFT', 'page-back-scrim', 'page-back-departure-scrim',
                       'state.predictiveGeneration != predictiveGeneration'):
             self.assertIn(token, self.host)
@@ -476,7 +489,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('gesturePreviewReady = beginPreview()', self.host)
         self.assertIn('beginPreview = { currentTarget != null && layers.beginGesture(frame) }', self.host)
         self.assertIn('if (!previewAllowed) frame.animateReturn = false', self.host)
-        self.assertIn('state.previewAllowed && (state.active || progress > 0f) -> frame.image', self.host)
+        self.assertIn('state.previewAllowed && (state.active || state.gestureVisualActive) -> frame.image', self.host)
         self.assertIn('departure != null && showDeparture && !departure.forward ->', self.host)
         self.assertIn('if (retainedRootContent != null && retainedRootVisible) null else departure.targetImage', self.host)
         self.assertIn('layers.resume(frame)', self.host)
@@ -486,8 +499,9 @@ class PageBackGestureContractTest(unittest.TestCase):
         base = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation'
         gestures = (base / 'PageBackGesturesActivityTest.kt').read_text()
         stack = (base / 'PageBackStackActivityTest.kt').read_text()
-        for name in ('testReleaseVelocityContinuesIntoDeparture', 'testPinnedPixelsSurviveContentUpdateUntilCommit', 'testCancelledGestureRestoresCurrentLivePixels'):
+        for name in ('testReleaseVelocityContinuesIntoDeparture', 'testPinnedPixelsSurviveContentUpdateUntilCommit', 'testCancelledGestureRestoresCurrentLivePixels', 'testPointerProgressUpdatesDoNotRecomposePageContentPerFrame'):
             self.assertIn('fun ' + name + '()', gestures)
+        self.assertIn('beforeGesture + 1, pageCompositions', gestures)
         for name in ('testReturnAdvancesWhileCaptureIsPending', 'testColdReturnDoesNotWaitOrEnableLatePreview', 'testFrozenPreviewRejectsSameGenerationLateCopy'):
             self.assertIn('fun ' + name + '()', stack)
         self.assertIn('assertFalse(gate.isCompleted)', stack)

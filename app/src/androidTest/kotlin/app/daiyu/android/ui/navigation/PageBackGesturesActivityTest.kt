@@ -74,11 +74,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var currentColor by mutableStateOf(Color.Blue)
     private var observedFrame: PageBackPreviewLayers.Frame? = null
     private var rowClicks = 0
+    private var pageCompositions = 0
     private var sliderValue by mutableStateOf(0.2f)
     private var inputText by mutableStateOf("a text field with selectable content")
     private lateinit var horizontal: ScrollState
 
-    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false) {
+    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, onPageComposition: () -> Unit = {}) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -90,6 +91,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                         captureFromContent = !horizontalChild && !clickableRows && !sliderChild && !textChild) {
                         val currentFrame = LocalPageBackPreviewFrame.current
                         androidx.compose.runtime.SideEffect { observedFrame = currentFrame }
+                        onPageComposition()
                         PageBackHandler(enabled = canBack, previewEnabled = previewAllowed) {
                             backCount++
                             if (navigateOnBack) route = "previous-page"
@@ -277,6 +279,33 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 Offset(width * endFraction, height * 0.6f), 400)
         }
         ui.waitForIdle()
+    }
+
+
+    fun testPointerProgressUpdatesDoNotRecomposePageContentPerFrame() {
+        predictive = false
+        mount(capturePreviousPage = true, onPageComposition = { pageCompositions++ })
+        ui.mainClock.autoAdvance = false
+        try {
+            val beforeGesture = pageCompositions
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .25f, height * .6f), 32)
+                repeat(5) { index ->
+                    advanceEventTime(32)
+                    moveTo(Offset(width * (.35f + index * .1f), height * .6f))
+                }
+                cancel()
+            }
+            ui.mainClock.advanceTimeByFrame()
+            assertTrue("the first gesture transition may compose once", pageCompositions <= beforeGesture + 1)
+            assertEquals("subsequent visual progress belongs to the motion layer, not page composition",
+                beforeGesture + 1, pageCompositions)
+            assertEquals(0, backCount)
+            ui.mainClock.advanceTimeBy(1000)
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
     }
 
     fun testSwipeCommitsOnceThroughTheInnermostHandlerAndTheSwitchAppliesImmediately() {

@@ -135,24 +135,30 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     // turn the duplicate-submit / stop race into a lookup of a new or already removed button.
     private fun submitAction():()->Boolean = node("question-submit").assertIsEnabled()
         .fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-    private fun send(f:Fixture, verifyDraftCleared:Boolean=true):Message {
-        setDraft("Ask for a route")
+    private fun send(f:Fixture):Message {
+        val prompt="Ask for a route"
+        setDraft(prompt)
         ui.waitUntil(timeoutMillis=8_000) {
             ui.onAllNodes(hasTestTag("chat-send") and isEnabled()).fetchSemanticsNodes().size==1
         }
         node("chat-send").assertIsEnabled().performClick()
         awaitTextSendResult(checkNotNull(activity))
-        if (verifyDraftCleared) {
-            ui.waitUntil(timeoutMillis = 8_000) {
-                runCatching {
-                    ui.onAllNodesWithTag("chat-draft").fetchSemanticsNodes().single()
-                        .config[SemanticsProperties.EditableText].text == ""
-                }.getOrDefault(false)
-            }
-            assertDraft("")
+        var acceptedAssistant:Message?=null
+        // A null pending-send state also occurs on synchronous queue rejection. Confirm the
+        // durable user/assistant pair instead of treating an empty draft or null state as receipt.
+        ui.waitUntil(timeoutMillis=30_000) {
+            acceptedAssistant=runCatching {
+                val conversation=f.db.conversations().singleOrNull() ?: return@runCatching null
+                val rows=f.db.messages(conversation.id).map {it.second}
+                val user=rows.lastOrNull {message -> message.role==Message.USER_ROLE &&
+                    message.blocks.filterIsInstance<MessageBlock.Text>().any {it.text==prompt} } ?: return@runCatching null
+                rows.lastOrNull {message -> message.role==Message.ASSISTANT_ROLE &&
+                    message.runId==user.runId && message.conversationId==user.conversationId &&
+                    message.id!=user.id && message.status==RunStatus.RUNNING }
+            }.getOrNull()
+            acceptedAssistant!=null
         }
-        ui.waitUntil(timeoutMillis = 30_000) { runCatching { f.c.active != null }.getOrDefault(false) }
-        return checkNotNull(f.c.active)
+        return checkNotNull(acceptedAssistant)
     }
     private fun checkpointOrNull(f:Fixture,m:Message):RunCheckpoint?=f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(m.id.value)).use {
         if(it.moveToFirst()) RunCheckpointCodec.decode(it.getString(0)) else null
@@ -285,12 +291,17 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     }
     fun testStopAfterAnswerQueuedBeforeResumeDrainsOriginalContinuation() {
         val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
+        // Select while the question card is editable; blocking the controller worker first can
+        // make its fresh-answer projection temporarily disable option rows.
+        ui.waitUntil(timeoutMillis=8_000) {
+            ui.onAllNodes(hasTestTag("question-option:1") and isEnabled()).fetchSemanticsNodes().size==1
+        }
+        node("question-option:1").performClick().assertIsSelected()
         val worker=ChatController::class.java.getDeclaredField("executor").apply {isAccessible=true}.get(f.c) as Executor
         val entered=CountDownLatch(1);val release=CountDownLatch(1)
         worker.execute {entered.countDown();check(release.await(10,TimeUnit.SECONDS))}
         assertTrue(entered.await(5,TimeUnit.SECONDS))
         try {
-            node("question-option:1").performClick().assertIsSelected()
             node("question-submit").assertIsEnabled().performClick()
             await(f,"answer resume queued in same blocked slot") {
                 val current=ChatController::class.java.getDeclaredField("resources").apply {isAccessible=true}.get(f.c)
@@ -323,7 +334,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertEquals(1,f.probe.nexts.get());assertEquals(1,f.probe.opens.get())
     }
     fun testCloseFromMainDrainsPendingBeforeReleasingStore() {
-        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f,verifyDraftCleared=false);val id=waiting(f,owner)
+        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
         main {f.c.close();assertFalse(f.c.ready);assertNull(f.c.active)}
         f.c.close()
         val saved=checkpoint(f,owner)

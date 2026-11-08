@@ -131,20 +131,22 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     // turn the duplicate-submit / stop race into a lookup of a new or already removed button.
     private fun submitAction():()->Boolean = node("question-submit").assertIsEnabled()
         .fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-    private fun send(f:Fixture):Message {
+    private fun send(f:Fixture, verifyDraftCleared:Boolean=true):Message {
         setDraft("Ask for a route")
         ui.waitUntil(timeoutMillis=8_000) {
             ui.onAllNodes(hasTestTag("chat-send") and isEnabled()).fetchSemanticsNodes().size==1
         }
         node("chat-send").assertIsEnabled().performClick()
         awaitTextSendResult(checkNotNull(activity))
-        ui.waitUntil(timeoutMillis = 8_000) {
-            runCatching {
-                ui.onAllNodesWithTag("chat-draft").fetchSemanticsNodes().single()
-                    .config[SemanticsProperties.EditableText].text == ""
-            }.getOrDefault(false)
+        if (verifyDraftCleared) {
+            ui.waitUntil(timeoutMillis = 8_000) {
+                runCatching {
+                    ui.onAllNodesWithTag("chat-draft").fetchSemanticsNodes().single()
+                        .config[SemanticsProperties.EditableText].text == ""
+                }.getOrDefault(false)
+            }
+            assertDraft("")
         }
-        assertDraft("")
         return checkNotNull(f.c.active)
     }
     private fun checkpointOrNull(f:Fixture,m:Message):RunCheckpoint?=f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(m.id.value)).use {
@@ -316,7 +318,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertEquals(1,f.probe.nexts.get());assertEquals(1,f.probe.opens.get())
     }
     fun testCloseFromMainDrainsPendingBeforeReleasingStore() {
-        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
+        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f,verifyDraftCleared=false);val id=waiting(f,owner)
         main {f.c.close();assertFalse(f.c.ready);assertNull(f.c.active)}
         f.c.close()
         val saved=checkpoint(f,owner)

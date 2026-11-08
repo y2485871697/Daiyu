@@ -58,7 +58,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 val current = currentKey()
                 val loaded = loadedKey()
                 val projected = steps()
-                ready = loaded == current && projected.map { it.state } == expected
+                ready = loaded?.canDisplayFor(current) == true && projected.map { it.state } == expected
                 diagnostic = "current=$current loaded=$loaded states=${projected.map { it.state }} " +
                     "activities=${projected.map { it.activity }} active=${fixture.controller.active?.id}"
             }

@@ -130,7 +130,7 @@ pause_receipt_target = {
     'app.daiyu.android.ControllerRunControlTest',
     'app.daiyu.android.QuestionBarrierIntegrationTest',
 }
-pause_receipt_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(pause_receipt_target)
+pause_receipt_only = mode in ('smoke', 'candidate') and sorted(raw_filter.split(',')) == sorted(pause_receipt_target)
 pause_receipt_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                          for name in pause_receipt_target}
 

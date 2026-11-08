@@ -11,6 +11,12 @@ def source(path):
     return (SRC / path).read_text()
 
 class ChatTimelineContractTest(unittest.TestCase):
+    def reconnect_callback(self):
+        controller = source('ChatController.kt')
+        start = controller.index('reconnect=frozenReconnect.runnerPolicyWithDiagnostics')
+        end = controller.index('runtimeStore=checkNotNull', start)
+        return controller[start:end]
+
     def test_conversation_delete_cascades_display_events(self):
         sql = re.search(r'db.execSQL\("(CREATE TABLE IF NOT EXISTS chat_timeline_events[^"\n]+)"\)', source('timeline/ChatTimelineStore.kt')).group(1)
         db = sqlite3.connect(':memory:')
@@ -31,7 +37,7 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('timelineWriters--', persist)
         self.assertIn('timelineWriters!=0 || contextManagementReaders!=0 || closingStorage', controller)
         self.assertIn('timelineExecutor.shutdown()', controller)
-        callback = controller.split('RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics', 1)[1].split('runtimeStore=checkNotNull', 1)[0]
+        callback = self.reconnect_callback()
         self.assertNotIn('handler.post', callback)
         self.assertIn('synchronized(this)', callback)
         self.assertIn('postReconnectNotice(', callback)
@@ -94,7 +100,7 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('sendLocked("stopped")', budget)
         self.assertIn('private val id = UUID.randomUUID().toString()', budget)
         self.assertEqual(1, budget.count('UUID.randomUUID().toString()'))
-        callback = source('ChatController.kt').split('RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics', 1)[1].split('runtimeStore=checkNotNull', 1)[0]
+        callback = self.reconnect_callback()
         self.assertIn('reconnectTransitionAllowed(previous.status, event.status)', callback)
         self.assertIn('reconnectTransitionAllowed(prior.status, entry.status)', source('timeline/ChatTimelineStore.kt'))
         self.assertIn('pausedDurationMs += (timing.nowMs() - pauseStart).coerceAtLeast(0)', budget)

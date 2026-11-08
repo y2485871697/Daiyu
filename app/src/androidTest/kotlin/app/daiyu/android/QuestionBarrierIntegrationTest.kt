@@ -103,7 +103,11 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         if (interactiveEnabled) check(f.app.getSharedPreferences("conversation-ui",0).edit().putBoolean("interactive_mode",true).commit())
         seed(f)
         f.c=ChatController(f.app,f.db,f.settings,f.app.getSharedPreferences("conversation-ui",0),{f.probe}, providerBalanceHost = { f.app.balances })
-        await(f,"recovery ready") {f.c.ready};assertNull(f.c.problem);return f
+        await(f,"recovery ready") {f.c.ready};assertNull(f.c.problem)
+        val binding = checkNotNull(f.c.providers.selectedConversationModel()) { "fixture selected model missing" }
+        assertTrue("fixture must bind the global composer model",
+            f.db.bindModel(null, f.db.modelBinding(null), binding))
+        return f
     }
     private fun launch(f:Fixture,conversation:Conversation?=null) {
         finishExistingMainActivities()

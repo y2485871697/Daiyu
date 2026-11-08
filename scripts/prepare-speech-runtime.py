@@ -10,6 +10,8 @@ import io
 import os
 from pathlib import Path
 import tarfile
+import time
+import urllib.error
 import urllib.request
 
 URL = 'https://github.com/k2-fsa/sherpa-ncnn/releases/download/v2.1.15/sherpa-ncnn-v2.1.15-android.tar.bz2'
@@ -17,12 +19,31 @@ SHA256 = '7fbdb6f8bb1f8ec092467ed61d9ec85c01f060d125ccf632ef9d7ec5816d4a65'
 ABIS = ('arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86')
 LIBS = ('libsherpa-ncnn-jni.so', 'libncnn.so')
 MAX_TAR_BYTES = 12 * 1024 * 1024
+DOWNLOAD_ATTEMPTS = 5
+RETRYABLE_HTTP_CODES = frozenset((408, 429, 500, 502, 503, 504))
+
+
+def download_archive():
+    """Fetch the pinned archive through brief transient upstream outages."""
+    for attempt in range(DOWNLOAD_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(URL, timeout=120) as response:
+                return response.read(MAX_TAR_BYTES + 1)
+        except urllib.error.HTTPError as error:
+            retry = error.code in RETRYABLE_HTTP_CODES and attempt + 1 < DOWNLOAD_ATTEMPTS
+            error.close()
+            if not retry:
+                raise
+        except (urllib.error.URLError, TimeoutError):
+            if attempt + 1 == DOWNLOAD_ATTEMPTS:
+                raise
+        time.sleep(min(2 ** attempt, 8))
+    raise RuntimeError('Speech runtime download retries exhausted')
 
 
 def prepare(output, local_archive=None):
     if local_archive is None:
-        with urllib.request.urlopen(URL, timeout=120) as response:
-            data = response.read(MAX_TAR_BYTES + 1)
+        data = download_archive()
     else:
         with Path(local_archive).open('rb') as source:
             data = source.read(MAX_TAR_BYTES + 1)

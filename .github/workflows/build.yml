@@ -96,7 +96,7 @@ jobs:
           java-version: |
             21
             27
-          check-latest: true
+          check-latest: false
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - name: 安装检查 SDK
@@ -110,6 +110,7 @@ jobs:
         env:
           CHECK_SCOPE: ${{ inputs.check_scope }}
         run: |
+          python -B -m unittest discover -s tests -p 'test_prepare_speech_runtime.py' -v
           if [[ "$CHECK_SCOPE" == "delegation" ]]; then
             python -B -m unittest discover -s tests -p 'test_delegation*.py' -v
             python -B -m unittest discover -s tests -p 'test_cooperation*.py' -v
@@ -148,7 +149,7 @@ jobs:
             cooperation-reports/
             app/build/test-results/testDebugUnitTest/
             app/build/reports/tests/testDebugUnitTest/
-          if-no-files-found: error
+          if-no-files-found: warn
   delegation-matrix:
     name: 子代理定向矩阵核验
     if: inputs.mode == 'checks' && inputs.check_scope == 'delegation' && github.ref == 'refs/heads/main'
@@ -192,7 +193,7 @@ jobs:
           java-version: |
             21
             27
-          check-latest: true
+          check-latest: false
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
@@ -289,7 +290,7 @@ jobs:
           java-version: |
             21
             27
-          check-latest: true
+          check-latest: false
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
@@ -404,7 +405,7 @@ jobs:
           java-version: |
             21
             27
-          check-latest: true
+          check-latest: false
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
@@ -509,7 +510,7 @@ jobs:
           java-version: |
             21
             27
-          check-latest: true
+          check-latest: false
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd

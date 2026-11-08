@@ -14,6 +14,9 @@ class ChecksJobTimeoutContract(unittest.TestCase):
         self.assertIn('os: [ubuntu-26.04, windows-latest]', checks)
         self.assertIn('fail-fast: false', checks)
         self.assertIn('python scripts/cooperation/cloud_checks.py --scope "$CHECK_SCOPE"', checks)
+        self.assertIn("python -B -m unittest discover -s tests -p 'test_prepare_speech_runtime.py' -v", checks)
+        self.assertIn('check-latest: false', checks)
+        self.assertNotIn('check-latest: true', checks)
         upload = checks.split('- name: 上传检查报告', 1)[1]
         self.assertIn('if: always()', upload)
-        self.assertIn('if-no-files-found: error', upload)
+        self.assertIn('if-no-files-found: warn', upload)

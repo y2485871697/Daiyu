@@ -156,7 +156,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
                     message.runId==user.runId && message.conversationId==user.conversationId &&
                     message.id!=user.id && message.status==RunStatus.RUNNING }
             }.getOrNull()
-            acceptedAssistant!=null
+            acceptedAssistant?.let { saved -> f.c.active?.id==saved.id && f.c.active?.runId==saved.runId }==true
         }
         return checkNotNull(acceptedAssistant)
     }

@@ -501,7 +501,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         stack = (base / 'PageBackStackActivityTest.kt').read_text()
         for name in ('testReleaseVelocityContinuesIntoDeparture', 'testPinnedPixelsSurviveContentUpdateUntilCommit', 'testCancelledGestureRestoresCurrentLivePixels', 'testPointerProgressUpdatesDoNotRecomposePageContentPerFrame'):
             self.assertIn('fun ' + name + '()', gestures)
-        self.assertIn('beforeGesture + 1, pageCompositions', gestures)
+        self.assertIn('afterFirstFrame <= beforeGesture + 1', gestures)
+        self.assertIn('afterFirstFrame, pageCompositions', gestures)
         for name in ('testReturnAdvancesWhileCaptureIsPending', 'testColdReturnDoesNotWaitOrEnableLatePreview', 'testFrozenPreviewRejectsSameGenerationLateCopy'):
             self.assertIn('fun ' + name + '()', stack)
         self.assertIn('assertFalse(gate.isCompleted)', stack)

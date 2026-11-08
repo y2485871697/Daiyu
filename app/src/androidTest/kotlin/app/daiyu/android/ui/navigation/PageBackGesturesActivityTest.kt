@@ -298,10 +298,14 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 cancel()
             }
             ui.mainClock.advanceTimeByFrame()
-            assertTrue("the first gesture transition may compose once", pageCompositions <= beforeGesture + 1)
-            assertEquals("subsequent visual progress belongs to the motion layer, not page composition",
-                beforeGesture + 1, pageCompositions)
+            val afterFirstFrame = pageCompositions
+            assertTrue("the first gesture frame may compose at most once", afterFirstFrame <= beforeGesture + 1)
             assertEquals(0, backCount)
+            repeat(5) {
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("subsequent visual progress belongs to the motion layer, not page composition",
+                    afterFirstFrame, pageCompositions)
+            }
             ui.mainClock.advanceTimeBy(1000)
         } finally {
             ui.mainClock.autoAdvance = true

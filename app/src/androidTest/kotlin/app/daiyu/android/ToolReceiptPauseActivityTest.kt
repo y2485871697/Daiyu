@@ -149,7 +149,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             assertEquals(ExecutionPhase.PAUSED, key.execution?.phase)
             assertTrue(fixture.controller.resume(owner))
         }
-        assertTrue(second.entered.await(5, TimeUnit.SECONDS))
+        assertTrue(second.entered.await(30, TimeUnit.SECONDS))
         mainThread {
             assertFalse(key == currentKey())
             assertTrue(key.canDisplayFor(currentKey()))

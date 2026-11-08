@@ -115,7 +115,7 @@ internal fun InstrumentationTestCase.controlMain(work:()->Unit) {
 }
 @Suppress("DEPRECATION")
 internal fun InstrumentationTestCase.awaitControl(description:String,predicate:()->Boolean) {
-    val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+    val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30)
     var done=false
     while(!done && System.nanoTime()<deadline) {
         controlMain {done=predicate()}

@@ -223,6 +223,71 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         assertNotNull(observedPreview)
     }
 
+    fun testRealMainChatReturnRefreshesOnceAndSidebarDismissStillRefreshesImmediately() {
+        val runtime = app.daiyu.android.diagnostics.RuntimeDiagnostics
+        val recorder = app.daiyu.android.diagnostics.BackPerformance.recorder
+        val previousEnabled = runtime.enabled
+        assertFalse(app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS)
+        runtime.enabled = false
+        runtime.clear()
+        fun recordSynchronous(startWindow: Boolean, action: () -> Unit): org.json.JSONObject {
+            runtime.clear()
+            mainThread {
+                if (startWindow) recorder.start(Any(), app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.BACK_PRESS)
+                action()
+                assertNotNull("return callback must start the ordinary automatic recorder", recorder.token())
+                // Deterministic synthetic sample: count/path only, not an emulator timing assertion.
+                recorder.frame(System.nanoTime(), 40_000_000L, 16_666_667L, 60f, LongArray(9))
+                // Close in the same main-thread turn: later IO publications are not part of this assertion.
+                recorder.end(app.daiyu.android.diagnostics.BackPerformanceRecorder.End.PAUSED)
+            }
+            val rows = runtime.export()
+            val incidents = (0 until rows.length()).map { rows.getJSONObject(it) }
+                .filter { it.optString("stage") == "BACK_PERFORMANCE" }
+            assertEquals(1, incidents.size)
+            val incident = incidents.single()
+            val phases = incident.getJSONArray("phases")
+            val refresh = (0 until phases.length()).map { phases.getJSONObject(it) }
+                .single { it.getString("phase") == "CHAT_REFRESH" }
+            val publish = (0 until phases.length()).map { phases.getJSONObject(it) }
+                .single { it.getString("phase") == "CHAT_PUBLISH" }
+            assertEquals("one synchronous refresh, not merely one visible composition", 1, refresh.getInt("count"))
+            assertEquals(1, publish.getInt("count"))
+            return incident
+        }
+        try {
+            // Quiet fixture: no pending receipts/attachments that may legitimately publish or navigate again.
+            setDraft("return refresh count draft")
+            openSettings() // Keep production MainActivity content and its real returnToChat wiring.
+            ui.waitForIdle()
+            val returned = recordSynchronous(startWindow = false) {
+                activity.onBackPressedDispatcher.onBackPressed()
+                assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+                assertEquals(false, invokeHost(activity, "getSidebarVisible"))
+            }
+            assertEquals("BACK_PRESS", returned.getString("kind"))
+            assertTrue(returned.getBoolean("commit_attempted"))
+            val returnedPhases = returned.getJSONArray("phases")
+            val route = (0 until returnedPhases.length()).map { returnedPhases.getJSONObject(it) }
+                .single { it.getString("phase") == "ROUTE" }
+            assertEquals(1, route.getInt("count"))
+            // route_changed is a later Compose observation; the synchronous route is asserted above.
+            awaitUniqueTag("chat-draft")
+            assertDraft("return refresh count draft")
+            dismissIme()
+            ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
+            ui.waitForIdle()
+            recordSynchronous(startWindow = true) {
+                assertEquals(true, invokeHost(activity, "getSidebarVisible"))
+                invokeHost(activity, "dismissSidebar")
+                assertEquals(false, invokeHost(activity, "getSidebarVisible"))
+            }
+            awaitUniqueTag("chat-draft")
+            assertDraft("return refresh count draft")
+            assertEquals(0, fixture.opens.get())
+        } finally { runtime.clear(); runtime.enabled = previousEnabled }
+    }
+
     fun testRealChatOrdinaryReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = false)
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)

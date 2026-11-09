@@ -17,7 +17,8 @@ internal class BackPerformanceRecorder(
         LIFECYCLE_CLOSE("daiyu.retained.lifecycle-close"), MODEL_COMMIT("daiyu.chat.model-refresh-commit"),
         MODEL_PUBLISH("daiyu.chat.model-refresh-publish"), POSITION("daiyu.chat.position-seed"),
         RESTORE("daiyu.chat.restore-lifecycle"), CLEARANCE("daiyu.chat.restore-clearance"),
-        COMPOSE_ENTRY("daiyu.chat.retained-compose-entry")
+        COMPOSE_ENTRY("daiyu.chat.retained-compose-entry"),
+        CHAT_REFRESH("daiyu.chat.refresh"), CHAT_PUBLISH("daiyu.chat.publish")
     }
     class Owner(val host: Any, val schedule: (Long, () -> Unit) -> Unit)
     data class Token(val sequence: Long, val epoch: Long)

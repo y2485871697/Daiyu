@@ -88,7 +88,16 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
         self.assertIn('catch (_: Throwable)', helper)
         recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
         names = re.findall(r'\("(daiyu\.[^"]+)"\)', recorder)
-        self.assertEqual(14, len(names))
+        self.assertEqual(16, len(names))
+        self.assertEqual({
+            'daiyu.back.custom-up-dispatch', 'daiyu.back.callback-commit', 'daiyu.back.prepare',
+            'daiyu.back.business-handler', 'daiyu.back.reset', 'daiyu.back.route-change',
+            'daiyu.retained.lifecycle-set', 'daiyu.retained.lifecycle-close',
+            'daiyu.chat.model-refresh-commit', 'daiyu.chat.model-refresh-publish',
+            'daiyu.chat.position-seed', 'daiyu.chat.restore-lifecycle',
+            'daiyu.chat.restore-clearance', 'daiyu.chat.retained-compose-entry',
+            'daiyu.chat.refresh', 'daiyu.chat.publish',
+        }, set(names))
         self.assertIn('INCLUSIVE', recorder)
         nav = (APP / 'ui/navigation/PageBackGestures.kt').read_text()
         self.assertIn('synchronousTrace("daiyu.chat.retained-compose-entry") {}', nav)

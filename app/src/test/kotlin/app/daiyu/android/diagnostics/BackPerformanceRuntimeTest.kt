@@ -19,6 +19,9 @@ class BackPerformanceRuntimeTest {
             fun incident() {
                 recorder.start(owner, BackPerformanceRecorder.Kind.BACK_PRESS)
                 recorder.commit(owner)
+                val refresh = recorder.begin("daiyu.chat.refresh")
+                val publish = recorder.begin("daiyu.chat.publish")
+                recorder.complete(publish); recorder.complete(refresh)
                 recorder.frame(now, 40_000_000L, 16_666_667L, 60f, LongArray(9))
                 recorder.end(BackPerformanceRecorder.End.TAIL)
                 now += 100_000_000L
@@ -34,6 +37,17 @@ class BackPerformanceRuntimeTest {
                 "max_budget_ns", "min_refresh_hz", "max_refresh_hz", "start_overlap_count", "start_overlap_slow_count", "phase_semantics", "phases", "worst_frames"),
                 row.keys().asSequence().toSet())
             assertEquals("INCLUSIVE_NOT_ADDITIVE", row.getString("phase_semantics"))
+            val chatPhases = row.getJSONArray("phases")
+            assertEquals(2, chatPhases.length())
+            assertEquals(setOf("CHAT_REFRESH", "CHAT_PUBLISH"),
+                (0 until chatPhases.length()).map { chatPhases.getJSONObject(it).getString("phase") }.toSet())
+            for (index in 0 until chatPhases.length()) {
+                val phase = chatPhases.getJSONObject(index)
+                assertEquals(setOf("phase", "count", "inclusive_total_ns", "max_ns", "in_flight_count",
+                    "in_flight_max_observed_ns"), phase.keys().asSequence().toSet())
+                assertEquals(1, phase.getInt("count"))
+                assertEquals(0, phase.getInt("in_flight_count"))
+            }
             recorder.start(owner, BackPerformanceRecorder.Kind.BACK_PRESS)
             recorder.begin("daiyu.back.business-handler")
             recorder.frame(now - 10_000_000L, 40_000_000L, 16_666_667L, 60f, LongArray(9))

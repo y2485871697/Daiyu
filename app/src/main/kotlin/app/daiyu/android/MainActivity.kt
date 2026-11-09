@@ -5991,7 +5991,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun returnToChat() {
-        dismissSidebar()
+        dismissSidebarState()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
         taskRecordsConversationId = null
@@ -6185,9 +6185,12 @@ class MainActivity : ComponentActivity() {
         imageHost.setVisible(false, selected?.id?.value, keepThumbnails = retainedPage == "chat")
         sidebarVisible = true; publishChat()
     } }
-    private fun dismissSidebar() {
+    private fun dismissSidebarState() {
         sidebarVisible = false; speechHost.setVisible(retainedPage == "chat")
         imageHost.setVisible(retainedPage == "chat", selected?.id?.value)
+    }
+    private fun dismissSidebar() {
+        dismissSidebarState()
         if (activityUsable()) refresh()
     }
     private fun paneRefreshAllowed() = !paneRefreshClosed && activityUsable() &&
@@ -6724,7 +6727,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun currentControlOwner(): Message? =
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
-    private fun refresh() {
+    private fun refresh() { app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.refresh") {
         if (!activityUsable()) return
         resumeContextManagementPage(contextManagementPage, contextManagementEntryEpoch)
         childStopChoice = controller.childStopChoice()
@@ -6855,7 +6858,7 @@ class MainActivity : ComponentActivity() {
                 requestPaneRefresh(invalidate = false)
         }
         consumeOpenedAttachments()
-    }
+    } }
     private fun consumeOpenedAttachments() {
         if (!app.daiyu.android.attachments.OpenedAttachmentInbox.hasPending() || !generationResumed()) return
         if ((!controller.ready || !selectionReady) && controller.problem?.startsWith("会话恢复失败") != true) return
@@ -7021,7 +7024,7 @@ class MainActivity : ComponentActivity() {
 
     private fun publishChat() = publishChat(rowsChanged = true)
 
-    private fun publishChat(rowsChanged: Boolean, scrollRequest: ChatScrollRequest? = chatState.scrollRequest) {
+    private fun publishChat(rowsChanged: Boolean, scrollRequest: ChatScrollRequest? = chatState.scrollRequest) { app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.publish") {
         RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PUBLISH) {
             if (rowsChanged) refreshTimeline()
             contextReceiptRevision = controller.contextUsageRevision
@@ -7161,7 +7164,7 @@ class MainActivity : ComponentActivity() {
                     ?.let { id -> chatState.turns.any { it.id == id } } == true
             }?.let { acceptedTextPreview = null }
         }
-    }
+    } }
     private fun requestScroll(id: String? = null, follow: Boolean = true, segmentIndex: Int? = null) {
         chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow, segmentIndex))
     }

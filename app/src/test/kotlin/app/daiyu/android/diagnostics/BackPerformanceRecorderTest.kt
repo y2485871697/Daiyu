@@ -136,15 +136,36 @@ class BackPerformanceRecorderTest {
         val phase = f.rows.single().phases.single()
         assertEquals(1, phase.count); assertEquals(7, phase.inFlight)
     }
+    @Test fun chatRefreshAndPublishHaveSeparateInclusiveCountsWithoutNewFields() {
+        assertEquals(16, BackPerformanceRecorder.Phase.entries.size)
+        val f = Fixture(); f.start(); f.frame()
+        val refresh = f.recorder.begin("daiyu.chat.refresh")
+        f.now += 2_000_000L
+        val publish = f.recorder.begin("daiyu.chat.publish")
+        f.now += 3_000_000L
+        f.recorder.complete(publish)
+        f.now += 1_000_000L
+        f.recorder.complete(refresh)
+        f.end()
+        val phases = f.rows.single().phases
+        assertEquals(2, phases.size)
+        val refreshed = phases.single { it.phase == BackPerformanceRecorder.Phase.CHAT_REFRESH }
+        val published = phases.single { it.phase == BackPerformanceRecorder.Phase.CHAT_PUBLISH }
+        assertEquals(1, refreshed.count); assertEquals(6_000_000L, refreshed.total)
+        assertEquals(1, published.count); assertEquals(3_000_000L, published.total)
+        assertEquals(0, refreshed.inFlight); assertEquals(0, published.inFlight)
+    }
     @Test fun helperPreservesReturnExceptionAndNonlocalReturnDespiteDiagnosticFailure() {
-        var calls = 0
-        assertEquals(42, synchronousTrace("daiyu.back.prepare") { calls++; 42 })
-        fun nonlocal(): Int { synchronousTrace("daiyu.back.prepare") { calls++; return 7 } }
-        assertEquals(7, nonlocal())
-        val failure = IllegalStateException("not-exported")
-        try { synchronousTrace("daiyu.back.prepare") { calls++; throw failure }; fail() }
-        catch (caught: IllegalStateException) { assertSame(failure, caught) }
-        assertEquals(3, calls)
+        for (name in listOf("daiyu.back.prepare", "daiyu.chat.refresh", "daiyu.chat.publish")) {
+            var calls = 0
+            assertEquals(42, synchronousTrace(name) { calls++; 42 })
+            fun nonlocal(): Int { synchronousTrace(name) { calls++; return 7 } }
+            assertEquals(7, nonlocal())
+            val failure = IllegalStateException("not-exported")
+            try { synchronousTrace(name) { calls++; throw failure }; fail() }
+            catch (caught: IllegalStateException) { assertSame(failure, caught) }
+            assertEquals(3, calls)
+        }
         BackPerformance.safely { error("diagnostic-only") }
     }
 }

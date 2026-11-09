@@ -175,6 +175,48 @@ internal object RuntimeDiagnostics {
     private val sequence = AtomicLong()
     private val dropped = AtomicLong()
     private val generation = AtomicLong()
+    // Clear-only epoch: broad opt-in toggles must not invalidate automatic back evidence.
+    private val backGeneration = AtomicLong()
+    internal fun backEpoch(): Long = backGeneration.get()
+
+    internal fun backIncident(incident: BackPerformanceRecorder.Incident) {
+        if (directory == null || incident.epoch != backGeneration.get()) return
+        try {
+            executor.execute {
+                try {
+                    if (incident.epoch != backGeneration.get()) return@execute
+                    // Serialization and file locking happen ONLY on the existing bounded writer.
+                    val value = JSONObject().put("stage", "BACK_PERFORMANCE").put("code", "INCIDENT")
+                        .put("time_ms", System.currentTimeMillis()).put("kind", incident.kind.name)
+                        .put("end_reason", incident.reason.name).put("commit_attempted", incident.commitAttempted)
+                        .put("route_changed", incident.routeChanged).put("elapsed_ns", incident.elapsed)
+                        .put("frame_count", incident.frames).put("slow_count", incident.slow).put("max_ns", incident.max)
+                        .put("min_budget_ns", incident.minBudget).put("max_budget_ns", incident.maxBudget)
+                        .put("min_refresh_hz", incident.minHz).put("max_refresh_hz", incident.maxHz)
+                        .put("start_overlap_count", incident.overlapFrames).put("start_overlap_slow_count", incident.overlapSlow)
+                        .put("phase_semantics", "INCLUSIVE_NOT_ADDITIVE")
+                        .put("phases", JSONArray().apply { incident.phases.forEach { phase ->
+                            put(JSONObject().put("phase", phase.phase.name).put("count", phase.count)
+                                .put("inclusive_total_ns", phase.total).put("max_ns", phase.max)
+                                .put("in_flight_count", phase.inFlight).put("in_flight_max_observed_ns", phase.inFlightMaxObserved))
+                        } })
+                        .put("worst_frames", JSONArray().apply { incident.worst.forEach { frame ->
+                            put(JSONObject().put("total_ns", frame.duration).put("budget_ns", frame.budget)
+                                .put("refresh_hz", frame.refreshHz).put("stages_ns", JSONArray(frame.stages))
+                                .put("overlaps_start_unattributed", frame.overlapsStart))
+                        } })
+                    val row = value.toString()
+                    lock.withLock {
+                        if (incident.epoch != backGeneration.get()) return@withLock
+                        val missing = dropped.getAndSet(0)
+                        if (missing > 0) append(JSONObject().put("code", Code.DROPPED.name).put("count", missing).toString())
+                        append(row)
+                    }
+                } catch (_: Throwable) { dropped.incrementAndGet() }
+            }
+        } catch (_: Throwable) { dropped.incrementAndGet() }
+    }
+
     private val active = ConcurrentHashMap<Long, Span>()
     private val lock = ReentrantLock()
     @Volatile private var directory: File? = null
@@ -386,7 +428,12 @@ internal object RuntimeDiagnostics {
         current.appendBytes(bytes)
     }
 
-    fun export(): JSONArray = lock.withLock {
+    fun export(): JSONArray {
+        awaitWrites()
+        return exportLocked()
+    }
+
+    private fun exportLocked(): JSONArray = lock.withLock {
         val root = directory ?: return@withLock JSONArray()
         val rows = java.util.ArrayDeque<JSONObject>()
         for (i in 2 downTo 0) {
@@ -402,6 +449,7 @@ internal object RuntimeDiagnostics {
     }
 
     fun clear() = lock.withLock {
+        backGeneration.incrementAndGet()
         generation.incrementAndGet()
         active.clear()
         directory?.let { root -> for (i in 0..2) File(root, "trace-$i.jsonl").let { check(!it.exists() || it.delete()) } }

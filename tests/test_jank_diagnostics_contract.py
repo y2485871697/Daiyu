@@ -35,9 +35,11 @@ class JankDiagnosticsContract(unittest.TestCase):
     def test_one_existing_window_collector_and_independent_diagnostic_gate(self):
         s=(APP/'diagnostics/WindowFramePerformance.kt').read_text()
         self.assertEqual(1,s.count('addOnFrameMetricsAvailableListener(session.listener, target)'))
-        self.assertIn('if (epoch == null && !diagnostic)',s)
+        self.assertIn('if (epoch == null && !diagnostic && !automaticBack)',s)
         self.assertIn('if (diagnostic) incident.add(page, frame)',s)
-        self.assertIn('host.diagnostic || (state.loaded && state.enabled && !state.unavailable)',s)
+        self.assertIn('if (!host.diagnostic && (!state.loaded || !state.enabled || state.unavailable))',s)
+        self.assertIn('it.kind != "main"',s)
+        self.assertIn('if (kind != "main" && !diagnostic && log.captureEpoch() == null) return',s)
         self.assertIn('session.incident.flush()',s)
         self.assertIn('removeOnFrameMetricsAvailableListener',s)
 

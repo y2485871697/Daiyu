@@ -320,7 +320,9 @@ class PageBackGestureContractTest(unittest.TestCase):
     def test_release_sync_traces_have_fixed_names_and_do_not_wrap_suspension(self):
         helper = (APP / 'diagnostics/SynchronousTrace.kt').read_text()
         self.assertIn('Trace.beginSection(name)', helper)
-        self.assertIn('try { block() } finally { Trace.endSection() }', helper)
+        self.assertIn('return try { block() } finally {', helper)
+        self.assertIn('if (tracing) try { Trace.endSection() } catch (_: Throwable)', helper)
+        self.assertIn('BackPerformance.recorder.complete(sample)', helper)
         self.assertNotIn('BuildConfig', helper)
         self.assertNotIn('JANK_DIAGNOSTICS', helper)
         self.assertNotIn('Log.', helper)

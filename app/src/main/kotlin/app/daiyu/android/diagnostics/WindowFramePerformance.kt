@@ -33,6 +33,9 @@ import java.util.concurrent.TimeUnit
 internal class WindowFramePerformance private constructor(
     private val activity: ComponentActivity, private val store: DiagnosticLogStore,
 ) {
+    internal fun backOwner() = BackPerformanceRecorder.Owner(this) { delay, work ->
+        handler?.postDelayed({ work() }, delay); Unit
+    }
     private val log = store.frames
     private val diagnostic = app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS
     private val windows = LinkedHashMap<Window, String>()
@@ -54,7 +57,7 @@ internal class WindowFramePerformance private constructor(
         handler?.post { session?.timeline?.change(now, current); session?.batch?.flush("context") }
     }
     private var resumed = false
-    private var enabled = diagnostic
+    private var enabled = true // Main-window automatic back capture is available in ordinary Release.
     private var closed = false
     @Volatile private var retired: CountDownLatch? = null
 
@@ -77,7 +80,8 @@ internal class WindowFramePerformance private constructor(
         @Volatile var refreshHz = refreshRate(window)
         val listener = Window.OnFrameMetricsAvailableListener { _, metrics, drops ->
             val epoch = log.captureEpoch()
-            if (epoch == null && !diagnostic) return@OnFrameMetricsAvailableListener
+            val automaticBack = kind == "main" && BackPerformance.recorder.observing(this@WindowFramePerformance)
+            if (epoch == null && !diagnostic && !automaticBack) return@OnFrameMetricsAvailableListener
             try {
             val intended = metrics.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP)
             val vsync = intended.takeIf { it > 0 } ?: System.nanoTime()
@@ -92,9 +96,14 @@ internal class WindowFramePerformance private constructor(
             val frame = PerformanceFrame(vsync,
                 metrics.getMetric(FrameMetrics.TOTAL_DURATION), budget, refreshHz, stages, drops.coerceAtLeast(0),
                 metrics.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 1L)
-            val page = timeline.pageAt(vsync)
-            if (epoch != null) batch.add(epoch, page, frame)
-            if (diagnostic) incident.add(page, frame)
+            if (automaticBack) BackPerformance.safely {
+                BackPerformance.recorder.frame(vsync, frame.totalNs, budget, refreshHz.toFloat(), stages, host = this@WindowFramePerformance)
+            }
+            if (epoch != null || diagnostic) {
+                val page = timeline.pageAt(vsync)
+                if (epoch != null) batch.add(epoch, page, frame)
+                if (diagnostic) incident.add(page, frame)
+            }
             } catch (_: RuntimeException) { log.reportCaptureFailure() }
         }
     }
@@ -122,6 +131,7 @@ internal class WindowFramePerformance private constructor(
 
     private fun attach(window: Window, kind: String) {
         if (sessions.containsKey(window) || !resumed || !enabled || closed) return
+        if (kind != "main" && !diagnostic && log.captureEpoch() == null) return
         val target = handler ?: HandlerThread("daiyu-frame-metrics").also { it.start(); thread = it }
             .let { Handler(it.looper).also { worker -> handler = worker } }
         val session = Session(window, kind)
@@ -196,9 +206,16 @@ internal class WindowFramePerformance private constructor(
             host.log.registerCapture(host, flushHook)
             val observer = LifecycleEventObserver { _, event ->
                 when (event) {
-                    Lifecycle.Event.ON_RESUME -> { host.resumed = true; host.reconcile(); if (host.diagnostic) JankDiagnostics.ready() }
-                    Lifecycle.Event.ON_PAUSE -> { host.resumed = false; host.reconcile() }
+                    Lifecycle.Event.ON_RESUME -> {
+                        host.resumed = true; host.reconcile()
+                        if (host.diagnostic) JankDiagnostics.ready()
+                    }
+                    Lifecycle.Event.ON_PAUSE -> {
+                        BackPerformance.safely { BackPerformance.recorder.endHost(host, BackPerformanceRecorder.End.PAUSED) }
+                        host.resumed = false; host.reconcile()
+                    }
                     Lifecycle.Event.ON_DESTROY -> {
+                        BackPerformance.safely { BackPerformance.recorder.endHost(host, BackPerformanceRecorder.End.DESTROYED) }
                         host.closed = true; host.reconcile(); hosts.remove(activity)
                     }
                     else -> Unit
@@ -208,7 +225,10 @@ internal class WindowFramePerformance private constructor(
             activity.lifecycleScope.launch {
                 withContext(Dispatchers.IO) { store.load() }
                 store.state.collect { state ->
-                    host.enabled = host.diagnostic || (state.loaded && state.enabled && !state.unavailable)
+                    host.enabled = true // Broad batches still use log.captureEpoch(), never this listener gate.
+                    if (!host.diagnostic && (!state.loaded || !state.enabled || state.unavailable)) {
+                        host.sessions.filterValues { it.kind != "main" }.keys.toList().forEach(host::detach)
+                    }
                     host.reconcile()
                 }
             }

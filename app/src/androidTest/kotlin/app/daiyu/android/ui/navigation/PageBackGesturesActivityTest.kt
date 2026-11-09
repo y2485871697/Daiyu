@@ -142,6 +142,44 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         if (capturePreviousPage) prepareCurrentPixels()
     }
 
+    fun testOrdinaryBuildAutomaticallyRecordsClaimedBackWithBroadDiagnosticsOff() {
+        val runtime = app.daiyu.android.diagnostics.RuntimeDiagnostics
+        val recorder = app.daiyu.android.diagnostics.BackPerformance.recorder
+        assertFalse(app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS)
+        val previousEnabled = runtime.enabled
+        runtime.enabled = false
+        runtime.clear()
+        try {
+            navigateOnBack = true
+            mount()
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .15f, height * .6f), 16)
+                moveTo(Offset(width * .85f, height * .6f), 160)
+            }
+            mainThread {
+                assertNotNull("claimed swipe starts automatic recorder without settings", recorder.token())
+                val host = checkNotNull(app.daiyu.android.diagnostics.WindowFramePerformance.forContext(activity))
+                assertTrue(recorder.observing(host))
+                // Deterministic synthetic sample, NOT an emulator speed/performance assertion.
+                recorder.frame(System.nanoTime(), 40_000_000L, 16_666_667L, 60f, LongArray(9), host)
+            }
+            ui.onNodeWithTag("page-back-host").performTouchInput { up() }
+            ui.waitForIdle()
+            mainThread { recorder.end(app.daiyu.android.diagnostics.BackPerformanceRecorder.End.PAUSED) }
+            val rows = runtime.export()
+            val incidents = (0 until rows.length()).map { rows.getJSONObject(it) }
+                .filter { it.optString("stage") == "BACK_PERFORMANCE" }
+            assertEquals(1, incidents.size)
+            val incident = incidents.single()
+            assertEquals("CUSTOM_SWIPE", incident.getString("kind"))
+            assertTrue(incident.getBoolean("commit_attempted"))
+            assertTrue(incident.getBoolean("route_changed"))
+            assertFalse("RESET" == incident.getString("end_reason"))
+            assertEquals(1, backCount)
+        } finally { runtime.clear(); runtime.enabled = previousEnabled }
+    }
+
     fun testPauseAndHomeKeepLivePageAndGraphicsFrameWithoutMountingAgain() {
         var mounts = 0
         var disposals = 0

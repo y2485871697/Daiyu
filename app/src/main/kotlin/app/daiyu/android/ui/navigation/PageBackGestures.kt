@@ -2,6 +2,8 @@ package app.daiyu.android.ui.navigation
 
 import android.os.Build
 import app.daiyu.android.diagnostics.synchronousTrace
+import app.daiyu.android.diagnostics.BackPerformance
+import app.daiyu.android.diagnostics.BackPerformanceRecorder
 import android.os.SystemClock
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
@@ -75,6 +77,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean, val returnDirection: Float,
     private val scope: kotlinx.coroutines.CoroutineScope,
+    val diagnosticOwner: Any,
     private val beginPreview: () -> Boolean,
     val commit: (Float, Boolean, Float, Float, Boolean, () -> Unit) -> Unit) {
     var predictiveGeneration = 0L
@@ -101,11 +104,21 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
             swipeCommit = null
         }
     }
+    private var diagnosticToken: BackPerformanceRecorder.Token? = null
+    fun startDiagnostic(kind: BackPerformanceRecorder.Kind) {
+        diagnosticToken = BackPerformance.start(diagnosticOwner, kind)
+    }
     var committing = false
         private set
 
     fun commitBack(back: () -> Unit) {
         if (!alive || (transitionBlocked && swipeCommit == null) || committing) return
+        BackPerformance.safely {
+            if (diagnosticToken == null || diagnosticToken != BackPerformance.recorder.token()) {
+                startDiagnostic(BackPerformanceRecorder.Kind.BACK_PRESS)
+            }
+            BackPerformance.commit(diagnosticOwner)
+        }
         val visual = swipeCommit
         swipeCommit = null
         committing = true
@@ -167,6 +180,12 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     fun reset(owner: Any? = null) {
         synchronousTrace("daiyu.back.reset") {
             if (owner != null && this.owner !== owner) return
+            BackPerformance.safely {
+                if (diagnosticToken != null && diagnosticToken == BackPerformance.recorder.token()) {
+                    BackPerformance.reset(diagnosticOwner)
+                }
+            }
+            diagnosticToken = null
             this.owner = null
             active = false
             progress = 0f
@@ -277,6 +296,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                 }
                 val owner = Any()
                 session.gesture = activeState to owner
+                activeState.startDiagnostic(BackPerformanceRecorder.Kind.PREDICTIVE)
                 activeState.update(owner, 0f, predictive = true,
                     direction = activeState.returnDirection)
             }
@@ -380,6 +400,21 @@ internal fun PageBackGestureHost(
     val stackPath = remember(stack) { PageBackStackPath(stack) }
     stack.freezeCurrent = { layers.freezeCurrent() }
     val visualRouteKey = stack.routeKey(routeKey)
+    // Stable across route-keyed state replacements; no route value enters the incident.
+    val diagnosticFrameHost = app.daiyu.android.diagnostics.WindowFramePerformance.forContext(context)
+    val diagnosticOwner = remember(diagnosticFrameHost) { diagnosticFrameHost?.backOwner() ?: Any() }
+    val diagnosticRoute = remember { arrayOf<Any>(visualRouteKey) }
+    SideEffect {
+        if (diagnosticRoute[0] != visualRouteKey) {
+            BackPerformance.safely { BackPerformance.recorder.route(diagnosticOwner) }
+            diagnosticRoute[0] = visualRouteKey
+        }
+    }
+    DisposableEffect(diagnosticOwner) {
+        onDispose { BackPerformance.safely {
+            BackPerformance.recorder.end(diagnosticOwner, BackPerformanceRecorder.End.OWNER_REMOVED)
+        } }
+    }
     app.daiyu.android.diagnostics.ObservePageFrames(visualRouteKey)
     val visualBackTargetKey = stack.targetKey(routeKey, backTargetKey)
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -407,7 +442,7 @@ internal fun PageBackGestureHost(
     SideEffect { layers.trim(frame, target, departure.takeIf { departing }, stack.ancestorKeys(routeKey, backTargetKey)) }
     val currentTarget by rememberUpdatedState(target)
     val state = remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey) {
-        PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope,
+        PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope, diagnosticOwner,
             beginPreview = { currentTarget != null && layers.beginGesture(frame) }) { value, predictive, direction, velocity, previewAllowed, back ->
             if (!previewAllowed) frame.animateReturn = false
             val request = if (value > 0f && currentTarget != null && visualBackTargetKey != null) {
@@ -519,6 +554,7 @@ internal fun PageBackGestureHost(
                                     (dy > viewConfiguration.touchSlop && dx <= dy * 1.5f)) break
                                 if (dx <= viewConfiguration.touchSlop || dx <= dy * 1.5f) continue
                                 claimed = true
+                                state.startDiagnostic(BackPerformanceRecorder.Kind.CUSTOM_SWIPE)
                                 claimSwipe()
                             }
                             val distance = (dx - viewConfiguration.touchSlop).coerceAtLeast(0f)

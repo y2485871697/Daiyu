@@ -1160,8 +1160,7 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
-            android.os.Trace.beginSection("daiyu.back.route-change")
-            try {
+            app.daiyu.android.diagnostics.synchronousTrace("daiyu.back.route-change") {
             if (value != retainedPageState) {
                 revokeWorkspaceVisit()
                 resetRootExitConfirmation()
@@ -1228,7 +1227,7 @@ class MainActivity : ComponentActivity() {
                 keepThumbnails = value == "chat")
             retainedPageState = value
             syncHaptics()
-            } finally { android.os.Trace.endSection() }
+            }
         }
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, "", conversationsLoaded = false))
     private data class PaneRevision(val data: Long, val title: Long,
@@ -7227,6 +7226,7 @@ class MainActivity : ComponentActivity() {
     private fun refreshConfirmedModelLabel() = reloadConfirmedModelLabel(retainBalanceForProvider = null)
 
     private fun reloadConfirmedModelLabel(retainBalanceForProvider: String?) {
+        val diagnosticToken = app.daiyu.android.diagnostics.captureBackPerformanceToken()
         val request = Any()
         val conversation = selected?.id
         val generation = editorGeneration
@@ -7244,7 +7244,7 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             }
             if (activityUsable() && modelLabelRead === request && selected?.id == conversation && editorGeneration == generation) {
-                app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.model-refresh-commit") {
+                app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.model-refresh-commit", diagnosticToken) {
                     val saved = loaded.getOrNull()
                     val next = saved?.let { ChatGptSpeedSelection(it.first, it.second) }
                     val previous = confirmedGptSpeed
@@ -7260,7 +7260,7 @@ class MainActivity : ComponentActivity() {
                     if (previous != next) confirmedGptSpeed = next
                     if (configurationChanged) contextModelRevision++
                     if (presentationChanged) {
-                        app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.model-refresh-publish") {
+                        app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.model-refresh-publish", diagnosticToken) {
                             publishChat(rowsChanged = false)
                         }
                     }

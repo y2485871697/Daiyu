@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.navigation
 
 import android.os.Build
-import android.os.Trace
 import app.daiyu.android.diagnostics.synchronousTrace
 import android.os.SystemClock
 import androidx.activity.BackEventCompat
@@ -602,9 +601,9 @@ internal fun PageBackGestureHost(
                             LocalPageBackPreviewFrame provides frame.takeIf { retainedRootVisible && captureFromContent },
                         ) {
                             PageRetainedContent(retainedRootVisible, rootActive, resumed) { active ->
-                                // Keep the composable call in a composable scope, not the sync helper.
-                                Trace.beginSection("daiyu.chat.retained-compose")
-                                try { retainedRootContent(active) } finally { Trace.endSection() }
+                                // Entry marker only; Compose tracing owns the composition duration.
+                                synchronousTrace("daiyu.chat.retained-compose-entry") {}
+                                retainedRootContent(active)
                             }
                         }
                     }

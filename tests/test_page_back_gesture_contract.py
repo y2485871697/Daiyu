@@ -338,8 +338,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (frame.frozen) return', freeze)
         for name in ('lifecycle-set', 'lifecycle-close'):
             self.assertIn(f'synchronousTrace("daiyu.retained.{name}")', retained)
-        self.assertIn('Trace.beginSection("daiyu.chat.retained-compose")', self.host)
-        self.assertIn('try { retainedRootContent(active) } finally { Trace.endSection() }', self.host)
+        self.assertIn('synchronousTrace("daiyu.chat.retained-compose-entry") {}', self.host)
+        self.assertNotIn('try { retainedRootContent(active)', self.host)
         for name in ('position-seed', 'restore-lifecycle', 'restore-clearance'):
             self.assertIn(f'synchronousTrace("daiyu.chat.{name}")', chat)
         clearance = chat.split('    fun correctFollowClearance()', 1)[1].split('    val requestedIndex', 1)[0]

@@ -69,11 +69,16 @@ class JankDiagnosticsContract(unittest.TestCase):
         menu = (APP/'ui/screens/chat/conversation/ChatMenuLayer.kt').read_text()
         for name in ('wide', 'tight'):
             self.assertIn('JankDiagnostics.section("daiyu.menu-shadow=' + name + '")', menu)
-        freeze = (APP/'ui/navigation/PageBackPreviewLayers.kt').read_text().split('private fun freeze(', 1)[1].split('    fun frame(', 1)[0]
-        self.assertLess(freeze.index('section("daiyu.back-preview=freeze-start")'), freeze.index('scope.launch(start = CoroutineStart.UNDISPATCHED)'))
-        self.assertLess(freeze.index('beginPhase("daiyu.back-preview=freeze"'), freeze.index('toImageBitmap()'))
-        self.assertIn('finally {', freeze)
-        self.assertIn('endPhase("daiyu.back-preview=freeze"', freeze)
+        preview = (APP/'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        freeze = preview.split('private fun freeze(', 1)[1].split('    private fun capture(', 1)[0]
+        self.assertIn('frame.image = frame.ready?.takeIf { frame.readySize == frame.size }', freeze)
+        self.assertNotIn('scope.launch', freeze)
+        self.assertIn('private val snapshot: suspend (Frame) -> ImageBitmap = { frame -> frame.layer.toImageBitmap() }', preview)
+        self.assertNotIn('snapshot(frame)', freeze)
+        capture = preview.split('private fun capture(', 1)[1].split('    fun frame(', 1)[0]
+        self.assertLess(capture.index('section("daiyu.back-preview=freeze-start")'), capture.index('scope.launch(start = CoroutineStart.UNDISPATCHED)'))
+        self.assertLess(capture.index('beginPhase("daiyu.back-preview=freeze"'), capture.index('withContext(NonCancellable) { snapshot(frame) }'))
+        self.assertRegex(capture, r'finally\s*\{\s*JankDiagnostics\.endPhase\("daiyu\.back-preview=freeze", traceCookie\)')
 
     def test_incident_is_bounded_and_off_callback_disk_io(self):
         s=(APP/'diagnostics/JankDiagnostics.kt').read_text()

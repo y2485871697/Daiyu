@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.diagnostics.synchronousTrace
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -114,7 +115,9 @@ internal fun ChatMessageList(
         tailCompressions.lastOrNull()?.let { "chat-context-compressing:${it.id}" } ?: turns.lastOrNull()?.listKey)
     // Seed the first measure at the destination, not at the oldest loaded message.
     // LazyListState's saver still owns an existing reader position on restoration.
-    val initialIndex = initialChatListIndex(scrollRequest, scrollRequest?.targetIndex(turns) ?: -1, tailIndex)
+    val initialIndex = synchronousTrace("daiyu.chat.position-seed") {
+        initialChatListIndex(scrollRequest, scrollRequest?.targetIndex(turns) ?: -1, tailIndex)
+    }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val dragging by listState.interactionSource.collectIsDraggedAsState()
     var followBottom by rememberSaveable { mutableStateOf(true) }
@@ -133,17 +136,19 @@ internal fun ChatMessageList(
     var revealResetEpoch by remember { mutableStateOf(0L) }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE -> {
-                    scrollResumed = false
-                    resumeFollowPending = true
-                    wasDragged = false
+            synchronousTrace("daiyu.chat.restore-lifecycle") {
+                when (event) {
+                    Lifecycle.Event.ON_PAUSE -> {
+                        scrollResumed = false
+                        resumeFollowPending = true
+                        wasDragged = false
+                    }
+                    Lifecycle.Event.ON_RESUME -> {
+                        if (resumeFollowPending) revealResetEpoch++
+                        scrollResumed = true
+                    }
+                    else -> Unit
                 }
-                Lifecycle.Event.ON_RESUME -> {
-                    if (resumeFollowPending) revealResetEpoch++
-                    scrollResumed = true
-                }
-                else -> Unit
             }
         }
         lifecycle.addObserver(observer)
@@ -176,29 +181,31 @@ internal fun ChatMessageList(
             (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
 
     fun correctFollowClearance() {
-        if (!clearanceLayout.active || clearanceLayout.correcting || !canFollowBottom() ||
-            currentOcclusionPx <= 0 || !listState.canScrollForward) return
-        val remeasurement = clearanceLayout.remeasurement ?: return
-        val layout = listState.layoutInfo
-        if (layout.viewportSize.height <= 0) return
-        val last = layout.visibleItemsInfo.lastOrNull {
-            it.index == currentTailIndex && it.key == currentTailKey
-        } ?: return
-        val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-        if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-            (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
-                else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) return
-        val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-        val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
-        if (correction == 0) return
-        clearanceLayout.correcting = true
-        try {
-            if (listState.dispatchRawDelta(correction.toFloat()) > 0f && clearanceLayout.active) {
-                // Raw delta may defer placement; finish it after the previous layout pass.
-                remeasurement.forceRemeasure()
+        synchronousTrace("daiyu.chat.restore-clearance") {
+            if (!clearanceLayout.active || clearanceLayout.correcting || !canFollowBottom() ||
+                currentOcclusionPx <= 0 || !listState.canScrollForward) return
+            val remeasurement = clearanceLayout.remeasurement ?: return
+            val layout = listState.layoutInfo
+            if (layout.viewportSize.height <= 0) return
+            val last = layout.visibleItemsInfo.lastOrNull {
+                it.index == currentTailIndex && it.key == currentTailKey
+            } ?: return
+            val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
+            if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
+                (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
+                    else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) return
+            val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+            val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
+            if (correction == 0) return
+            clearanceLayout.correcting = true
+            try {
+                if (listState.dispatchRawDelta(correction.toFloat()) > 0f && clearanceLayout.active) {
+                    // Raw delta may defer placement; finish it after the previous layout pass.
+                    remeasurement.forceRemeasure()
+                }
+            } finally {
+                clearanceLayout.correcting = false
             }
-        } finally {
-            clearanceLayout.correcting = false
         }
     }
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1

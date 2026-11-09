@@ -2,6 +2,7 @@ package app.daiyu.android.ui.navigation
 
 import androidx.compose.runtime.getValue
 import app.daiyu.android.diagnostics.JankDiagnostics
+import app.daiyu.android.diagnostics.synchronousTrace
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -206,9 +207,11 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float, velocity: Float = 0f): Departure {
-        freeze(frame)
-        return Departure(frame, target, progress, predictive, direction, velocity = velocity,
-            targetImage = frames[target]?.image).also { pending = it }
+        return synchronousTrace("daiyu.back.prepare") {
+            freeze(frame)
+            Departure(frame, target, progress, predictive, direction, velocity = velocity,
+                targetImage = frames[target]?.image).also { pending = it }
+        }
     }
 
     fun abandon(departure: Departure) {

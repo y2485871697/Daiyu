@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.navigation
 
 import android.os.Build
+import android.os.Trace
+import app.daiyu.android.diagnostics.synchronousTrace
 import android.os.SystemClock
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
@@ -35,7 +37,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -72,7 +74,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean, val returnDirection: Float,
+internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean, val returnDirection: Float,
     private val scope: kotlinx.coroutines.CoroutineScope,
     private val beginPreview: () -> Boolean,
     val commit: (Float, Boolean, Float, Float, Boolean, () -> Unit) -> Unit) {
@@ -109,8 +111,10 @@ private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: 
         swipeCommit = null
         committing = true
         val velocity = visual?.velocity ?: if (predictive) predictiveMotion.calculateVelocity().x / 1000f else 0f
-        try { commit(if (previewAllowed) visual?.progress ?: progress else 0f,
-            visual?.predictive ?: predictive, visual?.direction ?: direction, velocity, previewAllowed, back) }
+        try { synchronousTrace("daiyu.back.callback-commit") {
+            commit(if (previewAllowed) visual?.progress ?: progress else 0f,
+                visual?.predictive ?: predictive, visual?.direction ?: direction, velocity, previewAllowed, back)
+        } }
         finally { scope.launch { try { withFrameNanos { } } finally { committing = false } } }
     }
     private class SwipeCommit(val progress: Float, val predictive: Boolean, val direction: Float, val velocity: Float)
@@ -122,7 +126,7 @@ private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: 
         if (!alive || transitionBlocked || committing || dispatching) return
         swipeCommit = SwipeCommit(progress, predictive, direction, velocity)
         dispatching = true
-        try { back() }
+        try { synchronousTrace("daiyu.back.custom-up-dispatch") { back() } }
         finally { swipeCommit = null; dispatching = false }
     }
     private var owner: Any? = null
@@ -162,37 +166,39 @@ private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: 
     }
 
     fun reset(owner: Any? = null) {
-        if (owner != null && this.owner !== owner) return
-        this.owner = null
-        active = false
-        progress = 0f
-        val start = visualProgress
-        if (!alive || start <= 0f || !previewAllowed) {
+        synchronousTrace("daiyu.back.reset") {
+            if (owner != null && this.owner !== owner) return
+            this.owner = null
+            active = false
+            progress = 0f
+            val start = visualProgress
+            if (!alive || start <= 0f || !previewAllowed) {
+                settleJob?.cancel()
+                settleJob = null
+                visualProgress = 0f
+                gestureVisualActive = false
+                return
+            }
+            // Preserve the old cancel spring without making the page host observe every animation tick.
+            gestureVisualActive = true
             settleJob?.cancel()
-            settleJob = null
-            visualProgress = 0f
-            gestureVisualActive = false
-            return
-        }
-        // Preserve the old cancel spring without making the page host observe every animation tick.
-        gestureVisualActive = true
-        settleJob?.cancel()
-        val newSettleJob = scope.launch(start = CoroutineStart.LAZY) {
-            val settle = Animatable(start)
-            try {
-                settle.animateTo(0f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f)) {
-                    visualProgress = value
-                }
-            } finally {
-                if (settleJob === kotlinx.coroutines.currentCoroutineContext()[Job]) {
-                    visualProgress = 0f
-                    gestureVisualActive = false
-                    settleJob = null
+            val newSettleJob = scope.launch(start = CoroutineStart.LAZY) {
+                val settle = Animatable(start)
+                try {
+                    settle.animateTo(0f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f)) {
+                        visualProgress = value
+                    }
+                } finally {
+                    if (settleJob === kotlinx.coroutines.currentCoroutineContext()[Job]) {
+                        visualProgress = 0f
+                        gestureVisualActive = false
+                        settleJob = null
+                    }
                 }
             }
+            settleJob = newSettleJob
+            newSettleJob.start()
         }
-        settleJob = newSettleJob
-        newSettleJob.start()
     }
 }
 
@@ -215,7 +221,7 @@ private class PageBackCallbackSession {
     }
 }
 
-internal val LocalPageBackPreviewFrame = staticCompositionLocalOf<PageBackPreviewLayers.Frame?> { null }
+internal val LocalPageBackPreviewFrame = compositionLocalOf<PageBackPreviewLayers.Frame?> { null }
 
 /** Records only the page body when a surrounding overlay is not part of its back target. */
 @Composable
@@ -228,7 +234,7 @@ internal fun Modifier.pageBackPreviewSource(): Modifier {
     }.background(MiuixTheme.colorScheme.background)
 }
 
-private val LocalPageBackGesture = staticCompositionLocalOf<PageBackGestureState?> { null }
+internal val LocalPageBackGesture = compositionLocalOf<PageBackGestureState?> { null }
 
 /** Keeps nested page handlers in the dispatcher's existing last-enabled-first order. */
 @Composable
@@ -408,7 +414,7 @@ internal fun PageBackGestureHost(
             val request = if (value > 0f && currentTarget != null && visualBackTargetKey != null) {
                 layers.prepare(frame, visualBackTargetKey, value, predictive, direction, velocity)
             } else null
-            try { back() } finally {
+            try { synchronousTrace("daiyu.back.business-handler") { back() } } finally {
                 if (request != null) scope.launch {
                     withFrameNanos { }
                     // A veto or an asynchronous save must not be treated as a completed pop.
@@ -595,7 +601,11 @@ internal fun PageBackGestureHost(
                             LocalPageBackStackPath provides stackPath.takeIf { rootActive },
                             LocalPageBackPreviewFrame provides frame.takeIf { retainedRootVisible && captureFromContent },
                         ) {
-                            PageRetainedContent(retainedRootVisible, rootActive, resumed) { active -> retainedRootContent(active) }
+                            PageRetainedContent(retainedRootVisible, rootActive, resumed) { active ->
+                                // Keep the composable call in a composable scope, not the sync helper.
+                                Trace.beginSection("daiyu.chat.retained-compose")
+                                try { retainedRootContent(active) } finally { Trace.endSection() }
+                            }
                         }
                     }
                     key(contentKey) { content() }

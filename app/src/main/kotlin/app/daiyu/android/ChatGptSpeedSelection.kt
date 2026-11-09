@@ -8,6 +8,9 @@ import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ProviderEditorSlot
 
 internal data class ChatGptSpeedSelection(val editor: ProviderEditorSlot, val editing: EditingSettings) {
+    fun hasSameConfiguration(other: ChatGptSpeedSelection?): Boolean =
+        other != null && editor.slotId == other.editor.slotId && editing == other.editing
+
     val mode: GptSpeedMode? get() {
         if (editing.credentialUnavailable || editing.requestOptionsUnavailable || editing.headersUnavailable) return null
         val settings = editing.settings

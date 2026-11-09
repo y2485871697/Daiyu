@@ -15,6 +15,24 @@ class ChatGptSpeedSelectionTest {
         EditingSettings(ModelSettings("https://example.invalid", model, "fixture", false, protocol = protocol,
             requestOptions = ProviderRequestOptions(speedMode = mode, customBody = body, codex = codex)), false))
 
+    @Test fun configurationEqualityExcludesOnlyTheRegistryRevision() {
+        val original = selection()
+        assertTrue(original.hasSameConfiguration(original.copy()))
+        assertTrue(original.hasSameConfiguration(original.copy(editor = original.editor.copy(registryRevision = 2))))
+        assertNotEquals(original, original.copy(editor = original.editor.copy(registryRevision = 2)))
+        assertFalse(original.hasSameConfiguration(null))
+        assertFalse(original.hasSameConfiguration(original.copy(editor = original.editor.copy(slotId = "other"))))
+        listOf(
+            original.editing.copy(credentialUnavailable = true),
+            original.editing.copy(requestOptionsUnavailable = true),
+            original.editing.copy(headersUnavailable = true),
+            original.editing.copy(settings = original.editing.settings.copy(model = "other")),
+            original.editing.copy(settings = original.editing.settings.copy(contextWindowOverride = 32000)),
+            original.editing.copy(settings = original.editing.settings.copy(requestOptions =
+                original.editing.settings.requestOptions.copy(speedMode = GptSpeedMode.FAST))),
+        ).forEach { assertFalse(original.hasSameConfiguration(original.copy(editing = it))) }
+    }
+
     @Test fun cyclesThreeModesAndLeavesNullUnchangedUntilAnAction() {
         val original = selection()
         assertEquals(GptSpeedMode.NORMAL, original.mode)

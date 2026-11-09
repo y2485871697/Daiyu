@@ -13,6 +13,18 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.host = HOST.read_text(encoding='utf-8')
         self.main = (APP / 'MainActivity.kt').read_text(encoding='utf-8')
 
+    def test_chat_return_refresh_only_invalidates_changed_configuration(self):
+        reload = self.main.split('    private fun reloadConfirmedModelLabel(', 1)[1].split('    private fun refreshAutomaticCompression()', 1)[0]
+        self.assertIn('retainBalanceForProvider ?: confirmedGptSpeed?.editor?.slotId', reload)
+        self.assertIn('controller.providerBalances.cached(balanceProvider) !== balanceRuntime', reload)
+        self.assertIn('modelLabelRead === request && selected?.id == conversation && editorGeneration == generation', reload)
+        self.assertIn('if (it is kotlinx.coroutines.CancellationException) throw it', reload)
+        self.assertIn('!previous.hasSameConfiguration(next)', reload)
+        self.assertIn('if (previous != next) confirmedGptSpeed = next', reload)
+        self.assertIn('if (configurationChanged) contextModelRevision++', reload)
+        self.assertIn('if (presentationChanged)', reload)
+        self.assertLess(reload.index('balanceRuntime = saved?.third'), reload.index('publishChat(rowsChanged = false)'))
+
     def test_production_host_consumes_both_existing_preferences(self):
         for field in ('swipeDismissEnabled', 'predictiveBackEnabled'):
             self.assertIn(f'{field} = appearance.{field}', self.main)
@@ -173,7 +185,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (commit && state.alive) state.dispatchBack(screensPerSecond) { currentBack() }', self.host)
         self.assertIn('state.dispatchBack(screensPerSecond) { currentBack() }', self.host)
         handoff = self.host.split('fun dispatchBack(velocity: Float = 0f, back:', 1)[1].split('private var owner:', 1)[0]
-        self.assertIn('try { back() }', handoff)
+        self.assertIn('try { synchronousTrace("daiyu.back.custom-up-dispatch") { back() } }', handoff)
         self.assertIn('finally { swipeCommit = null; dispatching = false }', handoff)
         self.assertNotIn('withFrameNanos', handoff)
         self.assertIn('if (claimed && change.changedToUp()) {\n                                    change.consume()', self.host)
@@ -200,7 +212,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('captureFromContent: Boolean = false', self.host)
         self.assertIn('LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }', self.host)
         self.assertIn('if (captureFromContent) drawContent()', self.host)
-        source = self.host.split('internal fun Modifier.pageBackPreviewSource()', 1)[1].split('private val LocalPageBackGesture', 1)[0]
+        source = self.host.split('internal fun Modifier.pageBackPreviewSource()', 1)[1].split('internal val LocalPageBackGesture', 1)[0]
         self.assertIn('LocalPageBackPreviewFrame.current ?: return this', source)
         self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', source)
         self.assertIn('drawLayer(frame.layer)', source)
@@ -282,6 +294,58 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (!visible && (!visited || !resumed)) return', retained)
         self.assertIn('Modifier.clearAndSetSemantics {}', retained)
         self.assertNotIn('delay(', retained)
+
+    def test_dynamic_navigation_locals_track_only_their_readers(self):
+        retained = (APP / 'ui/navigation/PageRetainedContent.kt').read_text()
+        stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
+        for name, source in (('LocalPageContentActive', retained),
+                             ('LocalPageBackGesture', self.host),
+                             ('LocalPageBackStackPath', stack),
+                             ('LocalPageBackPreviewFrame', self.host)):
+            declaration = next(line for line in source.splitlines() if f'val {name} =' in line)
+            self.assertIn('compositionLocalOf', declaration)
+            self.assertNotIn('staticCompositionLocalOf', declaration)
+        self.assertIn('compositionLocalOf { true }', retained)
+        self.assertIn('compositionLocalOf<PageBackGestureState?> { null }', self.host)
+        self.assertIn('compositionLocalOf<PageBackStackPath?> { null }', stack)
+        self.assertIn('compositionLocalOf<PageBackPreviewLayers.Frame?> { null }', self.host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
+        self.assertIn('fun testDynamicNavigationLocalsOnlyRecomposeTheirSeparateConsumerScopes()', test)
+        for probe in ('ActiveLocalProbe', 'GestureLocalProbe', 'StackLocalProbe',
+                      'PreviewLocalProbe', 'UnreadLocalProbe'):
+            self.assertIn(f'private fun {probe}()', test)
+        self.assertIn('before[scope], localCompositions[scope]', test)
+        self.assertIn('localCompositions[scope] > before[scope]', test)
+
+    def test_release_sync_traces_have_fixed_names_and_do_not_wrap_suspension(self):
+        helper = (APP / 'diagnostics/SynchronousTrace.kt').read_text()
+        self.assertIn('Trace.beginSection(name)', helper)
+        self.assertIn('try { block() } finally { Trace.endSection() }', helper)
+        self.assertNotIn('BuildConfig', helper)
+        self.assertNotIn('JANK_DIAGNOSTICS', helper)
+        self.assertNotIn('Log.', helper)
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        retained = (APP / 'ui/navigation/PageRetainedContent.kt').read_text()
+        chat = (APP / 'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
+        for name in ('custom-up-dispatch', 'callback-commit', 'business-handler', 'reset'):
+            self.assertIn(f'synchronousTrace("daiyu.back.{name}")', self.host)
+        prepare = layers.split('    fun prepare(', 1)[1].split('    fun abandon(', 1)[0]
+        self.assertIn('synchronousTrace("daiyu.back.prepare")', prepare)
+        self.assertIn('freeze(frame)', prepare)
+        self.assertNotIn('launch', prepare)
+        self.assertNotIn('withFrameNanos', prepare)
+        freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun capture(', 1)[0]
+        self.assertIn('if (frame.frozen) return', freeze)
+        for name in ('lifecycle-set', 'lifecycle-close'):
+            self.assertIn(f'synchronousTrace("daiyu.retained.{name}")', retained)
+        self.assertIn('Trace.beginSection("daiyu.chat.retained-compose")', self.host)
+        self.assertIn('try { retainedRootContent(active) } finally { Trace.endSection() }', self.host)
+        for name in ('position-seed', 'restore-lifecycle', 'restore-clearance'):
+            self.assertIn(f'synchronousTrace("daiyu.chat.{name}")', chat)
+        clearance = chat.split('    fun correctFollowClearance()', 1)[1].split('    val requestedIndex', 1)[0]
+        self.assertNotIn('withFrameNanos', clearance)
+        self.assertNotIn('scrollToItem', clearance)
+        self.assertIn('remeasurement.forceRemeasure()', clearance)
 
     def test_continuous_redraw_uses_throttled_same_size_last_good_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()

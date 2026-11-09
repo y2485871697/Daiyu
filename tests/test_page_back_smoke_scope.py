@@ -40,7 +40,8 @@ class PageBackSmokeScopeTests(unittest.TestCase):
 
     def test_partial_extended_duplicate_and_other_modes_keep_full_selection(self):
         classes = ','.join(CLASSES)
-        for raw in ('', ','.join(CLASSES[:-1]), classes + ',app.daiyu.android.UnknownTest',
+        for raw in ('', ','.join(name.rsplit('.', 1)[-1] for name in CLASSES),
+                    ','.join(CLASSES[:-1]), classes + ',app.daiyu.android.UnknownTest',
                     classes + ',' + CLASSES[0], ' ' + classes):
             self.assertEqual('full', recorder.command_for('python3', dict(
                 SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=raw))[1])

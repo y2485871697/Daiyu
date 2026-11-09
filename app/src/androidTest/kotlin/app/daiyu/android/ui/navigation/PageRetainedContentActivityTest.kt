@@ -121,6 +121,108 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         assertEquals(Lifecycle.State.RESUMED, owner.lifecycle.currentState)
     }
 
+    private val localCompositions = IntArray(5)
+    private var observedActive = true
+
+    @androidx.compose.runtime.Composable
+    private fun ActiveLocalProbe() {
+        val value = LocalPageContentActive.current
+        SideEffect { localCompositions[0]++; observedActive = value }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun GestureLocalProbe() {
+        val value = LocalPageBackGesture.current
+        SideEffect { localCompositions[1]++; observedGesture = value }
+    }
+
+    private var observedGesture: PageBackGestureState? = null
+
+    @androidx.compose.runtime.Composable
+    private fun StackLocalProbe() {
+        val value = LocalPageBackStackPath.current
+        SideEffect { localCompositions[2]++; observedPath = value }
+    }
+
+    private var observedPath: PageBackStackPath? = null
+
+    @androidx.compose.runtime.Composable
+    private fun PreviewLocalProbe() {
+        val value = LocalPageBackPreviewFrame.current
+        SideEffect { localCompositions[3]++; observedPreview = value }
+    }
+
+    private var observedPreview: PageBackPreviewLayers.Frame? = null
+
+    @androidx.compose.runtime.Composable
+    private fun UnreadLocalProbe() {
+        SideEffect { localCompositions[4]++ }
+    }
+
+    fun testDynamicNavigationLocalsOnlyRecomposeTheirSeparateConsumerScopes() {
+        var active by mutableStateOf(true)
+        var gestureEnabled by mutableStateOf(true)
+        var stackEnabled by mutableStateOf(true)
+        var previewEnabled by mutableStateOf(true)
+        // A stable provider child with five independent restart scopes. None reads the
+        // control state; static locals would invalidate all five, including unread.
+        val probes: @androidx.compose.runtime.Composable () -> Unit = {
+            ActiveLocalProbe()
+            GestureLocalProbe()
+            StackLocalProbe()
+            PreviewLocalProbe()
+            UnreadLocalProbe()
+        }
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    PageBackGestureHost("local-probes", canNavigateBack = false,
+                        swipeDismissEnabled = false, predictiveBackEnabled = false,
+                        animateBackEnabled = false, dispatchBack = {}, captureFromContent = true) {
+                        val gesture = checkNotNull(LocalPageBackGesture.current)
+                        val stack = checkNotNull(LocalPageBackStackPath.current)
+                        val preview = checkNotNull(LocalPageBackPreviewFrame.current)
+                        CompositionLocalProvider(
+                            LocalPageContentActive provides active,
+                            LocalPageBackGesture provides gesture.takeIf { gestureEnabled },
+                            LocalPageBackStackPath provides stack.takeIf { stackEnabled },
+                            LocalPageBackPreviewFrame provides preview.takeIf { previewEnabled },
+                            content = probes,
+                        )
+                    }
+                }
+            }
+        }
+        dismissIme()
+        ui.waitForIdle()
+        assertNotNull(observedGesture)
+        assertNotNull(observedPath)
+        assertNotNull(observedPreview)
+        val changes: List<() -> Unit> = listOf(
+            { active = !active }, { gestureEnabled = !gestureEnabled },
+            { stackEnabled = !stackEnabled }, { previewEnabled = !previewEnabled },
+        )
+        // Both directions, no emulator timing threshold: only actual committed compositions.
+        repeat(2) {
+            changes.forEachIndexed { consumer, change ->
+                val before = localCompositions.copyOf()
+                mainThread { change() }
+                ui.waitForIdle()
+                mainThread {
+                    localCompositions.indices.forEach { scope ->
+                        if (scope == consumer) assertTrue("consumer $scope must observe its local change",
+                            localCompositions[scope] > before[scope])
+                        else assertEquals("unrelated scope $scope changed for local $consumer",
+                            before[scope], localCompositions[scope])
+                    }
+                }
+            }
+        }
+        assertNotNull(observedGesture)
+        assertNotNull(observedPath)
+        assertNotNull(observedPreview)
+    }
+
     fun testRealChatOrdinaryReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = false)
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)

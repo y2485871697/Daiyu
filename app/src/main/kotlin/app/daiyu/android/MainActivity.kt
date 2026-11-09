@@ -1160,6 +1160,8 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            android.os.Trace.beginSection("daiyu.back.route-change")
+            try {
             if (value != retainedPageState) {
                 revokeWorkspaceVisit()
                 resetRootExitConfirmation()
@@ -1226,6 +1228,7 @@ class MainActivity : ComponentActivity() {
                 keepThumbnails = value == "chat")
             retainedPageState = value
             syncHaptics()
+            } finally { android.os.Trace.endSection() }
         }
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, "", conversationsLoaded = false))
     private data class PaneRevision(val data: Long, val title: Long,
@@ -7228,8 +7231,8 @@ class MainActivity : ComponentActivity() {
         val conversation = selected?.id
         val generation = editorGeneration
         modelLabelRead = request
-        if (retainBalanceForProvider == null ||
-            controller.providerBalances.cached(retainBalanceForProvider) !== balanceRuntime) {
+        val balanceProvider = retainBalanceForProvider ?: confirmedGptSpeed?.editor?.slotId
+        if (balanceProvider == null || controller.providerBalances.cached(balanceProvider) !== balanceRuntime) {
             balanceRuntime = null
         }
         lifecycleScope.launch {
@@ -7238,18 +7241,30 @@ class MainActivity : ComponentActivity() {
                     val (editor, editing) = controller.conversationModelEditing(conversation)
                     val runtime = controller.providerBalances.get(editor.slotId)
                     Triple(editor, editing, runtime)
-                }.getOrNull()
+                }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             }
-            val saved = loaded
             if (activityUsable() && modelLabelRead === request && selected?.id == conversation && editorGeneration == generation) {
-                confirmedModelLabel = saved?.second?.settings?.model?.ifBlank { "模型" } ?: "模型"
-                confirmedReasoningModel = saved?.second?.settings?.let {
-                    runCatching { app.daiyu.android.model.ReasoningRequestPolicy.requestModel(it.model, it.requestOptions) }.getOrNull()
-                }.orEmpty()
-                confirmedGptSpeed = saved?.let { ChatGptSpeedSelection(it.first, it.second) }
-                publishChat(rowsChanged = false)
-                contextModelRevision++
-                balanceRuntime = saved?.third
+                app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.model-refresh-commit") {
+                    val saved = loaded.getOrNull()
+                    val next = saved?.let { ChatGptSpeedSelection(it.first, it.second) }
+                    val previous = confirmedGptSpeed
+                    val label = saved?.second?.settings?.model?.ifBlank { "模型" } ?: "模型"
+                    val reasoningModel = saved?.second?.settings?.let {
+                        runCatching { app.daiyu.android.model.ReasoningRequestPolicy.requestModel(it.model, it.requestOptions) }.getOrNull()
+                    }.orEmpty()
+                    val configurationChanged = if (previous == null) next != null else !previous.hasSameConfiguration(next)
+                    val presentationChanged = confirmedModelLabel != label || confirmedReasoningModel != reasoningModel || previous != next
+                    balanceRuntime = saved?.third
+                    confirmedModelLabel = label
+                    confirmedReasoningModel = reasoningModel
+                    if (previous != next) confirmedGptSpeed = next
+                    if (configurationChanged) contextModelRevision++
+                    if (presentationChanged) {
+                        app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.model-refresh-publish") {
+                            publishChat(rowsChanged = false)
+                        }
+                    }
+                }
             }
         }
     }

@@ -76,7 +76,9 @@ jobs:
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
               patterns = ('test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py',
                           'test_chat_timeline_contract.py', 'test_reasoning_flow_stability_contract.py',
-                          'test_diagnostic_smoke_source.py')
+                          'test_diagnostic_smoke_source.py', 'test_page_back_smoke_scope.py',
+                          'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py',
+                          'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] in ('menu-scroll', 'ui-jank'):
               patterns += ('test_diagnostic_smoke_source.py', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
           for pattern in patterns:
@@ -130,7 +132,7 @@ jobs:
             classes=(app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
           fi
           if [[ $SCREEN_JANK_CHECK_SCOPE == page-back ]]; then
-            classes=(app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest)
+            classes=(app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest app.daiyu.android.ChatGptSpeedSelectionTest)
           fi
           filters=()
           for class in "${classes[@]}"; do
@@ -159,7 +161,7 @@ jobs:
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'ui-jank':
               expected = {'JankIncidentBufferTest', 'FramePerformanceLogTest', 'DiagnosticLogStoreTest', 'ChatMenuIsolationCompositionTest'}
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
-              expected = {'ReconnectPartsTest', 'ReconnectIndexTest', 'RootExitConfirmationTest', 'PageBackMotionTest'}
+              expected = {'ReconnectPartsTest', 'ReconnectIndexTest', 'RootExitConfirmationTest', 'PageBackMotionTest', 'ChatGptSpeedSelectionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

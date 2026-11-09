@@ -9,7 +9,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 
 internal data class PageBackRouteKey(val root: Any, val path: List<Any>)
 
@@ -40,7 +40,7 @@ internal class PageBackStackRegistry {
 }
 
 internal data class PageBackStackPath(val registry: PageBackStackRegistry, val path: List<Any> = emptyList(), val entry: PageBackStackRegistry.Entry? = null)
-internal val LocalPageBackStackPath = staticCompositionLocalOf<PageBackStackPath?> { null }
+internal val LocalPageBackStackPath = compositionLocalOf<PageBackStackPath?> { null }
 
 /** Registers visual subroutes without replacing their live composition or back callbacks. */
 @Composable

@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.navigation
 
+import app.daiyu.android.diagnostics.synchronousTrace
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -9,7 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
@@ -22,7 +23,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 
-internal val LocalPageContentActive = staticCompositionLocalOf { true }
+internal val LocalPageContentActive = compositionLocalOf { true }
 
 private class RetainedPageLifecycle : LifecycleOwner {
     val registry = LifecycleRegistry(this)
@@ -32,12 +33,14 @@ private class RetainedPageLifecycle : LifecycleOwner {
         if (closed) return
         val target = if (active) parent else minOf(parent, Lifecycle.State.CREATED)
         if (target == Lifecycle.State.INITIALIZED && registry.currentState != Lifecycle.State.INITIALIZED) return
-        registry.currentState = target
+        synchronousTrace("daiyu.retained.lifecycle-set") { registry.currentState = target }
     }
     fun close() {
         if (closed) return
         closed = true
-        if (registry.currentState.isAtLeast(Lifecycle.State.CREATED)) registry.currentState = Lifecycle.State.DESTROYED
+        if (registry.currentState.isAtLeast(Lifecycle.State.CREATED)) {
+            synchronousTrace("daiyu.retained.lifecycle-close") { registry.currentState = Lifecycle.State.DESTROYED }
+        }
     }
 }
 

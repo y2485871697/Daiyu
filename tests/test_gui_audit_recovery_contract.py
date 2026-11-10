@@ -55,7 +55,9 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         runtime = (K / 'gui/GuiAccessibilityService.kt').read_text()
         factory = (K / 'gui/GuiScreenToolFactory.kt').read_text()
         self.assertIn('require(maxNodes in 128..512)', runtime)
-        self.assertIn('maxNodes = observed.maxNodes', runtime)
+        self.assertIn('maxNodes = observedMaxNodes(lease)', runtime)
+        action = runtime.split('private fun actionInternal', 1)[1].split('internal fun', 1)[0]
+        self.assertNotIn('sampleTree(', action)
         self.assertIn('count > observed.maxNodes', runtime)
         self.assertIn('observe_again_with_max_nodes_512', factory)
         self.assertIn('ArgumentType.Integer(0, 511)', factory)

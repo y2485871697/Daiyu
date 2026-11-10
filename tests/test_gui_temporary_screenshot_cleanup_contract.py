@@ -92,7 +92,7 @@ class TemporaryScreenScreenshotCleanupContract(unittest.TestCase):
 
     def test_incremental_cloud_scope_includes_store_and_native_receipt_regressions_without_packaging(self):
         source = (ROOT / '.github/workflows/gui-screenshot-checks.yml').read_text()
-        self.assertIn('options: [screenshot, direct-read, temporary-cleanup]', source)
+        self.assertIn('options: [screenshot, direct-read, temporary-cleanup, gestures]', source)
         targeted = source.split('      - name: 独立截图路由及资源生命周期定向检查（不打包）', 1)[1].split('      - name: 核对定向报告及零安装包', 1)[0]
         self.assertIn('test_gui_temporary_screenshot_cleanup_contract', targeted)
         for name in ('ScreenToolImageStoreTest', 'ScreenToolImageInputTest', 'ToolScreenshotReceiptUnitTest'):

@@ -357,16 +357,23 @@ class PageBackGestureContractTest(unittest.TestCase):
         for expected in (
             'Composer.setTracer(SystemTracer)',
             'private object SystemTracer : CompositionTracer',
-            'Build.VERSION.SDK_INT < 29',
             'Build.VERSION.SDK_INT >= 29 && Trace.isEnabled()',
-            'Trace.beginSection(info.take(MAX_SECTION_NAME_LENGTH))',
-            'MAX_SECTION_NAME_LENGTH = 127',
+            'Trace.beginSection(info.take(BackPerformanceRecorder.MAX_COMPOSE_NAME))',
+            'onMainThread() && samples.enabled(BackPerformance.recorder.compositionToken())',
+            'samples.start(BackPerformance.recorder.compositionToken(), info)',
+            'samples.end(BackPerformance.recorder.compositionToken())',
             'Trace.endSection()',
         ):
             self.assertIn(expected, source)
         self.assertIn('ComposeSystemTrace.install()', application)
         self.assertNotIn('JANK_DIAGNOSTICS', source + application.split('class ChatApplication', 1)[1].split('class ChatController', 1)[0])
         self.assertNotIn('runtime-tracing', source)
+        self.assertNotIn('Build.VERSION.SDK_INT < 29', source)
+        collector = (APP / 'diagnostics/BackCompositionSamples.kt').read_text()
+        self.assertIn('MAX_CALLS = 4096', collector)
+        self.assertIn('MAX_DEPTH = 128', collector)
+        self.assertIn('stopped = true', collector)
+        self.assertNotIn('Trace.', collector)
 
     def test_continuous_redraw_uses_throttled_same_size_last_good_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()

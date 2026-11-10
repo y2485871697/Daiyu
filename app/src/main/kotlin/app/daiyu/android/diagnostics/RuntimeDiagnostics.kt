@@ -199,6 +199,12 @@ internal object RuntimeDiagnostics {
                         .put("timeline", JSONArray().apply { incident.timeline.forEach { mark ->
                             put(JSONObject().put("event", mark.event.name).put("offset_ns", mark.offset).put("count", mark.count))
                         } })
+                        .put("compose_observed", incident.composeObserved).put("compose_limited", incident.composeLimited)
+                        .put("compose_timing_semantics", "NESTED_ELAPSED_NOT_CPU")
+                        .put("compositions", JSONArray().apply { incident.compositions.forEach { sample ->
+                            put(JSONObject().put("function", sample.function).put("start_offset_ns", sample.offset)
+                                .put("inclusive_ns", sample.inclusive).put("self_ns", sample.self))
+                        } })
                         .put("capture_timing_semantics", "ELAPSED_INCLUDING_SUSPENSION_NOT_CPU")
                         .put("capture_timings", JSONArray().apply { incident.captures.forEach { timing ->
                             put(JSONObject().put("phase", timing.phase.name).put("start_offset_ns", timing.offset)

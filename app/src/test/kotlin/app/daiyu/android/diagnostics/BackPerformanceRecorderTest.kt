@@ -294,4 +294,141 @@ class BackPerformanceRecorderTest {
         f.end(); assertEquals(2, f.rows.size)
     }
 
+
+    @Test fun nativeTraceEventsPairTheirStartStateAcrossSwitchesAndThreads() {
+        val main = CompositionTraceEvents(); val worker = CompositionTraceEvents()
+        assertFalse(main.end()); assertFalse(main.pending)
+        assertFalse(main.start(false)); assertTrue(main.pending)
+        assertTrue(main.start(true)); assertTrue(worker.start(true))
+        assertTrue(main.end()); assertTrue(main.pending)
+        assertFalse(main.end()); assertFalse(main.pending)
+        assertTrue(worker.pending); assertTrue(worker.end()); assertFalse(worker.pending)
+    }
+
+    @Test fun nativeTraceDepthOverflowDrainsWithoutClosingTrackedParents() {
+        val events = CompositionTraceEvents()
+        repeat(BackCompositionSamples.MAX_DEPTH) { assertTrue(events.start(true)) }
+        repeat(4) { assertFalse(events.start(true)) }
+        repeat(4) { assertFalse(events.end()); assertTrue(events.pending) }
+        repeat(BackCompositionSamples.MAX_DEPTH) { assertTrue(events.end()) }
+        assertFalse(events.pending); assertFalse(events.end())
+    }
+
+    @Test fun expiredCompositionFlagsCannotMutateHardOrTailWindowsOrTheNextWindow() {
+        for (tail in listOf(false, true)) {
+            val f = Fixture(); val old = f.start(); f.frame()
+            if (tail) f.recorder.commit(f.owner)
+            f.now += if (tail) BackPerformanceRecorder.TAIL_NS else BackPerformanceRecorder.HARD_NS
+            assertNull(f.recorder.compositionToken())
+            f.recorder.compositionObserved(old); f.recorder.compositionLimited(old)
+            f.recorder.checkpoint()
+            assertFalse(f.rows.single().composeObserved); assertFalse(f.rows.single().composeLimited)
+            f.start(); f.frame()
+            f.recorder.compositionObserved(old); f.recorder.compositionLimited(old)
+            f.end()
+            assertFalse(f.rows.last().composeObserved); assertFalse(f.rows.last().composeLimited)
+        }
+    }
+
+    private fun Fixture.compositions() = BackCompositionSamples(
+        clock = { now }, observed = recorder::compositionObserved,
+        limited = recorder::compositionLimited, completed = recorder::composition,
+    )
+
+    @Test fun compositionCallbacksOutsideWindowsDoNotReadClockOrSave() {
+        var reads = 0
+        val samples = BackCompositionSamples({ reads++; 1L }, { fail() }, { fail() }, { _, _, _, _, _ -> fail() })
+        assertFalse(samples.enabled(null))
+        samples.start(null, "not-saved"); samples.end(null)
+        assertEquals(0, reads)
+        val f = Fixture()
+        assertNull(f.recorder.compositionToken())
+    }
+
+    @Test fun aSlowCompositionAloneSavesTheWindowWithoutSyntheticFramesOrPhases() {
+        val f = Fixture(); val token = f.start(); val samples = f.compositions()
+        samples.start(token, "app.daiyu.android.SlowComposition (Fixture.kt:1)")
+        f.now += 20_000_000L; samples.end(token); f.end()
+        val row = f.rows.single()
+        assertEquals(0, row.frames); assertTrue(row.phases.isEmpty())
+        assertTrue(row.composeObserved); assertFalse(row.composeLimited)
+        assertEquals(20_000_000L, row.compositions.single().self)
+    }
+
+    @Test fun nestedCompositionSelfTimeExcludesChildrenAndRetainsStaticNames() {
+        val f = Fixture(); val token = f.start(); val samples = f.compositions()
+        samples.end(token) // End of a parent entered before the window is deliberately unattributed.
+        samples.start(token, "app.daiyu.android.Parent (Fixture.kt:1)")
+        f.now += 1_000_000L
+        samples.start(token, "app.daiyu.android.Child (Fixture.kt:2)")
+        f.now += 20_000_000L; samples.end(token)
+        f.now += 3_000_000L; samples.end(token); f.end()
+        val row = f.rows.single()
+        assertTrue(row.composeObserved); assertFalse(row.composeLimited)
+        assertEquals(listOf(20_000_000L, 4_000_000L), row.compositions.map { it.self })
+        assertEquals(listOf(20_000_000L, 24_000_000L), row.compositions.map { it.inclusive })
+        assertEquals(listOf(1_000_000L, 0L), row.compositions.map { it.offset })
+        assertTrue(row.compositions.first().function.contains("Child"))
+    }
+
+    @Test fun compositionWindowsChangingInsideParentNeverRebindTheOldSpan() {
+        val f = Fixture(); val first = f.start(); val samples = f.compositions()
+        samples.start(first, "old-parent"); f.now += 2_000_000L
+        f.frame(); val second = f.start()
+        samples.end(second)
+        samples.start(second, "new-child"); f.now += 20_000_000L; samples.end(second)
+        samples.end(second); f.end()
+        assertTrue(f.rows.first().compositions.isEmpty())
+        assertEquals("new-child", f.rows.last().compositions.single().function)
+        assertEquals(20_000_000L, f.rows.last().compositions.single().inclusive)
+    }
+
+    @Test fun compositionDeadlineAndClearDiscardUnfinishedSpansWithoutCountingCompletion() {
+        val f = Fixture(); val token = f.start(); val samples = f.compositions(); f.frame()
+        samples.start(token, "unfinished"); f.recorder.commit(f.owner)
+        f.now += BackPerformanceRecorder.TAIL_NS
+        assertNull(f.recorder.compositionToken())
+        samples.end(f.recorder.compositionToken()); f.recorder.checkpoint()
+        assertTrue(f.rows.single().compositions.isEmpty())
+        val next = f.start(); samples.start(next, "cleared"); f.epoch++
+        assertNull(f.recorder.compositionToken()); samples.end(f.recorder.compositionToken())
+        f.end(); assertEquals(1, f.rows.size)
+    }
+
+    @Test fun compositionDepthAndCallbackBudgetsStopUntilAnotherWindow() {
+        val f = Fixture(); val samples = f.compositions(); var token = f.start(); f.frame()
+        repeat(BackCompositionSamples.MAX_DEPTH + 1) { samples.start(token, "nested") }
+        assertFalse(samples.enabled(token)); samples.end(token); f.end()
+        assertTrue(f.rows.single().composeLimited); assertTrue(f.rows.single().compositions.isEmpty())
+        token = f.start(); f.frame()
+        repeat(BackCompositionSamples.MAX_CALLS) { samples.start(token, "small"); samples.end(token) }
+        samples.start(token, "beyond-budget")
+        assertFalse(samples.enabled(token)); f.end()
+        assertTrue(f.rows.last().composeLimited)
+        assertTrue(samples.enabled(f.start()))
+    }
+
+    @Test fun onlyFourCompletedSelfSamplesAreSavedAndNamesAreBounded() {
+        val f = Fixture(); val token = f.start(); val samples = f.compositions(); f.frame()
+        samples.start(token, "below-threshold"); f.now += 999_999L; samples.end(token)
+        repeat(6) { index ->
+            samples.start(token, "function-$index-" + "x".repeat(500))
+            f.now += (index + 1) * 1_000_000L; samples.end(token)
+        }
+        f.end()
+        val rows = f.rows.single().compositions
+        assertEquals(4, rows.size)
+        assertEquals(listOf(6_000_000L, 5_000_000L, 4_000_000L, 3_000_000L), rows.map { it.self })
+        assertTrue(rows.all { it.function.length == BackPerformanceRecorder.MAX_COMPOSE_NAME })
+    }
+
+    @Test fun staleOrOutOfWindowCompositionSamplesCannotEnterNextWindow() {
+        val f = Fixture(); val old = f.start(); val began = f.now
+        f.now += 1_000_000L; val token = f.start(); f.frame()
+        f.recorder.composition(old, "stale", began, 20_000_000L, 20_000_000L)
+        f.recorder.composition(token, "before-start", began, 20_000_000L, 20_000_000L)
+        f.recorder.composition(token, "invalid-self", f.now, 1L, 20_000_000L)
+        f.recorder.composition(token, "beyond-deadline", f.now, BackPerformanceRecorder.HARD_NS + 1, 20_000_000L)
+        f.end(); assertTrue(f.rows.single().compositions.isEmpty())
+    }
 }

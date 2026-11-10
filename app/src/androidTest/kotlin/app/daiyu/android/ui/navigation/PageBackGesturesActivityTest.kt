@@ -147,6 +147,51 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         if (capturePreviousPage) prepareCurrentPixels()
     }
 
+    @androidx.compose.runtime.Composable
+    private fun BackCompositionProbe() {
+        // Test-only elapsed work: verifies compiler callbacks, not emulator performance.
+        val until = System.nanoTime() + 20_000_000L
+        while (System.nanoTime() < until) { }
+        Box(Modifier.fillMaxSize().testTag("back-composition-probe"))
+    }
+
+    fun testOrdinaryBuildPersistsRealCompilerNamesWithoutSystemTraceOrBroadDiagnostics() {
+        val runtime = app.daiyu.android.diagnostics.RuntimeDiagnostics
+        val recorder = app.daiyu.android.diagnostics.BackPerformance.recorder
+        val previousEnabled = runtime.enabled
+        assertFalse(app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS)
+        assertFalse(Build.VERSION.SDK_INT >= 29 && android.os.Trace.isEnabled())
+        runtime.enabled = false
+        runtime.clear()
+        try {
+            mainThread {
+                recorder.start(Any(), app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.BACK_PRESS)
+                activity.setContent { BackCompositionProbe() }
+            }
+            ui.onNodeWithTag("back-composition-probe").assertExists()
+            mainThread { recorder.end(app.daiyu.android.diagnostics.BackPerformanceRecorder.End.PAUSED) }
+            val rows = runtime.export()
+            val incidents = (0 until rows.length()).map { rows.getJSONObject(it) }
+                .filter { it.optString("stage") == "BACK_PERFORMANCE" }
+            val incident = incidents.single()
+            assertTrue(incident.getBoolean("compose_observed"))
+            assertFalse(incident.getBoolean("compose_limited"))
+            assertEquals("NESTED_ELAPSED_NOT_CPU", incident.getString("compose_timing_semantics"))
+            val samples = incident.getJSONArray("compositions")
+            assertTrue(samples.length() in 1..4)
+            val probe = (0 until samples.length()).map { samples.getJSONObject(it) }
+                .single { it.getString("function").contains("BackCompositionProbe") }
+            assertTrue(probe.getLong("self_ns") >= 20_000_000L)
+            assertTrue(probe.getLong("inclusive_ns") >= probe.getLong("self_ns"))
+            assertTrue(probe.getLong("start_offset_ns") >= 0L)
+            assertEquals(0, incident.getInt("frame_count"))
+            assertFalse(runtime.enabled)
+        } finally {
+            mainThread { recorder.end(app.daiyu.android.diagnostics.BackPerformanceRecorder.End.PAUSED) }
+            runtime.clear(); runtime.enabled = previousEnabled
+        }
+    }
+
     fun testOrdinaryBuildAutomaticallyRecordsClaimedBackWithBroadDiagnosticsOff() {
         val runtime = app.daiyu.android.diagnostics.RuntimeDiagnostics
         val recorder = app.daiyu.android.diagnostics.BackPerformance.recorder

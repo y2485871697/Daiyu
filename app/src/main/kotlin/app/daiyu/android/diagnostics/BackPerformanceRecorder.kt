@@ -34,6 +34,7 @@ internal class BackPerformanceRecorder(
     enum class CaptureResult { COMPLETE, STORED, DISCARDED, CANCELLED, FAILED, IN_FLIGHT }
     data class Mark(val event: Event, val offset: Long, val count: Int)
     data class CaptureTiming(val phase: Phase, val offset: Long, val duration: Long, val result: CaptureResult)
+    data class Composition(val function: String, val offset: Long, val inclusive: Long, val self: Long)
     class Owner(val host: Any, val schedule: (Long, () -> Unit) -> Unit)
     data class Token(val sequence: Long, val epoch: Long)
     data class Sample(val token: Token, val phase: Phase, val started: Long, val slot: Int)
@@ -50,9 +51,11 @@ internal class BackPerformanceRecorder(
         val minBudget: Long, val maxBudget: Long, val minHz: Float, val maxHz: Float,
         val phases: List<PhaseStats>, val worst: List<Frame>, val overlapFrames: Int, val overlapSlow: Int,
         val timeline: List<Mark> = emptyList(), val timelineDropped: Int = 0,
-        val captures: List<CaptureTiming> = emptyList(), val capturesDropped: Int = 0)
+        val captures: List<CaptureTiming> = emptyList(), val capturesDropped: Int = 0,
+        val compositions: List<Composition> = emptyList(), val composeObserved: Boolean = false,
+        val composeLimited: Boolean = false)
     private class Window(val owner: Any, val token: Token, val kind: Kind, val start: Long) {
-        var deadline = start + HARD_NS
+        @Volatile var deadline = start + HARD_NS
         var commit = false
         var route = false
         var frames = 0; var slow = 0; var max = 0L
@@ -65,9 +68,12 @@ internal class BackPerformanceRecorder(
         var timelineDropped = 0
         val captures = arrayListOf<CaptureTiming>()
         var capturesDropped = 0
+        val compositions = arrayListOf<Composition>()
+        var composeObserved = false
+        var composeLimited = false
     }
     private var sequence = 0L
-    private var active: Window? = null
+    @Volatile private var active: Window? = null
     @Synchronized fun start(owner: Any, kind: Kind): Token {
         finish(End.SUPERSEDED)
         return Token(++sequence, epoch()).also { active = Window(owner, it, kind, clock()) }
@@ -78,6 +84,27 @@ internal class BackPerformanceRecorder(
         return window
     }
     @Synchronized fun token(): Token? = valid()?.token
+
+    // The callback hot path only reads the clock while a back window is present.
+    fun compositionToken(): Token? {
+        val window = active ?: return null
+        return window.token.takeIf { it.epoch == epoch() && clock() < window.deadline }
+    }
+    @Synchronized fun compositionObserved(source: Token) {
+        valid()?.takeIf { it.token == source && clock() < it.deadline }?.composeObserved = true
+    }
+    @Synchronized fun compositionLimited(source: Token) {
+        valid()?.takeIf { it.token == source && clock() < it.deadline }?.composeLimited = true
+    }
+    @Synchronized fun composition(source: Token, info: String, started: Long, inclusive: Long, self: Long) {
+        val window = valid()?.takeIf { it.token == source } ?: return
+        if (started < window.start || started >= window.deadline || inclusive < self ||
+            self < BackCompositionSamples.MIN_SELF_NS || inclusive > window.deadline - started) return
+        val rank = window.compositions.indexOfFirst { it.self < self }.let { if (it < 0) window.compositions.size else it }
+        if (rank >= MAX_COMPOSITIONS) return
+        window.compositions.add(rank, Composition(info.take(MAX_COMPOSE_NAME), started - window.start, inclusive, self))
+        if (window.compositions.size > MAX_COMPOSITIONS) window.compositions.removeAt(MAX_COMPOSITIONS)
+    }
     @Synchronized fun observing(host: Any): Boolean = (valid()?.owner as? Owner)?.host === host
     @Synchronized fun endHost(host: Any, reason: End) {
         if ((valid()?.owner as? Owner)?.host === host) finish(reason)
@@ -189,7 +216,8 @@ internal class BackPerformanceRecorder(
                 PhaseStats(phase, stats.count, stats.total, stats.max, pending.size, inFlightMax)
         }
         if (window.slow == 0 && window.overlapSlow == 0 &&
-            phases.none { it.max >= SLOW_PHASE_NS || it.inFlightMaxObserved >= SLOW_PHASE_NS }) return
+            phases.none { it.max >= SLOW_PHASE_NS || it.inFlightMaxObserved >= SLOW_PHASE_NS } &&
+            window.compositions.none { it.self >= SLOW_PHASE_NS }) return
         val pendingCaptures = listOf(Phase.CAPTURE_LAUNCH, Phase.CAPTURE_WALL).flatMap { phase ->
             window.phases[phase.ordinal].pending.filterNotNull().map { sample ->
                 CaptureTiming(phase, (sample.started - window.start).coerceAtLeast(0),
@@ -204,7 +232,7 @@ internal class BackPerformanceRecorder(
             phases, window.worst.toList(), window.overlapFrames, window.overlapSlow,
             window.timeline.toList(), window.timelineDropped, captures,
             (window.capturesDropped + (window.captures.size + pendingCaptures.size - MAX_CAPTURE_TIMINGS).coerceAtLeast(0))
-                .coerceAtMost(MAX_COUNT)))
+                .coerceAtMost(MAX_COUNT), window.compositions.toList(), window.composeObserved, window.composeLimited))
     }
     companion object {
         const val TAIL_NS = 750_000_000L
@@ -212,6 +240,8 @@ internal class BackPerformanceRecorder(
         const val SLOW_PHASE_NS = 16_000_000L
         const val MAX_TIMELINE = 32
         const val MAX_CAPTURE_TIMINGS = 16
+        const val MAX_COMPOSITIONS = 4
+        const val MAX_COMPOSE_NAME = 127
         const val MAX_WORST = 4
         const val MAX_COUNT = 1_000_000
         const val MAX_TOTAL_NS = 60_000_000_000L

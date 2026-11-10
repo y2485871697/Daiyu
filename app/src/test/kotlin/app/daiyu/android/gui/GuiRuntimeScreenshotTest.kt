@@ -873,7 +873,7 @@ class GuiRuntimeScreenshotTest {
         contentEvent(null); platform.screenUnlocked = false; platform.completeVisual()
         rejected(pending.completed(), "SCREEN_LOCKED_NOT_EXECUTED"); assertEquals(0, platform.gestures)
         platform.screenUnlocked = true
-        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "CAPTURE_ID_MISMATCH_NOT_EXECUTED")
+        rejected(GuiRuntime.visualAction(session.lease, action) { false }.completed(), "GUI_AUTHORIZATION_REVOKED")
     }
 
     @Test fun ordinaryObserveAndScreenshotRecoverRootlessReadsDespiteTargetContentAtEveryStage() {
@@ -2125,6 +2125,7 @@ class GuiRuntimeScreenshotTest {
 
     @Test fun truncatedOrDuplicateNodeTreesDoNotBlockWindowOnlyActionsBeforeApproval() {
         for (operation in listOf(GuiOperation.BACK, GuiOperation.COORDINATE_TAP, GuiOperation.COORDINATE_LONG_PRESS, GuiOperation.SWIPE)) {
+            assertTrue(session.approveReadsFromUser(GuiReadApproval(1, 0)) is GuiResult.Value)
             permitGestureWindow(); platform.descendants = 160
             val observation = observe(); assertTrue(observation.truncated)
             val action = if (!operation.isCoordinateGesture) GuiAction(observation.observationId, operation)
@@ -2145,10 +2146,12 @@ class GuiRuntimeScreenshotTest {
     @Test fun targetContentEventsKeepOnlyLiveUniquelyIdentifiedNodes() {
         for (type in listOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)) {
+            assertTrue(session.approveReadsFromUser(GuiReadApproval(1, 0)) is GuiResult.Value)
             val observation = observe(); val action = approve(observation)
             service.onAccessibilityEvent(contentEvent(type, platform.pkg, observation.windowId))
             assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
         }
+        assertTrue(session.approveReadsFromUser(GuiReadApproval(1, 0)) is GuiResult.Value)
         val observation = observe(); val action = approve(observation)
         service.onAccessibilityEvent(contentEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, platform.pkg, observation.windowId))
         platform.label = "changed-target"

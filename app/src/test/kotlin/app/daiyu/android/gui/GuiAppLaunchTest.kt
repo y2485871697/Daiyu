@@ -295,15 +295,15 @@ class GuiAppLaunchTest {
         val args = """{"operation":"coordinate_tap","capture_id":"$capture","x":0,"y":0}"""
         val delivered = f.callTool("screen_action", args, "visual-tap") as DispatchOutcome.Confirmed
         assertEquals(capture, JSONObject(delivered.payload).getString("capture_id"))
-        assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
+        assertEquals(1, platform.gestures); assertEquals(1, platform.captures); assertEquals(3, platform.visualReads); assertEquals(0, platform.nodeActions)
         assertTrue((f.callTool("screen_action", args, "visual-tap") as DispatchOutcome.Confirmed).replayed)
         assertEquals(1, platform.gestures)
         assertEquals(delivered.copy(replayed = true), f.callTool("screen_action", args, "consumed-visual"))
-        assertEquals(1, platform.gestures); assertEquals(2, platform.captures)
+        assertEquals(1, platform.gestures); assertEquals(1, platform.captures)
         val changedAction = """{"operation":"back","capture_id":"$capture"}"""
         assertEquals(DispatchOutcome.NotExecuted("CAPTURE_ID_MISMATCH_NOT_EXECUTED"),
             f.callTool("screen_action", changedAction, "different-consumed-visual"))
-        assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
+        assertEquals(1, platform.gestures); assertEquals(1, platform.captures); assertEquals(3, platform.visualReads); assertEquals(0, platform.nodeActions)
     }
 
     @Test fun ordinaryObserveAutomaticallyCapturesAllMissingRootCasesWithAndWithoutTarget() {
@@ -349,7 +349,7 @@ class GuiAppLaunchTest {
                 "own-content-action-$targeted") as DispatchOutcome.Confirmed
             assertFalse(action.isError)
         }
-        assertEquals(2, platform.gestures); assertEquals(4, platform.captures); assertEquals(0, platform.nodeActions)
+        assertEquals(2, platform.gestures); assertEquals(2, platform.captures); assertEquals(6, platform.visualReads); assertEquals(0, platform.nodeActions)
     }
 
     @Test fun ordinaryObserveVisualFallbackConnectsDirectlyToOneCoordinateAction() {
@@ -361,9 +361,9 @@ class GuiAppLaunchTest {
         val args = """{"operation":"coordinate_tap","capture_id":"$id","x":0,"y":0}"""
         val action = f.callTool("screen_action", args, "visual-action") as DispatchOutcome.Confirmed
         assertEquals(id, JSONObject(action.payload).getString("capture_id")); assertFalse(action.isError)
-        assertEquals(1, platform.gestures); assertEquals(2, platform.captures); assertEquals(0, platform.nodeActions)
+        assertEquals(1, platform.gestures); assertEquals(1, platform.captures); assertEquals(3, platform.visualReads); assertEquals(0, platform.nodeActions)
         assertEquals(action.copy(replayed = true), f.callTool("screen_action", args, "same-effect"))
-        assertEquals(1, platform.gestures); assertEquals(2, platform.captures)
+        assertEquals(1, platform.gestures); assertEquals(1, platform.captures)
     }
     @Test fun ordinaryObserveMissingWitnessStopsAfterOneVisualAttempt() {
         val f = Fixture()

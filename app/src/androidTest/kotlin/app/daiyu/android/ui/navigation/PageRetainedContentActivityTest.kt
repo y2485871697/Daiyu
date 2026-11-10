@@ -31,6 +31,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.WiredActivityTestCase
+import app.daiyu.android.awaitControl
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 

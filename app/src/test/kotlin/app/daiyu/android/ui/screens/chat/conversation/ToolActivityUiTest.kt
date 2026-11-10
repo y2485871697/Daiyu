@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import app.daiyu.android.domain.RunStatus
+import app.daiyu.android.domain.*
+import app.daiyu.android.ui.RetainedToolOutcomes
 import app.daiyu.android.domain.runtime.ExecutionPhase
 import app.daiyu.android.domain.runtime.ToolDisposition
 import org.junit.Assert.*
@@ -72,6 +73,10 @@ class ToolActivityUiTest {
             seen += toolReceiptPresentation(disposition, false, phase, runStatus = RunStatus.STOPPED).activity
             seen += toolReceiptPresentation(disposition, false, phase, runStatus = RunStatus.INTERRUPTED).activity
         }
+        val message = Message(MessageId("message"), ConversationId("conversation"), RunId("run"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        val returned = MessageBlock.Tool(ToolInvocation(ToolCallId("call"), "search_apps", "{}"), "returned")
+        seen += RetainedToolOutcomes.pendingProjection(message, returned)!!.activity
         assertEquals(ToolActivityUi.entries.toSet(), seen)
     }
     @Test fun unknownAndFinalReceiptsCannotBePromotedByTheLivePhase() {

@@ -10,6 +10,7 @@ import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.SQLiteRuntimeStore
 import app.daiyu.android.question.QuestionCheckpointEvidence
 import app.daiyu.android.ui.screens.chat.conversation.WorkStepState
+import app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi
 import app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi
 import app.daiyu.android.ui.screens.chat.conversation.toolReceiptPresentation
 import app.daiyu.android.domain.runtime.ExecutionState
@@ -75,6 +76,11 @@ internal object RetainedToolOutcomes {
             }
         }
     }
+
+    /** Only while the host's exact-source receipt read is pending; returned text proves no outcome. */
+    fun pendingProjection(message: Message, block: MessageBlock.Tool): ToolReceiptUi? =
+        if (message.role == Message.ASSISTANT_ROLE && block.result != null)
+            ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING) else null
 
     fun projectionReader(database: ConversationDatabase, messages: List<Message>,
         liveState: (Message) -> ExecutionState? = { null },

@@ -13,6 +13,15 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertLess(read.index('SQLiteText.read('), read.index('if (ownTransaction) db.endTransaction()'))
         self.assertLess(read.index('db.endTransaction()'), read.index('RunCheckpointCodec.decodeWithRecovery(payload)'))
         self.assertIn('检查点元数据不匹配', read)
+    def test_pending_receipt_read_is_not_an_unknown_terminal_result(self):
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        self.assertIn('if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)', host)
+        projection = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
+        pending = projection.split('fun pendingProjection(', 1)[1].split('fun projectionReader(database:', 1)[0]
+        self.assertIn('block.result != null', pending)
+        self.assertIn('ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING)', pending)
+        self.assertNotIn('WorkStepState.OK', pending)
+        self.assertNotIn('JSONObject', pending)
     def test_the_ui_publisher_uses_only_a_worker_prepared_immutable_snapshot(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         publish = text.split('private fun publishChat(rowsChanged:', 1)[1].split('private fun requestScroll', 1)[0]

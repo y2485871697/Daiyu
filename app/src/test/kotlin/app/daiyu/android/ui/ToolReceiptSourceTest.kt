@@ -3,11 +3,12 @@ package app.daiyu.android.ui
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.ExecutionPhase
 import app.daiyu.android.domain.runtime.ExecutionState
+import app.daiyu.android.ui.screens.chat.conversation.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class ToolReceiptSourceTest {
-    private val call = ToolInvocation(ToolCallId("call"), "screen", "{}")
+    private val call = ToolInvocation(ToolCallId("call"), "search_apps", "{}")
     private val message = Message(MessageId("message"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, listOf(MessageBlock.Tool(call)), RunStatus.RUNNING)
     private fun source(value: Message) = RetainedToolOutcomes.sources(listOf(value))
@@ -61,6 +62,31 @@ class ToolReceiptSourceTest {
         }
         assertTrue(loaded.canDisplayFor(loaded.copy(sources = source(message.copy(
             blocks = message.blocks + MessageBlock.Text("body", "more text"))))))
+    }
+
+    @Test fun returnedSearchResultWaitsForEvidenceWithoutTrustingItsJson() {
+        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED, RunStatus.INTERRUPTED)) {
+            for (result in listOf("{\"ok\":true}", "{\"ok\":false}", "not a receipt", "")) {
+                val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = result)
+                val source = message.copy(status = status, blocks = listOf(returned))
+                val pending = RetainedToolOutcomes.pendingProjection(source, returned)!!
+                assertEquals(ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING), pending)
+                val turn = ChatTurnMapper.map(listOf(source), toolReceipt = { owner, tool ->
+                    RetainedToolOutcomes.pendingProjection(owner, tool)
+                }).single() as ChatTurnUi.Assistant
+                val flow = turn.workProcess!!
+                val step = flow.segments.flatMap { it.steps }.single()
+                assertEquals(WorkStepState.PENDING, step.state)
+                assertEquals(ToolActivityUi.READING, step.activity)
+                assertEquals(0, flow.unconfirmedStepCount)
+                assertEquals(0, flow.completedStepCount)
+            }
+        }
+    }
+    @Test fun noReturnedResultAndUserMessagesCannotInventAReadingActivity() {
+        val pending = message.blocks.single() as MessageBlock.Tool
+        assertNull(RetainedToolOutcomes.pendingProjection(message, pending))
+        assertNull(RetainedToolOutcomes.pendingProjection(message.copy(role = Message.USER_ROLE), pending.copy(result = "done")))
     }
 
 }

@@ -7111,7 +7111,9 @@ class MainActivity : ComponentActivity() {
             val visibleToolReceipts = toolReceiptSnapshot?.takeIf {
                 receiptsReady || toolReceiptKey?.canDisplayFor(currentToolReceiptKey()) == true
             }?.projectionReader(controller::runState, controller::runStopping)
-                ?: { _, _ -> null }
+                ?: { message, block ->
+                    if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)
+                }
             val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
                 reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
             chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,

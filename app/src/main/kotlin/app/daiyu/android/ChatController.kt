@@ -96,6 +96,7 @@ class ChatApplication:Application() {
     override fun onCreate() {
         super.onCreate()
         try { RuntimeDiagnostics.install(java.io.File(noBackupFilesDir, "diagnostics-v1/runtime-trace")) } catch (_: Throwable) { }
+        try { app.daiyu.android.diagnostics.ComposeSystemTrace.install() } catch (_: Throwable) { }
         // One store/runtime for the entire process, shared by UI, streams and settings.
         hapticsRuntime = app.daiyu.android.haptics.HapticsRuntime(
             app.daiyu.android.haptics.LocalHapticSettingsStore(this))

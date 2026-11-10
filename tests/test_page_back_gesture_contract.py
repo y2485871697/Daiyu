@@ -341,6 +341,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         for name in ('lifecycle-set', 'lifecycle-close'):
             self.assertIn(f'synchronousTrace("daiyu.retained.{name}")', retained)
         self.assertIn('synchronousTrace("daiyu.chat.retained-compose-entry") {}', self.host)
+        for name in ('layers.transition', 'layers.frame', 'layers.find'):
+            self.assertIn(f'synchronousTrace("daiyu.back.{name}")', layers)
         self.assertNotIn('try { retainedRootContent(active)', self.host)
         for name in ('position-seed', 'restore-lifecycle', 'restore-clearance'):
             self.assertIn(f'synchronousTrace("daiyu.chat.{name}")', chat)
@@ -348,6 +350,23 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertNotIn('withFrameNanos', clearance)
         self.assertNotIn('scrollToItem', clearance)
         self.assertIn('remeasurement.forceRemeasure()', clearance)
+
+    def test_release_compose_names_use_existing_android_trace(self):
+        source = (APP / 'diagnostics/ComposeSystemTrace.kt').read_text()
+        application = (APP / 'ChatController.kt').read_text()
+        for expected in (
+            'Composer.setTracer(SystemTracer)',
+            'private object SystemTracer : CompositionTracer',
+            'Build.VERSION.SDK_INT < 29',
+            'Build.VERSION.SDK_INT >= 29 && Trace.isEnabled()',
+            'Trace.beginSection(info.take(MAX_SECTION_NAME_LENGTH))',
+            'MAX_SECTION_NAME_LENGTH = 127',
+            'Trace.endSection()',
+        ):
+            self.assertIn(expected, source)
+        self.assertIn('ComposeSystemTrace.install()', application)
+        self.assertNotIn('JANK_DIAGNOSTICS', source + application.split('class ChatApplication', 1)[1].split('class ChatController', 1)[0])
+        self.assertNotIn('runtime-tracing', source)
 
     def test_continuous_redraw_uses_throttled_same_size_last_good_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()

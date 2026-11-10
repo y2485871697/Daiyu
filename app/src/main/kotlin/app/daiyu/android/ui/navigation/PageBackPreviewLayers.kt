@@ -88,15 +88,17 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     fun transition(key: Any, backTargetKey: Any?, animateEnter: Boolean, size: IntSize, contentKey: Any = key): Departure? {
-        val previous = frames[currentKey]?.takeIf { currentKey != key }
-        val departure = enter(key, contentKey)
-        if (departure != null) return departure
-        if (!animateEnter || previous == null || !previous.animateReturn ||
-            previous.sourceKey != backTargetKey || previous.childChangeCaptured == false) return null
-        val source = frames[previous.sourceKey]?.takeIf {
-            it.animateReturn && size != IntSize.Zero && it.size == size
-        } ?: return null
-        return Departure(source, key, 0f, predictive = false, direction = previous.returnDirection, forward = true)
+        return synchronousTrace("daiyu.back.layers.transition") {
+            val previous = frames[currentKey]?.takeIf { currentKey != key }
+            val departure = enter(key, contentKey)
+            if (departure != null) return@synchronousTrace departure
+            if (!animateEnter || previous == null || !previous.animateReturn ||
+                previous.sourceKey != backTargetKey || previous.childChangeCaptured == false) return@synchronousTrace null
+            val source = frames[previous.sourceKey]?.takeIf {
+                it.animateReturn && size != IntSize.Zero && it.size == size
+            } ?: return@synchronousTrace null
+            Departure(source, key, 0f, predictive = false, direction = previous.returnDirection, forward = true)
+        }
     }
 
     fun freezeCurrent() {
@@ -205,20 +207,22 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     fun frame(key: Any, sourceKey: Any = key, contentKey: Any = key): Frame {
-        val previous = frames.remove(key)
-        return Frame(key, context.createGraphicsLayer(), sourceKey, contentKey, ::schedule).also { frame ->
-            if (previous != null && !previous.releaseRequested && previous.sourceKey == sourceKey && previous.contentKey == contentKey) {
-                previous.ready?.takeIf { previous.readySize == previous.size &&
-                    it.width == previous.size.width && it.height == previous.size.height }?.let { image ->
-                    // The returning visit may still be covered by its child's departure.
-                    // Keep its prepared pixels, not the old layer or its recording generation.
-                    frame.size = previous.size
-                    frame.readySize = previous.readySize
-                    frame.ready = image
+        return synchronousTrace("daiyu.back.layers.frame") {
+            val previous = frames.remove(key)
+            Frame(key, context.createGraphicsLayer(), sourceKey, contentKey, ::schedule).also { frame ->
+                if (previous != null && !previous.releaseRequested && previous.sourceKey == sourceKey && previous.contentKey == contentKey) {
+                    previous.ready?.takeIf { previous.readySize == previous.size &&
+                        it.width == previous.size.width && it.height == previous.size.height }?.let { image ->
+                        // The returning visit may still be covered by its child's departure.
+                        // Keep its prepared pixels, not the old layer or its recording generation.
+                        frame.size = previous.size
+                        frame.readySize = previous.readySize
+                        frame.ready = image
+                    }
                 }
+                previous?.let { release(it) }
+                frames[key] = frame
             }
-            previous?.let { release(it) }
-            frames[key] = frame
         }
     }
 
@@ -232,8 +236,10 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         else frame.captures.toList().forEach { it.cancel() }
     }
 
-    fun find(key: Any?, size: IntSize): Frame? = frames[key]?.takeIf {
-        size != IntSize.Zero && it.size == size && it.canDrawPreview
+    fun find(key: Any?, size: IntSize): Frame? = synchronousTrace("daiyu.back.layers.find") {
+        frames[key]?.takeIf {
+            size != IntSize.Zero && it.size == size && it.canDrawPreview
+        }
     }
 
     fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float, velocity: Float = 0f): Departure {

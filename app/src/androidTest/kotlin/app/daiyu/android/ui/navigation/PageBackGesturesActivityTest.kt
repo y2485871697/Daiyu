@@ -181,6 +181,14 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             assertTrue(incident.getBoolean("commit_attempted"))
             assertTrue(incident.getBoolean("route_changed"))
             assertFalse("RESET" == incident.getString("end_reason"))
+            val timeline = incident.getJSONArray("timeline")
+            val marks = (0 until timeline.length()).map { timeline.getJSONObject(it) }
+            assertTrue(marks.any { it.getString("event") == "RELEASE" })
+            assertTrue(marks.any { it.getString("event") == "COMMIT" })
+            assertTrue(marks.any { it.getString("event") == "ROUTE" })
+            assertTrue(marks.zipWithNext().all { (a, b) -> a.getLong("offset_ns") <= b.getLong("offset_ns") })
+            assertTrue(incident.getJSONArray("worst_frames").getJSONObject(0).has("vsync_offset_ns"))
+            assertEquals("ELAPSED_INCLUDING_SUSPENSION_NOT_CPU", incident.getString("capture_timing_semantics"))
             assertEquals(1, backCount)
         } finally { runtime.clear(); runtime.enabled = previousEnabled }
     }

@@ -137,7 +137,7 @@ class BackPerformanceRecorderTest {
         assertEquals(1, phase.count); assertEquals(7, phase.inFlight)
     }
     @Test fun chatRefreshAndPublishHaveSeparateInclusiveCountsWithoutNewFields() {
-        assertEquals(17, BackPerformanceRecorder.Phase.entries.size)
+        assertEquals(19, BackPerformanceRecorder.Phase.entries.size)
         val f = Fixture(); f.start(); f.frame()
         val refresh = f.recorder.begin("daiyu.chat.refresh")
         f.now += 2_000_000L
@@ -183,4 +183,114 @@ class BackPerformanceRecorderTest {
         }
         BackPerformance.safely { error("diagnostic-only") }
     }
+    @Test fun timelineAndWorstFrameOffsetsShareOneMonotonicOrigin() {
+        val f = Fixture(); val token = f.start()
+        f.now += 2_000_000L
+        f.recorder.mark(BackPerformanceRecorder.Event.RELEASE, token)
+        f.now += 3_000_000L; f.recorder.commit(f.owner)
+        f.now += 1_000_000L; f.recorder.route(f.owner)
+        f.recorder.mark(BackPerformanceRecorder.Event.MOTION_ADOPTED, token)
+        f.recorder.reset(f.owner)
+        f.frame(vsync = 1_004_000_000L)
+        f.frame(40_000_000L, 999_000_000L)
+        f.end()
+        val row = f.rows.single()
+        assertEquals(listOf(BackPerformanceRecorder.Event.RELEASE, BackPerformanceRecorder.Event.COMMIT,
+            BackPerformanceRecorder.Event.ROUTE, BackPerformanceRecorder.Event.MOTION_ADOPTED,
+            BackPerformanceRecorder.Event.RESET), row.timeline.map { it.event })
+        assertEquals(listOf(2_000_000L, 5_000_000L, 6_000_000L, 6_000_000L, 6_000_000L), row.timeline.map { it.offset })
+        assertEquals(listOf(-1_000_000L, 4_000_000L), row.worst.map { it.vsyncOffset })
+        assertTrue(row.worst.first().overlapsStart)
+        assertFalse(row.worst.last().overlapsStart)
+    }
+
+    @Test fun captureLaunchPrefixAndSuspendedWallKeepIndependentElapsedSlices() {
+        val f = Fixture(); val token = f.start()
+        val prefix = f.recorder.begin("daiyu.back.capture-launch", token)
+        f.now += 1_000_000L
+        val wall = f.recorder.begin("daiyu.back.capture-wall", token)
+        f.now += 2_000_000L; f.recorder.complete(prefix)
+        f.now += 40_000_000L
+        f.recorder.completeCapture(wall, BackPerformanceRecorder.CaptureResult.STORED)
+        f.end()
+        val row = f.rows.single()
+        assertEquals(listOf(0L, 1_000_000L), row.captures.map { it.offset })
+        assertEquals(listOf(3_000_000L, 42_000_000L), row.captures.map { it.duration })
+        assertEquals(listOf(BackPerformanceRecorder.CaptureResult.COMPLETE, BackPerformanceRecorder.CaptureResult.STORED), row.captures.map { it.result })
+        assertEquals(2, row.phases.size)
+    }
+
+    @Test fun synchronousCaptureCanFinishBeforeLaunchReturnsAndOutcomesRemainTyped() {
+        val f = Fixture(); val token = f.start(); f.frame()
+        for (outcome in listOf(BackPerformanceRecorder.CaptureResult.STORED, BackPerformanceRecorder.CaptureResult.DISCARDED,
+            BackPerformanceRecorder.CaptureResult.CANCELLED, BackPerformanceRecorder.CaptureResult.FAILED)) {
+            val prefix = f.recorder.begin("daiyu.back.capture-launch", token)
+            val wall = f.recorder.begin("daiyu.back.capture-wall", token)
+            f.now += 1000L; f.recorder.completeCapture(wall, outcome)
+            f.recorder.completeCapture(wall, outcome)
+            f.now += 1000L; f.recorder.complete(prefix)
+        }
+        f.end()
+        val captures = f.rows.single().captures
+        assertEquals(8, captures.size)
+        assertTrue(captures.filter { it.phase == BackPerformanceRecorder.Phase.CAPTURE_LAUNCH }.all { it.duration == 2000L })
+        assertEquals(4, captures.count { it.phase == BackPerformanceRecorder.Phase.CAPTURE_WALL && it.duration == 1000L })
+    }
+
+    @Test fun timelineAndCaptureBoundsAreExplicitAndInFlightWallIsNotCompleted() {
+        val f = Fixture(); val token = f.start(); f.frame()
+        repeat(80) { f.recorder.mark(BackPerformanceRecorder.Event.OBSERVED_CAPTURE_IN_FLIGHT, token, Int.MAX_VALUE) }
+        repeat(30) {
+            val sample = f.recorder.begin("daiyu.back.capture-launch", token)
+            f.now += 1000L; f.recorder.complete(sample)
+        }
+        f.recorder.begin("daiyu.back.capture-wall", token)
+        f.now += 20_000_000L; f.end()
+        val row = f.rows.single()
+        assertEquals(BackPerformanceRecorder.MAX_TIMELINE, row.timeline.size)
+        assertEquals(48, row.timelineDropped)
+        assertTrue(row.timeline.all { it.count == BackPerformanceRecorder.MAX_COUNT })
+        assertEquals(BackPerformanceRecorder.MAX_CAPTURE_TIMINGS, row.captures.size)
+        assertEquals(15, row.capturesDropped)
+        assertEquals(1, row.phases.single { it.phase == BackPerformanceRecorder.Phase.CAPTURE_WALL }.inFlight)
+
+        val next = f.start()
+        f.recorder.begin("daiyu.back.capture-wall", next)
+        f.recorder.commit(f.owner)
+        f.now += BackPerformanceRecorder.TAIL_NS; f.recorder.checkpoint()
+        val pending = f.rows.last().captures.single()
+        assertEquals(BackPerformanceRecorder.CaptureResult.IN_FLIGHT, pending.result)
+        assertEquals(BackPerformanceRecorder.TAIL_NS, pending.duration)
+
+        val saturated = f.start(); f.frame()
+        repeat(BackPerformanceRecorder.MAX_CAPTURE_TIMINGS + BackPerformanceRecorder.MAX_COUNT) {
+            f.recorder.complete(f.recorder.begin("daiyu.back.capture-launch", saturated))
+        }
+        repeat(8) {
+            f.recorder.begin("daiyu.back.capture-launch", saturated)
+            f.recorder.begin("daiyu.back.capture-wall", saturated)
+        }
+        f.end()
+        assertEquals(BackPerformanceRecorder.MAX_COUNT, f.rows.last().capturesDropped)
+    }
+
+    @Test fun oldAndNullCaptureSourcesAndTimelineCannotRebindAfterNewGestureOrClear() {
+        val f = Fixture(); val old = f.start(); f.frame()
+        val oldWall = f.recorder.begin("daiyu.back.capture-wall", old)
+        f.now += 1_000_000L; val next = f.start(); f.frame()
+        f.recorder.completeCapture(oldWall, BackPerformanceRecorder.CaptureResult.STORED)
+        f.recorder.mark(BackPerformanceRecorder.Event.MOTION_FINISHED, old)
+        f.recorder.mark(BackPerformanceRecorder.Event.MOTION_ADOPTED, null)
+        assertNull(f.recorder.begin("daiyu.back.capture-launch", old))
+        assertNull(f.recorder.begin("daiyu.back.capture-wall", null))
+        f.recorder.mark(BackPerformanceRecorder.Event.OBSERVED_CAPTURE_IN_FLIGHT, next, 1)
+        f.end()
+        val row = f.rows.last()
+        assertTrue(row.captures.isEmpty()); assertTrue(row.phases.isEmpty())
+        assertEquals(listOf(BackPerformanceRecorder.Event.OBSERVED_CAPTURE_IN_FLIGHT), row.timeline.map { it.event })
+        f.start(); f.frame(); f.epoch++
+        f.recorder.mark(BackPerformanceRecorder.Event.MOTION_ADOPTED, next)
+        f.end(); assertEquals(2, f.rows.size)
+    }
+
 }

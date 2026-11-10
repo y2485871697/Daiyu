@@ -34,7 +34,8 @@ class BackPerformanceRuntimeTest {
             assertEquals("BACK_PERFORMANCE", row.getString("stage"))
             assertEquals(setOf("stage", "code", "time_ms", "kind", "end_reason", "commit_attempted",
                 "route_changed", "elapsed_ns", "frame_count", "slow_count", "max_ns", "min_budget_ns",
-                "max_budget_ns", "min_refresh_hz", "max_refresh_hz", "start_overlap_count", "start_overlap_slow_count", "phase_semantics", "phases", "worst_frames"),
+                "max_budget_ns", "min_refresh_hz", "max_refresh_hz", "start_overlap_count", "start_overlap_slow_count", "phase_semantics", "phases", "worst_frames", "timeline", "timeline_dropped",
+                "capture_timings", "capture_timings_dropped", "capture_timing_semantics"),
                 row.keys().asSequence().toSet())
             assertEquals("INCLUSIVE_NOT_ADDITIVE", row.getString("phase_semantics"))
             val chatPhases = row.getJSONArray("phases")
@@ -57,6 +58,7 @@ class BackPerformanceRuntimeTest {
             assertEquals(0, boundary.getInt("frame_count"))
             assertEquals(1, boundary.getInt("start_overlap_slow_count"))
             assertTrue(boundary.getJSONArray("worst_frames").getJSONObject(0).getBoolean("overlaps_start_unattributed"))
+            assertEquals(-10_000_000L, boundary.getJSONArray("worst_frames").getJSONObject(0).getLong("vsync_offset_ns"))
             val phase = boundary.getJSONArray("phases").getJSONObject(0)
             assertEquals(0, phase.getInt("count")); assertEquals(1, phase.getInt("in_flight_count"))
             assertEquals(BackPerformanceRecorder.HARD_NS, phase.getLong("in_flight_max_observed_ns"))
@@ -68,12 +70,26 @@ class BackPerformanceRuntimeTest {
             assertTrue(allSamples.all { it != null })
             now += 20_000_000L
             allSamples.forEach(recorder::complete)
+            repeat(50) { recorder.mark(BackPerformanceRecorder.Event.MOTION_START, recorder.token(), it) }
+            repeat(30) {
+                val capture = recorder.begin("daiyu.back.capture-wall", recorder.token())
+                now += 1000L
+                recorder.completeCapture(capture, BackPerformanceRecorder.CaptureResult.DISCARDED)
+            }
             repeat(4) { recorder.frame(now, 40_000_000L + it, 16_666_667L, 60f, LongArray(9)) }
             recorder.end(BackPerformanceRecorder.End.TAIL)
             val full = RuntimeDiagnostics.export().getJSONObject(0)
-            assertEquals(17, full.getJSONArray("phases").length())
+            assertEquals(19, full.getJSONArray("phases").length())
             assertEquals(4, full.getJSONArray("worst_frames").length())
-            assertTrue(full.toString().toByteArray(Charsets.UTF_8).size <= 16 * 1024)
+            assertEquals(32, full.getJSONArray("timeline").length())
+            assertEquals(18, full.getInt("timeline_dropped"))
+            assertEquals(16, full.getJSONArray("capture_timings").length())
+            assertEquals(16, full.getInt("capture_timings_dropped"))
+            assertEquals("ELAPSED_INCLUDING_SUSPENSION_NOT_CPU", full.getString("capture_timing_semantics"))
+            assertEquals(setOf("event", "offset_ns", "count"), full.getJSONArray("timeline").getJSONObject(0).keys().asSequence().toSet())
+            assertEquals(setOf("phase", "start_offset_ns", "elapsed_ns", "result"), full.getJSONArray("capture_timings").getJSONObject(0).keys().asSequence().toSet())
+            assertTrue(full.getJSONArray("worst_frames").getJSONObject(0).has("vsync_offset_ns"))
+            assertTrue(full.toString().toByteArray(Charsets.UTF_8).size + 1 <= 16 * 1024)
             val revisionPhase = (0 until full.getJSONArray("phases").length())
                 .map { full.getJSONArray("phases").getJSONObject(it) }
                 .single { it.getString("phase") == "MESSAGE_ACTION_REVISION" }

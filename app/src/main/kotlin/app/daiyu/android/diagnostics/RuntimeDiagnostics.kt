@@ -195,6 +195,15 @@ internal object RuntimeDiagnostics {
                         .put("min_refresh_hz", incident.minHz).put("max_refresh_hz", incident.maxHz)
                         .put("start_overlap_count", incident.overlapFrames).put("start_overlap_slow_count", incident.overlapSlow)
                         .put("phase_semantics", "INCLUSIVE_NOT_ADDITIVE")
+                        .put("timeline_dropped", incident.timelineDropped).put("capture_timings_dropped", incident.capturesDropped)
+                        .put("timeline", JSONArray().apply { incident.timeline.forEach { mark ->
+                            put(JSONObject().put("event", mark.event.name).put("offset_ns", mark.offset).put("count", mark.count))
+                        } })
+                        .put("capture_timing_semantics", "ELAPSED_INCLUDING_SUSPENSION_NOT_CPU")
+                        .put("capture_timings", JSONArray().apply { incident.captures.forEach { timing ->
+                            put(JSONObject().put("phase", timing.phase.name).put("start_offset_ns", timing.offset)
+                                .put("elapsed_ns", timing.duration).put("result", timing.result.name))
+                        } })
                         .put("phases", JSONArray().apply { incident.phases.forEach { phase ->
                             put(JSONObject().put("phase", phase.phase.name).put("count", phase.count)
                                 .put("inclusive_total_ns", phase.total).put("max_ns", phase.max)
@@ -203,7 +212,7 @@ internal object RuntimeDiagnostics {
                         .put("worst_frames", JSONArray().apply { incident.worst.forEach { frame ->
                             put(JSONObject().put("total_ns", frame.duration).put("budget_ns", frame.budget)
                                 .put("refresh_hz", frame.refreshHz).put("stages_ns", JSONArray(frame.stages))
-                                .put("overlaps_start_unattributed", frame.overlapsStart))
+                                .put("overlaps_start_unattributed", frame.overlapsStart).put("vsync_offset_ns", frame.vsyncOffset))
                         } })
                     val row = value.toString()
                     lock.withLock {

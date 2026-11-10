@@ -2,6 +2,9 @@ package app.daiyu.android.ui.navigation
 
 import androidx.compose.runtime.getValue
 import app.daiyu.android.diagnostics.JankDiagnostics
+import app.daiyu.android.diagnostics.BackPerformance
+import app.daiyu.android.diagnostics.BackPerformanceRecorder
+import app.daiyu.android.diagnostics.captureBackPerformanceToken
 import app.daiyu.android.diagnostics.synchronousTrace
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -74,6 +77,10 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         val departure = pending
         pending = null
         val accepted = departure?.takeIf { it.target == key && it.frame === previous }
+        departure?.motion?.let { motion ->
+            BackPerformance.mark(if (accepted == null) BackPerformanceRecorder.Event.MOTION_REJECTED
+                else BackPerformanceRecorder.Event.MOTION_ACCEPTED, motion.diagnosticToken)
+        }
         if (accepted == null) departure?.motion?.cancel()
         return accepted
             ?: previous?.takeIf { it.animateReturn && it.backTargetKey == key && it.size != IntSize.Zero }
@@ -107,19 +114,29 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         else frames[currentKey]?.let { schedule(it) }
     }
 
-    private fun schedule(frame: Frame) {
+    private fun schedule(frame: Frame) = schedule(frame, captureBackPerformanceToken())
+
+    private fun schedule(frame: Frame, sourceToken: BackPerformanceRecorder.Token?) {
         if (closed || !active || frame.frozen || frame.releaseRequested || currentKey != frame.key || frame.generation == 0L || frame.size == IntSize.Zero) return
         if (frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }) return
         frame.warmup = scope.launch {
             if (frame.ready == null) withFrameNanos { } else delay(64)
             frame.warmup = null
             if (!closed && active && !frame.frozen && frames[frame.key] === frame && currentKey == frame.key) {
-                capture(frame)
+                capture(frame, sourceToken)
             }
         }
     }
 
+    private fun observeCaptures(sourceToken: BackPerformanceRecorder.Token?) {
+        BackPerformance.safely {
+            val count = frames.values.sumOf { frame -> frame.captures.count { !it.isCompleted } }
+            if (count > 0) BackPerformance.mark(BackPerformanceRecorder.Event.OBSERVED_CAPTURE_IN_FLIGHT, sourceToken, count)
+        }
+    }
+
     fun beginGesture(frame: Frame): Boolean {
+        observeCaptures(captureBackPerformanceToken())
         freeze(frame)
         return frame.canDrawPreview
     }
@@ -140,31 +157,41 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         JankDiagnostics.section(if (frame.image != null) "daiyu.back-preview=cache-hit" else "daiyu.back-preview=not-ready") { }
     }
 
-    private fun capture(frame: Frame) {
+    private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?) {
         if (closed || !active || frame.releaseRequested || frame.hasFreshImage || frame.size == IntSize.Zero || frame.layer.isReleased ||
             frame.captures.any { !it.isCompleted }) return
         val epoch = previewEpoch
         val generation = frame.generation
         val size = frame.size
         JankDiagnostics.section("daiyu.back-preview=freeze-start") {
-            val capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                val traceCookie = System.identityHashCode(frame)
-                JankDiagnostics.beginPhase("daiyu.back-preview=freeze", traceCookie)
-                try {
-                    // API26 must finish its submitted Surface copy before releasing the source layer.
-                    val image = withContext(NonCancellable) { snapshot(frame) }
-                    if (isActive && active && !closed && !frame.releaseRequested && !frame.frozen && previewEpoch == epoch &&
-                        frames[frame.key] === frame && frame.size == size && image.width == size.width && image.height == size.height) {
-                        frame.readyGeneration = generation
-                        frame.readySize = size
-                        frame.ready = image
+            val capture = synchronousTrace("daiyu.back.capture-launch", sourceToken) {
+                scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    val wall = BackPerformance.beginCapture(sourceToken)
+                    var result = BackPerformanceRecorder.CaptureResult.FAILED
+                    val traceCookie = System.identityHashCode(frame)
+                    JankDiagnostics.beginPhase("daiyu.back-preview=freeze", traceCookie)
+                    try {
+                        // API26 must finish its submitted Surface copy before releasing the source layer.
+                        val image = withContext(NonCancellable) { snapshot(frame) }
+                        result = if (isActive) BackPerformanceRecorder.CaptureResult.DISCARDED
+                            else BackPerformanceRecorder.CaptureResult.CANCELLED
+                        if (isActive && active && !closed && !frame.releaseRequested && !frame.frozen && previewEpoch == epoch &&
+                            frames[frame.key] === frame && frame.size == size && image.width == size.width && image.height == size.height) {
+                            frame.readyGeneration = generation
+                            frame.readySize = size
+                            frame.ready = image
+                            result = BackPerformanceRecorder.CaptureResult.STORED
+                        }
+                    } catch (cancelled: CancellationException) {
+                        result = BackPerformanceRecorder.CaptureResult.CANCELLED
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        result = BackPerformanceRecorder.CaptureResult.FAILED
+                        android.util.Log.w("DaiyuBackPreview", "freeze failed type=${failure.javaClass.simpleName}")
+                    } finally {
+                        JankDiagnostics.endPhase("daiyu.back-preview=freeze", traceCookie)
+                        BackPerformance.completeCapture(wall, result)
                     }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (failure: Exception) {
-                    android.util.Log.w("DaiyuBackPreview", "freeze failed type=${failure.javaClass.simpleName}")
-                } finally {
-                    JankDiagnostics.endPhase("daiyu.back-preview=freeze", traceCookie)
                 }
             }
             frame.capture = capture
@@ -172,7 +199,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             capture.invokeOnCompletion {
                 frame.captures.remove(capture)
                 if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)
-                else if (previewEpoch != epoch || frame.generation != generation) schedule(frame)
+                else if (previewEpoch != epoch || frame.generation != generation) schedule(frame, sourceToken)
             }
         }
     }
@@ -211,6 +238,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
 
     fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float, velocity: Float = 0f): Departure {
         return synchronousTrace("daiyu.back.prepare") {
+            observeCaptures(captureBackPerformanceToken())
             freeze(frame)
             pending?.motion?.cancel()
             Departure(frame, target, progress, predictive, direction, velocity = velocity,
@@ -221,10 +249,11 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
 
     fun abandon(departure: Departure) {
         if (pending === departure) {
+            BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_APPLIED, departure.motion?.diagnosticToken)
             departure.motion?.cancel()
             pending = null
             // The visible cancel settle still owns this image; resume unlocks it at rest.
-        }
+        } else BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_NOT_PENDING, departure.motion?.diagnosticToken)
     }
 
     fun trim(current: Frame, target: Frame?, departure: Departure?, ancestors: Set<Any>) {

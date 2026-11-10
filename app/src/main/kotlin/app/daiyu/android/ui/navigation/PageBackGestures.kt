@@ -108,6 +108,9 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     fun startDiagnostic(kind: BackPerformanceRecorder.Kind) {
         diagnosticToken = BackPerformance.start(diagnosticOwner, kind)
     }
+    fun releaseDiagnostic(predictive: Boolean = false) = BackPerformance.mark(
+        if (predictive) BackPerformanceRecorder.Event.PREDICTIVE_COMPLETE else BackPerformanceRecorder.Event.RELEASE,
+        diagnosticToken)
     var committing = false
         private set
 
@@ -322,6 +325,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                 val activeState = currentState
                 try {
                     if (!session.rejected && activeState.alive && currentEnabled) {
+                        if (activeState.predictive) activeState.releaseDiagnostic(predictive = true)
                         activeState.commitBack { currentBack() }
                     }
                 } finally {
@@ -434,7 +438,9 @@ internal fun PageBackGestureHost(
         if (departure != null) {
             if (departure.motion != null) {
                 // Adopt the already-started gesture clock; never initialize another route clock.
+                BackPerformance.mark(BackPerformanceRecorder.Event.MOTION_ADOPTED, departure.motion.diagnosticToken)
                 departure.motion.awaitCompletion()
+                BackPerformance.mark(BackPerformanceRecorder.Event.MOTION_WAIT_END, departure.motion.diagnosticToken)
             } else if (!departure.forwardSkipped) {
                 if (departure.frame.canDrawPreview && !departure.forwardSkipped) {
                     if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
@@ -455,10 +461,22 @@ internal fun PageBackGestureHost(
                 layers.prepare(frame, visualBackTargetKey, value, predictive, direction, velocity)
             } else null
             try { synchronousTrace("daiyu.back.business-handler") { back() } } finally {
-                if (request != null) scope.launch {
-                    withFrameNanos { }
-                    // A veto or an asynchronous save must not be treated as a completed pop.
-                    if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)
+                if (request != null) {
+                    val token = request.motion?.diagnosticToken
+                    BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_SCHEDULED, token)
+                    scope.launch {
+                        var checked = false
+                        try {
+                            withFrameNanos { }
+                            checked = true
+                            BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_CHECK, token)
+                            // A veto or an asynchronous save must not be treated as a completed pop.
+                            if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)
+                            else BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_ROUTE_CHANGED, token)
+                        } finally {
+                            if (!checked) BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_CHECK_CANCELLED, token)
+                        }
+                    }
                 }
             }
         }
@@ -536,6 +554,7 @@ internal fun PageBackGestureHost(
                             val dy = abs(change.position.y - down.position.y)
                             if (!change.pressed) {
                                 if (claimed && change.changedToUp()) {
+                                    state.releaseDiagnostic()
                                     change.consume()
                                     val screensPerSecond = velocity.calculateVelocity().x * direction / gestureWidth
                                     val commit = when {

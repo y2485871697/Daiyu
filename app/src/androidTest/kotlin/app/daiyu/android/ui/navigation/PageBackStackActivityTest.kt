@@ -122,6 +122,92 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    fun testOrdinaryBuildCaptureTimingKeepsSuspendedPrefixAndOldTokenSeparate() {
+        val runtime = app.daiyu.android.diagnostics.RuntimeDiagnostics
+        val recorder = app.daiyu.android.diagnostics.BackPerformance.recorder
+        val reason = app.daiyu.android.diagnostics.BackPerformanceRecorder.End.PAUSED
+        assertFalse(app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS)
+        val enabled = runtime.enabled
+        runtime.enabled = false; runtime.clear()
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        ui.waitForIdle()
+        try {
+            mainThread {
+                val scheduler = TestCoroutineScheduler()
+                val clock = object : MonotonicFrameClock {
+                    override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
+                }
+                val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
+                val copy = CompletableDeferred<ImageBitmap>()
+                val layers = PageBackPreviewLayers(graphics, scope) { copy.await() }
+                try {
+                    val owner = Any()
+                    recorder.start(owner, app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.CUSTOM_SWIPE)
+                    layers.enter("source")
+                    val frame = layers.frame("source")
+                    layers.setActive(true)
+                    frame.recorded(IntSize(2, 2)); scheduler.runCurrent()
+                    assertFalse(copy.isCompleted)
+                    layers.beginGesture(frame)
+                    // Deterministic synthetic sample, not an emulator performance threshold.
+                    recorder.frame(System.nanoTime(), 40_000_000L, 16_666_667L, 60f, LongArray(9))
+                    recorder.end(reason)
+                    recorder.start(owner, app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.CUSTOM_SWIPE)
+                    layers.beginGesture(frame)
+                    copy.complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                    recorder.frame(System.nanoTime(), 40_000_000L, 16_666_667L, 60f, LongArray(9))
+                    recorder.end(reason)
+
+                    val cancelledCopy = CompletableDeferred<ImageBitmap>()
+                    val cancelledLayers = PageBackPreviewLayers(graphics, scope) { cancelledCopy.await() }
+                    try {
+                        recorder.start(owner, app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.CUSTOM_SWIPE)
+                        cancelledLayers.enter("cancelled-source")
+                        val cancelledFrame = cancelledLayers.frame("cancelled-source")
+                        cancelledLayers.setActive(true)
+                        cancelledFrame.recorded(IntSize(2, 2)); scheduler.runCurrent()
+                        cancelledLayers.beginGesture(cancelledFrame)
+                        assertFalse(cancelledCopy.isCompleted)
+                        cancelledLayers.close()
+                        cancelledCopy.complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                        recorder.frame(System.nanoTime(), 40_000_000L, 16_666_667L, 60f, LongArray(9))
+                        recorder.end(reason)
+                    } finally {
+                        cancelledCopy.complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                        cancelledLayers.close()
+                    }
+                } finally {
+                    copy.complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                    layers.close(); scope.cancel()
+                }
+            }
+            val rows = runtime.export()
+            val incidents = (0 until rows.length()).map { rows.getJSONObject(it) }
+                .filter { it.optString("stage") == "BACK_PERFORMANCE" }
+            assertEquals(3, incidents.size)
+            val timings = incidents[0].getJSONArray("capture_timings")
+            val slices = (0 until timings.length()).map { timings.getJSONObject(it) }
+            val prefix = slices.single { it.getString("phase") == "CAPTURE_LAUNCH" }
+            val wall = slices.single { it.getString("phase") == "CAPTURE_WALL" }
+            assertEquals("COMPLETE", prefix.getString("result"))
+            assertEquals("IN_FLIGHT", wall.getString("result"))
+            assertTrue(prefix.getLong("start_offset_ns") <= wall.getLong("start_offset_ns"))
+            assertTrue(wall.getLong("start_offset_ns") <= prefix.getLong("start_offset_ns") + prefix.getLong("elapsed_ns"))
+            assertEquals(0, incidents[1].getJSONArray("capture_timings").length())
+            assertEquals(0, incidents[1].getJSONArray("phases").length())
+            val events = incidents[1].getJSONArray("timeline")
+            assertTrue((0 until events.length()).any { events.getJSONObject(it).getString("event") == "OBSERVED_CAPTURE_IN_FLIGHT" })
+            val cancelledTimings = incidents[2].getJSONArray("capture_timings")
+            val cancelledWall = (0 until cancelledTimings.length()).map { cancelledTimings.getJSONObject(it) }
+                .single { it.getString("phase") == "CAPTURE_WALL" }
+            assertEquals("CANCELLED", cancelledWall.getString("result"))
+        } finally {
+            recorder.end(reason); runtime.clear(); runtime.enabled = enabled
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun testPreparedSnapshotRetainsLastGoodGenerationButRejectsInvalidEpochs() {
         lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
         mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }

@@ -88,7 +88,7 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
         self.assertIn('catch (_: Throwable)', helper)
         recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
         names = re.findall(r'\("(daiyu\.[^"]+)"\)', recorder)
-        self.assertEqual(17, len(names))
+        self.assertEqual(19, len(names))
         self.assertEqual({
             'daiyu.back.custom-up-dispatch', 'daiyu.back.callback-commit', 'daiyu.back.prepare',
             'daiyu.back.business-handler', 'daiyu.back.reset', 'daiyu.back.route-change',
@@ -97,6 +97,7 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
             'daiyu.chat.position-seed', 'daiyu.chat.restore-lifecycle',
             'daiyu.chat.restore-clearance', 'daiyu.chat.retained-compose-entry',
             'daiyu.chat.refresh', 'daiyu.chat.publish', 'daiyu.chat.action-revision',
+            'daiyu.back.capture-launch', 'daiyu.back.capture-wall',
         }, set(names))
         self.assertIn('INCLUSIVE', recorder)
         nav = (APP / 'ui/navigation/PageBackGestures.kt').read_text()
@@ -117,6 +118,47 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
         self.assertIn('Deterministic synthetic sample', android)
         self.assertIn('checks_only.init.gradle', flow)
         self.assertIn('assert not packages, packages', flow)
+
+    def test_release_motion_and_abandon_timeline_keep_explicit_sources(self):
+        nav = (APP / 'ui/navigation/PageBackGestures.kt').read_text()
+        motion = (APP / 'ui/navigation/PageBackMotion.kt').read_text()
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        up = nav.split('if (claimed && change.changedToUp())', 1)[1].split('break', 1)[0]
+        self.assertLess(up.index('state.releaseDiagnostic()'), up.index('velocity.calculateVelocity()'))
+        self.assertIn('Event.PREDICTIVE_COMPLETE', nav)
+        for name in ('MOTION_START', 'MOTION_FIRST_TICK', 'MOTION_FINISHED', 'MOTION_CANCEL_REQUESTED', 'MOTION_CANCELLED', 'MOTION_FAILED'):
+            self.assertIn('Event.' + name, motion)
+        for name in ('MOTION_ADOPTED', 'MOTION_WAIT_END', 'ABANDON_SCHEDULED', 'ABANDON_CHECK_CANCELLED'):
+            self.assertIn('Event.' + name, nav)
+        for name in ('MOTION_ACCEPTED', 'MOTION_REJECTED', 'ABANDON_APPLIED', 'ABANDON_NOT_PENDING'):
+            self.assertIn('Event.' + name, layers)
+        self.assertIn('motion.diagnosticToken', layers)
+        self.assertNotIn('withFrameNanos', motion)
+        self.assertIn('throw cancelled', motion)
+
+    def test_capture_prefix_wall_and_schedule_preserve_original_token_and_bitmap_policy(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        self.assertIn('private fun schedule(frame: Frame) = schedule(frame, captureBackPerformanceToken())', layers)
+        self.assertIn('capture(frame, sourceToken)', layers)
+        self.assertIn('schedule(frame, sourceToken)', layers)
+        prefix = layers.split('val capture = synchronousTrace("daiyu.back.capture-launch", sourceToken)', 1)[1].split('frame.capture = capture', 1)[0]
+        self.assertIn('scope.launch(start = CoroutineStart.UNDISPATCHED)', prefix)
+        self.assertIn('BackPerformance.beginCapture(sourceToken)', prefix)
+        self.assertIn('withContext(NonCancellable) { snapshot(frame) }', prefix)
+        self.assertIn('BackPerformance.completeCapture(wall, result)', prefix)
+        self.assertNotIn('captureBackPerformanceToken()', prefix)
+        self.assertIn('!frame.frozen && previewEpoch == epoch', prefix)
+        self.assertIn('Event.OBSERVED_CAPTURE_IN_FLIGHT', layers)
+        runtime = (APP / 'diagnostics/RuntimeDiagnostics.kt').read_text()
+        self.assertIn('ELAPSED_INCLUDING_SUSPENSION_NOT_CPU', runtime)
+        android = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        self.assertIn('fun testOrdinaryBuildCaptureTimingKeepsSuspendedPrefixAndOldTokenSeparate()', android)
+        for field in ('vsync_offset_ns', 'timeline_dropped', 'capture_timings_dropped', 'start_offset_ns'):
+            self.assertIn('"' + field + '"', runtime)
+        recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
+        self.assertIn('MAX_TIMELINE = 32', recorder)
+        self.assertIn('MAX_CAPTURE_TIMINGS = 16', recorder)
+        self.assertIn('vsync - window.start', recorder)
 
 
 if __name__ == '__main__':

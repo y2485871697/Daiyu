@@ -253,10 +253,27 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 .single { it.getString("phase") == "CHAT_PUBLISH" }
             assertEquals("one synchronous refresh, not merely one visible composition", 1, refresh.getInt("count"))
             assertEquals(1, publish.getInt("count"))
+            assertFalse("unchanged rendered history must not perform another cold SHA", (0 until phases.length())
+                .any { phases.getJSONObject(it).getString("phase") == "MESSAGE_ACTION_REVISION" })
             return incident
         }
         try {
-            // Quiet fixture: no pending receipts/attachments that may legitimately publish or navigate again.
+            // Quiet, non-empty rendered history; no pending receipts/attachments/provider work.
+            val conversation = fixture.database.create("default")
+            val user = app.daiyu.android.domain.Message(app.daiyu.android.domain.MessageId("return-user"),
+                conversation.id, app.daiyu.android.domain.RunId("return-run"), "user",
+                listOf(app.daiyu.android.domain.MessageBlock.Text("body", "retained history ".repeat(256))),
+                app.daiyu.android.domain.RunStatus.COMPLETED)
+            val assistant = user.copy(id = app.daiyu.android.domain.MessageId("return-assistant"), role = "assistant",
+                blocks = listOf(app.daiyu.android.domain.MessageBlock.Text("answer", "retained answer")),
+                status = app.daiyu.android.domain.RunStatus.RUNNING)
+            fixture.database.send(user, assistant)
+            fixture.database.save(assistant.copy(status = app.daiyu.android.domain.RunStatus.COMPLETED))
+            mainThread { activity.select(conversation) }
+            awaitControl("message action snapshot admitted before warm returns") {
+                !fixture.controller.dataBusy && app.daiyu.android.MainActivity::class.java
+                    .getDeclaredField("messageActionSnapshot").apply { isAccessible = true }.get(activity) != null
+            }
             setDraft("return refresh count draft")
             openSettings() // Keep production MainActivity content and its real returnToChat wiring.
             ui.waitForIdle()
@@ -274,6 +291,9 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             // route_changed is a later Compose observation; the synchronous route is asserted above.
             awaitUniqueTag("chat-draft")
             assertDraft("return refresh count draft")
+            repeat(3) {
+                recordSynchronous(startWindow = true) { invokeHost(activity, "refresh") }
+            }
             dismissIme()
             ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
             ui.waitForIdle()

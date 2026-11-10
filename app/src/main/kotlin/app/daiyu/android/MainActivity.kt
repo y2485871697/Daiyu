@@ -1295,6 +1295,11 @@ class MainActivity : ComponentActivity() {
     private var messageActionKey: MessageActionRenderKey? = null
     private var messageActionLoading: MessageActionRenderKey? = null
     private var messageActionAttempted: MessageActionRenderKey? = null
+    private val messageActionRenderedRevision = MessageActionRenderedRevision { rows ->
+        app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.action-revision") {
+            app.daiyu.android.domain.context.ContextRevision.digest(rows)
+        }
+    }
     private fun clearInlineMessageEditor() {
         inlineMessageEditor?.additions?.close()
         inlineMessageEditor = null
@@ -1327,7 +1332,7 @@ class MainActivity : ComponentActivity() {
         val owner = selected?.id ?: run { invalidateMessageActionEditor(); return }
         if (!activityUsable() || !voiceForeground || !selectionReady || displayWindow != null || !controller.ready || controller.dataBusy || controller.active != null) return
         val key = MessageActionRenderKey(owner, editorGeneration,
-            app.daiyu.android.domain.context.ContextRevision.digest(shown.map { it.second }), controller.dataRevision)
+            messageActionRenderedRevision.revision(owner, shown.map { it.second }), controller.dataRevision)
         if (messageActionKey == key || messageActionLoading == key || messageActionAttempted == key) return
         messageActionSnapshot = null; messageActionKey = null
         // Admitted failures and mismatches consume the key; a busy rejection has not read anything.

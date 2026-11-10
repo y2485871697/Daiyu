@@ -64,6 +64,37 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
             self.assertNotIn('withContext(', block)
             self.assertNotIn('delay(', block)
 
+    def test_rendered_revision_is_single_entry_deep_list_projection_not_authority(self):
+        prepare = body(self.main, 'private fun prepareMessageActionSnapshot()')
+        lookup = 'messageActionRenderedRevision.revision(owner, shown.map { it.second })'
+        self.assertIn('private val messageActionRenderedRevision = MessageActionRenderedRevision { rows ->', self.main)
+        self.assertIn(lookup, prepare)
+        self.assertLess(prepare.index(lookup), prepare.index('if (messageActionKey == key'))
+        callback = prepare.split('controller.loadMessageActionSnapshot(owner)', 1)[1]
+        self.assertNotIn('messageActionRenderedRevision', callback)
+        for guard in ('messageActionVisit === visit', 'messageActionLoading == key',
+                      'activityUsable() && voiceForeground', 'selected?.id == key.conversation',
+                      'editorGeneration == key.editor', 'controller.dataRevision == key.data',
+                      'ContextRevision.digest(rows) == key.rows', 'candidate.matchesRendered(rows)'):
+            self.assertIn(guard, callback)
+        self.assertIn('snapshot.matchesRendered(shown.map { it.second })', self.main)
+        self.assertIn('it.matchesRendered(shown.map { row -> row.second })', self.main)
+        self.assertEqual(1, self.main.count('synchronousTrace("daiyu.chat.action-revision")'))
+        cold = self.main.split('private val messageActionRenderedRevision =', 1)[1].split('private fun clearInlineMessageEditor()', 1)[0]
+        self.assertIn('ContextRevision.digest(rows)', cold)
+        helper = (APP / 'MessageActionRenderedRevision.kt').read_text()
+        self.assertIn('private var entry: Entry? = null', helper)
+        self.assertIn('it.owner == owner && it.rows == frozen', helper)
+        self.assertIn('return digest(frozen).also { entry = Entry(owner, frozen, it) }', helper)
+        for owner in ('message', 'segment'):
+            for field in ('blocks', 'protocolItems', 'reportedReasoning'):
+                self.assertIn(f'{field} = {owner}.{field}.toList()', helper)
+        self.assertIn('historySegments = message.historySegments.map', helper)
+        for forbidden in ('toByteArray(', 'MessageDigest', 'hashCode(', 'IdentityHashMap',
+                          'serialize', 'database.', 'JSONObject', 'isCurrent', 'MessageActionTarget'):
+            self.assertNotIn(forbidden, helper)
+        self.assertIn('ContextRevision::digest', helper)
+
     def test_real_main_regression_counts_sync_work_and_keeps_existing_scope(self):
         android = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
         regression = body(android, 'fun testRealMainChatReturnRefreshesOnceAndSidebarDismissStillRefreshesImmediately()')
@@ -81,8 +112,16 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         flow = (ROOT / '.github/workflows/screen-observation-jank-checks.yml').read_text()
         page_scope = flow.split("if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':", 1)[1].split('if os.environ', 1)[0]
         self.assertIn('test_chat_return_refresh_contract.py', page_scope)
-        for name in ('BackPerformanceRecorderTest', 'BackPerformanceRuntimeTest'):
+        self.assertIn('"MESSAGE_ACTION_REVISION"', regression)
+        self.assertIn('fixture.database.send(user, assistant)', regression)
+        self.assertIn('message action snapshot admitted before warm returns', regression)
+        self.assertIn('recordSynchronous(startWindow = true) { invokeHost(activity, "refresh") }', regression)
+        for name in ('BackPerformanceRecorderTest', 'BackPerformanceRuntimeTest', 'MessageActionRenderedRevisionTest'):
             self.assertEqual(2, flow.count(name))
+        classes = flow.split('if [[ $SCREEN_JANK_CHECK_SCOPE == page-back ]]; then', 1)[1].split('\n          fi', 1)[0]
+        expected = flow.split("if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':", 2)[2].split('suites =', 1)[0]
+        self.assertIn('app.daiyu.android.MessageActionRenderedRevisionTest', classes)
+        self.assertIn("'MessageActionRenderedRevisionTest'", expected)
         self.assertIn('checks_only.init.gradle', flow)
 
 

@@ -79,12 +79,16 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var inputText by mutableStateOf("a text field with selectable content")
     private lateinit var horizontal: ScrollState
 
-    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, onPageComposition: () -> Unit = {}) {
+    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, rtl: Boolean = false, onPageComposition: () -> Unit = {}) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     previewBackground = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.background
                     val renderedRoute = route
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalLayoutDirection provides
+                            if (rtl) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr,
+                    ) {
                     PageBackGestureHost(renderedRoute, canBack, swipe, predictive,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                         backTargetKey = if (renderedRoute == "test-page") "previous-page" else null,
@@ -123,6 +127,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                         } else Box(Modifier.fillMaxSize().pageBackPreviewSource().background(if (renderedRoute == "previous-page") Color.Red else currentColor)) {
                             Text(renderedRoute)
                         }
+                    }
                     }
                 }
             }
@@ -610,11 +615,15 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_RIGHT)) }
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_RIGHT)) }
             ui.mainClock.advanceTimeBy(32)
-            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            ui.mainClock.advanceTimeByFrame()
-            ui.onNodeWithTag("page-back-departure").assertExists()
+            val release = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() } // includes the route frame
+            val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+            assertEquals("predictive release position stays continuous", release.left, start.left, 1.1f)
             assertEquals("previous-page", route)
             assertEquals(1, backCount)
+            ui.mainClock.advanceTimeByFrame()
+            val next = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+            assertTrue("predictive completion advances on the first positive-time frame", next.left > start.left)
             ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
             assertEquals("previous-page", route)
@@ -729,22 +738,29 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testReleaseVelocityContinuesIntoDeparture() {
+    fun testReleaseVelocityContinuesIntoDeparture() = assertReleaseClockContinuity(rtl = false)
+
+    fun testReleaseVelocityContinuesIntoDepartureInRtl() = assertReleaseClockContinuity(rtl = true)
+
+    private fun assertReleaseClockContinuity(rtl: Boolean) {
         predictive = false
         navigateOnBack = true
-        mount(capturePreviousPage = true)
+        mount(capturePreviousPage = true, rtl = rtl)
         ui.mainClock.autoAdvance = false
         try {
             val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            val direction = if (rtl) -1f else 1f
+            fun edge(bounds: androidx.compose.ui.geometry.Rect) = if (rtl) bounds.right else bounds.left
             ui.onNodeWithTag("page-back-host").performTouchInput {
-                down(Offset(width * .05f, height * .6f))
-                moveTo(Offset(width * .55f, height * .6f), 96)
-                moveTo(Offset(width * .65f, height * .6f), 16)
-                moveTo(Offset(width * .75f, height * .6f), 16)
+                fun x(fraction: Float) = width * if (rtl) 1f - fraction else fraction
+                down(Offset(x(.05f), height * .6f))
+                moveTo(Offset(x(.55f), height * .6f), 96)
+                moveTo(Offset(x(.65f), height * .6f), 16)
+                moveTo(Offset(x(.75f), height * .6f), 16)
             }
             ui.mainClock.advanceTimeBy(32)
             val released = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
-            assertTrue("the release trajectory starts from a moving page", released.left > initial.left)
+            assertTrue("the release trajectory starts from a moving page", direction * (edge(released) - edge(initial)) > 0f)
             ui.onNodeWithTag("page-back-host").performTouchInput { up() }
             ui.runOnIdle {
                 assertEquals("previous-page", route)
@@ -752,17 +768,63 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             }
             ui.mainClock.advanceTimeByFrame()
             val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
-            assertEquals("release position stays continuous", released.left, start.left, 1.1f)
-            // The first animation callback initializes play time to t=0 after departure composition.
-            ui.mainClock.advanceTimeByFrame()
-            val springStart = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
-            assertEquals("the spring t=0 keeps the release position", start.left, springStart.left, 1.1f)
+            assertEquals("release position stays continuous", edge(released), edge(start), 1.1f)
+            // The request registered its clock before the route frame. The next frame has positive
+            // elapsed time, not a second route-owned t=0 callback.
             ui.mainClock.advanceTimeByFrame()
             val next = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
-            val remaining = initial.right - springStart.left
-            val delta = next.left - springStart.left
+            val remaining = initial.width - direction * (edge(start) - edge(initial))
+            val delta = direction * (edge(next) - edge(start))
             assertTrue("release momentum survives the first positive-time spring frame: delta=$delta remaining=$remaining",
                 delta > remaining * .08f)
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testVetoedCommitDoesNotPublishCompletionAndNextSwipeCanReturn() = assertUnacceptedCommit(completeLater = false)
+
+    fun testAsyncPopDoesNotAdoptAnAbandonedGestureClock() = assertUnacceptedCommit(completeLater = true)
+
+    private fun assertUnacceptedCommit(completeLater: Boolean) {
+        predictive = false
+        navigateOnBack = false
+        mount(capturePreviousPage = true)
+        ui.mainClock.autoAdvance = false
+        try {
+            val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            fun swipeToCommit() {
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    down(Offset(width * .05f, height * .6f))
+                    moveTo(Offset(width * .75f, height * .6f), 240)
+                    up()
+                }
+            }
+            swipeToCommit()
+            assertEquals(1, backCount)
+            assertEquals("callback is not proof of a pop", "test-page", route)
+            ui.mainClock.advanceTimeByFrame() // revoke the unconsumed request
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            assertEquals(initial, ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot)
+            if (completeLater) {
+                mainThread { route = "previous-page" }
+                ui.mainClock.advanceTimeByFrame()
+                val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                assertEquals("a late save is an ordinary return, not the old .7 gesture", initial.left, start.left, 1.1f)
+                assertEquals(1, backCount)
+            } else {
+                mainThread { navigateOnBack = true }
+                swipeToCommit()
+                assertEquals("previous-page", route)
+                assertEquals(2, backCount)
+                ui.mainClock.advanceTimeByFrame()
+                val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                ui.mainClock.advanceTimeByFrame()
+                val next = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                assertTrue("a veto must not poison the next completion", next.left > start.left)
+            }
             ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
         } finally { ui.mainClock.autoAdvance = true }

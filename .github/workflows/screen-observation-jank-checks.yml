@@ -135,7 +135,7 @@ jobs:
             classes=(app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
           fi
           if [[ $SCREEN_JANK_CHECK_SCOPE == page-back ]]; then
-            classes=(app.daiyu.android.diagnostics.RuntimeDiagnosticsTest app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.BackPerformanceRecorderTest app.daiyu.android.diagnostics.BackPerformanceRuntimeTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest app.daiyu.android.ChatGptSpeedSelectionTest)
+            classes=(app.daiyu.android.diagnostics.RuntimeDiagnosticsTest app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.BackPerformanceRecorderTest app.daiyu.android.diagnostics.BackPerformanceRuntimeTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest app.daiyu.android.ChatGptSpeedSelectionTest app.daiyu.android.MessageActionRenderedRevisionTest)
           fi
           filters=()
           for class in "${classes[@]}"; do
@@ -166,7 +166,7 @@ jobs:
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
               expected = {'RuntimeDiagnosticsTest', 'JankIncidentBufferTest', 'BackPerformanceRecorderTest', 'BackPerformanceRuntimeTest', 'DiagnosticLogStoreTest',
                           'FramePerformanceLogTest', 'ReconnectPartsTest', 'ReconnectIndexTest',
-                          'RootExitConfirmationTest', 'PageBackMotionTest', 'ChatGptSpeedSelectionTest'}
+                          'RootExitConfirmationTest', 'PageBackMotionTest', 'ChatGptSpeedSelectionTest', 'MessageActionRenderedRevisionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

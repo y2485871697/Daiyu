@@ -52,7 +52,8 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
     internal class Departure(val frame: Frame, val target: Any, val progress: Float,
         val predictive: Boolean, val direction: Float, val forward: Boolean = false,
-        val velocity: Float = 0f, val targetImage: ImageBitmap? = null) {
+        val velocity: Float = 0f, val targetImage: ImageBitmap? = null,
+        val motion: PageBackCompletionMotion? = null) {
         var forwardSkipped by mutableStateOf(false)
     }
 
@@ -72,7 +73,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         currentKey = key
         val departure = pending
         pending = null
-        return departure?.takeIf { it.target == key && it.frame === previous }
+        val accepted = departure?.takeIf { it.target == key && it.frame === previous }
+        if (accepted == null) departure?.motion?.cancel()
+        return accepted
             ?: previous?.takeIf { it.animateReturn && it.backTargetKey == key && it.size != IntSize.Zero }
                 ?.let { Departure(it, key, 0f, predictive = false, direction = it.returnDirection, targetImage = frames[key]?.image) }
     }
@@ -209,13 +212,16 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float, velocity: Float = 0f): Departure {
         return synchronousTrace("daiyu.back.prepare") {
             freeze(frame)
+            pending?.motion?.cancel()
             Departure(frame, target, progress, predictive, direction, velocity = velocity,
-                targetImage = frames[target]?.image).also { pending = it }
+                targetImage = frames[target]?.image,
+                motion = PageBackCompletionMotion(scope, progress, velocity)).also { pending = it }
         }
     }
 
     fun abandon(departure: Departure) {
         if (pending === departure) {
+            departure.motion?.cancel()
             pending = null
             // The visible cancel settle still owns this image; resume unlocks it at rest.
         }
@@ -233,6 +239,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
 
     fun clearPreviews() {
         previewEpoch++
+        pending?.motion?.cancel()
         pending = null
         frames.values.forEach {
             it.warmup?.cancel()
@@ -249,6 +256,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun close() {
         closed = true
         active = false
+        pending?.motion?.cancel()
         pending = null
         frames.values.forEach { release(it) }
         frames.clear()

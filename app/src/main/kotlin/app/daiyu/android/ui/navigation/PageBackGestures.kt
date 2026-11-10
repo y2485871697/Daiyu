@@ -426,10 +426,16 @@ internal fun PageBackGestureHost(
     }
     val target = layers.find(visualBackTargetKey, viewport)
     var departing by remember(departure) { mutableStateOf(departure != null) }
-    val exit = remember(departure) { Animatable(if (departure?.forward == false) departure.progress else 0f) }
+    val exit = remember(departure) {
+        departure?.motion?.animation ?: Animatable(if (departure?.forward == false) departure.progress else 0f)
+    }
+    DisposableEffect(departure) { onDispose { departure?.motion?.cancel() } }
     LaunchedEffect(departure, departure?.forwardSkipped) {
         if (departure != null) {
-            if (!departure.forwardSkipped) {
+            if (departure.motion != null) {
+                // Adopt the already-started gesture clock; never initialize another route clock.
+                departure.motion.awaitCompletion()
+            } else if (!departure.forwardSkipped) {
                 if (departure.frame.canDrawPreview && !departure.forwardSkipped) {
                     if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
                     else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f),
@@ -498,6 +504,7 @@ internal fun PageBackGestureHost(
     val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)
     val returning by rememberUpdatedState(showDeparture && departure?.forward == false)
     val claimSwipe by rememberUpdatedState {
+        departure?.motion?.cancel()
         departing = false
         state.transitionBlocked = false
     }

@@ -554,6 +554,54 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('val value = exit.value', self.host)
         self.assertNotIn('departure.progress + (1f - departure.progress) * exit.value', self.host)
 
+    def test_completion_clock_is_owned_by_prepared_request_not_destination_effect(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        motion = (APP / 'ui/navigation/PageBackMotion.kt').read_text()
+        prepare = layers.split('fun prepare(', 1)[1].split('fun abandon(', 1)[0]
+        self.assertIn('motion = PageBackCompletionMotion(scope, progress, velocity)', prepare)
+        self.assertIn('val animation = Animatable(progress)', motion)
+        self.assertIn('scope.launch(start = CoroutineStart.UNDISPATCHED)', motion)
+        self.assertIn('initialVelocity = pageBackInitialVelocity(progress, velocity)', motion)
+        self.assertIn('suspend fun awaitCompletion() = job.join()', motion)
+        self.assertIn('departure?.motion?.animation ?: Animatable', self.host)
+        effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped)', 1)[1].split('SideEffect { layers.trim', 1)[0]
+        self.assertIn('if (departure.motion != null)', effect)
+        self.assertIn('departure.motion.awaitCompletion()', effect)
+        self.assertIn('} else if (!departure.forwardSkipped)', effect)
+        self.assertIn('onDispose { departure?.motion?.cancel() }', self.host)
+        claim = self.host.split('val claimSwipe by rememberUpdatedState {', 1)[1].split('CompositionLocalProvider', 1)[0]
+        self.assertIn('departure?.motion?.cancel()', claim)
+        abandon = layers.split('fun abandon(', 1)[1].split('fun trim(', 1)[0]
+        self.assertIn('if (pending === departure)', abandon)
+        self.assertIn('departure.motion?.cancel()', abandon)
+        self.assertIn('if (accepted == null) departure?.motion?.cancel()', layers)
+        for operation in ('fun clearPreviews()', 'fun close()'):
+            self.assertIn('pending?.motion?.cancel()', layers.split(operation, 1)[1])
+        for forbidden in ('System.nanoTime', 'SystemClock', 'delay(', 'withFrameNanos'):
+            self.assertNotIn(forbidden, motion)
+        android = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
+        for name in ('testReleaseVelocityContinuesIntoDepartureInRtl',
+                     'testVetoedCommitDoesNotPublishCompletionAndNextSwipeCanReturn',
+                     'testAsyncPopDoesNotAdoptAnAbandonedGestureClock'):
+            self.assertIn('fun ' + name + '()', android)
+        self.assertNotIn('the spring t=0 keeps the release position', android)
+        self.assertIn('predictive completion advances on the first positive-time frame', android)
+        regression = android.split('private fun assertReleaseClockContinuity(', 1)[1].split('fun testVetoedCommit', 1)[0]
+        first = regression.split('release position stays continuous', 1)[1].split('val next =', 1)[0]
+        self.assertEqual(1, first.count('advanceTimeByFrame()'))
+        self.assertIn('delta > remaining * .08f', regression)
+        self.assertIn('fun edge(bounds: androidx.compose.ui.geometry.Rect) = if (rtl) bounds.right else bounds.left', regression)
+        for sample in ('edge(released)', 'edge(start)', 'edge(next)', 'edge(initial)'):
+            self.assertIn(sample, regression)
+        predictive = android.split('val release = ui.onNodeWithTag("page-back-surface")', 1)[1].split('predictive release position stays continuous', 1)[0]
+        self.assertIn('mainThread { activity.onBackPressedDispatcher.onBackPressed() }', predictive)
+        self.assertNotIn('advanceTimeByFrame()', predictive)
+        jvm = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/navigation/PageBackMotionTest.kt').read_text()
+        self.assertIn('BroadcastFrameClock()', jvm)
+        self.assertIn('commit registers a frame without destination composition', jvm)
+        self.assertIn('first positive time must preserve momentum', jvm)
+        self.assertIn('abandonedMotionCannotAdvanceOrAffectTheNextRequest', jvm)
+
     def test_gesture_pins_prepared_pixels_before_motion_and_unlocks_at_rest(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         begin = layers.split('fun beginGesture(frame: Frame): Boolean {', 1)[1].split('fun resume(', 1)[0]

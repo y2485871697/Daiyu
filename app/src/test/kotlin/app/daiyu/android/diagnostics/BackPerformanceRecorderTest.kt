@@ -137,7 +137,7 @@ class BackPerformanceRecorderTest {
         assertEquals(1, phase.count); assertEquals(7, phase.inFlight)
     }
     @Test fun chatRefreshAndPublishHaveSeparateInclusiveCountsWithoutNewFields() {
-        assertEquals(16, BackPerformanceRecorder.Phase.entries.size)
+        assertEquals(17, BackPerformanceRecorder.Phase.entries.size)
         val f = Fixture(); f.start(); f.frame()
         val refresh = f.recorder.begin("daiyu.chat.refresh")
         f.now += 2_000_000L
@@ -155,8 +155,23 @@ class BackPerformanceRecorderTest {
         assertEquals(1, published.count); assertEquals(3_000_000L, published.total)
         assertEquals(0, refreshed.inFlight); assertEquals(0, published.inFlight)
     }
+    @Test fun coldRevisionPhaseIsWhitelistedAndNestedWithoutChangingRefreshPublishCounts() {
+        val f = Fixture(); f.start(); f.frame()
+        val refresh = f.recorder.begin("daiyu.chat.refresh")
+        val revision = f.recorder.begin("daiyu.chat.action-revision")
+        assertNotNull(revision)
+        f.now += 4_000_000L; f.recorder.complete(revision)
+        val publish = f.recorder.begin("daiyu.chat.publish")
+        f.now += 1_000_000L; f.recorder.complete(publish)
+        f.recorder.complete(refresh); f.end()
+        val phases = f.rows.single().phases
+        assertEquals(3, phases.size)
+        assertEquals(4_000_000L, phases.single { it.phase == BackPerformanceRecorder.Phase.MESSAGE_ACTION_REVISION }.total)
+        assertEquals(5_000_000L, phases.single { it.phase == BackPerformanceRecorder.Phase.CHAT_REFRESH }.total)
+        assertTrue(phases.all { it.count == 1 && it.inFlight == 0 })
+    }
     @Test fun helperPreservesReturnExceptionAndNonlocalReturnDespiteDiagnosticFailure() {
-        for (name in listOf("daiyu.back.prepare", "daiyu.chat.refresh", "daiyu.chat.publish")) {
+        for (name in listOf("daiyu.back.prepare", "daiyu.chat.refresh", "daiyu.chat.publish", "daiyu.chat.action-revision")) {
             var calls = 0
             assertEquals(42, synchronousTrace(name) { calls++; 42 })
             fun nonlocal(): Int { synchronousTrace(name) { calls++; return 7 } }

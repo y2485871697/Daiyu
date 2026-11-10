@@ -137,7 +137,7 @@ class BackPerformanceRecorderTest {
         assertEquals(1, phase.count); assertEquals(7, phase.inFlight)
     }
     @Test fun chatRefreshAndPublishHaveSeparateInclusiveCountsWithoutNewFields() {
-        assertEquals(19, BackPerformanceRecorder.Phase.entries.size)
+        assertEquals(22, BackPerformanceRecorder.Phase.entries.size)
         val f = Fixture(); f.start(); f.frame()
         val refresh = f.recorder.begin("daiyu.chat.refresh")
         f.now += 2_000_000L
@@ -171,7 +171,8 @@ class BackPerformanceRecorderTest {
         assertTrue(phases.all { it.count == 1 && it.inFlight == 0 })
     }
     @Test fun helperPreservesReturnExceptionAndNonlocalReturnDespiteDiagnosticFailure() {
-        for (name in listOf("daiyu.back.prepare", "daiyu.chat.refresh", "daiyu.chat.publish", "daiyu.chat.action-revision")) {
+        for (name in listOf("daiyu.back.prepare", "daiyu.back.layers.transition", "daiyu.back.layers.frame",
+            "daiyu.back.layers.find", "daiyu.chat.refresh", "daiyu.chat.publish", "daiyu.chat.action-revision")) {
             var calls = 0
             assertEquals(42, synchronousTrace(name) { calls++; 42 })
             fun nonlocal(): Int { synchronousTrace(name) { calls++; return 7 } }

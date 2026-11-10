@@ -79,7 +79,7 @@ class BackPerformanceRuntimeTest {
             repeat(4) { recorder.frame(now, 40_000_000L + it, 16_666_667L, 60f, LongArray(9)) }
             recorder.end(BackPerformanceRecorder.End.TAIL)
             val full = RuntimeDiagnostics.export().getJSONObject(0)
-            assertEquals(19, full.getJSONArray("phases").length())
+            assertEquals(22, full.getJSONArray("phases").length())
             assertEquals(4, full.getJSONArray("worst_frames").length())
             assertEquals(32, full.getJSONArray("timeline").length())
             assertEquals(18, full.getInt("timeline_dropped"))

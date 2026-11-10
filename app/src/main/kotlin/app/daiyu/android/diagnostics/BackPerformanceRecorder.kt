@@ -18,6 +18,8 @@ internal class BackPerformanceRecorder(
         MODEL_PUBLISH("daiyu.chat.model-refresh-publish"), POSITION("daiyu.chat.position-seed"),
         RESTORE("daiyu.chat.restore-lifecycle"), CLEARANCE("daiyu.chat.restore-clearance"),
         COMPOSE_ENTRY("daiyu.chat.retained-compose-entry"),
+        LAYERS_TRANSITION("daiyu.back.layers.transition"), LAYERS_FRAME("daiyu.back.layers.frame"),
+        LAYERS_FIND("daiyu.back.layers.find"),
         CHAT_REFRESH("daiyu.chat.refresh"), CHAT_PUBLISH("daiyu.chat.publish"),
         MESSAGE_ACTION_REVISION("daiyu.chat.action-revision"),
         CAPTURE_LAUNCH("daiyu.back.capture-launch"), CAPTURE_WALL("daiyu.back.capture-wall")

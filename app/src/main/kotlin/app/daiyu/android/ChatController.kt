@@ -3108,6 +3108,56 @@ class ChatController internal constructor(private val application:Application,
             toolScreenshotPreviews[ToolScreenshotPreviewCache.Key(owner, callId, dataRevision, screenScreenshotRevision)]
     }
 
+    internal fun toolScreenshotPreviewCurrent(expectedDataRevision: Long, expectedScreenshotRevision: Long): Boolean =
+        synchronized(this) { !closed && ready && !dataBusy && dataRevision == expectedDataRevision &&
+            screenScreenshotRevision == expectedScreenshotRevision }
+
+    internal fun loadToolScreenshotOriginal(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
+        callId: String, expectedDataRevision: Long, expectedScreenshotRevision: Long,
+        complete: (ToolScreenshotOriginal?) -> Unit): Boolean {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        synchronized(this) {
+            if (!toolScreenshotPreviewCurrent(expectedDataRevision, expectedScreenshotRevision)) return false
+            generationReaders++
+        }
+        try { screenshotExecutor.execute {
+            val original = runCatching {
+                val record = committedScreenshotOnWorker(owner, callId) ?: return@runCatching null
+                check(record.disposition == app.daiyu.android.domain.runtime.ToolDisposition.SUCCEEDED)
+                if (record.invocation.name == "screen") {
+                    val output = checkNotNull(record.result)
+                    val asset = org.json.JSONObject(output).optJSONObject("image_asset")
+                    if (asset?.optBoolean("temporary") == true && screenToolImages.wasCleared(owner.conversationId, owner.runId))
+                        return@runCatching null
+                    val image = app.daiyu.android.media.NativeScreenImage.parse(record.invocation.name,
+                        record.invocation.arguments, output) { receipt ->
+                        screenToolImages.read(owner.conversationId, callId, receipt, owner.runId)
+                    } ?: return@runCatching null
+                    ToolScreenshotOriginal(image.bytes, "image/png")
+                } else {
+                    check(org.json.JSONObject(record.invocation.arguments).optString("action") == "screenshot")
+                    val receipt = org.json.JSONObject(checkNotNull(record.result)).getJSONObject("screenshot_receipt")
+                    val bytes = app.daiyu.android.media.BrowserScreenshotStore(application.filesDir, application.cacheDir).read(
+                        app.daiyu.android.media.BrowserScreenshotStore.Binding(owner.conversationId, owner.messageId,
+                            owner.runId, record.invocation.id.value, record.invocation.name, record.invocation.arguments), receipt)
+                    ToolScreenshotOriginal(bytes, "image/jpeg")
+                }
+            }.getOrNull()
+            handler.post {
+                val valid = synchronized(this) {
+                    generationReaders--
+                    if (closed) closeStorageWhenIdle()
+                    toolScreenshotPreviewCurrent(expectedDataRevision, expectedScreenshotRevision)
+                }
+                complete(original.takeIf { valid })
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { generationReaders--; if (closed) closeStorageWhenIdle() }
+            return false
+        }
+        return true
+    }
+
     internal fun loadToolScreenshot(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
         callId: String, complete: (android.graphics.Bitmap?, Boolean) -> Unit): Boolean {
         check(Looper.myLooper() == Looper.getMainLooper())

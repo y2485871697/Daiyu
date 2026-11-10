@@ -181,7 +181,8 @@ jobs:
             extra_tests+=(--tests app.daiyu.android.media.ScreenToolImageStoreTest
               --tests app.daiyu.android.model.ScreenToolImageInputTest
               --tests app.daiyu.android.ui.ToolScreenshotReceiptUnitTest
-              --tests app.daiyu.android.ToolScreenshotPreviewCacheTest)
+              --tests app.daiyu.android.ToolScreenshotPreviewCacheTest
+              --tests app.daiyu.android.ToolScreenshotMediaPreviewTest)
           fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
@@ -206,7 +207,7 @@ jobs:
               expected = {'app.daiyu.android.gui.' + name for name in ('GuiRuntimeScreenshotTest', 'GuiAppLaunchTest',
                   'GuiScreenToolFactoryTest', 'GuiLeaseGateTest', 'GuiCaptureRequestTest', 'GuiCaptureDisposalTest')}
           if os.environ.get('GUI_CHECK_SCOPE') == 'temporary-cleanup':
-              expected.update({'app.daiyu.android.media.ScreenToolImageStoreTest', 'app.daiyu.android.model.ScreenToolImageInputTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.ToolScreenshotPreviewCacheTest'})
+              expected.update({'app.daiyu.android.media.ScreenToolImageStoreTest', 'app.daiyu.android.model.ScreenToolImageInputTest', 'app.daiyu.android.ui.ToolScreenshotReceiptUnitTest', 'app.daiyu.android.ToolScreenshotPreviewCacheTest', 'app.daiyu.android.ToolScreenshotMediaPreviewTest'})
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest', 'core-domain/build/test-results/test') for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

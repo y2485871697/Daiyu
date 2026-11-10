@@ -23,20 +23,22 @@ import org.json.JSONObject
 class ToolScreenshotPreviewActivityTest : WiredActivityTestCase() {
     private lateinit var owner: WorkStepOwnerUi
     private val callId = "preview-call"
+    private lateinit var originalPng: ByteArray
     internal override fun createFixture() = RunControlFixture(instrumentation.targetContext,
         beforeController = { database, _ ->
             val conversation = database.create("default")
             val user = Message(MessageId("preview-user"), conversation.id, RunId("preview-run"),
                 Message.USER_ROLE, listOf(MessageBlock.Text("user", "read")), RunStatus.COMPLETED)
-            val bitmap = Bitmap.createBitmap(4, 3, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(240, 600, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.BLUE)
             val png = ByteArrayOutputStream().use { output ->
                 check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)); output.toByteArray()
             }
             bitmap.recycle()
+            originalPng = png
             val record = ToolRecord(ToolInvocation(ToolCallId(callId), "screen", """{"operation":"screenshot"}"""),
                 ToolDisposition.SUCCEEDED, JSONObject().put("capture_id", "fixture")
-                    .put("width", 4).put("height", 3).put("mime_type", "image/png")
+                    .put("width", 240).put("height", 600).put("mime_type", "image/png")
                     .put("data_base64", Base64.encodeToString(png, Base64.NO_WRAP)).toString())
             val initial = user.copy(id = MessageId("preview-assistant"), role = Message.ASSISTANT_ROLE,
                 status = RunStatus.RUNNING, blocks = listOf(MessageBlock.Tool(record.invocation, record.result)))
@@ -133,6 +135,94 @@ class ToolScreenshotPreviewActivityTest : WiredActivityTestCase() {
         assertTrue("late read completion timed out", done.await(10, TimeUnit.SECONDS))
         assertNull(result.get())
         assertNull(cache[key])
+    }
+
+    private fun showScreenshot(visible: androidx.compose.runtime.MutableState<Boolean>) {
+        val step = WorkStepUi(callId, "查看屏幕", "", WorkStepState.OK, owner, hasScreenScreenshot = true)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            if (visible.value) ToolScreenshotContent(fixture.controller, step)
+        } } }
+    }
+
+    fun testClickUsesOrdinaryFullScreenViewerAndBackKeepsCachedThumbnail() {
+        val thumbnail = loaded()
+        showScreenshot(mutableStateOf(true))
+        repeat(2) {
+            val cardBounds = ui.onNodeWithContentDescription("该调用已确认的屏幕截图").fetchSemanticsNode().boundsInRoot
+            ui.onNodeWithContentDescription("该调用已确认的屏幕截图").performClick()
+            ui.waitUntil(10_000) {
+                ui.onAllNodesWithContentDescription("屏幕截图.png").fetchSemanticsNodes().isNotEmpty()
+            }
+            ui.onNodeWithContentDescription("下载原件").assertIsDisplayed()
+            ui.onNodeWithText("已保存截图").assertDoesNotExist()
+            val fullBounds = ui.onNodeWithContentDescription("屏幕截图.png").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue("ordinary viewer fills the screen", fullBounds.height > cardBounds.height * 2)
+            awaitNodeWindowFocus(ui.onNodeWithContentDescription("屏幕截图.png"))
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitUntil(10_000) { ui.onAllNodesWithContentDescription("下载原件").fetchSemanticsNodes().isEmpty() }
+            ui.onNodeWithContentDescription("该调用已确认的屏幕截图").assertIsDisplayed()
+            mainThread { assertSame(thumbnail, fixture.controller.cachedToolScreenshot(owner, callId)!!.image) }
+            assertFalse(thumbnail.isRecycled)
+        }
+    }
+
+    fun testOriginalReaderPreservesExactPngAndRejectsStaleRevision() {
+        val done = CountDownLatch(1)
+        val result = AtomicReference<ToolScreenshotOriginal?>()
+        mainThread {
+            assertTrue(fixture.controller.loadToolScreenshotOriginal(owner, callId,
+                fixture.controller.dataRevision, fixture.controller.screenScreenshotRevision) { original ->
+                result.set(original); done.countDown()
+            })
+        }
+        assertTrue(done.await(10, TimeUnit.SECONDS))
+        val original = checkNotNull(result.get())
+        assertEquals("image/png", original.mimeType)
+        assertTrue(originalPng.contentEquals(original.bytes))
+        val wrongOwnerDone = CountDownLatch(1)
+        val wrongOwnerResult = AtomicReference<ToolScreenshotOriginal?>()
+        mainThread {
+            assertTrue(fixture.controller.loadToolScreenshotOriginal(owner.copy(runId = "other"), callId,
+                fixture.controller.dataRevision, fixture.controller.screenScreenshotRevision) {
+                wrongOwnerResult.set(it); wrongOwnerDone.countDown()
+            })
+        }
+        assertTrue(wrongOwnerDone.await(10, TimeUnit.SECONDS))
+        assertNull(wrongOwnerResult.get())
+        mainThread {
+            assertFalse(fixture.controller.loadToolScreenshotOriginal(owner, callId,
+                fixture.controller.dataRevision + 1, fixture.controller.screenScreenshotRevision) { fail("stale callback") })
+            assertFalse(fixture.controller.loadToolScreenshotOriginal(owner, callId,
+                fixture.controller.dataRevision, fixture.controller.screenScreenshotRevision + 1) { fail("stale callback") })
+        }
+    }
+
+    fun testLeavingCardWhileOriginalIsQueuedCannotReopenViewer() {
+        val thumbnail = loaded()
+        val visible = mutableStateOf(true)
+        showScreenshot(visible)
+        val readers = ChatController::class.java.getDeclaredField("generationReaders").apply { isAccessible = true }
+        awaitControl("previous readers drained") { synchronized(fixture.controller) { readers.getInt(fixture.controller) == 0 } }
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val drained = CountDownLatch(1)
+        executor().execute { entered.countDown(); check(release.await(20, TimeUnit.SECONDS)) }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        try {
+            ui.onNodeWithContentDescription("该调用已确认的屏幕截图").performClick()
+            ui.onNodeWithContentDescription("下载原件").assertIsDisplayed()
+            awaitControl("original read admitted behind blocked screenshot worker") {
+                synchronized(fixture.controller) { readers.getInt(fixture.controller) > 0 }
+            }
+            mainThread { visible.value = false }
+            ui.onNodeWithContentDescription("下载原件").assertDoesNotExist()
+            executor().execute { drained.countDown() }
+        } finally { release.countDown() }
+        assertTrue(drained.await(10, TimeUnit.SECONDS))
+        mainThread { visible.value = true }
+        ui.onNodeWithContentDescription("该调用已确认的屏幕截图").assertIsDisplayed()
+        ui.onNodeWithContentDescription("下载原件").assertDoesNotExist()
+        assertFalse(thumbnail.isRecycled)
     }
 
     fun testClosingControllerDropsCacheAndRejectsNewLoadsWithoutRecyclingReaders() {

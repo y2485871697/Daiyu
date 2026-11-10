@@ -20,7 +20,10 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.ui.screens.chat.conversation.ConversationTextButton as TextButton
-import top.yukonga.miuix.kmp.window.WindowDialog
+import app.daiyu.android.ToolScreenshotMediaPreview
+import app.daiyu.android.readToolScreenshotOriginal
+import app.daiyu.android.ui.media.ChatMediaPreviewHost
+import app.daiyu.android.ui.media.LocalOpenChatMediaPreview
 
 /** Reads the already committed screenshot; never captures a new screen. */
 @Composable
@@ -35,7 +38,6 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
     var image by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) {
         mutableStateOf(initial?.image)
     }
-    var expanded by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(false) }
     var cleared by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(initial?.cleared == true) }
     var loading by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(initial == null) }
     var revision by remember(owner, step.toolCallId) { mutableStateOf(0) }
@@ -45,7 +47,7 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
         val cached = controller.cachedToolScreenshot(owner, step.toolCallId)
         image = cached?.image; loading = cached == null; cleared = cached?.cleared == true
         if (cached == null && !controller.loadToolScreenshot(owner, step.toolCallId) { bitmap, cleaned ->
-            if (visible) { image = bitmap; loading = false; cleared = cleaned; if (cleaned) expanded = false }
+            if (visible) { image = bitmap; loading = false; cleared = cleaned }
         }) loading = false
         onDispose { visible = false }
     }
@@ -55,17 +57,26 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
         if (!loading && !cleared) TextButton(text = "重新读取", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { revision++ })
     }
     image?.let { bitmap ->
-        Column(Modifier.fillMaxWidth().testTag("tool-screenshot:${step.toolCallId}")) {
-            Text("屏幕截图", color = conversationColors().muted,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
-            val shape = RoundedCornerShape(8.dp)
-            Image(bitmap.asImageBitmap(), "该调用已确认的屏幕截图", Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 140.dp)
-                .clip(shape).border(1.dp, conversationColors().line, shape)
-                .conversationClickable(onClickLabel = "放大已保存截图") { expanded = true }, contentScale = ContentScale.Crop)
-            if (expanded) WindowDialog(show = true, title = "已保存截图", onDismissRequest = { expanded = false }) {
-                app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
-                Image(bitmap.asImageBitmap(), "放大已保存截图", Modifier.fillMaxWidth().heightIn(max = 520.dp), contentScale = ContentScale.Fit)
-                TextButton(text = "关闭", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { expanded = false })
+        val preview = remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision, bitmap) {
+            ToolScreenshotMediaPreview(
+                key = "tool-screenshot:$owner:${step.toolCallId}:$dataRevision:$screenshotRevision",
+                mimeType = if (step.hasScreenScreenshot) "image/png" else "image/jpeg",
+                isCurrent = { controller.toolScreenshotPreviewCurrent(dataRevision, screenshotRevision) },
+                readOriginal = { controller.readToolScreenshotOriginal(owner, step.toolCallId, dataRevision, screenshotRevision) },
+            )
+        }
+        DisposableEffect(preview) { onDispose { preview.close() } }
+        key(preview) {
+            ChatMediaPreviewHost(remember(preview) { listOf(preview.item) }) {
+                val openPreview = LocalOpenChatMediaPreview.current
+                Column(Modifier.fillMaxWidth().testTag("tool-screenshot:${step.toolCallId}")) {
+                    Text("屏幕截图", color = conversationColors().muted,
+                        style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
+                    val shape = RoundedCornerShape(8.dp)
+                    Image(bitmap.asImageBitmap(), "该调用已确认的屏幕截图", Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 140.dp)
+                        .clip(shape).border(1.dp, conversationColors().line, shape)
+                        .conversationClickable(onClickLabel = "查看截图原图") { openPreview(preview.item.key) }, contentScale = ContentScale.Crop)
+                }
             }
         }
     }

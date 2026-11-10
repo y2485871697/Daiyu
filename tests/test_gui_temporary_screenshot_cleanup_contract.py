@@ -61,7 +61,8 @@ class TemporaryScreenScreenshotCleanupContract(unittest.TestCase):
         self.assertIn('controller.screenScreenshotRevision', ui)
         self.assertIn('临时截图已清理', ui)
         self.assertIn('if (!loading && !cleared)', ui)
-        self.assertIn('if (cleaned) expanded = false', ui)
+        self.assertIn('DisposableEffect(preview) { onDispose { preview.close() } }', ui)
+        self.assertIn('key(preview)', ui)
 
     def test_verified_preview_is_seeded_synchronously_and_failed_reads_remain_retryable(self):
         controller = (APP / 'ChatController.kt').read_text()
@@ -89,6 +90,21 @@ class TemporaryScreenScreenshotCleanupContract(unittest.TestCase):
         self.assertIn('toolScreenshotPreviews.clear()', close)
         workflow = (ROOT / '.github/workflows/gui-screenshot-checks.yml').read_text()
         self.assertIn('--tests app.daiyu.android.ToolScreenshotPreviewCacheTest', workflow)
+
+    def test_tool_screenshot_uses_ordinary_viewer_instead_of_a_separate_dialog(self):
+        ui = (APP / 'ui/screens/chat/conversation/ToolScreenshotContent.kt').read_text()
+        self.assertIn('ChatMediaPreviewHost', ui)
+        self.assertIn('val openPreview = LocalOpenChatMediaPreview.current', ui)
+        self.assertIn('openPreview(preview.item.key)', ui)
+        self.assertNotIn('WindowDialog', ui)
+        self.assertNotIn('已保存截图', ui)
+        controller = (APP / 'ChatController.kt').read_text()
+        reader = controller.split('    internal fun loadToolScreenshotOriginal(', 1)[1].split('    internal fun loadToolScreenshot(', 1)[0]
+        self.assertIn('committedScreenshotOnWorker(owner, callId)', reader)
+        self.assertIn('toolScreenshotPreviewCurrent(expectedDataRevision, expectedScreenshotRevision)', reader)
+        self.assertIn('complete(original.takeIf { valid })', reader)
+        self.assertIn('NativeScreenImage.parse', reader)
+        self.assertNotIn('capture(', reader)
 
     def test_incremental_cloud_scope_includes_store_and_native_receipt_regressions_without_packaging(self):
         source = (ROOT / '.github/workflows/gui-screenshot-checks.yml').read_text()

@@ -28,10 +28,10 @@ class GuiScreenToolFactoryTest {
         assertTrue(tools.getValue("screen_action").definition.description.contains("bypass"))
     }
 
-    @Test fun visualActionsDescribeDiagnosticOnlyTapPixelsWithoutRelaxingOtherActions() {
+    @Test fun visualActionsDescribeWindowBoundCoordinatesWithoutPixelOrTreeEquality() {
         val text = GuiScreenToolFactory.actionDefinition(allowVisualCapture = true).description
-        assertTrue(text.contains("pixel changes (including target-tile changes) are diagnostic only"))
-        assertTrue(text.contains("swipe and back still require a stable frame"))
+        assertTrue(text.contains("not screenshot pixels or full-tree equality"))
+        assertTrue(text.contains("No second screenshot is required before delivery"))
         assertTrue(text.contains("display geometry and target bounds"))
     }
 
@@ -40,7 +40,7 @@ class GuiScreenToolFactoryTest {
             GuiScreenToolFactory.actionDefinition(allowVisualCapture = true))
         definitions.forEach { definition ->
             val text = definition.description
-            assertTrue(text.contains("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED and CAPTURE_STALE_NOT_EXECUTED"))
+            assertTrue(text.contains("CAPTURE_STALE_NOT_EXECUTED and CAPTURE_WINDOW_CHANGED_NOT_EXECUTED"))
             assertTrue(text.contains("first call screen operation=observe without observation_id or capture_id"))
             assertTrue(text.contains("inspect the fresh nodes or image"))
             assertTrue(text.contains("new ID and current coordinates"))
@@ -61,6 +61,25 @@ class GuiScreenToolFactoryTest {
         invalid { GuiScreenToolFactory.parseAction(schema.parse("""{"operation":"coordinate_tap","capture_id":"capture","observation_id":"old","x":10,"y":20}""")) }
         invalid { GuiScreenToolFactory.parseAction(schema.parse("""{"operation":"tap","capture_id":"capture","node_id":0}""")) }
         invalid { GuiScreenToolFactory.actionDefinition().schema.parse("""{"operation":"back","capture_id":"capture"}""") }
+    }
+
+    @Test fun coordinateLongPressHasExactDurationAndVisualGlobalsAcceptNoCoordinates() {
+        val schema = GuiScreenToolFactory.actionDefinition(allowVisualCapture = true).schema
+        fun action(json: String) = GuiScreenToolFactory.parseAction(schema.parse(json))
+        val held = action("""{"operation":"coordinate_long_press","capture_id":"capture","x":10,"y":20}""")
+        assertEquals(GuiGesture(10, 20, 10, 20, 800), held.gesture)
+        for (duration in listOf(300, 3000)) {
+            assertEquals(duration.toLong(), action("""{"operation":"coordinate_long_press","capture_id":"capture","x":10,"y":20,"duration_ms":$duration}""").gesture!!.durationMillis)
+        }
+        for (duration in listOf(299, 3001)) invalid {
+            action("""{"operation":"coordinate_long_press","capture_id":"capture","x":10,"y":20,"duration_ms":$duration}""")
+        }
+        invalid { action("""{"operation":"coordinate_long_press","capture_id":"capture","x":10,"y":20,"end_x":11,"end_y":20}""") }
+        for (operation in listOf("back", "home", "recents", "notifications")) {
+            val global = action("""{"operation":"$operation","capture_id":"capture"}""")
+            assertTrue(global.visual); assertNull(global.gesture); assertNull(global.nodeId)
+            invalid { action("""{"operation":"$operation","capture_id":"capture","x":10,"y":20}""") }
+        }
     }
 
     @Test fun windowSelectionFailureDoesNotAdvertiseLockScreenAsItsCause() {

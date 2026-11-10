@@ -19,9 +19,12 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         self.assertIn('never an automatic retry of the old ID or coordinates', factory)
         self.assertIn('UNKNOWN, unconfirmed delivery, cancellation and authorization denial do not authorize retry', factory)
         self.assertIn('is GuiResult.Rejected -> ExecutionReceipt.NotExecuted(result.code)', ordinary)
-        branch = runtime[runtime.index('!matchesVisualContent(captured,'):runtime.index('visualCapture = null // consume before dispatch')]
-        self.assertIn('retire(); future.complete(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"))', branch)
-        self.assertNotIn('dispatchGesture(', branch)
+        branch = runtime[runtime.index('internal fun visualAction('):runtime.index('private fun captureVisualFrame(')]
+        self.assertIn('visualCapture = null', branch)
+        self.assertIn('access.visualWindow(current)', branch)
+        self.assertNotIn('captureVisualFrame(', branch)
+        self.assertNotIn('matchesVisualContent', branch)
+        self.assertNotIn('CAPTURE_CONTENT_CHANGED_NOT_EXECUTED', branch)
 
     def test_tap_pixel_changes_are_diagnostics_but_geometry_and_identity_still_gate(self):
         pixels = (K / 'gui/GuiVisualPixels.kt').read_text()
@@ -30,8 +33,7 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         self.assertIn('Code.LOCAL_EQUAL, Code.LOCAL_PIXELS_CHANGED, Code.BLANK_TARGET', pixels)
         self.assertIn('if (!window.admits(gesture)) return result(Code.TARGET_OUTSIDE)', pixels)
         self.assertIn('if (width != other.width || height != other.height)', pixels)
-        self.assertIn('RuntimeDiagnostics.pixels(check)', runtime)
-        self.assertIn('check.accepted', runtime)
+        self.assertNotIn('private fun matchesVisualContent', runtime)
         self.assertIn('frame.validation(id)', runtime)
         self.assertIn('window != captured.window', runtime)
         self.assertIn('"DIAGNOSTIC_ONLY"', diagnostics)
@@ -58,19 +60,20 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         self.assertIn('observe_again_with_max_nodes_512', factory)
         self.assertIn('ArgumentType.Integer(0, 511)', factory)
 
-    def test_foreign_window_content_only_preserves_exact_external_nodes(self):
+    def test_attributed_content_preserves_nodes_for_live_identity_checks(self):
         runtime = (K / 'gui/GuiAccessibilityService.kt').read_text()
         start = runtime.index('val keepExternalNodes =')
         end = runtime.index('if (observed != null && observed.generation', start)
         scoped = runtime[start:end]
         self.assertIn('event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED', scoped)
-        self.assertIn('observed.windowId >= 0 && otherWindow', scoped)
+        self.assertIn('observed.windowId >= 0 && lease != null', scoped)
+        self.assertIn('sameWindow && (pkg == null || pkg == observed.packageName)', scoped)
         self.assertIn('!isSelfLease(lease) && retained.isNotEmpty()', scoped)
         self.assertIn('contentChanged = true', scoped)
         self.assertNotIn('generation++', scoped)
         self.assertIn('changed(value, contentOnly = localContent,', scoped)
         self.assertIn('invalidateVisual = !content || lease == null || isSelfLease(lease)', scoped)
-        self.assertIn('if (contentChanged && action.nodeId == null)', runtime)
+        self.assertNotIn('if (contentChanged && action.nodeId == null)', runtime)
         self.assertIn('if (contentChanged) return recordObservationRejection', runtime)
 
     def test_visual_freshness_is_separate_from_node_content_but_hard_clears_still_fence(self):
@@ -86,7 +89,7 @@ class GuiAuditRecoveryContract(unittest.TestCase):
         self.assertIn('visualGeneration != startVisualGeneration', visual)
         self.assertNotIn('captured.generation', visual)
         self.assertIn('finalWindow != initial', visual)
-        self.assertIn('CAPTURE_CONTENT_CHANGED_NOT_EXECUTED', visual)
+        self.assertNotIn('CAPTURE_CONTENT_CHANGED_NOT_EXECUTED', visual)
         self.assertIn('GUI_OBSERVATION_TTL_MILLIS', visual)
 
     def test_repeatable_flag_is_opt_in_and_durably_saved(self):

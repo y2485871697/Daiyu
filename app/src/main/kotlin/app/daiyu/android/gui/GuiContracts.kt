@@ -29,9 +29,12 @@ internal sealed interface GuiScreenRead {
     data class Visual(val image: GuiScreenshot, val nodeFailureCode: String) : GuiScreenRead
 }
 internal enum class GuiOperation { TAP, LONG_PRESS, SCROLL_FORWARD, SCROLL_BACKWARD, INPUT, IME_SUBMIT,
-    COORDINATE_TAP, SWIPE, BACK, HOME, RECENTS, NOTIFICATIONS }
+    COORDINATE_TAP, COORDINATE_LONG_PRESS, SWIPE, BACK, HOME, RECENTS, NOTIFICATIONS }
+internal val GuiOperation.isCoordinateGesture: Boolean
+    get() = this in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.COORDINATE_LONG_PRESS, GuiOperation.SWIPE)
+
 internal data class GuiGesture(val x: Int, val y: Int, val endX: Int, val endY: Int, val durationMillis: Long) {
-    init { require(listOf(x, y, endX, endY).all { it in 0..100_000 } && durationMillis in 50..2000) }
+    init { require(listOf(x, y, endX, endY).all { it in 0..100_000 } && durationMillis in 50..3000) }
 }
 internal fun guiTreeDepth(maxNodes: Int): Int = if (maxNodes <= 128) 16 else 32
 internal fun guiTreeChildren(maxNodes: Int): Int = if (maxNodes <= 128) 64 else maxNodes
@@ -42,12 +45,13 @@ internal data class GuiAction(val observationId: String, val operation: GuiOpera
         val nodeAction = operation in setOf(GuiOperation.TAP, GuiOperation.LONG_PRESS,
             GuiOperation.SCROLL_FORWARD, GuiOperation.SCROLL_BACKWARD, GuiOperation.INPUT, GuiOperation.IME_SUBMIT)
         require(nodeAction == (nodeId != null))
-        require(!visual || operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE, GuiOperation.BACK))
+        require(!visual || operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.COORDINATE_LONG_PRESS, GuiOperation.SWIPE,
+            GuiOperation.BACK, GuiOperation.HOME, GuiOperation.RECENTS, GuiOperation.NOTIFICATIONS))
         require(nodeId == null || nodeId >= 0)
         require((operation == GuiOperation.INPUT) == (text != null))
         require(text == null || text.length <= 4096)
-        require((operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE)) == (gesture != null))
-        if (operation == GuiOperation.COORDINATE_TAP) require(gesture!!.x == gesture.endX && gesture.y == gesture.endY)
+        require((operation.isCoordinateGesture) == (gesture != null))
+        if (operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.COORDINATE_LONG_PRESS)) require(gesture!!.x == gesture.endX && gesture.y == gesture.endY)
     }
     fun effect(owner: GuiOwner): WriteEffect = WriteEffect("gui", operation.name.lowercase(),
         "${owner.sessionId.length}:${owner.sessionId}:${owner.runId.length}:${owner.runId}:${if (visual) "capture:" else ""}$observationId:${nodeId ?: "global"}",

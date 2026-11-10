@@ -33,9 +33,8 @@ internal data class GuiConfirmedDelivery(
             action.text?.let { put("text", it) }
             action.gesture?.let {
                 put("x", it.x); put("y", it.y)
-                if (action.operation == GuiOperation.SWIPE) {
-                    put("end_x", it.endX); put("end_y", it.endY); put("duration_ms", it.durationMillis)
-                }
+                if (action.operation == GuiOperation.SWIPE) { put("end_x", it.endX); put("end_y", it.endY) }
+                if (action.operation != GuiOperation.COORDINATE_TAP) put("duration_ms", it.durationMillis)
             }
         }.toString()
 }

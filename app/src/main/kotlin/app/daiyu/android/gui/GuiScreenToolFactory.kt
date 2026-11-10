@@ -12,7 +12,7 @@ import org.json.JSONObject
  */
 internal object GuiScreenToolFactory {
     const val CAPABILITY = "gui.accessibility"
-    private const val VISUAL_RECOVERY = "CAPTURE_CONTENT_CHANGED_NOT_EXECUTED and CAPTURE_STALE_NOT_EXECUTED mean the requested action was not delivered and the old capture is retired. " +
+    private const val VISUAL_RECOVERY = "CAPTURE_STALE_NOT_EXECUTED and CAPTURE_WINDOW_CHANGED_NOT_EXECUTED mean the requested action was not delivered and the old capture is retired. " +
         "Do not end an otherwise authorized task solely for these recoverable results: first call screen operation=observe without observation_id or capture_id, inspect the fresh nodes or image, and select the target again using its new ID and current coordinates. " +
         "This is a new decision after a read, never an automatic retry of the old ID or coordinates. If a fresh read fails or the target cannot be verified, report that obstacle; do not bypass it. " +
         "UNKNOWN, unconfirmed delivery, cancellation and authorization denial do not authorize retry. "
@@ -75,9 +75,9 @@ internal object GuiScreenToolFactory {
 
     internal fun actionDefinition(allowVisualCapture: Boolean = false): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact authorized accessibility node, coordinate gesture or global action, bound to the same fresh observation_id. " +
-                (if (allowVisualCapture) "When screen returns capture_id, including an observe visual_fallback result, it has no nodes. Use capture_id (not observation_id) only for coordinate_tap, swipe or back; the real foreground window, display geometry and target bounds are checked before delivery. For coordinate_tap, pixel changes (including target-tile changes) are diagnostic only and do not block an authorized tap; swipe and back still require a stable frame. Other actions require observe. " else "") +
+                (if (allowVisualCapture) "When screen returns capture_id, including an observe visual_fallback result, it has no nodes. Use capture_id (not observation_id) for coordinate_tap, coordinate_long_press, swipe, back, home, recents or notifications; the real foreground window, display geometry and target bounds are checked before delivery. Capture actions recheck current window identity, package, UID, display geometry and path occlusion, not screenshot pixels or full-tree equality. Observation-bound coordinates likewise check the active window and path; exact node actions still refresh and verify the selected node. Animation, clocks and loading content do not invalidate coordinates. No second screenshot is required before delivery. Other actions require observe. " else "") +
                 (if (allowVisualCapture) VISUAL_RECOVERY else "") +
-                "coordinate_tap uses x/y; swipe uses x/y/end_x/end_y and optional duration_ms (50-2000, default 500). Coordinates are screen pixels in the observed application window, never screenshot-scaled. " +
+                "coordinate_tap uses x/y; coordinate_long_press uses x/y and optional duration_ms (300-3000, default 800); swipe uses x/y/end_x/end_y and optional duration_ms (50-2000, default 500). Swipes follow the finger path: bottom-to-top reveals lower content; top-to-bottom reveals upper content. Node long_press and scroll_forward/scroll_backward require node_id from observe. Coordinates are screen pixels in the observed application window, never screenshot-scaled. " +
                 "ime_submit requires an editable focused node advertising IME_ENTER on API 30+. Explicit gestures are not a fallback for denied or unknown actions. " +
                 "Self-app observations do not authorize HOME/BACK/RECENTS/NOTIFICATIONS; when provided, use launch_app to open another app. No automatic coordinate fallback/retry or shell/input/uiautomator bypass of screen admission, target or location restrictions. Android acceptance is not verified business success.",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
@@ -89,7 +89,7 @@ internal object GuiScreenToolFactory {
                 ArgumentField("y", ArgumentType.Integer(0, 100_000), required = false),
                 ArgumentField("end_x", ArgumentType.Integer(0, 100_000), required = false),
                 ArgumentField("end_y", ArgumentType.Integer(0, 100_000), required = false),
-                ArgumentField("duration_ms", ArgumentType.Integer(50, 2000), required = false),
+                ArgumentField("duration_ms", ArgumentType.Integer(50, 3000), required = false),
                 ArgumentField("text", ArgumentType.Text(4096), required = false),
             )))
 
@@ -99,16 +99,20 @@ internal object GuiScreenToolFactory {
         val visual = arguments.contains("capture_id")
         require(arguments.contains("observation_id") != visual) { "one_screen_identity_required" }
         val operation = GuiOperation.valueOf(arguments.text("operation").uppercase())
-        val coordinate = operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE)
+        val coordinate = operation.isCoordinateGesture
         val swipe = operation == GuiOperation.SWIPE
+        val longPress = operation == GuiOperation.COORDINATE_LONG_PRESS
         require(arguments.contains("x") == coordinate && arguments.contains("y") == coordinate) { "invalid_gesture_parameters" }
         require(arguments.contains("end_x") == swipe && arguments.contains("end_y") == swipe) { "invalid_gesture_parameters" }
-        require(swipe || !arguments.contains("duration_ms")) { "invalid_gesture_parameters" }
+        require(swipe || longPress || !arguments.contains("duration_ms")) { "invalid_gesture_parameters" }
         val gesture = if (coordinate) {
             val x = arguments.integer("x").toInt(); val y = arguments.integer("y").toInt()
+            val duration = if (arguments.contains("duration_ms")) arguments.integer("duration_ms")
+                else if (longPress) 800L else if (swipe) 500L else 50L
+            require(if (longPress) duration in 300..3000 else if (swipe) duration in 50..2000 else duration == 50L) { "invalid_gesture_duration" }
             GuiGesture(x, y, if (swipe) arguments.integer("end_x").toInt() else x,
                 if (swipe) arguments.integer("end_y").toInt() else y,
-                if (!swipe) 50 else if (arguments.contains("duration_ms")) arguments.integer("duration_ms") else 500)
+                duration)
         } else null
         return GuiAction(arguments.text(if (visual) "capture_id" else "observation_id"), operation,
             if (arguments.contains("node_id")) arguments.integer("node_id").toInt() else null,

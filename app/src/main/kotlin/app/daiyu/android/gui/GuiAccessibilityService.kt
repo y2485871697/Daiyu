@@ -109,6 +109,7 @@ internal interface GuiRuntimeAccess {
     fun launchIntent(current: GuiAccessibilityService, packageName: String): Intent? =
         current.packageManager.getLaunchIntentForPackage(packageName)
     fun startActivity(current: GuiAccessibilityService, intent: Intent) { current.startActivity(intent) }
+    fun globalAction(current: GuiAccessibilityService, action: Int): Boolean = current.performGlobalAction(action)
     fun gesture(current: GuiAccessibilityService, gesture: GuiGesture, completed: (Boolean) -> Unit): Boolean {
         val path = Path().apply {
             moveTo(gesture.x.toFloat(), gesture.y.toFloat())
@@ -234,7 +235,7 @@ internal object GuiRuntime {
         ownerCurrent: () -> Boolean, onNotExecuted: (String) -> Unit, onRevoked: () -> Unit,
         deliver: (GuiConfirmedDelivery) -> Boolean, productDefaults: Boolean = false): GuiResult<Unit> {
         onMain(); operationRejection(session.lease, operation)?.let { return it }; screenRejection()?.let { return it }
-        if (operation in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE))
+        if (operation.isCoordinateGesture)
             return GuiResult.Rejected("GUI_GESTURE_REQUIRES_OBSERVED_COORDINATES")
         selfRootRejection(session.lease)?.let { return it }
         if (confirmation != null) return GuiResult.Rejected("CONFIRMATION_ALREADY_OPEN")
@@ -301,7 +302,7 @@ internal object GuiRuntime {
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)
         if (!content) windowReadGeneration++
         // Our reply content is not the external rootless target. Keep both pending reads and
-        // published captures; WM witnesses, occlusion and pixel revalidation still fence actions.
+        // published captures; window witnesses and path occlusion still fence actions.
         if (content && pkg == value.packageName && lease != null && observed == null && !isSelfLease(lease) &&
             ((captures[lease] ?: 0) > 0 || visualCapture?.lease === lease)) return
         val sameWindow = observed != null && event.windowId == observed.windowId
@@ -310,15 +311,16 @@ internal object GuiRuntime {
         // The self lease still validates the active root and original target twice before delivery.
         val localContent = content && (pkg == value.packageName || pkg == null && sameWindow || otherWindow)
         val previousGeneration = generation
-        val keepExternalNodes = event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-            observed != null && observed.windowId >= 0 && otherWindow && lease != null &&
-            !isSelfLease(lease) && retained.isNotEmpty()
+        val keepExternalNodes = content && observed != null && observed.windowId >= 0 && lease != null &&
+            !isSelfLease(lease) && retained.isNotEmpty() &&
+            (sameWindow && (pkg == null || pkg == observed.packageName) || pkg == observed.packageName ||
+                event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED && otherWindow)
         if (keepExternalNodes) {
-            // Other-window content cannot prove this external target changed. Retain exact nodes
-            // for live revalidation, while screenshots and actions without a node stay dirty.
+            // Content changes do not identify a different window. Refresh and verify the exact
+            // target node at delivery; coordinate/global actions use current window metadata.
             contentChanged = true
         } else {
-            // Content retires node handles, not visual evidence. Visual actions re-read WM and pixels.
+            // Unattributed node content retires handles; visual actions recheck window metadata.
             changed(value, contentOnly = localContent,
                 invalidateVisual = !content || lease == null || isSelfLease(lease))
         }
@@ -376,7 +378,7 @@ internal object GuiRuntime {
     }
     private var screenshotBinding: Pair<String, TreeSample>? = null
     private data class VisualCapture(val lease: GuiLeaseGate.Lease, val id: String, val visualGeneration: Long,
-        val capturedAt: Long, val window: GuiVisualWindow, val digest: List<Byte>, val pixels: GuiVisualPixels?)
+        val capturedAt: Long, val window: GuiVisualWindow)
     private var visualCapture: VisualCapture? = null
     private var contentChanged = false
     @Suppress("DEPRECATION") private fun clearNodes(invalidateVisual: Boolean = true) {
@@ -748,8 +750,6 @@ internal object GuiRuntime {
         screenRejection()?.let { return it }; selfRootRejection(lease)?.let { return it }
         validateObservation(lease, action.observationId, "validate_target")?.let { return it }
         val observed = lease.observation!!
-        if (contentChanged && action.nodeId == null) return recordObservationRejection(lease,
-            action.observationId, "validate_target", GuiResult.Rejected("OBSERVATION_STALE"))
         if (observed.windowType != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION && action.nodeId == null)
             return GuiResult.Rejected("SYSTEM_WINDOW_NODE_ACTIONS_ONLY_NOT_EXECUTED")
         val fetched = externalRoot(lease, service!!)
@@ -758,6 +758,7 @@ internal object GuiRuntime {
         if (fetched.value.windowType != observed.windowType || root.windowId != observed.windowId || root.packageName?.toString() != observed.packageName) {
             root.recycle(); return rejectChangedTarget(lease, "TARGET_WINDOW_CHANGED_RECONFIRM_NOT_EXECUTED")
         }
+        if (action.nodeId == null) { root.recycle(); return GuiResult.Value(Unit) }
         val original = action.nodeId?.let { id -> observed.nodes.singleOrNull { it.id == id } }
         if (action.nodeId != null && original == null) { root.recycle(); return GuiResult.Rejected("NODE_NOT_IN_OBSERVATION") }
         if (isSelfLease(lease) && action.nodeId != null) {
@@ -961,11 +962,6 @@ internal object GuiRuntime {
             fun inside(x: Int, y: Int) = x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom
             if (!inside(gesture.x, gesture.y) || !inside(gesture.endX, gesture.endY))
                 return GuiResult.Rejected("GESTURE_OUTSIDE_OBSERVED_WINDOW_NOT_EXECUTED")
-            val binding = screenshotBinding?.takeIf { it.first == observed.observationId }?.second
-                ?: return GuiResult.Rejected("GESTURE_TREE_UNVERIFIABLE_NOT_EXECUTED")
-            val sampled = sampleTree(lease, retain = false, maxNodes = observed.maxNodes)
-            if (!binding.verifiable || sampled !is GuiResult.Value || sampled.value != binding)
-                return rejectChangedTarget(lease, "GESTURE_TREE_CHANGED_OR_INCOMPLETE_NOT_EXECUTED")
             gestureWindowRejection(current, observed, gesture)?.let { return it }
         }
         val consumed = gate.consumeAction(lease, action, generation)
@@ -982,11 +978,11 @@ internal object GuiRuntime {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text)
                 })
                 GuiOperation.IME_SUBMIT -> node!!.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
-                GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE -> error("gesture_required")
-                GuiOperation.BACK -> current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-                GuiOperation.HOME -> current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
-                GuiOperation.RECENTS -> current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
-                GuiOperation.NOTIFICATIONS -> current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
+                GuiOperation.COORDINATE_TAP, GuiOperation.COORDINATE_LONG_PRESS, GuiOperation.SWIPE -> error("gesture_required")
+                GuiOperation.BACK -> access.globalAction(current, AccessibilityService.GLOBAL_ACTION_BACK)
+                GuiOperation.HOME -> access.globalAction(current, AccessibilityService.GLOBAL_ACTION_HOME)
+                GuiOperation.RECENTS -> access.globalAction(current, AccessibilityService.GLOBAL_ACTION_RECENTS)
+                GuiOperation.NOTIFICATIONS -> access.globalAction(current, AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
             }
             GuiResult.Value(if (accepted) "PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED" else "PLATFORM_ACTION_REJECTED")
         } catch (_: Exception) { GuiResult.Unknown("ACTION_DELIVERY_UNCONFIRMED") }
@@ -1082,28 +1078,12 @@ internal object GuiRuntime {
         val capturedAt = SystemClock.elapsedRealtime()
         captureVisualFrame(lease, id, cancelled) { image, window, startVisualGeneration ->
             if (image is GuiResult.Value && window != null) {
-                visualCapture = VisualCapture(lease, id, startVisualGeneration, capturedAt, window,
-                    java.security.MessageDigest.getInstance("SHA-256").digest(image.value.png).toList(), image.value.visualPixels)
+                visualCapture = VisualCapture(lease, id, startVisualGeneration, capturedAt, window)
                 future.complete(GuiResult.Value(image.value.copy(observationBound = false, visualPackage = window.packageName)))
             } else future.complete(image)
         }
         return future
     }
-
-    private fun matchesVisualContent(captured: VisualCapture, image: GuiScreenshot, action: GuiAction): Boolean =
-        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.GUI_VALIDATE) {
-            if (action.operation == GuiOperation.COORDINATE_TAP && action.gesture != null && captured.pixels != null) {
-                val check = captured.pixels.compareTap(image.visualPixels, action.gesture, captured.window)
-                RuntimeDiagnostics.pixels(check)
-                check.accepted
-            } else if (java.security.MessageDigest.getInstance("SHA-256").digest(image.png).toList() == captured.digest) {
-                RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.FRAME_EQUAL)
-                true
-            } else {
-                RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.FRAME_CHANGED)
-                false
-            }
-        }
 
     internal fun visualAction(lease: GuiLeaseGate.Lease, action: GuiAction, cancelled: () -> Boolean): CompletableFuture<GuiResult<String>> {
         onMain()
@@ -1123,50 +1103,70 @@ internal object GuiRuntime {
         visualRejection(lease)?.let { return reject(it.code) }
         val captured = visualCapture?.takeIf { it.lease === lease && it.id == action.observationId }
             ?: return reject("CAPTURE_ID_MISMATCH_NOT_EXECUTED")
-        if (action.nodeId != null || action.operation !in setOf(GuiOperation.COORDINATE_TAP, GuiOperation.SWIPE, GuiOperation.BACK))
-            return reject("VISUAL_CAPTURE_COORDINATES_OR_BACK_ONLY_NOT_EXECUTED")
-        fun retire() { if (visualCapture === captured) visualCapture = null }
-        if (captured.visualGeneration != visualGeneration || SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS) {
-            retire(); return reject("CAPTURE_STALE_NOT_EXECUTED")
+        if (!action.visual || action.nodeId != null)
+            return reject("VISUAL_CAPTURE_COORDINATES_OR_GLOBAL_ONLY_NOT_EXECUTED")
+        fun currentRejection(): GuiResult.Rejected? {
+            visualRejection(lease)?.let { return it }
+            if (cancelled()) return GuiResult.Rejected("CANCELLED_NOT_EXECUTED")
+            if (captured.visualGeneration != visualGeneration ||
+                SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS)
+                return GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED")
+            return null
         }
-        if (action.gesture != null && !captured.window.admits(action.gesture))
-            return reject("GESTURE_WINDOW_OCCLUDED_OR_OUTSIDE_NOT_EXECUTED")
+        // Consume once, before the asynchronous window check. No image comparison gates input.
+        visualCapture = null
+        currentRejection()?.let { return reject(it.code) }
+        action.gesture?.let { if (!captured.window.admits(it)) return reject("GESTURE_WINDOW_OCCLUDED_OR_OUTSIDE_NOT_EXECUTED") }
+        val current = service ?: return reject("SERVICE_DISCONNECTED_NOT_EXECUTED")
         RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.GUI_VALIDATE, RuntimeDiagnostics.Code.CAPTURE_AGE,
             size = GUI_OBSERVATION_TTL_MILLIS, count = SystemClock.elapsedRealtime() - captured.capturedAt)
-        // Recheck the window and geometry; changing tap pixels are recorded, not a reason to block.
-        captureVisualFrame(lease, captured.id, cancelled, validationOnly = action.operation == GuiOperation.COORDINATE_TAP && captured.pixels != null) { image, window, _ ->
-            val rejection = visualRejection(lease) ?: if (cancelled()) GuiResult.Rejected("CANCELLED_NOT_EXECUTED") else null
-            when {
-                future.isDone -> Unit
-                rejection != null -> { retire(); future.complete(rejection) }
-                image is GuiResult.Rejected -> { retire(); future.complete(image) }
-                image is GuiResult.Unknown -> { retire(); future.complete(image) }
-                visualCapture !== captured || window != captured.window || captured.visualGeneration != visualGeneration ||
-                    SystemClock.elapsedRealtime() - captured.capturedAt !in 0..GUI_OBSERVATION_TTL_MILLIS -> {
-                    retire(); future.complete(GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED"))
+        captures[lease] = (captures[lease] ?: 0) + 1
+        val witness = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.GUI_WINDOW_WITNESS)
+        var completed = false
+        val readGeneration = windowReadGeneration
+        fun finish(window: GuiVisualWindow?) {
+            onMain()
+            if (completed) return
+            completed = true
+            witness.end()
+            try {
+                val rejection = currentRejection() ?: when {
+                    service !== current -> GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
+                    window == null -> GuiResult.Rejected("VISUAL_WINDOW_UNVERIFIABLE_NOT_EXECUTED")
+                    window != captured.window -> GuiResult.Rejected("CAPTURE_WINDOW_CHANGED_NOT_EXECUTED")
+                    action.gesture != null && !window.admits(action.gesture) -> GuiResult.Rejected("GESTURE_WINDOW_OCCLUDED_OR_OUTSIDE_NOT_EXECUTED")
+                    else -> null
                 }
-                !matchesVisualContent(captured, (image as GuiResult.Value).value, action) -> {
-                    retire(); future.complete(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"))
+                if (rejection != null) { future.complete(rejection); return }
+                // A newer explicit screen read supersedes the pending coordinate decision.
+                if (windowReadGeneration != readGeneration) {
+                    future.complete(GuiResult.Rejected("CAPTURE_STALE_NOT_EXECUTED")); return
                 }
-                else -> {
-                    visualCapture = null // consume before dispatch, including denied/unknown submission
-                    val current = service
-                    if (current == null) future.complete(GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED"))
-                    else if (action.gesture != null) {
-                        val submitted = dispatchGesture(current, lease, action.gesture)
-                        generation++; clearNodes()
-                        val pending = gestures[lease]
-                        if (pending == null) future.complete(submitted)
-                        else pending.whenComplete { value, error -> future.complete(value ?: GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED")) }
-                    } else {
-                        val result = try { GuiResult.Value(if (current.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
-                            "PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED" else "PLATFORM_ACTION_REJECTED") }
-                            catch (_: Exception) { GuiResult.Unknown("ACTION_DELIVERY_UNCONFIRMED") }
-                        generation++; clearNodes(); future.complete(result)
+                if (action.gesture != null) {
+                    val submitted = dispatchGesture(current, lease, action.gesture)
+                    generation++; clearNodes()
+                    val pending = gestures[lease]
+                    if (pending == null) future.complete(submitted)
+                    else pending.whenComplete { value, _ -> future.complete(value ?: GuiResult.Unknown("GESTURE_DELIVERY_UNCONFIRMED")) }
+                } else {
+                    val key = when (action.operation) {
+                        GuiOperation.BACK -> AccessibilityService.GLOBAL_ACTION_BACK
+                        GuiOperation.HOME -> AccessibilityService.GLOBAL_ACTION_HOME
+                        GuiOperation.RECENTS -> AccessibilityService.GLOBAL_ACTION_RECENTS
+                        GuiOperation.NOTIFICATIONS -> AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
+                        else -> error("global_action_required")
                     }
+                    val result = try { GuiResult.Value(if (access.globalAction(current, key))
+                        "PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED" else "PLATFORM_ACTION_REJECTED") }
+                        catch (_: Exception) { GuiResult.Unknown("ACTION_DELIVERY_UNCONFIRMED") }
+                    generation++; clearNodes(); future.complete(result)
                 }
-            }
+            } finally { captureFinished(lease) }
         }
+        try { access.visualWindow(current) { window ->
+            if (Looper.myLooper() === Looper.getMainLooper()) finish(window) else main.post { finish(window) }
+        } }
+        catch (_: Exception) { finish(null) }
         return future
     }
 

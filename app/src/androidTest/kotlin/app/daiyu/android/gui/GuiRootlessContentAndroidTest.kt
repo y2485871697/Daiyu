@@ -21,6 +21,9 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         var captured: ((GuiCaptureFrame) -> Unit)? = null
         var completedGesture: ((Boolean) -> Unit)? = null
         var gestures = 0
+        var lastGesture: GuiGesture? = null
+        val globalKeys = mutableListOf<Int>()
+        override fun globalAction(current: GuiAccessibilityService, action: Int): Boolean { globalKeys += action; return true }
         var disposed = 0
         var rootReads = 0
         override fun root(current: GuiAccessibilityService): android.view.accessibility.AccessibilityNodeInfo? {
@@ -32,7 +35,7 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         override fun visualWindow(current: GuiAccessibilityService, completed: (GuiVisualWindow?) -> Unit) { windows += completed }
         override fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit) { captured = success }
         override fun gesture(current: GuiAccessibilityService, gesture: GuiGesture, completed: (Boolean) -> Unit): Boolean {
-            gestures++; completedGesture = completed; return true
+            gestures++; lastGesture = gesture; completedGesture = completed; return true
         }
         fun witness() { windows.removeAt(0)(window) }
         fun image(pixels: ByteArray = byteArrayOf(1), spatial: GuiScreenshot? = null) {
@@ -102,26 +105,20 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
         assertEquals(1, platform.disposed); assertEquals(0, platform.gestures)
     }
 
-    fun testOwnContentAcrossAsyncWitnessesKeepsPixelVerifiedSingleUseAction() = fixture { service, session, platform ->
+    fun testOwnContentAcrossWindowWitnessKeepsSingleUseAction() = fixture { service, session, platform ->
         if (unsupported(session, platform)) return@fixture
         val image = capture(service, session, platform)
+        val action = GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+            gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)
         lateinit var pending: CompletableFuture<GuiResult<String>>
         controlMain {
-            for (type in listOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
-                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)) event(service, type = type)
-            pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
-                gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { false }
-            event(service); platform.witness(); platform.image()
+            pending = GuiRuntime.visualAction(session.lease, action) { false }
+            event(service); assertEquals(0, platform.gestures); assertNull(platform.captured)
+            platform.witness(); assertEquals(1, platform.gestures)
+            assertFalse(pending.isDone); platform.completedGesture!!(true); platform.completedGesture = null
+            assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
         }
-        instrumentation.waitForIdleSync()
-        controlMain {
-            event(service); platform.witness()
-            assertEquals(1, platform.gestures); platform.completedGesture!!(true)
-            assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease,
-                GuiAction(image.observationId, GuiOperation.BACK, visual = true)) { false }.get())
-            assertNull(session.lease.observation)
-        }
-        assertTrue(pending.get() is GuiResult.Value); assertEquals(2, platform.disposed)
+        assertTrue(pending.get() is GuiResult.Value); assertEquals(1, platform.disposed)
     }
     fun testHardEventsStillRejectBeforePlatformCapture() {
         for ((pkg, type) in listOf("external.app" to AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
@@ -136,59 +133,51 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
             }
         }
     }
-    fun testChangedPngWithoutSpatialEvidenceAfterOwnContentDoesNotDispatch() = fixture { service, session, platform ->
+    fun testNoPixelEvidenceIsRequiredForWindowBoundSwipe() = fixture { service, session, platform ->
         if (unsupported(session, platform)) return@fixture
         val image = capture(service, session, platform)
         lateinit var pending: CompletableFuture<GuiResult<String>>
         controlMain {
-            event(service)
-            pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
-                gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { false }
-            platform.witness(); event(service); platform.image(byteArrayOf(2))
+            pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.SWIPE,
+                gesture = GuiGesture(0, 0, 0, 0, 500), visual = true)) { false }
+            event(service); platform.witness()
+            assertNull(platform.captured); assertEquals(1, platform.gestures)
+            platform.completedGesture!!(true); platform.completedGesture = null
         }
-        instrumentation.waitForIdleSync()
-        controlMain { event(service); platform.witness(); assertEquals(0, platform.gestures) }
-        assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
-        assertEquals(2, platform.disposed)
+        assertTrue(pending.get() is GuiResult.Value); assertEquals(1, platform.disposed)
     }
-    fun testTargetAndUnknownContentAcrossCaptureAndVerificationKeepsSingleUseGestures() {
-        for (pkg in listOf("external.app", null, "")) fixture { service, session, platform ->
-            if (unsupported(session, platform)) return@fixture
+    fun testTargetAndUnknownContentAcrossWindowWitnessKeepsSingleUseGestures() = fixture { service, session, platform ->
+        if (unsupported(session, platform)) return@fixture
+        for (pkg in listOf("external.app", null, "", "unrelated.app")) {
+            controlMain { session.approveReadsFromUser(GuiReadApproval(0, 1)) }
             val image = capture(service, session, platform, pkg)
+            val action = GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
+                gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)
             lateinit var pending: CompletableFuture<GuiResult<String>>
             controlMain {
-                for (type in listOf(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)) event(service, pkg, type)
-                pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
-                    gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { false }
-                event(service, pkg); platform.witness(); event(service, pkg); platform.image()
-            }
-            instrumentation.waitForIdleSync()
-            controlMain {
+                pending = GuiRuntime.visualAction(session.lease, action) { false }
                 event(service, pkg); platform.witness()
-                assertEquals(1, platform.gestures); platform.completedGesture!!(true)
-                assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease,
-                    GuiAction(image.observationId, GuiOperation.BACK, visual = true)) { false }.get())
-                assertNull(session.lease.observation)
+                platform.completedGesture!!(true); platform.completedGesture = null
+                assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
+                assertNull(platform.captured)
             }
-            assertTrue(pending.get() is GuiResult.Value); assertEquals(2, platform.disposed)
+            assertTrue(pending.get() is GuiResult.Value)
         }
+        assertEquals(4, platform.gestures); assertEquals(4, platform.disposed)
     }
 
-    fun testTargetContentWithoutSpatialEvidenceStillRejectsChangedPng() = fixture { service, session, platform ->
+    fun testCancelledMetadataDecisionNeverDispatchesLate() = fixture { service, session, platform ->
         if (unsupported(session, platform)) return@fixture
         val image = capture(service, session, platform, "external.app")
+        var cancelled = false
         lateinit var pending: CompletableFuture<GuiResult<String>>
         controlMain {
-            event(service, "external.app")
             pending = GuiRuntime.visualAction(session.lease, GuiAction(image.observationId, GuiOperation.COORDINATE_TAP,
-                gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { false }
-            platform.witness(); event(service, null); platform.image(byteArrayOf(2))
+                gesture = GuiGesture(0, 0, 0, 0, 50), visual = true)) { cancelled }
+            cancelled = true; event(service, "external.app"); platform.witness()
+            assertEquals(0, platform.gestures); assertNull(platform.captured)
         }
-        instrumentation.waitForIdleSync()
-        controlMain { event(service, "external.app"); platform.witness(); assertEquals(0, platform.gestures) }
-        assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
-        assertEquals(2, platform.disposed)
+        assertEquals(GuiResult.Rejected("CANCELLED_NOT_EXECUTED"), pending.get()); assertEquals(1, platform.disposed)
     }
     private fun spatialImage(change: Pair<Int, Int>? = null, width: Int = 512, height: Int = 768,
         targetX: Int = 400, targetY: Int = 650): GuiScreenshot {
@@ -204,78 +193,84 @@ class GuiRootlessContentAndroidTest : InstrumentationTestCase() {
             return GuiScreenshot("fixture", width, height, png, visualPixels = GuiVisualPixels.from(bitmap))
         } finally { bitmap.recycle() }
     }
-    fun testStableTargetWithDistantAnimationDispatchesExactlyOnceWithoutReplay() {
-        for (edge in 0..2) fixture { service, session, platform ->
-            if (unsupported(session, platform)) return@fixture
-            val width = if (edge == 0) 512 else 1216; val height = if (edge == 0) 768 else 2640
-            val x = if (edge == 0) 400 else 1092; val y = if (edge == 0) 650 else 2549
-            controlMain {
-                platform.window = platform.window.copy(bounds = GuiBounds(0, 0, width, if (edge == 1) 2560 else height),
-                    displayBounds = GuiBounds(0, 0, width, height), above = if (edge == 2)
-                        listOf(GuiVisualOccluder("navigation", GuiBounds(0, 2560, width, height))) else emptyList())
-            }
-            val original = capture(service, session, platform, "external.app", spatialImage(width = width, height = height, targetX = x, targetY = y))
-            val changed = spatialImage(10 to 10, width, height, x, y)
-            assertFalse(original.png.contentEquals(changed.png))
-            val action = GuiAction(original.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(x, y, x, y, 50), visual = true)
+    fun testAllCoordinateGesturesUseOneWindowWitnessAndNoSecondCapture() = fixture { service, session, platform ->
+        if (unsupported(session, platform)) return@fixture
+        controlMain { platform.window = platform.window.copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768)) }
+        val gestures = listOf(
+            GuiOperation.COORDINATE_TAP to GuiGesture(400, 650, 400, 650, 50),
+            GuiOperation.COORDINATE_LONG_PRESS to GuiGesture(400, 650, 400, 650, 800),
+            GuiOperation.SWIPE to GuiGesture(250, 600, 250, 200, 500),
+            GuiOperation.SWIPE to GuiGesture(250, 200, 250, 600, 500),
+            GuiOperation.SWIPE to GuiGesture(450, 400, 50, 400, 500),
+            GuiOperation.SWIPE to GuiGesture(50, 400, 450, 400, 500))
+        for ((index, pair) in gestures.withIndex()) {
+            controlMain { session.approveReadsFromUser(GuiReadApproval(0, 1)) }
+            val image = capture(service, session, platform, "external.app", spatialImage())
+            val action = GuiAction(image.observationId, pair.first, gesture = pair.second, visual = true)
             lateinit var pending: CompletableFuture<GuiResult<String>>
             controlMain {
-                event(service, "external.app")
                 pending = GuiRuntime.visualAction(session.lease, action) { false }
-                platform.witness(); platform.image(spatial = changed)
-            }
-            instrumentation.waitForIdleSync()
-            controlMain {
-                try {
-                    platform.witness(); assertEquals(1, platform.gestures); assertFalse(pending.isDone)
-                    assertEquals(GuiResult.Rejected("GESTURE_IN_PROGRESS_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
-                } finally { platform.completedGesture?.invoke(true); platform.completedGesture = null }
+                event(service, "external.app"); assertEquals(index, platform.gestures)
+                platform.witness(); assertEquals(index + 1, platform.gestures)
+                assertEquals(pair.second, platform.lastGesture); assertNull(platform.captured)
+                assertFalse(pending.isDone); platform.completedGesture!!(true); platform.completedGesture = null
                 assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
-                assertEquals(1, platform.gestures)
             }
-            assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Value)
-            assertEquals(2, platform.disposed)
+            assertTrue(pending.get() is GuiResult.Value)
         }
+        assertEquals(6, platform.disposed)
     }
-    fun testPixelChangesDispatchButMissingEvidenceWindowGeometryAndIdentityStillReject() {
-        for (mode in 0..7) fixture { service, session, platform ->
-            if (unsupported(session, platform)) return@fixture
-            controlMain { platform.window = platform.window.copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768)) }
+    fun testWindowGeometryIdentityUidAndOcclusionStillReject() = fixture { service, session, platform ->
+        if (unsupported(session, platform)) return@fixture
+        controlMain { platform.window = platform.window.copy(bounds = GuiBounds(0, 0, 512, 768), displayBounds = GuiBounds(0, 0, 512, 768)) }
+        for (mode in 0..6) {
+            controlMain { session.approveReadsFromUser(GuiReadApproval(0, 1)) }
             val original = capture(service, session, platform, "external.app", spatialImage())
             val window = platform.window
-            val changed = spatialImage(if (mode == 0) 400 to 650 else if (mode == 1) 470 to 700 else 10 to 10)
-                .let { if (mode == 2) it.copy(visualPixels = null) else it }
-            val action = GuiAction(original.observationId, GuiOperation.COORDINATE_TAP, gesture = GuiGesture(400, 650, 400, 650, 50), visual = true)
+            val action = GuiAction(original.observationId, GuiOperation.COORDINATE_TAP,
+                gesture = GuiGesture(400, 650, 400, 650, 50), visual = true)
             lateinit var pending: CompletableFuture<GuiResult<String>>
             controlMain {
-                platform.window = when (mode) {
-                    3 -> window.copy(identity = "replacement")
-                    4 -> window.copy(displayBounds = GuiBounds(0, 0, 513, 768))
-                    5 -> window.copy(packageName = "other.app")
-                    6 -> window.copy(above = listOf(GuiVisualOccluder("overlay", GuiBounds(390, 640, 410, 660))))
-                    7 -> window.copy(rotation = 90)
-                    else -> window
-                }
                 pending = GuiRuntime.visualAction(session.lease, action) { false }
-                platform.witness(); platform.image(spatial = changed)
-            }
-            instrumentation.waitForIdleSync()
-            controlMain {
-                platform.witness()
-                if (mode <= 1) {
-                    assertEquals(1, platform.gestures); assertFalse(pending.isDone)
-                    platform.completedGesture!!(true); platform.completedGesture = null
-                    assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Value)
-                } else {
-                    assertEquals(0, platform.gestures)
-                    assertTrue(pending.get(5, java.util.concurrent.TimeUnit.SECONDS) is GuiResult.Rejected)
-                    if (mode == 2) assertEquals(GuiResult.Rejected("CAPTURE_CONTENT_CHANGED_NOT_EXECUTED"), pending.get())
+                platform.window = when (mode) {
+                    0 -> window.copy(identity = "replacement")
+                    1 -> window.copy(displayBounds = GuiBounds(0, 0, 513, 768))
+                    2 -> window.copy(packageName = "other.app")
+                    3 -> window.copy(above = listOf(GuiVisualOccluder("overlay", GuiBounds(390, 640, 410, 660))))
+                    4 -> window.copy(rotation = 90)
+                    5 -> window.copy(uid = 10223)
+                    else -> window.copy(bounds = GuiBounds(0, 0, 512, 700))
                 }
+                platform.witness(); assertEquals(0, platform.gestures); assertNull(platform.captured)
                 platform.window = window
                 assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
-                assertEquals(if (mode <= 1) 1 else 0, platform.gestures); assertTrue(platform.windows.isEmpty()); assertNull(platform.captured)
             }
-            assertEquals(2, platform.disposed)
+            assertTrue(pending.get() is GuiResult.Rejected)
+        }
+        assertEquals(7, platform.disposed)
+    }
+
+    fun testVisualSystemKeysNeedOnlyCurrentWindowMetadata() = fixture { service, session, platform ->
+        if (unsupported(session, platform)) return@fixture
+        val keys = listOf(GuiOperation.BACK to android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK,
+            GuiOperation.HOME to android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME,
+            GuiOperation.RECENTS to android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS,
+            GuiOperation.NOTIFICATIONS to android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
+        for ((index, pair) in keys.withIndex()) {
+            controlMain { session.approveReadsFromUser(GuiReadApproval(0, 1)) }
+            val image = capture(service, session, platform)
+            val action = GuiAction(image.observationId, pair.first, visual = true)
+            lateinit var pending: CompletableFuture<GuiResult<String>>
+            controlMain {
+                pending = GuiRuntime.visualAction(session.lease, action) { false }
+                assertEquals(index, platform.globalKeys.size)
+                event(service, "external.app"); platform.witness()
+                assertEquals(pair.second, platform.globalKeys.last())
+                assertEquals(index + 1, platform.globalKeys.size)
+                assertNull(platform.captured); assertEquals(0, platform.gestures)
+                assertEquals(GuiResult.Rejected("CAPTURE_ID_MISMATCH_NOT_EXECUTED"), GuiRuntime.visualAction(session.lease, action) { false }.get())
+            }
+            assertTrue(pending.get() is GuiResult.Value)
         }
     }
 

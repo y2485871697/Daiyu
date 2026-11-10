@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import top.yukonga.miuix.kmp.basic.Text
@@ -27,17 +26,26 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 @Composable
 internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi) {
     val owner = step.owner ?: return
-    var image by remember(owner, step.toolCallId) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    var expanded by remember(owner, step.toolCallId) { mutableStateOf(false) }
-    var cleared by remember(owner, step.toolCallId) { mutableStateOf(false) }
-    var loading by remember(owner, step.toolCallId) { mutableStateOf(true) }
+    if (!controller.ready || controller.dataBusy) return
+    val dataRevision = controller.dataRevision
+    val screenshotRevision = controller.screenScreenshotRevision
+    val initial = remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) {
+        controller.cachedToolScreenshot(owner, step.toolCallId)
+    }
+    var image by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) {
+        mutableStateOf(initial?.image)
+    }
+    var expanded by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(false) }
+    var cleared by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(initial?.cleared == true) }
+    var loading by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(initial == null) }
     var revision by remember(owner, step.toolCallId) { mutableStateOf(0) }
-    DisposableEffect(controller, owner, step.toolCallId, step.state, controller.ready, controller.dataBusy, controller.screenScreenshotRevision, revision) {
+    DisposableEffect(controller, owner, step.toolCallId, step.state, controller.ready, controller.dataBusy,
+        dataRevision, screenshotRevision, revision) {
         var visible = true
-        image = null; loading = true; cleared = false
-        if (!controller.loadToolScreenshot(owner, step.toolCallId) { bitmap, cleaned ->
+        val cached = controller.cachedToolScreenshot(owner, step.toolCallId)
+        image = cached?.image; loading = cached == null; cleared = cached?.cleared == true
+        if (cached == null && !controller.loadToolScreenshot(owner, step.toolCallId) { bitmap, cleaned ->
             if (visible) { image = bitmap; loading = false; cleared = cleaned; if (cleaned) expanded = false }
-            else bitmap?.recycle()
         }) loading = false
         onDispose { visible = false }
     }

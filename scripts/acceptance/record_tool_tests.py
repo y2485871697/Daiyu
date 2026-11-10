@@ -178,7 +178,8 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PAUSE_RECEIPT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PAUSE_RECEIPT_MODULES, "-v"], "pause-receipts-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SCREEN_CLEANUP_PLATFORM_CLASSES)):
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in [sorted(SCREEN_CLEANUP_PLATFORM_CLASSES), sorted((*SCREEN_CLEANUP_PLATFORM_CLASSES,
+                'app.daiyu.android.ToolScreenshotPreviewActivityTest'))]):
         return [python, "-B", "-m", "unittest", *SCREEN_CLEANUP_MODULES, "-v"], "screen-cleanup-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(ROOTLESS_COMMIT_PLATFORM_CLASSES)):

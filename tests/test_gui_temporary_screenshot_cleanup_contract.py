@@ -63,6 +63,33 @@ class TemporaryScreenScreenshotCleanupContract(unittest.TestCase):
         self.assertIn('if (!loading && !cleared)', ui)
         self.assertIn('if (cleaned) expanded = false', ui)
 
+    def test_verified_preview_is_seeded_synchronously_and_failed_reads_remain_retryable(self):
+        controller = (APP / 'ChatController.kt').read_text()
+        loader = controller.split('    internal fun loadToolScreenshot(', 1)[1].split('    @Synchronized internal fun ', 1)[0]
+        self.assertLess(loader.index('if (cached != null)'), loader.index('screenshotExecutor.execute'))
+        commit = loader.split('val valid = synchronized(this)', 1)[1].split('if (!valid) image?.recycle()', 1)[0]
+        self.assertIn('screenScreenshotRevision == key.screenshotRevision', commit)
+        self.assertIn('if (current) toolScreenshotPreviews.put(key, image, cleared)', commit)
+        cache = (APP / 'ToolScreenshotPreviewCache.kt').read_text()
+        self.assertIn('8 * 1024 * 1024', cache)
+        self.assertIn('if (image != null || cleared)', cache)
+        self.assertNotIn('.recycle()', cache)
+        ui = (APP / 'ui/screens/chat/conversation/ToolScreenshotContent.kt').read_text()
+        self.assertIn('if (!controller.ready || controller.dataBusy) return', ui)
+        self.assertIn('mutableStateOf(initial?.image)', ui)
+        self.assertIn('mutableStateOf(initial == null)', ui)
+        self.assertIn('controller.dataRevision', ui)
+        self.assertIn('onDispose { visible = false }', ui)
+
+    def test_cleanup_and_close_drop_preview_cache_without_recycling_borrowed_images(self):
+        controller = (APP / 'ChatController.kt').read_text()
+        cleanup = controller.split('    private fun cleanupRun(lifetime:RunResources)', 1)[1].split('    @Synchronized internal fun canRetryQuestionCleanup', 1)[0]
+        self.assertIn('toolScreenshotPreviews.clear(); screenScreenshotRevision++', cleanup)
+        close = controller.split('    internal fun close() {', 1)[1]
+        self.assertIn('toolScreenshotPreviews.clear()', close)
+        workflow = (ROOT / '.github/workflows/gui-screenshot-checks.yml').read_text()
+        self.assertIn('--tests app.daiyu.android.ToolScreenshotPreviewCacheTest', workflow)
+
     def test_incremental_cloud_scope_includes_store_and_native_receipt_regressions_without_packaging(self):
         source = (ROOT / '.github/workflows/gui-screenshot-checks.yml').read_text()
         self.assertIn('options: [screenshot, direct-read, temporary-cleanup]', source)

@@ -122,9 +122,10 @@ screen_cleanup_target = {
     'app.daiyu.android.gui.GuiRootlessContentAndroidTest',
     'app.daiyu.android.ui.ToolScreenshotReceiptTest',
 }
-screen_cleanup_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(screen_cleanup_target)
+screen_cleanup_scopes = [sorted(screen_cleanup_target), sorted(screen_cleanup_target | {'app.daiyu.android.ToolScreenshotPreviewActivityTest'})]
+screen_cleanup_only = mode == 'smoke' and sorted(raw_filter.split(',')) in screen_cleanup_scopes
 screen_cleanup_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
-                          for name in screen_cleanup_target}
+                          for name in (requested if screen_cleanup_only else screen_cleanup_target)}
 
 pause_receipt_target = {
     'app.daiyu.android.ToolReceiptPauseActivityTest',

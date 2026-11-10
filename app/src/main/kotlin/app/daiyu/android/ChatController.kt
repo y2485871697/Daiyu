@@ -3100,12 +3100,25 @@ class ChatController internal constructor(private val application:Application,
         }
     }
 
+    private val toolScreenshotPreviews = ToolScreenshotPreviewCache()
+
+    internal fun cachedToolScreenshot(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
+        callId: String): ToolScreenshotPreviewCache.Preview? = synchronized(this) {
+        if (closed || !ready || dataBusy) null else
+            toolScreenshotPreviews[ToolScreenshotPreviewCache.Key(owner, callId, dataRevision, screenScreenshotRevision)]
+    }
+
     internal fun loadToolScreenshot(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
         callId: String, complete: (android.graphics.Bitmap?, Boolean) -> Unit): Boolean {
-        val revision = synchronized(this) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val (key, cached) = synchronized(this) {
             if (closed || !ready || dataBusy) return false
-            generationReaders++; dataRevision
+            val key = ToolScreenshotPreviewCache.Key(owner, callId, dataRevision, screenScreenshotRevision)
+            val preview = toolScreenshotPreviews[key]
+            if (preview == null) generationReaders++
+            key to preview
         }
+        if (cached != null) { complete(cached.image, cached.cleared); return true }
         try { screenshotExecutor.execute {
             var cleared = false
             val image = runCatching {
@@ -3127,7 +3140,12 @@ class ChatController internal constructor(private val application:Application,
             }.getOrNull()
             handler.post {
                 val valid = synchronized(this) {
-                    generationReaders--; if (closed) closeStorageWhenIdle(); !closed && !dataBusy && dataRevision == revision
+                    generationReaders--
+                    if (closed) closeStorageWhenIdle()
+                    val current = !closed && !dataBusy && dataRevision == key.dataRevision &&
+                        screenScreenshotRevision == key.screenshotRevision
+                    if (current) toolScreenshotPreviews.put(key, image, cleared)
+                    current
                 }
                 if (!valid) image?.recycle()
                 complete(if (valid) image else null, valid && cleared)
@@ -4757,7 +4775,7 @@ class ChatController internal constructor(private val application:Application,
                         lifetime.screenImagesCleaning = false
                         cleaned.fold(onSuccess = {
                             lifetime.screenImagesCleaned = true
-                            if (it > 0) screenScreenshotRevision++
+                            if (it > 0) { toolScreenshotPreviews.clear(); screenScreenshotRevision++ }
                             if (problem == "操作临时截图清理失败；请重试停止") problem = null
                             cleanupRun(lifetime)
                         }, onFailure = {
@@ -5773,6 +5791,7 @@ class ChatController internal constructor(private val application:Application,
         val lifetime=synchronized(this) {
             if(!closed) {
                 closed=true;ready=false;dataOperation=null;dataStatus=null;dataBusy=false;active=null
+                toolScreenshotPreviews.clear()
                 preparation?.revoked=true
                 imageProvider=null; imageProviderConfiguration=null
                 configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear()

@@ -188,7 +188,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('try { synchronousTrace("daiyu.back.custom-up-dispatch") { back() } }', handoff)
         self.assertIn('finally { swipeCommit = null; dispatching = false }', handoff)
         self.assertNotIn('withFrameNanos', handoff)
-        self.assertIn('if (claimed && change.changedToUp()) {\n                                    change.consume()', self.host)
+        self.assertIn('if (claimed && change.changedToUp()) {\n                                    state.releaseDiagnostic()\n                                    change.consume()', self.host)
         self.assertNotIn('retainedPage =', self.host)
 
     def test_content_key_only_controls_the_live_composition(self):
@@ -281,7 +281,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('!frame.frozen && previewEpoch == epoch', layers)
         self.assertNotIn('if (frame.frozen) frame.image = image', layers)
         freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun capture(', 1)[0]
-        self.assertNotIn('capture(frame)', freeze)
+        self.assertNotIn('capture(frame', freeze)
         self.assertIn('frame.image = frame.ready?.takeIf { frame.readySize == frame.size }', freeze)
         self.assertIn('frame.captures.any { !it.isCompleted }', layers)
         self.assertIn('previewEpoch != epoch || frame.generation != generation', layers)
@@ -354,8 +354,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('fun beginGesture(', 1)[0]
         self.assertIn('frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }', schedule)
         self.assertNotIn('frame.warmup?.cancel()', schedule)
-        self.assertLess(schedule.index('frame.warmup = null'), schedule.index('capture(frame)'))
-        capture = layers.split('private fun capture(frame: Frame)', 1)[1].split('fun frame(', 1)[0]
+        self.assertLess(schedule.index('frame.warmup = null'), schedule.index('capture(frame, sourceToken)'))
+        capture = layers.split('private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?)', 1)[1].split('fun frame(', 1)[0]
         self.assertNotIn('frame.generation == generation', capture)
         self.assertIn('image.width == size.width && image.height == size.height', capture)
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()

@@ -21,7 +21,7 @@ internal class BackPerformanceRecorder(
         LAYERS_TRANSITION("daiyu.back.layers.transition"), LAYERS_FRAME("daiyu.back.layers.frame"),
         LAYERS_FIND("daiyu.back.layers.find"),
         CHAT_REFRESH("daiyu.chat.refresh"), CHAT_PUBLISH("daiyu.chat.publish"),
-        MESSAGE_ACTION_REVISION("daiyu.chat.action-revision"),
+        MESSAGE_ACTION_REVISION("daiyu.chat.action-revision"), MESSAGE_ACTION_MATCH("daiyu.chat.action-match"),
         CAPTURE_LAUNCH("daiyu.back.capture-launch"), CAPTURE_WALL("daiyu.back.capture-wall")
     }
     enum class Event {
@@ -102,7 +102,7 @@ internal class BackPerformanceRecorder(
             self < BackCompositionSamples.MIN_SELF_NS || inclusive > window.deadline - started) return
         val rank = window.compositions.indexOfFirst { it.self < self }.let { if (it < 0) window.compositions.size else it }
         if (rank >= MAX_COMPOSITIONS) return
-        window.compositions.add(rank, Composition(info.take(MAX_COMPOSE_NAME), started - window.start, inclusive, self))
+        window.compositions.add(rank, Composition(info.takeLast(MAX_COMPOSE_NAME), started - window.start, inclusive, self))
         if (window.compositions.size > MAX_COMPOSITIONS) window.compositions.removeAt(MAX_COMPOSITIONS)
     }
     @Synchronized fun observing(host: Any): Boolean = (valid()?.owner as? Owner)?.host === host

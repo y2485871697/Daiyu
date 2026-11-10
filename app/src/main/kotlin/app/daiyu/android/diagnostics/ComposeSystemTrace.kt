@@ -33,7 +33,7 @@ internal object ComposeSystemTrace {
 
         override fun traceEventStart(key: Int, dirty1: Int, dirty2: Int, info: String) {
             val stack = events.get() ?: CompositionTraceEvents().also(events::set)
-            if (stack.start(systemEnabled())) Trace.beginSection(info.take(BackPerformanceRecorder.MAX_COMPOSE_NAME))
+            if (stack.start(systemEnabled())) Trace.beginSection(info.takeLast(BackPerformanceRecorder.MAX_COMPOSE_NAME))
             if (onMainThread()) BackPerformance.safely {
                 samples.start(BackPerformance.recorder.compositionToken(), info)
             }

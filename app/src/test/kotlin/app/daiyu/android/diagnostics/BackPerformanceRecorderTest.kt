@@ -137,7 +137,7 @@ class BackPerformanceRecorderTest {
         assertEquals(1, phase.count); assertEquals(7, phase.inFlight)
     }
     @Test fun chatRefreshAndPublishHaveSeparateInclusiveCountsWithoutNewFields() {
-        assertEquals(22, BackPerformanceRecorder.Phase.entries.size)
+        assertEquals(23, BackPerformanceRecorder.Phase.entries.size)
         val f = Fixture(); f.start(); f.frame()
         val refresh = f.recorder.begin("daiyu.chat.refresh")
         f.now += 2_000_000L
@@ -163,16 +163,20 @@ class BackPerformanceRecorderTest {
         f.now += 4_000_000L; f.recorder.complete(revision)
         val publish = f.recorder.begin("daiyu.chat.publish")
         f.now += 1_000_000L; f.recorder.complete(publish)
+        val match = f.recorder.begin("daiyu.chat.action-match")
+        assertNotNull(match)
+        f.now += 2_000_000L; f.recorder.complete(match)
         f.recorder.complete(refresh); f.end()
         val phases = f.rows.single().phases
-        assertEquals(3, phases.size)
+        assertEquals(4, phases.size)
         assertEquals(4_000_000L, phases.single { it.phase == BackPerformanceRecorder.Phase.MESSAGE_ACTION_REVISION }.total)
-        assertEquals(5_000_000L, phases.single { it.phase == BackPerformanceRecorder.Phase.CHAT_REFRESH }.total)
+        assertEquals(2_000_000L, phases.single { it.phase == BackPerformanceRecorder.Phase.MESSAGE_ACTION_MATCH }.total)
+        assertEquals(7_000_000L, phases.single { it.phase == BackPerformanceRecorder.Phase.CHAT_REFRESH }.total)
         assertTrue(phases.all { it.count == 1 && it.inFlight == 0 })
     }
     @Test fun helperPreservesReturnExceptionAndNonlocalReturnDespiteDiagnosticFailure() {
         for (name in listOf("daiyu.back.prepare", "daiyu.back.layers.transition", "daiyu.back.layers.frame",
-            "daiyu.back.layers.find", "daiyu.chat.refresh", "daiyu.chat.publish", "daiyu.chat.action-revision")) {
+            "daiyu.back.layers.find", "daiyu.chat.refresh", "daiyu.chat.publish", "daiyu.chat.action-revision", "daiyu.chat.action-match")) {
             var calls = 0
             assertEquals(42, synchronousTrace(name) { calls++; 42 })
             fun nonlocal(): Int { synchronousTrace(name) { calls++; return 7 } }
@@ -431,4 +435,19 @@ class BackPerformanceRecorderTest {
         f.recorder.composition(token, "beyond-deadline", f.now, BackPerformanceRecorder.HARD_NS + 1, 20_000_000L)
         f.end(); assertTrue(f.rows.single().compositions.isEmpty())
     }
+    @Test fun longAnonymousCompilerNamesKeepTheDistinctSourceLocationsWithinTheSameBudget() {
+        val f = Fixture(); val token = f.start(); f.frame()
+        val prefix = "app.daiyu.android.MainActivity.onCreate." + "<anonymous>.".repeat(12)
+        val infos = listOf(2291, 2304, 2313, 2314).map { "$prefix (MainActivity.kt:$it)" }
+        infos.forEachIndexed { index, info ->
+            f.recorder.composition(token, info, f.now, (index + 1) * 2_000_000L, (index + 1) * 2_000_000L)
+        }
+        f.end()
+        val names = f.rows.single().compositions.map { it.function }
+        assertEquals(infos.reversed().map { it.takeLast(BackPerformanceRecorder.MAX_COMPOSE_NAME) }, names)
+        assertEquals(4, names.distinct().size)
+        assertTrue(names.all { it.length == BackPerformanceRecorder.MAX_COMPOSE_NAME })
+        assertTrue(names.first().endsWith("(MainActivity.kt:2314)"))
+    }
+
 }

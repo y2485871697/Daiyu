@@ -1295,11 +1295,18 @@ class MainActivity : ComponentActivity() {
     private var messageActionKey: MessageActionRenderKey? = null
     private var messageActionLoading: MessageActionRenderKey? = null
     private var messageActionAttempted: MessageActionRenderKey? = null
-    private val messageActionRenderedRevision = MessageActionRenderedRevision { rows ->
-        app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.action-revision") {
-            app.daiyu.android.domain.context.ContextRevision.digest(rows)
-        }
-    }
+    private val messageActionRenderedRevision = MessageActionRenderedRevision(
+        matcher = { snapshot, rows ->
+            app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.action-match") {
+                snapshot.matchesRendered(rows)
+            }
+        },
+        digest = { rows ->
+            app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.action-revision") {
+                app.daiyu.android.domain.context.ContextRevision.digest(rows)
+            }
+        },
+    )
     private fun clearInlineMessageEditor() {
         inlineMessageEditor?.additions?.close()
         inlineMessageEditor = null
@@ -3116,7 +3123,7 @@ class MainActivity : ComponentActivity() {
         }
         fun actionUnavailable() { toast("操作未完成，请稍后再试") }
         val actionSnapshot = messageActionSnapshot?.takeIf {
-            it.conversationId.value == renderedConversation && it.matchesRendered(shown.map { row -> row.second })
+            it.conversationId.value == renderedConversation && messageActionRenderedRevision.matches(it, shown.map { row -> row.second })
         }
         val messageCallbacks = messageActionHost.bind(actionSnapshot,
             isCurrent = { displayWindow == null && editorMatches() && draftRevision == renderedDraftRevision &&

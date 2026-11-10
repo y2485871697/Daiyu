@@ -64,7 +64,7 @@ class BackPerformanceRuntimeTest {
             assertEquals(0, phase.getInt("count")); assertEquals(1, phase.getInt("in_flight_count"))
             assertEquals(BackPerformanceRecorder.HARD_NS, phase.getLong("in_flight_max_observed_ns"))
             // The fixed whitelist still fits the unchanged per-line/file budgets at full phase
-            // cardinality, including the cold-only revision phase and four bounded worst frames.
+            // cardinality, including the cold-only revision and matching phases and four bounded worst frames.
             RuntimeDiagnostics.clear()
             recorder.start(owner, BackPerformanceRecorder.Kind.BACK_PRESS)
             val allSamples = BackPerformanceRecorder.Phase.entries.map { recorder.begin(it.trace) }
@@ -83,7 +83,7 @@ class BackPerformanceRuntimeTest {
             repeat(4) { recorder.frame(now, 40_000_000L + it, 16_666_667L, 60f, LongArray(9)) }
             recorder.end(BackPerformanceRecorder.End.TAIL)
             val full = RuntimeDiagnostics.export().getJSONObject(0)
-            assertEquals(22, full.getJSONArray("phases").length())
+            assertEquals(23, full.getJSONArray("phases").length())
             assertEquals(4, full.getJSONArray("worst_frames").length())
             assertEquals(32, full.getJSONArray("timeline").length())
             assertEquals(18, full.getInt("timeline_dropped"))
@@ -105,6 +105,11 @@ class BackPerformanceRuntimeTest {
                 .single { it.getString("phase") == "MESSAGE_ACTION_REVISION" }
             assertEquals(1, revisionPhase.getInt("count"))
             assertEquals(20_000_000L, revisionPhase.getLong("inclusive_total_ns"))
+            val matchPhase = (0 until full.getJSONArray("phases").length())
+                .map { full.getJSONArray("phases").getJSONObject(it) }
+                .single { it.getString("phase") == "MESSAGE_ACTION_MATCH" }
+            assertEquals(1, matchPhase.getInt("count"))
+            assertEquals(20_000_000L, matchPhase.getLong("inclusive_total_ns"))
             RuntimeDiagnostics.clear()
             val onlyComposition = recorder.start(owner, BackPerformanceRecorder.Kind.BACK_PRESS)
             recorder.compositionObserved(onlyComposition)

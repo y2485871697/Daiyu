@@ -358,7 +358,7 @@ class PageBackGestureContractTest(unittest.TestCase):
             'Composer.setTracer(SystemTracer)',
             'private object SystemTracer : CompositionTracer',
             'Build.VERSION.SDK_INT >= 29 && Trace.isEnabled()',
-            'Trace.beginSection(info.take(BackPerformanceRecorder.MAX_COMPOSE_NAME))',
+            'Trace.beginSection(info.takeLast(BackPerformanceRecorder.MAX_COMPOSE_NAME))',
             'onMainThread() && samples.enabled(BackPerformance.recorder.compositionToken())',
             'samples.start(BackPerformance.recorder.compositionToken(), info)',
             'samples.end(BackPerformance.recorder.compositionToken())',
@@ -374,6 +374,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('MAX_DEPTH = 128', collector)
         self.assertIn('stopped = true', collector)
         self.assertNotIn('Trace.', collector)
+        recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
+        self.assertIn('info.takeLast(MAX_COMPOSE_NAME)', recorder)
 
     def test_continuous_redraw_uses_throttled_same_size_last_good_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()

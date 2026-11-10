@@ -38,6 +38,38 @@ class PageBackSmokeScopeTests(unittest.TestCase):
         self.assertEqual(len(required), len(recorder.PAGE_BACK_MODULES))
         self.assertNotIn('discover', command)
 
+    def test_return_with_message_actions_keeps_exact_targeted_command_and_inventory(self):
+        extra = 'app.daiyu.android.MessageActionsActivityTest'
+        extended = (*CLASSES, extra)
+        for classes in (extended, tuple(reversed(extended))):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(classes)))
+            self.assertEqual('page-back-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.PAGE_BACK_MODULES, '-v'], command)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            path = root / 'app/src/androidTest/kotlin' / (extra.replace('.', '/') + '.kt')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('package app.daiyu.android\nclass MessageActionsActivityTest : TestCase() {\n fun testOne() {}\n}\n')
+            selected = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=','.join(reversed(extended)))
+                self.assertEqual(0, result.returncode, result.stderr)
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                self.assertEqual(set(extended), set(inventory['all_classes']))
+                selected.extend(selection['selected_classes'])
+            self.assertCountEqual(extended, selected)
+            for raw in (','.join(extended) + ',' + extra, ','.join(extended) + ',app.daiyu.android.UnknownTest',
+                        ','.join(extended[1:])):
+                self.assertEqual('full', recorder.command_for('python3', dict(
+                    SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=raw))[1])
+                result = helper.select(root, classes=raw)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn('Ambiguous instrumentation test declaration', result.stderr)
+
     def test_partial_extended_duplicate_and_other_modes_keep_full_selection(self):
         classes = ','.join(CLASSES)
         for raw in ('', ','.join(name.rsplit('.', 1)[-1] for name in CLASSES),

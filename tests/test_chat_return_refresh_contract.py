@@ -67,7 +67,7 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
     def test_rendered_revision_is_single_entry_deep_list_projection_not_authority(self):
         prepare = body(self.main, 'private fun prepareMessageActionSnapshot()')
         lookup = 'messageActionRenderedRevision.revision(owner, shown.map { it.second })'
-        self.assertIn('private val messageActionRenderedRevision = MessageActionRenderedRevision { rows ->', self.main)
+        self.assertIn('private val messageActionRenderedRevision = MessageActionRenderedRevision(', self.main)
         self.assertIn(lookup, prepare)
         self.assertLess(prepare.index(lookup), prepare.index('if (messageActionKey == key'))
         callback = prepare.split('controller.loadMessageActionSnapshot(owner)', 1)[1]
@@ -78,14 +78,19 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
                       'ContextRevision.digest(rows) == key.rows', 'candidate.matchesRendered(rows)'):
             self.assertIn(guard, callback)
         self.assertIn('snapshot.matchesRendered(shown.map { it.second })', self.main)
-        self.assertIn('it.matchesRendered(shown.map { row -> row.second })', self.main)
+        self.assertIn('messageActionRenderedRevision.matches(it, shown.map { row -> row.second })', self.main)
+        self.assertIn('snapshot.matchesRendered(rows)', self.main)
+        self.assertEqual(1, self.main.count('synchronousTrace("daiyu.chat.action-match")'))
         self.assertEqual(1, self.main.count('synchronousTrace("daiyu.chat.action-revision")'))
         cold = self.main.split('private val messageActionRenderedRevision =', 1)[1].split('private fun clearInlineMessageEditor()', 1)[0]
         self.assertIn('ContextRevision.digest(rows)', cold)
         helper = (APP / 'MessageActionRenderedRevision.kt').read_text()
         self.assertIn('private var entry: Entry? = null', helper)
-        self.assertIn('it.owner == owner && it.rows == frozen', helper)
-        self.assertIn('return digest(frozen).also { entry = Entry(owner, frozen, it) }', helper)
+        self.assertIn('it.owner == owner && it.rows == rows', helper)
+        self.assertIn('current.revision ?: digest(current.rows)', helper)
+        self.assertIn('snapshot.rowRevisions.toMap()', helper)
+        self.assertIn('it.snapshot === snapshot && it.revisions == revisions', helper)
+        self.assertIn('matcher(snapshot, current.rows)', helper)
         for owner in ('message', 'segment'):
             for field in ('blocks', 'protocolItems', 'reportedReasoning'):
                 self.assertIn(f'{field} = {owner}.{field}.toList()', helper)
@@ -113,6 +118,8 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         page_scope = flow.split("if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':", 1)[1].split('if os.environ', 1)[0]
         self.assertIn('test_chat_return_refresh_contract.py', page_scope)
         self.assertIn('"MESSAGE_ACTION_REVISION"', regression)
+        self.assertIn('"MESSAGE_ACTION_MATCH"', regression)
+        self.assertIn('warm Compose binding must reuse the unchanged content match', regression)
         self.assertIn('fixture.database.send(user, assistant)', regression)
         self.assertIn('message action snapshot admitted before warm returns', regression)
         self.assertIn('recordSynchronous(startWindow = true) { invokeHost(activity, "refresh") }', regression)

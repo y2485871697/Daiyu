@@ -295,6 +295,30 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             repeat(3) {
                 recordSynchronous(startWindow = true) { invokeHost(activity, "refresh") }
             }
+            // Keep the window open through real Compose work, not just the synchronous refresh.
+            ui.waitForIdle()
+            repeat(3) {
+                runtime.clear()
+                mainThread {
+                    recorder.start(Any(), app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.BACK_PRESS)
+                    retainedControls(activity).onTextChange("return warm binding $it")
+                }
+                ui.waitForIdle()
+                assertDraft("return warm binding $it")
+                mainThread {
+                    recorder.frame(System.nanoTime(), 40_000_000L, 16_666_667L, 60f, LongArray(9))
+                    recorder.end(app.daiyu.android.diagnostics.BackPerformanceRecorder.End.PAUSED)
+                }
+                val rows = runtime.export()
+                val incident = (0 until rows.length()).map { rows.getJSONObject(it) }
+                    .single { it.optString("stage") == "BACK_PERFORMANCE" }
+                assertTrue("draft change must execute real compiler callbacks", incident.getBoolean("compose_observed"))
+                val phases = incident.getJSONArray("phases")
+                assertFalse("warm Compose binding must reuse the unchanged content match", (0 until phases.length())
+                    .any { phases.getJSONObject(it).getString("phase") in setOf("MESSAGE_ACTION_MATCH", "MESSAGE_ACTION_REVISION") })
+            }
+            mainThread { retainedControls(activity).onTextChange("return refresh count draft") }
+            ui.waitForIdle()
             dismissIme()
             ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
             ui.waitForIdle()

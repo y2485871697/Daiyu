@@ -198,7 +198,9 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MENU_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *MENU_MODULES, "-v"], "menu-targeted"
     if (env.get('SMOKE_MODE') == 'smoke'
-            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(PAGE_BACK_PLATFORM_CLASSES)):
+            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) in (
+                sorted(PAGE_BACK_PLATFORM_CLASSES),
+                sorted((*PAGE_BACK_PLATFORM_CLASSES, 'app.daiyu.android.MessageActionsActivityTest')))):
         return [python, '-B', '-m', 'unittest', *PAGE_BACK_MODULES, '-v'], 'page-back-targeted'
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(TASK_SCROLL_PLATFORM_CLASSES)):

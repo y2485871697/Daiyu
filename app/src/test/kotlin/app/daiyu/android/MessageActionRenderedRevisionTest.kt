@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.ContextRevision
+import app.daiyu.android.storage.MessageActionSnapshot
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -142,5 +143,137 @@ class MessageActionRenderedRevisionTest {
         assertEquals(1, otherActivity.calls)
         assertEquals(expected, f.cache.revision(owner, rows))
         assertEquals(3, f.calls)
+    }
+
+    private fun snapshot(rows: List<Message>) = MessageActionSnapshot(owner, ContextRevision.digest(rows), emptyMap(),
+        rowRevisions = rows.associate { it.id.value to ContextRevision.digest(listOf(it)) })
+
+    private class Matching {
+        var matches = 0
+        var digests = 0
+        val cache = MessageActionRenderedRevision(
+            matcher = { snapshot, rows -> matches++; snapshot.matchesRendered(rows) },
+            digest = { rows -> digests++; ContextRevision.digest(rows) },
+        )
+    }
+
+    @Test fun unchangedRenderedContentMatchesOnceAcrossNewContainersAndValueCopies() {
+        val f = Matching()
+        val original = message()
+        val snapshot = snapshot(listOf(original))
+        repeat(30) {
+            val copied = original.copy(blocks = original.blocks.toMutableList(),
+                historySegments = original.historySegments.map { it.copy(blocks = it.blocks.toMutableList()) })
+            assertTrue(f.cache.matches(snapshot, mutableListOf(copied)))
+        }
+        assertEquals(1, f.matches)
+        assertEquals(0, f.digests)
+    }
+
+    @Test fun revisionAndMatchesShareAnEntryWithoutEagerFullDigest() {
+        for (revisionFirst in listOf(false, true)) {
+            val f = Matching()
+            val rows = listOf(message())
+            val snapshot = snapshot(rows)
+            val expected = ContextRevision.digest(rows)
+            if (revisionFirst) assertEquals(expected, f.cache.revision(owner, rows))
+            assertTrue(f.cache.matches(snapshot, rows))
+            assertEquals(if (revisionFirst) 1 else 0, f.digests)
+            assertEquals(expected, f.cache.revision(owner, rows.map { it.copy() }))
+            assertTrue(f.cache.matches(snapshot, rows.toMutableList()))
+            assertEquals(1, f.matches)
+            assertEquals(1, f.digests)
+        }
+    }
+
+    @Test fun snapshotIdentityAndInPlaceRevisionMapChangesInvalidateMatching() {
+        val f = Matching()
+        val rows = listOf(message())
+        val revisions = snapshot(rows).rowRevisions.toMutableMap()
+        val first = snapshot(rows).copy(rowRevisions = revisions)
+        assertTrue(f.cache.matches(first, rows))
+        val second = first.copy()
+        assertTrue(f.cache.matches(second, rows))
+        assertEquals(2, f.matches)
+        revisions[rows.single().id.value] = "corrected revision"
+        repeat(3) { assertFalse(f.cache.matches(second, rows)) }
+        assertEquals(3, f.matches)
+        revisions.clear()
+        assertFalse(f.cache.matches(second, rows))
+        assertEquals(4, f.matches)
+        revisions.putAll(snapshot(rows).rowRevisions)
+        assertTrue(f.cache.matches(second, rows))
+        assertEquals(5, f.matches)
+        assertEquals(0, f.digests)
+    }
+
+    @Test fun mutableRenderedAliasesCannotReuseAnOldMatch() {
+        val f = Matching()
+        val original = message()
+        val blocks = original.blocks.toMutableList()
+        val protocol = original.protocolItems.toMutableList()
+        val segment = original.historySegments.single()
+        val segmentBlocks = segment.blocks.toMutableList()
+        val segmentProtocol = segment.protocolItems.toMutableList()
+        val segmentReasoning = segment.reportedReasoning.toMutableList()
+        val projectedReasoning = original.reportedReasoning.toMutableList()
+        val segments = mutableListOf(segment.copy(blocks = segmentBlocks, protocolItems = segmentProtocol,
+            reportedReasoning = segmentReasoning))
+        val rows = mutableListOf(original.copy(blocks = blocks, protocolItems = protocol,
+            historySegments = segments, reportedReasoning = projectedReasoning))
+        val snapshot = snapshot(rows)
+        assertTrue(f.cache.matches(snapshot, rows))
+        val changes: List<() -> Unit> = listOf(
+            { blocks[0] = MessageBlock.Text("text", "corrected body") },
+            { protocol[0] = "corrected protocol" },
+            { segmentBlocks[1] = tool.copy(result = "corrected nested result") },
+            { segmentProtocol[0] = "corrected nested protocol" },
+            { segmentReasoning[0] = reasoning.copy(text = "corrected nested reasoning") },
+            { projectedReasoning[0] = reasoning.copy(text = "corrected projected reasoning") },
+            { segments[0] = segments[0].copy(role = "user") },
+            { rows[0] = rows[0].copy(error = "corrected error") },
+        )
+        changes.forEachIndexed { index, change ->
+            change()
+            repeat(2) { assertEquals(snapshot.matchesRendered(rows), f.cache.matches(snapshot, rows)) }
+            assertEquals(index + 2, f.matches)
+        }
+        assertEquals(0, f.digests)
+    }
+
+    @Test fun cachedMatchesPreserveEmptyMissingRevisionMixedOwnerAndFalseResults() {
+        val first = message()
+        val second = message("second")
+        val base = snapshot(listOf(first, second))
+        val cases = listOf(
+            base to emptyList(), base to listOf(first), base to listOf(second, first),
+            base.copy(rowRevisions = emptyMap()) to listOf(first),
+            base to listOf(first.copy(conversationId = ConversationId("other"))),
+            base to listOf(first.copy(blocks = listOf(MessageBlock.Text("text", "changed")))),
+        )
+        cases.forEach { (snapshot, rows) ->
+            val f = Matching()
+            repeat(3) { assertEquals(snapshot.matchesRendered(rows), f.cache.matches(snapshot, rows.toMutableList())) }
+            assertEquals(1, f.matches)
+            assertEquals(0, f.digests)
+        }
+    }
+
+    @Test fun matchingEvictsAcrossContentOwnerAndActivityBoundaries() {
+        val f = Matching()
+        val first = message()
+        val second = message("second")
+        val snapshot = snapshot(listOf(first, second))
+        val versions = listOf(listOf(first, second), listOf(second, first), listOf(first), emptyList(), listOf(first, second))
+        versions.forEachIndexed { index, rows ->
+            assertEquals(snapshot.matchesRendered(rows), f.cache.matches(snapshot, rows))
+            assertEquals(index + 1, f.matches)
+        }
+        f.cache.revision(ConversationId("other"), versions.last())
+        assertTrue(f.cache.matches(snapshot, versions.last()))
+        assertEquals(versions.size + 1, f.matches)
+        val otherActivity = Matching()
+        assertTrue(otherActivity.cache.matches(snapshot, versions.last()))
+        assertEquals(1, otherActivity.matches)
     }
 }

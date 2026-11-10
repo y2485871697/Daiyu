@@ -88,7 +88,7 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
         self.assertIn('catch (_: Throwable)', helper)
         recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
         names = re.findall(r'\("(daiyu\.[^"]+)"\)', recorder)
-        self.assertEqual(22, len(names))
+        self.assertEqual(23, len(names))
         self.assertEqual({
             'daiyu.back.custom-up-dispatch', 'daiyu.back.callback-commit', 'daiyu.back.prepare',
             'daiyu.back.business-handler', 'daiyu.back.reset', 'daiyu.back.route-change',
@@ -96,7 +96,7 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
             'daiyu.chat.model-refresh-commit', 'daiyu.chat.model-refresh-publish',
             'daiyu.chat.position-seed', 'daiyu.chat.restore-lifecycle',
             'daiyu.chat.restore-clearance', 'daiyu.chat.retained-compose-entry',
-            'daiyu.chat.refresh', 'daiyu.chat.publish', 'daiyu.chat.action-revision',
+            'daiyu.chat.refresh', 'daiyu.chat.publish', 'daiyu.chat.action-revision', 'daiyu.chat.action-match',
             'daiyu.back.capture-launch', 'daiyu.back.capture-wall',
             'daiyu.back.layers.transition', 'daiyu.back.layers.frame', 'daiyu.back.layers.find',
         }, set(names))

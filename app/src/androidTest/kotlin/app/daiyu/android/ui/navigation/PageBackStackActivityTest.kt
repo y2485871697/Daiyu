@@ -339,9 +339,15 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             mainThread {
                 assertEquals("outer layer was not recorded again", recorded, parent.generation)
                 assertSame("navigation starts with the stale prepared bitmap", oldBitmap, parent.ready)
+                assertFalse("the pixel regression starts without an in-flight warm copy", parent.captures.any { !it.isCompleted })
                 screen = "settings"
             }
-            ui.waitUntil(timeoutMillis = 5000) { parent.image != null }
+            ui.waitUntil(timeoutMillis = 5000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                parent.image != null
+            }
+            assertNotSame("the boundary replaces the stale prepared bitmap", oldBitmap, parent.image)
             ui.mainClock.advanceTimeBy(700)
             ui.onNodeWithTag("page-back-host").performTouchInput {
                 val start = Offset(width * .1f, height * .5f)

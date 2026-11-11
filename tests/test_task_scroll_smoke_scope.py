@@ -13,6 +13,7 @@ import test_speech_platform_discovery as discovery
 
 
 CLASSES = (
+    'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
@@ -29,6 +30,7 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
             self.assertEqual('task-scroll-targeted', scope)
             self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
         required = {
+            'test_streaming_follow_contract',
             'test_reasoning_stream_cost_contract',
             'test_workflow_render_isolation_contract',
             'test_markdown_typing_contract',

@@ -20,11 +20,12 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("Triple(canFollowBottom(),", self.follow)
         self.assertIn("val motion = BottomFollowMotion()", self.follow)
         self.assertNotIn("while (true)", self.follow)
-        self.assertNotIn("withFrameNanos", self.follow)
+        self.assertIn("withFrameNanos", self.follow)
+        self.assertIn("motion.velocityPxPerSecond == 0f", self.follow)
         self.assertNotIn("LaunchedEffect(turns", self.follow)
 
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
-        self.assertIn("val delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
+        self.assertIn("var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
         self.assertIn("motion.step(overflow.toFloat(), System.nanoTime(), currentDensity)", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
         self.assertIn("if (overflow <= 0)", self.follow)
@@ -41,7 +42,7 @@ class StreamingFollowContract(unittest.TestCase):
 
     def test_idle_wait_rechecks_current_layout_without_ending_the_worker(self):
         self.assertIn("if (overflow <= 0)", self.follow)
-        idle = self.follow.split("if (overflow <= 0)", 1)[1].split("val delta =", 1)[0]
+        idle = self.follow.split("if (overflow <= 0)", 1)[1].split("var delta =", 1)[0]
         self.assertIn("motion.reset()", idle)
         self.assertNotIn("continue", idle)
         self.assertNotIn("break", self.follow)

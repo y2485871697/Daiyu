@@ -310,11 +310,37 @@ internal fun ChatMessageList(
                 motion.reset(); resumeFollowPending = false; alignViewport = false
                 return@collectLatest
             }
-            val delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {
+            var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {
                 val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
                 val obscuredTail = if (currentOcclusionPx > 0)
                     (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
                 maxOf(motion.step(overflow.toFloat(), System.nanoTime(), currentDensity), obscuredTail.toFloat())
+            }
+            if (!alignViewport && !resumeFollowPending && delta == 0f && motion.velocityPxPerSecond == 0f) {
+                // The first motion sample intentionally returns zero so it does not invent a
+                // jump. Keep one frame alive to obtain the next sample; otherwise the layout
+                // snapshot never changes and a settled list can miss the next height burst.
+                var nextDelta = 0f
+                withFrameNanos { frameTimeNanos ->
+                    if (canFollowBottom()) {
+                        val nextLayout = listState.layoutInfo
+                        val nextLast = nextLayout.visibleItemsInfo.lastOrNull { it.index == index }
+                        if (nextLast != null) {
+                            val nextOverflow = nextLast.offset + nextLast.size +
+                                nextLayout.afterContentPadding - nextLayout.viewportEndOffset
+                            if (nextOverflow > 0) {
+                                val visibleBottom = nextLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+                                val obscuredTail = if (currentOcclusionPx > 0)
+                                    (nextLast.offset + nextLast.size - visibleBottom).coerceAtLeast(0) else 0
+                                nextDelta = maxOf(
+                                    motion.step(nextOverflow.toFloat(), frameTimeNanos, currentDensity),
+                                    obscuredTail.toFloat(),
+                                )
+                            }
+                        }
+                    }
+                }
+                delta = nextDelta
             }
             if (delta > 0f && canFollowBottom()) {
                 listState.scrollBy(delta)

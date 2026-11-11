@@ -13,14 +13,14 @@ class PageEnterContractTest(unittest.TestCase):
 
     def test_entry_requires_an_exact_predecessor_and_gives_pop_priority(self):
         transition = self.layers.split('fun transition(', 1)[1].split('fun freezeCurrent()', 1)[0]
-        self.assertLess(transition.index('val departure = enter(key)'), transition.index('if (!animateEnter'))
-        self.assertIn('if (departure != null) return departure', transition)
+        self.assertLess(transition.index('val departure = enter(key, contentKey)'), transition.index('if (!animateEnter'))
+        self.assertIn('if (departure != null) return@synchronousTrace departure', transition)
         self.assertIn('previous.sourceKey != backTargetKey || previous.childChangeCaptured == false', transition)
         self.assertIn('val source = frames[previous.sourceKey]?.takeIf', transition)
         self.assertIn('it.animateReturn && size != IntSize.Zero && it.size == size', transition)
         self.assertIn('forward = true', transition)
         self.assertIn('val forward: Boolean = false', self.layers)
-        self.assertIn('layers.transition(visualRouteKey, visualBackTargetKey, animateEnter = animateBackEnabled && resumed, size = viewport)', self.host)
+        self.assertIn('layers.transition(visualRouteKey, visualBackTargetKey, animateEnter = animateBackEnabled && resumed, size = viewport, contentKey = contentKey)', self.host)
         self.assertIn('frame.sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey', self.host)
 
     def test_nested_content_holds_only_its_outgoing_visit_and_cold_children_do_not_push(self):
@@ -29,7 +29,7 @@ class PageEnterContractTest(unittest.TestCase):
         self.assertIn('if (held != null) drawImage(held)', self.host)
         self.assertIn('drawContent()', self.host)
         self.assertIn('var holdingForChild by mutableStateOf(false)', self.layers)
-        self.assertIn('layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey)', self.host)
+        self.assertIn('layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey, contentKey = contentKey)', self.host)
 
     def test_original_push_geometry_places_the_frozen_old_page_below_one_live_page(self):
         previous = self.host.index('testTag("page-enter-previous")')
@@ -49,15 +49,15 @@ class PageEnterContractTest(unittest.TestCase):
 
     def test_entry_reuses_original_programmatic_curve_not_the_gesture_preference(self):
         self.assertIn('if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))', self.host)
-        self.assertIn('else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))', self.host)
+        self.assertIn('else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f),', self.host)
         transition = self.layers.split('fun transition(', 1)[1].split('fun freezeCurrent()', 1)[0]
         for forbidden in ('swipeDismissEnabled', 'predictiveBackEnabled', 'back()', 'dispatchBack'):
             self.assertNotIn(forbidden, transition)
 
     def test_pending_capture_and_transition_input_have_explicit_gates(self):
-        self.assertIn('departure.frame.capture?.join()', self.host)
-        self.assertIn('if (departure.frame.image != null && !departure.forwardSkipped)', self.host)
-        self.assertIn('departing && departure.frame.image != null && !departure.forwardSkipped && state.previewAllowed', self.host)
+        self.assertNotIn('departure.frame.capture?.join()', self.host)
+        self.assertIn('if (departure.frame.canDrawPreview && !departure.forwardSkipped)', self.host)
+        self.assertIn('departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed', self.host)
         self.assertIn('if (departure != null && showDeparture && departure.forward)', self.host)
         self.assertIn('departure.forwardSkipped = true', self.host)
         self.assertIn('departure?.forward == true && departing && !showDeparture', self.host)

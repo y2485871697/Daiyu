@@ -395,7 +395,7 @@ internal fun PageBackGestureHost(
     DisposableEffect(layers) { onDispose { layers.close() } }
     DisposableEffect(layers, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) layers.clearPreviews()
+            if (event == Lifecycle.Event.ON_PAUSE) layers.setActive(false)
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
@@ -455,7 +455,7 @@ internal fun PageBackGestureHost(
     val currentTarget by rememberUpdatedState(target)
     val state = remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey) {
         PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope, diagnosticOwner,
-            beginPreview = { currentTarget != null && layers.beginGesture(frame) }) { value, predictive, direction, velocity, previewAllowed, back ->
+            beginPreview = { layers.beginGesture(frame, currentTarget) }) { value, predictive, direction, velocity, previewAllowed, back ->
             if (!previewAllowed) frame.animateReturn = false
             val request = if (value > 0f && currentTarget != null && visualBackTargetKey != null) {
                 layers.prepare(frame, visualBackTargetKey, value, predictive, direction, velocity)

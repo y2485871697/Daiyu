@@ -25,6 +25,27 @@ class BackPerformanceRecorderTest {
         assertEquals(30_000_499L, row.max)
         assertEquals(16_666_667L, row.minBudget); assertEquals(60f, row.maxHz)
     }
+    @Test fun previewFailuresAndStalePixelsAreSavedEvenWithoutSlowFrames() {
+        for (event in listOf(BackPerformanceRecorder.Event.PREVIEW_TARGET_MISSING,
+            BackPerformanceRecorder.Event.PREVIEW_SOURCE_MISSING, BackPerformanceRecorder.Event.PREVIEW_TARGET_STALE,
+            BackPerformanceRecorder.Event.PREVIEW_SOURCE_STALE)) {
+            val f = Fixture(); val token = f.start()
+            f.recorder.mark(BackPerformanceRecorder.Event.PREVIEW_AFTER_RESUME, token)
+            f.recorder.mark(event, token, 3)
+            f.recorder.commit(f.owner); f.recorder.route(f.owner); f.end()
+            val row = f.rows.single()
+            assertEquals(0, row.frames); assertEquals(0, row.slow)
+            assertTrue(row.commitAttempted); assertTrue(row.routeChanged)
+            assertEquals(event, row.timeline[1].event)
+            assertEquals(3, row.timeline[1].count)
+        }
+        val healthy = Fixture(); val token = healthy.start()
+        healthy.recorder.mark(BackPerformanceRecorder.Event.PREVIEW_AFTER_RESUME, token)
+        healthy.recorder.mark(BackPerformanceRecorder.Event.PREVIEW_READY, token)
+        healthy.recorder.commit(healthy.owner); healthy.recorder.route(healthy.owner)
+        healthy.end(); assertTrue(healthy.rows.isEmpty())
+    }
+
     @Test fun commitAndFinallyResetPreserveTailWithoutClaimingCompletion() {
         val f = Fixture(); f.start(); f.frame(); f.recorder.commit(f.owner)
         f.recorder.reset(f.owner); f.recorder.route(f.owner)

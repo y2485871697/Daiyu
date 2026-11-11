@@ -73,6 +73,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var nestedCount = 0
     private var currentColor by mutableStateOf(Color.Blue)
     private var observedFrame: PageBackPreviewLayers.Frame? = null
+    private var previousFrame: PageBackPreviewLayers.Frame? = null
     private var rowClicks = 0
     private var pageCompositions = 0
     private var sliderValue by mutableStateOf(0.2f)
@@ -94,7 +95,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                         backTargetKey = if (renderedRoute == "test-page") "previous-page" else null,
                         captureFromContent = !horizontalChild && !clickableRows && !sliderChild && !textChild) {
                         val currentFrame = LocalPageBackPreviewFrame.current
-                        androidx.compose.runtime.SideEffect { observedFrame = currentFrame }
+                        androidx.compose.runtime.SideEffect {
+                            observedFrame = currentFrame
+                            if (renderedRoute == "previous-page") previousFrame = currentFrame
+                        }
                         onPageComposition()
                         PageBackHandler(enabled = canBack, previewEnabled = previewAllowed) {
                             backCount++
@@ -293,6 +297,93 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             node("page-enter-previous").assertDoesNotExist()
             assertEquals(0, fixture.opens.get())
         }
+    }
+
+    fun testCustomSwipeAfterPauseKeepsHistoricalTargetAndDeparture() = assertBackAfterBackground(home = false, prediction = false)
+
+    fun testCustomSwipeAfterHomeKeepsHistoricalTargetAndDeparture() = assertBackAfterBackground(home = true, prediction = false)
+
+    @OptIn(ExperimentalActivityApi::class)
+    fun testPredictiveBackAfterHomeKeepsHistoricalTargetAndDeparture() {
+        if (Build.VERSION.SDK_INT >= 34) assertBackAfterBackground(home = true, prediction = true)
+    }
+
+    @OptIn(ExperimentalActivityApi::class)
+    private fun assertBackAfterBackground(home: Boolean, prediction: Boolean) {
+        predictive = prediction
+        navigateOnBack = true
+        mount(capturePreviousPage = true)
+        val target = checkNotNull(previousFrame)
+        val image = checkNotNull(target.image)
+        val current = checkNotNull(observedFrame)
+        if (!home) realPauseResume(activity, atPause = {
+            assertSame("pause must not erase a covered target", image, target.image)
+            assertNull(current.ready)
+        }) else {
+            val original = activity
+            val stopped = java.util.concurrent.CountDownLatch(1)
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
+            }
+            mainThread { original.lifecycle.addObserver(observer) }
+            try {
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+                assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                mainThread {
+                    assertSame("HOME must not erase a covered target", image, target.image)
+                    assertNull(current.ready)
+                }
+            } finally {
+                mainThread { original.lifecycle.removeObserver(observer) }
+                restoreOriginalHost(original)
+            }
+            awaitHostWindowFocus(original)
+        }
+        prepareCurrentPixels()
+        mainThread {
+            assertSame(current, observedFrame)
+            assertSame(image, target.image)
+            assertTrue(target.canDrawPreview)
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+            if (prediction) {
+                mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
+                mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .6f, BackEventCompat.EDGE_LEFT)) }
+            } else node("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .7f, height * .6f), 200)
+            }
+            ui.mainClock.advanceTimeBy(32)
+            val preview = node("page-back-target").assertExists()
+            val pixels = captureScreenNode(preview).toPixelMap()
+            val release = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+            assertDimmedPreviousPage(pixels[2, pixels.height / 2],
+                (release.left - initial.left) / initial.width, "resumed target keeps red predecessor pixels")
+            assertTrue("resumed gesture moves before commit", release.left > initial.left)
+            assertEquals(0, backCount)
+            if (prediction) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            else {
+                node("page-back-host").performTouchInput { up() }
+                ui.mainClock.advanceTimeByFrame()
+            }
+            val departure = node("page-back-departure").assertExists()
+            val start = departure.fetchSemanticsNode().boundsInRoot
+            assertEquals("resumed release stays continuous", release.left, start.left, 1.1f)
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
+            ui.mainClock.advanceTimeByFrame()
+            val next = departure.fetchSemanticsNode().boundsInRoot
+            assertTrue("resumed departure advances on positive time", next.left > start.left)
+            val outgoing = captureScreenNode(departure).toPixelMap()
+            val blue = outgoing[outgoing.width / 2, outgoing.height / 2]
+            assertTrue("resumed departure keeps blue source pixels, actual=$blue",
+                blue.blue > .9f && blue.red < .1f && blue.green < .1f)
+            ui.mainClock.advanceTimeBy(1000)
+            node("page-back-departure").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testExplicitContentKeyKeepsLiveCompositionUntilContentActuallyChanges() {

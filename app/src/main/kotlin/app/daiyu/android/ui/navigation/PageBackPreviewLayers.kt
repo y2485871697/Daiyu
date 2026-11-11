@@ -65,6 +65,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     private var closed = false
     private var active = false
     private var previewEpoch = 0L
+    private var resumedSinceGesture = false
     var currentKey: Any? = null
         private set
 
@@ -112,8 +113,27 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun setActive(value: Boolean) {
         if (active == value) return
         active = value
-        if (!value) clearPreviews()
-        else frames[currentKey]?.let { schedule(it) }
+        if (!value) {
+            resumedSinceGesture = true
+            previewEpoch++
+            pending?.motion?.cancel()
+            pending = null
+            frames.values.forEach { frame ->
+                frame.warmup?.cancel()
+                frame.captures.toList().forEach { it.cancel() }
+            }
+            // Ancestors cannot redraw while covered. Keep their immutable target pixels.
+            frames[currentKey]?.let { frame ->
+                frame.image = null
+                frame.ready = null
+                frame.readyGeneration = -1L
+                frame.holdingForChild = false
+                frame.childChangeCaptured = null
+                frame.frozen = false
+            }
+        } else {
+            frames[currentKey]?.let { schedule(it) }
+        }
     }
 
     private fun schedule(frame: Frame) = schedule(frame, captureBackPerformanceToken())
@@ -137,9 +157,34 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
+    fun beginGesture(frame: Frame, target: Frame?): Boolean {
+        val token = captureBackPerformanceToken()
+        if (resumedSinceGesture) {
+            BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_AFTER_RESUME, token)
+            resumedSinceGesture = false
+        }
+        if (target == null) {
+            observeCaptures(token)
+            BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_TARGET_MISSING, token)
+            return false
+        }
+        if (target.readyGeneration >= 0 && target.readyGeneration < target.generation) {
+            BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_TARGET_STALE, token,
+                (target.generation - target.readyGeneration).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        }
+        return beginGesture(frame)
+    }
+
     fun beginGesture(frame: Frame): Boolean {
-        observeCaptures(captureBackPerformanceToken())
+        val token = captureBackPerformanceToken()
+        observeCaptures(token)
         freeze(frame)
+        BackPerformance.mark(if (frame.canDrawPreview) BackPerformanceRecorder.Event.PREVIEW_READY
+            else BackPerformanceRecorder.Event.PREVIEW_SOURCE_MISSING, token)
+        if (frame.canDrawPreview && frame.readyGeneration >= 0 && frame.readyGeneration < frame.generation) {
+            BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_SOURCE_STALE, token,
+                (frame.generation - frame.readyGeneration).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        }
         return frame.canDrawPreview
     }
 

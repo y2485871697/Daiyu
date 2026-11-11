@@ -30,6 +30,7 @@ class PageBackSmokeScopeTests(unittest.TestCase):
             self.assertEqual('page-back-targeted', scope)
             self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.PAGE_BACK_MODULES, '-v'], command)
         required = {'test_page_back_gesture_contract', 'test_page_back_repeat_contract',
+                    'test_page_enter_contract',
                     'test_chat_timeline_contract', 'test_reasoning_flow_stability_contract',
                     'test_diagnostic_smoke_source', 'test_record_tool_tests_scope',
                     'test_acceptance_tool_receipt', 'test_page_back_smoke_scope',

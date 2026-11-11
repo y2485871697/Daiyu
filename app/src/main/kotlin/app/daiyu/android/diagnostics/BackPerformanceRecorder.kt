@@ -29,7 +29,9 @@ internal class BackPerformanceRecorder(
         MOTION_START, MOTION_FIRST_TICK, MOTION_ACCEPTED, MOTION_REJECTED, MOTION_ADOPTED,
         MOTION_WAIT_END, MOTION_FINISHED, MOTION_CANCEL_REQUESTED, MOTION_CANCELLED, MOTION_FAILED,
         ABANDON_SCHEDULED, ABANDON_CHECK, ABANDON_APPLIED, ABANDON_NOT_PENDING,
-        ABANDON_ROUTE_CHANGED, ABANDON_CHECK_CANCELLED, OBSERVED_CAPTURE_IN_FLIGHT
+        ABANDON_ROUTE_CHANGED, ABANDON_CHECK_CANCELLED, OBSERVED_CAPTURE_IN_FLIGHT,
+        PREVIEW_AFTER_RESUME, PREVIEW_READY, PREVIEW_TARGET_MISSING, PREVIEW_SOURCE_MISSING,
+        PREVIEW_TARGET_STALE, PREVIEW_SOURCE_STALE
     }
     enum class CaptureResult { COMPLETE, STORED, DISCARDED, CANCELLED, FAILED, IN_FLIGHT }
     data class Mark(val event: Event, val offset: Long, val count: Int)
@@ -71,6 +73,7 @@ internal class BackPerformanceRecorder(
         val compositions = arrayListOf<Composition>()
         var composeObserved = false
         var composeLimited = false
+        var previewIssue = false
     }
     private var sequence = 0L
     @Volatile private var active: Window? = null
@@ -138,6 +141,8 @@ internal class BackPerformanceRecorder(
         valid()?.takeIf { it.token == source }?.let { markWindow(it, event, count) }
     }
     private fun markWindow(window: Window, event: Event, count: Int = 0) {
+        if (event == Event.PREVIEW_TARGET_MISSING || event == Event.PREVIEW_SOURCE_MISSING ||
+            event == Event.PREVIEW_TARGET_STALE || event == Event.PREVIEW_SOURCE_STALE) window.previewIssue = true
         if (window.timeline.size == MAX_TIMELINE) {
             window.timelineDropped = (window.timelineDropped + 1).coerceAtMost(MAX_COUNT)
             return
@@ -215,7 +220,7 @@ internal class BackPerformanceRecorder(
             if (stats.count == 0 && pending.isEmpty()) null else
                 PhaseStats(phase, stats.count, stats.total, stats.max, pending.size, inFlightMax)
         }
-        if (window.slow == 0 && window.overlapSlow == 0 &&
+        if (!window.previewIssue && window.slow == 0 && window.overlapSlow == 0 &&
             phases.none { it.max >= SLOW_PHASE_NS || it.inFlightMaxObserved >= SLOW_PHASE_NS } &&
             window.compositions.none { it.self >= SLOW_PHASE_NS }) return
         val pendingCaptures = listOf(Phase.CAPTURE_LAUNCH, Phase.CAPTURE_WALL).flatMap { phase ->

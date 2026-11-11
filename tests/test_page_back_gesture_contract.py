@@ -630,15 +630,49 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('first positive time must preserve momentum', jvm)
         self.assertIn('abandonedMotionCannotAdvanceOrAffectTheNextRequest', jvm)
 
+    def test_pause_cancels_capture_but_keeps_covered_target_pixels(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        pause = layers.split('fun setActive(value: Boolean)', 1)[1].split('private fun schedule(', 1)[0]
+        self.assertIn('if (active == value) return', pause)
+        self.assertNotIn('clearPreviews()', pause)
+        self.assertIn('previewEpoch++', pause)
+        self.assertIn('frame.captures.toList().forEach { it.cancel() }', pause)
+        reset = pause.split('frames[currentKey]?.let { frame ->', 1)[1]
+        self.assertIn('frame.image = null', reset)
+        self.assertIn('frame.ready = null', reset)
+        self.assertIn('frames[currentKey]?.let { schedule(it) }', pause)
+        self.assertIn('if (event == Lifecycle.Event.ON_PAUSE) layers.setActive(false)', self.host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
+        for name in ('testCustomSwipeAfterPauseKeepsHistoricalTargetAndDeparture',
+                     'testCustomSwipeAfterHomeKeepsHistoricalTargetAndDeparture',
+                     'testPredictiveBackAfterHomeKeepsHistoricalTargetAndDeparture'):
+            self.assertIn('fun ' + name + '(', test)
+        self.assertIn('assertSame("HOME must not erase a covered target", image, target.image)', test)
+        self.assertIn('assertTrue("resumed gesture moves before commit", release.left > initial.left)', test)
+
+    def test_preview_gate_evidence_uses_fixed_bounded_events_not_routes_or_pixels(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        begin = layers.split('fun beginGesture(frame: Frame, target: Frame?): Boolean {', 1)[1].split('fun resume(', 1)[0]
+        for event in ('PREVIEW_AFTER_RESUME', 'PREVIEW_READY', 'PREVIEW_TARGET_MISSING',
+                      'PREVIEW_SOURCE_MISSING', 'PREVIEW_TARGET_STALE', 'PREVIEW_SOURCE_STALE'):
+            self.assertIn('Event.' + event, begin)
+        self.assertIn('if (target == null)', begin)
+        self.assertIn('return beginGesture(frame)', begin)
+        self.assertIn('fun beginGesture(frame: Frame): Boolean {', begin)
+        self.assertNotIn('toString()', begin)
+        recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
+        self.assertIn('if (!window.previewIssue && window.slow == 0', recorder)
+        self.assertIn('window.previewIssue = true', recorder)
+
     def test_gesture_pins_prepared_pixels_before_motion_and_unlocks_at_rest(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        begin = layers.split('fun beginGesture(frame: Frame): Boolean {', 1)[1].split('fun resume(', 1)[0]
+        begin = layers.split('fun beginGesture(frame: Frame, target: Frame?): Boolean {', 1)[1].split('fun resume(', 1)[0]
         self.assertNotIn('hasFreshImage', begin)
         self.assertIn('freeze(frame)', begin)
         self.assertIn('return frame.canDrawPreview', begin)
         self.assertIn('if (frame.frozen) return', layers)
         self.assertIn('gesturePreviewReady = beginPreview()', self.host)
-        self.assertIn('beginPreview = { currentTarget != null && layers.beginGesture(frame) }', self.host)
+        self.assertIn('beginPreview = { layers.beginGesture(frame, currentTarget) }', self.host)
         self.assertIn('if (!previewAllowed) frame.animateReturn = false', self.host)
         self.assertIn('state.previewAllowed && (state.active || state.gestureVisualActive) -> frame.image', self.host)
         self.assertIn('departure != null && showDeparture && !departure.forward ->', self.host)

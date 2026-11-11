@@ -78,6 +78,7 @@ jobs:
                           'test_jank_diagnostics_contract.py',
                           'test_page_frame_logging_contract.py',
                           'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py',
+                          'test_page_enter_contract.py',
                           'test_chat_timeline_contract.py', 'test_reasoning_flow_stability_contract.py',
                           'test_diagnostic_smoke_source.py', 'test_page_back_smoke_scope.py',
                           'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py',

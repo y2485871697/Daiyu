@@ -150,6 +150,8 @@ data class WorkStepUi(
     val activity: ToolActivityUi = ToolActivityUi.from(state),
     val operationGlyph: String = "generic",
     val executionTargetLabel: String? = null,
+    /** Stable per-render occurrence key; invocation ids may repeat in restored history. */
+    val renderKey: String = id,
 ) {
     val toolCallId: String get() = id
 }

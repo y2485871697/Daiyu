@@ -14,17 +14,18 @@ import app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi
 import app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi
 import app.daiyu.android.ui.screens.chat.conversation.toolReceiptPresentation
 import app.daiyu.android.domain.runtime.ExecutionState
+import java.util.IdentityHashMap
 
 /** Read-only projection of the Runner's durable receipt disposition, never tool/model JSON text. */
 internal object RetainedToolOutcomes {
     private data class Owner(val conversation: String, val run: String, val message: String)
-    private data class Result(val invocation: ToolInvocation, val text: String?)
+    private data class Result(val invocation: ToolInvocation, val text: String?, val position: Int)
 
     internal data class Source(val conversation: String, val run: String, val message: String,
         val status: RunStatus, val tools: List<MessageBlock.Tool>)
     internal fun sources(messages: List<Message>): List<Source> = messages.filter { it.role == Message.ASSISTANT_ROLE }
         .mapNotNull { message ->
-            val tools = (message.blocks + message.historySegments.flatMap { it.blocks }).filterIsInstance<MessageBlock.Tool>().distinct()
+            val tools = (message.blocks + message.historySegments.flatMap { it.blocks }).filterIsInstance<MessageBlock.Tool>()
             if (tools.isEmpty()) null else Source(message.conversationId.value, message.runId.value, message.id.value, message.status, tools)
         }
 
@@ -35,15 +36,25 @@ internal object RetainedToolOutcomes {
     }
 
     internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>,
-        private val questions: Map<Owner, QuestionCheckpointEvidence>) {
+        private val questions: Map<Owner, QuestionCheckpointEvidence>,
+        private val blockPositions: Map<Owner, IdentityHashMap<MessageBlock.Tool, Int>>) {
         fun questionEvidence(message: Message): QuestionCheckpointEvidence? =
             questions[Owner(message.conversationId.value, message.runId.value, message.id.value)]
+
+        private fun position(message: Message, block: MessageBlock.Tool): Int {
+            val tools = (message.blocks + message.historySegments.flatMap { it.blocks })
+                .filterIsInstance<MessageBlock.Tool>()
+            return tools.indexOfFirst { it === block }.takeIf { it >= 0 }
+                ?: tools.indexOf(block).takeIf { it >= 0 } ?: 0
+        }
 
         fun projectionReader(liveState: (Message) -> ExecutionState? = { null }, stopping: (Message) -> Boolean = { false }):
             (Message, MessageBlock.Tool) -> ToolReceiptUi? = { message, block ->
             if (message.role != Message.ASSISTANT_ROLE) null else {
-                val disposition = records[Owner(message.conversationId.value, message.runId.value, message.id.value)]
-                    ?.get(Result(block.invocation, block.result))
+                val owner = Owner(message.conversationId.value, message.runId.value, message.id.value)
+                val sourcePosition = blockPositions[owner]?.get(block) ?: position(message, block)
+                val disposition = records[owner]
+                    ?.get(Result(block.invocation, block.result, sourcePosition))
                 disposition?.let {
                     val current = liveState(message)
                     toolReceiptPresentation(it, liveOwner = current != null && message.status == RunStatus.RUNNING,
@@ -56,6 +67,7 @@ internal object RetainedToolOutcomes {
         companion object {
             fun read(database: ConversationDatabase, messages: List<Message>): Snapshot {
                 val questions = mutableMapOf<Owner, QuestionCheckpointEvidence>()
+                val blockPositions = mutableMapOf<Owner, IdentityHashMap<MessageBlock.Tool, Int>>()
                 val records = buildMap {
                     for (source in sources(messages)) {
                         val (snapshot, recoveryOwner) = runCatching {
@@ -64,15 +76,18 @@ internal object RetainedToolOutcomes {
                         if (snapshot.message.id.value != source.message || snapshot.message.runId.value != source.run ||
                             snapshot.message.conversationId.value != source.conversation) continue
                         val owner = Owner(source.conversation, source.run, source.message)
+                        blockPositions.getOrPut(owner) { IdentityHashMap() }.also { positions ->
+                            source.tools.forEachIndexed { position, block -> positions[block] = position }
+                        }
                         if (snapshot.tools.any { it.invocation.name == app.daiyu.android.domain.question.ASK_USER_TOOL_NAME }) {
                             questions[owner] = QuestionCheckpointEvidence.from(snapshot, recoveryOwner)
                         }
-                        put(owner, snapshot.tools.associate {
-                            Result(it.invocation, it.result) to it.disposition
-                        })
+                        put(owner, snapshot.tools.mapIndexed { position, it ->
+                            Result(it.invocation, it.result, position) to it.disposition
+                        }.toMap())
                     }
                 }
-                return Snapshot(records, questions.toMap())
+                return Snapshot(records, questions.toMap(), blockPositions)
             }
         }
     }

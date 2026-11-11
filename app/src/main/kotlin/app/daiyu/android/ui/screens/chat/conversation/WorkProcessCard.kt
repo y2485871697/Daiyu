@@ -149,7 +149,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                             }
                             if (!stopped && segment.reasoning?.let { !sequence.ready(it) } == true) precedingReady = false
                             if (precedingReady) segment.steps.forEachIndexed { index, step ->
-                                key(ownerKey, step.owner, step.toolCallId) {
+                                key(ownerKey, step.renderKey) {
                                     val laterStep = index < segment.steps.lastIndex ||
                                         work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
                                     WorkTimelineEntry(leadingConnector = index > 0 || segment.reasoning != null ||
@@ -170,7 +170,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 @Composable
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
-    var expanded by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
+    var expanded by rememberSaveable(step.renderKey) { mutableStateOf(false) }
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.READING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error

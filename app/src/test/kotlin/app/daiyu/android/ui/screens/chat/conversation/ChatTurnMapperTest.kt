@@ -83,6 +83,43 @@ class ChatTurnMapperTest {
         assertEquals(6, original.blocks.size)
     }
 
+    @Test fun repeatedProviderToolIdsStillHaveDistinctWorkflowIdentities() {
+        val turn = mapped(message(tool("same", "first"), tool("same", "second")))
+        val steps = turn.workProcess!!.segments.flatMap { it.steps }
+        assertEquals(listOf("same", "same"), steps.map { it.id })
+        assertEquals(2, steps.map { it.renderKey }.toSet().size)
+        assertNotEquals(steps[0].renderKey, steps[1].renderKey)
+        assertEquals(listOf("tool:${steps[0].renderKey}", "tool:${steps[1].renderKey}"),
+            turn.workflowContent().steps.map { it.workflowKey(0) })
+    }
+
+    @Test fun receiptStateRemainsBoundWhenRepeatedToolIdsCrossHistorySegments() {
+        val owner = message().copy(historySegments = listOf(
+            MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(tool("same", "first"))),
+            MessageHistorySegment(MessageId("supplement"), Message.USER_ROLE, listOf(text("question", "Question"))),
+            MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(tool("same", "second"))),
+        ))
+        val turn = ChatTurnMapper.map(listOf(owner), toolState = { source, _ ->
+            if (source.blocks.filterIsInstance<MessageBlock.Tool>().single().result == "first") {
+                WorkStepState.OK
+            } else {
+                WorkStepState.FAILED
+            }
+        }).filterIsInstance<ChatTurnUi.Assistant>().single()
+        assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED),
+            turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
+    }
+
+    @Test fun receiptStateRemainsBoundToEachDistinctToolBlock() {
+        val first = tool("first", "one")
+        val second = tool("second", "two")
+        val turn = ChatTurnMapper.map(listOf(message(first, second)), toolState = { _, block ->
+            if (block.invocation.id.value == "first") WorkStepState.OK else WorkStepState.FAILED
+        }).single() as ChatTurnUi.Assistant
+        assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED),
+            turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
+    }
+
     @Test fun pendingToolIsPendingOnlyWhileRunning() {
         for (status in RunStatus.entries) {
             val turn = mapped(message(tool("one", null), status = status))

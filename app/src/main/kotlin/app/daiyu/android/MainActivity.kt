@@ -5752,7 +5752,11 @@ class MainActivity : ComponentActivity() {
         browserVisualEpoch++
         controller.providerBalances.onResume(lifecycleScope, android.os.SystemClock.uptimeMillis())
         if (retainedPage == "chat") refreshConfirmedModelLabel()
-        if (selectionReady && displayWindow == null) publishChat() else refresh() // Resume an initial read cancelled by onPause.
+        if (selectionReady && displayWindow == null) {
+            // Resuming is not a new message snapshot. Keep stable workflow rows and scroll state;
+            // actual controller/history changes publish a remapped snapshot through refresh().
+            publishChat(rowsChanged = false)
+        } else refresh() // Resume an initial read cancelled by onPause.
         prepareMessageActionSnapshot()
         if (retainedPage == "platform-settings") platformSettingsRevision++
         controller.attachVideoUi(videoUi)

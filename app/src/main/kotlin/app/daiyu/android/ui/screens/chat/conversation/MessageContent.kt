@@ -67,7 +67,7 @@ internal fun MessageContent(
             val visible = precedingReady
             key(block.workflowKey(index)) {
                 if (block is MessageContentUi.Tool) {
-                    key(block.step.owner, block.step.toolCallId) {
+                    key(block.step.renderKey) {
                         // Keep the dedicated interaction's callsite while a prior thought closes.
                         val dedicated = dedicatedTool(block.step)
                         if (visible && !dedicated) SpacedMessageEntry(index, content, connectors[index], entryBody, fillWidth) {

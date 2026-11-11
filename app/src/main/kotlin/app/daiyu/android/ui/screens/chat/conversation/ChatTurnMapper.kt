@@ -6,6 +6,7 @@ import app.daiyu.android.domain.MessageHistory
 import app.daiyu.android.domain.MessageImageOwner
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.runtime.ExecutionPhase
+import java.util.IdentityHashMap
 
 /** No clock or Android APIs. Timestamp formatting and optional presentation reuse belong to the caller. */
 object ChatTurnMapper {
@@ -26,26 +27,47 @@ object ChatTurnMapper {
         // retains the segment's message id (especially supplemental user image ownership).
         val history = if (messages.any { it.historySegments.isNotEmpty() }) MessageHistory.expand(messages) else messages
         presentations?.retain(history)
-        val toolSources = history.flatMap { source -> source.blocks.filterIsInstance<MessageBlock.Tool>().map {
-            (TurnOwner(source.conversationId.value, source.runId.value, source.id.value) to it.invocation.id.value) to source
-        } }.toMap()
-        fun source(message: Message, block: MessageBlock.Tool): Message = toolSources[
-            TurnOwner(message.conversationId.value, message.runId.value, message.id.value) to block.invocation.id.value] ?: message
-        val errors: (Message, MessageBlock.Tool) -> Boolean? = { message, block -> confirmedToolError(source(message, block), block) }
-        val dedicated: (Message, MessageBlock.Tool) -> String? = { message, block -> dedicatedTool(source(message, block), block) }
-        val states: (Message, MessageBlock.Tool) -> WorkStepState? = { message, block ->
+        // Invocation ids are only unique within one provider response in practice. A restored
+        // reply can contain several history segments with the same id, so an id-only map lets
+        // the last segment steal every receipt. Keep a complete, owner-scoped occurrence index.
+        val sourcePositions = IdentityHashMap<MessageBlock, Int>()
+        val occurrenceByCall = mutableMapOf<ToolSourceKey, Int>()
+        val toolSources = mutableMapOf<ToolSourceKey, Message>()
+        history.forEach { source ->
+            val owner = TurnOwner(source.conversationId.value, source.runId.value, source.id.value)
+            source.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
+                val prefix = ToolSourceKey(owner, block.invocation.id.value, 0)
+                val occurrence = occurrenceByCall[prefix] ?: 0
+                occurrenceByCall[prefix] = occurrence + 1
+                val key = prefix.copy(occurrence = occurrence)
+                sourcePositions[block] = occurrence
+                toolSources[key] = source
+            }
+        }
+        fun source(message: RenderMessage, block: MessageBlock.Tool): Message {
+            val owner = TurnOwner(message.conversationId.value, message.runId.value, message.id.value)
+            val occurrence = message.sourcePositions[block]
+                ?: message.blocks.asSequence().takeWhile { it !== block }
+                    .filterIsInstance<MessageBlock.Tool>()
+                    .count { it.invocation.id == block.invocation.id }
+            return toolSources[ToolSourceKey(owner, block.invocation.id.value, occurrence)]
+                ?: message.authoritative ?: message
+        }
+        val errors: (RenderMessage, MessageBlock.Tool) -> Boolean? = { message, block -> confirmedToolError(source(message, block), block) }
+        val dedicated: (RenderMessage, MessageBlock.Tool) -> String? = { message, block -> dedicatedTool(source(message, block), block) }
+        val states: (RenderMessage, MessageBlock.Tool) -> WorkStepState? = { message, block ->
             val original = source(message, block)
             toolReceipt(original, block)?.state ?: toolState(original, block)
         }
-        val activity: (Message, MessageBlock.Tool) -> ToolActivityUi? = { message, block -> toolReceipt(source(message, block), block)?.activity }
+        val activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi? = { message, block -> toolReceipt(source(message, block), block)?.activity }
         val databaseOwners = messages.flatMap { owner -> owner.historySegments.map { segment ->
             TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
         } }.toMap()
-        return mapRows(history.map(::renderMessage), databaseOwners,
-            { message, block -> errors(requireNotNull(message.authoritative), block) },
-            { message, block -> states(requireNotNull(message.authoritative), block) },
-            { message, block -> dedicated(requireNotNull(message.authoritative), block) },
-            { message, block -> activity(requireNotNull(message.authoritative), block) },
+        return mapRows(history.map { renderMessage(it, sourcePositions) }, databaseOwners,
+            errors,
+            states,
+            dedicated,
+            activity,
             { timestamp(requireNotNull(it.authoritative)) }, boundariesAfter,
             { message, owner -> assistantIdentity(requireNotNull(message.authoritative), owner) }, presentations,
             { messageVideos(requireNotNull(it.authoritative)) }, reconnects)
@@ -83,11 +105,16 @@ object ChatTurnMapper {
         val conversationId: app.daiyu.android.domain.ConversationId, val runId: app.daiyu.android.domain.RunId,
         val role: String, val blocks: List<MessageBlock>, val status: RunStatus, val error: String?,
         val createdAt: Long?, val reportedReasoning: List<app.daiyu.android.domain.ReportedReasoning>,
-        val authoritative: Message? = null)
+        val authoritative: Message? = null,
+        /** Absolute tool occurrence within this owner, retained when adjacent rows are merged. */
+        val sourcePositions: Map<MessageBlock, Int> = emptyMap())
 
-    private fun renderMessage(message: Message) = RenderMessage(message.id, message.conversationId,
-        message.runId, message.role, message.blocks, message.status, message.error, message.createdAt,
-        message.reportedReasoning, message)
+    private fun renderMessage(message: Message, positions: Map<MessageBlock, Int> = emptyMap()): RenderMessage {
+        val local = IdentityHashMap<MessageBlock, Int>()
+        message.blocks.forEach { block -> positions[block]?.let { local[block] = it } }
+        return RenderMessage(message.id, message.conversationId, message.runId, message.role, message.blocks,
+            message.status, message.error, message.createdAt, message.reportedReasoning, message, local)
+    }
 
     private fun mapRows(history: List<RenderMessage>, databaseOwners: Map<TurnOwner, String>,
         errors: (RenderMessage, MessageBlock.Tool) -> Boolean?,
@@ -128,6 +155,10 @@ object ChatTurnMapper {
                 val offset = prior.message.blocks.size
                 display[display.lastIndex] = prior.copy(
                     message = prior.message.copy(blocks = prior.message.blocks + message.blocks,
+                        sourcePositions = IdentityHashMap<MessageBlock, Int>().apply {
+                            putAll(prior.message.sourcePositions)
+                            putAll(message.sourcePositions)
+                        },
                         reportedReasoning = prior.message.reportedReasoning + message.reportedReasoning.map {
                             it.copy(blockOffset = (it.blockOffset ?: 0) + offset)
                         }, authoritative = prior.message.authoritative?.let { original -> original.copy(
@@ -235,6 +266,8 @@ object ChatTurnMapper {
      * including single-segment owners, use the same length-prefixed encoding: raw ids and
      * delimiter-containing ids cannot collide with synthetic segment keys.
      */
+    private data class ToolSourceKey(val owner: TurnOwner, val invocationId: String, val occurrence: Int)
+
     private data class TurnOwner(val conversationId: String, val runId: String, val messageId: String) {
         fun listKey(segment: Int): String =
             listOf(conversationId, runId, messageId, segment.toString()).joinToString("", prefix = "turn:") {
@@ -265,7 +298,8 @@ object ChatTurnMapper {
                     is MessageBlock.Text -> MessageContentUi.Text(block.itemId, block.text)
                     is MessageBlock.Image -> MessageContentUi.Image(MessageImageUi(owner, block.reference))
                     is MessageBlock.Tool -> MessageContentUi.Tool(
-                        workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations),
+                        workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations,
+                            toolOccurrence(message, block)),
                     )
                 })
             }
@@ -287,7 +321,15 @@ object ChatTurnMapper {
         .filter { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
         .groupBy { it.blockOffset ?: 0 }
 
-    private fun workStep(message: RenderMessage, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?): WorkStepUi {
+    private fun toolOccurrence(message: RenderMessage, block: MessageBlock.Tool): Int =
+        message.sourcePositions[block] ?: message.blocks.asSequence().takeWhile { it !== block }
+            .filterIsInstance<MessageBlock.Tool>().count { it.invocation.id == block.invocation.id }
+
+    private fun toolRenderKey(message: RenderMessage, block: MessageBlock.Tool, occurrence: Int): String =
+        listOf(message.conversationId.value, message.runId.value, message.id.value,
+            block.invocation.id.value, occurrence.toString()).joinToString("", prefix = "tool:") { "${it.length}:$it" }
+
+    private fun workStep(message: RenderMessage, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?, occurrence: Int = toolOccurrence(message, block)): WorkStepUi {
         val display = presentations?.present(block) ?: ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
         return WorkStepUi(
             id = block.invocation.id.value, name = display.title, detail = display.summary,
@@ -299,6 +341,7 @@ object ChatTurnMapper {
             owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value),
             toolName = block.invocation.name, category = display.category, sections = display.sections,
             executionTargetLabel = display.targetLabel,
+            renderKey = toolRenderKey(message, block, occurrence),
             dedicatedKey = dedicatedKey, categoryDetails = display.details,
             hasBrowserScreenshot = block.invocation.name in setOf("browser_read", "browser_write") &&
                 runCatching { org.json.JSONObject(block.invocation.arguments).optString("action") == "screenshot" }.getOrDefault(false),
@@ -340,7 +383,8 @@ object ChatTurnMapper {
                         segments += WorkSegmentUi(narration = block.text, narrationId = block.itemId)
                     }
                     is MessageBlock.Tool -> {
-                        val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations)
+                        val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations,
+                            toolOccurrence(message, block))
                         // Keep even trailing tools while reserving the last text for the final answer.
                         if (segments.isEmpty()) segments += WorkSegmentUi()
                         val previous = segments.last()

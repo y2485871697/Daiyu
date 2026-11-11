@@ -64,7 +64,6 @@ import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.BottomFollowMotion
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -278,69 +277,50 @@ internal fun ChatMessageList(
     LaunchedEffect(listState, revealResetEpoch) {
         var previousViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
         var alignViewport = false
-        snapshotFlow { canFollowBottom() }.collectLatest { canFollow ->
-            if (!canFollow) return@collectLatest
-            val motion = BottomFollowMotion()
-            try {
-                while (true) {
-                    // Layout notifications may arrive during measurement; scroll only on a frame.
-                    val frameTime = withFrameNanos { it }
-                    if (!canFollowBottom()) {
-                        motion.reset()
-                        continue
-                    }
-                    val index = currentTailIndex
-                    var layout = listState.layoutInfo
-                    val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding)
-                    if (previousViewport != null && previousViewport != viewport) alignViewport = true
-                    previousViewport = viewport
-                    var last = layout.visibleItemsInfo.lastOrNull { it.index == index }
-                    if (last == null) {
-                        listState.scrollToItem(index)
-                        layout = listState.layoutInfo
-                        last = layout.visibleItemsInfo.lastOrNull { it.index == index }
-                        motion.reset()
-                        if (last == null) continue
-                    }
-                    val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-                    if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-                        (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
-                            else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
-                        motion.reset()
-                        continue
-                    }
-                    val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
-                    if (overflow <= 0) {
-                        motion.reset()
-                        resumeFollowPending = false
-                        alignViewport = false
-                        // Recheck on subscription, including growth coalesced with reaching bottom.
-                        snapshotFlow {
-                            val nextIndex = currentTailIndex
-                            val nextLayout = listState.layoutInfo
-                            val nextLast = nextLayout.visibleItemsInfo.lastOrNull { it.index == nextIndex }
-                            Triple(nextLayout.viewportSize, nextLayout.beforeContentPadding, nextLayout.afterContentPadding) != previousViewport ||
-                                nextLast == null || nextLast.offset + nextLast.size + nextLayout.afterContentPadding > nextLayout.viewportEndOffset
-                        }.first { it }
-                        continue
-                    }
-                    // Window restoration is layout correction, not new output to animate.
-                    if (resumeFollowPending || alignViewport) {
-                        listState.scrollBy(overflow.toFloat())
-                        resumeFollowPending = false
-                        alignViewport = false
-                        motion.reset()
-                        continue
-                    }
-                    val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-                    // Keep 16dp clear while streaming; ease the last 8dp into the 24dp resting gap.
-                    val obscuredTail = if (currentOcclusionPx > 0)
-                        (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
-                    val delta = maxOf(motion.step(overflow.toFloat(), frameTime, currentDensity), obscuredTail.toFloat())
-                    if (delta > 0f) listState.scrollBy(delta)
-                }
-            } finally {
+        val motion = BottomFollowMotion()
+        // One bounded correction per layout snapshot; never keep a frame loop alive while output grows.
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val index = currentTailIndex
+            val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+            Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
+                Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding))
+        }.collectLatest { (canFollow, tailFrame, viewport) ->
+            if (!canFollow) { motion.reset(); return@collectLatest }
+            var layout = listState.layoutInfo
+            val index = tailFrame.first
+            var last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+            if (last == null) {
+                listState.scrollToItem(index)
+                layout = listState.layoutInfo
+                last = layout.visibleItemsInfo.lastOrNull { it.index == index }
                 motion.reset()
+                if (last == null) return@collectLatest
+            }
+            if (previousViewport != null && previousViewport != viewport) alignViewport = true
+            previousViewport = viewport
+            val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
+            if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
+                (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
+                    else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
+                motion.reset(); return@collectLatest
+            }
+            val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
+            if (overflow <= 0) {
+                motion.reset(); resumeFollowPending = false; alignViewport = false
+                return@collectLatest
+            }
+            val delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {
+                val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+                val obscuredTail = if (currentOcclusionPx > 0)
+                    (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
+                maxOf(motion.step(overflow.toFloat(), System.nanoTime(), currentDensity), obscuredTail.toFloat())
+            }
+            if (delta > 0f && canFollowBottom()) {
+                listState.scrollBy(delta)
+                if (alignViewport || resumeFollowPending) {
+                    resumeFollowPending = false; alignViewport = false; motion.reset()
+                }
             }
         }
     }
@@ -678,7 +658,9 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                             revealResetEpoch = revealResetEpoch, onVisibleAdvance = { if (expanded) onVisibleAdvance() },
                             onHandoffReady = { if (it) handoff.complete(reported) })
                     }, entryBody = { key, body ->
-                        WorkflowEntry(key, entrances, animate = expanded && work.running,
+                        // Live output must not start one AnimatedVisibility transition for every appended step;
+                        // this keeps LazyColumn drag work bounded to the changed row.
+                        WorkflowEntry(key, entrances, animate = false,
                             stopped = stopped, content = body)
                     }, textBody = textBody)
             }

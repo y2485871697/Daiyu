@@ -55,7 +55,7 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
 
 internal fun MessageContentUi.workflowKey(index: Int): String = when (this) {
     is MessageContentUi.Reasoning -> "reasoning:${reported.itemId}"
-    is MessageContentUi.Tool -> "tool:${step.toolCallId}"
+    is MessageContentUi.Tool -> "tool:${step.renderKey}"
     is MessageContentUi.Text -> "text:$itemId"
     is MessageContentUi.Image -> messageImagePreviewKey(image)
     is MessageContentUi.Video -> messageVideoPreviewKey(video)

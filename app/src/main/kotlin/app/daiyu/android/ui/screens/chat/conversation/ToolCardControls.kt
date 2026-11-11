@@ -66,7 +66,7 @@ internal fun ToolMediaSurface(step: WorkStepUi, thumbnail: Bitmap?, video: Boole
 @Composable
 internal fun ToolAudioControls(step: WorkStepUi, position: Float = 0f, durationMs: Long? = null,
     playing: Boolean = false, onAction: (ToolCardActionRequest) -> Unit) {
-    var seeking by remember(step.owner, step.toolCallId) { mutableStateOf<Float?>(null) }
+    var seeking by remember(step.renderKey) { mutableStateOf<Float?>(null) }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MiuixTheme.colorScheme.surfaceVariant)
         .padding(10.dp).testTag("tool-audio:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -24,6 +24,14 @@ class ToolReceiptSourceTest {
             assertNotEquals(source(message), source(next))
         }
     }
+    @Test fun repeatedToolRecordsKeepTheirOccurrenceInTheReceiptSource() {
+        val first = MessageBlock.Tool(call.copy(id = ToolCallId("same")), "first")
+        val second = MessageBlock.Tool(call.copy(id = ToolCallId("same")), "second")
+        val repeated = message.copy(blocks = listOf(first, second))
+        assertEquals(2, source(repeated).single().tools.size)
+        assertNotEquals(source(message), source(repeated))
+    }
+
     @Test fun historyOnlyToolsAreIncludedOnceWithoutTextInTheSignature() {
         val segment = MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, message.blocks)
         val historical = message.copy(blocks = emptyList(), historySegments = listOf(segment))

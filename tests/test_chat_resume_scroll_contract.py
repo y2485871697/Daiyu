@@ -40,14 +40,15 @@ class ChatResumeScrollContract(unittest.TestCase):
         guard = self.chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
         self.assertIn('scrollResumed && followBottom && !currentDragging', guard)
         self.assertNotIn('while (true)', follow)
-        self.assertNotIn('withFrameNanos', follow)
+        self.assertIn('withFrameNanos', follow)
+        self.assertIn('motion.velocityPxPerSecond == 0f', follow)
         self.assertIn('snapshotFlow {', follow)
         self.assertIn('Triple(canFollowBottom(),', follow)
         self.assertIn('if (!canFollow)', follow)
         self.assertIn('listState.scrollToItem(index)', follow)
         self.assertIn('layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding', follow)
         self.assertIn('if (overflow <= 0)', follow)
-        correction = follow.split('val delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {', 1)[1].split('if (delta > 0f', 1)[0]
+        correction = follow.split('var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {', 1)[1].split('if (delta > 0f', 1)[0]
         self.assertIn('overflow.toFloat()', correction)
         self.assertIn('motion.reset()', follow)
         stream = follow.split('val visibleBottom', 1)[1]

@@ -39,7 +39,8 @@ class WorkflowRenderIsolationContract(unittest.TestCase):
         content = (CHAT / 'MessageContent.kt').read_text()
         self.assertIn('key(source.workflowKey(index)) { rememberWorkflowItem(source) }', content)
         self.assertIn('rememberWorkflowItem(item: MessageContentUi): MessageContentUi = remember(item) { item }', content)
-        self.assertIn('key(block.step.owner, block.step.toolCallId)', content)
+        self.assertIn('key(block.step.renderKey)', content)
+        self.assertIn('renderKey', (CHAT / 'ChatScreenModels.kt').read_text())
         self.assertEqual(1, content.count('dedicatedTool(block.step)'))
 
     def test_chevron_frames_are_read_only_in_graphics_layer(self):

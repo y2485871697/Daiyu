@@ -51,7 +51,7 @@ object ChatTurnMapper {
                     .filterIsInstance<MessageBlock.Tool>()
                     .count { it.invocation.id == block.invocation.id }
             return toolSources[ToolSourceKey(owner, block.invocation.id.value, occurrence)]
-                ?: message.authoritative ?: message
+                ?: checkNotNull(message.authoritative)
         }
         val errors: (RenderMessage, MessageBlock.Tool) -> Boolean? = { message, block -> confirmedToolError(source(message, block), block) }
         val dedicated: (RenderMessage, MessageBlock.Tool) -> String? = { message, block -> dedicatedTool(source(message, block), block) }

@@ -39,14 +39,19 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('LaunchedEffect(listState, revealResetEpoch)', follow)
         guard = self.chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
         self.assertIn('scrollResumed && followBottom && !currentDragging', guard)
-        self.assertIn('snapshotFlow { canFollowBottom() }', follow)
-        self.assertIn('if (!canFollowBottom())', follow)
+        self.assertNotIn('while (true)', follow)
+        self.assertNotIn('withFrameNanos', follow)
+        self.assertIn('snapshotFlow {', follow)
+        self.assertIn('Triple(canFollowBottom(),', follow)
+        self.assertIn('if (!canFollow)', follow)
+        self.assertIn('listState.scrollToItem(index)', follow)
         self.assertIn('layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding', follow)
-        correction = follow.split('if (resumeFollowPending || alignViewport) {', 1)[1].split('val visibleBottom', 1)[0]
-        self.assertIn('listState.scrollBy(overflow.toFloat())', correction)
-        self.assertIn('motion.reset()', correction)
+        self.assertIn('if (overflow <= 0)', follow)
+        correction = follow.split('val delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {', 1)[1].split('if (delta > 0f', 1)[0]
+        self.assertIn('overflow.toFloat()', correction)
+        self.assertIn('motion.reset()', follow)
         stream = follow.split('val visibleBottom', 1)[1]
-        self.assertIn('motion.step(overflow.toFloat(), frameTime, currentDensity)', stream)
+        self.assertIn('motion.step(overflow.toFloat(), System.nanoTime(), currentDensity)', stream)
         self.assertIn('obscuredTail.toFloat()', stream)
 
     def test_finished_drag_is_consumed_once_not_rearmed_by_geometry(self):

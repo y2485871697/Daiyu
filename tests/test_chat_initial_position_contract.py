@@ -71,10 +71,11 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertIn('turns.size, tailIndex, touchEpoch, scrollResumed)', request)
         self.assertIn('listState.animateScrollToItem(index)', request)
         follow = chat.split('// Keep a single motion', 1)[1].split('// Read confirmation', 1)[0]
-        self.assertIn('snapshotFlow { canFollowBottom() }', follow)
+        self.assertIn('snapshotFlow {', follow)
+        self.assertIn('Triple(canFollowBottom(),', follow)
         guard = chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
         self.assertIn('!initialPositionPending &&', guard)
-        self.assertIn('motion.step(overflow.toFloat(), frameTime, currentDensity)', follow)
+        self.assertIn('motion.step(overflow.toFloat(), System.nanoTime(), currentDensity)', follow)
 
 
     def test_android_regressions_observe_draws_cold_parse_revisit_and_live_updates(self):

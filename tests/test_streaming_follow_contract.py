@@ -15,49 +15,37 @@ class StreamingFollowContract(unittest.TestCase):
         cls.follow = cls.source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
 
     def test_height_updates_do_not_restart_the_motion_collector(self):
-        observe, animate = self.follow.split("}.collectLatest { canFollow ->", 1)
-        self.assertNotIn("layoutInfo", observe)
-        self.assertIn("snapshotFlow { canFollowBottom()", observe)
-        self.assertIn("followBottom && !currentDragging", self.guard)
-        self.assertNotIn("layoutInfo", self.guard)
-        self.assertNotIn("index to overflow", observe)
-        self.assertIn("val motion = BottomFollowMotion()", animate)
-        self.assertLess(animate.index("val motion = BottomFollowMotion()"), animate.index("while (true)"))
+        self.assertIn("LaunchedEffect(listState, revealResetEpoch)", self.follow)
+        self.assertIn("snapshotFlow {", self.follow)
+        self.assertIn("Triple(canFollowBottom(),", self.follow)
+        self.assertIn("val motion = BottomFollowMotion()", self.follow)
+        self.assertNotIn("while (true)", self.follow)
+        self.assertNotIn("withFrameNanos", self.follow)
         self.assertNotIn("LaunchedEffect(turns", self.follow)
 
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
-        self.assertIn("val frameTime = withFrameNanos { it }", self.follow)
-        self.assertIn("motion.step(overflow.toFloat(), frameTime, currentDensity)", self.follow)
+        self.assertIn("val delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
+        self.assertIn("motion.step(overflow.toFloat(), System.nanoTime(), currentDensity)", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
-        correction = self.follow.split("if (resumeFollowPending || alignViewport) {", 1)[1].split("val visibleBottom", 1)[0]
-        self.assertIn("listState.scrollBy(overflow.toFloat())", correction)
-        self.assertIn("motion.reset()", correction)
-        self.assertIn("motion.step(overflow.toFloat(), frameTime, currentDensity)", self.follow.split("val visibleBottom", 1)[1])
+        self.assertIn("if (overflow <= 0)", self.follow)
         self.assertNotIn("animateScrollToItem", self.follow)
-        self.assertIn("if (overflow <= 0) {", self.follow)
-        self.assertIn("}.first { it }", self.follow)
-        self.assertNotIn("scrollBy(delta) <= 0f", self.follow)
-        self.assertIn("finally {\n                motion.reset()", self.follow)
+        self.assertIn("obscuredTail.toFloat()", self.follow)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
-        self.assertLess(self.follow.index("if (!canFollowBottom())"), self.follow.index("motion.reset()"))
-        self.assertIn("currentScrollSerial == null || currentScrollSerial == consumedScrollSerial", self.guard)
-        self.assertIn("if (!canFollowBottom())", self.follow)
-        self.assertIn("!initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0", self.guard)
+        self.assertIn("if (!canFollow)", self.follow)
+        self.assertIn("scrollResumed && followBottom && !currentDragging", self.guard)
         self.assertIn("followBottom = false; wasDragged = false", self.source)
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
         self.assertIn("listState.animateScrollToItem(index)", self.source)
         self.assertIn("readyTurns[it.listKey] == it", self.source)
 
     def test_idle_wait_rechecks_current_layout_without_ending_the_worker(self):
-        idle = self.follow.split("if (overflow <= 0) {", 1)[1].split("val delta = motion.step", 1)[0]
+        self.assertIn("if (overflow <= 0)", self.follow)
+        idle = self.follow.split("if (overflow <= 0)", 1)[1].split("val delta =", 1)[0]
         self.assertIn("motion.reset()", idle)
-        self.assertIn("snapshotFlow {", idle)
-        self.assertIn("val nextLayout = listState.layoutInfo", idle)
-        self.assertIn("}.first { it }", idle)
-        self.assertIn("continue", idle)
+        self.assertNotIn("continue", idle)
         self.assertNotIn("break", self.follow)
-        self.assertIn("if (delta > 0f) listState.scrollBy(delta)", self.follow)
+        self.assertIn("if (delta > 0f && canFollowBottom())", self.follow)
 
     def test_domain_motion_algorithm_remains_single_source(self):
         self.assertIn("import app.daiyu.android.domain.BottomFollowMotion", self.source)

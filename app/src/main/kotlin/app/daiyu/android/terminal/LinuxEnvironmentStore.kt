@@ -49,7 +49,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         this(directory, directorySync, fileKey, null)
     constructor(directory: File, chrootRoot: File) : this(directory, TerminalDurability::syncDirectory, chrootRoot = chrootRoot)
     private val selection = File(directory, "selected-linux.json")
-    private val runnerPins = LinuxRunnerGenerationPins(directory, fileKey, directorySync)
+    private val runnerPins = LinuxRunnerGenerationPins(directory, fileKey = fileKey, bootIdentity = rootfsAccess?.bootIdentity ?: ::linuxKernelBootIdentity, directorySync = directorySync)
     private val shared = synchronized(stores) {
         stores[directory.canonicalPath] ?: run {
             check(stores.size < 128) { "linux_environment_store_limit" }
@@ -128,7 +128,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
                 "linux_generation_mismatch"
             }
             val identities = validate(installation)
-            val rootAccess = rootfsAccess?.acquire(installation, identities)
+            val rootAccess = rootfsAccess?.reserve(installation, identities)
             shared.leases++
             Lease(installation, identities, rootAccess)
         } }
@@ -154,9 +154,11 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     }
 
     inner class Lease internal constructor(private val installation: LinuxInstallation, private val identities: List<String>,
-        private val rootAccess: AutoCloseable?) : AutoCloseable {
+        private val rootAccess: LinuxRootfsBackupAccess.Reservation?) : AutoCloseable {
         private var closed = false
         private var executionClaimed = false
+        private var claimFailed = false
+        private var unstartedRootExecution: AutoCloseable? = null
         val executionMode: LinuxExecutionMode get() = synchronized(control) {
             check(!closed) { "linux_environment_lease_closed" }
             installation.executionMode
@@ -225,16 +227,31 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
                 workingDirectory = cwd, linux = backend(tempDirectory, workspace))
         }
         internal fun claimExecution(): AutoCloseable = synchronized(control) {
-            check(!executionClaimed) { "linux_execution_already_claimed" }
+            check(!executionClaimed && !claimFailed) { "linux_execution_already_claimed" }
             check(!closed) { "linux_environment_lease_closed" }
-            val pin = runnerPins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities) {
-                check(load() == installation) { "linux_selection_changed" }
-                check(validate(installation) == identities) { "linux_installation_changed" }
+            val rootExecution = rootAccess?.claimExecution()
+            unstartedRootExecution = rootExecution
+            val pin = try {
+                runnerPins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities) {
+                    check(load() == installation) { "linux_selection_changed" }
+                    check(validate(installation) == identities) { "linux_installation_changed" }
+                }
+            } catch (failure: Throwable) {
+                // No process has started: release only the claim owned by this attempt.
+                claimFailed = true
+                try { closeUnstartedClaim(); finishLease() }
+                catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+                throw failure
             }
             executionClaimed = true
+            unstartedRootExecution = null
             AutoCloseable { synchronized(control) {
-                if (!closed) { pin.settleAfterTermination(); finishLease() }
+                if (!closed) { pin.settleAfterTermination(); rootExecution?.close(); finishLease() }
             } }
+        }
+        private fun closeUnstartedClaim() {
+            unstartedRootExecution?.close()
+            unstartedRootExecution = null
         }
         private fun finishLease() {
             rootAccess?.close()
@@ -242,7 +259,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
             shared.leases--
         }
         override fun close() = synchronized(control) {
-            if (!closed && !executionClaimed) finishLease()
+            if (!closed && !executionClaimed) { closeUnstartedClaim(); finishLease() }
         }
     }
 

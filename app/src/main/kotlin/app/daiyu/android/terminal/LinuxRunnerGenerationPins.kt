@@ -5,13 +5,15 @@ import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.Base64
 
 internal class LinuxRunnerGenerationUnknown : IllegalStateException("linux_runner_generation_unknown")
 
-/** Process death releases the OS lock, never an execution pin. Only the original drain can settle it. */
+/** Process death is not drain proof. A witnessed kernel reboot ends every process from that boot. */
 internal class LinuxRunnerGenerationPins(
     directory: File,
     private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
+    private val bootIdentity: () -> String? = ::linuxKernelBootIdentity,
     private val directorySync: (File) -> Unit,
 ) {
     private val requestedDirectory = directory.absoluteFile
@@ -22,14 +24,17 @@ internal class LinuxRunnerGenerationPins(
         var lockKey: Any? = null
         val known = mutableMapOf<String, KnownPin>()
         val unsettled = mutableSetOf<String>()
+        var recoverySyncPending = false
     }
 
     private data class KnownPin(val bytes: ByteArray, val key: Any)
 
     fun <T> admitted(requireEmpty: Boolean = false, action: () -> T): T = exclusive {
-        val files = checkNotNull(directory.listFiles()) { "linux_runner_pin_directory" }
-            .filter { it.name.startsWith(PREFIX) }
-        if (guard.unsettled.isNotEmpty() || files.size > MAX_PINS ||
+        if (guard.unsettled.isNotEmpty()) throw LinuxRunnerGenerationUnknown()
+        if (guard.recoverySyncPending) { directorySync(directory); guard.recoverySyncPending = false }
+        recoverAfterReboot()
+        val files = pinFiles()
+        if (files.size > MAX_PINS ||
             files.map { it.name }.toSet() != guard.known.keys) throw LinuxRunnerGenerationUnknown()
         files.forEach { file ->
             val known = checkNotNull(guard.known[file.name])
@@ -54,6 +59,7 @@ internal class LinuxRunnerGenerationPins(
         // Register in memory only after both file and directory are durable. A failed claim is UNKNOWN.
         TerminalDurability.replace(File(directory, id), bytes, directorySync = directorySync)
         val known = KnownPin(bytes, checkNotNull(fileKey(File(directory, id).toPath())) { "linux_runner_pin_identity" })
+        currentBoot()?.let { observeBoot(File(directory, id), known.bytes, known.key, it) }
         guard.known[id] = known
         Pin(id)
     }
@@ -74,6 +80,8 @@ internal class LinuxRunnerGenerationPins(
                 } else check(id in guard.unsettled) { "linux_runner_pin_missing" }
                 // A previous failed sync may already have unlinked the file. Retry the original sync only.
                 directorySync(directory)
+                Files.deleteIfExists(bootFile(id).toPath())
+                directorySync(directory)
                 guard.known.remove(id)
                 guard.unsettled.remove(id)
                 settled = true
@@ -81,6 +89,102 @@ internal class LinuxRunnerGenerationPins(
                 guard.unsettled.add(id)
                 throw failure
             }
+        }
+    }
+
+    private fun pinFiles(): List<File> = checkNotNull(directory.listFiles()) { "linux_runner_pin_directory" }
+        .filter { it.name.startsWith(PREFIX) }
+
+    private fun validBoot(value: String) = value.matches(Regex(
+        "kernel:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|android:[0-9]{1,10}"))
+    private fun currentBoot(): String? = bootIdentity()?.takeIf(::validBoot)
+
+    private fun bootFile(id: String) = File(directory, BOOT_PREFIX + id.removePrefix(PREFIX))
+    private fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes)
+        .joinToString("") { "%02x".format(it) }
+    // Unix NIO keys include device/inode and have a stable representation across boots.
+    private fun encodedKey(key: Any) = Base64.getUrlEncoder().withoutPadding().encodeToString(key.toString().toByteArray(Charsets.UTF_8))
+
+    private fun observeBoot(file: File, bytes: ByteArray, key: Any, boot: String) {
+        val record = "1\n$boot\n${file.name}\n${hash(bytes)}\n${encodedKey(key)}\n".toByteArray(Charsets.UTF_8)
+        check(record.size <= MAX_BOOT_BYTES) { "linux_runner_boot_record_limit" }
+        TerminalDurability.replace(bootFile(file.name), record, directorySync = directorySync)
+    }
+
+    private fun previousBoot(previous: String, current: String): Boolean = when {
+        previous.startsWith("kernel:") && current.startsWith("kernel:") -> previous != current
+        previous.startsWith("android:") && current.startsWith("android:") ->
+            previous.removePrefix("android:").toLongOrNull()?.let { old ->
+                current.removePrefix("android:").toLongOrNull()?.let { it > old }
+            } == true
+        else -> false
+    }
+
+    private fun recoverySync() {
+        guard.recoverySyncPending = true
+        directorySync(directory)
+        guard.recoverySyncPending = false
+    }
+
+    private fun recoverAfterReboot() {
+        val files = pinFiles()
+        if (files.size > MAX_PINS) throw LinuxRunnerGenerationUnknown()
+        // In-process owners still require their original handle, even if a file was replaced.
+        guard.known.forEach { (id, known) ->
+            val file = File(directory, id)
+            if (Files.isSymbolicLink(file.toPath()) || !file.isFile || file.length() > MAX_PIN_BYTES ||
+                fileKey(file.toPath()) != known.key || !file.readBytes().contentEquals(known.bytes))
+                throw LinuxRunnerGenerationUnknown()
+        }
+        val observations = checkNotNull(directory.listFiles()) { "linux_runner_pin_directory" }
+            .filter { it.name.startsWith(BOOT_PREFIX) }
+        if (observations.size > MAX_PINS * 2) throw LinuxRunnerGenerationUnknown()
+        observations.filter { it.name.endsWith(".tmp") }.forEach { staging ->
+            if (!staging.name.matches(Regex("\\.runner-boot-[0-9a-f]{32}\\.tmp")) ||
+                Files.isSymbolicLink(staging.toPath()) || !staging.isFile || staging.length() > MAX_BOOT_BYTES)
+                throw LinuxRunnerGenerationUnknown()
+            Files.delete(staging.toPath())
+            recoverySync()
+        }
+        val boot = currentBoot() ?: return
+        val witnesses = observations.filterNot { it.name.endsWith(".tmp") }
+        if (witnesses.size > MAX_PINS) throw LinuxRunnerGenerationUnknown()
+        // A witness also fences an interrupted unlink/fsync until that exact cleanup is durable.
+        witnesses.filter { PREFIX + it.name.removePrefix(BOOT_PREFIX) !in guard.known }.forEach { witness ->
+            if (Files.isSymbolicLink(witness.toPath()) || !witness.isFile || witness.length() > MAX_BOOT_BYTES)
+                throw LinuxRunnerGenerationUnknown()
+            val lines = witness.readText(Charsets.UTF_8).split('\n')
+            val id = PREFIX + witness.name.removePrefix(BOOT_PREFIX)
+            if (lines.size != 6 || lines[0] != "1" || !validBoot(lines[1]) || lines[2] != id ||
+                !lines[3].matches(Regex("[0-9a-f]{64}")) || lines[4].isEmpty() || lines[5].isNotEmpty() ||
+                !id.matches(Regex("\\.runner-pin-[0-9a-f]{32}"))) throw LinuxRunnerGenerationUnknown()
+            val file = File(directory, id)
+            if (!Files.exists(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                recoverySync()
+                Files.delete(witness.toPath())
+                recoverySync()
+            } else if (previousBoot(lines[1], boot)) {
+                if (Files.isSymbolicLink(file.toPath()) || !file.isFile || file.length() > MAX_PIN_BYTES ||
+                    hash(file.readBytes()) != lines[3] || fileKey(file.toPath())?.let(::encodedKey) != lines[4])
+                    throw LinuxRunnerGenerationUnknown()
+                Files.delete(file.toPath())
+                recoverySync()
+                Files.delete(witness.toPath())
+                recoverySync()
+            }
+        }
+        pinFiles().filter { it.name !in guard.known && !bootFile(it.name).exists() }.forEach { file ->
+            // Legacy pins gain a witness, never a guessed age/PID-based termination proof.
+            if (Files.isSymbolicLink(file.toPath()) || !file.isFile || file.length() > MAX_PIN_BYTES)
+                throw LinuxRunnerGenerationUnknown()
+            val bytes = file.readBytes()
+            val lines = bytes.toString(Charsets.UTF_8).split('\n')
+            if (lines.size != 6 || lines[0] != "1" || lines[4] != file.name || lines[5].isNotEmpty() ||
+                !file.name.matches(Regex("\\.runner-pin-[0-9a-f]{32}")) ||
+                !lines[1].matches(Regex("[A-Za-z0-9_-]{1,128}")) ||
+                !lines[2].matches(Regex("[A-Za-z0-9_-]{1,128}")) ||
+                !lines[3].matches(Regex("[0-9a-f]{64}"))) throw LinuxRunnerGenerationUnknown()
+            observeBoot(file, bytes, fileKey(file.toPath()) ?: throw LinuxRunnerGenerationUnknown(), boot)
         }
     }
 
@@ -108,8 +212,14 @@ internal class LinuxRunnerGenerationPins(
 
     companion object {
         private const val PREFIX = ".runner-pin-"
+        private const val BOOT_PREFIX = ".runner-boot-"
+        private const val MAX_BOOT_BYTES = 4096
         private const val MAX_PINS = 256
         private const val MAX_PIN_BYTES = 2048L
         private val guards = mutableMapOf<String, Guard>()
     }
 }
+
+internal fun linuxKernelBootIdentity(): String? = try {
+    File("/proc/sys/kernel/random/boot_id").readText(Charsets.US_ASCII).trim().let { "kernel:$it" }
+} catch (_: Exception) { null }

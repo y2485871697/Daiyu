@@ -27,6 +27,29 @@ class LinuxStatusPinContractTest(unittest.TestCase):
         self.assertNotIn(".acquire(", inspect)
         self.assertNotIn(".delete(", inspect)
 
+    def test_metadata_reservation_promotes_only_at_execution_and_keeps_unstarted_cleanup(self):
+        source = (TERMINAL / "LinuxEnvironmentStore.kt").read_text()
+        acquire = source[source.index("private fun acquireSelected"):source.index("private fun selectionPathIdentityUnavailable")]
+        self.assertIn("rootfsAccess?.reserve(installation, identities)", acquire)
+        self.assertNotIn("rootfsAccess?.acquire(", acquire)
+        claim = source[source.index("internal fun claimExecution()"):source.index("internal class BackupHandle")]
+        self.assertLess(claim.index("rootAccess?.claimExecution()"), claim.index("runnerPins.claim("))
+        for token in ("unstartedRootExecution = rootExecution", "closeUnstartedClaim()", "failure.addSuppressed(cleanup)"):
+            self.assertIn(token, claim)
+
+    def test_upgrade_observation_is_background_only_and_boot_identity_is_android_wired(self):
+        source = (TERMINAL / "LinuxBootRecoveryReceiver.kt").read_text()
+        manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
+        self.assertIn('android:name=".terminal.LinuxBootRecoveryReceiver" android:exported="false"', manifest)
+        self.assertIn("android.intent.action.MY_PACKAGE_REPLACED", manifest)
+        for token in ("Intent.ACTION_MY_PACKAGE_REPLACED", "goAsync()", "pending.finish()", "observeExistingLinuxPins"):
+            self.assertIn(token, source)
+        for token in ("startActivity(", "ProcessBuilder", "claimExecution("):
+            self.assertNotIn(token, source)
+        for filename in ("LinuxSettingsApplication.kt", "TerminalEnvironmentHost.kt"):
+            self.assertIn("androidLinuxBootIdentity(context)", (TERMINAL / filename).read_text())
+        self.assertIn("Settings.Global.BOOT_COUNT", (TERMINAL / "TerminalEnvironmentHost.kt").read_text())
+
     def test_model_binding_uses_actual_attempt_not_a_false_unconfigured_label(self):
         source = (ROOT / "app/src/main/kotlin/app/daiyu/android/ChatController.kt").read_text()
         factory = source[source.index("commandFactory = if (RunCommandTools.CAPABILITY"):]

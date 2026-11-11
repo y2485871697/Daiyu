@@ -8,13 +8,43 @@ internal class LinuxRootfsBackupAccess internal constructor(
     private val files: File,
     directorySync: (File) -> Unit = TerminalDurability::syncDirectory,
     fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
+    internal val bootIdentity: () -> String? = ::linuxKernelBootIdentity,
 ) {
     private val directory = File(files, "linux-rootfs-access-v1").also { TerminalDurability.ensureDirectory(it, directorySync) }
-    private val pins = LinuxRunnerGenerationPins(directory, fileKey = fileKey, directorySync = directorySync)
+    private val pins = LinuxRunnerGenerationPins(directory, fileKey = fileKey, bootIdentity = bootIdentity, directorySync = directorySync)
     private var exporting = false
+    private var reservations = 0
 
     @Synchronized fun inspectAdmission() = pins.admitted {
         check(!exporting) { "linux_rootfs_in_use" }
+    }
+
+    @Synchronized fun reserve(installation: LinuxInstallation, identities: List<String>): Reservation = pins.admitted {
+        check(!exporting) { "linux_rootfs_in_use" }
+        reservations++
+        Reservation(installation, identities.toList())
+    }
+
+    internal inner class Reservation(private val installation: LinuxInstallation, private val identities: List<String>) : AutoCloseable {
+        private var closed = false
+        private var claimed = false
+
+        fun claimExecution(): AutoCloseable = synchronized(this@LinuxRootfsBackupAccess) {
+            check(!closed && !claimed) { "linux_rootfs_reservation_closed" }
+            val execution = acquire(installation, identities)
+            claimed = true
+            AutoCloseable { synchronized(this@LinuxRootfsBackupAccess) {
+                if (!closed) {
+                    execution.close()
+                    closed = true
+                    reservations--
+                }
+            } }
+        }
+
+        override fun close() = synchronized(this@LinuxRootfsBackupAccess) {
+            if (!closed && !claimed) { closed = true; reservations-- }
+        }
     }
 
     @Synchronized fun acquire(installation: LinuxInstallation, identities: List<String>, export: Boolean = false): AutoCloseable {
@@ -22,6 +52,7 @@ internal class LinuxRootfsBackupAccess internal constructor(
             requireEmpty = export) {
             check(!exporting) { "linux_rootfs_in_use" }
             if (export) {
+                check(reservations == 0) { "linux_rootfs_in_use" }
                 requireNoLegacyPins()
                 // A failed durable claim deliberately stays blocked until its owner can settle it.
                 exporting = true
@@ -68,9 +99,9 @@ internal class LinuxRootfsBackupAccess internal constructor(
 
     companion object {
         private val instances = mutableMapOf<String, LinuxRootfsBackupAccess>()
-        @Synchronized fun forFiles(files: File): LinuxRootfsBackupAccess {
+        @Synchronized fun forFiles(files: File, bootIdentity: () -> String? = ::linuxKernelBootIdentity): LinuxRootfsBackupAccess {
             val canonical = files.canonicalFile
-            return instances.getOrPut(canonical.path) { LinuxRootfsBackupAccess(canonical) }
+            return instances.getOrPut(canonical.path) { LinuxRootfsBackupAccess(canonical, bootIdentity = bootIdentity) }
         }
     }
 }

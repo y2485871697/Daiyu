@@ -398,7 +398,7 @@ private class AndroidTerminalEnvironmentBackend(
     private val root by lazy { File(context.filesDir, "user-terminal") }
     private val selection by lazy { TerminalTrustedLinuxSelection(File(root, "linux-selection"), installations,
         chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations"),
-        rootfsAccess = LinuxRootfsBackupAccess.forFiles(context.filesDir)) }
+        rootfsAccess = LinuxRootfsBackupAccess.forFiles(context.filesDir) { androidLinuxBootIdentity(context) }) }
 
     override fun linuxStatus(): TerminalLinuxState = selection.status()
 
@@ -548,3 +548,8 @@ private class TerminalResource(
     override fun close() = closeOperation()
     override fun awaitTermination(timeoutMillis: Long) = awaitOperation(timeoutMillis)
 }
+
+internal fun androidLinuxBootIdentity(context: android.content.Context): String? = try {
+    val count = android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+    count.takeIf { it >= 0 }?.let { "android:$it" }
+} catch (_: Exception) { null }

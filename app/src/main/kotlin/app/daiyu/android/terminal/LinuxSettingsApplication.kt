@@ -158,7 +158,7 @@ class LinuxSettingsApplication private constructor(
         ): LinuxSettingsApplication {
             val runningMode = AndroidRunningModeStore.get(context)
             val allowChroot = { runningMode.mode.value == RunningMode.ROOT }
-            val rootfsAccess = LinuxRootfsBackupAccess.forFiles(context.filesDir)
+            val rootfsAccess = LinuxRootfsBackupAccess.forFiles(context.filesDir) { androidLinuxBootIdentity(context) }
             val snapshot = catalog.load()
             val modes = snapshot.associate { LinuxGenerationRef(it.environmentId, it.generation) to it.executionMode }
             val admission = LinuxSettingsAdmission(snapshot.filter { LinuxRuntimePlatform.unavailableReason(it.executionMode) == null }

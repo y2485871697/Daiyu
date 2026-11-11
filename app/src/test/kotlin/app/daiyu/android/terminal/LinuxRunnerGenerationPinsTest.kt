@@ -79,6 +79,85 @@ class LinuxRunnerGenerationPinsTest {
         rejects { pins.admitted { } }
     }
 
+    private fun legacyPin(root: File): File = File(root, ".runner-pin-" + "a".repeat(32)).apply {
+        writeText("1\nenvironment\ngeneration\n${"b".repeat(64)}\n$name\n")
+    }
+    private fun recovering(root: File, boot: String?, sync: (File) -> Unit = {}) =
+        LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey, bootIdentity = { boot }, directorySync = sync)
+
+    @Test fun legacyUnknownGetsWitnessButSameBootNeverBecomesDrain() = fixture { root ->
+        val pin = legacyPin(root); val bytes = pin.readBytes(); val key = hostLinuxFileKey(pin.toPath())
+        rejects { recovering(root, "android:10").admitted { } }
+        assertEquals(1, root.listFiles()!!.count { it.name.startsWith(".runner-boot-") })
+        rejects { recovering(root, "android:10").admitted { } }
+        assertArrayEquals(bytes, pin.readBytes()); assertEquals(key, hostLinuxFileKey(pin.toPath()))
+        recovering(root, "android:11").admitted(requireEmpty = true) { }
+        assertFalse(pin.exists())
+        assertFalse(root.listFiles()!!.any { it.name.startsWith(".runner-boot-") })
+    }
+
+    @Test fun missingBootCounterRollbackAndSourceChangeNeverRecoverLegacyPin() = fixture { root ->
+        val pin = legacyPin(root)
+        rejects { recovering(root, null).admitted { } }
+        assertFalse(root.listFiles()!!.any { it.name.startsWith(".runner-boot-") })
+        rejects { recovering(root, "android:10").admitted { } }
+        for (boot in listOf(null, "android:9", "kernel:00000000-0000-0000-0000-000000000001"))
+            rejects { recovering(root, boot).admitted { } }
+        assertTrue(pin.exists())
+    }
+
+    @Test fun changedLegacyPinCannotUseAnEarlierBootWitness() = fixture { root ->
+        val pin = legacyPin(root)
+        rejects { recovering(root, "android:10").admitted { } }
+        val replacement = File(root, "replacement").apply { writeBytes(pin.readBytes()) }
+        Files.move(replacement.toPath(), pin.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        HostLinuxIdentity.replaced(pin.toPath())
+        rejects { recovering(root, "android:11").admitted { } }
+        assertTrue(pin.exists())
+    }
+
+    @Test fun interruptedRebootRecoveryRetriesDirectorySyncBeforeAdmission() = fixture { root ->
+        val pin = legacyPin(root)
+        rejects { recovering(root, "android:10").admitted { } }
+        var fail = true
+        val pins = recovering(root, "android:11") { if (fail) throw IOException("recovery sync") }
+        assertThrows(IOException::class.java) { pins.admitted { } }
+        assertFalse(pin.exists())
+        assertTrue(root.listFiles()!!.any { it.name.startsWith(".runner-boot-") })
+        assertThrows(IOException::class.java) { pins.admitted { } }
+        fail = false
+        pins.admitted(requireEmpty = true) { }
+        assertFalse(root.listFiles()!!.any { it.name.startsWith(".runner-boot-") })
+    }
+
+    @Test fun realJvmOwnerWritesBootWitnessButAnotherJvmInSameBootIsStillDenied() = fixture { root ->
+        assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
+        assertEquals(1, root.listFiles()!!.count { it.name.startsWith(".runner-boot-") })
+        assertEquals("DENIED", runLinuxPinChild(root, "admit"))
+        recovering(root, "android:11").admitted(requireEmpty = true) { }
+    }
+
+    @Test fun interruptedWitnessStagingIsNotRebootProofOrAPermanentFence() = fixture { root ->
+        val pin = legacyPin(root)
+        File(root, ".runner-boot-" + "a".repeat(32) + ".tmp").writeText("incomplete")
+        rejects { recovering(root, "android:10").admitted { } }
+        assertTrue(pin.exists())
+        assertFalse(root.listFiles()!!.any { it.name.endsWith(".tmp") })
+        rejects { recovering(root, "android:10").admitted { } }
+        recovering(root, "android:11").admitted(requireEmpty = true) { }
+    }
+
+    @Test fun sameProcessOwnerCannotBeRetiredByAChangedBootProvider() = fixture { root ->
+        var boot = "android:10"
+        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey, bootIdentity = { boot }) { }
+        val owner = pins.claim(generation, listOf("installation")) { }
+        boot = "android:11"
+        rejects { pins.admitted(requireEmpty = true) { } }
+        assertTrue(root.listFiles()!!.any { it.name.startsWith(".runner-pin-") })
+        owner.settleAfterTermination()
+        pins.admitted(requireEmpty = true) { }
+    }
+
     @Test fun actualNewJvmCannotTreatDeadOwnerOrNewScopeAsDrain() = fixture { root ->
         assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
         assertEquals("DENIED", runLinuxPinChild(root, "admit"))
@@ -117,7 +196,7 @@ internal fun runLinuxPinChild(directory: File, operation: String) = finishLinuxP
 internal object LinuxRunnerPinProcess {
     @JvmStatic fun main(args: Array<String>) {
         val root = File(args[0]); val operation = args[1]
-        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }
+        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey, bootIdentity = { "android:10" }) { }
         if (operation == "race") {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
             while (!File(root, "go").exists()) {

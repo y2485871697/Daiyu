@@ -63,6 +63,8 @@ jobs:
             2>&1 | tee terminal-retention-checks/terminal-contracts.log
           python3 -B -m unittest discover -s tests -p 'test_chroot_workspace_command_contract.py' -v \
             2>&1 | tee terminal-retention-checks/chroot-contracts.log
+          python3 -B -m unittest discover -s tests -p 'test_linux_status_pin_contract.py' -v \
+            2>&1 | tee terminal-retention-checks/linux-pin-contracts.log
       - name: 准备既有离线语音依赖（不打包）
         run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
       - name: 终端保留额度定向单测及生产／设备测试源码编译（不打包）
@@ -80,6 +82,10 @@ jobs:
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=terminal-retention-checks/task-graph.json \
             :app:compileDebugKotlin :app:testDebugUnitTest \
+            --tests 'app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest' \
+            --tests 'app.daiyu.android.terminal.LinuxRootfsBackupAccessTest' \
+            --tests 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest' \
+            --tests 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest' \
             --tests 'app.daiyu.android.terminal.TerminalRegistryRetentionTest' \
             --tests 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest' \
             --tests 'app.daiyu.android.integration.tools.TerminalJobSessionTest' \
@@ -93,7 +99,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest'}
+          expected = {'app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest', 'app.daiyu.android.terminal.LinuxRootfsBackupAccessTest', 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest', 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest', 'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest'}
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest',) for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert set(names) == expected and len(names) == len(expected), (names, expected)

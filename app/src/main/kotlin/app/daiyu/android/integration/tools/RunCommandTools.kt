@@ -235,6 +235,7 @@ internal class RunCommandTools(
                 if (closed) return ExecutionReceipt.NotExecuted("terminal_run_closed")
                 creating = true
             }
+            var factoryEntered = false
             try {
                 if (environment == "linux") {
                     checkNotNull(linux).revalidate()
@@ -246,12 +247,13 @@ internal class RunCommandTools(
                     }
                 }
                 val config = checkNotNull(configuration(environment))
+                factoryEntered = true
                 val created = create(environment, config)
                 val late = synchronized(lock) { registries[environment] = created; closed }
                 if (late) { created.close(); return ExecutionReceipt.NotExecuted("terminal_run_closed") }
                 created
             } catch (failure: Exception) {
-                synchronized(lock) { creationUnconfirmed = true }
+                synchronized(lock) { creationUnconfirmed = factoryEntered }
                 throw failure
             } finally { synchronized(lock) { creating = false } }
         }

@@ -11,7 +11,8 @@ import java.io.File
 
 class RunCommandToolsTest {
     private class Fixture(private val automaticConsent: Boolean = false, linuxState: app.daiyu.android.terminal.TerminalLinuxState? = null,
-        androidConfiguration: TerminalConfiguration = TerminalConfiguration(workingDirectory = File("/fixed"))) {
+        androidConfiguration: TerminalConfiguration = TerminalConfiguration(workingDirectory = File("/fixed")),
+        linuxLaunch: TerminalPtyLaunch.Linux? = null) {
         val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val task = TaskAuthorization("s", "r")
@@ -38,7 +39,7 @@ class RunCommandToolsTest {
         val openRequests = mutableSetOf<String>()
         val executionRequests = mutableSetOf<String>()
         private val gate = CommandApprovalGate({ fail("automatic consent must not post UI") }, { ownerCurrent && it === owner })
-        val leaf = RunCommandTools(androidConfiguration, owner, task, null,
+        val leaf = RunCommandTools(androidConfiguration, owner, task, linuxLaunch,
             approve = { context, effect, disclosure ->
                 assertSame(task, context.authorization)
                 effects.add(effect)
@@ -78,6 +79,34 @@ class RunCommandToolsTest {
             listOf(ToolInvocation(ToolCallId(id), "terminal_exec", JSONObject().put("command", command)
                 .put("environment", environment).put("timeout_ms", timeout).toString())), dispatchOwner) { cancelled }.single().outcome
     }
+    @Test fun preFactoryLinuxClaimFailureCanDrainItsUnstartedMetadataLease() {
+        val files = java.nio.file.Files.createTempDirectory("command-unstarted-").toFile()
+        try {
+            val root = File(files, "rootfs").apply { File(this, "bin").mkdirs(); File(this, "bin/sh").writeText("never executed") }
+            val proot = File(files, "proot").apply { writeText("never executed"); setExecutable(true) }
+            val loader = File(files, "loader").apply { writeText("never executed") }
+            fun hash(file: File) = java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+            val installation = app.daiyu.android.terminal.LinuxInstallation("debian", "env", "generation", root, proot, hash(proot), loader, hash(loader))
+            val gate = app.daiyu.android.terminal.LinuxRootfsBackupAccess.forFiles(files)
+            val store = app.daiyu.android.terminal.LinuxEnvironmentStore(File(files, "user-terminal/linux-selection"),
+                directorySync = app.daiyu.android.terminal.TerminalDurability::syncDirectory, rootfsAccess = gate).apply { select(installation) }
+            val temporary = File(files, "tmp").apply { mkdirs() }
+            val launch = TerminalPtyLaunch.Linux.freeze(store, app.daiyu.android.terminal.LinuxGenerationRef("env", "generation"), temporary, files)
+            val fixture = Fixture(linuxLaunch = launch)
+            val orphan = File(files, "linux-rootfs-access-v1/.runner-pin-orphan")
+            fixture.duringConsent = { orphan.writeText("unknown") }
+            assertTrue(fixture.dispatch(environment = "linux") is DispatchOutcome.Unknown)
+            assertEquals(0, fixture.created)
+            fixture.leaf.close()
+            val closed = java.util.concurrent.CompletableFuture<RunCatalogCloseResult>()
+            fixture.leaf.observeClose { closed.complete(it) }
+            assertEquals(RunCatalogCloseResult.Drained, closed.get(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue(orphan.exists())
+            orphan.delete() // Remove only this test's deliberately injected fence.
+            store.acquireRootfsBackup(installation).close()
+        } finally { files.deleteRecursively() }
+    }
+
     @Test fun automaticDefaultExecutesDifferentCommandsAndTimeoutsWithSeparateExactGrants() {
         val fixture = Fixture(automaticConsent = true)
         val commands = listOf("echo first", "echo second", "echo second ")

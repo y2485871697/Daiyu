@@ -261,7 +261,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('scope.launch(start = CoroutineStart.UNDISPATCHED)', layers)
         enter = layers.split('    fun enter(key: Any, contentKey: Any = key): Departure? {', 1)[1].split('    fun transition(', 1)[0]
         self.assertIn('if (currentKey != key) frames[currentKey]?.let {', enter)
-        self.assertIn('JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }', enter)
+        self.assertIn('JankDiagnostics.section("daiyu.back-preview=route-change")', enter)
+        self.assertIn('if (returning) freeze(it) else freezeForNavigation(it)', enter)
         self.assertLess(enter.index('freeze(it)'), enter.index('currentKey = key'))
         self.assertIn('if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)', layers)
         self.assertIn('val previous = frames.remove(key)', layers)
@@ -303,9 +304,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertEqual(2, self.host.count('frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))'))
         self.assertIn('layers.setActive(resumed)', self.host)
         self.assertIn('var ready: ImageBitmap? = null', layers)
-        self.assertIn('!frame.frozen && previewEpoch == epoch', layers)
+        self.assertIn('previewEpoch == epoch', layers)
+        self.assertIn('if (navigation) frame.frozen && frame.generation == generation else !frame.frozen', layers)
         self.assertNotIn('if (frame.frozen) frame.image = image', layers)
-        freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun capture(', 1)[0]
+        freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun freezeForNavigation(', 1)[0]
         self.assertNotIn('capture(frame', freeze)
         self.assertIn('frame.image = frame.ready?.takeIf { frame.readySize == frame.size }', freeze)
         self.assertIn('frame.captures.any { !it.isCompleted }', layers)
@@ -361,7 +363,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('freeze(frame)', prepare)
         self.assertNotIn('launch', prepare)
         self.assertNotIn('withFrameNanos', prepare)
-        freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun capture(', 1)[0]
+        freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun freezeForNavigation(', 1)[0]
         self.assertIn('if (frame.frozen) return', freeze)
         for name in ('lifecycle-set', 'lifecycle-close'):
             self.assertIn(f'synchronousTrace("daiyu.retained.{name}")', retained)
@@ -408,8 +410,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }', schedule)
         self.assertNotIn('frame.warmup?.cancel()', schedule)
         self.assertLess(schedule.index('frame.warmup = null'), schedule.index('capture(frame, sourceToken)'))
-        capture = layers.split('private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?)', 1)[1].split('fun frame(', 1)[0]
-        self.assertNotIn('frame.generation == generation', capture)
+        capture = layers.split('private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?, navigation: Boolean = false)', 1)[1].split('fun frame(', 1)[0]
+        self.assertIn('(if (navigation) frame.frozen && frame.generation == generation else !frame.frozen)', capture)
         self.assertIn('image.width == size.width && image.height == size.height', capture)
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
         self.assertIn('fun testContinuousRedrawStillPreparesAndRefreshesPixels()', test)

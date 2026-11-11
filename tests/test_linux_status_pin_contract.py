@@ -44,6 +44,9 @@ class LinuxStatusPinContractTest(unittest.TestCase):
         self.assertIn("android.intent.action.MY_PACKAGE_REPLACED", manifest)
         for token in ("Intent.ACTION_MY_PACKAGE_REPLACED", "goAsync()", "pending.finish()", "observeExistingLinuxPins"):
             self.assertIn(token, source)
+        for token in ('"linux-rootfs-access-v1"', '"linux-selection"', '"workspace-generations"', "stores.forEach(::observe)"):
+            self.assertIn(token, source)
+        self.assertNotIn('if (!File(context.filesDir, "linux-rootfs-access-v1").isDirectory) return', source)
         for token in ("startActivity(", "ProcessBuilder", "claimExecution("):
             self.assertNotIn(token, source)
         for filename in ("LinuxSettingsApplication.kt", "TerminalEnvironmentHost.kt"):

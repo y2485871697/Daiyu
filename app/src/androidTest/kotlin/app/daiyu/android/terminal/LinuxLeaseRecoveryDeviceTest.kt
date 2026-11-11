@@ -11,6 +11,16 @@ import java.util.UUID
 @Suppress("DEPRECATION")
 class LinuxLeaseRecoveryDeviceTest : InstrumentationTestCase() {
     fun testUpgradeObservationUsesRealBootCounterWithoutClearingCurrentBootPin() {
+        assertUpgradeObservation(listOf("linux-rootfs-access-v1", "user-terminal/linux-selection",
+            "user-terminal/workspace-generations/" + "d".repeat(64)))
+    }
+
+    fun testUpgradeObservationDoesNotRequireTheCommonPinDirectory() {
+        assertUpgradeObservation(listOf("user-terminal/linux-selection",
+            "user-terminal/workspace-generations/" + "e".repeat(64)))
+    }
+
+    private fun assertUpgradeObservation(relativeDirectories: List<String>) {
         val files = File(instrumentation.targetContext.cacheDir, "linux-witness-${UUID.randomUUID()}").apply { mkdirs() }
         val context = object : ContextWrapper(instrumentation.targetContext) {
             override fun getFilesDir() = files
@@ -19,17 +29,23 @@ class LinuxLeaseRecoveryDeviceTest : InstrumentationTestCase() {
         try {
             val boot = androidLinuxBootIdentity(context)
             assertNotNull("Android boot counter is readable by the installed app", boot)
-            val directory = File(files, "linux-rootfs-access-v1").apply { mkdirs() }
-            val pin = File(directory, ".runner-pin-" + "a".repeat(32)).apply {
-                writeText("1\ndebian\ngeneration\n${"b".repeat(64)}\n$name\n")
+            val pins = relativeDirectories.map { relative ->
+                val directory = File(files, relative).apply { mkdirs() }
+                File(directory, ".runner-pin-" + "a".repeat(32)).apply {
+                    writeText("1\ndebian\ngeneration\n${"b".repeat(64)}\n$name\n")
+                }
             }
-            val bytes = pin.readBytes(); val identity = strictLinuxFileKey(pin.toPath())
+            val originals = pins.map { it.readBytes() to strictLinuxFileKey(it.toPath()) }
             observeExistingLinuxPins(context)
-            val witness = directory.listFiles()!!.single { it.name.startsWith(".runner-boot-") }
-            assertEquals(boot, witness.readLines()[1])
+            pins.forEach { pin ->
+                val witness = pin.parentFile!!.listFiles()!!.single { it.name.startsWith(".runner-boot-") }
+                assertEquals(boot, witness.readLines()[1])
+            }
             observeExistingLinuxPins(context)
-            assertTrue(bytes.contentEquals(pin.readBytes()))
-            assertEquals(identity, strictLinuxFileKey(pin.toPath()))
+            pins.zip(originals).forEach { (pin, original) ->
+                assertTrue(original.first.contentEquals(pin.readBytes()))
+                assertEquals(original.second, strictLinuxFileKey(pin.toPath()))
+            }
         } finally { files.deleteRecursively() }
     }
 

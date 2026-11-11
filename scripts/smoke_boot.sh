@@ -137,6 +137,14 @@ pause_receipt_only = mode in ('smoke', 'candidate') and sorted(raw_filter.split(
 pause_receipt_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                          for name in pause_receipt_target}
 
+linux_pin_target = {
+    "app.daiyu.android.terminal.LinuxLeaseRecoveryDeviceTest",
+    "app.daiyu.android.terminal.TerminalEnvironmentHostDeviceTest",
+}
+linux_pin_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(linux_pin_target)
+linux_pin_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                     for name in linux_pin_target}
+
 classes = {}
 for path in sorted(Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
@@ -169,6 +177,8 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
         continue
     if pause_receipt_only and path not in pause_receipt_sources:
         continue
+    if linux_pin_only and path not in linux_pin_sources:
+        continue
     source = path.read_text()
     if path.suffix == ".kt":
         count = len(re.findall(r"^\s*fun test\w+\(", source, re.M))
@@ -196,7 +206,7 @@ if mode == "daily" and (shards != 1 or shard != 0):
     raise ValueError("Daily Release requires one complete targeted shard per API")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys
@@ -216,7 +226,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only else "full",
+                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

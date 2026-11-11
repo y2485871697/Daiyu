@@ -84,15 +84,19 @@ internal fun TerminalConsole(session: TerminalSessionEntry?, onSend: (String) ->
             LaunchedEffect(frame) { if ((following || frame.alternate) && frame.lines.isNotEmpty()) list.scrollToItem(frame.lines.lastIndex) }
             LazyColumn(state = list, modifier = Modifier.fillMaxSize().testTag("terminal-output-scroll")) {
                 itemsIndexed(frame.lines) { index, line ->
-                    val content = buildAnnotatedString {
-                        line.forEachIndexed { column, cell ->
-                            if (!cell.continuation) {
-                                var fg = cell.style.foreground?.let { Color(0xff000000L or it.toLong()) } ?: foreground
-                                var bg = cell.style.background?.let { Color(0xff000000L or it.toLong()) } ?: Color.Unspecified
-                                if (cell.style.inverse) { val old = fg; fg = if (bg == Color.Unspecified) background else bg; bg = old }
-                                if (enabled && frame.cursorVisible && frame.cursorLine == index && frame.cursorColumn == column) { fg = background; bg = foreground }
-                                withStyle(SpanStyle(color = fg.copy(alpha = if (cell.style.dim) .55f else 1f), background = bg,
-                                    fontWeight = if (cell.style.bold) FontWeight.Bold else null)) { append(cell.text) }
+                    // A scroll only changes LazyColumn placement. Keep the expensive styled
+                    // line build stable until the terminal frame or palette actually changes.
+                    val content = remember(frame, index, enabled, foreground, background) {
+                        buildAnnotatedString {
+                            line.forEachIndexed { column, cell ->
+                                if (!cell.continuation) {
+                                    var fg = cell.style.foreground?.let { Color(0xff000000L or it.toLong()) } ?: foreground
+                                    var bg = cell.style.background?.let { Color(0xff000000L or it.toLong()) } ?: Color.Unspecified
+                                    if (cell.style.inverse) { val old = fg; fg = if (bg == Color.Unspecified) background else bg; bg = old }
+                                    if (enabled && frame.cursorVisible && frame.cursorLine == index && frame.cursorColumn == column) { fg = background; bg = foreground }
+                                    withStyle(SpanStyle(color = fg.copy(alpha = if (cell.style.dim) .55f else 1f), background = bg,
+                                        fontWeight = if (cell.style.bold) FontWeight.Bold else null)) { append(cell.text) }
+                                }
                             }
                         }
                     }
@@ -174,7 +178,9 @@ internal fun terminalStyledOutput(text: String): AnnotatedString {
     val lines = text.replace("\r\n", "\n").lines()
     val grid = remember(text) { TerminalGridBuffer(500, lines.size.coerceIn(1, 500), 500).apply { accept(text.replace("\r\n", "\n").replace("\n", "\r\n")) }.frame() }
     val color = MaterialTheme.colorScheme.onSurfaceVariant
-    return buildAnnotatedString {
+    // The styled output is immutable for a given text/palette. Memoize the complete annotated
+    // value, not only the terminal grid, so LazyColumn placement does not rebuild every span.
+    return remember(text, color) { buildAnnotatedString {
         val nonempty = grid.lines.indexOfLast { row -> row.any { it.text != " " && !it.continuation } }
         grid.lines.take(nonempty + 1).forEachIndexed { index, row ->
             row.take(row.indexOfLast { it.text != " " && !it.continuation } + 1).forEach { cell ->
@@ -183,5 +189,5 @@ internal fun terminalStyledOutput(text: String): AnnotatedString {
             }
             if (index < nonempty) append('\n')
         }
-    }
+    } }
 }

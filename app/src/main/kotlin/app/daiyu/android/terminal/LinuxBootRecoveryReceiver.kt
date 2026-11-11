@@ -23,8 +23,8 @@ internal fun observeExistingLinuxPins(context: Context) {
     val files = context.filesDir.canonicalFile
     val boot = androidLinuxBootIdentity(context)
     fun observe(directory: File) {
-        if (!directory.isDirectory || directory.canonicalFile != directory.absoluteFile) return
         try {
+            if (!directory.isDirectory || directory.canonicalFile != directory.absoluteFile) return
             LinuxRunnerGenerationPins(directory, bootIdentity = { boot },
                 directorySync = TerminalDurability::syncDirectory).admitted { }
         } catch (_: Exception) {

@@ -25,7 +25,10 @@ internal object RetainedToolOutcomes {
         val status: RunStatus, val tools: List<MessageBlock.Tool>)
     internal fun sources(messages: List<Message>): List<Source> = messages.filter { it.role == Message.ASSISTANT_ROLE }
         .mapNotNull { message ->
-            val tools = (message.blocks + message.historySegments.flatMap { it.blocks }).filterIsInstance<MessageBlock.Tool>()
+            val seen = IdentityHashMap<MessageBlock.Tool, Boolean>()
+            val tools = (message.blocks + message.historySegments.flatMap { it.blocks })
+                .filterIsInstance<MessageBlock.Tool>()
+                .filter { seen.put(it, true) == null }
             if (tools.isEmpty()) null else Source(message.conversationId.value, message.runId.value, message.id.value, message.status, tools)
         }
 

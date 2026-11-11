@@ -174,7 +174,24 @@ PAUSE_RECEIPT_MODULES = (
 )
 
 
+
+LINUX_PIN_PLATFORM_CLASSES = (
+    "app.daiyu.android.terminal.LinuxLeaseRecoveryDeviceTest",
+    "app.daiyu.android.terminal.TerminalEnvironmentHostDeviceTest",
+)
+LINUX_PIN_MODULES = (
+    "test_terminal_geometry_contract", "test_terminal_reference_contract",
+    "test_terminal_sheet_style_contract", "test_chroot_workspace_command_contract",
+    "test_linux_status_pin_contract", "test_record_tool_tests_scope",
+    "test_acceptance_tool_receipt", "test_linux_pin_smoke_scope",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(LINUX_PIN_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *LINUX_PIN_MODULES, "-v"], "linux-pins-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PAUSE_RECEIPT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PAUSE_RECEIPT_MODULES, "-v"], "pause-receipts-targeted"

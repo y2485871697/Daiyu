@@ -23,7 +23,7 @@ class ToolReceiptPauseContract(unittest.TestCase):
         for field in ('conversation:', 'data:', 'generation:', 'sources:', 'execution:'):
             self.assertIn(field, key)
         self.assertIn('copy(execution = current.execution) == current', key)
-        self.assertIn('Result(block.invocation, block.result)', source)
+        self.assertIn('Result(block.invocation, block.result, sourcePosition)', source)
 
     def test_display_continuity_does_not_relax_question_binding_or_unknown_semantics(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()

@@ -38,7 +38,7 @@ class ReceiptSnapshotContract(unittest.TestCase):
         source = text.split('internal fun sources(', 1)[1].split('internal class Snapshot', 1)[0]
         self.assertIn('filterIsInstance<MessageBlock.Tool>()', source)
         self.assertNotIn('MessageBlock.Text', source)
-        self.assertIn('Result(block.invocation, block.result)', text)
+        self.assertIn('Result(block.invocation, block.result, sourcePosition)', text)
         self.assertIn('snapshot.message.runId.value != source.run', text)
         self.assertIn('snapshot.message.conversationId.value != source.conversation', text)
 if __name__ == '__main__': unittest.main()

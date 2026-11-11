@@ -12,7 +12,7 @@ class PageEnterContractTest(unittest.TestCase):
         self.layers = (NAV / 'PageBackPreviewLayers.kt').read_text()
 
     def test_entry_requires_an_exact_predecessor_and_gives_pop_priority(self):
-        transition = self.layers.split('fun transition(', 1)[1].split('fun freezeCurrent()', 1)[0]
+        transition = self.layers.split('fun transition(', 1)[1].split('fun freezeCurrent(', 1)[0]
         self.assertLess(transition.index('val departure = enter(key, contentKey)'), transition.index('if (!animateEnter'))
         self.assertIn('if (departure != null) return@synchronousTrace departure', transition)
         self.assertIn('previous.sourceKey != backTargetKey || previous.childChangeCaptured == false', transition)
@@ -50,7 +50,7 @@ class PageEnterContractTest(unittest.TestCase):
     def test_entry_reuses_original_programmatic_curve_not_the_gesture_preference(self):
         self.assertIn('if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))', self.host)
         self.assertIn('else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f),', self.host)
-        transition = self.layers.split('fun transition(', 1)[1].split('fun freezeCurrent()', 1)[0]
+        transition = self.layers.split('fun transition(', 1)[1].split('fun freezeCurrent(', 1)[0]
         for forbidden in ('swipeDismissEnabled', 'predictiveBackEnabled', 'back()', 'dispatchBack'):
             self.assertNotIn(forbidden, transition)
 

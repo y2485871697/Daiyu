@@ -24,6 +24,8 @@ import app.daiyu.android.ui.screens.chat.conversation.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.lifecycle.Lifecycle
@@ -349,6 +351,48 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             assertDraft("return refresh count draft")
             assertEquals(0, fixture.opens.get())
         } finally { runtime.clear(); runtime.enabled = previousEnabled }
+    }
+
+    fun testRealSettingsScrollImmediatelyIntoReconnectAndBackKeepsSavedPosition() {
+        openSettings()
+        ui.waitForIdle()
+        ui.mainClock.autoAdvance = false
+        try {
+            val list = ui.onNodeWithTag("page:设置")
+            list.performTouchInput {
+                val start = Offset(width * .5f, height * .55f)
+                down(start)
+                moveTo(start - Offset(0f, 90f), 160)
+                advanceEventTime(200)
+                up()
+            }
+            ui.mainClock.advanceTimeByFrame()
+            val row = ui.onNodeWithTag("settings-row:错误重连")
+            val saved = list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+            val rowTop = row.fetchSemanticsNode().boundsInRoot.top
+            assertTrue("test must leave the initial list position", saved > 0f)
+            val click = checkNotNull(row.fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            mainThread {
+                assertTrue(click())
+                assertEquals("reconnect-settings", invokeHost(activity, "getRetainedPage"))
+            }
+            ui.mainClock.advanceTimeBy(700)
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                val start = Offset(width * .1f, height * .5f)
+                down(start); moveTo(start + Offset(width * .6f, 0f), 180); up()
+            }
+            repeat(4) {
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("settings", invokeHost(activity, "getRetainedPage"))
+                assertEquals("saved list offset stays fixed during return", saved,
+                    list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .00002f)
+                assertEquals("real row does not move vertically", rowTop, row.fetchSemanticsNode().boundsInRoot.top, 2f)
+            }
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals(saved, list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .00002f)
+            assertEquals(rowTop, row.fetchSemanticsNode().boundsInRoot.top, 2f)
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testPureChatReturnStillAdoptsVideoReceiptThatRequiredVisibleEditor() {

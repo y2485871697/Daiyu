@@ -38,6 +38,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         var returnDirection = 1f
         var animateReturn = false
         var frozen = false
+        var navigationFrozen = false
         var releaseRequested = false
         val canDrawPreview: Boolean get() = image?.let { it.width == size.width && it.height == size.height } == true
         val hasFreshImage: Boolean get() = ready != null && readyGeneration == generation && readySize == size
@@ -71,8 +72,11 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
 
     fun enter(key: Any, contentKey: Any = key): Departure? {
         val previous = frames[currentKey]?.takeIf { currentKey != key }
+        val returning = pending?.let { it.target == key && it.frame === previous } == true || previous?.backTargetKey == key
         if (currentKey != key) frames[currentKey]?.let {
-            JankDiagnostics.section("daiyu.back-preview=route-change") { freeze(it) }
+            JankDiagnostics.section("daiyu.back-preview=route-change") {
+                if (returning) freeze(it) else freezeForNavigation(it)
+            }
         }
         currentKey = key
         val departure = pending
@@ -96,17 +100,21 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             if (!animateEnter || previous == null || !previous.animateReturn ||
                 previous.sourceKey != backTargetKey || previous.childChangeCaptured == false) return@synchronousTrace null
             val source = frames[previous.sourceKey]?.takeIf {
-                it.animateReturn && size != IntSize.Zero && it.size == size
+                it.animateReturn && size != IntSize.Zero && it.size == size && it.canDrawPreview
             } ?: return@synchronousTrace null
             Departure(source, key, 0f, predictive = false, direction = previous.returnDirection, forward = true)
         }
     }
 
-    fun freezeCurrent() {
+    fun freezeCurrent(targetKey: Any? = null) {
         frames[currentKey]?.let {
-            it.childChangeCaptured = it.animateReturn && it.size != IntSize.Zero
-            it.holdingForChild = it.childChangeCaptured == true
-            JankDiagnostics.section("daiyu.back-preview=child-change") { freeze(it) }
+            if (targetKey != null && it.backTargetKey == targetKey) {
+                freeze(it)
+            } else {
+                it.childChangeCaptured = it.animateReturn && it.size != IntSize.Zero
+                it.holdingForChild = it.childChangeCaptured == true
+                JankDiagnostics.section("daiyu.back-preview=child-change") { freezeForNavigation(it) }
+            }
         }
     }
 
@@ -130,6 +138,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                 frame.holdingForChild = false
                 frame.childChangeCaptured = null
                 frame.frozen = false
+                frame.navigationFrozen = false
             }
         } else {
             frames[currentKey]?.let { schedule(it) }
@@ -191,6 +200,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun resume(frame: Frame) {
         if (frames[currentKey] !== frame || !frame.frozen || frame.holdingForChild || pending?.frame === frame) return
         frame.frozen = false
+        frame.navigationFrozen = false
         frame.image = null
         schedule(frame)
     }
@@ -204,9 +214,27 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         JankDiagnostics.section(if (frame.image != null) "daiyu.back-preview=cache-hit" else "daiyu.back-preview=not-ready") { }
     }
 
-    private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?) {
-        if (closed || !active || frame.releaseRequested || frame.hasFreshImage || frame.size == IntSize.Zero || frame.layer.isReleased ||
+    private fun freezeForNavigation(frame: Frame) {
+        if (frame.navigationFrozen) return
+        frame.navigationFrozen = true
+        frame.warmup?.cancel()
+        frame.captures.toList().forEach { it.cancel() }
+        frame.frozen = true
+        // Descendant layers can move without recording the outer layer again. A warm bitmap
+        // is not the final position; submit this copy before the outgoing content is disposed.
+        frame.image = null
+        frame.ready = null
+        frame.readyGeneration = -1L
+        frame.readySize = IntSize.Zero
+        capture(frame, captureBackPerformanceToken(), navigation = true)
+    }
+
+    private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?, navigation: Boolean = false) {
+        if (closed || !active || frame.releaseRequested || frame.size == IntSize.Zero || frame.layer.isReleased ||
             frame.captures.any { !it.isCompleted }) return
+        // A submitted API26 copy must drain; never queue a final read after content disposal.
+        if (navigation) { if (!frame.frozen || frame.generation == 0L) return }
+        else if (frame.frozen || frame.hasFreshImage) return
         val epoch = previewEpoch
         val generation = frame.generation
         val size = frame.size
@@ -222,11 +250,13 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                         val image = withContext(NonCancellable) { snapshot(frame) }
                         result = if (isActive) BackPerformanceRecorder.CaptureResult.DISCARDED
                             else BackPerformanceRecorder.CaptureResult.CANCELLED
-                        if (isActive && active && !closed && !frame.releaseRequested && !frame.frozen && previewEpoch == epoch &&
+                        if (isActive && active && !closed && !frame.releaseRequested && previewEpoch == epoch &&
+                            (if (navigation) frame.frozen && frame.generation == generation else !frame.frozen) &&
                             frames[frame.key] === frame && frame.size == size && image.width == size.width && image.height == size.height) {
                             frame.readyGeneration = generation
                             frame.readySize = size
                             frame.ready = image
+                            if (navigation) frame.image = image
                             result = BackPerformanceRecorder.CaptureResult.STORED
                         }
                     } catch (cancelled: CancellationException) {
@@ -330,6 +360,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             it.holdingForChild = false
             it.childChangeCaptured = null
             it.frozen = false
+            it.navigationFrozen = false
         }
     }
 

@@ -249,9 +249,12 @@ internal val LocalPageBackPreviewFrame = compositionLocalOf<PageBackPreviewLayer
 internal fun Modifier.pageBackPreviewSource(): Modifier {
     val frame = LocalPageBackPreviewFrame.current ?: return this
     return drawWithContent {
-        frame.layer.record { this@drawWithContent.drawContent() }
-        drawLayer(frame.layer)
-        frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))
+        if (frame.frozen) drawContent()
+        else {
+            frame.layer.record { this@drawWithContent.drawContent() }
+            drawLayer(frame.layer)
+            frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))
+        }
     }.background(MiuixTheme.colorScheme.background)
 }
 
@@ -402,7 +405,7 @@ internal fun PageBackGestureHost(
     }
     val stack = remember(routeKey) { PageBackStackRegistry() }
     val stackPath = remember(stack) { PageBackStackPath(stack) }
-    stack.freezeCurrent = { layers.freezeCurrent() }
+    stack.freezeCurrent = { path -> layers.freezeCurrent(if (path.isEmpty()) routeKey else PageBackRouteKey(routeKey, path)) }
     val visualRouteKey = stack.routeKey(routeKey)
     // Stable across route-keyed state replacements; no route value enters the incident.
     val diagnosticFrameHost = app.daiyu.android.diagnostics.WindowFramePerformance.forContext(context)
@@ -648,7 +651,7 @@ internal fun PageBackGestureHost(
                         drawContent()
                     }
                 }.drawWithContent {
-                    if (captureFromContent) drawContent()
+                    if (captureFromContent || frame.frozen) drawContent()
                     else {
                         frame.layer.record { this@drawWithContent.drawContent() }
                         drawLayer(frame.layer)

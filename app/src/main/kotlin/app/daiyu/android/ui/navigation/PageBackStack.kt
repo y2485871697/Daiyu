@@ -21,7 +21,7 @@ internal class PageBackStackRegistry {
         var target by mutableStateOf<List<Any>>(emptyList())
     }
     val entries = mutableStateListOf<Entry>()
-    var freezeCurrent: () -> Unit = {}
+    var freezeCurrent: (List<Any>) -> Unit = {}
     private fun attached(entry: Entry): Boolean = entry in entries && (entry.parent?.let {
         attached(it) && it.path == entry.parentPath
     } ?: true)
@@ -53,7 +53,7 @@ internal fun PageBackStack(routeKey: Any?, backTargetKey: Any? = null, content: 
     val entry = remember(parent?.registry, parent?.entry) { PageBackStackRegistry.Entry(parent?.entry) }
     val child = remember(parent?.registry, entry, path) { parent?.let { PageBackStackPath(it.registry, path, entry) } }
     remember(active, entry, path) {
-        if (active && (routeKey != null || entry.child)) checkNotNull(parent).registry.freezeCurrent()
+        if (active && (routeKey != null || entry.child)) checkNotNull(parent).registry.freezeCurrent(path)
         Unit
     }
     DisposableEffect(parent?.registry, entry, active) {

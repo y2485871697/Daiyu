@@ -111,6 +111,31 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('settle.animateTo(0f, spring', self.host)
         self.assertNotIn('key(predictiveBackEnabled)', self.host)
 
+    def test_navigation_boundary_copies_current_descendants_not_the_warm_bitmap(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        boundary = layers.split('    private fun freezeForNavigation(', 1)[1].split('    private fun capture(', 1)[0]
+        for value in ('if (frame.navigationFrozen) return', 'frame.navigationFrozen = true', 'frame.warmup?.cancel()',
+                      'frame.captures.toList().forEach { it.cancel() }', 'frame.frozen = true',
+                      'frame.image = null', 'frame.ready = null', 'frame.readyGeneration = -1L',
+                      'capture(frame, captureBackPerformanceToken(), navigation = true)'):
+            self.assertIn(value, boundary)
+        self.assertNotIn('frame.ready?.takeIf', boundary)
+        self.assertNotIn('delay(', boundary)
+        self.assertIn('if (returning) freeze(it) else freezeForNavigation(it)', layers)
+        self.assertIn('if (navigation) frame.frozen && frame.generation == generation else !frame.frozen', layers)
+        self.assertIn('if (navigation) frame.image = image', layers)
+        self.assertIn('frame.captures.any { !it.isCompleted }) return', layers)
+        self.assertIn('if (frame.frozen) drawContent()', self.host)
+        self.assertIn('if (captureFromContent || frame.frozen) drawContent()', self.host)
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        for method in ('testNavigationCopiesFinalDescendantPositionEvenWithoutAnotherOuterRecording',
+                       'testNavigationFinalCopyNeverQueuesBehindWarmCopyAndRespectsPauseEpoch',
+                       'testNestedLayerMovementThenImmediateEntryKeepsTargetAndLiveVerticalPosition'):
+            self.assertIn('fun ' + method + '()', tests)
+        self.assertIn('recorded, parent.generation', tests)
+        self.assertIn('prepared bitmap is still at A', tests)
+        self.assertIn('commit must not change the vertical band', tests)
+
     def test_drag_motion_stays_in_layer_properties_and_cancel_keeps_a_settle_spring(self):
         self.assertNotIn('animateFloatAsState', self.host)
         self.assertIn('visualProgress = nextProgress', self.host)
@@ -211,7 +236,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('captureFromContent = retainedPage == "chat" && !sidebarVisible', self.main)
         self.assertIn('captureFromContent: Boolean = false', self.host)
         self.assertIn('LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }', self.host)
-        self.assertIn('if (captureFromContent) drawContent()', self.host)
+        self.assertIn('if (captureFromContent || frame.frozen) drawContent()', self.host)
         source = self.host.split('internal fun Modifier.pageBackPreviewSource()', 1)[1].split('internal val LocalPageBackGesture', 1)[0]
         self.assertIn('LocalPageBackPreviewFrame.current ?: return this', source)
         self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', source)
@@ -446,7 +471,7 @@ class PageBackGestureContractTest(unittest.TestCase):
                        'it.animateReturn && it.backTargetKey == key && it.size != IntSize.Zero',
                        'Departure(it, key, 0f, predictive = false, direction = it.returnDirection, targetImage = frames[key]?.image)'):
             self.assertIn(wiring, layers)
-        enter = layers.split('fun enter(key: Any, contentKey: Any = key): Departure?', 1)[1].split('fun freezeCurrent()', 1)[0]
+        enter = layers.split('fun enter(key: Any, contentKey: Any = key): Departure?', 1)[1].split('fun freezeCurrent(', 1)[0]
         self.assertLess(enter.index('departure?.takeIf'), enter.index('previous?.takeIf'))
         for forbidden in ('back()', 'dispatchBack', 'launch', 'predictiveBackEnabled', 'swipeDismissEnabled'):
             self.assertNotIn(forbidden, enter)
@@ -488,7 +513,7 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_local_visual_routes_keep_ancestors_and_cancel_never_adds_a_pop(self):
         stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
-        for wiring in ('fun attached(', 'parentPath', 'freezeCurrent()',
+        for wiring in ('fun attached(', 'parentPath', 'freezeCurrent(path)',
                        'entry.child = active && routeKey != null', 'entry.path = path', 'entry.target = target'):
             self.assertIn(wiring, stack)
         self.assertIn('stack.ancestorKeys(routeKey, backTargetKey)', self.host)
@@ -539,12 +564,12 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_local_stack_freezes_before_replacing_content_and_validates_ancestors(self):
         stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
-        self.assertLess(stack.index('checkNotNull(parent).registry.freezeCurrent()'), stack.index('    CompositionLocalProvider'))
+        self.assertLess(stack.index('checkNotNull(parent).registry.freezeCurrent(path)'), stack.index('    CompositionLocalProvider'))
         for token in ('attached(it) && it.path == entry.parentPath', 'registry?.entries?.remove(entry)',
                       'entry.child = active && routeKey != null', 'PageBackRouteKey(root, path)', 'ancestorKeys'):
             self.assertIn(token, stack)
         self.assertNotIn('key(routeKey)', stack)
-        self.assertIn('stack.freezeCurrent = { layers.freezeCurrent() }', self.host)
+        self.assertIn('stack.freezeCurrent = { path -> layers.freezeCurrent(if (path.isEmpty()) routeKey else PageBackRouteKey(routeKey, path)) }', self.host)
 
     def test_drag_preview_alpha_avoids_a_fullscreen_offscreen_buffer(self):
         start = self.host.index('if (target != null && state.previewAllowed && state.gestureVisualActive)')

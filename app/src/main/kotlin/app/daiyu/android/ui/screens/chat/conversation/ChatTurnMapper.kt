@@ -142,7 +142,9 @@ object ChatTurnMapper {
             val positionedReconnect = reconnects.any { it.position != null &&
                 it.anchor.conversationId == original.conversationId.value && it.anchor.runId == original.runId.value &&
                 it.anchor.messageId == original.id.value }
-            val message = if (positionedReconnect) original else original.authoritative?.let(::normalizeCompletedReasoning)?.let(::renderMessage) ?: original
+            val message = if (positionedReconnect) original else original.authoritative?.let(::normalizeCompletedReasoning)?.let { normalized ->
+                renderMessage(normalized, original.sourcePositions, original.sourceMessages)
+            } ?: original
             val owner = TurnOwner(message.conversationId.value, message.runId.value, message.id.value)
             val segment = nextSegment[owner] ?: 0
             nextSegment[owner] = segment + 1

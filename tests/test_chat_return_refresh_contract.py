@@ -21,15 +21,24 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.main = (APP / 'MainActivity.kt').read_text()
 
     def test_return_keeps_cleanup_order_guards_and_only_the_final_refresh(self):
-        returned = body(self.main, 'private fun returnToChat()')
+        returned = body(self.main, 'private fun returnToChat(refreshState: Boolean)')
         self.assertEqual('''
         dismissSidebarState()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
         taskRecordsConversationId = null
-        if (activityUsable()) refresh()
+        if (activityUsable()) {
+            // A recreated video editor can only adopt its retained receipt after becoming visible.
+            if (refreshState || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
+        }
     ''', returned)
         self.assertEqual(1, returned.count('refresh()'))
+        self.assertIn('private fun returnToChat() = returnToChat(refreshState = true)', self.main)
+        self.assertIn('private val listener: () -> Unit = { refresh() }', self.main)
+        self.assertIn('"settings", "permission-check" -> returnToChat(refreshState = false)', self.main)
+        self.assertIn('"permission-check" -> app.daiyu.android.ui.screens.settings.PermissionCheckScreen(\n                        onBack = { returnToChat(refreshState = false) }', self.main)
+        self.assertIn('onBack = { returnToChat(refreshState = false) }, onRoute = { route -> openSettingsFromPage(route) }', self.main)
+        self.assertIn('if (skillsReturnPage == "settings") retainedPage = "settings" else returnToChat(refreshState = false)', self.main)
         # Shared state-only helper is deliberately used by just these two entry points.
         self.assertEqual(3, self.main.count('dismissSidebarState()'))
         state = body(self.main, 'private fun dismissSidebarState()')
@@ -102,7 +111,7 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
 
     def test_real_main_regression_counts_sync_work_and_keeps_existing_scope(self):
         android = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
-        regression = body(android, 'fun testRealMainChatReturnRefreshesOnceAndSidebarDismissStillRefreshesImmediately()')
+        regression = body(android, 'fun testRealMainChatReturnReusesRowsAndSidebarDismissStillRefreshesImmediately()')
         self.assertIn('openSettings()', regression)
         self.assertIn('activity.onBackPressedDispatcher.onBackPressed()', regression)
         self.assertIn('invokeHost(activity, "dismissSidebar")', regression)
@@ -110,7 +119,17 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertNotIn('assertRealChatReturn', regression)
         self.assertIn('runtime.enabled = false', regression)
         self.assertIn('recorder.frame(System.nanoTime(), 40_000_000L', regression)
-        self.assertIn('1, refresh.getInt("count")', regression)
+        self.assertIn('expectedRefresh, refreshCount', regression)
+        self.assertIn('expectedRefresh = 0', regression)
+        self.assertIn('before.turns, after.turns', regression)
+        self.assertIn('before.contentRevision, after.contentRevision', regression)
+        video = body(android, 'fun testPureChatReturnStillAdoptsVideoReceiptThatRequiredVisibleEditor()')
+        self.assertIn('fixture.controller.videoSendState()', video)
+        self.assertIn('invokeHost(activity, "settleRetainedVideoReceipt")', video)
+        self.assertIn('activity.onBackPressedDispatcher.onBackPressed()', video)
+        self.assertIn('navigation must take the business refresh fallback', video)
+        self.assertIn('listOf("permission-check", "skills")', regression)
+        self.assertIn('recordSynchronous(startWindow = true) { invokeHost(activity, "returnToChat") }', regression)
         self.assertIn('1, publish.getInt("count")', regression)
         self.assertLess(regression.index('action()'), regression.index('recorder.end('))
         self.assertLess(regression.index('recorder.end('), regression.index('runtime.export()'))

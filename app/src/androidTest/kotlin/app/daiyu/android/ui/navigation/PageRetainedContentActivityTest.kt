@@ -224,14 +224,14 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         assertNotNull(observedPreview)
     }
 
-    fun testRealMainChatReturnRefreshesOnceAndSidebarDismissStillRefreshesImmediately() {
+    fun testRealMainChatReturnReusesRowsAndSidebarDismissStillRefreshesImmediately() {
         val runtime = app.daiyu.android.diagnostics.RuntimeDiagnostics
         val recorder = app.daiyu.android.diagnostics.BackPerformance.recorder
         val previousEnabled = runtime.enabled
         assertFalse(app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS)
         runtime.enabled = false
         runtime.clear()
-        fun recordSynchronous(startWindow: Boolean, action: () -> Unit): org.json.JSONObject {
+        fun recordSynchronous(startWindow: Boolean, expectedRefresh: Int = 1, action: () -> Unit): org.json.JSONObject {
             runtime.clear()
             mainThread {
                 if (startWindow) recorder.start(Any(), app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.BACK_PRESS)
@@ -248,11 +248,11 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             assertEquals(1, incidents.size)
             val incident = incidents.single()
             val phases = incident.getJSONArray("phases")
-            val refresh = (0 until phases.length()).map { phases.getJSONObject(it) }
-                .single { it.getString("phase") == "CHAT_REFRESH" }
+            val refreshCount = (0 until phases.length()).map { phases.getJSONObject(it) }
+                .filter { it.getString("phase") == "CHAT_REFRESH" }.sumOf { it.getInt("count") }
             val publish = (0 until phases.length()).map { phases.getJSONObject(it) }
                 .single { it.getString("phase") == "CHAT_PUBLISH" }
-            assertEquals("one synchronous refresh, not merely one visible composition", 1, refresh.getInt("count"))
+            assertEquals("count synchronous refreshes, not merely visible compositions", expectedRefresh, refreshCount)
             assertEquals(1, publish.getInt("count"))
             assertFalse("unchanged rendered history must not perform another cold SHA", (0 until phases.length())
                 .any { phases.getJSONObject(it).getString("phase") == "MESSAGE_ACTION_REVISION" })
@@ -278,11 +278,18 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             setDraft("return refresh count draft")
             openSettings() // Keep production MainActivity content and its real returnToChat wiring.
             ui.waitForIdle()
-            val returned = recordSynchronous(startWindow = false) {
+            fun returnWithRetainedRows(): org.json.JSONObject = recordSynchronous(startWindow = false, expectedRefresh = 0) {
+                val before = invokeHost(activity, "getChatState") as ChatScreenState
                 activity.onBackPressedDispatcher.onBackPressed()
                 assertEquals("chat", invokeHost(activity, "getRetainedPage"))
                 assertEquals(false, invokeHost(activity, "getSidebarVisible"))
+                val after = invokeHost(activity, "getChatState") as ChatScreenState
+                assertSame("pure navigation must keep the published turns", before.turns, after.turns)
+                assertEquals(before.contentRevision, after.contentRevision)
+                assertEquals(before.scrollRequest, after.scrollRequest)
+                assertEquals(before.composer.text, after.composer.text)
             }
+            val returned = returnWithRetainedRows()
             assertEquals("BACK_PRESS", returned.getString("kind"))
             assertTrue(returned.getBoolean("commit_attempted"))
             val returnedPhases = returned.getJSONArray("phases")
@@ -292,6 +299,17 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             // route_changed is a later Compose observation; the synchronous route is asserted above.
             awaitUniqueTag("chat-draft")
             assertDraft("return refresh count draft")
+            for (page in listOf("permission-check", "skills")) {
+                mainThread {
+                    if (page == "skills") invokeHost(activity, "openSkillManagement")
+                    else invokeHost(activity, "setRetainedPage", page)
+                }
+                ui.waitForIdle()
+                returnWithRetainedRows()
+                awaitUniqueTag("chat-draft")
+                assertDraft("return refresh count draft")
+            }
+            recordSynchronous(startWindow = true) { invokeHost(activity, "returnToChat") }
             repeat(3) {
                 recordSynchronous(startWindow = true) { invokeHost(activity, "refresh") }
             }
@@ -331,6 +349,56 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             assertDraft("return refresh count draft")
             assertEquals(0, fixture.opens.get())
         } finally { runtime.clear(); runtime.enabled = previousEnabled }
+    }
+
+    fun testPureChatReturnStillAdoptsVideoReceiptThatRequiredVisibleEditor() {
+        val db = fixture.database
+        val conversation = db.create("default")
+        mainThread { activity.select(conversation) }
+        awaitControl("selected conversation ready") {
+            invokeHost(activity, "getChatState").let { it as ChatScreenState }.conversationKey == conversation.id.value
+        }
+        setDraft("accepted video caption")
+        lateinit var editor: app.daiyu.android.ControllerVideoEditor
+        mainThread {
+            editor = (app.daiyu.android.MainActivity::class.java.getDeclaredField("videoUi").apply { isAccessible = true }
+                .get(activity) as app.daiyu.android.ControllerVideoUi).editor()
+        }
+        assertTrue(editor.visible)
+        openSettings()
+        mainThread {
+            val owner = app.daiyu.android.media.video.VideoAttachmentOwner(conversation.id.value, "return-video")
+            val video = app.daiyu.android.media.video.VideoAttachment(owner,
+                "12345678-1234-1234-1234-123456789abc", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)
+            val request = app.daiyu.android.VideoDraftRequest(conversation.id.value, owner, 1, editor.text, listOf(video))
+            val user = app.daiyu.android.domain.Message(app.daiyu.android.domain.MessageId("return-video-user"),
+                conversation.id, app.daiyu.android.domain.RunId("return-video-run"), "user",
+                listOf(app.daiyu.android.domain.MessageBlock.Text("text", editor.text)),
+                app.daiyu.android.domain.RunStatus.COMPLETED)
+            val messageOwner = app.daiyu.android.media.video.MessageVideoOwner(conversation.id.value, user.id.value)
+            val assistant = user.copy(id = app.daiyu.android.domain.MessageId("return-video-assistant"),
+                role = "assistant", status = app.daiyu.android.domain.RunStatus.RUNNING)
+            val saved = db.send(user, assistant, videoInputs = listOf(app.daiyu.android.model.videos.MessageVideoInput(
+                messageOwner, listOf(app.daiyu.android.media.video.MessageVideoReference(messageOwner,
+                    video.id, video.mime, video.bytes, video.sha256, video.durationMs, video.width, video.height)))))
+            db.save(assistant.copy(status = app.daiyu.android.domain.RunStatus.COMPLETED))
+            val receipt = app.daiyu.android.VideoDraftReceipt(request.conversation, owner, request.revision,
+                request.videos, app.daiyu.android.VideoDraftOutcome.ACCEPTED, conversation.id.value)
+            app.daiyu.android.ChatController::class.java.getDeclaredField("pendingVideoState")
+                .apply { isAccessible = true }.set(fixture.controller,
+                    app.daiyu.android.ChatController.VideoSendState(request, editor, receipt, saved))
+            invokeHost(activity, "settleRetainedVideoReceipt")
+            assertNotNull("hidden chat cannot adopt the receipt", fixture.controller.videoSendState())
+            assertNull(app.daiyu.android.MainActivity::class.java.getDeclaredField("videoReceiptRequest")
+                .apply { isAccessible = true }.get(activity))
+            assertEquals(editor.text, (invokeHost(activity, "getChatState") as ChatScreenState).composer.text)
+            activity.onBackPressedDispatcher.onBackPressed()
+            assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+            assertNull("navigation must take the business refresh fallback", fixture.controller.videoSendState())
+        }
+        awaitUniqueTag("chat-draft")
+        assertDraft("")
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testRealChatOrdinaryReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = false)

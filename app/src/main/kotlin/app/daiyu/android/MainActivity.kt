@@ -2414,6 +2414,7 @@ class MainActivity : ComponentActivity() {
                         "legacy-library" -> retainedPage = "backup"
                         "terminal" -> closeTerminalPage()
                         "usage" -> closeUsagePage()
+                        "settings", "permission-check" -> returnToChat(refreshState = false)
                         "providers" -> closeProvidersPage()
                         "skills" -> closeSkillsPage()
                         "offline-speech" -> retainedPage = offlineSpeechReturnPage
@@ -2508,7 +2509,7 @@ class MainActivity : ComponentActivity() {
                             onBack = { returnToChat() })
                     }
                     "permission-check" -> app.daiyu.android.ui.screens.settings.PermissionCheckScreen(
-                        onBack = { returnToChat() },
+                        onBack = { returnToChat(refreshState = false) },
                     )
                     "shizuku-settings" -> ShizukuScreen(
                         authorization = (application as ChatApplication).shizuku, session = null,
@@ -2679,7 +2680,7 @@ class MainActivity : ComponentActivity() {
                         scrollBehavior = settingsScrollBehavior,
                         diagnostics = controller.diagnostics,
                         engineeringUi = engineeringUi,
-                        onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
+                        onBack = { returnToChat(refreshState = false) }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenSubAgents = { retainedPage = "subagents" },
                         onOpenAssistants = { openAssistantPicker(global = true) },
                         onOpenAppearance = { retainedPage = "appearance" },
@@ -6002,12 +6003,17 @@ class MainActivity : ComponentActivity() {
         else -> "chat"
     }
 
-    private fun returnToChat() {
+    private fun returnToChat() = returnToChat(refreshState = true)
+
+    private fun returnToChat(refreshState: Boolean) {
         dismissSidebarState()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
         taskRecordsConversationId = null
-        if (activityUsable()) refresh()
+        if (activityUsable()) {
+            // A recreated video editor can only adopt its retained receipt after becoming visible.
+            if (refreshState || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
+        }
     }
     private fun openSkillManagement() {
         skillsReturnPage = if (retainedPage == "settings") "settings" else "chat"
@@ -6015,7 +6021,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun closeSkillsPage() {
         if (!activityUsable() || retainedPage != "skills") return
-        if (skillsReturnPage == "settings") retainedPage = "settings" else returnToChat()
+        if (skillsReturnPage == "settings") retainedPage = "settings" else returnToChat(refreshState = false)
     }
     private fun openGenerationSettings() {
         requireActivityUsable()

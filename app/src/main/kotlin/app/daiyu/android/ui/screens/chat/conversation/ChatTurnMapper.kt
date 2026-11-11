@@ -31,6 +31,7 @@ object ChatTurnMapper {
         // reply can contain several history segments with the same id, so an id-only map lets
         // the last segment steal every receipt. Keep a complete, owner-scoped occurrence index.
         val sourcePositions = IdentityHashMap<MessageBlock, Int>()
+        val sourceMessages = IdentityHashMap<MessageBlock, Message>()
         val occurrenceByCall = mutableMapOf<ToolSourceKey, Int>()
         val toolSources = mutableMapOf<ToolSourceKey, Message>()
         history.forEach { source ->
@@ -41,6 +42,7 @@ object ChatTurnMapper {
                 occurrenceByCall[prefix] = occurrence + 1
                 val key = prefix.copy(occurrence = occurrence)
                 sourcePositions[block] = occurrence
+                sourceMessages[block] = source
                 toolSources[key] = source
             }
         }
@@ -50,7 +52,8 @@ object ChatTurnMapper {
                 ?: message.blocks.asSequence().takeWhile { it !== block }
                     .filterIsInstance<MessageBlock.Tool>()
                     .count { it.invocation.id == block.invocation.id }
-            return toolSources[ToolSourceKey(owner, block.invocation.id.value, occurrence)]
+            return message.sourceMessages[block]
+                ?: toolSources[ToolSourceKey(owner, block.invocation.id.value, occurrence)]
                 ?: checkNotNull(message.authoritative)
         }
         val errors: (RenderMessage, MessageBlock.Tool) -> Boolean? = { message, block -> confirmedToolError(source(message, block), block) }
@@ -63,7 +66,7 @@ object ChatTurnMapper {
         val databaseOwners = messages.flatMap { owner -> owner.historySegments.map { segment ->
             TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
         } }.toMap()
-        return mapRows(history.map { renderMessage(it, sourcePositions) }, databaseOwners,
+        return mapRows(history.map { renderMessage(it, sourcePositions, sourceMessages) }, databaseOwners,
             errors,
             states,
             dedicated,
@@ -107,13 +110,19 @@ object ChatTurnMapper {
         val createdAt: Long?, val reportedReasoning: List<app.daiyu.android.domain.ReportedReasoning>,
         val authoritative: Message? = null,
         /** Absolute tool occurrence within this owner, retained when adjacent rows are merged. */
-        val sourcePositions: Map<MessageBlock, Int> = emptyMap())
+        val sourcePositions: Map<MessageBlock, Int> = emptyMap(),
+        val sourceMessages: Map<MessageBlock, Message> = emptyMap())
 
-    private fun renderMessage(message: Message, positions: Map<MessageBlock, Int> = emptyMap()): RenderMessage {
+    private fun renderMessage(message: Message, positions: Map<MessageBlock, Int> = emptyMap(),
+        sources: Map<MessageBlock, Message> = emptyMap()): RenderMessage {
         val local = IdentityHashMap<MessageBlock, Int>()
-        message.blocks.forEach { block -> positions[block]?.let { local[block] = it } }
+        val localSources = IdentityHashMap<MessageBlock, Message>()
+        message.blocks.forEach { block ->
+            positions[block]?.let { local[block] = it }
+            sources[block]?.let { localSources[block] = it }
+        }
         return RenderMessage(message.id, message.conversationId, message.runId, message.role, message.blocks,
-            message.status, message.error, message.createdAt, message.reportedReasoning, message, local)
+            message.status, message.error, message.createdAt, message.reportedReasoning, message, local, localSources)
     }
 
     private fun mapRows(history: List<RenderMessage>, databaseOwners: Map<TurnOwner, String>,
@@ -158,6 +167,10 @@ object ChatTurnMapper {
                         sourcePositions = IdentityHashMap<MessageBlock, Int>().apply {
                             putAll(prior.message.sourcePositions)
                             putAll(message.sourcePositions)
+                        },
+                        sourceMessages = IdentityHashMap<MessageBlock, Message>().apply {
+                            putAll(prior.message.sourceMessages)
+                            putAll(message.sourceMessages)
                         },
                         reportedReasoning = prior.message.reportedReasoning + message.reportedReasoning.map {
                             it.copy(blockOffset = (it.blockOffset ?: 0) + offset)

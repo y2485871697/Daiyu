@@ -99,15 +99,17 @@ class ChatTurnMapperTest {
             MessageHistorySegment(MessageId("supplement"), Message.USER_ROLE, listOf(text("question", "Question"))),
             MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(tool("same", "second"))),
         ))
-        val turn = ChatTurnMapper.map(listOf(owner), toolState = { source, _ ->
+        val turns = ChatTurnMapper.map(listOf(owner), toolState = { source, _ ->
             if (source.blocks.filterIsInstance<MessageBlock.Tool>().single().result == "first") {
                 WorkStepState.OK
             } else {
                 WorkStepState.FAILED
             }
-        }).filterIsInstance<ChatTurnUi.Assistant>().single()
+        })
+        val assistants = turns.filterIsInstance<ChatTurnUi.Assistant>()
+        assertEquals(2, assistants.size)
         assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED),
-            turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
+            assistants.flatMap { it.workProcess!!.segments.flatMap { segment -> segment.steps } }.map { it.state })
     }
 
     @Test fun receiptStateRemainsBoundToEachDistinctToolBlock() {

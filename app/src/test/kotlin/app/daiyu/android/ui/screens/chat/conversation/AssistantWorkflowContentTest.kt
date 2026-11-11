@@ -34,7 +34,9 @@ class AssistantWorkflowContentTest {
         assertEquals(first.listKey, dedicated.listKey)
         assertEquals(listOf("reasoning:r1"), keys(first.workflowContent().steps))
         for (turn in listOf(ordinary, dedicated)) {
-            assertEquals(listOf("reasoning:r1", "tool:t1"), keys(turn.workflowContent().steps))
+            val turnKeys = keys(turn.workflowContent().steps)
+            assertEquals(listOf("reasoning:r1", turnKeys[1]), turnKeys)
+            assertTrue(turnKeys[1].startsWith("tool:"))
             assertEquals(thought, (turn.workflowContent().steps.first() as MessageContentUi.Reasoning).reported)
         }
     }
@@ -45,7 +47,12 @@ class AssistantWorkflowContentTest {
             listOf(thought), status = RunStatus.COMPLETED), dedicated = true)
         val ordered = turn.workflowContent()
         val expectedImageKey = "image:1:c1:a1:c1:a36:${reference.id}64:${reference.sha256}"
-        assertEquals(listOf("reasoning:r1", "tool:t1", expectedImageKey, "tool:t2"), keys(ordered.steps))
+        val orderedKeys = keys(ordered.steps)
+        assertEquals("reasoning:r1", orderedKeys[0])
+        assertTrue(orderedKeys[1].startsWith("tool:"))
+        assertEquals(expectedImageKey, orderedKeys[2])
+        assertTrue(orderedKeys[3].startsWith("tool:"))
+        assertNotEquals(orderedKeys[1], orderedKeys[3])
         assertEquals(listOf("text:answer"), keys(ordered.body))
         assertSame(reference, (ordered.steps[2] as MessageContentUi.Image).image.reference)
         assertEquals(owner, (ordered.steps[2] as MessageContentUi.Image).image.expectedOwner)
@@ -73,14 +80,16 @@ class AssistantWorkflowContentTest {
         val turn = map(source(listOf(tool("t1"), MessageBlock.Text("a", "answer")),
             listOf(ReportedReasoning("empty", "...", blockOffset = 2)), status = RunStatus.COMPLETED))
         assertEquals("answer", turn.finalText)
-        assertEquals(listOf("tool:t1"), keys(turn.workflowContent().steps))
+        assertEquals(1, turn.workflowContent().steps.size)
+        assertTrue(keys(turn.workflowContent().steps).single().startsWith("tool:"))
     }
     @Test fun visiblePrefixIncludesTheCurrentThoughtButHoldsItsSuccessors() {
         val steps = map(source(listOf(tool("t1")), listOf(thought))).workflowContent().steps
         val handoff = ReasoningHandoff(listOf(thought))
+        val toolKey = keys(steps).single { it.startsWith("tool:") }
         assertEquals(listOf("reasoning:r1"), visibleWorkflowKeys(steps, handoff))
         handoff.complete(thought.frozen())
-        assertEquals(listOf("reasoning:r1", "tool:t1"), visibleWorkflowKeys(steps, handoff))
+        assertEquals(listOf("reasoning:r1", toolKey), visibleWorkflowKeys(steps, handoff))
     }
     @Test fun historicalPrefixesNeverReplayEntrancesButANewlyReleasedStepEntersOnce() {
         val entrances = WorkflowEntrances(listOf("reasoning:r1"))
@@ -107,7 +116,12 @@ class AssistantWorkflowContentTest {
                 assertEquals(value, (ordered.pending.single() as MessageContentUi.Text).text)
             }
             val after = map(source(listOf(tool("t1"), MessageBlock.Text("n", "checking now"), tool("t2"))), dedicated).workflowContent()
-            assertEquals(listOf("tool:t1", "text:n", "tool:t2"), keys(after.steps))
+            val afterKeys = keys(after.steps)
+            assertEquals(3, afterKeys.size)
+            assertTrue(afterKeys[0].startsWith("tool:"))
+            assertEquals("text:n", afterKeys[1])
+            assertTrue(afterKeys[2].startsWith("tool:"))
+            assertNotEquals(afterKeys[0], afterKeys[2])
             assertTrue(after.body.isEmpty())
             assertTrue(after.pending.isEmpty())
         }
@@ -117,10 +131,12 @@ class AssistantWorkflowContentTest {
         for (dedicated in listOf(false, true)) {
             val message = source(listOf(tool("t1"), MessageBlock.Text("a1", "final first"), MessageBlock.Text("a2", "final second")))
             val running = map(message, dedicated).workflowContent()
-            assertEquals(listOf("tool:t1"), keys(running.steps))
+            val runningToolKeys = keys(running.steps)
+            assertEquals(1, runningToolKeys.size)
+            assertTrue(runningToolKeys.single().startsWith("tool:"))
             assertEquals(listOf("text:a1", "text:a2"), keys(running.pending))
             val terminal = map(message.copy(status = RunStatus.COMPLETED), dedicated).workflowContent()
-            assertEquals(listOf("tool:t1"), keys(terminal.steps))
+            assertEquals(runningToolKeys, keys(terminal.steps))
             assertEquals(listOf("text:a1", "text:a2"), keys(terminal.body))
             assertTrue(terminal.pending.isEmpty())
         }

@@ -47,7 +47,7 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
 
     def test_workflow_task_scroll_check_runs_streaming_follow_contract(self):
         root = Path(__file__).resolve().parents[1]
-        workflow = (root \/ '.github\/workflows\/chat-workflow-checks.yml').read_text()
+        workflow = (root / '.github/workflows/chat-workflow-checks.yml').read_text()
         scope = workflow.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':", 1)[1]
         scope = scope.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'tool-receipts':", 1)[0]
         self.assertIn("'test_streaming_follow_contract.py'", scope)

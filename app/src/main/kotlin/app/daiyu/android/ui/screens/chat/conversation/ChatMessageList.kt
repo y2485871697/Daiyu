@@ -462,7 +462,8 @@ internal fun ChatMessageList(
                 layout.visibleItemsInfo.none { it.key == tail.listKey } ||
                 readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail
             Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
-                Triple(layout.viewportSize, layout.beforeContentPadding to layout.afterContentPadding, resumeReady))
+                Triple(layout.viewportSize, layout.beforeContentPadding to layout.afterContentPadding,
+                    resumeReady to currentNestedTail.contentHeight))
         }.collect { (canFollow, _, _) ->
             if (!canFollow) { motion.reset(); return@collect }
             var observedViewport = previousViewport
@@ -484,6 +485,16 @@ internal fun ChatMessageList(
                         withFrameNanos { }
                         continue
                     }
+                }
+                // Body growth can publish before LazyColumn's cached item measure.
+                // Reconcile only that stale bounded tail, then use actual list geometry.
+                if (currentNestedTail.bounded && currentTailKey == assistantOwnerKey &&
+                    currentNestedTail.contentHeight > 0 && last.size != currentNestedTail.contentHeight) {
+                    clearanceLayout.remeasurement?.forceRemeasure()
+                    layout = listState.layoutInfo
+                    last = layout.visibleItemsInfo.lastOrNull {
+                        it.index == index && it.key == currentTailKey
+                    } ?: return@collect
                 }
                 val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding)
                 if (observedViewport != null && observedViewport != viewport) alignViewport = true

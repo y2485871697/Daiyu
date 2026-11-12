@@ -42,6 +42,17 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertNotIn("animateScrollToItem", self.follow)
         self.assertIn("maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
 
+    def test_settled_follow_observes_real_extent_and_reconciles_only_stale_lazy_geometry(self):
+        self.assertIn("resumeReady to currentNestedTail.contentHeight", self.follow)
+        self.assertIn("currentNestedTail.bounded && currentTailKey == assistantOwnerKey", self.follow)
+        self.assertIn("currentNestedTail.contentHeight > 0 && last.size != currentNestedTail.contentHeight", self.follow)
+        stale = self.follow.split("last.size != currentNestedTail.contentHeight", 1)[1].split("val viewport =", 1)[0]
+        self.assertIn("clearanceLayout.remeasurement?.forceRemeasure()", stale)
+        self.assertIn("layout = listState.layoutInfo", stale)
+        self.assertIn("it.index == index && it.key == currentTailKey", stale)
+        self.assertNotIn("scrollBy", stale)
+        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)", self.follow)
+
     def test_explicit_scroll_and_touch_keep_ownership(self):
         self.assertIn("if (!canFollow)", self.follow)
         self.assertIn("scrollResumed && followBottom && !currentDragging", self.guard)

@@ -178,6 +178,17 @@ PAUSE_RECEIPT_MODULES = (
 
 
 
+TERMINAL_SCREEN_PLATFORM_CLASS = "app.daiyu.android.terminal.TerminalScreenTest"
+TERMINAL_SCREEN_MODULES = (
+    "test_terminal_output_cloud_contract", "test_terminal_geometry_contract",
+    "test_terminal_reference_contract", "test_terminal_sheet_style_contract",
+    "test_chroot_workspace_command_contract", "test_record_tool_tests_scope",
+    "test_acceptance_tool_receipt", "test_terminal_screen_smoke_scope",
+    "test_diagnostic_smoke_source",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 LINUX_PIN_PLATFORM_CLASSES = (
     "app.daiyu.android.terminal.LinuxLeaseRecoveryDeviceTest",
     "app.daiyu.android.terminal.TerminalEnvironmentHostDeviceTest",
@@ -192,6 +203,9 @@ LINUX_PIN_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == TERMINAL_SCREEN_PLATFORM_CLASS):
+        return [python, "-B", "-m", "unittest", *TERMINAL_SCREEN_MODULES, "-v"], "terminal-screen-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(LINUX_PIN_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *LINUX_PIN_MODULES, "-v"], "linux-pins-targeted"

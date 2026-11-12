@@ -37,6 +37,10 @@ class TerminalOutputCloudContract(unittest.TestCase):
         self.assertIn("select_terminal_screen", smoke)
         self.assertIn(TARGET, smoke)
 
+        from test_record_tool_tests_scope import recorder
+        self.assertEqual(TARGET, recorder.TERMINAL_SCREEN_PLATFORM_CLASS)
+        self.assertIn("test_terminal_screen_smoke_scope", recorder.TERMINAL_SCREEN_MODULES)
+
     def test_selector_executes_and_rejects_wrong_mode_api_class_or_shard(self):
         mod = load_module("terminal_retention_contract", ROOT / "scripts/acceptance/terminal_retention_contract.py")
         for api in (26, 37):

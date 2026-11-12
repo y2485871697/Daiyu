@@ -81,9 +81,9 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
     }
 
     fun testNewAssistantDispatchesCreateWithoutSelectingOrTouchingAssets() {
-        awaitNodeWindowFocus(ui.onNodeWithTag("assistant-new"))
-        awaitDialogEnter(ui.onNodeWithTag("assistant-sheet", useUnmergedTree = true))
+        awaitDialogTouchReady(ui.onNodeWithTag("assistant-new"))
         ui.onNodeWithTag("assistant-new").assertIsDisplayed().performClick()
+        awaitVisualIdle()
         assertEquals(1, creates.get())
         ui.onNodeWithText("Picker A").assertIsDisplayed()
         ui.onNodeWithText("Picker B").assertIsDisplayed()
@@ -94,10 +94,10 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
     }
 
     fun testStaleNewAssistantDoesNotDispatchCreate() {
-        awaitNodeWindowFocus(ui.onNodeWithTag("assistant-new"))
-        awaitDialogEnter(ui.onNodeWithTag("assistant-sheet", useUnmergedTree = true))
+        awaitDialogTouchReady(ui.onNodeWithTag("assistant-new"))
         mainThread { admitted = false }
         ui.onNodeWithTag("assistant-new").assertIsDisplayed().performClick()
+        awaitVisualIdle()
         assertEquals(0, creates.get())
         assertEquals(0, writes.get())
         assertEquals(0, assetsWrites.get())
@@ -114,6 +114,7 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
     }
     fun testRunningGateRejectsSelectionAndLongPressWithoutClosingThenUnlocks() {
         mainThread { interactionsAllowed = false }
+        awaitDialogTouchReady(ui.onNodeWithTag("assistant-item-picker-b"))
         ui.onNodeWithTag("assistant-item-picker-b").performClick()
         ui.onNodeWithTag("assistant-item-picker-a").performTouchInput { longClick() }
         ui.waitForIdle()
@@ -126,7 +127,17 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
         assertEquals(0, writes.get())
         mainThread { interactionsAllowed = true }
         ui.onNodeWithTag("assistant-item-picker-b").performClick()
-        ui.waitUntil(5_000) { selections.get() == 1 && dismissals.get() == 1 }
+        awaitVisualIdle()
+        assertEquals(1, selections.get())
+        assertEquals(0, dismissals.get())
+        ui.onNodeWithTag("assistant-item-picker-b").assertIsDisplayed()
+        awaitDialogTouchReady(ui.onNodeWithTag("assistant-done"))
+        ui.onNodeWithTag("assistant-done").performClick()
+        awaitVisualIdle()
+        assertEquals(1, selections.get())
+        assertEquals(1, dismissals.get())
+        assertEquals(0, writes.get())
+        assertEquals(0, assetsWrites.get())
     }
 
     fun testTaskStartedAfterDeleteConfirmationLeavesProfileAndAssetsUntouched() {

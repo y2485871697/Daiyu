@@ -271,23 +271,50 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.settings.localModelCatalogSnapshot()); assertEquals(saved, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
+    fun testCancelledEditorCallbacksCannotModifyOrDismissFreshEditor() {
+        openLocalModels()
+        reveal("local-model-rename:extra-local").performClick()
+        node("settings-field:展示名称").performTextReplacement("stale editor name")
+        val oldSave = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val oldCancel = checkNotNull(node("dialog-cancel").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        node("dialog-cancel").performClick()
+        reveal("local-model-rename:extra-local").performClick()
+        node("settings-field:展示名称").assertEditableText("Extra local model")
+        val before = fixture.settings.localModelCatalogSnapshot()
+        mainThread { assertTrue(oldSave()) }
+        node("catalog-model-editor").assertExists()
+        node("dialog-confirm").assertIsEnabled()
+        node("settings-field:展示名称").assertEditableText("Extra local model")
+        assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        mainThread { assertTrue(oldCancel()) }
+        node("catalog-model-editor").assertExists()
+        node("dialog-confirm").assertIsEnabled()
+        node("dialog-cancel").performClick()
+        assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
+    }
     fun testOldConfirmationAfterPauseCannotModifyOrDismissFreshConfirmation() {
         openLocalModels()
         reveal("local-model-rename:extra-local").performClick()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))
         node("local-model-delete:extra-local").performClick()
         val stale = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val staleCancel = checkNotNull(node("dialog-cancel").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         realPauseResume(activity)
         awaitUniqueTag("page:主模型服务商")
         openLocalModelTab()
         reveal("local-model-rename:extra-local").performClick()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))
         node("local-model-delete:extra-local").performClick()
-        val before = fixture.settings.localModelCatalogSnapshot()
-        mainThread { assertTrue(stale()) }
+        node("dialog-confirm").assertExists()
+        val before = checkNotNull(fixture.settings.localModelCatalogSnapshot())
+        mainThread { assertTrue(stale()); assertTrue(staleCancel()) }
         node("dialog-confirm").assertExists()
         assertEquals(before, fixture.settings.localModelCatalogSnapshot())
-        node("dialog-cancel").performClick()
+        node("dialog-confirm").performClick()
+        awaitControl("fresh local delete completed") { !fixture.controller.dataBusy }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:extra-local").fetchSemanticsNodes().isEmpty() }
+        assertEquals(before.models.filterNot { it.id == "extra-local" },
+            checkNotNull(fixture.settings.localModelCatalogSnapshot()).models)
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
     fun testUnsavedModelAddSurvivesRepeatedPauseWithoutWritingCatalog() {

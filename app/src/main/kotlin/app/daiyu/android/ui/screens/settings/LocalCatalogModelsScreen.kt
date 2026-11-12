@@ -253,7 +253,7 @@ internal fun <T> LocalCatalogModelsScreen(
         if (form != null) CatalogModelEditorDialog(form(selection.record), isNew = false,
             enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice, saving = savingEditor,
             canDelete = !editorStale,
-            onDelete = { if (editing === selection && current() && currentEnabled && request == null && matches(selection)) { editing = null; deleting = selection } },
+            onDelete = { if (editing === selection && current() && currentEnabled && request == null && matches(selection)) { editing = null; deleting = selection.copy() } },
             onSave = { if (editing === selection) saveForm(it, selection) },
             onDismiss = { if (request == null && editing === selection) editing = null })
         else DaiyuTextInputDialog("编辑模型名称", selection.record.displayName, "仅更改显示名称，API模型ID保持不变", "保存",
@@ -383,7 +383,7 @@ internal fun <T> LocalCatalogModelsScreen(
                                     Box(Modifier.size(40.dp).testTag("local-model-rename:${model.id}")
                                         .clickable(enabled = editorEnabled) {
                                             if (current() && currentEnabled && selectedIds == null && request == null && ticket != null && matches(ticket)) {
-                                                notice = null; editorStale = false; editing = ticket
+                                                notice = null; editorStale = false; editing = ticket.copy()
                                             }
                                         }, contentAlignment = Alignment.Center) { DaiyuIcon(Icons.Rounded.Tune, "模型设置") }
                                 }

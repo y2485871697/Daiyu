@@ -49,7 +49,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
 
     def test_assistant_rejection_keeps_picker_and_management_state(self):
         text = (SRC / 'ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
-        self.assertIn('if (canSelect()) { onSelect(profile.id); onDismiss() }', text)
+        self.assertIn('onClick = { if (canSelect()) onSelect(profile.id) }', text)
         self.assertIn('canSelect = canSelect', text)
         self.assertIn('if (canInteract()) actionProfileId = profile.id', text)
         self.assertIn('if (canInteract()) { deleteProfile = null; onDelete(profile.id) }', text)

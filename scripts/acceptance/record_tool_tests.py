@@ -102,6 +102,8 @@ PAGE_PERFORMANCE_MODULES = TASK_SCROLL_MODULES + (
     'test_streaming_freeze_contract',
     'test_page_performance_contract',
     'test_page_performance_smoke_scope',
+    'test_task_configuration_admission_contract',
+    'test_selection_stays_open_contract',
 )
 
 

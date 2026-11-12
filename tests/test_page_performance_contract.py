@@ -48,3 +48,16 @@ class PagePerformanceContract(unittest.TestCase):
         self.assertIn('value = withContext(Dispatchers.Default)', usage)
         self.assertIn('val projection = key(projectionKey)', usage)
         self.assertNotIn('val projection = key(usage,', usage)
+
+    def test_blocked_assistant_management_does_not_request_a_sheet_exit(self):
+        picker = (MAIN / 'ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
+        self.assertIn('onLongClick = { if (canInteract()) finishSelection { if (canInteract()) actionProfileId = profile.id } }', picker)
+
+    def test_cached_model_tickets_do_not_reuse_editor_or_confirmation_authority(self):
+        models = (MAIN / 'ui/screens/settings/LocalCatalogModelsScreen.kt').read_text()
+        self.assertIn('editorStale = false; editing = ticket.copy()', models)
+        self.assertIn('editing = null; deleting = selection.copy()', models)
+        self.assertIn('if (deleting === selection && current() && matches(selection))', models)
+        runtime = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/LocalCatalogModelsActivityTest.kt').read_text()
+        self.assertIn('testCancelledEditorCallbacksCannotModifyOrDismissFreshEditor', runtime)
+        self.assertIn('assertTrue(stale()); assertTrue(staleCancel())', runtime)

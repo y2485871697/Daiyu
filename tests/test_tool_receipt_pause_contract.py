@@ -47,7 +47,9 @@ class ToolReceiptPauseContract(unittest.TestCase):
             self.assertIn('ToolDisposition.' + state, reuse)
         for state in ('READY', 'IN_FLIGHT', 'UNKNOWN'):
             self.assertNotIn('ToolDisposition.' + state, reuse)
-        self.assertNotIn('position(message, block)', reuse)
+        self.assertIn('val position = loaded.retainedPositions(current)', reuse)
+        self.assertIn('val index = position(message, block) ?: return@reader null', reuse)
+        self.assertNotIn('?: position(message, block)', reuse)
 
     def test_host_regression_observes_pending_frames_at_actual_pause_and_resume(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()

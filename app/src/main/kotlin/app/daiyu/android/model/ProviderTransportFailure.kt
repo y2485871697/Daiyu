@@ -2,20 +2,28 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.ModelFailure
 import app.daiyu.android.domain.ModelRequestException
+import app.daiyu.android.domain.ModelRequestDiagnostic
 import java.io.Closeable
 
 /** Keep provider-owned exception chains out of transport results, not caller failures. */
-internal fun providerTransportFailure(failure: Exception, configuringRequest: Boolean): Exception = when {
-    failure is ModelRequestException -> ModelRequestException(
-        if (failure.transportInterrupted) ModelFailure.NETWORK else failure.failure, failure.diagnostic)
-    configuringRequest && (failure is IllegalArgumentException || failure is IllegalStateException || failure is SecurityException) ->
-        ModelRequestException(ModelFailure.CONFIGURATION)
-    failure is SecurityException -> ModelRequestException(ModelFailure.PERMISSION)
-    failure is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
-    failure is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
-    failure is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
-    failure is org.json.JSONException -> ModelRequestException(ModelFailure.PROTOCOL)
-    else -> failure
+internal fun providerTransportFailure(failure: Exception, configuringRequest: Boolean,
+    trace: ProviderRequestTrace? = null): Exception {
+    val classified = when {
+        failure is ModelRequestException -> ModelRequestException(
+            if (failure.transportInterrupted) ModelFailure.NETWORK else failure.failure, failure.diagnostic)
+        configuringRequest && (failure is IllegalArgumentException || failure is IllegalStateException || failure is SecurityException) ->
+            ModelRequestException(ModelFailure.CONFIGURATION)
+        failure is SecurityException -> ModelRequestException(ModelFailure.PERMISSION)
+        failure is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
+        failure is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
+        failure is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
+        failure is org.json.JSONException -> ModelRequestException(ModelFailure.PROTOCOL)
+        else -> failure
+    }
+    if (classified !is ModelRequestException || trace == null) return classified
+    val diagnostic = (classified.diagnostic ?: ModelRequestDiagnostic()).copy(
+        transport = trace.diagnostic(failure, classified.failure))
+    return ModelRequestException(classified.failure, diagnostic)
 }
 
 /** A close failure must not be appended to a caller's exception by Closeable.use. */

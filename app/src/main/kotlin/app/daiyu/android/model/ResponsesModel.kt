@@ -129,6 +129,7 @@ class ResponsesModel internal constructor(
             }
             val id = requireNotNull(decoder.responseId)
             val sequence = requireNotNull(decoder.acknowledgedSequence)
+            val trace = ProviderRequestTrace(ModelRequestKind.RESUME)
             var conn: HttpsURLConnection? = null
             var configuringRequest = true
             var deliveryFailure: Exception? = null
@@ -147,7 +148,9 @@ class ResponsesModel internal constructor(
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
                 configuringRequest = false
+                trace.phase = ModelTransportPhase.WAITING_HEADERS
                 val status = conn.responseCode
+                trace.headersReceived()
                 if (status !in 200..299) {
                     val retryAuth = retryAuthentication(status, authentication)
                     if (retryAuth == null && status != 429 && status !in 500..599) resumeAllowed = false
@@ -157,9 +160,11 @@ class ResponsesModel internal constructor(
                     resumeAllowed = false
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 }
-                val items = conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse {
+                trace.phase = ModelTransportPhase.READING_STREAM
+                val items = trace.reader(conn.inputStream).useProviderResponse {
                     decoder.read(it, cancelled::get, prefix = ownItems.toList(), acknowledgedSink = deliver)
                 }
+                trace.completionReceived()
                 acceptItems(items)
                 usable = true
                 resumeAllowed = false
@@ -174,7 +179,7 @@ class ResponsesModel internal constructor(
                     throw failure
                 }
                 checkCancelled()
-                val classified = providerTransportFailure(failure, configuringRequest)
+                val classified = providerTransportFailure(failure, configuringRequest, trace)
                 if (classified !is ModelDeliveryRejectedException &&
                     (classified as? ModelRequestException)?.failure !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT, ModelFailure.SERVER, ModelFailure.RATE_LIMIT) &&
                     !((classified as? ModelRequestException)?.failure == ModelFailure.AUTHENTICATION && rejectedAuthorization != null)) resumeAllowed = false
@@ -349,6 +354,7 @@ class ResponsesModel internal constructor(
                     try { target(batch) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
                 }
             }
+            var trace = ProviderRequestTrace()
             var ownedConnection: HttpsURLConnection? = null
             var configuringRequest = false
             var transportStarted = false
@@ -400,6 +406,7 @@ class ResponsesModel internal constructor(
                 }
                 checkCancelled()
                 transportStarted = true
+                trace = ProviderRequestTrace()
                 configuringRequest = true
                 val authentication = authHeaders()
                 val conn = connect(URL(finalUrl))
@@ -425,10 +432,13 @@ class ResponsesModel internal constructor(
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()
                 configuringRequest = false
+                trace.phase = ModelTransportPhase.SENDING
                 conn.setFixedLengthStreamingMode(requestBytes.size.toLong())
                 conn.outputStream.useProviderResource { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
+                trace.phase = ModelTransportPhase.WAITING_HEADERS
                 val status = conn.responseCode
+                trace.headersReceived()
                 checkCancelled()
                 if (status !in 200..299) {
                     retryAuthentication(status, authentication)
@@ -436,11 +446,13 @@ class ResponsesModel internal constructor(
                 }
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
-                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse { reader ->
+                trace.phase = ModelTransportPhase.READING_STREAM
+                trace.reader(conn.inputStream).useProviderResponse { reader ->
                     resumeAllowed = backgroundResume != null
                     val items = if (backgroundResume != null) decoder.read(reader, cancelled::get,
                         prefix = ownItems.toList(), acknowledgedSink = requireNotNull(deliverAcknowledged))
                     else ResponsesStream.readBuffered(reader, cancelled::get, deliver)
+                    trace.completionReceived()
                     checkCancelled()
                     acceptItems(items)
                     completedPost = true
@@ -467,7 +479,7 @@ class ResponsesModel internal constructor(
                 }
                 checkCancelled()
                 if (!transportStarted) throw failure
-                val classified = providerTransportFailure(failure, configuringRequest)
+                val classified = providerTransportFailure(failure, configuringRequest, trace)
                 if (classified !is ModelDeliveryRejectedException &&
                     (classified as? ModelRequestException)?.failure !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT, ModelFailure.SERVER, ModelFailure.RATE_LIMIT) &&
                     !((classified as? ModelRequestException)?.failure == ModelFailure.AUTHENTICATION && rejectedAuthorization != null)) resumeAllowed = false

@@ -26,8 +26,8 @@ class ReceiptSnapshotContract(unittest.TestCase):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         publish = text.split('private fun publishChat(rowsChanged:', 1)[1].split('private fun requestScroll', 1)[0]
         self.assertNotIn('RetainedToolOutcomes.projectionReader(controller.database', publish)
-        self.assertIn('val visibleToolReceipts = toolReceiptSnapshot?.takeIf {', publish)
-        self.assertIn('}?.projectionReader(controller::runState, controller::runStopping)', publish)
+        self.assertIn('toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)', publish)
+        self.assertIn('retainedReceipts?.invoke(message, block)', publish)
         self.assertIn('if (receiptsReady) questionCards =', publish)
         prepare = text.split('private fun prepareToolReceipts()', 1)[1].split('private fun publishChat()', 1)[0]
         self.assertIn('withContext(Dispatchers.IO)', prepare)

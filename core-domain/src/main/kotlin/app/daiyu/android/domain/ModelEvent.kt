@@ -167,6 +167,32 @@ enum class ProviderErrorCode(val wireName: String) {
     INVALID_PARAMETER_VALUE("invalid_parameter_value"),
 }
 
+/** Closed transport observations only; no host, URL, body, headers or exception text. */
+enum class ModelTransportPhase { PREPARING, SENDING, WAITING_HEADERS, READING_STREAM, DECODING }
+enum class ModelTransportCause { DNS, CONNECT, TIMEOUT, TLS, SOCKET, IO, PREMATURE_EOF,
+    PARTIAL_SSE_FRAME, PROTOCOL, HTTP, PROVIDER_REJECTION, CONFIGURATION }
+enum class ModelRequestKind { POST, RESUME }
+
+data class ModelTransportDiagnostic(
+    val phase: ModelTransportPhase,
+    val cause: ModelTransportCause,
+    val requestKind: ModelRequestKind,
+    val requestElapsedMs: Long,
+    val streamElapsedMs: Long?,
+    val sseFrames: Long,
+    val lastFrameAgeMs: Long?,
+    val responseHeadersSeen: Boolean,
+    val completionReceived: Boolean,
+    val eofSeen: Boolean = false,
+    val partialFrame: Boolean = false,
+) {
+    init {
+        require(requestElapsedMs >= 0 && sseFrames >= 0)
+        require(streamElapsedMs == null || streamElapsedMs >= 0)
+        require(lastFrameAgeMs == null || lastFrameAgeMs >= 0)
+    }
+}
+
 /** Only closed values cross the provider boundary; never store a provider message or raw field. */
 data class ModelRequestDiagnostic(
     val httpStatus: Int? = null,
@@ -175,6 +201,7 @@ data class ModelRequestDiagnostic(
     val unsupportedReasoningEffort: RequestReasoningEffort? = null,
     val reasoningLevelRejected: Boolean = false,
     val providerCode: ProviderErrorCode? = null,
+    val transport: ModelTransportDiagnostic? = null,
 ) {
     init {
         require(httpStatus == null || httpStatus in 300..599)

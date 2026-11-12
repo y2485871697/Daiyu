@@ -1162,8 +1162,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     ModelFailure.NETWORK else null
                             val reported = failure as? ModelRequestException
                             // A paused attempt's cancellation is not a new provider error, even after fast resume.
+                            val providerDiagnostic = reported?.diagnostic?.let { detail ->
+                                if (detail.transport == null) detail
+                                else detail.copy(transport = null).takeUnless { it == ModelRequestDiagnostic() }
+                            }
                             val controlInterruption = reported?.transportInterrupted == true ||
-                                reported?.diagnostic == null && attemptFence != pauseEpoch &&
+                                providerDiagnostic == null && attemptFence != pauseEpoch &&
                                 classified in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)
                             if (reported != null && !controlInterruption)
                                 reconnectBudget?.updateReason(reported.failure, reported.diagnostic)

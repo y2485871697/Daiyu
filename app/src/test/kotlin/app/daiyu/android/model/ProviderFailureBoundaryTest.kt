@@ -247,7 +247,9 @@ class ProviderFailureBoundaryTest {
         val rejected = failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } } as ModelRequestException
         sanitized(rejected, ModelFailure.REQUEST)
         assertEquals(ModelRequestDiagnostic(422, RequestRejection.UNSUPPORTED_PARAMETER, RequestField.INCLUDE,
-            providerCode = ProviderErrorCode.UNSUPPORTED_PARAMETER), rejected.diagnostic)
+            providerCode = ProviderErrorCode.UNSUPPORTED_PARAMETER), rejected.diagnostic?.copy(transport = null))
+        assertEquals(ModelRequestKind.RESUME, rejected.diagnostic?.transport?.requestKind)
+        assertEquals(ModelTransportCause.HTTP, rejected.diagnostic?.transport?.cause)
         assertEquals("GET", get.requestMethod)
         assertTrue(get.disconnected)
         assertFalse(session.canResume)
@@ -275,4 +277,71 @@ class ProviderFailureBoundaryTest {
         assertTrue(get.closed)
         assertEquals(2, calls)
     }
+    @Test fun transportFailuresKeepTheirActualPhaseAndClosedCauseForEveryProtocol() {
+        for (protocol in protocols) for (stage in listOf("write", "headers", "stream")) {
+            val conn = object : Connection() {
+                override fun getOutputStream(): ByteArrayOutputStream {
+                    if (stage == "write") throw java.net.SocketTimeoutException(sentinel)
+                    return super.getOutputStream()
+                }
+                override fun getResponseCode(): Int {
+                    if (stage == "headers") throw java.net.SocketTimeoutException(sentinel)
+                    return super.getResponseCode()
+                }
+                override fun getInputStream(): ByteArrayInputStream {
+                    if (stage == "stream") throw java.net.SocketTimeoutException(sentinel)
+                    return super.getInputStream()
+                }
+            }
+            val session = port(protocol) { conn }.open(emptyList())
+            val error = failure { session.next(emptyList()) {} } as ModelRequestException
+            sanitized(error, ModelFailure.TIMEOUT)
+            val trace = checkNotNull(error.diagnostic?.transport)
+            assertEquals(ModelTransportCause.TIMEOUT, trace.cause)
+            assertEquals(when (stage) {
+                "write" -> ModelTransportPhase.SENDING
+                "headers" -> ModelTransportPhase.WAITING_HEADERS
+                else -> ModelTransportPhase.READING_STREAM
+            }, trace.phase)
+            assertEquals(stage == "stream", trace.responseHeadersSeen)
+            assertEquals(0L, trace.sseFrames)
+            assertNull(trace.lastFrameAgeMs)
+            assertFalse(trace.completionReceived)
+            assertFalse(error.diagnostic.toString().contains(sentinel))
+        }
+    }
+
+    @Test fun earlyEofAndUnterminatedSseAreDistinguishableWithoutRecordingBodiesOrReposting() {
+        for (protocol in protocols) for (partial in listOf(false, true)) {
+            val conn = Connection(if (partial) "data: $sentinel" else ": heartbeat\n\n")
+            var posts = 0
+            val session = port(protocol) { posts++; conn }.open(emptyList())
+            val error = failure { session.next(emptyList()) {} } as ModelRequestException
+            sanitized(error, ModelFailure.NETWORK)
+            val trace = checkNotNull(error.diagnostic?.transport)
+            assertEquals(if (partial) ModelTransportCause.PARTIAL_SSE_FRAME else ModelTransportCause.PREMATURE_EOF, trace.cause)
+            assertEquals(ModelRequestKind.POST, trace.requestKind)
+            assertEquals(ModelTransportPhase.READING_STREAM, trace.phase)
+            assertTrue(trace.eofSeen)
+            assertEquals(partial, trace.partialFrame)
+            assertEquals(0L, trace.sseFrames)
+            assertFalse(trace.completionReceived)
+            assertFalse(error.diagnostic.toString().contains(sentinel))
+            assertEquals(1, posts)
+        }
+    }
+
+    @Test fun cursorResumeGetsItsOwnEmptyTraceInsteadOfInheritingPostFrames() {
+        var requests = 0
+        val session = resumable { if (++requests == 1) Connection(created) else Connection(": heartbeat\n\n") }
+        val post = failure { session.nextAcknowledged(emptyList()) { ModelDeliveryAck.ACCEPTED } } as ModelRequestException
+        val resumed = failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } } as ModelRequestException
+        assertEquals(ModelRequestKind.POST, post.diagnostic?.transport?.requestKind)
+        assertEquals(1L, post.diagnostic?.transport?.sseFrames)
+        assertEquals(ModelRequestKind.RESUME, resumed.diagnostic?.transport?.requestKind)
+        assertEquals(0L, resumed.diagnostic?.transport?.sseFrames)
+        assertEquals(ModelTransportCause.PREMATURE_EOF, resumed.diagnostic?.transport?.cause)
+        assertEquals(2, requests)
+    }
+
 }

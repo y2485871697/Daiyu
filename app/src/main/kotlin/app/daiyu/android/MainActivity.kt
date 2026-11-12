@@ -7118,12 +7118,14 @@ class MainActivity : ComponentActivity() {
                 else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
             val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
-            val visibleToolReceipts = toolReceiptSnapshot?.takeIf {
-                receiptsReady || toolReceiptKey?.canDisplayFor(currentToolReceiptKey()) == true
-            }?.projectionReader(controller::runState, controller::runStopping)
-                ?: { message, block ->
-                    if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)
-                }
+            val currentReceipts = currentToolReceiptKey()
+            val retainedReceipts = toolReceiptKey?.let { loaded ->
+                toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)
+            }
+            val visibleToolReceipts = { message: Message, block: MessageBlock.Tool ->
+                retainedReceipts?.invoke(message, block)
+                    ?: if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)
+            }
             val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
                 reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
             chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,

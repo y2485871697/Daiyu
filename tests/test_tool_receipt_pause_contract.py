@@ -8,9 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class ToolReceiptPauseContract(unittest.TestCase):
     def test_pending_receipt_refresh_keeps_only_compatible_display_evidence(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
-        visible = host.split('val visibleToolReceipts =', 1)[1].split('val remapTurns', 1)[0]
-        self.assertIn('receiptsReady || toolReceiptKey?.canDisplayFor(currentToolReceiptKey()) == true', visible)
-        self.assertIn('projectionReader(controller::runState, controller::runStopping)', visible)
+        visible = host.split('val currentReceipts =', 1)[1].split('val remapTurns', 1)[0]
+        self.assertIn('displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)', visible)
+        self.assertIn('retainedReceipts?.invoke(message, block)', visible)
+        self.assertIn('if (receiptsReady) null else', visible)
         prepare = host.split('private fun prepareToolReceipts()', 1)[1].split('private fun publishChat()', 1)[0]
         for fence in ('toolReceiptRead?.cancel()', 'withContext(Dispatchers.IO)',
                       'toolReceiptRequest !== request', 'toolReceiptRequested != key', 'currentToolReceiptKey() != key'):
@@ -34,6 +35,19 @@ class ToolReceiptPauseContract(unittest.TestCase):
         self.assertIn('ToolDisposition.UNKNOWN -> WorkStepState.UNKNOWN', activity)
         mapper = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatTurnMapper.kt').read_text()
         self.assertIn('else WorkStepState.UNKNOWN', mapper)
+
+    def test_partial_reuse_keeps_owner_revision_and_current_absolute_position_fences(self):
+        source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
+        partial = source.split('fun retainedPositions(', 1)[1].split('private fun positions(', 1)[0]
+        for fence in ('conversation != current.conversation', 'data != current.data', 'generation != current.generation',
+                      'positions(current.sources)', 'positions[owner]?.get(block)', 'tools?.getOrNull(index) == block'):
+            self.assertIn(fence, partial)
+        reuse = source.split('fun displayReader(', 1)[1].split('fun projectionReader(', 1)[0]
+        for state in ('SUCCEEDED', 'FAILED', 'NOT_EXECUTED'):
+            self.assertIn('ToolDisposition.' + state, reuse)
+        for state in ('READY', 'IN_FLIGHT', 'UNKNOWN'):
+            self.assertNotIn('ToolDisposition.' + state, reuse)
+        self.assertNotIn('position(message, block)', reuse)
 
     def test_host_regression_observes_pending_frames_at_actual_pause_and_resume(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()

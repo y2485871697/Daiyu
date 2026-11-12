@@ -144,7 +144,7 @@ class ChatRunnerRequestRetryTest {
     }
 
     @Test(timeout = 15000) fun ordinaryPauseCancellationWaitsWithoutStartingReconnectOrBackoff() {
-        for (kind in listOf("network", "timeout", "interrupted")) {
+        for (kind in listOf("network", "timeout", "interrupted", "observed-network", "observed-timeout")) {
             val runtime = Runtime()
             val paused = CountDownLatch(1)
             lateinit var runner: ChatRunner
@@ -154,7 +154,10 @@ class ChatRunnerRequestRetryTest {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     sink(ModelEvent.TextDelta("m", "partial"))
                     assertTrue(runner.pause())
-                    throw ModelRequestException(if (kind == "timeout") ModelFailure.TIMEOUT else ModelFailure.NETWORK,
+                    throw ModelRequestException(if (kind.endsWith("timeout")) ModelFailure.TIMEOUT else ModelFailure.NETWORK,
+                        diagnostic = if (kind.startsWith("observed")) ModelRequestDiagnostic(transport = ModelTransportDiagnostic(
+                            ModelTransportPhase.READING_STREAM, ModelTransportCause.IO, ModelRequestKind.POST,
+                            12, 8, 1, 2, true, false)) else null,
                         transportInterrupted = kind == "interrupted")
                 }
                 override fun resume(sink: (ModelEvent) -> Unit) {

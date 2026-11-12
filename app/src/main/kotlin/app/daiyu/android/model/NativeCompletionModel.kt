@@ -121,6 +121,7 @@ class NativeCompletionModel internal constructor(
             })
             val deliver: (ModelEvent) -> Unit = eventBuffer::accept
             var owned: HttpsURLConnection? = null
+            val trace = ProviderRequestTrace()
             var configuringRequest = true
             try {
                 checkCancelled()
@@ -137,16 +138,21 @@ class NativeCompletionModel internal constructor(
                 conn.setRequestProperty("Accept", "text/event-stream")
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
+                trace.phase = ModelTransportPhase.SENDING
                 conn.setFixedLengthStreamingMode(bytes.size.toLong())
                 conn.outputStream.useProviderResource { bytes.writeTo(it, cancelled::get) }
                 checkCancelled()
+                trace.phase = ModelTransportPhase.WAITING_HEADERS
                 val status = conn.responseCode
+                trace.headersReceived()
                 checkCancelled()
                 if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
-                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse { reader ->
+                trace.phase = ModelTransportPhase.READING_STREAM
+                trace.reader(conn.inputStream).useProviderResponse { reader ->
                     val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver)
+                    trace.completionReceived()
                     checkCancelled()
                     app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(row)
                     val calls = NativeCompletionRequest.calls(settings.protocol, row)
@@ -168,7 +174,7 @@ class NativeCompletionModel internal constructor(
                     throw failure
                 }
                 checkCancelled()
-                val classified = providerTransportFailure(failure, configuringRequest)
+                val classified = providerTransportFailure(failure, configuringRequest, trace)
                 retry.failed(classified)
                 throw classified
             } finally {

@@ -97,4 +97,43 @@ class ToolReceiptSourceTest {
         assertNull(RetainedToolOutcomes.pendingProjection(message.copy(role = Message.USER_ROLE), pending.copy(result = "done")))
     }
 
+    @Test fun oneChangedOrNewToolDoesNotInvalidateOtherExactTerminalSourcePositions() {
+        val tools = List(33) { index -> MessageBlock.Tool(call.copy(id = ToolCallId("call-$index")), "receipt-$index") }
+        val old = message.copy(blocks = tools)
+        val loaded = key().copy(sources = source(old))
+        val changed = tools.map { it.copy() }.toMutableList()
+        changed[20] = changed[20].copy(result = "new-result")
+        changed += MessageBlock.Tool(call.copy(id = ToolCallId("call-33")), "new")
+        val currentMessage = old.copy(status = RunStatus.COMPLETED, blocks = changed)
+        val current = loaded.copy(sources = source(currentMessage))
+        assertFalse(loaded.canDisplayFor(current))
+        val position = loaded.retainedPositions(current)
+        changed.forEachIndexed { index, block ->
+            assertEquals(if (index == 20 || index == 33) null else index, position(currentMessage, block))
+        }
+        for (invalid in listOf(current.copy(conversation = ConversationId("other")),
+            current.copy(data = current.data + 1), current.copy(generation = current.generation + 1)))
+            assertNull(loaded.retainedPositions(invalid)(currentMessage, changed.first()))
+    }
+
+    @Test fun repeatedEqualToolsAcrossReloadedHistoryUseAbsoluteSourcePositionsNotSegmentLocalIndices() {
+        val first = MessageBlock.Tool(call, "same")
+        val second = first.copy()
+        val old = message.copy(blocks = emptyList(), historySegments = listOf(
+            MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, listOf(first)),
+            MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, listOf(second))))
+        val loaded = key().copy(sources = source(old))
+        val currentMessage = old.copy(historySegments = old.historySegments.map { segment ->
+            segment.copy(blocks = segment.blocks.map { (it as MessageBlock.Tool).copy() }) })
+        val position = loaded.retainedPositions(loaded.copy(sources = source(currentMessage)))
+        val expanded = MessageHistory.expand(listOf(currentMessage))
+        expanded.forEachIndexed { index, segment ->
+            assertEquals(index, position(segment, segment.blocks.single() as MessageBlock.Tool))
+        }
+        assertNull(position(expanded.first(), first))
+        val removed = currentMessage.copy(historySegments = currentMessage.historySegments.take(1))
+        val deleted = loaded.retainedPositions(loaded.copy(sources = source(removed)))
+        assertNull(deleted(expanded.last(), expanded.last().blocks.single() as MessageBlock.Tool))
+    }
+
 }

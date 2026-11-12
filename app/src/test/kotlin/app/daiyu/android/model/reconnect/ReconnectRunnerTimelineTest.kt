@@ -23,7 +23,9 @@ class ReconnectRunnerTimelineTest {
                 override val canResume = true
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     assertTrue(runner.pause()); assertTrue(runner.resume())
-                    throw ModelRequestException(ModelFailure.NETWORK, transportInterrupted = true)
+                    throw ModelRequestException(ModelFailure.NETWORK, ModelRequestDiagnostic(transport = ModelTransportDiagnostic(
+                        ModelTransportPhase.READING_STREAM, ModelTransportCause.SOCKET, ModelRequestKind.POST,
+                        10, 5, 1, 1, true, false)))
                 }
                 override fun resume(sink: (ModelEvent) -> Unit) {
                     resumes++

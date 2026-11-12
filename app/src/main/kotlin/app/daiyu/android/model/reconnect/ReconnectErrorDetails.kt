@@ -25,5 +25,11 @@ internal fun reconnectErrorDetails(reason: ModelFailure, diagnostic: ModelReques
             ModelFailure.TLS -> "模型 HTTPS 安全连接失败，请检查服务证书和网络。"
         }
     val field = diagnostic?.field?.let { "，涉及字段：${it.wireName}" }.orEmpty()
-    return "$code\n\n$explanation$field"
+    val transport = diagnostic?.transport?.let { trace ->
+        "\n\n诊断：${trace.requestKind.name} · ${trace.phase.name} · ${trace.cause.name}" +
+            "\n请求 ${trace.requestElapsedMs}ms，流读取 ${trace.streamElapsedMs?.let { "${it}ms" } ?: "未开始"}，完整SSE帧 ${trace.sseFrames}" +
+            "\n末帧距中断 ${trace.lastFrameAgeMs?.let { "${it}ms" } ?: "尚无完整帧"}" +
+            "，响应头${if (trace.responseHeadersSeen) "已收到" else "未收到"}，完成标记${if (trace.completionReceived) "已确认" else "未确认"}"
+    }.orEmpty()
+    return "$code\n\n$explanation$field$transport"
 }

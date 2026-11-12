@@ -36,7 +36,26 @@ internal object RetainedToolOutcomes {
         val generation: Long, val sources: List<Source>, val execution: ExecutionState?) {
         // Live activity is reprojected; the durable evidence remains valid for exactly the same source.
         fun canDisplayFor(current: ReadKey): Boolean = copy(execution = current.execution) == current
+
+        fun retainedPositions(current: ReadKey): (Message, MessageBlock.Tool) -> Int? {
+            if (conversation != current.conversation || data != current.data || generation != current.generation)
+                return { _, _ -> null }
+            val loaded = sources.associateBy { Owner(it.conversation, it.run, it.message) }
+            val positions = positions(current.sources)
+            return reader@ { message, block ->
+                val owner = Owner(message.conversationId.value, message.runId.value, message.id.value)
+                val index = positions[owner]?.get(block) ?: return@reader null
+                if (loaded[owner]?.tools?.getOrNull(index) == block) index else null
+            }
+        }
     }
+
+    private fun positions(sources: List<Source>): Map<Owner, IdentityHashMap<MessageBlock.Tool, Int>> =
+        sources.associate { source ->
+            Owner(source.conversation, source.run, source.message) to IdentityHashMap<MessageBlock.Tool, Int>().apply {
+                source.tools.forEachIndexed { index, block -> put(block, index) }
+            }
+        }
 
     internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>,
         private val questions: Map<Owner, QuestionCheckpointEvidence>,
@@ -51,11 +70,32 @@ internal object RetainedToolOutcomes {
                 ?: tools.indexOf(block).takeIf { it >= 0 } ?: 0
         }
 
-        fun projectionReader(liveState: (Message) -> ExecutionState? = { null }, stopping: (Message) -> Boolean = { false }):
-            (Message, MessageBlock.Tool) -> ToolReceiptUi? = { message, block ->
+        fun displayReader(loaded: ReadKey, current: ReadKey,
+            liveState: (Message) -> ExecutionState? = { null }, stopping: (Message) -> Boolean = { false }):
+            (Message, MessageBlock.Tool) -> ToolReceiptUi? {
+            if (loaded.canDisplayFor(current)) return projectionReader(liveState, stopping, current.sources)
+            val position = loaded.retainedPositions(current)
+            return reader@ { message, block ->
+                if (message.role != Message.ASSISTANT_ROLE) return@reader null
+                val index = position(message, block) ?: return@reader null
+                val owner = Owner(message.conversationId.value, message.runId.value, message.id.value)
+                val disposition = records[owner]?.get(Result(block.invocation, block.result, index))
+                if (disposition == ToolDisposition.SUCCEEDED || disposition == ToolDisposition.FAILED ||
+                    disposition == ToolDisposition.NOT_EXECUTED)
+                    toolReceiptPresentation(disposition, liveOwner = false, phase = ExecutionPhase.IDLE,
+                        runStatus = message.status) else null
+            }
+        }
+
+        fun projectionReader(liveState: (Message) -> ExecutionState? = { null }, stopping: (Message) -> Boolean = { false },
+            currentSources: List<Source>? = null):
+            (Message, MessageBlock.Tool) -> ToolReceiptUi? {
+            val currentPositions = currentSources?.let(::positions) ?: blockPositions
+            return reader@ { message, block ->
             if (message.role != Message.ASSISTANT_ROLE) null else {
                 val owner = Owner(message.conversationId.value, message.runId.value, message.id.value)
-                val sourcePosition = blockPositions[owner]?.get(block) ?: position(message, block)
+                val sourcePosition = currentPositions[owner]?.get(block)
+                    ?: if (currentSources == null) position(message, block) else return@reader null
                 val disposition = records[owner]
                     ?.get(Result(block.invocation, block.result, sourcePosition))
                 disposition?.let {
@@ -65,6 +105,7 @@ internal object RetainedToolOutcomes {
                         pauseRequested = current?.pauseRequested == true, stopRequested = stopping(message), runStatus = message.status,
                         activeCall = block.invocation.id in current?.activeToolCalls.orEmpty())
                 }
+            }
             }
         }
         companion object {

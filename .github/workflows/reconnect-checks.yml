@@ -148,6 +148,11 @@ jobs:
           if [ "$CHECK_SCOPE" != presentation ]; then
             tests+=(
               --tests 'app.daiyu.android.model.AllProtocolRequestRetryTest'
+              --tests 'app.daiyu.android.model.ProviderRequestTraceTest'
+              --tests 'app.daiyu.android.model.ProviderFailureBoundaryTest'
+              --tests 'app.daiyu.android.model.ProviderHttpFailureTest'
+              --tests 'app.daiyu.android.model.SseReaderTest'
+              --tests 'app.daiyu.android.diagnostics.RuntimeDiagnosticsTest'
               --tests 'app.daiyu.android.model.ResponsesBackgroundResumeTest'
               --tests 'app.daiyu.android.model.reconnect.*'
               --tests 'app.daiyu.android.model.usage.UsageRecordingModelTest'
@@ -170,7 +175,7 @@ jobs:
           import xml.etree.ElementTree as ET
           roots = {'domain': Path('core-domain/build/test-results/test'), 'app': Path('app/build/test-results/testDebugUnitTest')}
           required = {'domain': {'ContinuationTextTest', 'ChatRunnerRequestRetryTest', 'ChatRunnerBatchTransactionTest', 'ChatRunnerAttemptGateTest', 'ChatRunnerTransportResumeTest', 'ChatRunnerResumeCheckpointTest', 'ChatRunnerUsageCheckpointTest', 'RunnerHistorySegmentsTest', 'RunnerHistorySegmentsTimeTest', 'ProviderEventDeliveryGateTest', 'MessageHistoryTest'},
-                      'app': {'AllProtocolRequestRetryTest', 'ResponsesBackgroundResumeTest', 'ReconnectRunnerTimelineTest', 'ModelErrorReconnectTest', 'UsageRecordingModelTest', 'ControllerAuxiliaryVisionTest', 'AuxiliaryVisionModelAdapterTest', 'ChatTimelineCodecTest', 'ReconnectPositionCodecTest', 'ReconnectPartsTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest'}}
+                      'app': {'ProviderRequestTraceTest', 'ProviderFailureBoundaryTest', 'ProviderHttpFailureTest', 'SseReaderTest', 'RuntimeDiagnosticsTest', 'AllProtocolRequestRetryTest', 'ResponsesBackgroundResumeTest', 'ReconnectRunnerTimelineTest', 'ModelErrorReconnectTest', 'UsageRecordingModelTest', 'ControllerAuxiliaryVisionTest', 'AuxiliaryVisionModelAdapterTest', 'ChatTimelineCodecTest', 'ReconnectPositionCodecTest', 'ReconnectPartsTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest'}}
           if os.environ['CHECK_SCOPE'] == 'presentation':
               roots.pop('domain')
               required = {'app': {'ReconnectPartsTest', 'ReconnectPositionCodecTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest', 'ReasoningHandoffTest'}}

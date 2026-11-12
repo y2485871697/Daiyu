@@ -1,5 +1,6 @@
 package app.daiyu.android.diagnostics
 
+import app.daiyu.android.domain.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.nio.file.Files
@@ -119,6 +120,32 @@ class RuntimeDiagnosticsTest {
         RuntimeDiagnostics.enabled = false
         write.invoke(RuntimeDiagnostics, OutOfMemoryError("private-fatal-canary"), Thread.currentThread(), currentEpoch)
         assertEquals(0, RuntimeDiagnostics.export().length())
+    }
+
+    @Test fun modelFailureExportsOnlyClosedTransportObservationsAndRespectsDisable() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("runtime-model-transport").toFile())
+        RuntimeDiagnostics.awaitWrites(); RuntimeDiagnostics.clear(); RuntimeDiagnostics.enabled = true
+        try {
+            val diagnostic = ModelRequestDiagnostic(transport = ModelTransportDiagnostic(
+                ModelTransportPhase.READING_STREAM, ModelTransportCause.PARTIAL_SSE_FRAME, ModelRequestKind.RESUME,
+                210, 190, 3, 50, true, false, eofSeen = true, partialFrame = true))
+            RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.MODEL_REQUEST).end(ModelRequestException(ModelFailure.NETWORK, diagnostic))
+            RuntimeDiagnostics.awaitWrites()
+            val rows = RuntimeDiagnostics.export()
+            val row = rows.getJSONObject(rows.length() - 1)
+            assertEquals("READING_STREAM", row.getString("transport_phase"))
+            assertEquals("PARTIAL_SSE_FRAME", row.getString("transport_cause"))
+            assertEquals("RESUME", row.getString("request_kind"))
+            assertEquals(210L, row.getLong("request_elapsed_ms"))
+            assertEquals(3L, row.getLong("sse_frames"))
+            assertTrue(row.getBoolean("eof_seen")); assertTrue(row.getBoolean("partial_sse_frame"))
+            assertFalse(row.getBoolean("completion_received"))
+            for (forbidden in listOf("url", "headers", "body", "message", "cause", "suppressed")) assertFalse(row.has(forbidden))
+            RuntimeDiagnostics.enabled = false
+            RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.MODEL_REQUEST).end(ModelRequestException(ModelFailure.NETWORK, diagnostic))
+            RuntimeDiagnostics.awaitWrites()
+            assertEquals(rows.length(), RuntimeDiagnostics.export().length())
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
     }
 
 }

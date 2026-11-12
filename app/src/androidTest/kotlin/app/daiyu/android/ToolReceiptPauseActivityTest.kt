@@ -222,4 +222,45 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
     }
 
+    fun testNewToolResultOnlyMarksItsOwnRowReadingDuringTheActualHostPendingFrame() {
+        mainThread { activity.select(fixture.database.conversations().single()) }
+        awaitReceipts()
+        val pending = Job()
+        mainThread {
+            val key = checkNotNull(loadedKey())
+            val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
+            @Suppress("UNCHECKED_CAST")
+            val previous = field("shown").get(activity) as List<Pair<Long, Message>>
+            val next = previous.map { (row, message) -> row to if (message.id != historical.id) message else
+                message.copy(blocks = message.blocks.map { (it as MessageBlock.Tool).copy() } +
+                    MessageBlock.Tool(ToolInvocation(ToolCallId("new-reading"), "search_apps", "{}"), "returned")) }
+            try {
+                field("shown").set(activity, next)
+                field("toolReceiptKey").set(activity, key)
+                field("toolReceiptSnapshot").set(activity, snapshot)
+                field("toolReceiptRead").get(activity)?.let { (it as Job).cancel() }
+                field("toolReceiptRead").set(activity, pending)
+                field("toolReceiptRequested").set(activity, currentKey())
+                field("toolReceiptRequest").set(activity, Any())
+                repeat(3) {
+                    call("publishChat")
+                    assertEquals(expected + WorkStepState.PENDING, steps().map { it.state })
+                    assertEquals(listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED, ToolActivityUi.NOT_EXECUTED,
+                        ToolActivityUi.UNKNOWN, ToolActivityUi.READING), steps().map { it.activity })
+                }
+                assertSame(pending, field("toolReceiptRead").get(activity))
+                assertTrue(pending.isActive)
+                assertEquals(0, fixture.opens.get())
+            } finally {
+                pending.cancel()
+                field("shown").set(activity, previous)
+                field("toolReceiptRead").set(activity, null)
+                field("toolReceiptRequested").set(activity, null)
+                field("toolReceiptRequest").set(activity, null)
+                call("publishChat")
+            }
+        }
+        awaitReceipts()
+    }
+
 }

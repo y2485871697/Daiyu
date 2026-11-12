@@ -6,11 +6,13 @@ import app.daiyu.android.domain.ModelFailure
 
 object SseReader {
     fun read(reader:BufferedReader, consume:(String)->Boolean) {
+        val trace = (reader as? ProviderRequestTrace.Reader)?.trace
         val data=StringBuilder()
         var firstCharacter = true
         var skipLf = false
         fun boundedLine(): String? {
             val line = StringBuilder()
+            trace?.reading()
             while (true) {
                 val next = reader.read()
                 if (next == -1) return if (line.isEmpty()) null else line.toString()
@@ -29,9 +31,10 @@ object SseReader {
             }
         }
         while(true) {
-            val line=boundedLine() ?: break
+            val line=boundedLine()
+            if (line == null) { trace?.endOfStream(data.isNotEmpty()); break }
             if(line.isEmpty()) {
-                if(data.isNotEmpty()) {if (!consume(data.toString().removeSuffix("\n"))) return;data.setLength(0)}
+                if(data.isNotEmpty()) {trace?.frameReceived();if (!consume(data.toString().removeSuffix("\n"))) return;data.setLength(0)}
             } else if(line.startsWith("data:")) {
                 val value=line.substring(5).removePrefix(" ")
                 if(data.length+value.length>1_048_576) throw ModelRequestException(ModelFailure.PROTOCOL)

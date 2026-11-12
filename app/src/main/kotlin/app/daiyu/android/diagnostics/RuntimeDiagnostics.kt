@@ -384,6 +384,14 @@ internal object RuntimeDiagnostics {
                     .put("request_rejection", diagnostic.rejection.name)
                     .put("request_field", diagnostic.field?.name ?: "NONE")
                     .put("provider_code", diagnostic.providerCode?.name ?: "NONE")
+                diagnostic.transport?.let { transport ->
+                    value.put("transport_phase", transport.phase.name).put("transport_cause", transport.cause.name)
+                        .put("request_kind", transport.requestKind.name).put("request_elapsed_ms", transport.requestElapsedMs)
+                        .put("stream_elapsed_ms", transport.streamElapsedMs ?: -1).put("sse_frames", transport.sseFrames)
+                        .put("last_frame_age_ms", transport.lastFrameAgeMs ?: -1)
+                        .put("response_headers_seen", transport.responseHeadersSeen).put("completion_received", transport.completionReceived)
+                        .put("eof_seen", transport.eofSeen).put("partial_sse_frame", transport.partialFrame)
+                }
             }
         }
         if (failure != null || stack) {

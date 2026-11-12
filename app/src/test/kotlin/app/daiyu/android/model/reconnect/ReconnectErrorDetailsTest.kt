@@ -31,4 +31,19 @@ class ReconnectErrorDetailsTest {
         assertTrue(detail.contains("模型不支持低思考"))
         assertTrue(detail.contains("reasoning"))
     }
+    @Test fun transportOnlyDetailsDistinguishEarlyEofWithoutInventingHttpOrCompletedAnswers() {
+        val diagnostic = ModelRequestDiagnostic(transport = ModelTransportDiagnostic(
+            ModelTransportPhase.READING_STREAM, ModelTransportCause.PREMATURE_EOF, ModelRequestKind.POST,
+            130, 120, 2, 80, true, false, eofSeen = true))
+        val detail = reconnectErrorDetails(ModelFailure.NETWORK, diagnostic)
+        assertTrue(detail.startsWith("NETWORK\n\n"))
+        assertTrue(detail.contains("PREMATURE_EOF"))
+        assertTrue(detail.contains("完整SSE帧 2"))
+        assertTrue(detail.contains("完成标记未确认"))
+        assertFalse(detail.contains("HTTP"))
+        assertFalse(detail.contains("已重连"))
+        assertNotEquals(detail, reconnectErrorDetails(ModelFailure.NETWORK, diagnostic.copy(transport =
+            diagnostic.transport!!.copy(cause = ModelTransportCause.TIMEOUT, eofSeen = false))))
+    }
+
 }

@@ -75,7 +75,8 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertIn('Triple(canFollowBottom(),', follow)
         guard = chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
         self.assertIn('!initialPositionPending &&', guard)
-        self.assertIn('motion.step(overflow.toFloat(), System.nanoTime(), currentDensity)', follow)
+        self.assertIn('motion.step(overflow.toFloat(), frameTimeNanos, currentDensity)', follow)
+        self.assertNotIn('System.nanoTime()', follow)
 
 
     def test_android_regressions_observe_draws_cold_parse_revisit_and_live_updates(self):

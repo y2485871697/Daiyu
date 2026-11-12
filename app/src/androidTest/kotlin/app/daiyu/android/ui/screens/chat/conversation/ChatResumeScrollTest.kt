@@ -31,19 +31,22 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         override val lifecycle: Lifecycle get() = registry
     }
     private lateinit var owner: Owner
+    private var contentActive by mutableStateOf(true)
     private var height by mutableStateOf(600.dp)
     private var viewport by mutableStateOf(240.dp)
     private var request by mutableStateOf(ChatScrollRequest(1))
     private val formattedBody = "## 恢复前完整标题\n\n中文正文甲，包含 **粗体** 与一段已经完成的消息。\n\n- 第一项\n- 第二项"
     private var body by mutableStateOf("")
 
-    private fun mount(formatted: Boolean = false) {
+    private fun mount(formatted: Boolean = false, active: Boolean = true) {
         mainThread {
+            contentActive = active
             if (formatted) body = formattedBody
             owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                    CompositionLocalProvider(LocalLifecycleOwner provides owner,
+                        app.daiyu.android.ui.navigation.LocalPageContentActive provides contentActive) {
                         Box(Modifier.size(320.dp, viewport)) {
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
@@ -59,7 +62,21 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+        if (active) ui.onNodeWithText("resume tail marker").assertIsDisplayed()
+    }
+
+    fun testInactiveInitialPositionResumesWithoutLifecycleOrNewRequest() {
+        mount(active = false)
+        mainThread { contentActive = true }
+        ui.waitForIdle()
         ui.onNodeWithText("resume tail marker").assertIsDisplayed()
+        val before = top("chat-turn:tail")
+        mainThread { contentActive = false }
+        ui.waitForIdle()
+        mainThread { contentActive = true }
+        ui.waitForIdle()
+        ui.onNodeWithText("resume tail marker").assertIsDisplayed()
+        assertEquals(before, top("chat-turn:tail"), 1f)
     }
 
     private fun top(tag: String): Float = ui.onNodeWithTag(tag).fetchSemanticsNode()
@@ -69,6 +86,46 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
         return top("chat-turn:tail")
+    }
+
+    fun testInactivePageGrowthAlignsOnceWithoutLifecycleOrNewRequest() {
+        mount()
+        mainThread { contentActive = false }
+        val stopped = top("chat-turn:tail")
+        mainThread { height += 300.dp }
+        ui.waitForIdle()
+        assertEquals(stopped, top("chat-turn:tail"), 1f)
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { contentActive = true }
+            val density = activity.resources.displayMetrics.density
+            var corrections = 0
+            var previous = stopped
+            repeat(12) {
+                val current = frame()
+                if (kotlin.math.abs(current - previous) > 1f) corrections++
+                val movement = stopped - current
+                assertTrue("Inactive page growth cannot restart easing: $movement",
+                    kotlin.math.abs(movement) <= 1f || kotlin.math.abs(movement - 300f * density) <= 2f)
+                previous = current
+            }
+            assertEquals(1, corrections)
+            assertEquals(300f * density, stopped - previous, 2f)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.onNodeWithText("resume tail marker").assertIsDisplayed()
+    }
+
+    fun testInactivePageGrowthPreservesManualReadingOwnership() {
+        mount()
+        mainThread { request = ChatScrollRequest(2, messageId = "u1", followBottom = false) }
+        ui.waitForIdle()
+        val before = top("chat-turn:u1")
+        mainThread { contentActive = false; height += 300.dp }
+        ui.waitForIdle()
+        mainThread { contentActive = true }
+        ui.waitForIdle()
+        assertEquals(before, top("chat-turn:u1"), 1f)
+        ui.onNodeWithText("history 1").assertIsDisplayed()
     }
 
     fun testStreamingPrefixResumesFollowingBeforeTheLatestProjectionCompletes() {

@@ -185,6 +185,7 @@ data class ModelTransportDiagnostic(
     val completionReceived: Boolean,
     val eofSeen: Boolean = false,
     val partialFrame: Boolean = false,
+    val localDisconnectRequested: Boolean = false,
 ) {
     init {
         require(requestElapsedMs >= 0 && sseFrames >= 0)

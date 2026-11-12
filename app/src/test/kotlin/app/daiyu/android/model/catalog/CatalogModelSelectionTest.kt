@@ -18,6 +18,21 @@ class CatalogModelSelectionTest {
     private fun backend(file: File) = FileSavedModelCatalogPersistence(file, codec)
     private fun record(id: String) = SavedCatalogModel(id, "Local $id", "policy-$id")
 
+    @Test fun selectionIndexKeepsFullTicketsAndRejectsEveryOccurrenceOfDuplicateIds() {
+        val snapshot = SavedModelCatalogSnapshot("provider", 23L,
+            listOf(record("a"), record("b"), record("b").copy(displayName = "duplicate"),
+                record("c"), record("b")))
+        val index = snapshot.selectionIndex()
+        assertEquals(listOf("a", "c"), index.keys.toList())
+        snapshot.models.map { it.id }.distinct().forEach { id ->
+            assertEquals(snapshot.selectionFor(id), index[id])
+        }
+        assertEquals("provider", index.getValue("c").providerIdentity)
+        assertEquals(23L, index.getValue("c").expectedRevision)
+        assertEquals(record("c"), index.getValue("c").record)
+        assertTrue(snapshot.copy(models = emptyList()).selectionIndex().isEmpty())
+    }
+
     @Test fun offlineReadAndSelectionSurviveReopenWithoutImportOrNetwork() {
         val file = File(temporary.root, "catalog")
         val before = backend(file).register(listOf(record("a"), record("b")))

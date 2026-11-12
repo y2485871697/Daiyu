@@ -2246,14 +2246,14 @@ class MainActivity : ComponentActivity() {
                             checkNotNull(assistantStore.read(id)) { "助手已不存在" }
                             assistantEditReturnPage = retainedPage
                             assistantEditReturnToSidebar = true
-                            dismissSidebar(); assistantEditingId = id; retainedPage = "assistant-edit"
+                            dismissSidebarState(); assistantEditingId = id; retainedPage = "assistant-edit"
                         } },
-                        onOpenAssistants = { dismissSidebar(); openAssistantPicker(global = true) },
-                        onOpenSettings = { dismissSidebar(); retainedPage = "settings" },
-                        onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
-                        onOpenUsageStats = { dismissSidebar(); openUsagePage("chat") },
-                        onOpenSkills = { dismissSidebar(); guard { openSkillManagement() } },
-                        onOpenPermissions = { dismissSidebar(); retainedPage = "permission-check" },
+                        onOpenAssistants = { dismissSidebarState(); openAssistantPicker(global = true) },
+                        onOpenSettings = { dismissSidebarState(); retainedPage = "settings" },
+                        onOpenModelProviders = { dismissSidebarState(); guard { modelSettings() } },
+                        onOpenUsageStats = { dismissSidebarState(); openUsagePage("chat") },
+                        onOpenSkills = { dismissSidebarState(); guard { openSkillManagement() } },
+                        onOpenPermissions = { dismissSidebarState(); retainedPage = "permission-check" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
                             val messageSpeech by speechHost.state.collectAsStateWithLifecycle()

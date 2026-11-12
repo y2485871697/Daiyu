@@ -218,6 +218,49 @@ class ProviderFailureBoundaryTest {
         return ResponsesModel(config, factory).withBackgroundResume(token).open(emptyList()) as CheckpointedResumableModelSession
     }
 
+    @Test fun explicitDisconnectMarksOnlyItsActualPostAttemptForEveryProtocol() {
+        for (protocol in protocols) {
+            lateinit var session: ModelSession
+            var requests = 0
+            session = port(protocol) {
+                val local = ++requests == 1
+                object : Connection() {
+                    override fun getResponseCode(): Int {
+                        if (local) (session as RequestRetryModelSession).disconnectTransport()
+                        throw java.net.SocketException(sentinel)
+                    }
+                }
+            }.open(emptyList())
+            val first = failure { session.next(emptyList()) {} } as ModelRequestException
+            sanitized(first, ModelFailure.NETWORK)
+            assertTrue(first.diagnostic!!.transport!!.localDisconnectRequested)
+            val second = failure { (session as ResumableModelSession).resume {} } as ModelRequestException
+            sanitized(second, ModelFailure.NETWORK)
+            assertFalse(second.diagnostic!!.transport!!.localDisconnectRequested)
+            assertEquals(2, requests)
+        }
+    }
+
+    @Test fun explicitDisconnectMarksCursorGetWithoutChangingRecoveryClassification() {
+        lateinit var session: CheckpointedResumableModelSession
+        var requests = 0
+        session = resumable {
+            if (++requests == 1) Connection(created)
+            else object : Connection() {
+                override fun getResponseCode(): Int {
+                    session.disconnectTransport()
+                    throw java.net.SocketException(sentinel)
+                }
+            }
+        }
+        failure { session.nextAcknowledged(emptyList()) { ModelDeliveryAck.ACCEPTED } }
+        val observed = failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } } as ModelRequestException
+        sanitized(observed, ModelFailure.NETWORK)
+        assertTrue(observed.diagnostic!!.transport!!.localDisconnectRequested)
+        assertEquals(ModelRequestKind.RESUME, observed.diagnostic!!.transport!!.requestKind)
+        assertEquals(2, requests)
+    }
+
     @Test fun resumeRedirectsAreClassifiedAndNeverReadOrFollowedOrPostedAgain() {
         for (code in listOf(301, 302, 303, 307, 308)) {
             val post = Connection(created)

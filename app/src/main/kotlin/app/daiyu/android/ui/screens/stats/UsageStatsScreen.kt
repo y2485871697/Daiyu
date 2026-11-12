@@ -8,6 +8,10 @@ import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -106,6 +111,8 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
         stats = loaded.getOrDefault(UsageStatsSnapshot())
     }
 
+    val modelContent = if (!stats.isLoading && !loadFailed && selectedTab == UsageStatsTab.Models)
+        modelUsageContent(stats) else null
     SettingsScaffoldPage(
         title = stringResource(R.string.stats_page_title),
         compactTitle = true,
@@ -140,13 +147,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                 }
             }
         } else if (selectedTab == UsageStatsTab.Models) {
-            item(key = "model-usage") {
-                ModelUsagePane(
-                    stats = stats,
-                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)
-                        .testTag("usage-model-pane"),
-                )
-            }
+            modelContent?.invoke(this)
         } else {
             item(key = "heatmap") {
                 Card(modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp).testTag("usage-heatmap")) {
@@ -260,84 +261,106 @@ private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
     )
 
 @Composable
-private fun ModelUsagePane(
-    stats: UsageStatsSnapshot,
-    modifier: Modifier = Modifier,
-) {
+private fun modelUsageContent(stats: UsageStatsSnapshot): LazyListScope.() -> Unit {
     val usage = stats.modelUsage
     var expandedModels by remember { mutableStateOf(emptySet<String>()) }
     var startBound by remember { mutableStateOf(UsageTimeBound()) }
     var endBound by remember { mutableStateOf(UsageTimeBound()) }
-    val filtered = remember(usage, startBound, endBound) {
-        usage.filtered(startBound.toMillis(endOfBound = false), endBound.toMillis(endOfBound = true))
-    }
-    val tokens = stats.modelTokens(filtered)
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ModelUsageFilterCard(
-            start = startBound,
-            end = endBound,
-            onStartChange = { startBound = it },
-            onEndChange = { endBound = it },
-            onClear = {
-                startBound = UsageTimeBound()
-                endBound = UsageTimeBound()
-            },
-        )
-        Card(Modifier.testTag("usage-model-total")) {
-            Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.stats_model_total_title),
-                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
-                UsageTokenRows(tokens)
-                ModelMetricRow(stringResource(R.string.stats_model_cache_hit_rate),
-                    if (stats.tokenAccountingAvailable && tokens.input != null && tokens.cached != null && tokens.input > 0L)
-                        formatCacheHitRate(tokens.cached, tokens.input) else "0")
+    val projectionKey = remember(usage, stats.tokenAccountingAvailable, startBound, endBound) { Any() }
+    val projection = key(projectionKey) {
+        val prepared by produceState<Pair<ModelUsageSnapshot, UsageTokenMetrics>?>(null,
+            usage, stats.tokenAccountingAvailable, startBound, endBound) {
+            value = withContext(Dispatchers.Default) {
+                val filtered = usage.filtered(startBound.toMillis(endOfBound = false), endBound.toMillis(endOfBound = true))
+                filtered to stats.modelTokens(filtered)
             }
         }
-        if (filtered.providers.isEmpty()) {
-            if (startBound.isSet || endBound.isSet) Text(
-                text = stringResource(R.string.stats_model_filter_empty),
-                style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
-                color = usagePalette().muted,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-            )
+        prepared
+    }
+    return {
+        item(key = "model-usage-filter") {
+            Box(Modifier.testTag("usage-model-pane")) {
+                ModelUsageFilterCard(start = startBound, end = endBound,
+                    onStartChange = { startBound = it }, onEndChange = { endBound = it },
+                    onClear = { startBound = UsageTimeBound(); endBound = UsageTimeBound() },
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp))
+            }
+        }
+        val current = projection
+        if (current == null) {
+            item(key = "model-usage-loading") {
+                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    InfiniteProgressIndicator(modifier = Modifier.testTag("usage-model-loading"))
+                }
+            }
         } else {
+            val (filtered, tokens) = current
+            item(key = "model-usage-total") {
+                Card(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp).testTag("usage-model-total")) {
+                    Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(stringResource(R.string.stats_model_total_title),
+                            style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
+                        UsageTokenRows(tokens)
+                        ModelMetricRow(stringResource(R.string.stats_model_cache_hit_rate),
+                            if (stats.tokenAccountingAvailable && tokens.input != null && tokens.cached != null && tokens.input > 0L)
+                                formatCacheHitRate(tokens.cached, tokens.input) else "0")
+                    }
+                }
+            }
+            if (filtered.providers.isEmpty() && (startBound.isSet || endBound.isSet)) {
+                item(key = "model-usage-empty") {
+                    Text(text = stringResource(R.string.stats_model_filter_empty),
+                        style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp), color = usagePalette().muted,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                }
+            }
             filtered.providers.forEach { provider ->
-                Card {
-                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = provider.name,
-                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                                modifier = Modifier.weight(1f),
-                            )
+                item(key = "usage-provider:${provider.id}") {
+                    ModelUsageGroupPart(first = true, last = provider.models.isEmpty()) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = provider.name, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                                modifier = Modifier.weight(1f))
                         }
-                        provider.models.forEach { model ->
-                            val key = "${provider.id}/${model.id}"
-                            val expanded = key in expandedModels
-                            ModelUsageRow(
-                                model = model,
-                                expanded = expanded,
-                                onToggle = {
-                                    expandedModels = if (expanded) {
-                                        expandedModels - key
-                                    } else {
-                                        expandedModels + key
-                                    }
-                                },
-                            )
-                        }
+                    }
+                }
+                itemsIndexed(provider.models, key = { _, model -> "usage-model:${provider.id}/${model.id}" }) { index, model ->
+                    val id = "${provider.id}/${model.id}"
+                    ModelUsageGroupPart(first = false, last = index == provider.models.lastIndex) {
+                        ModelUsageRow(model = model, expanded = id in expandedModels, onToggle = {
+                            expandedModels = if (id in expandedModels) expandedModels - id else expandedModels + id
+                        })
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ModelUsageGroupPart(first: Boolean, last: Boolean, content: @Composable () -> Unit) {
+    val colors = usagePalette()
+    val shape = RoundedCornerShape(topStart = if (first) 15.dp else 0.dp, topEnd = if (first) 15.dp else 0.dp,
+        bottomStart = if (last) 15.dp else 0.dp, bottomEnd = if (last) 15.dp else 0.dp)
+    Column(Modifier.padding(horizontal = 12.dp).padding(bottom = if (last) 12.dp else 0.dp)
+        .fillMaxWidth().clip(shape).background(colors.bubble.copy(alpha = .62f))
+        .drawBehind {
+            val r = 15.dp.toPx().coerceAtMost(size.width / 2)
+            val stroke = 1.dp.toPx()
+            val path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(0f, if (first) r else 0f)
+                if (first) { quadraticBezierTo(0f, 0f, r, 0f); lineTo(size.width - r, 0f)
+                    quadraticBezierTo(size.width, 0f, size.width, r) }
+                else moveTo(size.width, 0f)
+                lineTo(size.width, size.height - if (last) r else 0f)
+                if (last) { quadraticBezierTo(size.width, size.height, size.width - r, size.height)
+                    lineTo(r, size.height); quadraticBezierTo(0f, size.height, 0f, size.height - r) }
+                else moveTo(0f, size.height)
+                lineTo(0f, if (first) r else 0f)
+            }
+            drawPath(path, colors.line, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+        }.padding(horizontal = 9.dp).padding(top = if (first) 17.dp else 0.dp, bottom = if (last) 17.dp else 0.dp)) {
+        content()
     }
 }
 
@@ -350,6 +373,7 @@ private fun ModelUsageFilterCard(
     onStartChange: (UsageTimeBound) -> Unit,
     onEndChange: (UsageTimeBound) -> Unit,
     onClear: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val view = LocalView.current
     var expanded by remember { mutableStateOf(false) }
@@ -360,7 +384,7 @@ private fun ModelUsageFilterCard(
     }
     val summary = filterSummaryText(start, end, matchedPreset)
         ?: stringResource(R.string.stats_model_filter_collapsed)
-    Card(Modifier.testTag("usage-model-filter")) {
+    Card(modifier.testTag("usage-model-filter")) {
         Column {
             Row(
                 modifier = Modifier

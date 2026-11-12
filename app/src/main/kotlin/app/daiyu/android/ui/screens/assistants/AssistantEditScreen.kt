@@ -88,7 +88,7 @@ fun AssistantEditScreen(
     var memorySaved by remember(session) { mutableStateOf("") }
     var cropBitmap by remember(session) { mutableStateOf<Bitmap?>(null) }
     var saving by remember(session) { mutableStateOf(false) }
-    val avatarBitmap = remember(assistantId, avatarFileName) { assets.avatarBitmap(avatarFileName) }
+    val avatarBitmap = rememberAssistantAvatar(assets, avatarFileName)
     val memoryBytes = remember(memoryDraft) { memoryDraft.toByteArray(Charsets.UTF_8).size }
     val memoryOverLimit = memoryBytes > AssistantAssets.MAX_MEMORY_BYTES
     val dirty = description != original.description || name.trim() != original.name || prompt != original.prompt || avatarFileName != original.avatarFileName ||

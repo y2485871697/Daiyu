@@ -10,6 +10,16 @@ internal data class CatalogModelSelection<T>(
 internal fun <T> SavedModelCatalogSnapshot<T>.selectionFor(id: String): CatalogModelSelection<T>? =
     models.singleOrNull { it.id == id }?.let { CatalogModelSelection(providerIdentity, revision, it) }
 
+internal fun <T> SavedModelCatalogSnapshot<T>.selectionIndex(): Map<String, CatalogModelSelection<T>> {
+    val unique = LinkedHashMap<String, CatalogModelSelection<T>>()
+    val duplicates = HashSet<String>()
+    models.forEach { model ->
+        if (model.id in unique) { unique.remove(model.id); duplicates += model.id }
+        else if (model.id !in duplicates) unique[model.id] = CatalogModelSelection(providerIdentity, revision, model)
+    }
+    return unique
+}
+
 /**
  * Read/consume port for already imported records. Implementations must recheck identity, revision
  * AND the complete record under the same lease as the host mutation. A read-then-save is unsafe.

@@ -49,11 +49,12 @@ class SettingsCopyCleanupContractTest(unittest.TestCase):
 
     def test_model_usage_empty_hint_removed_without_hiding_filter_empty_feedback(self):
         screen = source("ui/screens/stats/UsageStatsScreen.kt")
-        pane = screen.split("private fun ModelUsagePane(", 1)[1].split("private fun ", 1)[0]
+        pane = screen.split("private fun modelUsageContent(", 1)[1].split("private fun ", 1)[0]
         self.assertNotIn("R.string.stats_model_empty", pane)
-        self.assertIn("if (startBound.isSet || endBound.isSet) Text(", pane)
+        self.assertNotIn('"usage-model-coverage"', pane)
+        self.assertIn("filtered.providers.isEmpty() && (startBound.isSet || endBound.isSet)", pane)
         self.assertIn("stringResource(R.string.stats_model_filter_empty)", pane)
-        for text in ('"usage-model-total"', '"usage-model-coverage"', "ModelUsageFilterCard(", "UsageTokenRows("):
+        for text in ('"usage-model-total"', "ModelUsageFilterCard(", "UsageTokenRows("):
             self.assertIn(text, pane)
 
 

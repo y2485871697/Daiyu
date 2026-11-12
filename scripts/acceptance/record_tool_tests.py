@@ -79,6 +79,32 @@ TASK_SCROLL_MODULES = (
 )
 
 
+PAGE_PERFORMANCE_PLATFORM_CLASSES = TASK_SCROLL_PLATFORM_CLASSES + (
+    'app.daiyu.android.UsagePresentationActivityTest',
+    'app.daiyu.android.LocalCatalogModelsActivityTest',
+    'app.daiyu.android.ModelBulkSelectionActivityTest',
+    'app.daiyu.android.AssistantAvatarTest',
+    'app.daiyu.android.AssistantNavigationActivityTest',
+    'app.daiyu.android.AssistantPickerAdmissionTest',
+    'app.daiyu.android.SkillInstallScreenTest',
+    'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',
+    'app.daiyu.android.ui.navigation.PageBackStackActivityTest',
+    'app.daiyu.android.ui.navigation.PageEnterActivityTest',
+    'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
+)
+PAGE_PERFORMANCE_MODULES = TASK_SCROLL_MODULES + (
+    'test_model_bulk_selection_contract',
+    'test_settings_copy_cleanup_contract',
+    'test_page_enter_contract',
+    'test_page_back_gesture_contract',
+    'test_page_back_repeat_contract',
+    'test_sidebar_selection_contract',
+    'test_streaming_freeze_contract',
+    'test_page_performance_contract',
+    'test_page_performance_smoke_scope',
+)
+
+
 MARKDOWN_ENTRY_PLATFORM_CLASSES = (
     'app.daiyu.android.ControllerLifecycleTest',
     'app.daiyu.android.RestoredMarkdownActivityTest',
@@ -206,6 +232,9 @@ LINUX_PIN_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get('SMOKE_MODE') == 'smoke'
+            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(PAGE_PERFORMANCE_PLATFORM_CLASSES)):
+        return [python, '-B', '-m', 'unittest', *PAGE_PERFORMANCE_MODULES, '-v'], 'page-performance-targeted'
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == TERMINAL_SCREEN_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *TERMINAL_SCREEN_MODULES, "-v"], "terminal-screen-targeted"

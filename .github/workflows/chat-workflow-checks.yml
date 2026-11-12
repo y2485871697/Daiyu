@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动、附件弹层、权限界面、终端输出或工具回执的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts]
+        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance]
         default: workflow
 permissions:
   contents: read
@@ -95,6 +95,15 @@ jobs:
                           'test_streaming_occlusion_contract.py',
                           'test_streaming_follow_contract.py', 'test_task_scroll_smoke_scope.py',
                           'test_diagnostic_smoke_source.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'page-performance':
+              patterns = ('test_reasoning_stream_cost_contract.py', 'test_workflow_render_isolation_contract.py',
+                          'test_markdown_typing_contract.py', 'test_chat_resume_scroll_contract.py',
+                          'test_streaming_occlusion_contract.py', 'test_streaming_follow_contract.py',
+                          'test_task_scroll_smoke_scope.py', 'test_diagnostic_smoke_source.py',
+                          'test_model_bulk_selection_contract.py', 'test_settings_copy_cleanup_contract.py',
+                          'test_page_enter_contract.py', 'test_sidebar_selection_contract.py',
+                          'test_streaming_freeze_contract.py', 'test_page_performance_contract.py',
+                          'test_page_performance_smoke_scope.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'tool-receipts':
               patterns = ('test_tool_receipt_pause_contract.py', 'test_tool_receipt_snapshot_contract.py',
                           'test_streaming_freeze_contract.py', 'test_reasoning_flow_stability_contract.py', 'test_pause_receipt_smoke_scope.py',
@@ -144,6 +153,15 @@ jobs:
             classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest
                      AssistantWorkflowCompositionTest WorkflowNarrationCompositionTest ReasoningStreamCompositionTest)
           fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == page-performance ]]; then
+            classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest
+                     AssistantWorkflowCompositionTest WorkflowNarrationCompositionTest ReasoningStreamCompositionTest
+                     ToolPresentationCacheTest ChatTurnMapperTest StreamingHistoryRefreshTest)
+            filters+=(--tests app.daiyu.android.model.catalog.CatalogModelSelectionTest
+                      --tests app.daiyu.android.data.repository.ModelUsageProjectionTest
+                      --tests app.daiyu.android.ui.screens.terminal.TerminalTaskOutputTest
+                      --tests app.daiyu.android.terminal.TerminalGridBufferTest)
+          fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == terminal-output ]]; then
             classes=(ToolOutputPreviewTest)
           fi
@@ -185,6 +203,11 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
                           'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'page-performance':
+              expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
+                          'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest',
+                          'ToolPresentationCacheTest', 'ChatTurnMapperTest', 'StreamingHistoryRefreshTest',
+                          'CatalogModelSelectionTest', 'ModelUsageProjectionTest', 'TerminalTaskOutputTest', 'TerminalGridBufferTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'terminal-output':
               expected = {'ToolOutputPreviewTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'tool-receipts':

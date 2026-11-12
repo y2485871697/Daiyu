@@ -44,6 +44,7 @@ class NativeCompletionModel internal constructor(
         private val ownItems = mutableListOf<String>()
         private val cancelled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
+        @Volatile private var connectionTrace: Pair<HttpsURLConnection, ProviderRequestTrace>? = null
         private var usable = true
         private var started = false
         private var pending = emptyMap<String, String>()
@@ -58,7 +59,11 @@ class NativeCompletionModel internal constructor(
         override fun prepareContinuation(continuation: RequestContinuation) = retry.prepare(continuation)
         @Synchronized
         override fun resume(sink: (ModelEvent) -> Unit) = retry.replay { next(it, sink) }
-        override fun disconnectTransport() { try { connection?.disconnect() } catch (_: Exception) {} }
+        override fun disconnectTransport() {
+            val current = connection
+            connectionTrace?.takeIf { it.first === current }?.second?.localDisconnectRequested()
+            try { current?.disconnect() } catch (_: Exception) {}
+        }
 
         @Synchronized
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
@@ -127,7 +132,7 @@ class NativeCompletionModel internal constructor(
                 checkCancelled()
                 deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes)))
                 checkCancelled()
-                val conn = connect(URL(endpoint)); owned = conn; connection = conn
+                val conn = connect(URL(endpoint)); owned = conn; connectionTrace = conn to trace; connection = conn
                 checkCancelled()
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
@@ -180,7 +185,7 @@ class NativeCompletionModel internal constructor(
             } finally {
                 bytes.close()
                 try { owned?.errorStream?.close() } catch (_: Exception) {}
-                try { owned?.disconnect() } catch (_: Exception) {} finally { connection = null }
+                try { owned?.disconnect() } catch (_: Exception) {} finally { connection = null; connectionTrace = null }
             }
             checkCancelled(); usable = true; retry.completed()
         }

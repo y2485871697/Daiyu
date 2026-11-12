@@ -35,6 +35,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.daiyu.android.terminal.TerminalGridBuffer
 import app.daiyu.android.terminal.TerminalSessionEntry
 import app.daiyu.android.ui.haptics.clickable
@@ -175,12 +177,18 @@ internal fun terminalPlainOutput(text: String): String = text
 
 @Composable
 internal fun terminalStyledOutput(text: String): AnnotatedString {
-    val lines = text.replace("\r\n", "\n").lines()
-    val grid = remember(text) { TerminalGridBuffer(500, lines.size.coerceIn(1, 500), 500).apply { accept(text.replace("\r\n", "\n").replace("\n", "\r\n")) }.frame() }
     val color = MaterialTheme.colorScheme.onSurfaceVariant
-    // The styled output is immutable for a given text/palette. Memoize the complete annotated
-    // value, not only the terminal grid, so LazyColumn placement does not rebuild every span.
-    return remember(text, color) { buildAnnotatedString {
+    val prepared by produceState(AnnotatedString(""), text, color) {
+        value = withContext(Dispatchers.Default) { prepareTerminalStyledOutput(text, color) }
+    }
+    return prepared
+}
+
+internal fun prepareTerminalStyledOutput(text: String, color: Color): AnnotatedString {
+    val normalized = text.replace("\r\n", "\n")
+    val rows = (normalized.count { it == '\n' } + 1).coerceIn(1, 500)
+    val grid = TerminalGridBuffer(500, rows, 500).apply { accept(normalized.replace("\n", "\r\n")) }.frame()
+    return buildAnnotatedString {
         val nonempty = grid.lines.indexOfLast { row -> row.any { it.text != " " && !it.continuation } }
         grid.lines.take(nonempty + 1).forEachIndexed { index, row ->
             row.take(row.indexOfLast { it.text != " " && !it.continuation } + 1).forEach { cell ->
@@ -189,5 +197,5 @@ internal fun terminalStyledOutput(text: String): AnnotatedString {
             }
             if (index < nonempty) append('\n')
         }
-    } }
+    }
 }

@@ -41,8 +41,9 @@ class ModelBulkSelectionContract(unittest.TestCase):
 
     def test_settings_button_is_sibling_of_full_content_column(self):
         s=(UI/'LocalCatalogModelsScreen.kt').read_text()
-        self.assertIn('val ticket = snapshot?.selectionFor(model.id)',s)
-        card=s.split('val ticket = snapshot?.selectionFor(model.id)',1)[1]
+        self.assertIn('val ticket = selectionIndex[model.id]',s)
+        self.assertIn('val selectionIndex = remember(snapshot) { snapshot?.selectionIndex().orEmpty() }', s)
+        card=s.split('val ticket = selectionIndex[model.id]',1)[1]
         self.assertIn('Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically)',card)
         self.assertIn('Column(Modifier.weight(1f))',card)
         self.assertLess(card.index('FlowRow('),card.index('testTag("local-model-rename:'))

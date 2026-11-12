@@ -140,7 +140,7 @@ class ResponsesModel internal constructor(
                 val url = settings.requestEndpoint() + "/$id?stream=true&starting_after=$sequence"
                 val authentication = authHeaders()
                 conn = connect(URL(url))
-                synchronized(postLock) { checkCancelled(); connection = conn }
+                synchronized(postLock) { checkCancelled(); connectionTrace = conn to trace; connection = conn }
                 conn.requestMethod = "GET"; conn.doOutput = false; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 settings.customHeaders.applyTo(conn)
@@ -188,7 +188,7 @@ class ResponsesModel internal constructor(
                     classified.failure == ModelFailure.AUTHENTICATION && rejectedAuthorization != null)
                 throw classified
             } finally {
-                synchronized(postLock) { if (connection === conn) connection = null }
+                synchronized(postLock) { if (connection === conn) { connection = null; connectionTrace = null } }
                 try { conn?.disconnect() } catch (_: Exception) {}
             }
         }
@@ -206,7 +206,10 @@ class ResponsesModel internal constructor(
             pending = calls.toSet()
         }
         override fun disconnectTransport() {
-            val current = synchronized(postLock) { connection }
+            val current = synchronized(postLock) {
+                connectionTrace?.takeIf { it.first === connection }?.second?.localDisconnectRequested()
+                connection
+            }
             try { current?.disconnect() } catch (_: Exception) {}
         }
         private val cancelled = AtomicBoolean(false)
@@ -216,6 +219,7 @@ class ResponsesModel internal constructor(
         @Volatile private var pendingVideoPost: VideoPostRequest? = null
         private var postNumber = 0
         @Volatile private var connection: HttpsURLConnection? = null
+        @Volatile private var connectionTrace: Pair<HttpsURLConnection, ProviderRequestTrace>? = null
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
         private val imagePlan = ImageRequestPreflight.history(settings, ProviderProtocol.RESPONSES, capability, historySnapshot, images)
         private val videoPlan = videos?.also { it.validate(settings, videoCapability, historySnapshot) }
@@ -418,6 +422,7 @@ class ResponsesModel internal constructor(
                     if (pendingPost != null) {
                         check(pendingVideoPost === pendingPost) { "Video POST request expired" }
                     }
+                    connectionTrace = conn to trace
                     connection = conn
                 }
                 checkCancelled()
@@ -490,7 +495,7 @@ class ResponsesModel internal constructor(
                 post?.invalidate()
                 synchronized(postLock) {
                     if (pendingVideoPost === post) pendingVideoPost = null
-                    if (connection === ownedConnection) connection = null
+                    if (connection === ownedConnection) { connection = null; connectionTrace = null }
                 }
                 try { ownedConnection?.disconnect() } catch (_: Exception) {}
             }

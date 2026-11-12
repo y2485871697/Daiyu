@@ -52,7 +52,7 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.model.catalog.CatalogModelSelection
 import app.daiyu.android.model.catalog.SavedModelCatalogPersistence
 import app.daiyu.android.model.catalog.SavedModelCatalogSnapshot
-import app.daiyu.android.model.catalog.selectionFor
+import app.daiyu.android.model.catalog.selectionIndex
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.components.DaiyuTextInputDialog
 import kotlinx.coroutines.CancellationException
@@ -102,6 +102,7 @@ internal fun <T> LocalCatalogModelsScreen(
     var loaded by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<CatalogModelSelection<T>?>(null, referentialEqualityPolicy()) }
+    val selectionIndex = remember(snapshot) { snapshot?.selectionIndex().orEmpty() }
     var query by queryState
     val loadingListState = rememberLazyListState()
     val loadingScrollBehavior = MiuixScrollBehavior()
@@ -335,7 +336,7 @@ internal fun <T> LocalCatalogModelsScreen(
             }
             snapshot?.models?.filter { query.isBlank() || it.id.contains(query.trim(), true) || it.displayName.contains(query.trim(), true) }?.forEach { model ->
                 item("local-model:${model.id}") {
-                    val ticket = snapshot?.selectionFor(model.id)
+                    val ticket = selectionIndex[model.id]
                     SettingsCard(Modifier.testTag("local-model:${model.id}").semantics {
                         if (selection != null) {
                             role = Role.Checkbox
@@ -401,7 +402,7 @@ internal fun <T> LocalCatalogModelsScreen(
                 val cancelSelection = { if (selectionCurrent() && selectedIds === selection) { selectedIds = null; deletingSelected = null } }
                 val deleteSelection = {
                     if (selectionCurrent() && currentEnabled && request == null && selectedIds === selection) {
-                        val tickets = snapshot?.let { base -> selection.mapNotNull(base::selectionFor) }.orEmpty()
+                        val tickets = selection.mapNotNull(selectionIndex::get)
                         if (tickets.size == selection.size && tickets.all(::matches)) deletingSelected = tickets
                     }
                 }

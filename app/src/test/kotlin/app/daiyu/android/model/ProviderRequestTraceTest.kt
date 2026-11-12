@@ -5,6 +5,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProviderRequestTraceTest {
+    @Test fun localDisconnectIsRequestScopedMetadataAndDoesNotChangeSocketClassification() {
+        val first = ProviderRequestTrace()
+        first.localDisconnectRequested()
+        val socket = java.net.SocketException("private-host")
+        val before = first.diagnostic(socket, ModelFailure.NETWORK)
+        assertTrue(before.localDisconnectRequested)
+        assertEquals(ModelTransportCause.SOCKET, before.cause)
+        assertFalse(ProviderRequestTrace().diagnostic(socket, ModelFailure.NETWORK).localDisconnectRequested)
+        assertFalse(before.toString().contains("private-host"))
+    }
+
     @Test fun onlyCompleteDataFramesCountAndAgeUsesTheRequestMonotonicClock() {
         var time = 0L
         val trace = ProviderRequestTrace(now = { time })

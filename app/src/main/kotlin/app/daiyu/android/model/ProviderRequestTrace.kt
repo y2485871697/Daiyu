@@ -18,8 +18,10 @@ internal class ProviderRequestTrace(
     private var partialFrame = false
     private var eof = false
     private var completed = false
+    @Volatile private var locallyDisconnected = false
     var phase = ModelTransportPhase.PREPARING
 
+    fun localDisconnectRequested() { locallyDisconnected = true }
     fun headersReceived() { headersSeen = true }
     fun reader(input: InputStream): BufferedReader {
         streamStarted = now()
@@ -55,7 +57,7 @@ internal class ProviderRequestTrace(
             else -> ModelTransportCause.PROVIDER_REJECTION
         }
         return ModelTransportDiagnostic(phase, cause, kind, elapsed(started), streamStarted?.let(::elapsed),
-            frames, lastFrame?.let(::elapsed), headersSeen, completed, eofSeen = eof, partialFrame = partialFrame)
+            frames, lastFrame?.let(::elapsed), headersSeen, completed, eofSeen = eof, partialFrame = partialFrame, localDisconnectRequested = locallyDisconnected)
     }
 
     internal class Reader(input: InputStream, val trace: ProviderRequestTrace) :

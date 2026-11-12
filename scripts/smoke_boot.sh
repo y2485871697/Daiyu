@@ -86,6 +86,22 @@ task_scroll_target = {
 task_scroll_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(task_scroll_target)
 task_scroll_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                        for name in task_scroll_target}
+page_performance_target = task_scroll_target | {
+    'app.daiyu.android.UsagePresentationActivityTest',
+    'app.daiyu.android.LocalCatalogModelsActivityTest',
+    'app.daiyu.android.ModelBulkSelectionActivityTest',
+    'app.daiyu.android.AssistantAvatarTest',
+    'app.daiyu.android.AssistantNavigationActivityTest',
+    'app.daiyu.android.AssistantPickerAdmissionTest',
+    'app.daiyu.android.SkillInstallScreenTest',
+    'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',
+    'app.daiyu.android.ui.navigation.PageBackStackActivityTest',
+    'app.daiyu.android.ui.navigation.PageEnterActivityTest',
+    'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
+}
+page_performance_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(page_performance_target)
+page_performance_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
+                            for name in page_performance_target}
 markdown_entry_target = {
     'app.daiyu.android.ControllerLifecycleTest',
     'app.daiyu.android.RestoredMarkdownActivityTest',
@@ -174,6 +190,8 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
         continue
     if task_scroll_only and path not in task_scroll_sources:
         continue
+    if page_performance_only and path not in page_performance_sources:
+        continue
     if markdown_entry_only and path not in markdown_entry_sources:
         continue
     if cold_display_only and path not in cold_display_sources:
@@ -239,7 +257,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or terminal_screen_only else "full",
+                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or terminal_screen_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TerminalTaskOutputTest {
+    @Test fun backgroundPreparationPreservesAnsiStylesAndNormalizesLineEndings() {
+        val color = androidx.compose.ui.graphics.Color.White
+        val styled = prepareTerminalStyledOutput("plain\r\n\u001b[1mBOLD\u001b[0m", color)
+        assertEquals("plain\nBOLD", styled.text)
+        assertTrue(styled.spanStyles.any { it.item.fontWeight == androidx.compose.ui.text.font.FontWeight.Bold })
+        assertEquals("", prepareTerminalStyledOutput("", color).text)
+        assertEquals("after", prepareTerminalStyledOutput("before\r\u001b[2Kafter", color).text)
+    }
+
     @Test fun emptyAndPlainTextAreNotTurnedIntoSuccessReceipts() {
         assertEquals("", terminalTaskOutput(""))
         assertEquals("观察未确认", terminalTaskOutput("观察未确认"))

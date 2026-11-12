@@ -34,6 +34,28 @@ class ToolPresentationCacheTest {
         assertEquals(3, builds)
     }
 
+    @Test fun mountedHistoryLargerThanTheLruBudgetDoesNotReparseOnEveryStreamChunk() {
+        var builds = 0
+        val cache = ToolPresentationCache({ n, a, r -> builds++; ToolCardPresentations.present(n, a, r) },
+            maxEntries = 2, maxSourceChars = 200, maxLargeEntries = 1)
+        val blocks = (0 until 12).map { tool("tool-$it", 1_000 + it) }
+        var receipt = WorkStepState.OK
+        repeat(20) { index ->
+            if (index == 10) receipt = WorkStepState.UNKNOWN
+            val input = message(*(blocks + MessageBlock.Text("tail", "chunk-$index")).toTypedArray())
+            val turn = ChatTurnMapper.map(listOf(input), toolState = { _, _ -> receipt },
+                presentations = cache).single() as ChatTurnUi.Assistant
+            assertEquals(List(blocks.size) { receipt }, turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
+        }
+        assertEquals(blocks.size, builds)
+        val changed = blocks[0].copy(result = blocks[0].result + " ")
+        ChatTurnMapper.map(listOf(message(*(listOf(changed) + blocks.drop(1)).toTypedArray())), presentations = cache)
+        assertEquals(blocks.size + 1, builds)
+        cache.retain(emptyList())
+        cache.present(blocks[0])
+        assertEquals("An unmounted source must not survive as an identity cache entry", blocks.size + 2, builds)
+    }
+
     @Test fun windowPruningScopeAndBudgetsReleaseOldPresentations() {
         var builds = 0
         val cache = ToolPresentationCache({ n, a, r -> builds++; ToolCardPresentations.present(n, a, r) }, maxEntries = 2, maxSourceChars = 200)

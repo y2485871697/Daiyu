@@ -103,6 +103,7 @@ private class StreamingTailViewport(initiallyBounded: Boolean) {
     var scrollOffset by mutableStateOf(0f)
     var maxOffset by mutableStateOf(0)
     var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)
+    var boundaryDelta by mutableStateOf(0f)
     var viewportOffset = 0
     var itemOrigin by mutableStateOf<Float?>(null)
     var scroller: ScrollableState? = null
@@ -122,7 +123,12 @@ private fun StreamingTailContainer(
     val innerScroll = rememberScrollableState { delta ->
         val old = state.scrollOffset
         state.scrollOffset = (old - delta).coerceIn(0f, state.maxOffset.toFloat())
-        old - state.scrollOffset
+        val consumed = old - state.scrollOffset
+        val remaining = delta - consumed
+        if (state.bounded && !follows() && abs(remaining) > 0.5f) {
+            state.boundaryDelta += remaining
+            delta // Keep the outer list out of the empty extent until the same-anchor unwrap.
+        } else consumed
     }
     SideEffect { state.scroller = innerScroll }
     // Cancel the inner fling too when navigation/bottom restoration takes ownership.
@@ -145,10 +151,12 @@ private fun StreamingTailContainer(
             }) { measurables, constraints ->
             val body = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
             state.contentHeight = body.height
-            val safeBottom = (listCoordinates()?.size?.height ?: (viewportHeight() + clearance())) - clearance()
-            val availableBelowOrigin = safeBottom - (state.itemOrigin?.roundToInt() ?: 0).coerceAtLeast(0)
-            val visibleHeight = minOf(viewportHeight(), availableBelowOrigin).coerceAtLeast(1)
-            val height = if (state.bounded) minOf(body.height, visibleHeight) else body.height
+            val height = if (state.bounded) {
+                val safeBottom = (listCoordinates()?.size?.height ?: (viewportHeight() + clearance())) - clearance()
+                val availableBelowOrigin = safeBottom - (state.itemOrigin?.roundToInt() ?: 0).coerceAtLeast(0)
+                val visibleHeight = minOf(viewportHeight(), availableBelowOrigin).coerceAtLeast(1)
+                minOf(body.height, visibleHeight)
+            } else body.height
             val maximum = (body.height - height).coerceAtLeast(0)
             state.maxOffset = maximum
             // Same-measure alignment, not a second, independently animated follower.
@@ -251,6 +259,13 @@ internal fun ChatMessageList(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
+    DisposableEffect(pageActive) {
+        if (!pageActive) {
+            resumeFollowPending = true
+            wasDragged = false
+        } else if (resumeFollowPending) revealResetEpoch++
+        onDispose { }
+    }
     val density = LocalDensity.current
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
@@ -320,6 +335,65 @@ internal fun ChatMessageList(
             }
         }
     }
+    // A retired viewport may keep its reader anchor while visible. Once off-screen,
+    // its full-height row must be ordinary content before the reader re-enters it.
+    LaunchedEffect(listState, turnKeys, assistantOwnerKey) {
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            if (layout.totalItemsCount == 0) emptyList() else nestedStates.mapNotNull { (key, viewport) ->
+                if (key == assistantOwnerKey || !viewport.bounded || viewport.migrating) return@mapNotNull null
+                val item = layout.visibleItemsInfo.firstOrNull { it.key == key }
+                if (item == null) key else {
+                    val top = item.offset + viewport.viewportOffset
+                    val bottom = top + viewport.contentHeight - viewport.maxOffset
+                    key.takeIf { bottom <= layout.viewportStartOffset || top >= layout.viewportEndOffset }
+                }
+            }
+        }.collect { offscreen ->
+            offscreen.forEach { key ->
+                val viewport = nestedStates[key] ?: return@forEach
+                if (key != assistantOwnerKey && viewport.bounded && !viewport.migrating) {
+                    viewport.bounded = false
+                    viewport.scrollOffset = 0f
+                    viewport.viewportOffset = 0
+                    viewport.boundaryDelta = 0f
+                }
+            }
+        }
+    }
+    val boundaryRequests = nestedStates.mapNotNull { (key, state) ->
+        state.boundaryDelta.takeIf { it != 0f }?.let { key to it }
+    }
+    LaunchedEffect(boundaryRequests, touchEpoch, pageActive, scrollResumed, scrollRequest?.serial) {
+        if (!pageActive || !scrollResumed || followBottom || currentScrollSerial != consumedScrollSerial) return@LaunchedEffect
+        val epoch = touchEpoch
+        val serial = currentScrollSerial
+        for ((key, _) in boundaryRequests) {
+            val viewport = nestedStates[key] ?: continue
+            fun current() = pageActive && scrollResumed && !followBottom && touchEpoch == epoch &&
+                currentScrollSerial == serial && currentScrollSerial == consumedScrollSerial && nestedStates[key] === viewport
+            if (!viewport.bounded || viewport.migrating || !current()) continue
+            viewport.migrating = true
+            var unwrapped = false
+            var committed = false
+            try {
+                viewport.scroller?.stopScroll(MutatePriority.PreventUserInput)
+                listState.stopScroll(MutatePriority.PreventUserInput)
+                if (!current()) return@LaunchedEffect
+                val delta = viewport.scrollOffset.roundToInt() - viewport.viewportOffset - viewport.boundaryDelta.roundToInt()
+                val index = listState.firstVisibleItemIndex
+                val offset = listState.firstVisibleItemScrollOffset
+                viewport.bounded = false
+                unwrapped = true
+                listState.scrollToItem(index, offset + delta)
+                viewport.boundaryDelta = 0f
+                committed = true
+            } finally {
+                if (unwrapped && !committed) viewport.bounded = true
+                viewport.migrating = false
+            }
+        }
+    }
     // Unwrap only after terminal formatting/reveal has settled. Capture the live
     // offset AFTER stopping a possible fling, never an earlier touch-up offset.
     LaunchedEffect(nestedTail, currentTailKey, turnKeys, tailAssistant, scrollRequest?.serial,
@@ -372,7 +446,7 @@ internal fun ChatMessageList(
         }
     }
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
-    LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed) {
+    LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed, pageActive) {
         if (!scrollResumed || !pageActive) return@LaunchedEffect
         val request = scrollRequest?.takeIf { it.serial != consumedScrollSerial }
         if (request != null || initialPositionPending && scrollRequest == null) {
@@ -392,7 +466,8 @@ internal fun ChatMessageList(
                         nestedTail.scroller?.stopScroll(MutatePriority.PreventUserInput)
                         // Only the explicit destination relinquishes its inner
                         // position. Other retained viewports keep their live anchor.
-                        if ((targetTurn as? ChatTurnUi.Assistant)?.status != RunStatus.RUNNING) nestedTail.bounded = false
+                        nestedTail.bounded = false
+                        nestedTail.boundaryDelta = 0f
                         nestedTail.viewportOffset = 0
                         nestedTail.scrollOffset = 0f
                     }
@@ -400,6 +475,10 @@ internal fun ChatMessageList(
                     consumedScrollSerial = request.serial
                 }
             } else if (followBottom && tailIndex >= 0) {
+                if (tailAssistant?.status == RunStatus.RUNNING) {
+                    nestedTail.boundaryDelta = 0f
+                    nestedTail.bounded = true
+                }
                 listState.scrollToItem(tailIndex)
                 if (initialPositionPending) {
                     // Initial placement is layout restoration, not streaming output to animate.

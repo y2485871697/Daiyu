@@ -202,7 +202,7 @@ internal fun AssistantProfileCard(
     modifier: Modifier = Modifier,
 ) {
     val view = LocalView.current
-    val bitmap = remember(assets, profile.avatarFileName) { assets.avatarBitmap(profile.avatarFileName) }
+    val bitmap = rememberAssistantAvatar(assets, profile.avatarFileName)
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     val shape = RoundedCornerShape(15.dp * s)
@@ -268,7 +268,7 @@ internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantA
 private fun AssistantDialogIdentity(profile: AssistantProfile, assets: AssistantAssets) {
     val s = assistantPreviewScale()
     val colors = assistantPreviewPalette()
-    val bitmap = remember(assets, profile.avatarFileName) { assets.avatarBitmap(profile.avatarFileName) }
+    val bitmap = rememberAssistantAvatar(assets, profile.avatarFileName)
     Row(Modifier.fillMaxWidth().padding(start = 2.dp * s, end = 2.dp * s, top = 7.dp * s, bottom = 16.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
         AssistantAvatar(bitmap = bitmap, size = 44.dp * s)

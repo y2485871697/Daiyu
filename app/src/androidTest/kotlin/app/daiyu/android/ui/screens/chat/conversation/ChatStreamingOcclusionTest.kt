@@ -151,6 +151,44 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("manual-anchor").assertIsDisplayed()
     }
 
+    fun testManualDragPastInnerStartUnwrapsWithoutEmptyExtent() {
+        mount(interactive = true)
+        var observedUnwrapped = false
+        repeat(8) {
+            ui.onNodeWithTag("chat-messages").performTouchInput {
+                swipe(Offset(center.x, 60f * density), Offset(center.x, 220f * density), durationMillis = 500)
+            }
+            ui.waitForIdle()
+            val tail = ui.onAllNodesWithTag("chat-stream-viewport:tail").fetchSemanticsNodes().singleOrNull()
+            if (tail != null && tail.config[SemanticsProperties.VerticalScrollAxisRange].maxValue() == 0f) {
+                observedUnwrapped = true
+            }
+        }
+        assertTrue("A reader crossing the inner edge must own an ordinary full-height item", observedUnwrapped)
+        ui.onNodeWithText("history 0").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRetiredViewportHasRealContentWhenReaderScrollsBackIntoIt() {
+        mount(interactive = true)
+        manualNonzeroPosition()
+        mainThread { running = false; showCompression = true; appendAssistant = true }
+        ui.waitForIdle()
+        mainThread { request = ChatScrollRequest(6, messageId = "u0", followBottom = false) }
+        ui.waitForIdle()
+        ui.onNodeWithText("history 0").assertIsDisplayed()
+        var sawRealStart = false
+        repeat(16) {
+            ui.onNodeWithTag("chat-messages").performTouchInput {
+                swipe(Offset(center.x, 180f * density), Offset(center.x, 140f * density), durationMillis = 500)
+            }
+            ui.waitForIdle()
+            if (ui.onNodeWithTag("inner-start").isDisplayed()) sawRealStart = true
+        }
+        assertTrue("Re-entering a retired row must show its real beginning, not an empty extent", sawRealStart)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testContinuousEveryFrameGrowthKeepsRealTailClearAndOuterBounded() {
         mount()
         ui.mainClock.autoAdvance = false

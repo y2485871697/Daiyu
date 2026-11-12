@@ -16,6 +16,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.ui.graphics.Brush
+import app.daiyu.android.ui.components.usagePalette
 import androidx.compose.foundation.background
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,6 +37,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -208,12 +211,17 @@ internal fun SkillManagementScreen(
                 val entries = state.entries.filter { it.builtin == builtin }
                 if (entries.isNotEmpty()) {
                     item(key = "skills-heading:$builtin") { SettingsSectionTitle(title) }
-                    item(key = "skills-group:$builtin") {
-                        SkillSettingsCard {
-                            entries.forEach { entry ->
-                                SkillProductRow(entry, !controller.busy && controller.confirmed,
-                                    onDetails = { details = entry }, onRemove = { controller.prepareRemoval(entry) })
-                            }
+                    itemsIndexed(entries, key = { _, entry -> "skill:${entry.id}" }) { index, entry ->
+                        val top = if (index == 0) 22.dp else 0.dp
+                        val bottom = if (index == entries.lastIndex) 22.dp else 0.dp
+                        Column(Modifier.padding(horizontal = 16.dp)
+                            .padding(top = if (index == 0) 4.dp else 0.dp,
+                                bottom = if (index == entries.lastIndex) 4.dp else 0.dp)
+                            .fillMaxWidth().clip(RoundedCornerShape(topStart = top, topEnd = top,
+                                bottomStart = bottom, bottomEnd = bottom))
+                            .background(Brush.linearGradient(usagePalette().sheet))) {
+                            SkillProductRow(entry, !controller.busy && controller.confirmed,
+                                onDetails = { details = entry }, onRemove = { controller.prepareRemoval(entry) })
                         }
                     }
                 }

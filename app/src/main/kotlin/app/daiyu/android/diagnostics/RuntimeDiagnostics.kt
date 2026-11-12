@@ -391,6 +391,7 @@ internal object RuntimeDiagnostics {
                         .put("last_frame_age_ms", transport.lastFrameAgeMs ?: -1)
                         .put("response_headers_seen", transport.responseHeadersSeen).put("completion_received", transport.completionReceived)
                         .put("eof_seen", transport.eofSeen).put("partial_sse_frame", transport.partialFrame)
+                        .put("local_disconnect_requested", transport.localDisconnectRequested)
                 }
             }
         }

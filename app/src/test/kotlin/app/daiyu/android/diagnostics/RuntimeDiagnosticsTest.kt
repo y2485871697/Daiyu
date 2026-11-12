@@ -128,7 +128,7 @@ class RuntimeDiagnosticsTest {
         try {
             val diagnostic = ModelRequestDiagnostic(transport = ModelTransportDiagnostic(
                 ModelTransportPhase.READING_STREAM, ModelTransportCause.PARTIAL_SSE_FRAME, ModelRequestKind.RESUME,
-                210, 190, 3, 50, true, false, eofSeen = true, partialFrame = true))
+                210, 190, 3, 50, true, false, eofSeen = true, partialFrame = true, localDisconnectRequested = true))
             RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.MODEL_REQUEST).end(ModelRequestException(ModelFailure.NETWORK, diagnostic))
             RuntimeDiagnostics.awaitWrites()
             val rows = RuntimeDiagnostics.export()
@@ -139,6 +139,7 @@ class RuntimeDiagnosticsTest {
             assertEquals(210L, row.getLong("request_elapsed_ms"))
             assertEquals(3L, row.getLong("sse_frames"))
             assertTrue(row.getBoolean("eof_seen")); assertTrue(row.getBoolean("partial_sse_frame"))
+            assertTrue(row.getBoolean("local_disconnect_requested"))
             assertFalse(row.getBoolean("completion_received"))
             for (forbidden in listOf("url", "headers", "body", "message", "cause", "suppressed")) assertFalse(row.has(forbidden))
             RuntimeDiagnostics.enabled = false

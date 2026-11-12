@@ -26,6 +26,71 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("withFrameNanos { frameTimeNanos ->", follow)
         self.assertIn("listState.scrollBy(delta)", follow)
 
+    def test_bounded_viewport_preserves_extent_and_aligns_real_content_same_measure(self):
+        source = CHAT.read_text()
+        viewport = source.split("private fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = body.height",
+                      "minOf(body.height, visibleHeight)", "body.height - height",
+                      "state.bounded && follows()", "maximum.toFloat()",
+                      "body.placeRelative(0, -state.scrollOffset.roundToInt())",
+                      "layout(viewport.width, state.contentHeight)", "Modifier.onPlaced",
+                      "list.localPositionOf(coordinates, Offset.Zero).y",
+                      "viewport.placeRelative(0, q)", "state.scrollOffset = (old - delta).coerceIn",
+                      "ScrollAxisRange(", "state.viewportOffset.coerceIn(0, state.maxOffset)"):
+            self.assertIn(token, viewport)
+        self.assertNotIn("BottomFollowMotion()", viewport)
+        self.assertNotIn("listState.layoutInfo", viewport)
+        self.assertIn("24.dp.roundToPx()", source)
+        migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
+        for token in ("revealedTurns[tail.listKey] != tail", "while (followBottom && abs(",
+                      "stopScroll(MutatePriority.PreventUserInput)",
+                      "nestedTail.scrollOffset.roundToInt() - nestedTail.viewportOffset",
+                      "listState.scrollToItem(index, offset + delta)"):
+            self.assertIn(token, migration)
+        exact = source.split("val index = request.targetIndex(turns)", 1)[1].split("} else if (followBottom", 1)[0]
+        self.assertIn("nestedTail.viewportOffset = 0", exact)
+        self.assertIn("nestedTail.scrollOffset = 0f", exact)
+        self.assertIn("listState.animateScrollToItem(index)", exact)
+
+    def test_assistant_identity_retains_viewports_when_physical_tail_changes(self):
+        source = CHAT.read_text()
+        for token in ("val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }",
+                      "nestedStates.getOrPut(key)", "nestedStates[tailAssistant?.listKey]",
+                      "LaunchedEffect(nestedTail, currentTailKey, turnKeys, tailAssistant",
+                      "currentNestedTail === nestedTail", "nestedStates[tail.listKey] === nestedTail",
+                      "if (!ownsMigration()) return@LaunchedEffect",
+                      "if (unwrapped && !committed) nestedTail.bounded = true",
+                      "val viewportState = nestedStates[turn.listKey]",
+                      "turn.listKey == assistantOwnerKey && followBottom",
+                      "nestedStates[targetTurn.listKey]?.let"):
+            self.assertIn(token, source)
+        self.assertNotIn("val nestedTail = remember(currentTailKey)", source)
+        device = DEVICE.read_text()
+        for token in ("testCompressionAndNewAssistantRetainOldManualAnchor",
+                      "showCompression = true", "appendAssistant = true",
+                      "Compression must not unwrap the old viewport",
+                      "New assistant must not unwrap the old viewport",
+                      "Retired migration cannot steal a new exact request"):
+            self.assertIn(token, device)
+
+    def test_new_device_cases_exercise_scroll_ownership_and_completed_anchors(self):
+        source = DEVICE.read_text()
+        for token in ("else Box(Modifier.height(height))",
+                      'Text("occlusion tail marker", Modifier.testTag("occlusion-tail"))',
+                      "SemanticsProperties.VerticalScrollAxisRange", "after < before - 20f * density",
+                      "after > 20f * density", "durationMillis = 1000",
+                      "testContinuousEveryFrameGrowthKeepsRealTailClearAndOuterBounded",
+                      "movement <= 14f * density", "testManualInnerScrollOwnsBothLayersDuringLaterGrowth",
+                      "offset, innerOffset(), 1f", "testCompletionMigratesRealManualAnchorWithoutJumpOrDrift",
+                      "anchor, anchorTop(), 2f", "repeat(90)",
+                      "testExactTailShowsContentAndExactHistoryPreemptsCompletionMigration",
+                      'ui.onNodeWithTag("inner-start").assertIsDisplayed()', "repeat(180)", "repeat(30)"):
+            self.assertIn(token, source)
+        original = source.split("fun testStreamingGrowthKeepsTailAboveComposer()", 1)[1].split("fun testComposerAndViewport", 1)[0]
+        self.assertIn("listOf(26, 52, 300, 26, 78)", original)
+        self.assertIn("repeat(2) { frame() }", original)
+        self.assertIn("assertTailClearance()", original)
+
     def test_real_streaming_text_is_checked_before_settling(self):
         source = (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text()
         live = source.split("fun testRealStreamingTextKeepsClearanceDuringIntermediateFrames()", 1)[1].split("fun testShortReply", 1)[0]
@@ -50,7 +115,7 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, correction)
         self.assertIn("coordinates.isAttached && turn.listKey == currentTailKey", source)
         self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text())
-        self.assertIn("ChatTurnUi.Assistant(\"tail\", status = RunStatus.RUNNING, isStreaming = true)", DEVICE.read_text())
+        self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", DEVICE.read_text())
 
     def test_device_sources_use_real_composer_measure_and_unclipped_tail_geometry(self):
         source = DEVICE.read_text()

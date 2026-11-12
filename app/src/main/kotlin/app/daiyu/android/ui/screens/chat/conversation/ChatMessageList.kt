@@ -6,6 +6,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableState
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.gestures.stopScroll
+import androidx.compose.foundation.MutatePriority
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.geometry.Offset
+import kotlin.math.abs
+import androidx.compose.ui.semantics.ScrollAxisRange
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.verticalScrollAxisRange
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -70,9 +87,91 @@ private class FollowClearanceLayout : RemeasurementModifier {
     var remeasurement: Remeasurement? = null
     var correcting = false
     var active = false
+    var coordinates: LayoutCoordinates? = null
 
     override fun onRemeasurementAvailable(remeasurement: Remeasurement) {
         this.remeasurement = remeasurement
+    }
+}
+
+// The lazy item keeps the full content extent H. Only its interactive viewport is
+// bounded (V), and placed at q inside that extent. Content has an ordinary scroll
+// offset a, so its *unclipped* origin is itemOrigin + q - a, not itemOrigin.
+private class StreamingTailViewport(initiallyBounded: Boolean) {
+    var bounded by mutableStateOf(initiallyBounded)
+    var migrating by mutableStateOf(false)
+    var scrollOffset by mutableStateOf(0f)
+    var maxOffset by mutableStateOf(0)
+    var contentHeight = 0
+    var viewportOffset = 0
+    var itemOrigin by mutableStateOf<Float?>(null)
+    var scroller: ScrollableState? = null
+}
+
+@Composable
+private fun StreamingTailContainer(
+    state: StreamingTailViewport,
+    listCoordinates: () -> LayoutCoordinates?,
+    itemKey: String,
+    userScrollEnabled: Boolean,
+    follows: () -> Boolean,
+    clearance: () -> Int,
+    viewportHeight: () -> Int,
+    content: @Composable () -> Unit,
+) {
+    val innerScroll = rememberScrollableState { delta ->
+        val old = state.scrollOffset
+        state.scrollOffset = (old - delta).coerceIn(0f, state.maxOffset.toFloat())
+        old - state.scrollOffset
+    }
+    SideEffect { state.scroller = innerScroll }
+    // Cancel the inner fling too when navigation/bottom restoration takes ownership.
+    LaunchedEffect(follows(), state.bounded) {
+        if (follows() || !state.bounded) innerScroll.stopScroll(MutatePriority.PreventUserInput)
+    }
+    Layout(modifier = Modifier.onPlaced { coordinates ->
+        val list = listCoordinates()
+        if (list != null && list.isAttached && coordinates.isAttached) {
+            state.itemOrigin = list.localPositionOf(coordinates, Offset.Zero).y
+        }
+    }, content = {
+        Layout(content = { Column(content = { content() }) }, modifier = Modifier
+            .testTag("chat-stream-viewport:$itemKey")
+            .clipToBounds()
+            .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)
+            .semantics {
+                verticalScrollAxisRange = ScrollAxisRange(
+                    value = { state.scrollOffset }, maxValue = { state.maxOffset.toFloat() })
+            }) { measurables, constraints ->
+            val body = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+            state.contentHeight = body.height
+            val safeBottom = (listCoordinates()?.size?.height ?: (viewportHeight() + clearance())) - clearance()
+            val availableBelowOrigin = safeBottom - (state.itemOrigin?.roundToInt() ?: 0).coerceAtLeast(0)
+            val visibleHeight = minOf(viewportHeight(), availableBelowOrigin).coerceAtLeast(1)
+            val height = if (state.bounded) minOf(body.height, visibleHeight) else body.height
+            val maximum = (body.height - height).coerceAtLeast(0)
+            state.maxOffset = maximum
+            // Same-measure alignment, not a second, independently animated follower.
+            // Growth can exceed an entire viewport in one frame. The real last child
+            // still ends at V; clipping alone would leave its unclipped coordinates hidden.
+            state.scrollOffset = if (state.bounded && follows()) maximum.toFloat()
+                else state.scrollOffset.coerceIn(0f, maximum.toFloat())
+            layout(body.width, height) {
+                body.placeRelative(0, -state.scrollOffset.roundToInt())
+            }
+        }
+    }) { measurables, constraints ->
+        val viewport = measurables.single().measure(constraints.copy(minHeight = 0))
+        layout(viewport.width, state.contentHeight) {
+            val origin = state.itemOrigin
+            // onPlaced runs after this item's parent placement, before its child
+            // placement. No assumption about LazyListState publishing a measure.
+            val q = if (!state.bounded) 0 else if (follows() && origin != null)
+                ((listCoordinates()?.size?.height ?: 0) - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
+            else state.viewportOffset.coerceIn(0, state.maxOffset)
+            state.viewportOffset = q
+            viewport.placeRelative(0, q)
+        }
     }
 }
 
@@ -166,6 +265,17 @@ internal fun ChatMessageList(
     val revealedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
+    val tailAssistant = turns.lastOrNull() as? ChatTurnUi.Assistant
+    val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }
+    assistantTurns.forEach { (key, turn) ->
+        nestedStates.getOrPut(key) { StreamingTailViewport(turn.status == RunStatus.RUNNING) }
+    }
+    SideEffect { nestedStates.keys.retainAll(assistantTurns.keys) }
+    val unboundedTail = remember { StreamingTailViewport(false) }
+    val nestedTail = nestedStates[tailAssistant?.listKey] ?: unboundedTail
+    val currentNestedTail by rememberUpdatedState(nestedTail)
+    val assistantOwnerKey by rememberUpdatedState(tailAssistant?.listKey)
+    val turnKeys = remember(turns) { turns.map { it.listKey } }
     val clearanceLayout = remember(listState) { FollowClearanceLayout() }
     DisposableEffect(clearanceLayout) {
         clearanceLayout.active = true
@@ -176,12 +286,12 @@ internal fun ChatMessageList(
     }
     fun canFollowBottom(): Boolean =
         !initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
-            (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
+            (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !currentNestedTail.migrating
 
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
             val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (activeTail?.status == RunStatus.RUNNING || !clearanceLayout.active || clearanceLayout.correcting ||
+            if (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded || nestedTail.migrating || !clearanceLayout.active || clearanceLayout.correcting ||
                 !canFollowBottom() || currentOcclusionPx <= 0 || !listState.canScrollForward) return
             val remeasurement = clearanceLayout.remeasurement ?: return
             val layout = listState.layoutInfo
@@ -207,6 +317,55 @@ internal fun ChatMessageList(
             }
         }
     }
+    // Unwrap only after terminal formatting/reveal has settled. Capture the live
+    // offset AFTER stopping a possible fling, never an earlier touch-up offset.
+    LaunchedEffect(nestedTail, currentTailKey, turnKeys, tailAssistant, scrollRequest?.serial,
+        consumedScrollSerial, touchEpoch, pageActive, scrollResumed) {
+        val tail = tailAssistant ?: return@LaunchedEffect
+        val requestSerial = currentScrollSerial
+        val migrationTouchEpoch = touchEpoch
+        fun ownsMigration() = currentNestedTail === nestedTail && assistantOwnerKey == tail.listKey &&
+            currentAssistants[tail.listKey] == tail && nestedStates[tail.listKey] === nestedTail &&
+            currentScrollSerial == requestSerial && currentScrollSerial == consumedScrollSerial &&
+            touchEpoch == migrationTouchEpoch && pageActive && scrollResumed
+        if (!nestedTail.bounded || tail.status == RunStatus.RUNNING || !pageActive || !scrollResumed) return@LaunchedEffect
+        if (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial) return@LaunchedEffect
+        while (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail) {
+            withFrameNanos { }
+            if (!ownsMigration()) return@LaunchedEffect
+        }
+        // A following reader keeps the original bounded outer motion until its
+        // virtual origin has caught the real content origin. Unwrapping then has
+        // no visible jump and cannot pay the outstanding growth in one frame.
+        while (followBottom && abs(nestedTail.scrollOffset - nestedTail.viewportOffset) > 1f) {
+            withFrameNanos { }
+            if (!ownsMigration()) return@LaunchedEffect
+        }
+        if (!ownsMigration()) return@LaunchedEffect
+        nestedTail.migrating = true
+        var unwrapped = false
+        var committed = false
+        try {
+            nestedTail.scroller?.stopScroll(MutatePriority.PreventUserInput)
+            if (!ownsMigration()) return@LaunchedEffect
+            listState.stopScroll(MutatePriority.PreventUserInput)
+            withFrameNanos { }
+            if (!ownsMigration()) return@LaunchedEffect
+            // Before: y + q - a. After: y - delta. Thus delta = a - q.
+            val delta = nestedTail.scrollOffset.roundToInt() - nestedTail.viewportOffset
+            val index = listState.firstVisibleItemIndex
+            val offset = listState.firstVisibleItemScrollOffset
+            nestedTail.bounded = false
+            unwrapped = true
+            // scrollToItem forces the expanded measure in the same transaction;
+            // waiting another frame here would expose a one-frame anchor jump.
+            listState.scrollToItem(index, offset + delta)
+            committed = true
+        } finally {
+            if (unwrapped && !committed) nestedTail.bounded = true
+            nestedTail.migrating = false
+        }
+    }
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
     LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed) {
         if (!scrollResumed || !pageActive) return@LaunchedEffect
@@ -223,6 +382,15 @@ internal fun ChatMessageList(
             if (request != null && (request.messageId != null || request.listKey != null)) {
                 val index = request.targetIndex(turns)
                 if (index >= 0) {
+                    val targetTurn = turns[index]
+                    nestedStates[targetTurn.listKey]?.let { nestedTail ->
+                        nestedTail.scroller?.stopScroll(MutatePriority.PreventUserInput)
+                        // Only the explicit destination relinquishes its inner
+                        // position. Other retained viewports keep their live anchor.
+                        if ((targetTurn as? ChatTurnUi.Assistant)?.status != RunStatus.RUNNING) nestedTail.bounded = false
+                        nestedTail.viewportOffset = 0
+                        nestedTail.scrollOffset = 0f
+                    }
                     listState.animateScrollToItem(index)
                     consumedScrollSerial = request.serial
                 }
@@ -412,9 +580,12 @@ internal fun ChatMessageList(
         }
     }
     Box(modifier.fillMaxSize()) {
+      BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewportHeightPx = constraints.maxHeight
         LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending,
             modifier = Modifier.testTag("chat-messages").fillMaxSize()
                 .then(clearanceLayout)
+                .onPlaced { clearanceLayout.coordinates = it }
                 .drawWithContent { if (!initialPositionPending) drawContent() }
                 .then(if (initialPositionPending) Modifier.clearAndSetSemantics {} else Modifier)
                 .pointerInput(Unit) {
@@ -438,9 +609,7 @@ internal fun ChatMessageList(
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 24.dp),
             verticalArrangement = Arrangement.spacedBy(26.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
-                Column(Modifier.testTag("chat-turn:${turn.id}").onGloballyPositioned { coordinates ->
-                    if (coordinates.isAttached && turn.listKey == currentTailKey) correctFollowClearance()
-                }) {
+                val turnContent: @Composable () -> Unit = {
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
@@ -478,6 +647,19 @@ internal fun ChatMessageList(
                             label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩，当前调用结束后执行" else "正在压缩上下文"}") }
                     }
                 }
+                Column(Modifier.testTag("chat-turn:${turn.id}").onGloballyPositioned { coordinates ->
+                    if (coordinates.isAttached && turn.listKey == currentTailKey) correctFollowClearance()
+                }) {
+                    val viewportState = nestedStates[turn.listKey]
+                    if (turn is ChatTurnUi.Assistant && viewportState != null) {
+                        StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
+                            userScrollEnabled = pageActive && !initialPositionPending,
+                            follows = { turn.listKey == assistantOwnerKey && followBottom && (initialPositionPending || canFollowBottom()) },
+                            clearance = { currentOcclusionPx + with(density) { 24.dp.roundToPx() } },
+                            viewportHeight = { viewportHeightPx - currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() } },
+                            content = turnContent)
+                    } else turnContent()
+                }
             }
             tailCompressions.forEach { activity ->
                 item(key = "chat-context-compressing:${activity.id}", contentType = "compression") {
@@ -489,6 +671,7 @@ internal fun ChatMessageList(
                 }
             }
         }
+      }
     }
 }
 

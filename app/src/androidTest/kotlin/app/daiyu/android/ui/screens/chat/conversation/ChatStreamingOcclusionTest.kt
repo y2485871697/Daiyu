@@ -3,6 +3,9 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -28,7 +31,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     private var viewportHeight by mutableStateOf(420.dp)
     private var request by mutableStateOf(ChatScrollRequest(1))
 
-    private fun mount() {
+    private var running by mutableStateOf(true)
+    private var showCompression by mutableStateOf(false)
+    private var appendAssistant by mutableStateOf(false)
+
+    private fun mount(interactive: Boolean = false) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -37,11 +44,23 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { bottomInset ->
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
-                                    ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING, isStreaming = true),
+                                    ChatTurnUi.Assistant("tail", status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running) +
+                                    if (appendAssistant) listOf(ChatTurnUi.Assistant("next", finalText = "next reply")) else emptyList(),
                                 ChatScreenActions(), scrollRequest = request,
-                                composerBottomInset = bottomInset, turnExtras = {
-                                    Box(Modifier.height(height))
+                                compressionActivity = if (showCompression) app.daiyu.android.timeline.CompressionActivity(
+                                    "tail-compression", "fixture", 6, null) else null,
+                                composerBottomInset = bottomInset, turnExtras = { turn ->
+                                  if (turn.id == "tail") {
+                                    if (interactive) {
+                                        Column {
+                                            Text("inner content start", Modifier.testTag("inner-start"))
+                                            Box(Modifier.height(height - 160.dp))
+                                            Text("manual content anchor", Modifier.testTag("manual-anchor"))
+                                            Box(Modifier.height(140.dp))
+                                        }
+                                    } else Box(Modifier.height(height))
                                     Text("occlusion tail marker", Modifier.testTag("occlusion-tail"))
+                                  }
                                 },
                             )
                         }, composer = {
@@ -108,6 +127,152 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         assertTailClearance()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    private fun innerOffset(): Float = ui.onNodeWithTag("chat-stream-viewport:tail")
+        .fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+
+    private fun anchorTop(): Float = ui.onNodeWithTag("manual-anchor")
+        .fetchSemanticsNode().layoutInfo.coordinates.positionInRoot().y
+
+    private fun manualNonzeroPosition() {
+        val before = innerOffset()
+        ui.onNodeWithTag("chat-stream-viewport:tail").performTouchInput {
+            // Drag down INSIDE the finite viewport, away from its end. Slow
+            // release avoids making this fixture depend on a fling's duration.
+            swipe(Offset(center.x, top + 50f * density),
+                Offset(center.x, top + 110f * density), durationMillis = 1000)
+        }
+        ui.waitForIdle()
+        val after = innerOffset()
+        assertTrue("Inner content really scrolled, not just the outer list", after < before - 20f * density)
+        assertTrue("Manual position must remain nonzero", after > 20f * density)
+        ui.onNodeWithTag("manual-anchor").assertIsDisplayed()
+    }
+
+    fun testContinuousEveryFrameGrowthKeepsRealTailClearAndOuterBounded() {
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            var previous = tailTop()
+            repeat(24) {
+                ui.runOnUiThread { height += 52.dp }
+                frame()
+                assertTailClearance()
+                val current = tailTop()
+                val movement = previous - current
+                assertTrue("Outer origin never reverses", movement >= -1f)
+                assertTrue("Outer retains the original 14dp frame guard", movement <= 14f * density)
+                previous = current
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        assertTailClearance()
+    }
+
+    fun testManualInnerScrollOwnsBothLayersDuringLaterGrowth() {
+        mount(interactive = true)
+        manualNonzeroPosition()
+        val offset = innerOffset()
+        val origin = tailTop()
+        ui.mainClock.autoAdvance = false
+        try {
+            repeat(12) {
+                ui.runOnUiThread { height += 26.dp }
+                frame()
+                assertEquals("Touch freezes outer follow", origin, tailTop(), 1f)
+                assertEquals("Growth cannot steal inner ownership", offset, innerOffset(), 1f)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        mainThread { request = ChatScrollRequest(2) }
+        ui.waitForIdle()
+        assertTailClearance()
+    }
+
+    fun testCompletionMigratesRealManualAnchorWithoutJumpOrDrift() {
+        mount(interactive = true)
+        manualNonzeroPosition()
+        val anchor = anchorTop()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { running = false }
+            // Includes readiness, stopped-fling capture, and subsequent frames;
+            // two frames alone can miss the actual migration entirely.
+            repeat(90) {
+                frame()
+                ui.onNodeWithTag("manual-anchor").assertIsDisplayed()
+                assertEquals("Completion preserves the real content anchor", anchor, anchorTop(), 2f)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        assertEquals("Anchor remains stable after idle", anchor, anchorTop(), 2f)
+        assertEquals(0f, innerOffset(), 1f)
+    }
+
+    fun testExactTailShowsContentAndExactHistoryPreemptsCompletionMigration() {
+        mount(interactive = true)
+        mainThread { request = ChatScrollRequest(2, messageId = "tail", followBottom = false) }
+        ui.waitForIdle()
+        assertEquals("Exact tail starts at actual content, not empty extent", 0f, innerOffset(), 1f)
+        ui.onNodeWithTag("inner-start").assertIsDisplayed()
+        assertTrue("Actual body origin is in the viewport", tailTop() >= -1f)
+        mainThread { request = ChatScrollRequest(3) }
+        ui.waitForIdle()
+        manualNonzeroPosition()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { running = false }
+            frame()
+            ui.runOnUiThread { request = ChatScrollRequest(4, messageId = "u1", followBottom = false) }
+            // Bound the exact animation AND check later frames for a stale
+            // migration/follower taking ownership back after it has finished.
+            repeat(180) { frame() }
+            ui.onNodeWithText("history 1").assertIsDisplayed()
+            val historyTop = ui.onNodeWithText("history 1").fetchSemanticsNode().boundsInRoot.top
+            repeat(30) {
+                frame()
+                ui.onNodeWithText("history 1").assertIsDisplayed()
+                assertEquals(historyTop, ui.onNodeWithText("history 1").fetchSemanticsNode().boundsInRoot.top, 1f)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        ui.onNodeWithText("history 1").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCompressionAndNewAssistantRetainOldManualAnchor() {
+        mount(interactive = true)
+        manualNonzeroPosition()
+        val anchor = anchorTop()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { running = false; showCompression = true }
+            repeat(12) {
+                frame()
+                ui.onNodeWithTag("manual-anchor").assertIsDisplayed()
+                assertEquals("Compression must not unwrap the old viewport", anchor, anchorTop(), 2f)
+            }
+            val retainedOffset = innerOffset()
+            ui.runOnUiThread { appendAssistant = true }
+            repeat(12) {
+                frame()
+                ui.onNodeWithTag("manual-anchor").assertIsDisplayed()
+                assertEquals("New assistant must not unwrap the old viewport", anchor, anchorTop(), 2f)
+                assertEquals("Retired inner position remains owned by the reader", retainedOffset, innerOffset(), 1f)
+            }
+            ui.runOnUiThread { request = ChatScrollRequest(5, messageId = "u1", followBottom = false) }
+            repeat(180) { frame() }
+            ui.onNodeWithText("history 1").assertIsDisplayed()
+            val target = ui.onNodeWithText("history 1").fetchSemanticsNode().boundsInRoot.top
+            repeat(30) {
+                frame()
+                assertEquals("Retired migration cannot steal a new exact request", target,
+                    ui.onNodeWithText("history 1").fetchSemanticsNode().boundsInRoot.top, 1f)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        ui.onNodeWithText("history 1").assertIsDisplayed()
         assertEquals(0, fixture.opens.get())
     }
 

@@ -210,7 +210,8 @@ class SourceTests(unittest.TestCase):
         run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=397560064, status='completed', conclusion='success')
         jobs = [dict(name='单测、检查与开发包', conclusion='success')]
         source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh', 'docs/acceptance/final-delivery-entry.md',
-                                              'scripts/acceptance/cloud_report.py', 'tests/test_smoke_boot.py'])
+                                              'scripts/acceptance/cloud_report.py', 'scripts/acceptance/record_tool_tests.py',
+                                              '.github/workflows/chat-workflow-checks.yml', 'tests/test_smoke_boot.py'])
         source.verify(env, record, dict(run, conclusion='failure'), jobs, [])
         for conclusion in (None, 'cancelled', 'timed_out', 'skipped', 'neutral', 'action_required'):
             with self.subTest(conclusion=conclusion), self.assertRaises(ValueError):

@@ -57,6 +57,7 @@ def verify(env, record, source_run, jobs, changed):
     # New tooling must be reviewed here before it can authorize old-APK reuse.
     validation_files = {
         'scripts/smoke_boot.sh', 'scripts/verify_smoke_source.py',
+        'scripts/acceptance/record_tool_tests.py', '.github/workflows/chat-workflow-checks.yml',
         'scripts/adb_bounded.sh', 'scripts/install_bounded_adb.sh',
         'scripts/verify_boundaries.py', 'scripts/daily_release.py',
     }

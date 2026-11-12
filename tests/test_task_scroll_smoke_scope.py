@@ -15,6 +15,8 @@ import test_speech_platform_discovery as discovery
 CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
@@ -32,6 +34,7 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
             self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
         required = {
             'test_streaming_follow_contract',
+            'test_streaming_occlusion_contract',
             'test_reasoning_stream_cost_contract',
             'test_workflow_render_isolation_contract',
             'test_markdown_typing_contract',
@@ -52,6 +55,7 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
         scope = workflow.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':", 1)[1]
         scope = scope.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'tool-receipts':", 1)[0]
         self.assertIn("'test_streaming_follow_contract.py'", scope)
+        self.assertIn("'test_streaming_occlusion_contract.py'", scope)
 
     def test_partial_extended_duplicate_and_other_modes_keep_full_selection(self):
         classes = ','.join(CLASSES)

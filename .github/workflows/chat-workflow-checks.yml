@@ -92,6 +92,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               patterns = ('test_reasoning_stream_cost_contract.py', 'test_workflow_render_isolation_contract.py',
                           'test_markdown_typing_contract.py', 'test_chat_resume_scroll_contract.py',
+                          'test_streaming_occlusion_contract.py',
                           'test_streaming_follow_contract.py', 'test_task_scroll_smoke_scope.py',
                           'test_diagnostic_smoke_source.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'tool-receipts':

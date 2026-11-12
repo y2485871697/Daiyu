@@ -76,6 +76,8 @@ page_back_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/'
 task_scroll_target = {
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',

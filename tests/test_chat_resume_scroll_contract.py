@@ -86,12 +86,14 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
         self.assertNotIn('key(revealResetEpoch)', self.chat)
         resume_gate = (
-            'resumeFollowPending && tail != null && '
+            'resumeFollowPending && tail != null && !tail.isStreaming && '
             'layout.visibleItemsInfo.any { it.key == tail.listKey } && '
-            '(if (tail.isStreaming) displayedTurns[tail.listKey] != tail '
-            'else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)'
+            '(readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)'
         )
-        self.assertEqual(2, ' '.join(self.chat.split()).count(resume_gate))
+        normalized_chat = ' '.join(self.chat.split())
+        self.assertEqual(2, normalized_chat.count(resume_gate))
+        self.assertNotIn('if (tail.isStreaming) displayedTurns[tail.listKey]', normalized_chat)
+        self.assertNotIn('displayedTurns[tail.listKey] != tail', normalized_chat)
         self.assertIn('val contentReady = projection?.sources == sources', self.chat)
         self.assertIn('SideEffect { onContentReady(contentReady) }', self.chat)
         self.assertIn('SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }', self.chat)

@@ -8,10 +8,10 @@ TERMINAL_SCREEN = "app.daiyu.android.terminal.TerminalScreenTest"
 
 def select_terminal_screen(mode: str, smoke_api: str, class_name: str,
                            api: int, shard: int) -> str:
-    """Validate the dedicated two-API, two-shard smoke selector."""
+    """Validate the dedicated one-shard-per-API terminal smoke selector."""
     if (mode != "smoke" or smoke_api != "all" or class_name != TERMINAL_SCREEN
             or type(api) is not int or api not in (26, 37)
-            or type(shard) is not int or shard not in (0, 1)):
+            or type(shard) is not int or shard != 0):
         raise ValueError("invalid_terminal_screen_selector")
     return class_name
 

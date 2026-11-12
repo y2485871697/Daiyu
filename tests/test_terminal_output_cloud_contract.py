@@ -31,7 +31,7 @@ class TerminalOutputCloudContract(unittest.TestCase):
             {"api": "26", "target": "google_apis", "ram": 4096, "shard": 0},
             {"api": "37.2", "target": "google_apis_ps16k", "ram": 6144, "shard": 0},
         ])
-        self.assertTrue(all(row["shard"] == 0 for row in options))
+        self.assertEqual([row["shard"] for row in options], [0, 0])
         self.assertIn("inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalScreenTest')) && '1' || '4'", workflow)
         smoke = (ROOT / "scripts/smoke_boot.sh").read_text()
         self.assertIn("select_terminal_screen", smoke)

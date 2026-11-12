@@ -52,6 +52,18 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("nestedTail.scrollOffset = 0f", exact)
         self.assertIn("listState.animateScrollToItem(index)", exact)
 
+    def test_full_extent_invalidates_outer_measure_and_exact_ownership_survives_consumption(self):
+        source = CHAT.read_text()
+        self.assertIn("var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)", source)
+        self.assertIn("state.contentHeight = body.height", source)
+        self.assertIn("layout(viewport.width, state.contentHeight)", source)
+        migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
+        self.assertIn("&& !exactNavigationOwnsScroll", migration)
+        self.assertIn("if (exactNavigationOwnsScroll) return@LaunchedEffect", migration)
+        self.assertIn("val requestTouchEpoch = remember(scrollRequest?.serial) { touchEpoch }", source)
+        self.assertIn("touchEpoch == requestTouchEpoch", source)
+        self.assertIn("currentScrollSerial == consumedScrollSerial", migration)
+
     def test_assistant_identity_retains_viewports_when_physical_tail_changes(self):
         source = CHAT.read_text()
         for token in ("val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }",

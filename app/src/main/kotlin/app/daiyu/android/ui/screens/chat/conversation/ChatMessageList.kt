@@ -102,7 +102,7 @@ private class StreamingTailViewport(initiallyBounded: Boolean) {
     var migrating by mutableStateOf(false)
     var scrollOffset by mutableStateOf(0f)
     var maxOffset by mutableStateOf(0)
-    var contentHeight = 0
+    var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)
     var viewportOffset = 0
     var itemOrigin by mutableStateOf<Float?>(null)
     var scroller: ScrollableState? = null
@@ -264,6 +264,9 @@ internal fun ChatMessageList(
     val displayedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val revealedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
+    val requestTouchEpoch = remember(scrollRequest?.serial) { touchEpoch }
+    val exactNavigationOwnsScroll by rememberUpdatedState(
+        (scrollRequest?.messageId != null || scrollRequest?.listKey != null) && touchEpoch == requestTouchEpoch)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val tailAssistant = turns.lastOrNull() as? ChatTurnUi.Assistant
     val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }
@@ -327,8 +330,10 @@ internal fun ChatMessageList(
         fun ownsMigration() = currentNestedTail === nestedTail && assistantOwnerKey == tail.listKey &&
             currentAssistants[tail.listKey] == tail && nestedStates[tail.listKey] === nestedTail &&
             currentScrollSerial == requestSerial && currentScrollSerial == consumedScrollSerial &&
-            touchEpoch == migrationTouchEpoch && pageActive && scrollResumed
+            touchEpoch == migrationTouchEpoch && pageActive && scrollResumed && !exactNavigationOwnsScroll
         if (!nestedTail.bounded || tail.status == RunStatus.RUNNING || !pageActive || !scrollResumed) return@LaunchedEffect
+        // Only a new request or touch can relinquish an exact navigation, not consumption.
+        if (exactNavigationOwnsScroll) return@LaunchedEffect
         if (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial) return@LaunchedEffect
         while (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail) {
             withFrameNanos { }

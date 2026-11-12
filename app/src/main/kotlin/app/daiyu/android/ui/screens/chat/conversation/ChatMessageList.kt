@@ -180,8 +180,9 @@ internal fun ChatMessageList(
 
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
-            if (!clearanceLayout.active || clearanceLayout.correcting || !canFollowBottom() ||
-                currentOcclusionPx <= 0 || !listState.canScrollForward) return
+            val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
+            if (activeTail?.status == RunStatus.RUNNING || !clearanceLayout.active || clearanceLayout.correcting ||
+                !canFollowBottom() || currentOcclusionPx <= 0 || !listState.canScrollForward) return
             val remeasurement = clearanceLayout.remeasurement ?: return
             val layout = listState.layoutInfo
             if (layout.viewportSize.height <= 0) return
@@ -322,7 +323,11 @@ internal fun ChatMessageList(
                     return@collect
                 }
                 val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
-                if (overflow <= 0) {
+                val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+                val obscuredTail = if (currentOcclusionPx > 0)
+                    (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
+                val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())
+                if (followDistance <= 0f) {
                     motion.reset()
                     resumeFollowPending = false
                     alignViewport = false
@@ -330,7 +335,7 @@ internal fun ChatMessageList(
                     return@collect
                 }
                 val alignment = alignViewport || resumeFollowPending
-                var delta = if (alignment) overflow.toFloat() else 0f
+                var delta = if (alignment) followDistance else 0f
                 if (!alignment) {
                     // Keep one cancellable frame loop alive while measured overflow remains.
                     // A settled LazyColumn may not emit another layout snapshot after the first
@@ -344,12 +349,12 @@ internal fun ChatMessageList(
                             if (frameLast != null) {
                                 val frameOverflow = frameLast.offset + frameLast.size +
                                     frameLayout.afterContentPadding - frameLayout.viewportEndOffset
-                                if (frameOverflow > 0) {
-                                    val visibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-                                    val obscuredTail = if (currentOcclusionPx > 0)
-                                        (frameLast.offset + frameLast.size - visibleBottom).coerceAtLeast(0) else 0
-                                    val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())
-                                    delta = motion.step(followDistance, frameTimeNanos, currentDensity)
+                                val frameVisibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+                                val frameObscuredTail = if (currentOcclusionPx > 0)
+                                    (frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0) else 0
+                                val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())
+                                if (frameFollowDistance > 0f) {
+                                    delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)
                                 } else {
                                     motion.reset()
                                 }

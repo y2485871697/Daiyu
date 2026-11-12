@@ -11,13 +11,16 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_occlusion_clearance_uses_the_same_bounded_frame_motion(self):
         source = CHAT.read_text()
         follow = source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
-        self.assertIn("val visibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
+        self.assertIn("val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
+        self.assertIn("val frameVisibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
         self.assertIn("val currentFollowClearancePx by rememberUpdatedState(with(density) { 16.dp.roundToPx() })", source)
         self.assertIn("bottom = composerBottomInset + 24.dp", source)
         self.assertIn("val obscuredTail = if (currentOcclusionPx > 0)", follow)
-        self.assertIn("(frameLast.offset + frameLast.size - visibleBottom).coerceAtLeast(0)", follow)
-        self.assertIn("val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())", follow)
-        self.assertIn("delta = motion.step(followDistance, frameTimeNanos, currentDensity)", follow)
+        self.assertIn("(last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
+        self.assertIn("(frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0)", follow)
+        self.assertIn("val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())", follow)
+        self.assertIn("val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", follow)
+        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)", follow)
         self.assertNotIn("delta = maxOf(", follow)
         self.assertIn("while (canFollowBottom())", follow)
         self.assertIn("withFrameNanos { frameTimeNanos ->", follow)
@@ -40,13 +43,14 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_post_layout_clearance_uses_the_same_follow_ownership_and_exact_tail(self):
         source = CHAT.read_text()
         correction = source.split("fun correctFollowClearance() {", 1)[1].split("val requestedIndex", 1)[0]
-        for token in ("!canFollowBottom()", "clearanceLayout.correcting", "clearanceLayout.active",
+        for token in ("activeTail?.status == RunStatus.RUNNING", "!canFollowBottom()", "clearanceLayout.correcting", "clearanceLayout.active",
                       "it.index == currentTailIndex && it.key == currentTailKey",
                       "last.offset + last.size - visibleBottom", "dispatchRawDelta", "forceRemeasure()",
                       "finally", "clearanceLayout.correcting = false"):
             self.assertIn(token, correction)
         self.assertIn("coordinates.isAttached && turn.listKey == currentTailKey", source)
         self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text())
+        self.assertIn("ChatTurnUi.Assistant(\"tail\", status = RunStatus.RUNNING, isStreaming = true)", DEVICE.read_text())
 
     def test_device_sources_use_real_composer_measure_and_unclipped_tail_geometry(self):
         source = DEVICE.read_text()

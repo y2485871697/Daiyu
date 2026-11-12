@@ -27,18 +27,20 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertNotIn("LaunchedEffect(turns", self.follow)
 
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
+        self.assertIn("val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())", self.follow)
+        self.assertIn("if (followDistance <= 0f)", self.follow)
         self.assertIn("val alignment = alignViewport || resumeFollowPending", self.follow)
-        self.assertIn("var delta = if (alignment) overflow.toFloat() else 0f", self.follow)
-        self.assertIn("val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())", self.follow)
-        self.assertIn("delta = motion.step(followDistance, frameTimeNanos, currentDensity)", self.follow)
+        self.assertIn("var delta = if (alignment) followDistance else 0f", self.follow)
+        self.assertIn("val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
+        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)", self.follow)
         self.assertNotIn("delta = maxOf(", self.follow)
         self.assertNotIn("System.nanoTime()", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
-        self.assertIn("if (overflow <= 0)", self.follow)
+        self.assertIn("if (followDistance <= 0f)", self.follow)
         self.assertIn("while (canFollowBottom())", self.follow)
         self.assertNotIn("alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
         self.assertNotIn("animateScrollToItem", self.follow)
-        self.assertIn("maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())", self.follow)
+        self.assertIn("maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
         self.assertIn("if (!canFollow)", self.follow)
@@ -50,8 +52,8 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail", self.follow)
 
     def test_idle_wait_rechecks_current_layout_without_ending_the_worker(self):
-        self.assertIn("if (overflow <= 0)", self.follow)
-        idle = self.follow.split("if (overflow <= 0)", 1)[1].split("val alignment =", 1)[0]
+        self.assertIn("if (followDistance <= 0f)", self.follow)
+        idle = self.follow.split("if (followDistance <= 0f)", 1)[1].split("val alignment =", 1)[0]
         self.assertIn("motion.reset()", idle)
         self.assertIn("return@collect", idle)
         self.assertNotIn("break", self.follow)

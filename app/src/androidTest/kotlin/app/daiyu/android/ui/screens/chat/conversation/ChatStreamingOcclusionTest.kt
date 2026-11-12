@@ -37,7 +37,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { bottomInset ->
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
-                                    ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING),
+                                    ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING, isStreaming = true),
                                 ChatScreenActions(), scrollRequest = request,
                                 composerBottomInset = bottomInset, turnExtras = {
                                     Box(Modifier.height(height))

@@ -29,15 +29,16 @@ class StreamingFollowContract(unittest.TestCase):
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
         self.assertIn("val alignment = alignViewport || resumeFollowPending", self.follow)
         self.assertIn("var delta = if (alignment) overflow.toFloat() else 0f", self.follow)
-        self.assertIn("motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity)", self.follow)
+        self.assertIn("val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())", self.follow)
+        self.assertIn("delta = motion.step(followDistance, frameTimeNanos, currentDensity)", self.follow)
+        self.assertNotIn("delta = maxOf(", self.follow)
         self.assertNotIn("System.nanoTime()", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
         self.assertIn("if (overflow <= 0)", self.follow)
         self.assertIn("while (canFollowBottom())", self.follow)
         self.assertNotIn("alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
         self.assertNotIn("animateScrollToItem", self.follow)
-        self.assertIn("maxOf(", self.follow)
-        self.assertIn("obscuredTail.toFloat()", self.follow)
+        self.assertIn("maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())", self.follow)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
         self.assertIn("if (!canFollow)", self.follow)

@@ -75,7 +75,8 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertIn('Triple(canFollowBottom(),', follow)
         guard = chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
         self.assertIn('!initialPositionPending &&', guard)
-        self.assertIn('motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity)', follow)
+        self.assertIn('val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())', follow)
+        self.assertIn('delta = motion.step(followDistance, frameTimeNanos, currentDensity)', follow)
         self.assertNotIn('System.nanoTime()', follow)
 
 

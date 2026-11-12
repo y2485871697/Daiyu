@@ -8,7 +8,7 @@ DEVICE = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/co
 
 
 class StreamingOcclusionContract(unittest.TestCase):
-    def test_follow_protects_minimum_clearance_before_smoothing_remaining_spacing(self):
+    def test_occlusion_clearance_uses_the_same_bounded_frame_motion(self):
         source = CHAT.read_text()
         follow = source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
         self.assertIn("val visibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
@@ -16,8 +16,9 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("bottom = composerBottomInset + 24.dp", source)
         self.assertIn("val obscuredTail = if (currentOcclusionPx > 0)", follow)
         self.assertIn("(frameLast.offset + frameLast.size - visibleBottom).coerceAtLeast(0)", follow)
-        self.assertIn("motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity)", follow)
-        self.assertIn("obscuredTail.toFloat()", follow)
+        self.assertIn("val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())", follow)
+        self.assertIn("delta = motion.step(followDistance, frameTimeNanos, currentDensity)", follow)
+        self.assertNotIn("delta = maxOf(", follow)
         self.assertIn("while (canFollowBottom())", follow)
         self.assertIn("withFrameNanos { frameTimeNanos ->", follow)
         self.assertIn("listState.scrollBy(delta)", follow)

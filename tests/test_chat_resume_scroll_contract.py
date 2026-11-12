@@ -53,15 +53,16 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('if (overflow <= 0)', follow)
         self.assertIn('val alignment = alignViewport || resumeFollowPending', follow)
         self.assertIn('var delta = if (alignment) overflow.toFloat() else 0f', follow)
-        self.assertIn('motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity)', follow)
+        self.assertIn('val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())', follow)
+        self.assertIn('delta = motion.step(followDistance, frameTimeNanos, currentDensity)', follow)
         self.assertIn('while (canFollowBottom())', follow)
         self.assertIn('readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail', follow)
         self.assertIn('overflow.toFloat()', follow)
         self.assertIn('motion.reset()', follow)
         stream = follow.split('val visibleBottom', 1)[1]
-        self.assertIn('motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity)', stream)
+        self.assertIn('delta = motion.step(followDistance, frameTimeNanos, currentDensity)', stream)
         self.assertNotIn('System.nanoTime()', stream)
-        self.assertIn('obscuredTail.toFloat()', follow)
+        self.assertNotIn('delta = maxOf(', follow)
 
     def test_finished_drag_is_consumed_once_not_rearmed_by_geometry(self):
         self.assertIn('snapshotFlow { Triple(scrollResumed, currentDragging,', self.chat)

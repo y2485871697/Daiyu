@@ -348,10 +348,8 @@ internal fun ChatMessageList(
                                     val visibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
                                     val obscuredTail = if (currentOcclusionPx > 0)
                                         (frameLast.offset + frameLast.size - visibleBottom).coerceAtLeast(0) else 0
-                                    delta = maxOf(
-                                        motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity),
-                                        obscuredTail.toFloat(),
-                                    )
+                                    val followDistance = maxOf(frameOverflow.toFloat(), obscuredTail.toFloat())
+                                    delta = motion.step(followDistance, frameTimeNanos, currentDensity)
                                 } else {
                                     motion.reset()
                                 }

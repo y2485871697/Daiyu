@@ -21,7 +21,9 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("val motion = BottomFollowMotion()", self.follow)
         self.assertNotIn("while (true)", self.follow)
         self.assertIn("withFrameNanos", self.follow)
-        self.assertIn("motion.velocityPxPerSecond == 0f", self.follow)
+        self.assertIn("if (observedViewport != null && observedViewport != viewport) alignViewport = true", self.follow)
+        alignment = self.follow.split("if (alignment) {", 1)[1].split("}", 1)[0]
+        self.assertIn("motion.reset()", alignment)
         self.assertNotIn("LaunchedEffect(turns", self.follow)
 
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):

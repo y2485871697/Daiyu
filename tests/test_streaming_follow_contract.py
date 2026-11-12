@@ -26,7 +26,8 @@ class StreamingFollowContract(unittest.TestCase):
 
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
         self.assertIn("var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
-        self.assertIn("motion.step(overflow.toFloat(), System.nanoTime(), currentDensity)", self.follow)
+        self.assertIn("motion.step(overflow.toFloat(), frameTimeNanos, currentDensity)", self.follow)
+        self.assertNotIn("System.nanoTime()", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
         self.assertIn("if (overflow <= 0)", self.follow)
         self.assertNotIn("animateScrollToItem", self.follow)

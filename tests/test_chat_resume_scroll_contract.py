@@ -49,10 +49,12 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding', follow)
         self.assertIn('if (overflow <= 0)', follow)
         correction = follow.split('var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {', 1)[1].split('if (delta > 0f', 1)[0]
-        self.assertIn('overflow.toFloat()', correction)
+        self.assertIn('motionDelta', correction)
+        self.assertIn('overflow.toFloat()', follow)
         self.assertIn('motion.reset()', follow)
         stream = follow.split('val visibleBottom', 1)[1]
-        self.assertIn('motion.step(overflow.toFloat(), System.nanoTime(), currentDensity)', stream)
+        self.assertIn('motion.step(overflow.toFloat(), frameTimeNanos, currentDensity)', stream)
+        self.assertNotIn('System.nanoTime()', stream)
         self.assertIn('obscuredTail.toFloat()', stream)
 
     def test_finished_drag_is_consumed_once_not_rearmed_by_geometry(self):

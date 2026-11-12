@@ -45,6 +45,13 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
         self.assertEqual(len(required), len(recorder.TASK_SCROLL_MODULES))
         self.assertNotIn('discover', command)
 
+    def test_workflow_task_scroll_check_runs_streaming_follow_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root \/ '.github\/workflows\/chat-workflow-checks.yml').read_text()
+        scope = workflow.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':", 1)[1]
+        scope = scope.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'tool-receipts':", 1)[0]
+        self.assertIn("'test_streaming_follow_contract.py'", scope)
+
     def test_partial_extended_duplicate_and_other_modes_keep_full_selection(self):
         classes = ','.join(CLASSES)
         for raw in ('', ','.join(CLASSES[:-1]), classes + ',app.daiyu.android.UnknownTest',

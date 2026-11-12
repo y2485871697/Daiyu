@@ -310,11 +310,22 @@ internal fun ChatMessageList(
                 motion.reset(); resumeFollowPending = false; alignViewport = false
                 return@collectLatest
             }
+            val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+            val obscuredTail = if (currentOcclusionPx > 0)
+                (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
+            var motionDelta = 0f
+            if (!alignViewport && !resumeFollowPending) {
+                // Use the Compose frame clock consistently. Mixing System.nanoTime with the
+                // frame-clock timestamp in the idle wakeup makes the next sample non-monotonic
+                // under a controlled clock and can silently stop following measured growth.
+                withFrameNanos { frameTimeNanos ->
+                    if (canFollowBottom()) {
+                        motionDelta = motion.step(overflow.toFloat(), frameTimeNanos, currentDensity)
+                    }
+                }
+            }
             var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {
-                val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-                val obscuredTail = if (currentOcclusionPx > 0)
-                    (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
-                maxOf(motion.step(overflow.toFloat(), System.nanoTime(), currentDensity), obscuredTail.toFloat())
+                maxOf(motionDelta, obscuredTail.toFloat())
             }
             if (!alignViewport && !resumeFollowPending && delta == 0f && motion.velocityPxPerSecond == 0f) {
                 // The first motion sample intentionally returns zero so it does not invent a

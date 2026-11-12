@@ -140,5 +140,17 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, source)
 
 
+    def test_nonfollowing_running_owner_unwraps_after_leaving_the_viewport(self):
+        source = CHAT.read_text()
+        cleanup = source.split('LaunchedEffect(listState, turnKeys, assistantOwnerKey)', 1)[1].split('val boundaryRequests', 1)[0]
+        self.assertIn('key == assistantOwnerKey && followBottom', cleanup)
+        self.assertIn('(key != assistantOwnerKey || !followBottom)', cleanup)
+        self.assertIn('bottom <= layout.viewportStartOffset || top >= layout.viewportEndOffset', cleanup)
+        self.assertIn('viewport.scrollOffset = 0f', cleanup)
+        owner = DEVICE.read_text().split('fun testRunningOwnerViewportHasRealContentWhenReaderScrollsBackIntoIt()', 1)[1].split('fun testContinuousEveryFrameGrowth', 1)[0]
+        for token in ('height = 2400.dp', 'manualNonzeroPosition()', 'messageId = "u0"', 'sawRealStart && observedUnwrapped', 'assertTrue(running)', 'assertFalse(appendAssistant)'):
+            self.assertIn(token, owner)
+
+
 if __name__ == "__main__":
     unittest.main()

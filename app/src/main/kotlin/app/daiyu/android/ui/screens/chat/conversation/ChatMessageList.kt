@@ -335,13 +335,13 @@ internal fun ChatMessageList(
             }
         }
     }
-    // A retired viewport may keep its reader anchor while visible. Once off-screen,
+    // A non-following viewport keeps its reader anchor while visible. Once off-screen,
     // its full-height row must be ordinary content before the reader re-enters it.
     LaunchedEffect(listState, turnKeys, assistantOwnerKey) {
         snapshotFlow {
             val layout = listState.layoutInfo
             if (layout.totalItemsCount == 0) emptyList() else nestedStates.mapNotNull { (key, viewport) ->
-                if (key == assistantOwnerKey || !viewport.bounded || viewport.migrating) return@mapNotNull null
+                if (key == assistantOwnerKey && followBottom || !viewport.bounded || viewport.migrating) return@mapNotNull null
                 val item = layout.visibleItemsInfo.firstOrNull { it.key == key }
                 if (item == null) key else {
                     val top = item.offset + viewport.viewportOffset
@@ -352,7 +352,7 @@ internal fun ChatMessageList(
         }.collect { offscreen ->
             offscreen.forEach { key ->
                 val viewport = nestedStates[key] ?: return@forEach
-                if (key != assistantOwnerKey && viewport.bounded && !viewport.migrating) {
+                if ((key != assistantOwnerKey || !followBottom) && viewport.bounded && !viewport.migrating) {
                     viewport.bounded = false
                     viewport.scrollOffset = 0f
                     viewport.viewportOffset = 0

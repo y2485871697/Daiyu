@@ -189,6 +189,32 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testRunningOwnerViewportHasRealContentWhenReaderScrollsBackIntoIt() {
+        mainThread { height = 2400.dp }
+        mount(interactive = true)
+        manualNonzeroPosition()
+        mainThread { request = ChatScrollRequest(6, messageId = "u0", followBottom = false) }
+        ui.waitForIdle()
+        ui.onNodeWithText("history 0").assertIsDisplayed()
+        var sawRealStart = false
+        var observedUnwrapped = false
+        repeat(16) {
+            ui.onNodeWithTag("chat-messages").performTouchInput {
+                swipe(Offset(center.x, 180f * density), Offset(center.x, 140f * density), durationMillis = 500)
+            }
+            ui.waitForIdle()
+            if (ui.onNodeWithTag("inner-start").isDisplayed()) sawRealStart = true
+            val tail = ui.onAllNodesWithTag("chat-stream-viewport:tail").fetchSemanticsNodes().singleOrNull()
+            if (tail != null && tail.config[SemanticsProperties.VerticalScrollAxisRange].maxValue() == 0f) {
+                observedUnwrapped = true
+            }
+        }
+        assertTrue("The same running owner must not retain an empty offscreen extent", sawRealStart && observedUnwrapped)
+        assertTrue(running)
+        assertFalse(appendAssistant)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testContinuousEveryFrameGrowthKeepsRealTailClearAndOuterBounded() {
         mount()
         ui.mainClock.autoAdvance = false

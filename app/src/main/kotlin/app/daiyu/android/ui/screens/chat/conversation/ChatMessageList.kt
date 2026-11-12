@@ -63,7 +63,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.BottomFollowMotion
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectLatest
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -190,9 +189,9 @@ internal fun ChatMessageList(
                 it.index == currentTailIndex && it.key == currentTailKey
             } ?: return
             val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-                (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
-                    else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) return
+            if (resumeFollowPending && tail != null && !tail.isStreaming &&
+                layout.visibleItemsInfo.any { it.key == tail.listKey } &&
+                (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) return
             val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
             val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
             if (correction == 0) return
@@ -278,15 +277,16 @@ internal fun ChatMessageList(
         var previousViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
         var alignViewport = false
         val motion = BottomFollowMotion()
-        // One bounded correction per layout snapshot; never keep a frame loop alive while output grows.
+        // Process each measured target update through a frame; collectLatest would cancel a
+        // pending motion step whenever the streaming item's size changes again.
         snapshotFlow {
             val layout = listState.layoutInfo
             val index = currentTailIndex
             val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
             Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
                 Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding))
-        }.collectLatest { (canFollow, tailFrame, viewport) ->
-            if (!canFollow) { motion.reset(); return@collectLatest }
+        }.collect { (canFollow, tailFrame, viewport) ->
+            if (!canFollow) { motion.reset(); return@collect }
             var layout = listState.layoutInfo
             val index = tailFrame.first
             var last = layout.visibleItemsInfo.lastOrNull { it.index == index }
@@ -295,20 +295,20 @@ internal fun ChatMessageList(
                 layout = listState.layoutInfo
                 last = layout.visibleItemsInfo.lastOrNull { it.index == index }
                 motion.reset()
-                if (last == null) return@collectLatest
+                if (last == null) return@collect
             }
             if (previousViewport != null && previousViewport != viewport) alignViewport = true
             previousViewport = viewport
             val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-                (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
-                    else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
-                motion.reset(); return@collectLatest
+            if (resumeFollowPending && tail != null && !tail.isStreaming &&
+                layout.visibleItemsInfo.any { it.key == tail.listKey } &&
+                (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
+                motion.reset(); return@collect
             }
             val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
             if (overflow <= 0) {
                 motion.reset(); resumeFollowPending = false; alignViewport = false
-                return@collectLatest
+                return@collect
             }
             val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
             val obscuredTail = if (currentOcclusionPx > 0)

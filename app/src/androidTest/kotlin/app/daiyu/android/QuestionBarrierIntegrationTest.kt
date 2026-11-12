@@ -138,10 +138,13 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     private fun send(f:Fixture):Message {
         val prompt="Ask for a route"
         setDraft(prompt)
+        assertDraft(prompt)
         ui.waitUntil(timeoutMillis=8_000) {
             ui.onAllNodes(hasTestTag("chat-send") and isEnabled()).fetchSemanticsNodes().size==1
         }
-        node("chat-send").assertIsEnabled().performClick()
+        // This suite verifies durable admission, not the cold-start IME's moving touch target.
+        node("chat-send").assertIsDisplayed().assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitTextSendResult(checkNotNull(activity))
         var acceptedAssistant:Message?=null
         // A null pending-send state also occurs on synchronous queue rejection. Confirm the

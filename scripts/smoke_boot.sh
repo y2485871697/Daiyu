@@ -146,6 +146,11 @@ linux_pin_target = {
 linux_pin_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(linux_pin_target)
 linux_pin_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                      for name in linux_pin_target}
+terminal_screen_target = "app.daiyu.android.terminal.TerminalScreenTest"
+terminal_screen_only = mode == "smoke" and raw_filter == terminal_screen_target
+terminal_screen_source = Path("app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalScreenTest.kt")
+if raw_filter == terminal_screen_target and not terminal_screen_only:
+    raise ValueError("TerminalScreenTest is smoke-only")
 
 classes = {}
 for path in sorted(Path("app/src/androidTest").rglob("*")):
@@ -181,6 +186,8 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
         continue
     if linux_pin_only and path not in linux_pin_sources:
         continue
+    if terminal_screen_only and path != terminal_screen_source:
+        continue
     source = path.read_text()
     if path.suffix == ".kt":
         count = len(re.findall(r"^\s*fun test\w+\(", source, re.M))
@@ -206,6 +213,8 @@ shards = int(os.environ.get("SMOKE_SHARD_COUNT", "1"))
 shard = int(os.environ.get("SMOKE_SHARD_INDEX", "0"))
 if mode == "daily" and (shards != 1 or shard != 0):
     raise ValueError("Daily Release requires one complete targeted shard per API")
+if terminal_screen_only and (os.environ.get("SMOKE_API") != "all" or shards != 1 or shard != 0):
+    raise ValueError("TerminalScreenTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
 if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and len(classes) < shards):
@@ -279,6 +288,17 @@ collect_diagnostics() {
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device
 api=$(adb_stage api 15 shell getprop ro.build.version.sdk | tr -d '\r')
+if test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.terminal.TerminalScreenTest"; then
+  python3 - "$api" "${SMOKE_SHARD_INDEX:-0}" <<'PYTERMINAL'
+import os, sys
+sys.path.insert(0, os.path.join(os.environ['SMOKE_SCRIPT_DIR'], 'acceptance'))
+from terminal_retention_contract import select_terminal_screen
+select_terminal_screen(__import__('os').environ.get('SMOKE_MODE', ''),
+                      __import__('os').environ.get('SMOKE_API', ''),
+                      __import__('os').environ['SMOKE_TEST_CLASSES'],
+                      int(sys.argv[1]), int(sys.argv[2]))
+PYTERMINAL
+fi
 # Observe the image's renderer without restarting framework processes or hiding startup crashes.
 adb_stage image-state 15 shell getprop > smoke/properties-before.txt
 adb_stage ime-list 15 shell ime list -a > smoke/ime-list-before.txt

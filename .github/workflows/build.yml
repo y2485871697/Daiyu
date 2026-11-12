@@ -537,7 +537,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.mode == 'daily' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
+        include: ${{ fromJSON(inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalScreenTest' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || inputs.mode == 'daily' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
     steps:
       - name: 限定定向过滤仅用于smoke或candidate
         shell: bash
@@ -621,8 +621,9 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
-          SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}
+          SMOKE_SHARD_COUNT: ${{ (inputs.mode == 'daily' || (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalScreenTest')) && '1' || '4' }}
           DAILY_API: ${{ matrix.api }}
+          SMOKE_API: ${{ inputs.smoke_api }}
           SMOKE_SHARD_INDEX: ${{ matrix.shard }}
         with:
           api-level: ${{ matrix.api }}

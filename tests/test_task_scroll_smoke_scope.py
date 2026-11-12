@@ -14,6 +14,7 @@ import test_speech_platform_discovery as discovery
 
 CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',

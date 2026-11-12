@@ -75,6 +75,7 @@ page_back_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/'
                      for name in (requested if page_back_only else page_back_target)}
 task_scroll_target = {
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',

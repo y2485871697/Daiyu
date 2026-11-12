@@ -56,6 +56,7 @@ PAGE_BACK_MODULES = (
 
 TASK_SCROLL_PLATFORM_CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',

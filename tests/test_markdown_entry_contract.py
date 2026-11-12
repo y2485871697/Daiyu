@@ -41,7 +41,9 @@ class MarkdownEntryContract(unittest.TestCase):
     def test_cancelled_initial_selection_resumes_and_background_notifications_do_not_restart_it(self):
         source = (APP / 'MainActivity.kt').read_text()
         resume = source.split('    override fun onResume() {', 1)[1].split('    private fun applyPreferredRefreshRate()', 1)[0]
-        self.assertIn('if (selectionReady && displayWindow == null) publishChat() else refresh()', resume)
+        stable = resume.split('if (selectionReady && displayWindow == null) {', 1)[1].split('} else refresh()', 1)[0]
+        self.assertIn('publishChat(rowsChanged = false)', stable)
+        self.assertIn('} else refresh()', resume)
         self.assertLess(resume.index('voiceForeground = true'), resume.index('else refresh()'))
         pause = source.split('    override fun onPause() {', 1)[1].split('    override fun onStop()', 1)[0]
         self.assertIn('cancelPaneConversationSelection()', pause)

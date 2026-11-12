@@ -136,4 +136,19 @@ class ToolReceiptSourceTest {
         assertNull(deleted(expanded.last(), expanded.last().blocks.single() as MessageBlock.Tool))
     }
 
+    @Test fun independentlyDecodedSummaryAliasesNeverShiftTheAuthoritativeHistoryOrdinals() {
+        val physical = MessageBlock.Tool(call, "receipt")
+        val segment = physical.copy()
+        assertEquals(physical, segment); assertNotSame(physical, segment)
+        val historical = message.copy(blocks = listOf(physical), historySegments = listOf(
+            MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, listOf(segment))))
+        val canonical = source(historical).single().tools
+        assertEquals(1, canonical.size)
+        assertSame(segment, canonical.single())
+        assertEquals(source(message.copy(blocks = listOf(physical))), source(historical))
+        val onlyUser = historical.copy(historySegments = listOf(MessageHistorySegment(
+            MessageId("user"), Message.USER_ROLE, listOf(MessageBlock.Text("user", "supplement")))))
+        assertTrue(source(onlyUser).isEmpty())
+    }
+
 }

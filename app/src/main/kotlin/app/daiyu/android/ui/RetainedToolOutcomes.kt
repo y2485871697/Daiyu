@@ -23,12 +23,13 @@ internal object RetainedToolOutcomes {
 
     internal data class Source(val conversation: String, val run: String, val message: String,
         val status: RunStatus, val tools: List<MessageBlock.Tool>)
+    private fun sourceBlocks(message: Message): List<MessageBlock> =
+        if (message.historySegments.isEmpty()) message.blocks else message.historySegments
+            .filter { it.role == Message.ASSISTANT_ROLE }.flatMap { it.blocks }
+
     internal fun sources(messages: List<Message>): List<Source> = messages.filter { it.role == Message.ASSISTANT_ROLE }
         .mapNotNull { message ->
-            val seen = IdentityHashMap<MessageBlock.Tool, Boolean>()
-            val tools = (message.blocks + message.historySegments.flatMap { it.blocks })
-                .filterIsInstance<MessageBlock.Tool>()
-                .filter { seen.put(it, true) == null }
+            val tools = sourceBlocks(message).filterIsInstance<MessageBlock.Tool>()
             if (tools.isEmpty()) null else Source(message.conversationId.value, message.runId.value, message.id.value, message.status, tools)
         }
 
@@ -64,8 +65,7 @@ internal object RetainedToolOutcomes {
             questions[Owner(message.conversationId.value, message.runId.value, message.id.value)]
 
         private fun position(message: Message, block: MessageBlock.Tool): Int {
-            val tools = (message.blocks + message.historySegments.flatMap { it.blocks })
-                .filterIsInstance<MessageBlock.Tool>()
+            val tools = sourceBlocks(message).filterIsInstance<MessageBlock.Tool>()
             return tools.indexOfFirst { it === block }.takeIf { it >= 0 }
                 ?: tools.indexOf(block).takeIf { it >= 0 } ?: 0
         }
@@ -126,9 +126,26 @@ internal object RetainedToolOutcomes {
                         if (snapshot.tools.any { it.invocation.name == app.daiyu.android.domain.question.ASK_USER_TOOL_NAME }) {
                             questions[owner] = QuestionCheckpointEvidence.from(snapshot, recoveryOwner)
                         }
-                        put(owner, snapshot.tools.mapIndexed { position, it ->
-                            Result(it.invocation, it.result, position) to it.disposition
-                        }.toMap())
+                        val projected = sourceBlocks(snapshot.message)
+                        val visibleUnreturned = projected.filterIsInstance<MessageBlock.Tool>()
+                            .filter { it.result == null }.toSet()
+                        val physical = snapshot.message.blocks.filter {
+                            it !is MessageBlock.Tool || it.result != null || it in visibleUnreturned
+                        }
+                        val tailStart = projected.size - physical.size
+                        val outcomes: Map<Result, ToolDisposition> =
+                            if (tailStart < 0 || projected.subList(tailStart, projected.size) != physical) emptyMap()
+                            else {
+                                val offset = projected.take(tailStart).count { it is MessageBlock.Tool }
+                                val ledger = snapshot.tools.associateBy { it.invocation.id }
+                                physical.filterIsInstance<MessageBlock.Tool>().mapIndexedNotNull { position, block ->
+                                    val record = ledger[block.invocation.id]?.takeIf {
+                                        it.invocation == block.invocation && it.result == block.result
+                                    } ?: return@mapIndexedNotNull null
+                                    Result(block.invocation, block.result, offset + position) to record.disposition
+                                }.toMap()
+                            }
+                        put(owner, outcomes)
                     }
                 }
                 return Snapshot(records, questions.toMap(), blockPositions)

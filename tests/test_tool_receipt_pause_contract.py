@@ -51,6 +51,17 @@ class ToolReceiptPauseContract(unittest.TestCase):
         self.assertIn('val index = position(message, block) ?: return@reader null', reuse)
         self.assertNotIn('?: position(message, block)', reuse)
 
+    def test_reopened_history_uses_one_authority_and_exact_physical_suffix_evidence(self):
+        source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
+        blocks = source.split('private fun sourceBlocks(', 1)[1].split('internal fun sources(', 1)[0]
+        self.assertIn('if (message.historySegments.isEmpty()) message.blocks else message.historySegments', blocks)
+        self.assertIn('filter { it.role == Message.ASSISTANT_ROLE }', blocks)
+        self.assertNotIn('message.blocks +', source)
+        read = source.split('fun read(database:', 1)[1].split('fun pendingProjection(', 1)[0]
+        self.assertIn('projected.subList(tailStart, projected.size) != physical', read)
+        self.assertIn('it.invocation == block.invocation && it.result == block.result', read)
+        self.assertIn('offset + position', read)
+
     def test_host_regression_observes_pending_frames_at_actual_pause_and_resume(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()
         for token in ('SQLiteRuntimeStore.acquire(database)', 'call("publishChat")', 'val pending = Job()',

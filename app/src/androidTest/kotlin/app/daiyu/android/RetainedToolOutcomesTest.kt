@@ -203,12 +203,15 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         val user = Message(MessageId("history-user"), conversation.id, RunId("history-run"),
             Message.USER_ROLE, listOf(MessageBlock.Text("user", "read")), RunStatus.COMPLETED)
         val invocation = ToolInvocation(ToolCallId("same"), "read", "{}")
-        val tools = listOf(ToolRecord(invocation, ToolDisposition.SUCCEEDED, "same"),
+        val old = MessageBlock.Tool(invocation, "same")
+        val now = old.copy()
+        val unreported = ToolInvocation(ToolCallId("unreported"), "read", "{}")
+        val tools = listOf(ToolRecord(unreported, ToolDisposition.UNKNOWN, null),
             ToolRecord(invocation, ToolDisposition.FAILED, "same"))
         val assistant = user.copy(id = MessageId("history-assistant"), role = Message.ASSISTANT_ROLE,
-            status = RunStatus.RUNNING, blocks = emptyList(), historySegments = tools.map { tool ->
-                MessageHistorySegment(MessageId("history-assistant"), Message.ASSISTANT_ROLE,
-                    listOf(MessageBlock.Tool(tool.invocation, tool.result))) })
+            status = RunStatus.RUNNING, blocks = listOf(MessageBlock.Tool(unreported), now),
+            historySegments = listOf(old, now.copy()).map { tool ->
+                MessageHistorySegment(MessageId("history-assistant"), Message.ASSISTANT_ROLE, listOf(tool)) })
         SQLiteRuntimeStore.acquire(database).use { runtime ->
             runtime.recoverPending(); database.send(user, assistant)
             runtime.commitCheckpoint(RunCheckpoint(assistant, listOf(user), ExecutionPhase.STREAMING,
@@ -216,13 +219,14 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
             val snapshot = RetainedToolOutcomes.Snapshot.read(database, listOf(assistant))
             val loaded = RetainedToolOutcomes.ReadKey(conversation.id, 3, 4,
                 RetainedToolOutcomes.sources(listOf(assistant)), null)
-            val copied = assistant.copy(historySegments = assistant.historySegments.map { segment ->
-                segment.copy(blocks = segment.blocks.map { (it as MessageBlock.Tool).copy() }) })
+            val copied = assistant.copy(blocks = assistant.blocks.map { (it as MessageBlock.Tool).copy() },
+                historySegments = assistant.historySegments.map { segment ->
+                    segment.copy(blocks = segment.blocks.map { (it as MessageBlock.Tool).copy() }) })
             for (next in listOf(copied, copied.copy(status = RunStatus.COMPLETED))) {
                 val current = loaded.copy(sources = RetainedToolOutcomes.sources(listOf(next)))
                 val turn = ChatTurnMapper.map(listOf(next), toolReceipt = snapshot.displayReader(loaded, current))
                     .single() as ChatTurnUi.Assistant
-                assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED),
+                assertEquals(listOf(WorkStepState.UNKNOWN, WorkStepState.FAILED),
                     turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
             }
         }

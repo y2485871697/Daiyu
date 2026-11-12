@@ -41,7 +41,9 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('scrollResumed && followBottom && !currentDragging', guard)
         self.assertNotIn('while (true)', follow)
         self.assertIn('withFrameNanos', follow)
-        self.assertIn('motion.velocityPxPerSecond == 0f', follow)
+        self.assertIn('if (observedViewport != null && observedViewport != viewport) alignViewport = true', follow)
+        alignment = follow.split('if (alignment) {', 1)[1].split('}', 1)[0]
+        self.assertIn('motion.reset()', alignment)
         self.assertIn('snapshotFlow {', follow)
         self.assertIn('Triple(canFollowBottom(),', follow)
         self.assertIn('if (!canFollow)', follow)

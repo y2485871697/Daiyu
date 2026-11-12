@@ -68,7 +68,8 @@ class ChatInitialPositionContract(unittest.TestCase):
     def test_later_navigation_and_stream_motion_are_preserved(self):
         chat = CHAT.read_text()
         request = chat.split('LaunchedEffect(scrollRequest,', 1)[1].split('// Keep a single motion', 1)[0]
-        self.assertIn('turns.size, tailIndex, touchEpoch, scrollResumed)', request)
+        self.assertIn('turns.size, tailIndex, touchEpoch, scrollResumed, pageActive)', request)
+        self.assertGreaterEqual(request.count('if (!scrollResumed || !pageActive) return@LaunchedEffect'), 2)
         self.assertIn('listState.animateScrollToItem(index)', request)
         follow = chat.split('// Keep a single motion', 1)[1].split('// Read confirmation', 1)[0]
         self.assertIn('snapshotFlow {', follow)

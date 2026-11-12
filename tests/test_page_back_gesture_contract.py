@@ -373,7 +373,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertNotIn('try { retainedRootContent(active)', self.host)
         for name in ('position-seed', 'restore-lifecycle', 'restore-clearance'):
             self.assertIn(f'synchronousTrace("daiyu.chat.{name}")', chat)
-        clearance = chat.split('    fun correctFollowClearance()', 1)[1].split('    val requestedIndex', 1)[0]
+        clearance = chat.split('    fun correctFollowClearance()', 1)[1].split('\n    }\n', 1)[0]
         self.assertNotIn('withFrameNanos', clearance)
         self.assertNotIn('scrollToItem', clearance)
         self.assertIn('remeasurement.forceRemeasure()', clearance)

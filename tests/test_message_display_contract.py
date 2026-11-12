@@ -43,7 +43,12 @@ class MessageDisplayContract(unittest.TestCase):
         self.assertLess(upgrade.index('MessageDisplayStore.install(db)'), upgrade.index('if (oldVersion >= 13) return'))
         canonical = db.split('internal fun storedMessage(', 1)[1].split('internal fun videoInputs(', 1)[0]
         self.assertIn('requireNotNull(text("protocol"))', canonical)
-        self.assertIn('MessageHistoryCodec.validate(message)', canonical)
+        self.assertIn('MessageHistoryCodec.validate(message, decodeReuse?.historyReceipts)', canonical)
+        self.assertIn('decodeColumns().also(::validateRead)', canonical)
+        self.assertIn('decodeReuse.read(columns, ::decodeColumns, ::validateRead)', canonical)
+        reuse = (APP / 'storage/CommitMessageDecodeReuse.kt').read_text()
+        self.assertIn('validate(hit.message)', reuse)
+        self.assertIn('snapshot(decode()).also(validate)', reuse)
         self.assertIn('SQLiteMessageVideoStore.readVerified(db, message)', canonical)
 
     def test_cloud_regressions_are_wired(self):

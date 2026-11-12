@@ -28,8 +28,8 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
                     Box(Modifier.size(320.dp, 240.dp)) {
                         ChatMessageList(
                             List(6) { ChatTurnUi.User("u$it", "history $it") } +
-                                ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING),
-                            ChatScreenActions(), scrollRequest = request, turnExtras = {
+                                ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING, isStreaming = true),
+                            ChatScreenActions(), scrollRequest = request, composerBottomInset = 64.dp, turnExtras = {
                                 Box(Modifier.height(height))
                                 Text("stream tail marker")
                             },

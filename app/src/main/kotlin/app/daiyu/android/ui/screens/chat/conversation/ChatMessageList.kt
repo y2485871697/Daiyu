@@ -283,82 +283,100 @@ internal fun ChatMessageList(
             val layout = listState.layoutInfo
             val index = currentTailIndex
             val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
-            Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
-                Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding))
-        }.collect { (canFollow, tailFrame, viewport) ->
-            if (!canFollow) { motion.reset(); return@collect }
-            var layout = listState.layoutInfo
-            val index = tailFrame.first
-            var last = layout.visibleItemsInfo.lastOrNull { it.index == index }
-            if (last == null) {
-                listState.scrollToItem(index)
-                layout = listState.layoutInfo
-                last = layout.visibleItemsInfo.lastOrNull { it.index == index }
-                motion.reset()
-                if (last == null) return@collect
-            }
-            if (previousViewport != null && previousViewport != viewport) alignViewport = true
-            previousViewport = viewport
             val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (resumeFollowPending && tail != null && !tail.isStreaming &&
-                layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-                (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
-                motion.reset(); return@collect
-            }
-            val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
-            if (overflow <= 0) {
-                motion.reset(); resumeFollowPending = false; alignViewport = false
-                return@collect
-            }
-            val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-            val obscuredTail = if (currentOcclusionPx > 0)
-                (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
-            var motionDelta = 0f
-            if (!alignViewport && !resumeFollowPending) {
-                // Use the Compose frame clock consistently. Mixing System.nanoTime with the
-                // frame-clock timestamp in the idle wakeup makes the next sample non-monotonic
-                // under a controlled clock and can silently stop following measured growth.
-                withFrameNanos { frameTimeNanos ->
-                    if (canFollowBottom()) {
-                        motionDelta = motion.step(overflow.toFloat(), frameTimeNanos, currentDensity)
+            val resumeReady = !resumeFollowPending || tail == null || tail.isStreaming ||
+                layout.visibleItemsInfo.none { it.key == tail.listKey } ||
+                readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail
+            Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
+                Triple(layout.viewportSize, layout.beforeContentPadding to layout.afterContentPadding, resumeReady))
+        }.collect { (canFollow, _, _) ->
+            if (!canFollow) { motion.reset(); return@collect }
+            var observedViewport = previousViewport
+            while (canFollowBottom()) {
+                val index = currentTailIndex
+                if (index < 0) { motion.reset(); return@collect }
+                var layout = listState.layoutInfo
+                var last = layout.visibleItemsInfo.lastOrNull {
+                    it.index == index && it.key == currentTailKey
+                }
+                if (last == null) {
+                    listState.scrollToItem(index)
+                    layout = listState.layoutInfo
+                    last = layout.visibleItemsInfo.lastOrNull {
+                        it.index == index && it.key == currentTailKey
+                    }
+                    motion.reset()
+                    if (last == null) {
+                        withFrameNanos { }
+                        continue
                     }
                 }
-            }
-            var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {
-                maxOf(motionDelta, obscuredTail.toFloat())
-            }
-            if (!alignViewport && !resumeFollowPending && delta == 0f && motion.velocityPxPerSecond == 0f) {
-                // The first motion sample intentionally returns zero so it does not invent a
-                // jump. Keep one frame alive to obtain the next sample; otherwise the layout
-                // snapshot never changes and a settled list can miss the next height burst.
-                var nextDelta = 0f
-                withFrameNanos { frameTimeNanos ->
-                    if (canFollowBottom()) {
-                        val nextLayout = listState.layoutInfo
-                        val nextLast = nextLayout.visibleItemsInfo.lastOrNull { it.index == index }
-                        if (nextLast != null) {
-                            val nextOverflow = nextLast.offset + nextLast.size +
-                                nextLayout.afterContentPadding - nextLayout.viewportEndOffset
-                            if (nextOverflow > 0) {
-                                val visibleBottom = nextLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-                                val obscuredTail = if (currentOcclusionPx > 0)
-                                    (nextLast.offset + nextLast.size - visibleBottom).coerceAtLeast(0) else 0
-                                nextDelta = maxOf(
-                                    motion.step(nextOverflow.toFloat(), frameTimeNanos, currentDensity),
-                                    obscuredTail.toFloat(),
-                                )
+                val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding)
+                if (observedViewport != null && observedViewport != viewport) alignViewport = true
+                observedViewport = viewport
+                val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
+                if (resumeFollowPending && tail != null && !tail.isStreaming &&
+                    layout.visibleItemsInfo.any { it.key == tail.listKey } &&
+                    (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
+                    motion.reset()
+                    return@collect
+                }
+                val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
+                if (overflow <= 0) {
+                    motion.reset()
+                    resumeFollowPending = false
+                    alignViewport = false
+                    previousViewport = observedViewport
+                    return@collect
+                }
+                val alignment = alignViewport || resumeFollowPending
+                var delta = if (alignment) overflow.toFloat() else 0f
+                if (!alignment) {
+                    // Keep one cancellable frame loop alive while measured overflow remains.
+                    // A settled LazyColumn may not emit another layout snapshot after the first
+                    // zero-velocity sample, so the next frame must be sampled here directly.
+                    withFrameNanos { frameTimeNanos ->
+                        if (canFollowBottom()) {
+                            val frameLayout = listState.layoutInfo
+                            val frameLast = frameLayout.visibleItemsInfo.lastOrNull {
+                                it.index == index && it.key == currentTailKey
+                            }
+                            if (frameLast != null) {
+                                val frameOverflow = frameLast.offset + frameLast.size +
+                                    frameLayout.afterContentPadding - frameLayout.viewportEndOffset
+                                if (frameOverflow > 0) {
+                                    val visibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+                                    val obscuredTail = if (currentOcclusionPx > 0)
+                                        (frameLast.offset + frameLast.size - visibleBottom).coerceAtLeast(0) else 0
+                                    delta = maxOf(
+                                        motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity),
+                                        obscuredTail.toFloat(),
+                                    )
+                                } else {
+                                    motion.reset()
+                                }
                             }
                         }
                     }
                 }
-                delta = nextDelta
-            }
-            if (delta > 0f && canFollowBottom()) {
-                listState.scrollBy(delta)
-                if (alignViewport || resumeFollowPending) {
-                    resumeFollowPending = false; alignViewport = false; motion.reset()
+                if (delta > 0f && canFollowBottom()) {
+                    val consumed = listState.scrollBy(delta)
+                    if (consumed <= 0f) {
+                        motion.reset()
+                        return@collect
+                    }
+                    if (alignment) {
+                        resumeFollowPending = false
+                        alignViewport = false
+                        motion.reset()
+                    }
+                } else if (!canFollowBottom()) {
+                    motion.reset()
+                    return@collect
                 }
             }
+            previousViewport = observedViewport
+            motion.reset()
         }
     }
     // Read confirmation observes existing measured layout only; it never changes follow/scroll.

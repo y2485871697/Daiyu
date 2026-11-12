@@ -11,14 +11,16 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_follow_protects_minimum_clearance_before_smoothing_remaining_spacing(self):
         source = CHAT.read_text()
         follow = source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
-        self.assertIn("val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
+        self.assertIn("val visibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
         self.assertIn("val currentFollowClearancePx by rememberUpdatedState(with(density) { 16.dp.roundToPx() })", source)
         self.assertIn("bottom = composerBottomInset + 24.dp", source)
         self.assertIn("val obscuredTail = if (currentOcclusionPx > 0)", follow)
-        self.assertIn("(last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
-        self.assertIn("maxOf(motion.step(overflow.toFloat(), frameTime, currentDensity), obscuredTail.toFloat())", follow)
-        self.assertLess(follow.index("if (!canFollowBottom())"), follow.index("val obscuredTail"))
-        self.assertIn("if (delta > 0f) listState.scrollBy(delta)", follow)
+        self.assertIn("(frameLast.offset + frameLast.size - visibleBottom).coerceAtLeast(0)", follow)
+        self.assertIn("motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity)", follow)
+        self.assertIn("obscuredTail.toFloat()", follow)
+        self.assertIn("while (canFollowBottom())", follow)
+        self.assertIn("withFrameNanos { frameTimeNanos ->", follow)
+        self.assertIn("listState.scrollBy(delta)", follow)
 
     def test_real_streaming_text_is_checked_before_settling(self):
         source = (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text()

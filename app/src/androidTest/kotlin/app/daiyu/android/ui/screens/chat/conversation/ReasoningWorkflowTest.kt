@@ -26,6 +26,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     private fun message(blocks: List<MessageBlock>, summaries: List<ReportedReasoning>) = Message(
         MessageId("a"), ConversationId("c"), RunId("r"), "assistant", blocks, RunStatus.COMPLETED, reportedReasoning = summaries)
     private fun mapped(message: Message) = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
+    private fun toolEntryTag(id: String): String {
+        val item = mapped(message(listOf(tool(id)), emptyList())).workflowContent().steps
+            .withIndex().single { it.value is MessageContentUi.Tool }
+        return "workflow-entry:${item.value.workflowKey(item.index)}"
+    }
     private fun prepare() = runBlocking {
         val sources = listOf("first summary", "second summary", "answer")
         projectMarkdown(sources)
@@ -958,9 +963,10 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onAllNodesWithText("first summary").assertCountEquals(1)
     }
 
-    fun testAReleasedToolExpandsIntoPlaceInsteadOfMountingAtFullHeight() {
+    fun testAReleasedToolUsesStableIdentityWithoutPerStepEntranceAnimation() {
         prepare()
         var reported by mutableStateOf(ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))
+        val entryTag = toolEntryTag("t1")
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -969,20 +975,22 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             } } }
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("first summary").assertIsDisplayed()
-            ui.onNodeWithTag("workflow-entry:tool:t1").assertDoesNotExist()
+            ui.onNodeWithTag(entryTag).assertDoesNotExist()
             mainThread { reported = reported.frozen() }
             ui.mainClock.advanceTimeByFrame()
-            ui.onNodeWithTag("workflow-entry:tool:t1").assertDoesNotExist()
+            ui.onNodeWithTag(entryTag).assertDoesNotExist()
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
-                ui.onAllNodesWithTag("workflow-entry:tool:t1").fetchSemanticsNodes().isNotEmpty()
+                ui.onAllNodesWithTag(entryTag).fetchSemanticsNodes().isNotEmpty()
             }
             ui.onNodeWithText("first summary").assertDoesNotExist()
+            val firstHeight = ui.onNodeWithTag(entryTag).fetchSemanticsNode().boundsInRoot.height
             ui.mainClock.advanceTimeBy(48)
-            val intermediate = ui.onNodeWithTag("workflow-entry:tool:t1").fetchSemanticsNode().boundsInRoot.height
+            val nextFrameHeight = ui.onNodeWithTag(entryTag).fetchSemanticsNode().boundsInRoot.height
             ui.mainClock.advanceTimeBy(300)
-            val complete = ui.onNodeWithTag("workflow-entry:tool:t1").fetchSemanticsNode().boundsInRoot.height
-            assertTrue("entry should have a real intermediate height: $intermediate < $complete", intermediate > 0f && intermediate < complete)
+            val settledHeight = ui.onNodeWithTag(entryTag).fetchSemanticsNode().boundsInRoot.height
+            assertEquals("Live tool additions do not animate each row", firstHeight, nextFrameHeight, 1f)
+            assertEquals("Released tool mounts at its measured height", firstHeight, settledHeight, 1f)
             ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
             assertDisclosure("work-process-header", expanded = true)
         } finally { ui.mainClock.autoAdvance = true }

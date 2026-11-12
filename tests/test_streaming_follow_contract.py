@@ -25,12 +25,16 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertNotIn("LaunchedEffect(turns", self.follow)
 
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
-        self.assertIn("var delta = if (alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
-        self.assertIn("motion.step(overflow.toFloat(), frameTimeNanos, currentDensity)", self.follow)
+        self.assertIn("val alignment = alignViewport || resumeFollowPending", self.follow)
+        self.assertIn("var delta = if (alignment) overflow.toFloat() else 0f", self.follow)
+        self.assertIn("motion.step(frameOverflow.toFloat(), frameTimeNanos, currentDensity)", self.follow)
         self.assertNotIn("System.nanoTime()", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
         self.assertIn("if (overflow <= 0)", self.follow)
+        self.assertIn("while (canFollowBottom())", self.follow)
+        self.assertNotIn("alignViewport || resumeFollowPending) overflow.toFloat() else {", self.follow)
         self.assertNotIn("animateScrollToItem", self.follow)
+        self.assertIn("maxOf(", self.follow)
         self.assertIn("obscuredTail.toFloat()", self.follow)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
@@ -40,13 +44,15 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
         self.assertIn("listState.animateScrollToItem(index)", self.source)
         self.assertIn("readyTurns[it.listKey] == it", self.source)
+        self.assertIn("readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail", self.follow)
 
     def test_idle_wait_rechecks_current_layout_without_ending_the_worker(self):
         self.assertIn("if (overflow <= 0)", self.follow)
-        idle = self.follow.split("if (overflow <= 0)", 1)[1].split("var delta =", 1)[0]
+        idle = self.follow.split("if (overflow <= 0)", 1)[1].split("val alignment =", 1)[0]
         self.assertIn("motion.reset()", idle)
-        self.assertNotIn("continue", idle)
+        self.assertIn("return@collect", idle)
         self.assertNotIn("break", self.follow)
+        self.assertIn("withFrameNanos { frameTimeNanos ->", self.follow)
         self.assertIn("if (delta > 0f && canFollowBottom())", self.follow)
 
     def test_domain_motion_algorithm_remains_single_source(self):
@@ -63,7 +69,7 @@ class StreamingFollowContract(unittest.TestCase):
                       "testIdleFollowWakesForEachLaterBurstWithoutANewScrollRequest", "height += 26.dp",
                       "movement <= 14f * density", "height += 78.dp", "frame()",
                       "Continuous growth cannot starve follow", "ui.mainClock.autoAdvance = false",
-                      "ui.mainClock.advanceTimeByFrame()", "positionInRoot().y",
+                      "ui.mainClock.advanceTimeByFrame()", "positionInRoot().y", "composerBottomInset = 64.dp",
                       "Touch cancels momentum as well as later height updates",
                       'messageId = "u1", followBottom = false', "fixture.opens.get()"]:
             self.assertIn(token, device)

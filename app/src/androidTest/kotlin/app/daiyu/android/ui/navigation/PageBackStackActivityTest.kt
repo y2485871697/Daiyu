@@ -67,7 +67,9 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
 
     private fun mount(local: Boolean = false, drawerPreviewSource: Boolean = false,
         gesturesEnabled: Boolean = true, rtl: Boolean = false, previewEnabled: Boolean = true,
-        animateBackEnabled: Boolean = true) {
+        animateBackEnabled: Boolean = true, immediateCapture: Boolean = false) {
+        // Motion-only fixtures can accept a pre-sampled unchanged source; pending-copy tests use real capture.
+        val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, ImageBitmap>()
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -79,7 +81,11 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                         captureFromContent = drawerPreviewSource && rendered == "chat",
                         animateBackEnabled = animateBackEnabled,
-                        previewCapture = { frame -> capturedFrame = frame; frame.layer.toImageBitmap() },
+                        previewCapture = { frame ->
+                            capturedFrame = frame
+                            if (immediateCapture && frame.navigationFrozen) checkNotNull(exactPixels[frame])
+                            else frame.layer.toImageBitmap().also { exactPixels[frame] = it }
+                        },
                         backTargetKey = if (rendered == "settings") "chat" else null) {
                         val registry = LocalPageBackStackPath.current?.registry
                         androidx.compose.runtime.SideEffect { observedStack = registry }
@@ -280,19 +286,22 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 frame.recorded(IntSize(2, 2)); scheduler.runCurrent()
                 assertEquals(1, copies.size)
                 layers.freezeCurrent()
-                assertEquals("final submission must not overlap a noncancellable Surface copy", 1, copies.size)
+                assertEquals("final copy is submitted before disposal while cancelled warm copy drains", 2, copies.size)
                 layers.enter("detail")
                 copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
                 assertNull("old in-flight pixels cannot become the final target", frame.image)
-                assertNull(frame.ready)
+                val finalPixels = ImageBitmap(2, 2)
+                copies[1].complete(finalPixels); scheduler.runCurrent()
+                assertSame("only the pre-disposal final submission becomes the historical target", finalPixels, frame.image)
+                assertEquals("draining the old warm task never submits a post-disposal copy", 2, copies.size)
                 layers.enter("other")
                 val other = layers.frame("other")
                 other.recorded(IntSize(2, 2)); scheduler.runCurrent()
-                copies[1].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
-                layers.freezeCurrent()
-                assertEquals(3, copies.size)
-                layers.setActive(false)
                 copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                layers.freezeCurrent()
+                assertEquals(4, copies.size)
+                layers.setActive(false)
+                copies[3].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
                 assertNull("pause invalidates a submitted boundary image", other.image)
                 assertNull(other.ready)
             } finally {
@@ -545,8 +554,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertFalse(returned.holdingForChild)
                 assertNull(returned.childChangeCaptured)
                 assertFalse(returned.animateReturn)
-                assertFalse("an unrecorded visit must not use inherited foreground pixels", layers.beginGesture(returned))
-                assertNull(returned.image)
+                assertTrue("a covered visit can continue its exact immutable source before its first recording", layers.beginGesture(returned))
+                assertSame(pixels, returned.image)
                 layers.resume(returned)
                 scheduler.advanceTimeBy(65); scheduler.runCurrent()
                 assertEquals("never copy an unrecorded replacement layer", 2, copies)
@@ -622,8 +631,9 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertEquals(3, copies.size)
                 assertTrue(layers.beginGesture(frame))
                 assertNull(frame.image)
+                assertEquals("gesture submits final pixels before the cancelled warm task drains", 4, copies.size)
                 copies[2].complete(oldTab); scheduler.runCurrent()
-                assertEquals("one final copy follows the cancelled warm copy while source is still visible", 4, copies.size)
+                assertEquals("warm completion does not duplicate the already submitted final copy", 4, copies.size)
                 assertNull("cancelled warm pixels never become visible", frame.image)
                 copies[3].complete(selectedTab); scheduler.runCurrent()
                 assertSame(selectedTab, frame.image)
@@ -734,8 +744,9 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     }
 
     private fun assertOrdinaryReturnMotion(rtl: Boolean = false, dispatchSystemBack: Boolean = false) {
-        mount(gesturesEnabled = false, rtl = rtl)
+        mount(gesturesEnabled = false, rtl = rtl, immediateCapture = true)
         changeScreen("settings")
+        awaitPreparedCurrentPixels()
         val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
         ui.mainClock.autoAdvance = false

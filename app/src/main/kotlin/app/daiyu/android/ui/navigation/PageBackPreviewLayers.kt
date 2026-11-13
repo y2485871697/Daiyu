@@ -43,6 +43,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         val canDrawPreview: Boolean get() = image?.let { it.width == size.width && it.height == size.height } == true
         val hasFreshImage: Boolean get() = ready != null && readyGeneration == generation && readySize == size
         var ready: ImageBitmap? = null
+        var inheritedImage: ImageBitmap? = null
         var image by mutableStateOf<ImageBitmap?>(null)
         var warmup: Job? = null
         var capture: Job? = null
@@ -51,6 +52,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         fun recorded(size: IntSize) {
             this.size = size
             generation++
+            inheritedImage = null
             onRecorded(this)
         }
     }
@@ -59,6 +61,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         val velocity: Float = 0f, val targetImage: ImageBitmap? = null,
         val motion: PageBackCompletionMotion? = null) {
         var forwardSkipped by mutableStateOf(false)
+        var returnSkipped by mutableStateOf(false)
     }
 
     private val frames = LinkedHashMap<Any, Frame>()
@@ -134,6 +137,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             frames[currentKey]?.let { frame ->
                 frame.image = null
                 frame.ready = null
+                frame.inheritedImage = null
                 frame.readyGeneration = -1L
                 frame.holdingForChild = false
                 frame.childChangeCaptured = null
@@ -188,7 +192,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         val token = captureBackPerformanceToken()
         observeCaptures(token)
         val canBegin = active && !closed && frames[frame.key] === frame && frame.size != IntSize.Zero &&
-            frame.generation > 0L && !frame.releaseRequested && !frame.layer.isReleased
+            (frame.generation > 0L || frame.inheritedImage != null) && !frame.releaseRequested && !frame.layer.isReleased
         if (frame.readyGeneration >= 0 && frame.readyGeneration < frame.generation) {
             BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_SOURCE_STALE, token,
                 (frame.generation - frame.readyGeneration).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
@@ -222,18 +226,21 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         frame.frozen = true
         // Descendant layers can move without recording the outer layer again. A warm bitmap
         // is not the final position; submit this copy before the outgoing content is disposed.
-        frame.image = null
+        val inherited = frame.inheritedImage?.takeIf {
+            frame.generation == 0L && it.width == frame.size.width && it.height == frame.size.height
+        }
+        frame.image = inherited
         frame.ready = null
         frame.readyGeneration = -1L
         frame.readySize = IntSize.Zero
         frame.captures.toList().forEach { it.cancel() }
-        capture(frame, captureBackPerformanceToken(), navigation = true)
+        if (inherited == null) capture(frame, captureBackPerformanceToken(), navigation = true)
     }
 
     private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?, navigation: Boolean = false) {
         if (closed || !active || frame.releaseRequested || frame.size == IntSize.Zero || frame.layer.isReleased ||
-            frame.captures.any { !it.isCompleted }) return
-        // A submitted API26 copy must drain; never queue a final read after content disposal.
+            frame.captures.any { !it.isCompleted && (!navigation || !it.isCancelled) }) return
+        // Submit the final read while the source is alive; cancelled warm reads drain separately.
         if (navigation) { if (!frame.frozen || frame.generation == 0L) return }
         else if (frame.frozen || frame.hasFreshImage) return
         val epoch = previewEpoch
@@ -292,13 +299,14 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             val previous = frames.remove(key)
             Frame(key, context.createGraphicsLayer(), sourceKey, contentKey, ::schedule).also { frame ->
                 if (previous != null && !previous.releaseRequested && previous.sourceKey == sourceKey && previous.contentKey == contentKey) {
-                    previous.ready?.takeIf { previous.readySize == previous.size &&
+                    (previous.image ?: previous.ready?.takeIf { previous.readySize == previous.size })?.takeIf {
                         it.width == previous.size.width && it.height == previous.size.height }?.let { image ->
                         // The returning visit may still be covered by its child's departure.
                         // Keep its prepared pixels, not the old layer or its recording generation.
                         frame.size = previous.size
-                        frame.readySize = previous.readySize
+                        frame.readySize = previous.size
                         frame.ready = image
+                        frame.inheritedImage = previous.image?.takeIf { it === image }
                     }
                 }
                 previous?.let { release(it) }
@@ -313,6 +321,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         frame.warmup?.cancel()
         frame.image = null
         frame.ready = null
+        frame.inheritedImage = null
         if (frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)
         else frame.captures.toList().forEach { it.cancel() }
     }
@@ -362,6 +371,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             it.captures.toList().forEach { capture -> capture.cancel() }
             it.image = null
             it.ready = null
+            it.inheritedImage = null
             it.readyGeneration = -1L
             it.holdingForChild = false
             it.childChangeCaptured = null

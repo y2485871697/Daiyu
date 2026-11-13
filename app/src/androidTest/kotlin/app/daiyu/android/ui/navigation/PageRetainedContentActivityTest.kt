@@ -461,6 +461,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         var detailFrame: PageBackPreviewLayers.Frame? = null
         var settingsDetail by mutableStateOf(false)
         var observedStack: PageBackStackRegistry? = null
+        val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, androidx.compose.ui.graphics.ImageBitmap>()
+        var immediateCaptureRequests = 0
         val draft = ComposerUi("retained draft", selectionStart = 2, selectionEnd = 5)
         val actions = ChatScreenActions()
         val turns = List(12) { ChatTurnUi.User("u$it", "earlier row $it") } +
@@ -485,7 +487,10 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                         "settings" -> settingsFrame = frame
                                         else -> detailFrame = frame
                                     }
-                                    frame.layer.toImageBitmap()
+                                    if (!swipe && frame.navigationFrozen) {
+                                        immediateCaptureRequests++
+                                        checkNotNull(exactPixels[frame])
+                                    } else frame.layer.toImageBitmap().also { exactPixels[frame] = it }
                                 },
                                 retainedRootContent = {
                                     DisposableEffect(Unit) { mounts++; onDispose { disposals++ } }
@@ -634,6 +639,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 activity.onBackPressedDispatcher.onBackPressed()
                 assertEquals("business return is synchronous", "chat", route)
             }
+            if (!swipe) assertTrue("ordinary-motion fixture accepted its unchanged final source", immediateCaptureRequests > 0)
             assertEquals("both committed releases invoke their callbacks", if (nested) 2 else 1, detailBacks)
             assertEquals("chat", route)
             assertEquals(if (nested) 2 else 1, detailBacks)

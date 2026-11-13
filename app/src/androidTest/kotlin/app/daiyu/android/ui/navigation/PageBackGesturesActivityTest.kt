@@ -78,9 +78,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var pageCompositions = 0
     private var sliderValue by mutableStateOf(0.2f)
     private var inputText by mutableStateOf("a text field with selectable content")
+    private var immediateCaptureRequests = 0
     private lateinit var horizontal: ScrollState
 
-    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, rtl: Boolean = false, onPageComposition: () -> Unit = {}) {
+    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, rtl: Boolean = false, immediateCapture: Boolean = false, onPageComposition: () -> Unit = {}) {
+        // Motion-only fixtures can accept a pre-sampled unchanged source; pending-copy tests use real capture.
+        val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, ImageBitmap>()
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -93,7 +96,13 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                     PageBackGestureHost(renderedRoute, canBack, swipe, predictive,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                         backTargetKey = if (renderedRoute == "test-page") "previous-page" else null,
-                        captureFromContent = !horizontalChild && !clickableRows && !sliderChild && !textChild) {
+                        captureFromContent = !horizontalChild && !clickableRows && !sliderChild && !textChild,
+                        previewCapture = { frame ->
+                            if (immediateCapture && frame.navigationFrozen) {
+                                immediateCaptureRequests++
+                                checkNotNull(exactPixels[frame])
+                            } else frame.layer.toImageBitmap().also { exactPixels[frame] = it }
+                        }) {
                         val currentFrame = LocalPageBackPreviewFrame.current
                         androidx.compose.runtime.SideEffect {
                             observedFrame = currentFrame
@@ -933,7 +942,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private fun assertUnacceptedCommit(completeLater: Boolean) {
         predictive = false
         navigateOnBack = false
-        mount(capturePreviousPage = true)
+        mount(capturePreviousPage = true, immediateCapture = true)
         ui.mainClock.autoAdvance = false
         try {
             val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
@@ -1065,7 +1074,6 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             modelTab.assertIsSelected()
             val selectedPixels = captureScreenNode(modelTab).toPixelMap()
             val selected = selectedPixels[selectedPixels.width / 4, selectedPixels.height / 2]
-            ui.waitUntil(5_000) { blockedCopies > 0 }
             mainThread {
                 // Pin the actual Overview capture to model a child-only redraw with unchanged generation.
                 val source = checkNotNull(usageFrame)
@@ -1087,6 +1095,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             mainThread {
                 val source = checkNotNull(usageFrame)
                 assertTrue("gesture must claim and freeze the Usage source", source.frozen && source.navigationFrozen)
+                assertTrue("gesture submits a current-pixel copy without a warm redraw", blockedCopies > 0)
             }
             modelTab.assertIsSelected()
             val pixels = captureScreenNode(modelTab).toPixelMap()
@@ -1119,12 +1128,13 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
 
     fun testPauseNeverRestoresAcceptedDepartureOnResume() {
         navigateOnBack = true
-        mount(capturePreviousPage = true)
+        mount(capturePreviousPage = true, immediateCapture = true)
         ui.mainClock.autoAdvance = false
         try {
             val source = checkNotNull(observedFrame)
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
             assertEquals("previous-page", route)
+            assertTrue("pause fixture submitted its final source capture", immediateCaptureRequests > 0)
             ui.waitUntil(5_000) { source.image != null }
             ui.mainClock.advanceTimeByFrame()
             ui.onNodeWithTag("page-back-departure").assertExists()

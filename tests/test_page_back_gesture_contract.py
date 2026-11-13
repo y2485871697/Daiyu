@@ -116,7 +116,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         boundary = layers.split('    private fun freezeForNavigation(', 1)[1].split('    private fun capture(', 1)[0]
         for value in ('if (frame.navigationFrozen) return', 'frame.navigationFrozen = true', 'frame.warmup?.cancel()',
                       'frame.captures.toList().forEach { it.cancel() }', 'frame.frozen = true',
-                      'frame.image = null', 'frame.ready = null', 'frame.readyGeneration = -1L',
+                      'frame.image = inherited', 'frame.ready = null', 'frame.readyGeneration = -1L',
                       'capture(frame, captureBackPerformanceToken(), navigation = true)'):
             self.assertIn(value, boundary)
         self.assertNotIn('frame.ready?.takeIf', boundary)
@@ -124,7 +124,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (returning) freeze(it) else freezeForNavigation(it)', layers)
         self.assertIn('if (navigation) frame.frozen && frame.generation == generation else !frame.frozen', layers)
         self.assertIn('if (navigation) frame.image = image', layers)
-        self.assertIn('frame.captures.any { !it.isCompleted }) return', layers)
+        self.assertIn('frame.captures.any { !it.isCompleted && (!navigation || !it.isCancelled) }) return', layers)
         self.assertIn('if (frame.frozen) drawContent()', self.host)
         self.assertIn('if (captureFromContent || frame.frozen) drawContent()', self.host)
         tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
@@ -491,10 +491,12 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search"', self.main)
         self.assertIn('"conversation-search", "message-search" -> searchPage?.returnPage', self.main)
         self.assertIn('"history-search" -> null', self.main)
-        self.assertIn('val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed', self.host)
+        self.assertIn('val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.returnSkipped && !departure.forwardSkipped && state.previewAllowed', self.host)
         effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped, resumed, pauseEpoch)', 1)[1].split('SideEffect { layers.trim', 1)[0]
         self.assertNotIn('.join()', effect)
-        self.assertIn('if (departure.frame.canDrawPreview && !departure.forwardSkipped)', effect)
+        self.assertIn('departure.returnSkipped = true', self.host)
+        self.assertIn('departure?.forward == false && departing && !showDeparture', self.host)
+        self.assertNotIn('if (departure.frame.canDrawPreview', effect)
         self.assertIn('if (departure != null && showDeparture && !departure.forward)', self.host)
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         self.assertIn('it.target == key && it.frame === previous', layers)

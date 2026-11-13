@@ -56,8 +56,8 @@ class PageEnterContractTest(unittest.TestCase):
 
     def test_pending_capture_and_transition_input_have_explicit_gates(self):
         self.assertNotIn('departure.frame.capture?.join()', self.host)
-        self.assertIn('if (departure.frame.canDrawPreview && !departure.forwardSkipped)', self.host)
-        self.assertIn('departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed', self.host)
+        self.assertIn('departure.returnSkipped = true', self.host)
+        self.assertIn('departing && departure.frame.canDrawPreview && !departure.returnSkipped && !departure.forwardSkipped && state.previewAllowed', self.host)
         self.assertIn('if (departure != null && showDeparture && departure.forward)', self.host)
         self.assertIn('departure.forwardSkipped = true', self.host)
         self.assertIn('departure?.forward == true && departing && !showDeparture', self.host)

@@ -456,11 +456,9 @@ internal fun PageBackGestureHost(
                 departure.motion.awaitCompletion()
                 BackPerformance.mark(BackPerformanceRecorder.Event.MOTION_WAIT_END, departure.motion.diagnosticToken)
             } else if (!departure.forwardSkipped) {
-                if (departure.frame.canDrawPreview && !departure.forwardSkipped) {
-                    if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
-                    else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f),
-                        initialVelocity = pageBackInitialVelocity(departure.progress, departure.velocity))
-                }
+                if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
+                else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f),
+                    initialVelocity = pageBackInitialVelocity(departure.progress, departure.velocity))
             }
             departing = false
         }
@@ -509,7 +507,7 @@ internal fun PageBackGestureHost(
     }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val currentBack by rememberUpdatedState(dispatchBack)
-    val activeDeparture = departing && !departureInterrupted && !(departure?.forward == true &&
+    val activeDeparture = departing && !departureInterrupted && departure?.returnSkipped != true && !(departure?.forward == true &&
         (!state.previewAllowed || departure.forwardSkipped))
     // Do not read visualProgress here. It is intentionally consumed only by layer/draw lambdas so
     // pointer updates invalidate the motion layer rather than the whole page composition.
@@ -532,7 +530,7 @@ internal fun PageBackGestureHost(
         }
     }
 
-    val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed
+    val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.returnSkipped && !departure.forwardSkipped && state.previewAllowed
     val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)
     val returning by rememberUpdatedState(showDeparture && departure?.forward == false)
     val claimSwipe by rememberUpdatedState {
@@ -648,6 +646,10 @@ internal fun PageBackGestureHost(
                 } else Modifier).testTag("page-back-surface").drawWithContent {
                     if (departure?.forward == true && departing && !showDeparture) {
                         departure.forwardSkipped = true
+                    }
+                    if (departure?.forward == false && departing && !showDeparture) {
+                        // Once the destination is drawn live, never reintroduce a late outgoing bitmap.
+                        departure.returnSkipped = true
                     }
                     val held = when {
                         departure != null && showDeparture && !departure.forward ->

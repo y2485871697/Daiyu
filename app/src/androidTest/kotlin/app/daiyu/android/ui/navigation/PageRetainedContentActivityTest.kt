@@ -449,7 +449,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)
 
-    private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false) {
+    private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false, resumePixels: Boolean = false) {
         val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
         if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
         var marker by mutableStateOf(Color.Green)
@@ -685,11 +685,35 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             assertEquals(0, rootBacks)
             assertEquals(1, mounts)
             assertEquals(0, disposals)
+            if (resumePixels) {
+                val beforeResume = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+                realPauseResume(activity)
+                ui.mainClock.advanceTimeBy(64)
+                ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                ui.onNodeWithTag("page-back-target").assertDoesNotExist()
+                val afterResume = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+                assertEquals(beforeResume.width, afterResume.width)
+                assertEquals(beforeResume.height, afterResume.height)
+                // Sample only the stable message area, outside system bars and the editor caret.
+                for (y in beforeResume.height / 5 until beforeResume.height * 3 / 5 step 4) {
+                    for (x in beforeResume.width / 5 until beforeResume.width * 4 / 5 step 4) {
+                        val before = beforeResume[x, y]
+                        val after = afterResume[x, y]
+                        assertEquals("resume red at $x,$y", before.red, after.red, .015f)
+                        assertEquals("resume green at $x,$y", before.green, after.green, .015f)
+                        assertEquals("resume blue at $x,$y", before.blue, after.blue, .015f)
+                    }
+                }
+                assertEquals(1, mounts)
+                assertEquals(0, disposals)
+            }
         } finally {
             ui.mainClock.autoAdvance = true
             if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
         }
     }
+
+    fun testRealChatIdlePauseResumeKeepsOneTextFrame() = assertRealChatReturn(swipe = true, resumePixels = true)
 
     fun testRealChatRapidNestedSwipeReturnsKeepBothAnimations() = assertRealChatReturn(swipe = true, nested = true)
 

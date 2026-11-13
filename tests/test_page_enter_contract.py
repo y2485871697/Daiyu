@@ -61,7 +61,7 @@ class PageEnterContractTest(unittest.TestCase):
         self.assertIn('if (departure != null && showDeparture && departure.forward)', self.host)
         self.assertIn('departure.forwardSkipped = true', self.host)
         self.assertIn('departure?.forward == true && departing && !showDeparture', self.host)
-        self.assertIn('LaunchedEffect(departure, departure?.forwardSkipped)', self.host)
+        self.assertIn('LaunchedEffect(departure, departure?.forwardSkipped, resumed, pauseEpoch)', self.host)
         self.assertIn('var forwardSkipped by mutableStateOf(false)', self.layers)
         self.assertIn('if (frame.holdingForChild) frame.childChangeCaptured = false', self.host)
         self.assertIn('if (activeDeparture && departure?.forward == true) Box(', self.host)

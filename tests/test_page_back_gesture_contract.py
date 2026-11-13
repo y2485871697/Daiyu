@@ -308,8 +308,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (navigation) frame.frozen && frame.generation == generation else !frame.frozen', layers)
         self.assertNotIn('if (frame.frozen) frame.image = image', layers)
         freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun freezeForNavigation(', 1)[0]
-        self.assertNotIn('capture(frame', freeze)
-        self.assertIn('frame.image = frame.ready?.takeIf { frame.readySize == frame.size }', freeze)
+        self.assertIn('freezeForNavigation(frame)', freeze)
+        self.assertNotIn('frame.ready?.takeIf', freeze)
+        self.assertIn('currentKey == frame.key', layers)
+        self.assertIn('!navigation && active && !closed', layers)
         self.assertIn('frame.captures.any { !it.isCompleted }', layers)
         self.assertIn('previewEpoch != epoch || frame.generation != generation', layers)
         self.assertIn('if (frame.ready == null) withFrameNanos { } else delay(64)', layers)
@@ -489,8 +491,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search"', self.main)
         self.assertIn('"conversation-search", "message-search" -> searchPage?.returnPage', self.main)
         self.assertIn('"history-search" -> null', self.main)
-        self.assertIn('val showDeparture = departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed', self.host)
-        effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped)', 1)[1].split('SideEffect { layers.trim', 1)[0]
+        self.assertIn('val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed', self.host)
+        effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped, resumed, pauseEpoch)', 1)[1].split('SideEffect { layers.trim', 1)[0]
         self.assertNotIn('.join()', effect)
         self.assertIn('if (departure.frame.canDrawPreview && !departure.forwardSkipped)', effect)
         self.assertIn('if (departure != null && showDeparture && !departure.forward)', self.host)
@@ -619,7 +621,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('initialVelocity = pageBackInitialVelocity(progress, velocity)', motion)
         self.assertIn('suspend fun awaitCompletion() = job.join()', motion)
         self.assertIn('departure?.motion?.animation ?: Animatable', self.host)
-        effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped)', 1)[1].split('SideEffect { layers.trim', 1)[0]
+        effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped, resumed, pauseEpoch)', 1)[1].split('SideEffect { layers.trim', 1)[0]
         self.assertIn('if (departure.motion != null)', effect)
         self.assertIn('departure.motion.awaitCompletion()', effect)
         self.assertIn('} else if (!departure.forwardSkipped)', effect)
@@ -668,7 +670,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('frame.image = null', reset)
         self.assertIn('frame.ready = null', reset)
         self.assertIn('frames[currentKey]?.let { schedule(it) }', pause)
-        self.assertIn('if (event == Lifecycle.Event.ON_PAUSE) layers.setActive(false)', self.host)
+        self.assertIn('if (event == Lifecycle.Event.ON_PAUSE) {', self.host)
+        self.assertIn('layers.setActive(false)', self.host)
+        self.assertIn('pauseEpoch++', self.host)
+        self.assertIn('departurePauseEpoch != pauseEpoch', self.host)
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
         for name in ('testCustomSwipeAfterPauseKeepsHistoricalTargetAndDeparture',
                      'testCustomSwipeAfterHomeKeepsHistoricalTargetAndDeparture',
@@ -696,7 +701,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         begin = layers.split('fun beginGesture(frame: Frame, target: Frame?): Boolean {', 1)[1].split('fun resume(', 1)[0]
         self.assertNotIn('hasFreshImage', begin)
         self.assertIn('freeze(frame)', begin)
-        self.assertIn('return frame.canDrawPreview', begin)
+        self.assertIn('return canBegin', begin)
         self.assertIn('if (frame.frozen) return', layers)
         self.assertIn('gesturePreviewReady = beginPreview()', self.host)
         self.assertIn('beginPreview = { layers.beginGesture(frame, currentTarget) }', self.host)
@@ -718,7 +723,12 @@ class PageBackGestureContractTest(unittest.TestCase):
         for name in ('testReturnAdvancesWhileCaptureIsPending', 'testColdReturnDoesNotWaitOrEnableLatePreview', 'testFrozenPreviewRejectsSameGenerationLateCopy'):
             self.assertIn('fun ' + name + '()', stack)
         self.assertIn('assertFalse(gate.isCompleted)', stack)
-        self.assertIn('same-generation late copy cannot replace the visible image', stack)
+        self.assertIn('cancelled warm pixels never become visible', stack)
+        self.assertIn('even same-generation prepared pixels cannot replace the current tab', stack)
+        for name in ('testUsageModelsImmediateGestureAndCancelKeepSelectedTabPixels',
+                     'testUsageModelsDelayedGestureAndCancelKeepSelectedTabPixels',
+                     'testPauseNeverRestoresAcceptedDepartureOnResume'):
+            self.assertIn('fun ' + name + '()', gestures)
 
 
 if __name__ == '__main__':

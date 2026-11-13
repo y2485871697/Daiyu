@@ -1013,6 +1013,128 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     fun testPinnedPixelsSurviveContentUpdateUntilCommit() = assertPinnedPixels(true)
     fun testCancelledGestureRestoresCurrentLivePixels() = assertPinnedPixels(false)
 
+    private fun assertUsageTabDoesNotFlashOldPixels(waitBeforeGesture: Boolean) {
+        var rendered by mutableStateOf("chat")
+        var blockCopies = false
+        var usageFrame: PageBackPreviewLayers.Frame? = null
+        var blockedCopies = 0
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var mounts = 0
+        var disposals = 0
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val page = rendered
+                    PageBackGestureHost(page, canNavigateBack = page == "usage",
+                        swipeDismissEnabled = true, predictiveBackEnabled = false,
+                        animateBackEnabled = false,
+                        dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
+                        backTargetKey = if (page == "usage") "chat" else null,
+                        previewCapture = { frame ->
+                            if (frame.key == "usage") {
+                                usageFrame = frame
+                                if (blockCopies) { blockedCopies++; gate.await() }
+                            }
+                            frame.layer.toImageBitmap()
+                        }) {
+                        if (page == "chat") Box(Modifier.fillMaxSize().background(Color.Red))
+                        else {
+                            DisposableEffect(Unit) { mounts++; onDispose { disposals++ } }
+                            app.daiyu.android.ui.screens.stats.UsageStatsScreen(
+                                onBack = { rendered = "chat" },
+                                load = { app.daiyu.android.data.repository.UsageStatsSnapshot() },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        dismissIme(); ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        mainThread { rendered = "usage" }
+        awaitControl("usage-heatmap")
+        ui.waitUntil(5_000) { usageFrame?.ready != null }
+        val preparedOverview = checkNotNull(usageFrame?.ready)
+        val modelTab = ui.onNodeWithTag("usage-tab:" + activity.getString(app.daiyu.android.R.string.stats_tab_models))
+        val overviewPixels = captureScreenNode(modelTab).toPixelMap()
+        val old = overviewPixels[overviewPixels.width / 4, overviewPixels.height / 2]
+        try {
+            mainThread { blockCopies = true }
+            modelTab.performClick()
+            awaitControl("usage-model-pane")
+            modelTab.assertIsSelected()
+            val selectedPixels = captureScreenNode(modelTab).toPixelMap()
+            val selected = selectedPixels[selectedPixels.width / 4, selectedPixels.height / 2]
+            ui.waitUntil(5_000) { blockedCopies > 0 }
+            mainThread {
+                // Pin the actual Overview capture to model a child-only redraw with unchanged generation.
+                val source = checkNotNull(usageFrame)
+                source.ready = preparedOverview
+                source.readySize = source.size
+                source.readyGeneration = source.generation
+                assertSame(preparedOverview, source.ready)
+            }
+            assertTrue("pixel probe distinguishes selected Models from old Overview",
+                abs(selected.red - old.red) + abs(selected.green - old.green) + abs(selected.blue - old.blue) > .15f)
+            ui.mainClock.autoAdvance = false
+            if (waitBeforeGesture) ui.mainClock.advanceTimeBy(128)
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .02f, height * .65f))
+                moveTo(Offset(width * .15f, height * .65f), 180)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            modelTab.assertIsSelected()
+            val pixels = captureScreenNode(modelTab).toPixelMap()
+            val actual = pixels[pixels.width / 4, pixels.height / 2]
+            assertEquals("drag must draw selected Models, not the prepared Overview bitmap", selected.red, actual.red, .03f)
+            assertEquals(selected.green, actual.green, .03f)
+            assertEquals(selected.blue, actual.blue, .03f)
+            ui.onNodeWithTag("page-back-host").performTouchInput { cancel() }
+            ui.mainClock.advanceTimeBy(1000)
+            modelTab.assertIsSelected()
+            ui.onNodeWithTag("usage-heatmap").assertDoesNotExist()
+            assertEquals("usage", rendered)
+            assertEquals(1, mounts)
+            assertEquals(0, disposals)
+        } finally {
+            mainThread { blockCopies = false; gate.complete(Unit) }
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testUsageModelsImmediateGestureAndCancelKeepSelectedTabPixels() = assertUsageTabDoesNotFlashOldPixels(false)
+
+    fun testUsageModelsDelayedGestureAndCancelKeepSelectedTabPixels() = assertUsageTabDoesNotFlashOldPixels(true)
+
+    fun testPauseNeverRestoresAcceptedDepartureOnResume() {
+        navigateOnBack = true
+        mount(capturePreviousPage = true)
+        ui.mainClock.autoAdvance = false
+        try {
+            val source = checkNotNull(observedFrame)
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            assertEquals("previous-page", route)
+            ui.waitUntil(5_000) { source.image != null }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("page-back-departure").assertExists()
+            realPauseResume(activity)
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            ui.onNodeWithTag("page-back-departure-scrim").assertDoesNotExist()
+            ui.onNodeWithTag("page-back-target").assertDoesNotExist()
+            assertEquals(1, backCount)
+            mainThread { route = "test-page" }
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .8f, height * .6f), 200)
+                up()
+            }
+            assertEquals("previous-page", route)
+            assertEquals(2, backCount)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testGesturePreferencesPersistIndependently() {
         val preferences = activity.getSharedPreferences("page-back-gestures-test", 0)
         assertTrue(preferences.edit().clear().commit())

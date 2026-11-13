@@ -396,9 +396,13 @@ internal fun PageBackGestureHost(
         PageBackPreviewLayers(graphics, scope, previewCapture)
     }
     DisposableEffect(layers) { onDispose { layers.close() } }
+    var pauseEpoch by remember(layers) { mutableStateOf(0L) }
     DisposableEffect(layers, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) layers.setActive(false)
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                layers.setActive(false)
+                pauseEpoch++
+            }
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
@@ -432,12 +436,19 @@ internal fun PageBackGestureHost(
         layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey, contentKey = contentKey)
     }
     val target = layers.find(visualBackTargetKey, viewport)
+    val departurePauseEpoch = remember(departure) { pauseEpoch }
+    val departureInterrupted = departurePauseEpoch != pauseEpoch
     var departing by remember(departure) { mutableStateOf(departure != null) }
     val exit = remember(departure) {
         departure?.motion?.animation ?: Animatable(if (departure?.forward == false) departure.progress else 0f)
     }
     DisposableEffect(departure) { onDispose { departure?.motion?.cancel() } }
-    LaunchedEffect(departure, departure?.forwardSkipped) {
+    LaunchedEffect(departure, departure?.forwardSkipped, resumed, pauseEpoch) {
+        if (!resumed || departureInterrupted) {
+            departure?.motion?.cancel()
+            departing = false
+            return@LaunchedEffect
+        }
         if (departure != null) {
             if (departure.motion != null) {
                 // Adopt the already-started gesture clock; never initialize another route clock.
@@ -498,7 +509,7 @@ internal fun PageBackGestureHost(
     }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val currentBack by rememberUpdatedState(dispatchBack)
-    val activeDeparture = departing && !(departure?.forward == true &&
+    val activeDeparture = departing && !departureInterrupted && !(departure?.forward == true &&
         (!state.previewAllowed || departure.forwardSkipped))
     // Do not read visualProgress here. It is intentionally consumed only by layer/draw lambdas so
     // pointer updates invalidate the motion layer rather than the whole page composition.
@@ -521,7 +532,7 @@ internal fun PageBackGestureHost(
         }
     }
 
-    val showDeparture = departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed
+    val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.forwardSkipped && state.previewAllowed
     val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)
     val returning by rememberUpdatedState(showDeparture && departure?.forward == false)
     val claimSwipe by rememberUpdatedState {

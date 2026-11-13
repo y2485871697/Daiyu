@@ -187,14 +187,17 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun beginGesture(frame: Frame): Boolean {
         val token = captureBackPerformanceToken()
         observeCaptures(token)
-        freeze(frame)
-        BackPerformance.mark(if (frame.canDrawPreview) BackPerformanceRecorder.Event.PREVIEW_READY
-            else BackPerformanceRecorder.Event.PREVIEW_SOURCE_MISSING, token)
-        if (frame.canDrawPreview && frame.readyGeneration >= 0 && frame.readyGeneration < frame.generation) {
+        val canBegin = active && !closed && frames[frame.key] === frame && frame.size != IntSize.Zero &&
+            frame.generation > 0L && !frame.releaseRequested && !frame.layer.isReleased
+        if (frame.readyGeneration >= 0 && frame.readyGeneration < frame.generation) {
             BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_SOURCE_STALE, token,
                 (frame.generation - frame.readyGeneration).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
         }
-        return frame.canDrawPreview
+        freeze(frame)
+        BackPerformance.mark(if (canBegin) BackPerformanceRecorder.Event.PREVIEW_READY
+            else BackPerformanceRecorder.Event.PREVIEW_SOURCE_MISSING, token)
+        // A fresh copy can still be draining. Until then the same live page remains visible.
+        return canBegin
     }
 
     fun resume(frame: Frame) {
@@ -207,18 +210,15 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
 
     private fun freeze(frame: Frame) {
         if (frame.frozen) return
-        frame.warmup?.cancel()
-        frame.frozen = true
-        if (!active || closed || frame.releaseRequested) return
-        frame.image = frame.ready?.takeIf { frame.readySize == frame.size }
-        JankDiagnostics.section(if (frame.image != null) "daiyu.back-preview=cache-hit" else "daiyu.back-preview=not-ready") { }
+        // Child graphics layers can change without advancing the outer recording generation.
+        // Freeze the pixels visible now, never a warm bitmap from a previous tab or layout.
+        freezeForNavigation(frame)
     }
 
     private fun freezeForNavigation(frame: Frame) {
         if (frame.navigationFrozen) return
         frame.navigationFrozen = true
         frame.warmup?.cancel()
-        frame.captures.toList().forEach { it.cancel() }
         frame.frozen = true
         // Descendant layers can move without recording the outer layer again. A warm bitmap
         // is not the final position; submit this copy before the outgoing content is disposed.
@@ -226,6 +226,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         frame.ready = null
         frame.readyGeneration = -1L
         frame.readySize = IntSize.Zero
+        frame.captures.toList().forEach { it.cancel() }
         capture(frame, captureBackPerformanceToken(), navigation = true)
     }
 
@@ -276,7 +277,12 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             capture.invokeOnCompletion {
                 frame.captures.remove(capture)
                 if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)
-                else if (previewEpoch != epoch || frame.generation != generation) schedule(frame, sourceToken)
+                else if (!navigation && active && !closed && currentKey == frame.key &&
+                    frame.navigationFrozen && frame.frozen && frame.image == null) {
+                    // Only an on-screen gesture may follow a cancelled warm copy with a fresh one.
+                    // Never enqueue another read after navigation has disposed the source content.
+                    capture(frame, sourceToken, navigation = true)
+                } else if (previewEpoch != epoch || frame.generation != generation) schedule(frame, sourceToken)
             }
         }
     }

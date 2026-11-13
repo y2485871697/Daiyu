@@ -1246,8 +1246,11 @@ class MainActivity : ComponentActivity() {
     internal var paneConversationReader: (String) -> PaneConversationSnapshot = { id ->
         val conversations = controller.database.conversations()
         val conversation = conversations.single { it.id.value == id }
-        PaneConversationSnapshot(conversation, conversations, emptyList(), controller.database.displayMessages(conversation.id))
+        PaneConversationSnapshot(conversation, conversations, emptyList(),
+            controller.database.displayMessages(conversation.id, latestRunOnly = true))
     }
+    internal var paneDisplayWindowReader: (ConversationId) -> app.daiyu.android.storage.MessageDisplayWindow =
+        { id -> controller.database.displayMessages(id) }
     internal var panePresentationPreparer: (String, PaneConversationSnapshot, () -> Unit) ->
         app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache = { id, snapshot, checkActive ->
         app.daiyu.android.ui.screens.chat.conversation.prepareHistoryPresentations(
@@ -5429,7 +5432,7 @@ class MainActivity : ComponentActivity() {
     private fun loadRefreshedHistory(conversation: Conversation) {
         refreshHistoryPending = true
         if (refreshHistoryLoading || !activityUsable() || !controller.ready || controller.dataBusy ||
-            (displayWindow != null && sidebarVisible) || controller.problem?.startsWith("会话恢复失败") == true) return
+            (displayWindow != null && (sidebarVisible || paneDisplayPreparationPending(conversation.id))) || controller.problem?.startsWith("会话恢复失败") == true) return
         refreshHistoryLoading = true
         refreshHistoryPending = false
         val id = conversation.id
@@ -5441,9 +5444,10 @@ class MainActivity : ComponentActivity() {
         val content = chatState.contentRevision
         val data = controller.dataRevision
         val owner = loadedHistoryOwner(id)
-        val first = capturedDisplay?.rows?.firstOrNull()?.first ?: shown.firstOrNull()?.first
+        val first = if ((capturedDisplay?.deferredRows ?: 0) > 0) null
+            else capturedDisplay?.rows?.firstOrNull()?.first ?: shown.firstOrNull()?.first
         val last = capturedDisplay?.rows?.lastOrNull()?.first ?: shown.lastOrNull()?.first
-        val count = capturedDisplay?.rows?.size ?: shown.size
+        val count = capturedDisplay?.let { it.rows.size + it.deferredRows } ?: shown.size
         val reloadTail = refreshHistoryTailConversation == id
         val newOwner = owner != null && shown.none {
             Triple(it.second.conversationId, it.second.id, it.second.runId) == owner
@@ -6278,6 +6282,9 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun paneDisplayPreparationPending(id: ConversationId) =
+        paneSelectionRequest != null && pendingPaneConversationId == id.value
+
     private fun cancelPaneConversationSelection() {
         val job = paneSelectionJob
         paneSelectionRequest = null
@@ -6301,29 +6308,14 @@ class MainActivity : ComponentActivity() {
         pendingPaneConversationId = id
         paneState = paneState.copy(selectedConversationId = id)
         paneSelectionJob = lifecycleScope.launch {
+            var published = false
             try {
                 while (paneSelectionRequest === request) {
                     val revision = currentPaneRevision()
                     val snapshot = withContext(Dispatchers.IO) {
                         val snapshot = read(id)
                         val context = coroutineContext
-                        try {
-                            if (snapshot.display != null) {
-                                app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.display) {
-                                    context.ensureActive()
-                                }
-                            } else app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.messages.map { it.second }) {
-                                context.ensureActive()
-                            }
-                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            // Optional AST preparation must not hide intact history.
-                        }
-                        val presentations = try { prepare(id, snapshot) { context.ensureActive() } }
-                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                        catch (_: Exception) { null }
-                        snapshot.copy(presentations = presentations)
+                        preparePaneSnapshot(id, snapshot, prepare) { context.ensureActive() }
                     }
                     if (paneSelectionRequest !== request || !activityUsable() ||
                         (!initial && retainedPage != "chat") || selected?.id != owner || editorGeneration != editor) return@launch
@@ -6331,6 +6323,30 @@ class MainActivity : ComponentActivity() {
                     dataRevision = revision.data
                     titleRevision = revision.title
                     select(snapshot.conversation, snapshot)
+                    published = true
+                    val firstWindow = snapshot.display
+                    if (firstWindow != null && firstWindow.deferredRows > 0) {
+                        val generation = editorGeneration
+                        // The latest run is already published. Older rows cannot delay first content.
+                        val expanded = try { withContext(Dispatchers.IO) {
+                            val context = coroutineContext
+                            val window = paneDisplayWindowReader(snapshot.conversation.id)
+                            context.ensureActive()
+                            preparePaneSnapshot(id, snapshot.copy(display = window, presentations = null), prepare) {
+                                context.ensureActive()
+                            }
+                        } } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) { null }
+                        if (expanded != null && paneSelectionRequest === request && activityUsable() &&
+                            controller.ready && !controller.dataBusy && retainedPage == "chat" &&
+                            controller.problem?.startsWith("会话恢复失败") != true &&
+                            selected?.id == snapshot.conversation.id && editorGeneration == generation &&
+                            revision == currentPaneRevision() && displayWindow === firstWindow && !refreshHistoryLoading) {
+                            displayWindow = expanded.display
+                            expanded.presentations?.let { toolPresentations = it }
+                            publishChat()
+                        }
+                    }
                     break
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -6342,11 +6358,32 @@ class MainActivity : ComponentActivity() {
                     paneSelectionRequest = null
                     pendingPaneConversationId = null
                     paneSelectionJob = null
-                    if (activityUsable()) paneState = paneState.copy(selectedConversationId = selected?.id?.value)
+                    if (activityUsable()) {
+                        paneState = paneState.copy(selectedConversationId = selected?.id?.value)
+                        if (published) refresh()
+                    }
                 }
             }
         }
     } }
+
+    private fun preparePaneSnapshot(id: String, snapshot: PaneConversationSnapshot,
+        prepare: (String, PaneConversationSnapshot, () -> Unit) -> app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache,
+        checkActive: () -> Unit): PaneConversationSnapshot {
+        checkActive()
+        try {
+            if (snapshot.display != null) {
+                app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.display, checkActive = checkActive)
+            } else app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(
+                snapshot.messages.map { it.second }, checkActive = checkActive)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Optional AST preparation must not hide intact history. */ }
+        val presentations = try { prepare(id, snapshot, checkActive) }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        checkActive()
+        return snapshot.copy(presentations = presentations)
+    }
 
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
     private fun openRetainedConversation(id: String) { val conversation = retainedConversation(id); dismissSidebar(); returnToChat(); select(conversation) }
@@ -6889,7 +6926,7 @@ class MainActivity : ComponentActivity() {
                 val loaded = displayWindow == null && (active == null || shown.any { (_, message) ->
                     message.conversationId == active.conversationId && message.id == active.id && message.runId == active.runId
                 })
-                if (!(displayWindow != null && (sidebarVisible || refreshHistoryLoading)) &&
+                if (!(displayWindow != null && (sidebarVisible || refreshHistoryLoading || paneDisplayPreparationPending(conversation.id))) &&
                     streamingHistoryRefresh.needsRead(active, loaded, controller.dataRevision, editorGeneration,
                         force = refreshHistoryTailConversation == conversation.id)) loadRefreshedHistory(conversation)
             }

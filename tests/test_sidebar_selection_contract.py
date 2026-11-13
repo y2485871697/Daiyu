@@ -67,9 +67,11 @@ class SidebarSelectionContractTest(unittest.TestCase):
         host = (SRC / 'MainActivity.kt').read_text()
         click = host.split('private fun selectPaneConversation(', 1)[1].split('private fun retainedConversation(', 1)[0]
         io = click.split('withContext(Dispatchers.IO) {', 1)[1].split('if (paneSelectionRequest !== request', 1)[0]
-        self.assertIn('prepareRestoredMarkdown(snapshot.display)', io)
-        self.assertIn('prepare(id, snapshot) { context.ensureActive() }', io)
-        self.assertIn('snapshot.copy(presentations = presentations)', io)
+        self.assertIn('preparePaneSnapshot(id, snapshot, prepare)', io)
+        prepare = click.split('private fun preparePaneSnapshot(', 1)[1]
+        self.assertIn('prepareRestoredMarkdown(snapshot.display, checkActive = checkActive)', prepare)
+        self.assertIn('prepare(id, snapshot, checkActive)', prepare)
+        self.assertIn('snapshot.copy(presentations = presentations)', prepare)
         self.assertNotIn('toolPresentations', io)
         self.assertLess(click.index('if (revision != currentPaneRevision()) continue'),
                         click.index('select(snapshot.conversation, snapshot)'))
@@ -86,7 +88,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
 
     def test_inert_drawer_preview_does_not_start_authority_hydration_until_close(self):
         host = (SRC / 'MainActivity.kt').read_text()
-        self.assertIn('displayWindow != null && (sidebarVisible || refreshHistoryLoading)', host)
+        self.assertIn('displayWindow != null && (sidebarVisible || refreshHistoryLoading || paneDisplayPreparationPending(conversation.id))', host)
         closing = host.split('private fun dismissSidebar()', 1)[1].split('private fun paneRefreshAllowed', 1)[0]
         self.assertIn('dismissSidebarState()', closing)
         self.assertIn('refresh()', closing)
@@ -211,6 +213,22 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('setSelection(2, 4, relativeToOriginalText = false)', test)
         self.assertIn('setSelection(4, 4, relativeToOriginalText = false)', test)
 
+
+    def test_latest_body_precedes_expansion_and_late_results_cannot_replace_it(self):
+        host = (SRC / 'MainActivity.kt').read_text()
+        click = host.split('private fun selectPaneConversation(', 1)[1].split('private fun preparePaneSnapshot(', 1)[0]
+        self.assertLess(click.index('select(snapshot.conversation, snapshot)'), click.index('paneDisplayWindowReader('))
+        self.assertIn('firstWindow.deferredRows > 0', click)
+        self.assertIn('displayWindow === firstWindow', click)
+        self.assertIn('revision == currentPaneRevision()', click)
+        self.assertIn('editorGeneration == generation', click)
+        self.assertIn('if (published) refresh()', click)
+        self.assertIn('it.rows.size + it.deferredRows', host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneSwitchActivityTest.kt').read_text()
+        for name in ('testLatestBodyIsVisibleBeforeOlderDisplayReadCompletes',
+                     'testCancelledOlderPreparationCannotReplaceNewSelection',
+                     'testFailedOlderReadKeepsLatestBodyAndHydratesFullTailAfterClose'):
+            self.assertIn(name, test)
 
 if __name__ == '__main__':
     unittest.main()

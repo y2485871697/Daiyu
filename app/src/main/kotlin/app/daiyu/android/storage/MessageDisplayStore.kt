@@ -18,13 +18,17 @@ internal object MessageDisplayStore {
         db.execSQL("CREATE TRIGGER IF NOT EXISTS message_display_delete BEFORE DELETE ON messages BEGIN DELETE FROM message_display WHERE message_id=OLD.id; END")
     }
 
-    fun read(db: SQLiteDatabase, conversation: ConversationId, before: Long, limit: Int, rebuildWindow: Boolean = true): MessageDisplayWindow {
+    fun read(db: SQLiteDatabase, conversation: ConversationId, before: Long, limit: Int, rebuildWindow: Boolean = true,
+        latestRunOnly: Boolean = false): MessageDisplayWindow {
         check(db.inTransaction())
-        val ids = db.rawQuery("SELECT seq,id,run_id,role,status,created_at FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",
+        val metadata = db.rawQuery("SELECT seq,id,run_id,role,status,created_at FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",
             arrayOf(conversation.value, before.toString(), limit.toString())).use { c ->
             buildList { while (c.moveToNext()) add(Metadata(c.getLong(0), c.getString(1), c.getString(2),
                 c.getString(3), c.getString(4), if (c.isNull(5)) null else c.getLong(5))) }.reversed()
         }
+        // Keep the newest contiguous run, including supplements, within the requested tail.
+        val tail = if (latestRunOnly) metadata.takeLastWhile { it.run == metadata.last().run } else metadata
+        val ids = if (latestRunOnly && tail.any { it.role == Message.ASSISTANT_ROLE }) tail else metadata
         val rows = ids.map { row ->
             fun decodePayload(payload: String): MessageDisplayRow {
                 val value = JSONObject(payload)
@@ -57,10 +61,10 @@ internal object MessageDisplayStore {
                 projection
             })
         }
-        return try { MessageDisplayWindow(rows) } catch (invalid: IllegalArgumentException) {
+        return try { MessageDisplayWindow(rows, deferredRows = metadata.size - ids.size) } catch (invalid: IllegalArgumentException) {
             if (!rebuildWindow) throw invalid
             ids.forEach { db.delete("message_display", "message_id=?", arrayOf(it.id)) }
-            read(db, conversation, before, limit, rebuildWindow = false)
+            read(db, conversation, before, limit, rebuildWindow = false, latestRunOnly = latestRunOnly)
         }
     }
 

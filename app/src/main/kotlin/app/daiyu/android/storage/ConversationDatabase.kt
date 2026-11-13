@@ -931,12 +931,13 @@ class ConversationDatabase internal constructor(context: Context, private val af
         put("created_at", message.createdAt)
     }
     private fun transaction(block:(SQLiteDatabase)->Unit) { val db=writableDatabase;db.beginTransaction();try {block(db);db.setTransactionSuccessful()} finally {db.endTransaction()} }
-    internal fun displayMessages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50): MessageDisplayWindow {
+    internal fun displayMessages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50,
+        latestRunOnly: Boolean = false): MessageDisplayWindow {
         require(limit in 1..200)
         val db = writableDatabase
         db.beginTransaction()
         try {
-            val result = MessageDisplayStore.read(db, id, before, limit)
+            val result = MessageDisplayStore.read(db, id, before, limit, latestRunOnly = latestRunOnly)
             db.setTransactionSuccessful()
             return result
         } finally { db.endTransaction() }

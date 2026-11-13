@@ -3,8 +3,12 @@ package app.daiyu.android.storage
 import app.daiyu.android.domain.*
 
 /** Inert presentation data, never a provider history or an action/asset capability. */
-internal data class MessageDisplayWindow(val rows: List<Pair<Long, MessageDisplayRow>>) {
+internal data class MessageDisplayWindow(
+    val rows: List<Pair<Long, MessageDisplayRow>>,
+    val deferredRows: Int = 0,
+) {
     init {
+        require(deferredRows >= 0)
         val originals = rows.map { it.second }.associateBy { Triple(it.conversationId, it.runId, it.id) }
         val supplements = mutableSetOf<Triple<ConversationId, RunId, MessageId>>()
         rows.forEach { (_, owner) -> owner.segments.filter { it.role == Message.USER_ROLE }.forEach { segment ->

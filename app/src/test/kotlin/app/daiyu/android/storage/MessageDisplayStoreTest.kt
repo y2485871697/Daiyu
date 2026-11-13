@@ -136,4 +136,72 @@ class MessageDisplayStoreTest {
         assertEquals(saved, database.messages(user.conversationId).last().second)
     }
 
+    private fun seedNextRun(): Message {
+        val (user, answer) = seed()
+        database.save(answer.copy(status = RunStatus.COMPLETED))
+        val next = user.copy(id = MessageId("next-user"), runId = RunId("next-run"))
+        val nextAnswer = answer.copy(id = MessageId("next-answer"), runId = next.runId)
+        database.send(next, nextAnswer)
+        database.save(nextAnswer.copy(status = RunStatus.COMPLETED))
+        return nextAnswer.copy(status = RunStatus.COMPLETED)
+    }
+
+    private fun insertSupplement(id: String) {
+        database.writableDatabase.execSQL(
+            "INSERT INTO messages(id,conversation_id,run_id,role,blocks,status,protocol,history_segments) " +
+                "SELECT ?,conversation_id,run_id,role,blocks,status,protocol,history_segments FROM messages WHERE id='next-user'",
+            arrayOf(id))
+    }
+
+    @Test fun latestRunDefersOlderPayloadDecodeAndNormalWindowRemainsFull() {
+        val answer = seedNextRun()
+        val preview = database.displayMessages(answer.conversationId, latestRunOnly = true)
+        assertEquals(listOf("next-user", "next-answer"), preview.rows.map { it.second.id.value })
+        assertEquals(2, preview.deferredRows)
+        assertEquals(4, database.displayMessages(answer.conversationId).rows.size)
+        assertEquals(0, database.displayMessages(answer.conversationId).deferredRows)
+        database.writableDatabase.execSQL("UPDATE messages SET blocks='broken' WHERE id='answer'")
+        assertEquals(preview, database.displayMessages(answer.conversationId, latestRunOnly = true))
+        assertTrue(runCatching { database.displayMessages(answer.conversationId) }.isFailure)
+    }
+
+    @Test fun latestRunKeepsAssistantWithLaterSupplementsAndRebuildKeepsScope() {
+        val answer = seedNextRun()
+        val user = database.messages(answer.conversationId).first { it.second.id.value == "next-user" }.second
+        val saved = answer.copy(historySegments = listOf(
+            MessageHistorySegment(user.id, Message.USER_ROLE, user.blocks),
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, answer.blocks)))
+        database.save(saved)
+        repeat(3) { insertSupplement("supplement-$it") }
+        val preview = database.displayMessages(answer.conversationId, latestRunOnly = true)
+        assertEquals(5, preview.rows.size)
+        assertEquals(2, preview.deferredRows)
+        assertTrue(preview.rows.any { it.second.id == answer.id })
+        val db = database.writableDatabase
+        val value = org.json.JSONObject(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", answer.id.value)))
+        value.getJSONArray("history").getJSONObject(0).getJSONArray("blocks").getJSONObject(0).put("text", "cache corruption")
+        db.execSQL("UPDATE message_display SET payload=? WHERE message_id=?", arrayOf(value.toString(), answer.id.value))
+        assertEquals(preview, database.displayMessages(answer.conversationId, latestRunOnly = true))
+        assertEquals(saved, database.messages(answer.conversationId).first { it.second.id == answer.id }.second)
+        assertEquals(7, database.displayMessages(answer.conversationId).rows.size)
+    }
+
+    @Test fun missingAssistantInBoundedTailFallsBackToNormalWindow() {
+        val answer = seedNextRun()
+        insertSupplement("orphan-tail")
+        database.writableDatabase.execSQL("UPDATE messages SET run_id='orphan-run' WHERE id='orphan-tail'")
+        val fallback = database.displayMessages(answer.conversationId, latestRunOnly = true)
+        assertEquals(5, fallback.rows.size)
+        assertEquals(0, fallback.deferredRows)
+        assertEquals(database.displayMessages(answer.conversationId), fallback)
+        database.writableDatabase.delete("messages", "id='orphan-tail'", null)
+        repeat(51) { insertSupplement("supplement-$it") }
+        val preview = database.displayMessages(answer.conversationId, latestRunOnly = true)
+        assertEquals(50, preview.rows.size)
+        assertEquals(0, preview.deferredRows)
+        assertEquals(database.displayMessages(answer.conversationId), preview)
+        val empty = database.create("default")
+        assertTrue(database.displayMessages(empty.id, latestRunOnly = true).rows.isEmpty())
+    }
+
 }

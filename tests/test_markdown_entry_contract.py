@@ -32,9 +32,13 @@ class MarkdownEntryContract(unittest.TestCase):
         selection = source.split('    private fun selectPaneConversation(id: String)', 1)[1].split('    private fun retainedConversation', 1)[0]
         io = selection.split('withContext(Dispatchers.IO) {', 1)[1].split('                    if (paneSelectionRequest', 1)[0]
         self.assertIn('val snapshot = read(id)', io)
-        self.assertIn('prepareRestoredMarkdown(snapshot.messages.map { it.second })', io)
+        self.assertIn('preparePaneSnapshot(id, snapshot, prepare)', io)
+        helper = selection.split('private fun preparePaneSnapshot(', 1)[1]
+        self.assertIn('snapshot.messages.map { it.second }, checkActive = checkActive)', helper)
+        self.assertIn('prepareRestoredMarkdown(snapshot.display, checkActive = checkActive)', helper)
         self.assertIn('context.ensureActive()', io)
-        self.assertLess(selection.index('prepareRestoredMarkdown('), selection.index('select(snapshot.conversation, snapshot)'))
+        self.assertLess(selection.index('preparePaneSnapshot(id, snapshot, prepare)'), selection.index('select(snapshot.conversation, snapshot)'))
+        self.assertLess(selection.index('select(snapshot.conversation, snapshot)'), selection.index('paneDisplayWindowReader(snapshot.conversation.id)'))
         self.assertIn('if (revision != currentPaneRevision()) continue', selection)
         self.assertIn('paneSelectionRequest !== request || !activityUsable()', selection)
 

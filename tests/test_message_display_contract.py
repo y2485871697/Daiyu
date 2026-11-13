@@ -8,7 +8,7 @@ class MessageDisplayContract(unittest.TestCase):
     def test_pane_does_not_require_authoritative_history(self):
         host = (APP / 'MainActivity.kt').read_text()
         reader = host.split('internal var paneConversationReader:', 1)[1].split('private var paneSelectionJob', 1)[0]
-        self.assertIn('controller.database.displayMessages(conversation.id)', reader)
+        self.assertIn('controller.database.displayMessages(conversation.id, latestRunOnly = true)', reader)
         self.assertNotIn('database.messages(', reader)
         self.assertIn('private var displayWindow by mutableStateOf<', host)
         self.assertIn('displayWindow = prepared?.display', host)

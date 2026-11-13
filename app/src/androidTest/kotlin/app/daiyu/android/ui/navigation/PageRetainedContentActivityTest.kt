@@ -470,7 +470,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 parent = Parent().also { it.registry.currentState = Lifecycle.State.RESUMED }
                 activity.setContent {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                        CompositionLocalProvider(LocalLifecycleOwner provides parent,
+                        CompositionLocalProvider(LocalLifecycleOwner provides if (resumePixels) activity else parent,
                             LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                             val rendered = route
                             PageBackGestureHost(rendered, contentKey = rendered,

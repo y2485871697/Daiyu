@@ -1076,6 +1076,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             }
             assertTrue("pixel probe distinguishes selected Models from old Overview",
                 abs(selected.red - old.red) + abs(selected.green - old.green) + abs(selected.blue - old.blue) > .15f)
+            mainThread { assertFalse("Usage is idle before the gesture", checkNotNull(usageFrame).frozen) }
             ui.mainClock.autoAdvance = false
             if (waitBeforeGesture) ui.mainClock.advanceTimeBy(128)
             ui.onNodeWithTag("page-back-host").performTouchInput {
@@ -1083,6 +1084,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 moveTo(Offset(width * .15f, height * .65f), 180)
             }
             ui.mainClock.advanceTimeByFrame()
+            mainThread {
+                val source = checkNotNull(usageFrame)
+                assertTrue("gesture must claim and freeze the Usage source", source.frozen && source.navigationFrozen)
+            }
             modelTab.assertIsSelected()
             val pixels = captureScreenNode(modelTab).toPixelMap()
             val actual = pixels[pixels.width / 4, pixels.height / 2]
@@ -1092,6 +1097,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.onNodeWithTag("page-back-host").performTouchInput { cancel() }
             ui.mainClock.advanceTimeBy(1000)
             modelTab.assertIsSelected()
+            mainThread { assertFalse("cancel must restore live Usage", checkNotNull(usageFrame).frozen) }
+            val cancelledPixels = captureScreenNode(modelTab).toPixelMap()
+            val cancelled = cancelledPixels[cancelledPixels.width / 4, cancelledPixels.height / 2]
+            assertEquals("cancel must retain selected Models pixels", selected.red, cancelled.red, .03f)
+            assertEquals(selected.green, cancelled.green, .03f)
+            assertEquals(selected.blue, cancelled.blue, .03f)
             ui.onNodeWithTag("usage-heatmap").assertDoesNotExist()
             assertEquals("usage", rendered)
             assertEquals(1, mounts)

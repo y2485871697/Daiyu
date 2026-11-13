@@ -21,16 +21,16 @@ class CompressionSendGateContractTest(unittest.TestCase):
         composer = (UI / "ChatComposer.kt").read_text()
         click = composer.split("ChatIconButton(primaryIcon, primaryLabel, {", 1)[1].split("iconSize = if", 1)[0]
         self.assertLess(click.index("if (compressionBlocked) actions.onCompressionSendBlocked()"), click.index("hideChatInputIme("))
-        self.assertIn("enabled = primaryEnabled || compressionBlocked", click)
+        self.assertIn("enabled = pageActive && (primaryEnabled || compressionBlocked)", click)
         self.assertIn("containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface", click)
         self.assertIn("tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface", click)
-        self.assertIn(".controlGesture(actions, primaryEnabled)", click)
+        self.assertIn(".controlGesture(actions, pageActive && primaryEnabled)", click)
         self.assertIn("state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)", composer)
     def test_host_notices_and_guards_before_mutating_draft_or_voice(self):
         activity = (APP / "MainActivity.kt").read_text()
         self.assertIn('onCompressionSendBlocked = { toast("正在压缩上下文") }', activity)
-        self.assertIn("onSend = send@{ text ->\n            if (compressionSendBlocked()) return@send", activity)
-        self.assertIn("onSupplement = supplement@{ text ->\n            if (compressionSendBlocked()) return@supplement", activity)
+        self.assertIn("onSend = send@{ text ->\n            if (!currentChat()) return@send\n            if (compressionSendBlocked()) return@send", activity)
+        self.assertIn("onSupplement = supplement@{ text ->\n            if (!currentChat()) return@supplement\n            if (compressionSendBlocked()) return@supplement", activity)
         draft = activity.split("private fun sendDraft(", 1)[1].split("private fun cancelPendingTextSend", 1)[0]
         self.assertLess(draft.index("compressionSendBlocked()"), draft.index("controller.database.draft("))
         supplement = activity.split("private fun submitSupplement(", 1)[1].split("private fun ", 1)[0]

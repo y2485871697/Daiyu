@@ -45,9 +45,9 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         content = (CHAT / 'MessageContent.kt').read_text()
         self.assertIn('reasoningBody(block.reported,', content)
         self.assertEqual(1, content.count('dedicatedTool(block.step)'))
-        self.assertIn('key(block.step.owner, block.step.toolCallId)', content)
+        self.assertIn('key(block.step.renderKey)', content)
         self.assertIn('val dedicated = dedicatedTool(block.step)', content)
-        self.assertIn('if (visible && !dedicated) SpacedMessageEntry(index, content, connectors[index], entryBody) {', content)
+        self.assertIn('if (visible && !dedicated) SpacedMessageEntry(index, content, connectors[index], entryBody, fillWidth) {', content)
         self.assertEqual(1, content.count('WorkStepRow('))
         self.assertLess(content.index('val dedicated = dedicatedTool(block.step)'),
                         content.index('if (visible && !dedicated) SpacedMessageEntry'))
@@ -147,7 +147,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
                       'WorkProcessUi(reasoning.map { WorkSegmentUi(reasoning = it) }',
                       'if (item is MessageContentUi.Reasoning && !handoff.ready(item.reported)) break',
                       'is MessageContentUi.Reasoning -> "reasoning:${reported.itemId}"',
-                      'is MessageContentUi.Tool -> "tool:${step.toolCallId}"']:
+                      'is MessageContentUi.Tool -> "tool:${step.renderKey}"']:
             self.assertIn(token, ordered)
         entry = ' '.join((CHAT / 'WorkflowEntry.kt').read_text().split())
         for token in ['fun enter(key: String, animate: Boolean): Boolean = shown.add(key) && animate',
@@ -161,7 +161,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('val entrances = remember(turn.listKey) { WorkflowEntrances(visibleWorkflowKeys(ordered.steps, handoff)) }', host)
         self.assertLess(host.index('val entrances = remember(turn.listKey)'), host.index('work?.let { AssistantWorkflow'))
         self.assertIn('entrances.suppress(steps.mapIndexed { index, item -> item.workflowKey(index) })', host)
-        self.assertIn('WorkflowEntry(key, entrances, animate = expanded && work.running,', host)
+        self.assertIn('WorkflowEntry(key, entrances, animate = false,', host)
         self.assertIn('entryBody = { key, body -> WorkflowEntry(key, bodyEntrances, observedLive,', host)
 
 if __name__ == '__main__':

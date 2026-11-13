@@ -136,14 +136,15 @@ class MessageDisplayStoreTest {
         assertEquals(saved, database.messages(user.conversationId).last().second)
     }
 
-    private fun seedNextRun(): Message {
+    private fun seedNextRun(completed: Boolean = true): Message {
         val (user, answer) = seed()
         database.save(answer.copy(status = RunStatus.COMPLETED))
         val next = user.copy(id = MessageId("next-user"), runId = RunId("next-run"))
         val nextAnswer = answer.copy(id = MessageId("next-answer"), runId = next.runId)
         database.send(next, nextAnswer)
-        database.save(nextAnswer.copy(status = RunStatus.COMPLETED))
-        return nextAnswer.copy(status = RunStatus.COMPLETED)
+        val stored = if (completed) nextAnswer.copy(status = RunStatus.COMPLETED) else nextAnswer
+        if (completed) database.save(stored)
+        return stored
     }
 
     private fun insertSupplement(id: String) {
@@ -166,9 +167,9 @@ class MessageDisplayStoreTest {
     }
 
     @Test fun latestRunKeepsAssistantWithLaterSupplementsAndRebuildKeepsScope() {
-        val answer = seedNextRun()
+        val answer = seedNextRun(completed = false)
         val user = database.messages(answer.conversationId).first { it.second.id.value == "next-user" }.second
-        val saved = answer.copy(historySegments = listOf(
+        val saved = answer.copy(status = RunStatus.STOPPED, historySegments = listOf(
             MessageHistorySegment(user.id, Message.USER_ROLE, user.blocks),
             MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, answer.blocks)))
         database.save(saved)

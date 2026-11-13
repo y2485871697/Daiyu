@@ -63,7 +63,8 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_timeline_and_compression_async_changes_reproject_exact_aliases(self):
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
-        for requirement in ('val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||',
+        for requirement in ('val remapTurns = rowsChanged || chatState.conversationKey != selected?.id?.value ||',
+                            'workflowBoundaries != oldBoundaries ||',
                             'reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }',
                             'boundariesAfter = workflowBoundaries',
                             'compressionActivitiesByAnchor(visibleCompressions, visibleTimeline)'):
@@ -79,9 +80,10 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
         listing = self.read('ChatMessageList.kt')
         self.assertIn('actionTurn: ChatTurnUi.Assistant = turn', listing)
         self.assertIn('MessageActionBar(actionTurn.actionKey, actions', listing)
-        self.assertIn('showActions && actionTurn.status != RunStatus.RUNNING', listing)
-        self.assertIn('showActions = index == parts.parts.lastIndex, actionTurn = turn',
-                      self.read('ReconnectedAssistantTurn.kt'))
+        self.assertIn('showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled', listing)
+        reconnect = self.read('ReconnectedAssistantTurn.kt')
+        self.assertIn('val actionsReady = parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }', reconnect)
+        self.assertIn('showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn', reconnect)
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         self.assertIn('messageCallbacks.onDeleteTurn(firstSourceKey)', main)
         self.assertIn('ChatTurnMapper.sourceMessages(turn, shown.map { it.second })', main)

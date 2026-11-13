@@ -74,6 +74,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var currentColor by mutableStateOf(Color.Blue)
     private var observedFrame: PageBackPreviewLayers.Frame? = null
     private var previousFrame: PageBackPreviewLayers.Frame? = null
+    private var observedState: PageBackGestureState? = null
     private var rowClicks = 0
     private var pageCompositions = 0
     private var sliderValue by mutableStateOf(0.2f)
@@ -81,7 +82,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var immediateCaptureRequests = 0
     private lateinit var horizontal: ScrollState
 
-    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, rtl: Boolean = false, immediateCapture: Boolean = false, onPageComposition: () -> Unit = {}) {
+    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, rtl: Boolean = false, immediateCapture: Boolean = false, lifecycleOwner: androidx.lifecycle.LifecycleOwner? = null, onPageComposition: () -> Unit = {}) {
         // Motion-only fixtures can accept a pre-sampled unchanged source; pending-copy tests use real capture.
         val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, ImageBitmap>()
         mainThread {
@@ -90,6 +91,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                     previewBackground = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.background
                     val renderedRoute = route
                     androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.lifecycle.compose.LocalLifecycleOwner provides (lifecycleOwner ?: activity),
                         androidx.compose.ui.platform.LocalLayoutDirection provides
                             if (rtl) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr,
                     ) {
@@ -104,7 +106,9 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                             } else frame.layer.toImageBitmap().also { exactPixels[frame] = it }
                         }) {
                         val currentFrame = LocalPageBackPreviewFrame.current
+                        val gestureState = LocalPageBackGesture.current
                         androidx.compose.runtime.SideEffect {
+                            observedState = gestureState
                             observedFrame = currentFrame
                             if (renderedRoute == "previous-page") previousFrame = currentFrame
                         }
@@ -1137,6 +1141,91 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     fun testUsageModelsImmediateGestureAndCancelKeepSelectedTabPixels() = assertUsageTabDoesNotFlashOldPixels(false)
 
     fun testUsageModelsDelayedGestureAndCancelKeepSelectedTabPixels() = assertUsageTabDoesNotFlashOldPixels(true)
+
+    fun testPauseClearsCancelSpringBeforeAnyPausedComposition() {
+        val owner = object : androidx.lifecycle.LifecycleOwner {
+            val registry = androidx.lifecycle.LifecycleRegistry(this)
+            override val lifecycle: androidx.lifecycle.Lifecycle get() = registry
+        }
+        mainThread { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        mount(capturePreviousPage = true, immediateCapture = true, lifecycleOwner = owner)
+        ui.mainClock.autoAdvance = false
+        try {
+            val original = checkNotNull(observedState)
+            mainThread {
+                val touch = Any()
+                original.update(touch, .4f, predictive = false)
+                original.reset(touch)
+                assertTrue("cancel spring has a nonzero start", original.visualProgress > .3f)
+                owner.registry.currentState = androidx.lifecycle.Lifecycle.State.STARTED
+                assertEquals("pause immediately clears progress before Compose runs", 0f, original.visualProgress, 0f)
+                assertFalse(original.gestureVisualActive)
+                assertFalse(original.active)
+                owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+            }
+            repeat(12) {
+                ui.mainClock.advanceTimeByFrame()
+                val host = node("page-back-host").fetchSemanticsNode().boundsInRoot
+                val surface = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+                assertEquals("resumed surface x", host.left, surface.left, 1.1f)
+                assertEquals("old cancel job cannot restart progress", 0f, original.visualProgress, 0f)
+                node("page-back-target").assertDoesNotExist()
+            }
+            assertEquals(0, backCount)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testRealPauseClearsUnfinishedCancelSpringSynchronously() {
+        mount(capturePreviousPage = true, immediateCapture = true)
+        ui.mainClock.autoAdvance = false
+        try {
+            val original = checkNotNull(observedState)
+            mainThread {
+                val touch = Any()
+                original.update(touch, .4f, predictive = false)
+                original.reset(touch)
+                assertTrue(original.visualProgress > .3f)
+            }
+            realPauseResume(activity, atPause = {
+                assertEquals(0f, original.visualProgress, 0f)
+                assertFalse(original.gestureVisualActive)
+                assertFalse(original.active)
+            })
+            repeat(12) {
+                ui.mainClock.advanceTimeByFrame()
+                val host = node("page-back-host").fetchSemanticsNode().boundsInRoot
+                val surface = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+                assertEquals(host.left, surface.left, 1.1f)
+                node("page-back-target").assertDoesNotExist()
+            }
+            assertEquals(0, backCount)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    @OptIn(ExperimentalActivityApi::class)
+    fun testPredictiveCompletionAfterUncomposedPauseIsRejected() {
+        val owner = object : androidx.lifecycle.LifecycleOwner {
+            val registry = androidx.lifecycle.LifecycleRegistry(this)
+            override val lifecycle: androidx.lifecycle.Lifecycle get() = registry
+        }
+        mainThread { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        mount(capturePreviousPage = true, immediateCapture = true, lifecycleOwner = owner)
+        mainThread {
+            val dispatcher = activity.onBackPressedDispatcher
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .4f, BackEventCompat.EDGE_LEFT))
+            if (Build.VERSION.SDK_INT >= 34) assertTrue(checkNotNull(observedState).visualProgress > .3f)
+            else assertEquals(0f, checkNotNull(observedState).visualProgress, 0f)
+            owner.registry.currentState = androidx.lifecycle.Lifecycle.State.STARTED
+            owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+            dispatcher.onBackPressed()
+            assertEquals("old predictive completion must not pop after pause", 0, backCount)
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .6f, BackEventCompat.EDGE_LEFT))
+            dispatcher.onBackPressed()
+            assertEquals("a new predictive session remains usable", 1, backCount)
+        }
+    }
 
     fun testPauseNeverRestoresAcceptedDepartureOnResume() {
         navigateOnBack = true

@@ -180,7 +180,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
         gestureVisualActive = previewAllowed && nextProgress > 0f
     }
 
-    fun reset(owner: Any? = null) {
+    fun reset(owner: Any? = null, immediate: Boolean = false) {
         synchronousTrace("daiyu.back.reset") {
             if (owner != null && this.owner !== owner) return
             BackPerformance.safely {
@@ -193,7 +193,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
             active = false
             progress = 0f
             val start = visualProgress
-            if (!alive || start <= 0f || !previewAllowed) {
+            if (immediate || !alive || start <= 0f || !previewAllowed) {
                 settleJob?.cancel()
                 settleJob = null
                 visualProgress = 0f
@@ -345,8 +345,16 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
         onDispose { session.invalidate() }
     }
     DisposableEffect(dispatcher, lifecycleOwner, callback) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) session.invalidate()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         dispatcher.addCallback(lifecycleOwner, callback)
-        onDispose { callback.handleOnBackCancelled(); callback.remove() }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            callback.handleOnBackCancelled()
+            callback.remove()
+        }
     }
 }
 
@@ -493,8 +501,19 @@ internal fun PageBackGestureHost(
             }
         }
     }
-    DisposableEffect(state) {
-        onDispose { state.alive = false; state.reset() }
+    DisposableEffect(state, lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                state.predictiveGeneration++
+                state.reset(immediate = true)
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            state.alive = false
+            state.reset()
+        }
     }
     SideEffect {
         layers.setActive(resumed)

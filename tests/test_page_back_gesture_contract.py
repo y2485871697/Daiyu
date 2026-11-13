@@ -144,6 +144,14 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('state.gestureVisualActive', self.host)
         self.assertIn('settle.animateTo(0f, spring', self.host)
         self.assertIn('if (settleJob === kotlinx.coroutines.currentCoroutineContext()[Job])', self.host)
+        self.assertIn('if (immediate || !alive || start <= 0f || !previewAllowed)', self.host)
+        self.assertIn('state.reset(immediate = true)', self.host)
+        self.assertIn('if (event == Lifecycle.Event.ON_PAUSE) session.invalidate()', self.host)
+        regressions = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
+        for method in ('testPauseClearsCancelSpringBeforeAnyPausedComposition',
+                       'testRealPauseClearsUnfinishedCancelSpringSynchronously',
+                       'testPredictiveCompletionAfterUncomposedPauseIsRejected'):
+            self.assertIn('fun ' + method + '()', regressions)
 
     def test_swipe_is_full_page_and_lets_children_arbitrate_before_claiming(self):
         for guard in ('canNavigateBack && swipeDismissEnabled && resumed && !imeVisible',

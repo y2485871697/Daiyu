@@ -307,18 +307,7 @@ class WorkflowNarrationCompositionTest {
             }
             assertTrue("Later streaming text must not restart the ready tool's frame admission", visible(firstTool, 1))
             assertFalse(visible(lastTool, 3))
-            withTimeout(10_000) {
-                var waiting = 0
-                while (narration!!.reveal.limit(after.itemId) == 0) {
-                    frame()
-                    if (++waiting % 120 == 0) println("admission-wait before=${narration!!.reveal.limit(before.itemId)} " +
-                        "beforeReady=${narration!!.reveal.ready(before.itemId, before.text)} " +
-                        "tools=${appended.value.mapIndexed { index, item -> visible(item, index + 2) }} " +
-                        "afterEntry=${visible(suffix.value, appended.value.size + 2)} " +
-                        "blocked=${admission.blockedText(listOf(before, firstTool) + appended.value + listOf(suffix.value, lastTool))} " +
-                        "projection=${narration!!.projection?.sources?.map { it.length }} suffix=${suffix.value.text.length}")
-                }
-            }
+            until { narration!!.reveal.limit(after.itemId) > 0 }
             assertTrue(narration!!.reveal.limit(after.itemId) < after.text.length)
             assertFalse(visible(lastTool, 3))
             until { visible(lastTool, 3) }
@@ -341,6 +330,23 @@ class WorkflowNarrationCompositionTest {
             assertTrue(visible(lastTool, 3))
             assertEquals(remountAdvances, advances)
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
+    @Test fun admittedToolsReleaseFollowingTextWithoutWaitingForLaterTools() {
+        val before = MessageContentUi.Text("before", "visible")
+        val first = MessageContentUi.Tool(WorkStepUi("first", "lookup", "done", WorkStepState.OK))
+        val after = MessageContentUi.Text("after", "waiting")
+        val last = MessageContentUi.Tool(WorkStepUi("last", "lookup", "done", WorkStepState.OK))
+        val steps = listOf(before, first, after, last)
+        val gate = WorkflowVisualAdmission(emptyList(), animateFirstNarration = true)
+        assertEquals(setOf(after.itemId), gate.blockedText(steps))
+        gate.admit(listOf(first.workflowKey(1)))
+        assertTrue("An admitted tool must not remain a text barrier", gate.blockedText(steps).isEmpty())
+        assertFalse(gate.contains(last.workflowKey(3)))
+        val textAfterLast = MessageContentUi.Text("tail", "last barrier")
+        assertEquals(setOf(textAfterLast.itemId), gate.blockedText(steps + textAfterLast))
+        gate.admit(listOf(last.workflowKey(3)))
+        assertTrue(gate.blockedText(steps + textAfterLast).isEmpty())
     }
 
     @Test fun restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount() {

@@ -54,8 +54,8 @@ internal class WorkflowVisualAdmission(initial: List<String>, private var animat
     fun blockedText(steps: List<MessageContentUi>): Set<String> = buildSet {
         var blocked = false
         steps.forEachIndexed { index, item ->
-            if (item is MessageContentUi.Tool && !contains(item.workflowKey(index))) blocked = true
-            if (blocked && item is MessageContentUi.Text && !contains(item.workflowKey(index))) add(item.itemId)
+            if (item is MessageContentUi.Tool && !this@WorkflowVisualAdmission.contains(item.workflowKey(index))) blocked = true
+            if (blocked && item is MessageContentUi.Text && !this@WorkflowVisualAdmission.contains(item.workflowKey(index))) add(item.itemId)
         }
     }
 }

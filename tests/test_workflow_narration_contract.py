@@ -59,13 +59,15 @@ class WorkflowNarrationContract(unittest.TestCase):
         self.assertIn('val currentPlan by rememberUpdatedState(plan)', narration)
         self.assertIn('currentPlan.firstOrNull { !gate.contains(it.key) }', narration)
         self.assertIn('gate.admit(listOf(candidate))', narration)
+        self.assertIn('!this@WorkflowVisualAdmission.contains(item.workflowKey(index))', narration)
         self.assertIn('val entriesSettled = visualAdmission?.settled(steps) != false', chat)
         self.assertIn('if (baselineOnly) admission?.admit(plan.map { it.key })', narration)
         self.assertIn('(initialBaseline ?: sources).toList()', typing)
         tests = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNarrationCompositionTest.kt').read_text()
         for method in ('newPlainWorkflowAdmitsEachToolAfterItsVisibleNarration',
                        'newMarkdownWorkflowAdmitsEachToolAfterItsVisibleNarration',
-                       'restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount'):
+                       'restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount',
+                       'admittedToolsReleaseFollowingTextWithoutWaitingForLaterTools'):
             self.assertIn(method, tests)
 
     def test_automatic_close_waits_for_narration_but_manual_close_can_finish(self):

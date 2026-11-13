@@ -234,6 +234,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
                 MessageBlock.Text("a", "prepared history body"))
         fixture.database.send(user, answer)
         fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+        fixture.database.draft(conversation.id, "draft-1")
         return fixture.database.messages(conversation.id)
     }
 

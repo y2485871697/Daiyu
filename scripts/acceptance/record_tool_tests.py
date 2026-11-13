@@ -233,7 +233,18 @@ LINUX_PIN_MODULES = (
 )
 
 
+TERMINAL_COMMAND_PAGER_PLATFORM_CLASS = "app.daiyu.android.terminal.TerminalCommandPagerTest"
+TERMINAL_COMMAND_PAGER_MODULES = (
+    "test_chroot_workspace_command_contract", "test_terminal_command_pager_smoke_scope",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == TERMINAL_COMMAND_PAGER_PLATFORM_CLASS):
+        return [python, "-B", "-m", "unittest", *TERMINAL_COMMAND_PAGER_MODULES, "-v"], "terminal-command-pager-targeted"
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(PAGE_PERFORMANCE_PLATFORM_CLASSES)):
         return [python, '-B', '-m', 'unittest', *PAGE_PERFORMANCE_MODULES, '-v'], 'page-performance-targeted'

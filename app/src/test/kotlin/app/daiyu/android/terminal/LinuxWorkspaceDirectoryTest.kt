@@ -134,6 +134,15 @@ class LinuxWorkspaceDirectoryTest {
         val launch = RootScopeLaunch(spec.rootfs, requireNotNull(spec.proot), guestWorkingDirectory = cwd, command = command)
         val args = launch.guestArgv()
         assertEquals(listOf("daiyu-command", cwd, command), args.takeLast(3))
-        assertEquals("cd -- \"\$1\" && exec /bin/sh -c \"\$2\"", args[4])
+        assertEquals(COMMAND_PAGER_SETUP + "cd -- \"\$1\" && exec /bin/sh -c \"\$2\"", args[4])
+    }
+    @Test fun commandPagerSetupPreservesTheMaximumOriginalCommandArgument() = fixture { _, spec, _ ->
+        val command = ": #" + "x".repeat(32765)
+        val launch = RootScopeLaunch(spec.rootfs, requireNotNull(spec.proot), command = command)
+        assertEquals(32768, command.length)
+        assertEquals(command, launch.guestArgv().last())
+        assertEquals(command, launch.binding().getString("command"))
+        assertTrue(launch.guestArgv()[4].startsWith(COMMAND_PAGER_SETUP))
+        assertFalse(launch.copy(command = null).guestArgv().any { "PAGER" in it })
     }
 }

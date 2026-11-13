@@ -5,6 +5,9 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+// Captured AI command output must not wait for an interactive pager.
+internal const val COMMAND_PAGER_SETUP = "export PAGER=cat GIT_PAGER=cat SYSTEMD_PAGER=cat; "
+
 /** Immutable selection. A Linux launcher must be explicitly configured by the owner; no fallback. */
 data class TerminalConfiguration(
     val backend: String = "android",
@@ -64,7 +67,7 @@ data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, 
         .put("command", command ?: JSONObject.NULL)
     internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh") + when {
         identityProbe -> listOf("-c", "id -u")
-        command != null -> listOf("-c", "cd -- \"\$1\" && exec /bin/sh -c \"\$2\"", "daiyu-command", guestWorkingDirectory, command)
+        command != null -> listOf("-c", COMMAND_PAGER_SETUP + "cd -- \"\$1\" && exec /bin/sh -c \"\$2\"", "daiyu-command", guestWorkingDirectory, command)
         guestWorkingDirectory == "/" -> emptyList()
         // Fixed bridge: cwd is a positional argument, never shell source. RootScope still owns
         // the cgroup, private procfs mount and D/launcher-exit termination protocol.

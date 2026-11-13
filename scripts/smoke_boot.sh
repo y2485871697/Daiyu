@@ -171,6 +171,12 @@ terminal_screen_source = Path("app/src/androidTest/kotlin/app/daiyu/android/term
 if raw_filter == terminal_screen_target and not terminal_screen_only:
     raise ValueError("TerminalScreenTest is smoke-only")
 
+terminal_command_pager_target = "app.daiyu.android.terminal.TerminalCommandPagerTest"
+terminal_command_pager_only = mode == "smoke" and raw_filter == terminal_command_pager_target
+terminal_command_pager_source = Path("app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalCommandPagerTest.kt")
+if raw_filter == terminal_command_pager_target and not terminal_command_pager_only:
+    raise ValueError("TerminalCommandPagerTest is smoke-only")
+
 classes = {}
 for path in sorted(Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
@@ -209,6 +215,8 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
         continue
     if terminal_screen_only and path != terminal_screen_source:
         continue
+    if terminal_command_pager_only and path != terminal_command_pager_source:
+        continue
     source = path.read_text()
     if path.suffix == ".kt":
         count = len(re.findall(r"^\s*fun test\w+\(", source, re.M))
@@ -236,6 +244,8 @@ if mode == "daily" and (shards != 1 or shard != 0):
     raise ValueError("Daily Release requires one complete targeted shard per API")
 if terminal_screen_only and (os.environ.get("SMOKE_API") != "all" or shards != 1 or shard != 0):
     raise ValueError("TerminalScreenTest requires smoke_api=all and its sole shard")
+if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shards != 1 or shard != 0):
+    raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
 if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and len(classes) < shards):
@@ -258,7 +268,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or terminal_screen_only else "full",
+                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or terminal_screen_only or terminal_command_pager_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

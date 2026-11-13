@@ -75,4 +75,52 @@ class RootScopeCommandProcessTest {
         assertFalse(process.waitFor(20, TimeUnit.MILLISECONDS))
         assertTrue(process.isAlive)
     }
+    @Test fun commandBridgeCompletesLongGitDiffWithoutStartingConfiguredPager() {
+        val root = Files.createTempDirectory("root-command-pager-").toFile().canonicalFile
+        var session: PtySession? = null
+        try {
+            val work = root.resolve("work 'quoted' \$(literal)").apply { mkdir() }
+            val old = work.resolve("old").apply { mkdir() }
+            val new = work.resolve("new").apply { mkdir() }
+            repeat(60) { index ->
+                old.resolve("file-$index.txt").writeText("old\n")
+                new.resolve("file-$index.txt").writeText("new\n")
+            }
+            val marker = root.resolve("pager-invoked")
+            val pager = root.resolve("pager").apply {
+                writeText("#!/bin/sh\nprintf invoked > '${marker.path}'\ncat\n")
+                assertTrue(setExecutable(true))
+            }
+            val launch = RootScopeLaunch(root.resolve("rootfs").apply { mkdir() },
+                root.resolve("su").apply { writeText("fixture"); setExecutable(true) },
+                guestWorkingDirectory = work.path,
+                command = "test -t 1 || exit 90\n" +
+                    "[ \"\$PAGER:\$GIT_PAGER:\$SYSTEMD_PAGER\" = cat:cat:cat ] || exit 91\n" +
+                    "git -c core.pager='${pager.path}' diff --no-index --stat old new\n" +
+                    "code=\$?; printf '\nDIFF-EXIT:%s\n' \"\$code\"; exit \"\$code\"")
+            val helper = java.io.File(checkNotNull(System.getProperty("daiyu.pty.helper")))
+            // Exercise the exact guest shell bridge on a real host PTY, without pretending to chroot.
+            session = PtySession.openBound(helper, launch.guestArgv().drop(2),
+                mapOf("PATH" to "/usr/bin:/bin", "TERM" to "xterm-256color", "HOME" to work.path,
+                    "PAGER" to pager.path, "GIT_PAGER" to pager.path, "SYSTEMD_PAGER" to pager.path),
+                root, root.resolve("journal"), "pager", 24, 80, null,
+                createJournal = { directory, scope, binding -> hostJournal(directory, scope, binding = binding) })
+            assertTrue("command must finish without pager input", session.awaitTermination(10_000))
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            var result = session.read(0, 65536)
+            while (result.getString("state") != "exited" && System.nanoTime() < deadline) {
+                Thread.sleep(5)
+                result = session.read(0, 65536)
+            }
+            assertEquals(result.toString(), "exited", result.getString("state"))
+            assertEquals(1 shl 8, result.getInt("wait_status"))
+            assertTrue(result.toString(), result.getString("stdout").contains("60 files changed"))
+            assertTrue(result.toString(), result.getString("stdout").contains("DIFF-EXIT:1"))
+            assertFalse("configured pager must not launch", marker.exists())
+        } finally {
+            session?.close()
+            assertTrue(session?.awaitTermination(3000) != false)
+            root.deleteRecursively()
+        }
+    }
 }

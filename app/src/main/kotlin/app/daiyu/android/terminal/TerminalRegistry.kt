@@ -172,7 +172,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             }
             if (closed || !synchronized(sessions) { session in sessions }) job.cancelRequested=true
             val prefix=b.guestCwd?.let { "cd -- '"+it.replace("'","'\\''")+"' || exit 125\n" }.orEmpty()
-            val bytes=(prefix+command+"\n").toByteArray(Charsets.UTF_8)
+            val bytes=(prefix+COMMAND_PAGER_SETUP+command+"\n").toByteArray(Charsets.UTF_8)
             require(bytes.size<=MAX_SCRIPT_BYTES)
             java.io.FileOutputStream(job.script).use { it.write(bytes); it.fd.sync() }
             android.system.Os.chmod(job.script.path,384) // 0600, private bounded stdin, no blocking pipe write.

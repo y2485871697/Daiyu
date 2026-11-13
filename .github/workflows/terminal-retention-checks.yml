@@ -87,6 +87,9 @@ jobs:
             --tests 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest' \
             --tests 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest' \
             --tests 'app.daiyu.android.terminal.TerminalGridBufferTest' \
+            --tests 'app.daiyu.android.terminal.LinuxWorkspaceDirectoryTest' \
+            --tests 'app.daiyu.android.terminal.RootScopeCommandProcessTest' \
+            --tests 'app.daiyu.android.terminal.PtyRootScopeProtocolTest' \
             --tests 'app.daiyu.android.terminal.TerminalRegistryRetentionTest' \
             --tests 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest' \
             --tests 'app.daiyu.android.integration.tools.TerminalJobSessionTest' \
@@ -100,7 +103,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest', 'app.daiyu.android.terminal.LinuxRootfsBackupAccessTest', 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest', 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest', 'app.daiyu.android.terminal.TerminalGridBufferTest', 'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest'}
+          expected = {'app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest', 'app.daiyu.android.terminal.LinuxRootfsBackupAccessTest', 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest', 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest', 'app.daiyu.android.terminal.TerminalGridBufferTest', 'app.daiyu.android.terminal.LinuxWorkspaceDirectoryTest', 'app.daiyu.android.terminal.RootScopeCommandProcessTest', 'app.daiyu.android.terminal.PtyRootScopeProtocolTest', 'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest'}
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest',) for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           import sys

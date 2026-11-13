@@ -255,6 +255,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
             ).forEach { excludeTestsMatching("app.daiyu.android.browser.BrowserCookieBackendTest.$it") }
         }
         filter {excludeTestsMatching("app.daiyu.android.terminal.PtySessionHostTest.testRealPtyPersistsShellAndRejectsStartupReplay")}
+        filter {excludeTestsMatching("app.daiyu.android.terminal.RootScopeCommandProcessTest.commandBridgeCompletesLongGitDiffWithoutStartingConfiguredPager")}
         if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
             // Android/Linux privacy and durability contracts need POSIX unlink, modes or directory fsync.
             // Keep pure parsers and preflight rejections on Windows; Linux runs every method.

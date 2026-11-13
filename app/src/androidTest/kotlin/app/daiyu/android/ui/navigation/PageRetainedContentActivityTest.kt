@@ -16,6 +16,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.unit.dp
@@ -449,13 +453,21 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)
 
-    private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false, resumePixels: Boolean = false) {
+    private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false, resumePixels: Boolean = false, hiddenPauseResume: Boolean = false, backgroundToHome: Boolean = false) {
         val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
         if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
         var marker by mutableStateOf(Color.Green)
         var messagesIdentity: Any? = null
         var composerIdentity: Any? = null
         var liveDraws = 0
+        data class LiveFrame(val attached: Boolean, val position: Offset, val size: IntSize,
+            val messages: Any?, val composer: Any?)
+        val returnFrames = mutableListOf<LiveFrame>()
+        var recordReturnFrames = false
+        var retainedCoordinates: LayoutCoordinates? = null
+        var answerCoordinates: LayoutCoordinates? = null
+        var originalPosition = Offset.Zero
+        var originalSize = IntSize.Zero
         var chatFrame: PageBackPreviewLayers.Frame? = null
         var settingsFrame: PageBackPreviewLayers.Frame? = null
         var detailFrame: PageBackPreviewLayers.Frame? = null
@@ -472,7 +484,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 parent = Parent().also { it.registry.currentState = Lifecycle.State.RESUMED }
                 activity.setContent {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                        CompositionLocalProvider(LocalLifecycleOwner provides if (resumePixels) activity else parent,
+                        CompositionLocalProvider(LocalLifecycleOwner provides if (resumePixels || hiddenPauseResume) activity else parent,
                             LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                             val rendered = route
                             PageBackGestureHost(rendered, contentKey = rendered,
@@ -494,7 +506,20 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                 },
                                 retainedRootContent = {
                                     DisposableEffect(Unit) { mounts++; onDispose { disposals++ } }
-                                    Box(Modifier.fillMaxSize().drawWithContent { liveDraws++; drawContent() }) {
+                                    Box(Modifier.fillMaxSize().onGloballyPositioned { retainedCoordinates = it }
+                                        .drawWithContent {
+                                            liveDraws++
+                                            drawContent()
+                                            if (recordReturnFrames) {
+                                                val answer = answerCoordinates
+                                                val root = retainedCoordinates
+                                                val attached = answer?.isAttached == true && root?.isAttached == true
+                                                returnFrames.add(LiveFrame(attached,
+                                                    if (attached) answer!!.positionInRoot() - root!!.positionInRoot() else Offset.Zero,
+                                                    if (attached) answer!!.size else IntSize.Zero,
+                                                    messagesIdentity, composerIdentity))
+                                            }
+                                        }) {
                                         ChatConversationLayers(
                                             messages = { inset ->
                                                 val identity = remember { Any() }
@@ -545,17 +570,56 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val originalComposer = ui.onNodeWithTag("chat-draft").fetchSemanticsNode().id
             val originalMessagesIdentity = checkNotNull(messagesIdentity)
             val originalComposerIdentity = checkNotNull(composerIdentity)
-            mainThread { route = "settings" }
+            answerCoordinates = answer.fetchSemanticsNode().layoutInfo.coordinates
+            mainThread {
+                originalPosition = checkNotNull(answerCoordinates).positionInRoot() - checkNotNull(retainedCoordinates).positionInRoot()
+                originalSize = checkNotNull(answerCoordinates).size
+                route = "settings"
+            }
             ui.mainClock.advanceTimeBy(1000)
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
             ui.waitUntil(5_000) { settingsFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
+            if (hiddenPauseResume) {
+                if (backgroundToHome) {
+                    val stopped = java.util.concurrent.CountDownLatch(1)
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_STOP) stopped.countDown()
+                    }
+                    mainThread { activity.lifecycle.addObserver(observer) }
+                    try {
+                        assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                            android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+                        assertTrue("hidden-chat host really stopped", stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        mainThread {
+                            assertEquals(1, mounts)
+                            assertEquals(0, disposals)
+                        }
+                    } finally {
+                        try { mainThread { activity.lifecycle.removeObserver(observer) } }
+                        finally {
+                            restoreOriginalHost(activity)
+                            awaitHostWindowFocus(activity)
+                        }
+                    }
+                } else realPauseResume(activity)
+                ui.waitForIdle()
+                assertEquals("settings", route)
+                assertEquals(1, mounts)
+                assertEquals(0, disposals)
+                assertSame(originalMessagesIdentity, messagesIdentity)
+                assertSame(originalComposerIdentity, composerIdentity)
+                ui.onNodeWithTag("chat-draft").assertDoesNotExist()
+                ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                captureScreenNode(ui.onNodeWithTag("page-back-host"))
+                ui.waitUntil(5_000) { settingsFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
+            }
             if (nested) {
                 mainThread { if (topLevel) route = "appearance" else settingsDetail = true }
                 ui.mainClock.advanceTimeBy(1000)
                 captureScreenNode(ui.onNodeWithTag("page-back-host"))
                 ui.waitUntil(5_000) { detailFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
             }
-            mainThread { marker = Color.Magenta }
+            mainThread { recordReturnFrames = true; marker = Color.Magenta }
             val beforeReturnDraws = liveDraws
             ui.mainClock.autoAdvance = false
             if (nested) {
@@ -713,7 +777,17 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertEquals(1, mounts)
                 assertEquals(0, disposals)
             }
+            assertTrue("return records its first live draw and subsequent frames", returnFrames.isNotEmpty())
+            returnFrames.forEachIndexed { index, frame ->
+                assertTrue("return frame $index retains original layout coordinates", frame.attached)
+                assertSame("return frame $index retains messages", originalMessagesIdentity, frame.messages)
+                assertSame("return frame $index retains composer", originalComposerIdentity, frame.composer)
+                assertEquals("return frame $index message width/height", originalSize, frame.size)
+                assertEquals("return frame $index message x relative to its moving surface", originalPosition.x, frame.position.x, 1.1f)
+                assertEquals("return frame $index message y relative to its moving surface", originalPosition.y, frame.position.y, 1.1f)
+            }
         } finally {
+            recordReturnFrames = false
             ui.mainClock.autoAdvance = true
             if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
         }
@@ -721,28 +795,39 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
 
     fun testRealChatIdlePauseResumeKeepsOneTextFrame() = assertRealChatReturn(swipe = true, resumePixels = true)
 
+    fun testRealChatHiddenPauseResumeReturnsWithoutRemountOrContentShift() =
+        assertRealChatReturn(swipe = true, hiddenPauseResume = true)
+
+    fun testRealChatHiddenHomeResumeReturnsWithoutRemountOrContentShift() =
+        assertRealChatReturn(swipe = true, hiddenPauseResume = true, backgroundToHome = true)
+
     fun testRealChatRapidNestedSwipeReturnsKeepBothAnimations() = assertRealChatReturn(swipe = true, nested = true)
 
     fun testRealChatRapidNestedSwipeReturnsKeepBothAnimationsInRtl() = assertRealChatReturn(swipe = true, nested = true, rtl = true)
 
     fun testRealChatRapidTopLevelSwipeReturnsKeepBothAnimations() = assertRealChatReturn(swipe = true, nested = true, topLevel = true)
 
-    fun testHiddenRootReleasesOnPauseAndIsNotRemountedUntilVisited() {
+    fun testHiddenRootRetainsItsStoppedInstanceAcrossPauseAndResume() {
         mount()
         val original = checkNotNull(rootOwner)
         mainThread { route = "settings" }
         mainThread { parent.registry.currentState = Lifecycle.State.CREATED }
         assertEquals(1, mounts)
-        assertEquals(1, disposals)
-        assertEquals(Lifecycle.State.DESTROYED, original.lifecycle.currentState)
+        assertEquals(0, disposals)
+        assertSame(original, rootOwner)
+        assertFalse(rootActive)
+        assertEquals(Lifecycle.State.CREATED, original.lifecycle.currentState)
         mainThread { parent.registry.currentState = Lifecycle.State.RESUMED }
         assertEquals(1, mounts)
+        assertEquals(0, disposals)
+        assertEquals(Lifecycle.State.CREATED, original.lifecycle.currentState)
         ui.onNodeWithTag("retained-root").assertDoesNotExist()
         mainThread { route = "chat" }
         ui.onNodeWithTag("retained-root").assertIsDisplayed()
-        assertEquals(2, mounts)
-        assertNotSame(original, rootOwner)
-        assertEquals(Lifecycle.State.RESUMED, checkNotNull(rootOwner).lifecycle.currentState)
+        assertEquals(1, mounts)
+        assertEquals(0, disposals)
+        assertSame(original, rootOwner)
+        assertEquals(Lifecycle.State.RESUMED, original.lifecycle.currentState)
     }
 
     fun testScopeChangeDisposesTheOldRootRatherThanRetainingTwoInstances() {

@@ -46,13 +46,10 @@ private class RetainedPageLifecycle : LifecycleOwner {
 
 /** One already visited target stays measured; a hidden target is never placed or started. */
 @Composable
-internal fun PageRetainedContent(visible: Boolean, active: Boolean, resumed: Boolean, content: @Composable (Boolean) -> Unit) {
+internal fun PageRetainedContent(visible: Boolean, active: Boolean, content: @Composable (Boolean) -> Unit) {
     var visited by remember { mutableStateOf(false) }
-    SideEffect {
-        if (visible) visited = true
-        else if (!resumed) visited = false
-    }
-    if (!visible && (!visited || !resumed)) return
+    SideEffect { if (visible) visited = true }
+    if (!visible && !visited) return
     val parent = LocalLifecycleOwner.current
     val currentActive = rememberUpdatedState(active)
     val owner = remember(parent) { RetainedPageLifecycle().also { it.update(parent.lifecycle.currentState, active) } }

@@ -320,7 +320,18 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('backHandlerEnabled = routeActive', self.main)
         self.assertIn('Lifecycle.State.CREATED', retained)
         self.assertIn('if (visible) placeable.place(0, 0)', retained)
-        self.assertIn('if (!visible && (!visited || !resumed)) return', retained)
+        self.assertIn('SideEffect { if (visible) visited = true }', retained)
+        self.assertIn('if (!visible && !visited) return', retained)
+        self.assertNotIn('!resumed', retained)
+        self.assertIn('PageRetainedContent(retainedRootVisible, rootActive)', self.host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
+        for method in ('testHiddenRootRetainsItsStoppedInstanceAcrossPauseAndResume',
+                       'testRealChatHiddenPauseResumeReturnsWithoutRemountOrContentShift',
+                       'testRealChatHiddenHomeResumeReturnsWithoutRemountOrContentShift'):
+            self.assertIn('fun ' + method + '()', test)
+        self.assertIn('returnFrames.forEachIndexed', test)
+        self.assertIn('answer!!.positionInRoot() - root!!.positionInRoot()', test)
+        self.assertIn('originalSize, frame.size', test)
         self.assertIn('Modifier.clearAndSetSemantics {}', retained)
         self.assertNotIn('delay(', retained)
 

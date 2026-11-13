@@ -689,6 +689,7 @@ internal fun ChatMessageList(
                 .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                if (currentTailIndex < 0) return@awaitEachGesture
                 if (initialPositionPending) {
                     down.consume()
                     do {

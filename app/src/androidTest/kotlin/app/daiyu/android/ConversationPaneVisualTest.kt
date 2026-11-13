@@ -47,6 +47,12 @@ import app.daiyu.android.ui.model.ConversationFolderUi
 import app.daiyu.android.ui.model.ConversationModeUi
 import app.daiyu.android.ui.model.ConversationPaneUiState
 import app.daiyu.android.ui.model.ConversationSummaryUi
+import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+import app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+import app.daiyu.android.ui.screens.chat.conversation.ChatScrollRequest
+import app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi
+import app.daiyu.android.ui.screens.chat.conversation.ComposerUi
+import app.daiyu.android.ui.screens.chat.conversation.DaiyuChatScreen
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -122,6 +128,52 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+    }
+
+    fun testEmptyChatSwipesOpenDrawerWithoutCancellingInitialBottomPlacement() {
+        for (request in listOf(null, ChatScrollRequest(1))) {
+            var turns by mutableStateOf<List<ChatTurnUi>>(emptyList())
+            var sends = 0
+            show(initiallyVisible = false) {
+                DaiyuChatScreen(
+                    ChatScreenState(title = "空会话", turns = turns, conversationKey = "empty-swipe",
+                        composer = ComposerUi(text = "保留草稿"), scrollRequest = request),
+                    ChatScreenActions(onSend = { sends++ }),
+                )
+            }
+            node("drawer-list").assertIsNotDisplayed()
+            node("drawer-host").performTouchInput { click(Offset(width * .5f, height * .5f)) }
+            node("drawer-host").performTouchInput {
+                swipe(Offset(width * .5f, height * .65f), Offset(width * .5f, height * .3f), 350)
+            }
+            node("drawer-list").assertIsNotDisplayed()
+            node("drawer-host").performTouchInput {
+                swipe(Offset(width * .85f, height * .5f), Offset(width * .15f, height * .5f), 350)
+            }
+            node("drawer-list").assertIsNotDisplayed()
+            node("drawer-host").performTouchInput {
+                swipe(Offset(width * .15f, height * .5f), Offset(width * .9f, height * .5f), 350)
+            }
+            node("drawer-list").assertIsDisplayed()
+            node("drawer-host").performTouchInput { click(Offset(width * .98f, height * .5f)) }
+            node("drawer-list").assertIsNotDisplayed()
+            node("chat-draft").assertTextEquals("保留草稿")
+            assertEquals(0, sends)
+
+            mainThread { turns = List(60) { ChatTurnUi.User("swipe-$it", "swipe row $it") } }
+            ui.waitForIdle()
+            ui.onNodeWithText("swipe row 59").assertIsDisplayed()
+            ui.onNodeWithText("swipe row 0").assertIsNotDisplayed()
+            node("drawer-host").performTouchInput {
+                swipe(Offset(width * .15f, height * .5f), Offset(width * .9f, height * .5f), 350)
+            }
+            node("drawer-list").assertIsDisplayed()
+            node("drawer-host").performTouchInput { click(Offset(width * .98f, height * .5f)) }
+            node("drawer-list").assertIsNotDisplayed()
+            node("chat-draft").assertTextEquals("保留草稿")
+            assertEquals(0, sends)
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testDrawerOnlyDimsExposedContentWithoutBlurringInBothThemes() {

@@ -65,6 +65,24 @@ class ChatInitialPositionContract(unittest.TestCase):
         receipts = chat.split('// Read confirmation', 1)[1].split('Box(modifier', 1)[0]
         self.assertGreaterEqual(receipts.count('!initialPositionPending'), 2)
 
+    def test_empty_gestures_leave_parent_drawer_and_initial_position_ownership_intact(self):
+        chat = CHAT.read_text()
+        gesture = chat.split('val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)', 1)[1]
+        gesture = gesture.split('contentPadding =', 1)[0]
+        empty_guard = 'if (currentTailIndex < 0) return@awaitEachGesture'
+        self.assertIn('val currentTailIndex by rememberUpdatedState(tailIndex)', chat)
+        self.assertLess(gesture.index(empty_guard), gesture.index('if (initialPositionPending)'))
+        self.assertLess(gesture.index(empty_guard), gesture.index('down.consume()'))
+        self.assertLess(gesture.index(empty_guard), gesture.index('followBottom = false'))
+        self.assertLess(gesture.index(empty_guard), gesture.index('touchEpoch++'))
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneVisualTest.kt').read_text()
+        regression = device.split('fun testEmptyChatSwipesOpenDrawerWithoutCancellingInitialBottomPlacement()', 1)[1]
+        regression = regression.split('fun testDrawerOnlyDims', 1)[0]
+        for token in ('listOf(null, ChatScrollRequest(1))', 'initiallyVisible = false', 'DaiyuChatScreen(',
+                      'performTouchInput', 'assertIsNotDisplayed()', 'assertIsDisplayed()', 'swipe row 59',
+                      'assertTextEquals("保留草稿")', 'assertEquals(0, sends)'):
+            self.assertIn(token, regression)
+
     def test_later_navigation_and_stream_motion_are_preserved(self):
         chat = CHAT.read_text()
         request = chat.split('LaunchedEffect(scrollRequest,', 1)[1].split('// Keep a single motion', 1)[0]

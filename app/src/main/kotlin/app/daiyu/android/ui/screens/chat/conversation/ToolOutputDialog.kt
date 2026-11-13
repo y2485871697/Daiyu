@@ -68,7 +68,8 @@ internal fun toolDocumentTitle(title: String): String = when (title) {
 }
 
 @Composable
-internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit) {
+internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit,
+    titleOverride: String? = null, plainText: Boolean = false) {
     val owner = LocalToolOutputContext.current
     val dark = conversationColors().dark
     val colors = toolOutputColors(dark)
@@ -78,7 +79,7 @@ internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit)
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember(document) { mutableStateOf(false) }
-    val title = when (document.title) {
+    val title = titleOverride ?: when (document.title) {
         "执行命令", "终端输入", "终端输出" -> document.title
         else -> owner?.operation?.let { "$it · 输出" } ?: "完整输出"
     }
@@ -91,7 +92,7 @@ internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit)
             .border(1.dp, colors.line, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("tool-output-dialog"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, color = colors.text)
+                Text(title, Modifier.testTag("tool-output-title"), fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, color = colors.text)
                 Text(meta, Modifier.testTag("tool-output-meta"), fontSize = 12.sp, lineHeight = 18.sp, color = colors.muted)
             }
             val contentShape = RoundedCornerShape(10.dp)
@@ -100,7 +101,7 @@ internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit)
                     .background(colors.surface).border(1.dp, colors.line, contentShape)
                     .testTag("tool-output-content").verticalScroll(rememberScrollState()).padding(12.dp)) {
                     Text(document.text, Modifier.fillMaxWidth().testTag("tool-output-text"),
-                        style = MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp),
+                        style = MiuixTheme.textStyles.footnote1.copy(fontFamily = if (plainText) FontFamily.Default else FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp),
                         color = colors.text)
                 }
             }

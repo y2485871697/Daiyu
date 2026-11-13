@@ -6998,7 +6998,7 @@ class MainActivity : ComponentActivity() {
     private var toolReceiptRequested: ToolReceiptKey? = null
     private var toolReceiptRequest: Any? = null
     private fun currentToolReceiptKey() = ToolReceiptKey(selected?.id, controller.dataRevision, editorGeneration,
-        app.daiyu.android.ui.RetainedToolOutcomes.sources(shown.map { it.second }),
+        app.daiyu.android.ui.RetainedToolOutcomes.sources(shown.map { it.second }, displayWindow),
         controller.active?.takeIf { it.conversationId == selected?.id }?.let(controller::runState))
 
     private fun prepareToolReceipts(): Boolean {
@@ -7015,10 +7015,11 @@ class MainActivity : ComponentActivity() {
         val request = Any()
         toolReceiptRequest = request
         val rows = shown.map { it.second }
+        val display = displayWindow
         toolReceiptRead = lifecycleScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
-                    RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows) }
+                    RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows, display) }
                 }
                 completeToolReceipts(request, key, snapshot)
             } finally {
@@ -7134,6 +7135,8 @@ class MainActivity : ComponentActivity() {
                 retainedReceipts?.invoke(message, block)
                     ?: if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)
             }
+            val visibleChildNames = toolReceiptKey?.takeIf { loaded -> loaded.canDisplayFor(currentReceipts) }
+                ?.let { toolReceiptSnapshot?.childAgentNames }.orEmpty()
             val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
                 reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
             chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
@@ -7144,14 +7147,15 @@ class MainActivity : ComponentActivity() {
                 compressionActivities = visibleCompressions,
                 turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,
                     timestamp = { time -> MessageTimestampFormatter.timestamp(time, appearance.messageTimestampsEnabled) },
-                    reconnects = reconnects, boundariesAfter = workflowBoundaries) } ?: ChatTurnMapper.map(shown.map { it.second },
+                    reconnects = reconnects, boundariesAfter = workflowBoundaries, childTaskNames = visibleChildNames) } ?: ChatTurnMapper.map(shown.map { it.second },
                     messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },
                     reconnects = reconnects, boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                     val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                     questionCards[owner to block.invocation.id.value]?.identity?.storageKey
                 }, timestamp = { message ->
                     MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-                }, presentations = toolPresentations, toolReceipt = visibleToolReceipts),
+                }, presentations = toolPresentations, toolReceipt = visibleToolReceipts,
+                    childTaskNames = visibleChildNames),
                     controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
                     stopRequested = controlOwner?.let(controller::runStopping) == true),
                 submissionPreview = submissionPreview,

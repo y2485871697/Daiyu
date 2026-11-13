@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.domain.*
+import app.daiyu.android.domain.delegation.ChildRunOwner
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -83,4 +85,85 @@ class ChildTaskCardPresentationTest {
         assertEquals("任务状态暂不可用", rich("{broken raw debug").prose!!.text)
         assertEquals("暂无任务记录", rich("""{"tasks":[]}""", "inspect_child_tasks").prose!!.text)
     }
+    private val frozenOwner = ChildRunOwner("conversation", "old-run", "old-group", 2, "old-child", "old-answer")
+    private fun identity(owner: ChildRunOwner = frozenOwner) = JSONObject()
+        .put("parent_run_id", owner.parentRunId).put("task_group_id", owner.taskGroupId)
+        .put("generation", owner.generation.toString()).put("child_run_id", owner.childRunId)
+        .put("assistant_message_id", owner.assistantMessageId)
+
+    @Test fun legacyReadRestoresFrozenNameAfterCacheHitWithoutChangingReceiptStateOrBody() {
+        val payload = JSONObject().put("child_run_id", frozenOwner.childRunId).put("status", "COMPLETED")
+            .put("text", "historical body").put("offset", 20).toString()
+        val block = MessageBlock.Tool(ToolInvocation(ToolCallId("read"), "get_child_task", identity().toString()), payload)
+        val message = Message(MessageId("read-answer"), ConversationId("conversation"), RunId("current-run"),
+            Message.ASSISTANT_ROLE, listOf(block), RunStatus.COMPLETED)
+        val cache = ToolPresentationCache()
+        fun project(names: Map<ChildRunOwner, String>) = (ChatTurnMapper.map(listOf(message), presentations = cache,
+            childTaskNames = names).single() as ChatTurnUi.Assistant).workProcess!!.segments.flatMap { it.steps }.single()
+        val initial = project(emptyMap())
+        assertEquals("子代理", initial.categoryDetails!!.rich.entries.single().title)
+        val named = project(mapOf(frozenOwner to "历史审查", frozenOwner.copy(childRunId = "another") to "其他任务"))
+        val initialDetails = requireNotNull(initial.categoryDetails)
+        val namedDetails = requireNotNull(named.categoryDetails)
+        assertEquals("历史审查", namedDetails.rich.entries.single().title)
+        assertEquals(initial.state, named.state)
+        assertEquals(initialDetails.rich.entries.single().documents, namedDetails.rich.entries.single().documents)
+        assertEquals(initialDetails.rich.entries.single().fields, namedDetails.rich.entries.single().fields)
+        assertEquals(payload, block.result)
+        assertEquals("子代理", project(emptyMap()).categoryDetails!!.rich.entries.single().title)
+        val ordered = ChatTurnMapper.map(listOf(message), presentations = cache,
+            dedicatedTool = { _, _ -> "child-host" }, childTaskNames = mapOf(frozenOwner to "历史审查"))
+            .single() as ChatTurnUi.Assistant
+        assertEquals("历史审查", ordered.content.filterIsInstance<MessageContentUi.Tool>()
+            .single().step.categoryDetails!!.rich.entries.single().title)
+        val window = app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to
+            app.daiyu.android.storage.MessageDisplayRow(message.id, message.conversationId, message.runId,
+                message.role, message.blocks, message.status, message.error, message.createdAt, emptyList())))
+        val inert = ChatTurnMapper.mapDisplay(window, childTaskNames = mapOf(frozenOwner to "历史审查"))
+            .single() as ChatTurnUi.Assistant
+        assertEquals("历史审查", inert.workProcess!!.segments.flatMap { it.steps }
+            .single().categoryDetails!!.rich.entries.single().title)
+        assertEquals(listOf(block), app.daiyu.android.ui.RetainedToolOutcomes.sources(emptyList(), window).single().tools)
+    }
+
+    @Test fun legacyIdentityRequiresExactOwnerAndDoesNotInferNamesFromCurrentProfiles() {
+        val payload = """{"child_run_id":"old-child","status":"COMPLETED","text":"body"}"""
+        assertEquals(listOf(frozenOwner), childTaskReceiptOwners("conversation", "get_child_task", identity().toString(), payload))
+        val original = ToolCardPresentations.present("get_child_task", identity().toString(), payload)
+        for (other in listOf(frozenOwner.copy(conversationId = "another"), frozenOwner.copy(parentRunId = "another"),
+            frozenOwner.copy(taskGroupId = "another"), frozenOwner.copy(generation = 3),
+            frozenOwner.copy(childRunId = "another"), frozenOwner.copy(assistantMessageId = "another"))) {
+            val actual = childTaskNamedPresentation(original, "conversation", "get_child_task", identity().toString(), payload,
+                mapOf(other to "不属于本任务"))
+            assertEquals("子代理", actual.details.rich.entries.single().title)
+        }
+        for (bad in listOf(identity().put("generation", "bad"), identity().put("generation", -1),
+            identity().put("assistant_message_id", ""), JSONObject()))
+            assertTrue(childTaskReceiptOwners("conversation", "get_child_task", bad.toString(), payload).isEmpty())
+    }
+
+    @Test fun inspectNamesFollowEachHistoricalOwnerInsteadOfArrayOrderAndStayScrubbed() {
+        val second = frozenOwner.copy(childRunId = "second-child")
+        val tasks = JSONArray().put(identity(second).put("status", "UNKNOWN").put("progress", "second"))
+            .put(identity().put("status", "COMPLETED").put("text", "first"))
+        val payload = JSONObject().put("tasks", tasks).toString()
+        val original = ToolCardPresentations.present("inspect_child_tasks", "{}", payload)
+        val actual = childTaskNamedPresentation(original, "conversation", "inspect_child_tasks", "{}", payload,
+            mapOf(frozenOwner to "历史执行", second to "历史审查"))
+        assertEquals(listOf("历史审查", "历史执行"), actual.details.rich.entries.map { it.title })
+        val recorded = JSONObject().put("agent_name", "原名").put("status", "COMPLETED").put("text", "body").toString()
+        val explicit = ToolCardPresentations.present("get_child_task", identity().toString(), recorded)
+        assertSame(explicit, childTaskNamedPresentation(explicit, "conversation", "get_child_task", identity().toString(), recorded,
+            mapOf(frozenOwner to "后改名")))
+        val secret = JSONObject().put("child_run_id", frozenOwner.childRunId).put("status", "UNKNOWN")
+            .put("token", "SECRET_NAME").put("text", "body").toString()
+        val named = childTaskNamedPresentation(ToolCardPresentations.present("get_child_task", identity().toString(), secret),
+            "conversation", "get_child_task", identity().toString(), secret, mapOf(frozenOwner to "SECRET_NAME"))
+        assertFalse(named.details.rich.entries.single().title.contains("SECRET_NAME"))
+        val private = """{"privacy_redacted":true,"child_run_id":"old-child","status":"COMPLETED","text":"private"}"""
+        val restricted = ToolCardPresentations.present("get_child_task", identity().toString(), private)
+        assertSame(restricted, childTaskNamedPresentation(restricted, "conversation", "get_child_task", identity().toString(), private,
+            mapOf(frozenOwner to "不应展示")))
+    }
+
 }

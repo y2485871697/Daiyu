@@ -8,6 +8,9 @@ import app.daiyu.android.domain.runtime.ToolDisposition
 import app.daiyu.android.domain.ToolInvocation
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.SQLiteRuntimeStore
+import app.daiyu.android.storage.SQLiteChildTaskStore
+import app.daiyu.android.domain.delegation.ChildRunOwner
+import app.daiyu.android.ui.screens.chat.conversation.childTaskReceiptOwners
 import app.daiyu.android.question.QuestionCheckpointEvidence
 import app.daiyu.android.ui.screens.chat.conversation.WorkStepState
 import app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi
@@ -27,7 +30,14 @@ internal object RetainedToolOutcomes {
         if (message.historySegments.isEmpty()) message.blocks else message.historySegments
             .filter { it.role == Message.ASSISTANT_ROLE }.flatMap { it.blocks }
 
-    internal fun sources(messages: List<Message>): List<Source> = messages.filter { it.role == Message.ASSISTANT_ROLE }
+    internal fun sources(messages: List<Message>, display: app.daiyu.android.storage.MessageDisplayWindow? = null): List<Source> =
+        display?.rows?.mapNotNull { (_, row) ->
+            if (row.role != Message.ASSISTANT_ROLE) return@mapNotNull null
+            val blocks = if (row.segments.isEmpty()) row.blocks else row.segments
+                .filter { it.role == Message.ASSISTANT_ROLE }.flatMap { it.blocks }
+            val tools = blocks.filterIsInstance<MessageBlock.Tool>()
+            if (tools.isEmpty()) null else Source(row.conversationId.value, row.runId.value, row.id.value, row.status, tools)
+        } ?: messages.filter { it.role == Message.ASSISTANT_ROLE }
         .mapNotNull { message ->
             val tools = sourceBlocks(message).filterIsInstance<MessageBlock.Tool>()
             if (tools.isEmpty()) null else Source(message.conversationId.value, message.runId.value, message.id.value, message.status, tools)
@@ -60,7 +70,8 @@ internal object RetainedToolOutcomes {
 
     internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>,
         private val questions: Map<Owner, QuestionCheckpointEvidence>,
-        private val blockPositions: Map<Owner, IdentityHashMap<MessageBlock.Tool, Int>>) {
+        private val blockPositions: Map<Owner, IdentityHashMap<MessageBlock.Tool, Int>>,
+        val childAgentNames: Map<ChildRunOwner, String>) {
         fun questionEvidence(message: Message): QuestionCheckpointEvidence? =
             questions[Owner(message.conversationId.value, message.runId.value, message.id.value)]
 
@@ -109,11 +120,22 @@ internal object RetainedToolOutcomes {
             }
         }
         companion object {
-            fun read(database: ConversationDatabase, messages: List<Message>): Snapshot {
+            fun read(database: ConversationDatabase, messages: List<Message>,
+                display: app.daiyu.android.storage.MessageDisplayWindow? = null): Snapshot {
                 val questions = mutableMapOf<Owner, QuestionCheckpointEvidence>()
                 val blockPositions = mutableMapOf<Owner, IdentityHashMap<MessageBlock.Tool, Int>>()
+                val childAgentNames = mutableMapOf<ChildRunOwner, String>()
+                val children = SQLiteChildTaskStore(database)
+                val lookedUp = mutableSetOf<ChildRunOwner>()
                 val records = buildMap {
-                    for (source in sources(messages)) {
+                    for (source in sources(messages, display)) {
+                        source.tools.forEach { block ->
+                            childTaskReceiptOwners(source.conversation, block.invocation.name,
+                                block.invocation.arguments, block.result).forEach { owner ->
+                                if (lookedUp.add(owner)) runCatching { children.get(owner)?.display?.agentName }
+                                    .getOrNull()?.let { childAgentNames[owner] = it }
+                            }
+                        }
                         val (snapshot, recoveryOwner) = runCatching {
                             SQLiteRuntimeStore.readQuestionCheckpoint(database.readableDatabase, source.message)
                         }.getOrNull() ?: continue
@@ -148,7 +170,7 @@ internal object RetainedToolOutcomes {
                         put(owner, outcomes)
                     }
                 }
-                return Snapshot(records, questions.toMap(), blockPositions)
+                return Snapshot(records, questions.toMap(), blockPositions, childAgentNames.toMap())
             }
         }
     }

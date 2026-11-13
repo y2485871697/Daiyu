@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.domain.Message
+import app.daiyu.android.domain.delegation.ChildRunOwner
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.MessageHistory
 import app.daiyu.android.domain.MessageImageOwner
@@ -22,6 +23,7 @@ object ChatTurnMapper {
         presentations: ToolPresentationCache? = null,
         messageVideos: (Message) -> List<MessageVideoUi> = { emptyList() },
         reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect> = emptyList(),
+        childTaskNames: Map<ChildRunOwner, String> = emptyMap(),
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
@@ -73,13 +75,14 @@ object ChatTurnMapper {
             activity,
             { timestamp(requireNotNull(it.authoritative)) }, boundariesAfter,
             { message, owner -> assistantIdentity(requireNotNull(message.authoritative), owner) }, presentations,
-            { messageVideos(requireNotNull(it.authoritative)) }, reconnects)
+            { messageVideos(requireNotNull(it.authoritative)) }, reconnects, childTaskNames)
     }
 
     internal fun mapDisplay(window: app.daiyu.android.storage.MessageDisplayWindow,
         timestamp: (Long?) -> String = { "" },
         boundariesAfter: Set<String> = emptySet(),
         reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect> = emptyList(),
+        childTaskNames: Map<ChildRunOwner, String> = emptyMap(),
     ): List<ChatTurnUi> {
         val rows = window.rows.map { it.second }
         val supplements = rows.flatMap { owner -> owner.segments.filter { it.role == Message.USER_ROLE }.map {
@@ -101,7 +104,7 @@ object ChatTurnMapper {
         }
         return mapRows(history, owners, { _, _ -> null }, { _, _ -> null }, { _, _ -> null },
             { _, _ -> null }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, null,
-            { emptyList() }, reconnects)
+            { emptyList() }, reconnects, childTaskNames)
     }
 
     private data class RenderMessage(val id: app.daiyu.android.domain.MessageId,
@@ -134,6 +137,7 @@ object ChatTurnMapper {
         assistantIdentity: (RenderMessage, String) -> app.daiyu.android.assistants.AssistantReplyIdentity?,
         presentations: ToolPresentationCache?, messageVideos: (RenderMessage) -> List<MessageVideoUi>,
         reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>,
+        childTaskNames: Map<ChildRunOwner, String> = emptyMap(),
     ): List<ChatTurnUi> {
         val nextSegment = mutableMapOf<TurnOwner, Int>()
         val nextOffset = mutableMapOf<TurnOwner, Long>()
@@ -195,7 +199,7 @@ object ChatTurnMapper {
                     id = message.id.value,
                     text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text },
                     timestamp = timestamp(message),
-                    content = mixedContent(message, errors, states, dedicated, activity, presentations = presentations,
+                    content = mixedContent(message, errors, states, dedicated, activity, presentations = presentations, childTaskNames = childTaskNames,
                         videos = messageVideos(message).filter { video ->
                             video.expectedOwner.conversationId == message.conversationId.value &&
                                 video.expectedOwner.messageId == message.id.value &&
@@ -205,7 +209,7 @@ object ChatTurnMapper {
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
                 )
-                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), errors, states, dedicated, activity, presentations).copy(
+                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), errors, states, dedicated, activity, presentations, childTaskNames).copy(
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
@@ -216,7 +220,7 @@ object ChatTurnMapper {
                         it.anchor.messageId == owner.messageId }) ReconnectSourceUi(
                         app.daiyu.android.timeline.TimelineAnchor(owner.conversationId, owner.runId, owner.messageId, segment),
                         source.start, mixedContent(message, errors, states, dedicated, activity,
-                            integrateReasoning = true, presentations = presentations, forceOrdered = true)) else null,
+                            integrateReasoning = true, presentations = presentations, childTaskNames = childTaskNames, forceOrdered = true)) else null,
                 )
                 else -> null
             }
@@ -299,7 +303,8 @@ object ChatTurnMapper {
         integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool },
         presentations: ToolPresentationCache? = null,
         videos: List<MessageVideoUi> = emptyList(),
-        forceOrdered: Boolean = false): List<MessageContentUi> {
+        forceOrdered: Boolean = false,
+        childTaskNames: Map<ChildRunOwner, String> = emptyMap()): List<MessageContentUi> {
         if (!forceOrdered && videos.isEmpty() && message.blocks.none { it is MessageBlock.Image ||
                 it is MessageBlock.Tool && dedicatedTool(message, it) != null }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
@@ -314,7 +319,7 @@ object ChatTurnMapper {
                     is MessageBlock.Image -> MessageContentUi.Image(MessageImageUi(owner, block.reference))
                     is MessageBlock.Tool -> MessageContentUi.Tool(
                         workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations,
-                            toolOccurrence(message, block)),
+                            toolOccurrence(message, block), childTaskNames),
                     )
                 })
             }
@@ -344,8 +349,11 @@ object ChatTurnMapper {
         listOf(message.conversationId.value, message.runId.value, message.id.value,
             block.invocation.id.value, occurrence.toString()).joinToString("", prefix = "tool:") { "${it.length}:$it" }
 
-    private fun workStep(message: RenderMessage, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?, occurrence: Int = toolOccurrence(message, block)): WorkStepUi {
-        val display = presentations?.present(block) ?: ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
+    private fun workStep(message: RenderMessage, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?, occurrence: Int = toolOccurrence(message, block),
+        childTaskNames: Map<ChildRunOwner, String> = emptyMap()): WorkStepUi {
+        val cached = presentations?.present(block) ?: ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
+        val display = childTaskNamedPresentation(cached, message.conversationId.value, block.invocation.name,
+            block.invocation.arguments, block.result, childTaskNames)
         return WorkStepUi(
             id = block.invocation.id.value, name = display.title, detail = display.summary,
             state = receipt ?: when (confirmedError) {
@@ -375,7 +383,8 @@ object ChatTurnMapper {
         toolState: (RenderMessage, MessageBlock.Tool) -> WorkStepState?,
         dedicatedTool: (RenderMessage, MessageBlock.Tool) -> String?,
         activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi?,
-        presentations: ToolPresentationCache?): ChatTurnUi.Assistant {
+        presentations: ToolPresentationCache?,
+        childTaskNames: Map<ChildRunOwner, String>): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val hasWorkflow = hasTools || message.reportedReasoning.any { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
         // Keep the unclassified tail out of process narration. The UI admits it only
@@ -399,7 +408,7 @@ object ChatTurnMapper {
                     }
                     is MessageBlock.Tool -> {
                         val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations,
-                            toolOccurrence(message, block))
+                            toolOccurrence(message, block), childTaskNames)
                         // Keep even trailing tools while reserving the last text for the final answer.
                         if (segments.isEmpty()) segments += WorkSegmentUi()
                         val previous = segments.last()
@@ -438,7 +447,7 @@ object ChatTurnMapper {
             status = message.status,
             error = message.error,
             reportedReasoning = message.reportedReasoning,
-            content = mixedContent(message, confirmedToolError, toolState, dedicatedTool, activity, integrateReasoning = hasWorkflow, presentations = presentations),
+            content = mixedContent(message, confirmedToolError, toolState, dedicatedTool, activity, integrateReasoning = hasWorkflow, presentations = presentations, childTaskNames = childTaskNames),
         )
     }
 

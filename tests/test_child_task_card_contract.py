@@ -18,14 +18,31 @@ class ChildTaskCardContractTest(unittest.TestCase):
         for signal in ('journal_unconfirmed', 'child_result_unconfirmed', 'live_state_available', 'settled'):
             self.assertIn(signal, card)
         self.assertIn('childTaskProgressText', card)
+        identity = (CHAT / 'ChildTaskCardIdentity.kt').read_text()
+        self.assertIn('childTaskReceiptTargets', identity)
+        self.assertIn('names[owner]', identity)
+        self.assertIn('presentation.details.rich.bodyRestricted', identity)
+        self.assertNotIn('available_profile', identity)
+        mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
+        display = mapper[mapper.index('internal fun mapDisplay('):mapper.index('private data class RenderMessage')]
+        self.assertIn('childTaskNames: Map<ChildRunOwner, String>', display)
+        self.assertIn('{ emptyList() }, reconnects, childTaskNames)', display)
+        activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        self.assertIn('Snapshot.read(controller.database, rows, display)', activity)
+        self.assertIn('childTaskNames = visibleChildNames', activity)
+
 
     def test_short_long_and_completed_content_share_a_non_code_frame(self):
         source = (CHAT / 'ChildTaskCardContent.kt').read_text()
         for fragment in ('RoundedCornerShape(8.dp)', '.background(colors.soft)', '.border(1.dp, colors.line, shape)',
-                         'ChildTaskFrame(Modifier.testTag("tool-child-receipt:', 'if (expanded) body else preview.text'):
+                         'ChildTaskFrame(Modifier.testTag("tool-child-receipt:', 'maxLines = 3', 'TextOverflow.Ellipsis', 'preview.truncated || layoutOverflow'):
             self.assertIn(fragment, source)
         self.assertNotIn('FontFamily.Monospace', source)
-        self.assertNotIn('ToolOutputDialog', source)
+        self.assertIn('if (truncated) Modifier.conversationClickable', source)
+        self.assertIn('onTextLayout = { layoutOverflow = it.hasVisualOverflow }', source)
+        self.assertIn('titleOverride = agentName, plainText = true', source)
+        self.assertNotIn('var expanded', source)
+        self.assertNotIn('ToolMiniAction', source)
 
     def test_live_cards_use_frozen_identity_progress_and_existing_exact_controls(self):
         source = (CHAT / 'ChildTaskToolContent.kt').read_text()
@@ -33,6 +50,10 @@ class ChildTaskCardContractTest(unittest.TestCase):
                          'ChildTaskFrame(Modifier.testTag("tool-child-frame:', 'ChildTaskProgressContent(',
                          'ToolCardAction.PAUSE_TASK', 'ToolCardAction.RESUME_TASK', 'ToolCardAction.STOP_TASK'):
             self.assertIn(fragment, source)
+        self.assertNotIn('SettingsExpandableContent', source)
+        self.assertNotIn('tool-child-batch-summary', source)
+        self.assertIn('verticalAlignment = Alignment.CenterVertically', source)
+        self.assertIn('.heightIn(min = 28.dp)', source)
         for debug in ('READ_TASK_RESULT', 'ToolDisclosureUi("原因"', 'ToolDisclosureUi("任务"', 'scrub(row.model'):
             self.assertNotIn(debug, source)
 

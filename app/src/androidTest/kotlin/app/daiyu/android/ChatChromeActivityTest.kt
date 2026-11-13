@@ -638,7 +638,11 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                     avatar.top - assistantSlot.top, 0f)
                 val colors = requireNotNull(actionColors)
                 val expected = colors.appendContainer
-                val tag = if (label == "发送" || label == "追加消息") "chat-send" else "chat-control"
+                val tag = when (label) {
+                    "取消发送" -> "text-send-cancel"
+                    "发送", "追加消息" -> "chat-send"
+                    else -> "chat-control"
+                }
                 val pixels = node(tag).assertIsEnabled().captureToImage().toPixelMap()
                 fun distance(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float {
                     val red = a.red - b.red

@@ -73,8 +73,9 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertDraft("")
         assertSelection(0, 0)
         mainThread {
-            fun retained(name: String) = MainActivity::class.java.getDeclaredField(name)
-                .apply { isAccessible = true }.get(activity)
+            fun retained(name: String) = if (name == "draft") MainActivity::class.java.getDeclaredMethod("getDraft")
+                .apply { isAccessible = true }.invoke(activity)
+                else MainActivity::class.java.getDeclaredField(name).apply { isAccessible = true }.get(activity)
             assertEquals(text, retained("draft"))
             assertEquals(start, retained("selectionStart"))
             assertEquals(end, retained("selectionEnd"))
@@ -177,8 +178,8 @@ class TextSendActivityTest : WiredActivityTestCase() {
                 assertEquals("", projected.composer.text)
                 assertEquals(0, projected.composer.selectionStart)
                 assertEquals(0, projected.composer.selectionEnd)
-                val retainedDraft = MainActivity::class.java.getDeclaredField("draft").apply { isAccessible = true }
-                assertEquals("The exact source draft remains available for rejection", text, retainedDraft.get(activity))
+                val retainedDraft = MainActivity::class.java.getDeclaredMethod("getDraft").apply { isAccessible = true }
+                assertEquals("The exact source draft remains available for rejection", text, retainedDraft.invoke(activity))
                 assertFalse(projected.composer.enabled)
             }
             ui.waitForIdle()

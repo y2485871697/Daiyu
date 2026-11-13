@@ -69,6 +69,61 @@ class PauseReceiptSmokeScopeTest(unittest.TestCase):
             self.assertCountEqual(recorder.PAUSE_RECEIPT_PLATFORM_CLASSES, selected)
             self.assertEqual(0, empty)
 
+    def test_retained_only_selects_its_source_and_preserves_empty_shards(self):
+        name = "app.daiyu.android.RetainedToolOutcomesTest"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            selected = []
+            empty = 0
+            for shard in range(4):
+                result = helper.select(root, shard, classes=name)
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                plan = json.loads((root / "smoke/shard-plan.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertEqual({name: 2}, inventory["all_classes"])
+                self.assertEqual([name], plan["allocated_classes"])
+                self.assertEqual([name], selection["requested_classes"])
+                self.assertEqual(2 if shard == 0 else 0, selection["expected_tests"])
+                selected.extend(selection["selected_classes"])
+                empty += selection["status"] == "filtered-empty-shard"
+            self.assertEqual([name], selected)
+            self.assertEqual(3, empty)
+
+    def test_retained_only_keeps_requested_source_validation(self):
+        name = "app.daiyu.android.RetainedToolOutcomesTest"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
+            with path.open("a") as output:
+                output.write("class OtherTest : TestCase() {}\n")
+            result = helper.select(root, classes=name)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            path.unlink()
+            result = helper.select(root, classes=name)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("No instrumentation tests found", result.stderr)
+
+    def test_retained_unapproved_filters_and_modes_keep_full_discovery(self):
+        name = "app.daiyu.android.RetainedToolOutcomesTest"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            for value in (name + "," + name, name + ",app.daiyu.android.OtherTest", name + "Other"):
+                result = helper.select(root, classes=value)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            result = helper.select(root, classes=name, mode="candidate")
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            result = helper.select(root, classes=name, mode="release")
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Class filtering is only allowed", result.stderr)
+
     def test_missing_or_ambiguous_requested_source_still_rejects(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

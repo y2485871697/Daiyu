@@ -153,9 +153,10 @@ pause_receipt_target = {
     'app.daiyu.android.ControllerRunControlTest',
     'app.daiyu.android.QuestionBarrierIntegrationTest',
 }
-pause_receipt_only = mode in ('smoke', 'candidate') and sorted(raw_filter.split(',')) == sorted(pause_receipt_target)
+pause_receipt_only = (mode in ('smoke', 'candidate') and sorted(raw_filter.split(',')) == sorted(pause_receipt_target)) or (
+    mode == 'smoke' and raw_filter == 'app.daiyu.android.RetainedToolOutcomesTest')
 pause_receipt_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
-                         for name in pause_receipt_target}
+                         for name in (requested if pause_receipt_only else pause_receipt_target)}
 
 linux_pin_target = {
     "app.daiyu.android.terminal.LinuxLeaseRecoveryDeviceTest",

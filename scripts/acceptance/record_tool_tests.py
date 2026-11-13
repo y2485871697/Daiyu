@@ -244,6 +244,9 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(LINUX_PIN_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *LINUX_PIN_MODULES, "-v"], "linux-pins-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.RetainedToolOutcomesTest"):
+        return [python, "-B", "-m", "unittest", *PAUSE_RECEIPT_MODULES, "-v"], "retained-outcomes-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PAUSE_RECEIPT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PAUSE_RECEIPT_MODULES, "-v"], "pause-receipts-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

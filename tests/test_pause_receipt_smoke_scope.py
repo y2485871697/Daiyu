@@ -29,6 +29,16 @@ class PauseReceiptSmokeScopeTest(unittest.TestCase):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value))[1])
         self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=raw))[1])
 
+    def test_single_retained_outcomes_gap_reuses_receipt_contracts_without_full_discovery(self):
+        name = "app.daiyu.android.RetainedToolOutcomesTest"
+        command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=name))
+        self.assertEqual("retained-outcomes-targeted", scope)
+        self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.PAUSE_RECEIPT_MODULES, "-v"], command)
+        self.assertNotIn("discover", command)
+        for value in (name + "," + name, name + ",app.daiyu.android.OtherTest", name + "Other"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value))[1])
+        self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=name))[1])
+
     def fixture(self, root):
         helper = SpeechPlatformDiscoveryTest()
         helper.fixture(root)

@@ -20,7 +20,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
-import app.daiyu.android.domain.RunStatus
+import app.daiyu.android.domain.*
 import app.daiyu.android.ui.app.AgentAppTheme
 import top.yukonga.miuix.kmp.basic.Text
 
@@ -89,6 +89,84 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     private fun frame() {
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
+    }
+
+    private fun shortWorkflow(count: Int): ChatTurnUi.Assistant {
+        val message = Message(MessageId("short-workflow"), ConversationId("short-conversation"), RunId("short-run"),
+            "assistant", List(count) { index ->
+                MessageBlock.Tool(ToolInvocation(ToolCallId("short-step-$index"), "lookup", "{}"), "done")
+            }, RunStatus.RUNNING)
+        return ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
+    }
+
+    fun testAppendingShortWorkflowKeepsIdentityAndHeaderUnclippedInEveryFrame() {
+        var count by mutableStateOf(1)
+        val tail = shortWorkflow(1)
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    Box(Modifier.size(320.dp, 640.dp)) {
+                        ChatConversationLayers(Modifier.size(320.dp, 640.dp), messages = { bottomInset ->
+                            ChatMessageList(List(6) { ChatTurnUi.User("short-history-$it", "history $it") } + shortWorkflow(count),
+                                ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = bottomInset)
+                        }, composer = {
+                            Box(Modifier.fillMaxWidth().height(96.dp).testTag("short-composer"))
+                        })
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        ui.onNodeWithTag("reply-identity:${tail.listKey}").assertIsDisplayed()
+        ui.mainClock.autoAdvance = false
+        try {
+            var sawVisibleNeighbor = false
+            for (next in 2..5) {
+                ui.runOnUiThread { count = next }
+                var sawNewTool = false
+                repeat(48) {
+                    frame()
+                    val viewport = ui.onNodeWithTag("chat-stream-viewport:${tail.listKey}").fetchSemanticsNode()
+                    val composer = ui.onNodeWithTag("short-composer").fetchSemanticsNode().boundsInRoot
+                    val row = ui.onNodeWithTag("chat-turn:${tail.id}").fetchSemanticsNode()
+                    val list = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot
+                    assertTrue("This regression must remain shorter than a full reading viewport",
+                        row.layoutInfo.coordinates.size.height < composer.top - list.top - 35f * density)
+                    val range = viewport.config[SemanticsProperties.VerticalScrollAxisRange]
+                    assertEquals("A short workflow must never scroll its identity out of its own viewport",
+                        0f, range.value(), 1f)
+                    for (tag in listOf("reply-identity:${tail.listKey}", "work-process-header")) {
+                        val node = ui.onNodeWithTag(tag).fetchSemanticsNode()
+                        val coordinates = node.layoutInfo.coordinates
+                        val top = coordinates.positionInRoot().y
+                        assertTrue("Existing workflow top must not be locally cropped: $tag",
+                            top >= viewport.boundsInRoot.top - 1f)
+                        assertEquals("The whole identity/header must remain visible: $tag",
+                            coordinates.size.height.toFloat(), node.boundsInRoot.height, 1f)
+                    }
+                    val identityTop = ui.onNodeWithTag("reply-identity:${tail.listKey}")
+                        .fetchSemanticsNode().layoutInfo.coordinates.positionInRoot().y
+                    val neighbors = ui.onAllNodesWithTag("chat-turn:short-history-5").fetchSemanticsNodes()
+                    neighbors.singleOrNull()?.takeIf { it.boundsInRoot.height > 1f }?.let { neighbor ->
+                        sawVisibleNeighbor = true
+                        assertTrue("Keeping the header must not draw it over the previous message",
+                            neighbor.boundsInRoot.bottom <= identityTop + 1f)
+                    }
+                    val tool = ui.onAllNodesWithTag("tool-step:short-step-${next - 1}").fetchSemanticsNodes().singleOrNull()
+                    if (tool != null && tool.boundsInRoot.height >= tool.layoutInfo.coordinates.size.height - 1f) {
+                        sawNewTool = true
+                        assertTrue("A fully revealed new tool must still clear the composer",
+                            tool.boundsInRoot.bottom <= composer.top - 16f * density + 1f)
+                    }
+                }
+                assertTrue("The outer follower must actually reveal each new tool", sawNewTool)
+            }
+            assertTrue("The regression must include a visible preceding message", sawVisibleNeighbor)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        ui.onNodeWithTag("tool-step:short-step-4").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testStreamingGrowthKeepsTailAboveComposer() {

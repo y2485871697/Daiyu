@@ -52,6 +52,21 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("nestedTail.scrollOffset = 0f", exact)
         self.assertIn("listState.animateScrollToItem(index)", exact)
 
+    def test_short_growth_does_not_use_partial_height_as_an_internal_follow_target(self):
+        source = CHAT.read_text()
+        viewport = source.split("private fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        self.assertIn("val followOffset = (body.height - viewportHeight().coerceAtLeast(1)).coerceAtLeast(0)", viewport)
+        self.assertIn("state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()", viewport)
+        self.assertNotIn("if (state.bounded && follows()) maximum.toFloat()", viewport)
+        self.assertIn(".clipToBounds()", viewport)
+        self.assertIn("state.viewportOffset.coerceIn(0, state.maxOffset)", viewport)
+        device = DEVICE.read_text()
+        for token in ("testAppendingShortWorkflowKeepsIdentityAndHeaderUnclippedInEveryFrame",
+                      "shortWorkflow(count)", "reply-identity:", "work-process-header",
+                      "range.value()", "node.boundsInRoot.height", "neighbor.boundsInRoot.bottom",
+                      "The outer follower must actually reveal each new tool"):
+            self.assertIn(token, device)
+
     def test_full_extent_invalidates_outer_measure_and_exact_ownership_survives_consumption(self):
         source = CHAT.read_text()
         self.assertIn("var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)", source)

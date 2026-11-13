@@ -159,10 +159,10 @@ private fun StreamingTailContainer(
             } else body.height
             val maximum = (body.height - height).coerceAtLeast(0)
             state.maxOffset = maximum
-            // Same-measure alignment, not a second, independently animated follower.
-            // Growth can exceed an entire viewport in one frame. The real last child
-            // still ends at V; clipping alone would leave its unclipped coordinates hidden.
-            state.scrollOffset = if (state.bounded && follows()) maximum.toFloat()
+            // A partial slice below the current item origin is not a full reading viewport.
+            // Keep short replies at their top while the outer follower reveals appended rows.
+            val followOffset = (body.height - viewportHeight().coerceAtLeast(1)).coerceAtLeast(0)
+            state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()
                 else state.scrollOffset.coerceIn(0f, maximum.toFloat())
             layout(body.width, height) {
                 body.placeRelative(0, -state.scrollOffset.roundToInt())

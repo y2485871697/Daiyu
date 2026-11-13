@@ -1,11 +1,13 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -14,10 +16,15 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -94,8 +101,10 @@ internal fun ChildTaskList(
             val record = records.firstOrNull { it.owner == row.owner }
             val agentName = record?.display?.agentName?.takeIf { it.isNotBlank() }
                 ?.let { ToolRichDetails.scrub(it, limit = 80) } ?: "子代理"
+            val text = childTaskProgressText(record?.text, progress[row.owner])?.let { ToolRichDetails.scrub(it) }
             ChildTaskDisclosure(row, taskTitle = agentName, details = {
-                val text = childTaskProgressText(record?.text, progress[row.owner])?.let { ToolRichDetails.scrub(it) }
+                ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName, expanded = true)
+            }, preview = {
                 ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName)
             }, controls = {
                 val actions = when (row.status) {
@@ -119,11 +128,15 @@ internal fun ChildTaskDisclosure(
     details: @Composable () -> Unit,
     controls: @Composable () -> Unit,
     taskTitle: String = row.agent,
+    preview: @Composable () -> Unit = {},
 ) {
     val colors = MiuixTheme.colorScheme
+    var expanded by rememberSaveable(row.owner) { mutableStateOf(false) }
     ChildTaskFrame(Modifier.testTag("tool-child-frame:${row.owner.childRunId}")) {
         Row(Modifier.fillMaxWidth().testTag("tool-child-summary:${row.owner.childRunId}")
-            .heightIn(min = 28.dp),
+            .heightIn(min = 28.dp)
+            .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") { expanded = !expanded }
+            .semantics { stateDescription = if (expanded) "已展开" else "已折叠" },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(taskTitle, Modifier.weight(1f).testTag("tool-child-name:${row.owner.childRunId}"), style = MiuixTheme.textStyles.footnote1,
@@ -134,8 +147,11 @@ internal fun ChildTaskDisclosure(
                 else -> colors.onSurfaceVariantSummary
             },
                 style = MiuixTheme.textStyles.footnote1)
+            Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp)
+                .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-arrow:${row.owner.childRunId}"),
+                tint = colors.onSurfaceVariantSummary)
         }
-        details()
+        if (expanded) details() else preview()
         controls()
     }
 }

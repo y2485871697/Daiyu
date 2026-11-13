@@ -40,13 +40,15 @@ class ChildTaskCardContractTest(unittest.TestCase):
     def test_short_long_and_completed_content_share_a_non_code_frame(self):
         source = (CHAT / 'ChildTaskCardContent.kt').read_text()
         for fragment in ('RoundedCornerShape(8.dp)', '.background(colors.soft)', '.border(1.dp, colors.line, shape)',
-                         'ChildTaskFrame(Modifier.testTag("tool-child-receipt:', 'maxLines = 3', 'TextOverflow.Ellipsis', 'preview.truncated || layoutOverflow'):
+                         'ChildTaskFrame(Modifier.testTag("tool-child-receipt:', 'maxLines = if (expanded) Int.MAX_VALUE else 3', 'TextOverflow.Ellipsis', 'preview.truncated || layoutOverflow'):
             self.assertIn(fragment, source)
         self.assertNotIn('FontFamily.Monospace', source)
         self.assertIn('if (truncated) Modifier.conversationClickable', source)
         self.assertIn('onTextLayout = { layoutOverflow = it.hasVisualOverflow }', source)
         self.assertIn('titleOverride = agentName, plainText = true', source)
-        self.assertNotIn('var expanded', source)
+        self.assertIn('var expanded by rememberSaveable(index, entry.title)', source)
+        self.assertIn('tool-child-receipt-arrow:$index', source)
+        self.assertIn('!expanded && (preview.truncated || layoutOverflow)', source)
         self.assertNotIn('ToolMiniAction', source)
 
     def test_live_cards_use_frozen_identity_progress_and_existing_exact_controls(self):
@@ -59,6 +61,11 @@ class ChildTaskCardContractTest(unittest.TestCase):
         self.assertNotIn('tool-child-batch-summary', source)
         self.assertIn('verticalAlignment = Alignment.CenterVertically', source)
         self.assertIn('.heightIn(min = 28.dp)', source)
+        self.assertIn('var expanded by rememberSaveable(row.owner)', source)
+        self.assertIn('tool-child-arrow:${row.owner.childRunId}', source)
+        self.assertIn('if (expanded) details() else preview()', source)
+        self.assertIn('preview: @Composable () -> Unit = {}', source)
+        self.assertIn('settingsDisclosureRotation(expanded, expandedDegrees = 180f)', source)
         for debug in ('READ_TASK_RESULT', 'ToolDisclosureUi("原因"', 'ToolDisclosureUi("任务"', 'scrub(row.model'):
             self.assertNotIn(debug, source)
 

@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.CompositionLocalProvider
@@ -17,12 +19,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -35,7 +42,7 @@ internal fun ChildTaskFrame(modifier: Modifier = Modifier, content: @Composable 
 }
 
 @Composable
-internal fun ChildTaskProgressContent(text: String?, status: String, tag: String, agentName: String) {
+internal fun ChildTaskProgressContent(text: String?, status: String, tag: String, agentName: String, expanded: Boolean = false) {
     val body = text ?: when (status) {
         "进行中" -> "正在处理任务…"
         "排队中" -> "等待开始任务"
@@ -48,14 +55,14 @@ internal fun ChildTaskProgressContent(text: String?, status: String, tag: String
     var opened by remember(tag) { mutableStateOf(false) }
     val preview = remember(body) { toolOutputPreview(body) }
     var layoutOverflow by remember(body) { mutableStateOf(false) }
-    val truncated = preview.truncated || layoutOverflow
+    val truncated = !expanded && (preview.truncated || layoutOverflow)
     val click = if (truncated) Modifier.conversationClickable(onClickLabel = "查看${agentName}的任务内容") {
         opened = true
     } else Modifier
-    BasicText(preview.text, Modifier.fillMaxWidth().heightIn(min = 20.dp)
+    BasicText(if (expanded) body else preview.text, Modifier.fillMaxWidth().heightIn(min = 20.dp)
         .testTag("tool-child-progress:$tag").then(click),
         style = MiuixTheme.textStyles.footnote1.copy(color = conversationColors().text),
-        maxLines = 3, overflow = TextOverflow.Ellipsis,
+        maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
         onTextLayout = { layoutOverflow = it.hasVisualOverflow })
     if (opened && truncated) CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(agentName, status)) {
         ToolOutputDialog(ToolDisclosureUi(agentName, body), onDismiss = { opened = false },
@@ -74,14 +81,20 @@ internal fun ChildTaskReceiptContent(details: ToolCategoryDetailsUi) {
         rich.entries.forEachIndexed { index, entry ->
             ChildTaskFrame(Modifier.testTag("tool-child-receipt:$index")) {
                 val status = entry.fields.firstOrNull { it.label == "状态" }?.value ?: "状态未确认"
-                Row(Modifier.fillMaxWidth().heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically,
+                var expanded by rememberSaveable(index, entry.title) { mutableStateOf(false) }
+                Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).testTag("tool-child-receipt-header:$index")
+                    .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") { expanded = !expanded }
+                    .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }, verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(entry.title, Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(status, style = MiuixTheme.textStyles.footnote1,
                         color = if (status in setOf("状态未确认", "失败", "未执行")) conversationColors().error else conversationColors().muted)
+                    Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp)
+                        .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-receipt-arrow:$index"),
+                        tint = conversationColors().muted)
                 }
-                ChildTaskProgressContent(entry.documents.firstOrNull()?.text, status, "receipt-$index", entry.title)
+                ChildTaskProgressContent(entry.documents.firstOrNull()?.text, status, "receipt-$index", entry.title, expanded)
             }
         }
         if (rich.entries.isEmpty()) rich.prose?.let { notice ->

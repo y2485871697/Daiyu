@@ -33,12 +33,15 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
-    fun testCompletedBatchShowsEveryTaskPreviewWithoutExpandingOrExecutingAnything() {
+    fun testCompletedBatchKeepsCollapsedPreviewsAndIndependentArrows() {
         val records = (0 until 10).map { task(it) }
         var actions = 0
         show(subAgentStatusRows(records, emptyList()), records) { _, _ -> actions++ }
         ui.onNodeWithTag("tool-child-batch-summary").assertDoesNotExist()
         for (index in 0 until 10) {
+            ui.onNodeWithTag("tool-child-arrow:internal-child-$index", useUnmergedTree = true).assertExists()
+            ui.onNodeWithTag("tool-child-summary:internal-child-$index")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
             ui.onNodeWithTag("tool-child-progress:internal-child-$index").scrollToVisible()
                 .assertIsDisplayed().assertTextEquals("第 ${index + 1} 项结果").assertHasNoClickAction()
         }
@@ -47,6 +50,64 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
         ui.onNodeWithText("internal-profile", substring = true).assertDoesNotExist()
         assertEquals(0, actions)
+    }
+
+
+    fun testLiveArrowExpandsAndCollapsesWithoutHidingPreviewOrChangingOtherTasks() {
+        val body = (1..8).joinToString("\n") { "第${it}段执行结果" }
+        val records = listOf(task(0).copy(text = body), task(1))
+        var actions = 0
+        show(subAgentStatusRows(records, emptyList()), records) { _, _ -> actions++ }
+        val header = ui.onNodeWithTag("tool-child-summary:internal-child-0")
+        val preview = ui.onNodeWithTag("tool-child-progress:internal-child-0")
+        val closed = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠")
+        val open = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开")
+        header.assert(closed)
+        ui.onNodeWithTag("tool-child-arrow:internal-child-0", useUnmergedTree = true).assertExists()
+        preview.assertTextEquals(toolOutputPreview(body).text).assertHasClickAction().performClick()
+        ui.onNodeWithTag("tool-output-title", useUnmergedTree = true).assertTextEquals("审查")
+        ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(body)
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
+        header.assert(closed).scrollToVisible().performClick()
+        header.assert(open)
+        preview.assertTextEquals(body).assertHasNoClickAction()
+        ui.onNodeWithTag("tool-child-summary:internal-child-1").assert(closed)
+        header.scrollToVisible().performClick()
+        header.assert(closed)
+        preview.assertTextEquals(toolOutputPreview(body).text).assertHasClickAction().assertIsDisplayed()
+        ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        assertEquals(0, actions)
+    }
+
+    fun testReadReceiptArrowRetainsCollapsedOverflowPreviewAndNamedDialog() {
+        val body = (1..9).joinToString("\n") { "第${it}段审查结论" }
+        val details = ToolCategoryDetails.project("child_control", "{}",
+            org.json.JSONObject().put("agent_name", "历史审查").put("status", "COMPLETED").put("text", body).toString(), "get_child_task")
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { ChildTaskReceiptContent(details) }
+            }
+        } }
+        ui.waitForIdle()
+        val header = ui.onNodeWithTag("tool-child-receipt-header:0")
+        val preview = ui.onNodeWithTag("tool-child-progress:receipt-0")
+        val closed = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠")
+        header.assert(closed)
+        ui.onNodeWithTag("tool-child-receipt-arrow:0", useUnmergedTree = true).assertExists()
+        header.performClick()
+        header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+        preview.assertTextEquals(body).assertHasNoClickAction()
+        header.scrollToVisible().performClick()
+        header.assert(closed)
+        preview.assertTextEquals(toolOutputPreview(body).text).assertHasClickAction().performClick()
+        ui.onNodeWithTag("tool-output-title", useUnmergedTree = true).assertTextEquals("历史审查")
+        ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(body)
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
+        header.assert(closed)
+        preview.assertTextEquals(toolOutputPreview(body).text).assertIsDisplayed()
+        ui.onNodeWithText("子任务记录").assertDoesNotExist()
     }
 
     fun testUnknownTaskCannotBeCollapsedAsACompletedBatch() {
@@ -122,6 +183,10 @@ class ChildTaskListTest : WiredActivityTestCase() {
         val preview = ui.onNodeWithTag("tool-child-progress:internal-child-0")
         preview.assertTextEquals("第 1 项结果").assertHasNoClickAction().performTouchInput { click() }
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
+        preview.assertTextEquals("第 1 项结果").assertHasNoClickAction().performTouchInput { click() }
+        ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
         val name = ui.onNodeWithTag("tool-child-name:internal-child-0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val status = ui.onNodeWithTag("tool-child-status:internal-child-0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val header = ui.onNodeWithTag("tool-child-summary:internal-child-0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -143,6 +208,12 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ui.onNodeWithTag("tool-child-progress:receipt-0").assertTextEquals(text).assertHasNoClickAction()
             .performTouchInput { click() }
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-receipt-header:0").performClick()
+        ui.onNodeWithTag("tool-child-progress:receipt-0").assertTextEquals(text).assertHasNoClickAction()
+            .performTouchInput { click() }
+        ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-receipt-header:0").performClick()
+        ui.onNodeWithTag("tool-child-progress:receipt-0").assertTextEquals(text).assertIsDisplayed()
     }
 
     fun testSoftWrappedOverflowUnderCharacterLimitOpensButFittingTextDoesNot() {

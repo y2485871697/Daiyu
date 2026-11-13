@@ -18,7 +18,15 @@ internal object ProviderHttpFailure {
     private val indexedInclude = Regex("include\\[[0-9]{1,4}]")
 
     fun from(connection: HttpURLConnection, status: Int, cancelled: () -> Boolean,
-             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null): ModelRequestException {
+             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null): ModelRequestException =
+        from({ connection.errorStream }, connection::disconnect, status, cancelled, diagnosticTimeoutMillis, request)
+
+    fun from(connection: ModelHttpConnection, status: Int, cancelled: () -> Boolean,
+             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null): ModelRequestException =
+        from({ connection.errorStream }, connection::disconnect, status, cancelled, diagnosticTimeoutMillis, request)
+
+    private fun from(errorStream: () -> java.io.InputStream?, disconnect: () -> Unit, status: Int,
+                     cancelled: () -> Boolean, diagnosticTimeoutMillis: Long, request: JSONObject?): ModelRequestException {
         val failure = when (status) {
             401 -> ModelFailure.AUTHENTICATION
             403 -> ModelFailure.PERMISSION
@@ -42,10 +50,10 @@ internal object ProviderHttpFailure {
                 timer.schedule(object : TimerTask() {
                     override fun run() {
                         expired.set(true)
-                        try { connection.disconnect() } catch (_: Exception) {}
+                        try { disconnect() } catch (_: Exception) {}
                     }
                 }, diagnosticTimeoutMillis)
-                connection.errorStream?.useProviderResource { stream ->
+                errorStream()?.useProviderResource { stream ->
                     val bytes = ByteArray(MAX_ERROR_BYTES + 1)
                     var count = 0
                     var complete = false

@@ -14,40 +14,42 @@ import javax.net.ssl.HttpsURLConnection
 class MessagesModel internal constructor(
     private val settings: ModelSettings,
     private val maxTokens: Int,
-    private val connect: (URL) -> HttpsURLConnection,
+    private val connect: ((URL) -> HttpsURLConnection)?,
     private val imageInputSupported: Boolean?,
     private val assistantInstructions: String? = null,
     private val sessionContext: SessionGatewayContext? = null,
     private val summaryRequest: Boolean = false,
+    private val beforeConnect: () -> Unit = {},
 ) : ModelPort {
     internal constructor(settings: ModelSettings, maxTokens: Int, connect: (URL) -> HttpsURLConnection) :
         this(settings, maxTokens, connect, null)
     constructor(settings: ModelSettings, maxTokens: Int = MessagesRequest.DEFAULT_MAX_TOKENS) :
-        this(settings, maxTokens, { it.openConnection() as HttpsURLConnection })
+        this(settings, maxTokens, null, null)
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, MessagesRequest.DEFAULT_MAX_TOKENS, connect)
     internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
                          sessionContext: SessionGatewayContext? = null) : this(snapshot.asModelSettings(), MessagesRequest.DEFAULT_MAX_TOKENS,
-        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions, sessionContext)
+        null, snapshot.imageInputSupported, assistantInstructions, sessionContext)
 
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession =
         open(history, MessagesRequest.definitions(tools))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null, assistantInstructions, sessionContext, summaryRequest)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null, assistantInstructions, sessionContext, summaryRequest, beforeConnect)
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images, assistantInstructions, sessionContext, summaryRequest)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images, assistantInstructions, sessionContext, summaryRequest, beforeConnect)
 
     private class Session(
         private val settings: ModelSettings,
         private val maxTokens: Int,
         history: List<Message>,
         private var tools: List<ToolDefinition>,
-        private val connect: (URL) -> HttpsURLConnection,
+        private val connect: ((URL) -> HttpsURLConnection)?,
         private val capability: Boolean?,
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
         private val sessionContext: SessionGatewayContext?,
         private val summaryRequest: Boolean,
+        private val beforeConnect: () -> Unit,
     ) : RequestRetryModelSession {
         private val endpoint = MessagesRequest.endpoint(settings)
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
@@ -55,8 +57,8 @@ class MessagesModel internal constructor(
         private var messages = MessagesRequest.history(historySnapshot, imagePlan)
         private val ownItems = mutableListOf<String>()
         private val cancelled = AtomicBoolean(false)
-        @Volatile private var connection: HttpsURLConnection? = null
-        @Volatile private var connectionTrace: Pair<HttpsURLConnection, ProviderRequestTrace>? = null
+        @Volatile private var connection: ModelHttpConnection? = null
+        @Volatile private var connectionTrace: Pair<ModelHttpConnection, ProviderRequestTrace>? = null
         private var usable = true
         private var started = false
         private var pending = emptySet<String>()
@@ -134,18 +136,18 @@ class MessagesModel internal constructor(
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             })
             val deliver: (ModelEvent) -> Unit = eventBuffer::accept
-            var ownedConnection: HttpsURLConnection? = null
+            var ownedConnection: ModelHttpConnection? = null
             val trace = ProviderRequestTrace()
             var configuringRequest = true
             try {
                 checkCancelled()
                 deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes)))
                 checkCancelled()
-                val conn = connect(URL(endpoint))
+                val conn = ModelHttpTransport.open(URL(endpoint), connect, beforeConnect)
                 ownedConnection = conn; connectionTrace = conn to trace; connection = conn
                 checkCancelled()
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
-                conn.connectTimeout = 20_000; conn.readTimeout = 60_000
+                conn.connectTimeout = 20_000; conn.readTimeout = 600_000
                 conn.setRequestProperty("x-api-key", settings.apiKey)
                 conn.setRequestProperty("anthropic-version", settings.requestOptions.anthropicVersion ?: "2023-06-01")
                 settings.customHeaders.applyTo(conn)
@@ -154,11 +156,9 @@ class MessagesModel internal constructor(
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
-                conn.setFixedLengthStreamingMode(requestBytes.size.toLong())
-                conn.outputStream.useProviderResource { requestBytes.writeTo(it, cancelled::get) }
+                conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
-                trace.phase = ModelTransportPhase.WAITING_HEADERS
-                val status = conn.responseCode
+                val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
                 checkCancelled()
                 if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)

@@ -187,6 +187,7 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.google.jimfs:jimfs:1.3.0")
     // Owner tests use Android Intent/Binder at SDK 36; host tests only.
     testImplementation("org.robolectric:robolectric:4.16.1")

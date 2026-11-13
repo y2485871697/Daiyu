@@ -69,6 +69,20 @@ class RikkaHubProtocolPortContractTest(unittest.TestCase):
         self.assertNotIn('isServerToolUse', tail)
         self.assertIn('MessagesRequest.validateServerBlock', stream)
 
+    def test_production_models_share_okhttp_without_platform_connection_fallback(self):
+        for name in ('ResponsesModel', 'MessagesModel', 'NativeCompletionModel'):
+            code = (S/'model'/f'{name}.kt').read_text()
+            self.assertNotIn('openConnection()', code)
+            self.assertIn('ModelHttpTransport.open(', code)
+            self.assertIn('conn.send(', code)
+        for path in ('context/ProviderSummaryModel.kt', 'model/auxiliary/AuxiliaryVisionModelAdapter.kt'):
+            self.assertNotIn('openConnection()', (S/path).read_text())
+        transport = (S/'model/ModelHttpConnection.kt').read_text()
+        self.assertIn('.retryOnConnectionFailure(false)', transport)
+        self.assertIn('override fun isOneShot() = true', transport)
+        self.assertIn('networkStarted.compareAndSet(false, true)', transport)
+        self.assertNotIn('.string()', transport)
+
     def test_upstream_pin_and_migration_scope_are_documented(self):
         notice = (R/'THIRD_PARTY/rikkahub/NOTICE.md').read_text()
         self.assertIn('ad2c4430d50ba52392b2941367f98ef59614cb73', notice)

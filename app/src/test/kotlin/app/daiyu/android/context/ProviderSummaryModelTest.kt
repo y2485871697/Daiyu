@@ -322,7 +322,7 @@ class ProviderSummaryModelTest {
             worker.start()
             try {
                 assertTrue(wire.entered.await(3, TimeUnit.SECONDS))
-                assertEquals(60000, wire.readTimeout) // This is the provider's inactivity timeout, not our total deadline.
+                assertEquals(600000, wire.readTimeout) // Original-model inactivity timeout; the independent summary deadline still cancels it.
                 deadline.expire()
                 worker.join(3000)
                 assertFalse(worker.isAlive)

@@ -14,9 +14,9 @@ import javax.net.ssl.HttpsURLConnection
  * One session owns the remote IDs; reuse across tool rounds, then delete on terminal/cancel. */
 internal class OfficialImageFiles(
     private val settings: ModelSettings,
-    private val connect: (URL) -> HttpsURLConnection,
+    private val connect: ((URL) -> HttpsURLConnection)?,
     private val cancelled: () -> Boolean,
-    private val onConnection: (HttpsURLConnection?) -> Unit,
+    private val onConnection: (ModelHttpConnection?) -> Unit,
 ) {
     private val files = linkedMapOf<String, String>()
 
@@ -63,14 +63,13 @@ internal class OfficialImageFiles(
             "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image.${when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }}\"\r\n" +
             "Content-Type: $mime\r\n\r\n").toByteArray(Charsets.UTF_8)
         val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
-        val connection = connect(URL(FILES))
+        val connection = ModelHttpTransport.open(URL(FILES), connect)
         try {
             onConnection(connection); active()
             configure(connection, "POST")
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-            connection.setFixedLengthStreamingMode(prefix.size.toLong() + source.bytes + suffix.size)
-            connection.outputStream.use { output ->
+            connection.send(prefix.size.toLong() + source.bytes + suffix.size) { output ->
                 output.write(prefix)
                 source.open().use { input ->
                     val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -89,7 +88,7 @@ internal class OfficialImageFiles(
                 }
                 output.write(suffix)
             }
-            require(connection.responseCode in 200..299) { "文件上传失败；未发送模型请求" }
+            require(connection.responseCode() in 200..299) { "文件上传失败；未发送模型请求" }
             val response = connection.inputStream.use { input ->
                 val out = ByteArrayOutputStream(); val buffer = ByteArray(4096)
                 while (true) {
@@ -111,8 +110,8 @@ internal class OfficialImageFiles(
         val ids = synchronized(files) { files.values.toList().also { files.clear() } }
         ids.forEach { id ->
             try {
-                val connection = connect(URL("$FILES/$id"))
-                try { configure(connection, "DELETE"); connection.connectTimeout = 3000; connection.readTimeout = 3000; connection.responseCode }
+                val connection = ModelHttpTransport.open(URL("$FILES/$id"), connect)
+                try { configure(connection, "DELETE"); connection.connectTimeout = 3000; connection.readTimeout = 3000; connection.responseCode() }
                 finally { connection.disconnect() }
             } catch (_: Exception) { /* The remote file may expire or require manual deletion. */ }
         }
@@ -122,7 +121,7 @@ internal class OfficialImageFiles(
         if (synchronized(files) { files.isEmpty() }) return
         CLEANUP.execute { close() }
     }
-    private fun configure(connection: HttpsURLConnection, method: String) {
+    private fun configure(connection: ModelHttpConnection, method: String) {
         connection.requestMethod = method
         connection.instanceFollowRedirects = false
         connection.connectTimeout = 20_000; connection.readTimeout = 60_000

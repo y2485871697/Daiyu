@@ -25,7 +25,7 @@ import javax.net.ssl.HttpsURLConnection
  */
 internal class AuxiliaryVisionModelAdapter(
     private val binding: AuxiliaryModelBinding,
-    private val connect: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection },
+    private val connect: ((URL) -> HttpsURLConnection)? = null,
     private val beginUsage: (() -> app.daiyu.android.model.usage.AuxiliaryUsageAttempt)? = null,
 ) : (AuxiliaryVisionRequest) -> String, AutoCloseable {
     private val lifecycle = Any()

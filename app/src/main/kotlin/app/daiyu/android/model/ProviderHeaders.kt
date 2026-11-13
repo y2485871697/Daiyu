@@ -8,8 +8,12 @@ import java.util.Locale
 class ProviderHeaders private constructor(private val values: Map<String, String>) {
     val isEmpty: Boolean get() = values.isEmpty()
 
-    internal fun applyTo(connection: HttpURLConnection) {
-        try { values.forEach { (name, value) -> connection.setRequestProperty(name, value) } }
+    internal fun applyTo(connection: HttpURLConnection) = applyTo(connection::setRequestProperty)
+
+    internal fun applyTo(connection: ModelHttpConnection) = applyTo(connection::setRequestProperty)
+
+    private fun applyTo(set: (String, String) -> Unit) {
+        try { values.forEach { (name, value) -> set(name, value) } }
         catch (failure: RuntimeException) {
             if (failure !is IllegalArgumentException && failure !is IllegalStateException && failure !is SecurityException) throw failure
             throw IllegalArgumentException("自定义请求头设置失败")

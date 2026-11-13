@@ -12,14 +12,15 @@ import javax.net.ssl.HttpsURLConnection
 /** Native Chat Completions and Gemini transports. ModelPort/Runner still own the run. Current-request retry is retained by the session. */
 class NativeCompletionModel internal constructor(
     private val settings: ModelSettings,
-    private val connect: (URL) -> HttpsURLConnection,
+    private val connect: ((URL) -> HttpsURLConnection)?,
     private val instructions: String? = null,
     private val sessionContext: SessionGatewayContext? = null,
     private val imageInputSupported: Boolean? = null,
     private val summaryRequest: Boolean = false,
+    private val beforeConnect: () -> Unit = {},
 ) : ModelPort {
     internal constructor(snapshot: ProviderSnapshot, instructions: String? = null, sessionContext: SessionGatewayContext? = null) :
-        this(snapshot.asModelSettings(), { it.openConnection() as HttpsURLConnection }, instructions, sessionContext,
+        this(snapshot.asModelSettings(), null, instructions, sessionContext,
             imageInputSupported = snapshot.imageInputSupported)
 
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
@@ -43,8 +44,8 @@ class NativeCompletionModel internal constructor(
         private var rows = NativeCompletionRequest.history(settings.protocol, historySnapshot, images = imagePlan)
         private val ownItems = mutableListOf<String>()
         private val cancelled = AtomicBoolean(false)
-        @Volatile private var connection: HttpsURLConnection? = null
-        @Volatile private var connectionTrace: Pair<HttpsURLConnection, ProviderRequestTrace>? = null
+        @Volatile private var connection: ModelHttpConnection? = null
+        @Volatile private var connectionTrace: Pair<ModelHttpConnection, ProviderRequestTrace>? = null
         private var usable = true
         private var started = false
         private var pending = emptyMap<String, String>()
@@ -125,17 +126,17 @@ class NativeCompletionModel internal constructor(
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             })
             val deliver: (ModelEvent) -> Unit = eventBuffer::accept
-            var owned: HttpsURLConnection? = null
+            var owned: ModelHttpConnection? = null
             val trace = ProviderRequestTrace()
             var configuringRequest = true
             try {
                 checkCancelled()
                 deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes)))
                 checkCancelled()
-                val conn = connect(URL(endpoint)); owned = conn; connectionTrace = conn to trace; connection = conn
+                val conn = ModelHttpTransport.open(URL(endpoint), connect, beforeConnect); owned = conn; connectionTrace = conn to trace; connection = conn
                 checkCancelled()
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
-                conn.connectTimeout = 20_000; conn.readTimeout = 60_000
+                conn.connectTimeout = 20_000; conn.readTimeout = 600_000
                 conn.setRequestProperty(if (settings.protocol == ProviderProtocol.GEMINI) "x-goog-api-key" else "Authorization",
                     if (settings.protocol == ProviderProtocol.GEMINI) settings.apiKey else "Bearer ${settings.apiKey}")
                 settings.customHeaders.applyTo(conn)
@@ -144,11 +145,9 @@ class NativeCompletionModel internal constructor(
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
-                conn.setFixedLengthStreamingMode(bytes.size.toLong())
-                conn.outputStream.useProviderResource { bytes.writeTo(it, cancelled::get) }
+                conn.send(bytes.size.toLong()) { bytes.writeTo(it, cancelled::get) }
                 checkCancelled()
-                trace.phase = ModelTransportPhase.WAITING_HEADERS
-                val status = conn.responseCode
+                val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
                 checkCancelled()
                 if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)

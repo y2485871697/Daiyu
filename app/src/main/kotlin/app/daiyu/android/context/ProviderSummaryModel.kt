@@ -57,16 +57,16 @@ data class SummaryProviderConfiguration(
  * A stale/mismatched lookup fails closed. Resolving and opening are lazy and do no network I/O. */
 class ProviderSummaryModelResolver internal constructor(
     private val lookup: (SummaryModelBinding) -> SummaryProviderConfiguration?,
-    private val connect: (URL) -> HttpsURLConnection,
+    private val connect: ((URL) -> HttpsURLConnection)?,
     private val deadlines: SummaryDeadlineScheduler,
     private val usagePort: BoundSummaryUsagePort? = null,
     private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
 ) : SummaryModelResolver {
     constructor(lookup: (SummaryModelBinding) -> SummaryProviderConfiguration?) : this(
-        lookup, { it.openConnection() as HttpsURLConnection }, SystemSummaryDeadlines)
+        lookup, null, SystemSummaryDeadlines)
     constructor(lookup: (SummaryModelBinding) -> SummaryProviderConfiguration?,
         usagePort: BoundSummaryUsagePort) : this(
-        lookup, { it.openConnection() as HttpsURLConnection }, SystemSummaryDeadlines, usagePort)
+        lookup, null, SystemSummaryDeadlines, usagePort)
 
     override fun resolve(binding: SummaryModelBinding): BoundSummaryModel? = resolve(binding, usagePort)
 
@@ -111,7 +111,7 @@ private object SystemSummaryDeadlines : SummaryDeadlineScheduler {
  * streaming deltas, reasoning, refusal and a failed/truncated response are not summaries. */
 internal class ProviderSummaryModelPort(
     private val configuration: SummaryProviderConfiguration,
-    private val connect: (URL) -> HttpsURLConnection,
+    private val connect: ((URL) -> HttpsURLConnection)?,
     private val deadlines: SummaryDeadlineScheduler,
     private val usagePort: BoundSummaryUsagePort? = null,
     private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
@@ -158,14 +158,8 @@ internal class ProviderSummaryModelPort(
         }
         checkLive()
         val provider = SummaryProviderFactory.create(configuration.provider, configuration.maxOutputTokens,
-            INSTRUCTIONS, connect = { url ->
-            // Provider serialization also consumes preparation time. Never connect after it expires,
-            // even if the timer thread is delayed; close a connection returned too late as well.
-            checkLive()
-            val connection = connect(url)
-            try { checkLive(); connection }
-            catch (failure: Exception) { runCatching { connection.disconnect() }; throw failure }
-        }, oauthHeaders = oauthHeaders, reasoning = reasoning)
+            INSTRUCTIONS, connect = connect, beforeConnect = checkLive,
+            oauthHeaders = oauthHeaders, reasoning = reasoning)
         checkLive()
         val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
             usagePort?.conversationId ?: frozen.first().conversationId.value).open(frozen, emptyList<ToolDefinition>())

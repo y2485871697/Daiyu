@@ -59,7 +59,8 @@ internal object SummaryProviderFactory {
     fun create(snapshot: ProviderSnapshot, maxOutputTokens: Int, instructions: String,
         oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
         reasoning: SummaryReasoningLevel = SummaryReasoningLevel.OFF,
-        connect: (URL) -> HttpsURLConnection,
+        connect: ((URL) -> HttpsURLConnection)?,
+        beforeConnect: () -> Unit = {},
     ): ModelPort {
         require(maxOutputTokens > 0 && instructions.isNotBlank())
         val body = validatedCustomBody(snapshot)
@@ -73,9 +74,9 @@ internal object SummaryProviderFactory {
             app.daiyu.android.delegation.ReasoningEffort.valueOf(reasoning.name), summary = true).asModelSettings()
         settings.validate()
         return when (snapshot.protocol) {
-            ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions, oauthHeaders = oauthHeaders, summaryRequest = true)
-            ProviderProtocol.MESSAGES -> MessagesModel(settings, maxOutputTokens, connect, null, instructions, summaryRequest = true)
-            ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionModel(settings, connect, instructions, null, summaryRequest = true)
+            ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions, oauthHeaders = oauthHeaders, summaryRequest = true, beforeConnect = beforeConnect)
+            ProviderProtocol.MESSAGES -> MessagesModel(settings, maxOutputTokens, connect, null, instructions, summaryRequest = true, beforeConnect = beforeConnect)
+            ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionModel(settings, connect, instructions, null, summaryRequest = true, beforeConnect = beforeConnect)
             ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${snapshot.protocol.wireName}")
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
         }

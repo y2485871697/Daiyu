@@ -17,7 +17,7 @@ import javax.net.ssl.HttpsURLConnection
 
 class ResponsesModel internal constructor(
     private val settings: ModelSettings,
-    private val connect: (URL) -> HttpsURLConnection,
+    private val connect: ((URL) -> HttpsURLConnection)?,
     private val imageInputSupported: Boolean?,
     private val assistantInstructions: String? = null,
     private val videoInputCapability: OpenRouterVideoCapability? = null,
@@ -27,12 +27,13 @@ class ResponsesModel internal constructor(
     private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
     private val oauthRefresh: (app.daiyu.android.model.oauth.CodexAuth, String) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::refreshHeaders,
     private val summaryRequest: Boolean = false,
+    private val beforeConnect: () -> Unit = {},
 ) : ModelPort {
     /** Preserve the assembled model/media/approval context; never bypass its approved open. */
     fun withBackgroundResume(capability: app.daiyu.android.model.reconnect.FrozenResponsesBackground): ResponsesModel {
         capability.requireMatches(settings)
         return ResponsesModel(settings, connect, imageInputSupported, assistantInstructions,
-            videoInputCapability, videoPostApprovalProvider, sessionContext, capability, oauthHeaders, oauthRefresh, summaryRequest)
+            videoInputCapability, videoPostApprovalProvider, sessionContext, capability, oauthHeaders, oauthRefresh, summaryRequest, beforeConnect)
     }
     private fun exposed(session: Session): ModelSession = if (backgroundResume != null) session else object : RequestRetryModelSession {
         override fun updateToolDefinitions(definitions: List<ToolDefinition>) = session.updateToolDefinitions(definitions)
@@ -44,12 +45,12 @@ class ResponsesModel internal constructor(
         override fun disconnectTransport() = session.disconnectTransport()
     }
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, connect, null)
-    constructor(settings: ModelSettings) : this(settings, { it.openConnection() as HttpsURLConnection }, null)
+    constructor(settings: ModelSettings) : this(settings, null, null)
     internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
                          videoInputCapability: OpenRouterVideoCapability? = null,
                          videoPostApprovalProvider: VideoPostApprovalProvider? = null,
                          sessionContext: SessionGatewayContext? = null) : this(snapshot.asModelSettings(),
-        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions,
+        null, snapshot.imageInputSupported, assistantInstructions,
         videoInputCapability, videoPostApprovalProvider, sessionContext)
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history, tools.map {
@@ -57,10 +58,10 @@ class ResponsesModel internal constructor(
     })
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions,
-            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh, summaryRequest = summaryRequest))
+            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh, summaryRequest = summaryRequest, beforeConnect = beforeConnect))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions,
-            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh, summaryRequest = summaryRequest))
+            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh, summaryRequest = summaryRequest, beforeConnect = beforeConnect))
 
     /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
      * Pass the same run-local capability used to freeze videos to this model's constructor.
@@ -70,12 +71,12 @@ class ResponsesModel internal constructor(
     fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
              images: ModelImagePlan? = null): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
-            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext, backgroundResume, oauthHeaders, oauthRefresh, summaryRequest))
+            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext, backgroundResume, oauthHeaders, oauthRefresh, summaryRequest, beforeConnect))
 
     private class Session(
         private val settings: ModelSettings,
         history: List<Message>,
-        private val connect: (URL) -> HttpsURLConnection,
+        private val connect: ((URL) -> HttpsURLConnection)?,
         private var tools: List<ToolDefinition>,
         private val capability: Boolean?,
         images: ModelImagePlan?,
@@ -88,6 +89,7 @@ class ResponsesModel internal constructor(
         private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String>,
         private val oauthRefresh: (app.daiyu.android.model.oauth.CodexAuth, String) -> Map<String, String>,
         private val summaryRequest: Boolean = false,
+        private val beforeConnect: () -> Unit = {},
     ) : CheckpointedResumableModelSession, RequestRetryModelSession {
         private var decoder = ResponsesStream.State(bufferDeltas = true)
         private var resumeAllowed = false
@@ -130,7 +132,7 @@ class ResponsesModel internal constructor(
             val id = requireNotNull(decoder.responseId)
             val sequence = requireNotNull(decoder.acknowledgedSequence)
             val trace = ProviderRequestTrace(ModelRequestKind.RESUME)
-            var conn: HttpsURLConnection? = null
+            var conn: ModelHttpConnection? = null
             var configuringRequest = true
             var deliveryFailure: Exception? = null
             val deliver: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
@@ -139,17 +141,16 @@ class ResponsesModel internal constructor(
             try {
                 val url = settings.requestEndpoint() + "/$id?stream=true&starting_after=$sequence"
                 val authentication = authHeaders()
-                conn = connect(URL(url))
+                conn = ModelHttpTransport.open(URL(url), connect, beforeConnect)
                 synchronized(postLock) { checkCancelled(); connectionTrace = conn to trace; connection = conn }
                 conn.requestMethod = "GET"; conn.doOutput = false; conn.instanceFollowRedirects = false
-                conn.connectTimeout = 20_000; conn.readTimeout = 60_000
+                conn.connectTimeout = 20_000; conn.readTimeout = 600_000
                 settings.customHeaders.applyTo(conn)
                 authentication.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
                 configuringRequest = false
-                trace.phase = ModelTransportPhase.WAITING_HEADERS
-                val status = conn.responseCode
+                val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
                 if (status !in 200..299) {
                     val retryAuth = retryAuthentication(status, authentication)
@@ -218,8 +219,8 @@ class ResponsesModel internal constructor(
         @Volatile private var approvalWait: Job? = null
         @Volatile private var pendingVideoPost: VideoPostRequest? = null
         private var postNumber = 0
-        @Volatile private var connection: HttpsURLConnection? = null
-        @Volatile private var connectionTrace: Pair<HttpsURLConnection, ProviderRequestTrace>? = null
+        @Volatile private var connection: ModelHttpConnection? = null
+        @Volatile private var connectionTrace: Pair<ModelHttpConnection, ProviderRequestTrace>? = null
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
         private val imagePlan = ImageRequestPreflight.history(settings, ProviderProtocol.RESPONSES, capability, historySnapshot, images)
         private val videoPlan = videos?.also { it.validate(settings, videoCapability, historySnapshot) }
@@ -359,7 +360,7 @@ class ResponsesModel internal constructor(
                 }
             }
             var trace = ProviderRequestTrace()
-            var ownedConnection: HttpsURLConnection? = null
+            var ownedConnection: ModelHttpConnection? = null
             var configuringRequest = false
             var transportStarted = false
             var post: VideoPostRequest? = null
@@ -413,7 +414,7 @@ class ResponsesModel internal constructor(
                 trace = ProviderRequestTrace()
                 configuringRequest = true
                 val authentication = authHeaders()
-                val conn = connect(URL(finalUrl))
+                val conn = ModelHttpTransport.open(URL(finalUrl), connect, beforeConnect)
                 // Own the result before checking cancellation so a late factory return is always
                 // disconnected by finally, even when it must never be published or write a body.
                 ownedConnection = conn
@@ -427,7 +428,7 @@ class ResponsesModel internal constructor(
                 }
                 checkCancelled()
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
-                conn.connectTimeout = 20_000; conn.readTimeout = 60_000
+                conn.connectTimeout = 20_000; conn.readTimeout = 600_000
                 settings.customHeaders.applyTo(conn)
                 authentication.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.routingHint(wireRequest)?.let {
@@ -438,11 +439,9 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
-                conn.setFixedLengthStreamingMode(requestBytes.size.toLong())
-                conn.outputStream.useProviderResource { requestBytes.writeTo(it, cancelled::get) }
+                conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
-                trace.phase = ModelTransportPhase.WAITING_HEADERS
-                val status = conn.responseCode
+                val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
                 checkCancelled()
                 if (status !in 200..299) {

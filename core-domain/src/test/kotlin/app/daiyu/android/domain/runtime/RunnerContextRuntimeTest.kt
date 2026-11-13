@@ -112,7 +112,7 @@ class RunnerContextRuntimeTest {
     }
     @Test fun belowThresholdAndImplausibleCloudReceiptsNeverCreatePressure() {
         for (receipt in listOf(ModelEvent.Usage(799, 10), ModelEvent.Usage(1301, 10),
-                ModelEvent.Usage(900, 10, 901))) {
+                ModelEvent.Usage(inputTokens = 1200, outputTokens = 10, cachedTokens = 1100))) {
             val store = Store(); var summaries = 0
             val runtime = object : RunContextRuntime {
                 override val windowTokens = 1000L
@@ -136,7 +136,7 @@ class RunnerContextRuntimeTest {
     }
 
     @Test fun invalidFollowupUsageRetainsAcceptedRequestAnchor() {
-        for (receipt in listOf(ModelEvent.Usage(0, 10), ModelEvent.Usage(1301, 10), ModelEvent.Usage(900, 10, 901))) {
+        for (receipt in listOf(ModelEvent.Usage(0, 10), ModelEvent.Usage(1301, 10), ModelEvent.Usage(inputTokens = 1200, outputTokens = 10, cachedTokens = 1100))) {
             val store = Store()
             val runtime = object : RunContextRuntime {
                 override val windowTokens = 1000L

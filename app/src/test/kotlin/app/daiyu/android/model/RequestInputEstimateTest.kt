@@ -80,4 +80,33 @@ class RequestInputEstimateTest {
         assertEquals(expected, RequestInputEstimate.from(body, null, mapOf(image.getString("image_url") to size)))
         assertThrows(IllegalArgumentException::class.java) { RequestInputEstimate.from(body, null) }
     }
+    @Test fun videoUsesOriginalMediaCostWithoutCountingBase64AsText() {
+        fun request(part: JSONObject) = JSONObject().put("input", org.json.JSONArray().put(
+            JSONObject().put("role", "user").put("content", org.json.JSONArray().put(part))))
+        for (type in listOf("video", "video_url", "input_video")) {
+            val small = JSONObject().put("type", type).put("video_url", "https://example.test/video.mp4")
+            assertEquals(1203L, RequestInputEstimate.from(request(small), null))
+            val encoded = "A".repeat(4 * 1024 * 1300)
+            val part = JSONObject().put("type", type).put("video_url", JSONObject().put("url", "data:video/mp4;base64,$encoded"))
+            assertEquals(3903L, RequestInputEstimate.from(request(part), null))
+        }
+    }
+
+    @Test fun frozenVideoUsesVerifiedBytesAndNeverOpensTheMedia() {
+        val bytes = 3L * 1024 * 1300 + 1
+        val media = StreamingMedia(bytes, "0".repeat(64)) { error("estimate must not open media") }
+        val part = JSONObject().put("type", "input_video").put("video_url", "data:video/mp4;base64,${media.token}")
+        val body = JSONObject().put("input", org.json.JSONArray().put(
+            JSONObject().put("role", "user").put("content", org.json.JSONArray().put(part))))
+        val expected = 3 + maxOf(1200L, ((bytes + 2) / 3) * 4 * 3 / 4 / 1024)
+        val before = body.toString()
+        assertEquals(expected, RequestInputEstimate.from(body, null, videoBytes = mapOf(media.token to media.bytes, "unused" to 99_000_000L)))
+        assertEquals(before, body.toString())
+        try { RequestInputEstimate.from(body, null); fail("unrecognized marker must fail") }
+        catch (_: IllegalArgumentException) { }
+        part.put("video_url", "data:video/mp4;base64,daiyu-media-a-different-token")
+        assertEquals(expected, RequestInputEstimate.from(body, null,
+            videoBytes = mapOf("daiyu-media-a-different-token" to bytes)))
+    }
+
 }

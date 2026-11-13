@@ -21,7 +21,7 @@ internal object RequestInputEstimate {
             request.has("contents") -> ProviderProtocol.GEMINI
             request.has("system") -> ProviderProtocol.MESSAGES
             else -> ProviderProtocol.CHAT_COMPLETIONS
-        }): Long {
+        }, videoBytes: Map<String, Long> = emptyMap()): Long {
         val sizes = images?.estimateImageSizes().orEmpty() + screenImages
         var tokens = 0L
         fun add(value: Any?) {
@@ -42,6 +42,18 @@ internal object RequestInputEstimate {
                         add(value.opt("name")); add(value.opt("input")); add(value.opt("id"))
                     }
                     "tool_result" -> { add(value.opt("tool_use_id")); content(value.opt("content")) }
+                    "video", "video_url", "input_video" -> {
+                        val url = value.optJSONObject("video_url")?.optString("url") ?: value.optString("video_url")
+                        val source = value.optJSONObject("source")
+                        val marker = url.indexOf("base64,", ignoreCase = true)
+                        val encoded = source?.takeIf { it.optString("type") == "base64" }?.optString("data")
+                        val token = if (encoded?.startsWith("daiyu-media-") == true) encoded
+                            else if (marker >= 0 && url.startsWith("daiyu-media-", marker + 7)) url.substring(marker + 7) else null
+                        val bytes = token?.let { requireNotNull(videoBytes[it]) { "Unrecognized frozen video estimate" } }
+                        val chars = if (bytes != null) ((bytes + 2) / 3) * 4
+                            else encoded?.length?.toLong() ?: if (marker >= 0) (url.length - marker - 7).toLong() else 0L
+                        tokens += maxOf(1_200L, chars * 3 / 4 / 1024)
+                    }
                     "image", "image_url", "input_image" -> {
                         val size = requireNotNull(payload(value)?.let(sizes::get)) { "Unrecognized frozen image estimate" }
                         tokens += TokenTailCompression.imageTokens(size.first, size.second)

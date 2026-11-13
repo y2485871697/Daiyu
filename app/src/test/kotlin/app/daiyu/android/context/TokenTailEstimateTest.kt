@@ -41,4 +41,29 @@ class TokenTailEstimateTest {
         assertEquals(85L, TokenTailCompression.imageTokens(1, 1))
         assertEquals(4096L, TokenTailCompression.imageTokens(4096, 4096))
     }
+    @Test fun boundaryCountsOnlyReplayedVisibleReasoningAndNeverDuplicatesBody() {
+        val text = "visible reasoning".repeat(100)
+        val body = "answer"
+        val row = Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant",
+            listOf(MessageBlock.Text("body", body)), RunStatus.COMPLETED)
+        val baseline = TokenTailCompression.messageTokens(row)
+        val native = JSONObject().put("role", "assistant").put("content", body).put("reasoning_content", text)
+        val thinking = JSONObject().put("type", "thinking").put("thinking", text).put("signature", "X".repeat(20000))
+        val messages = JSONObject().put("role", "assistant").put("content", JSONArray().put(thinking)
+            .put(JSONObject().put("type", "text").put("text", body)))
+        val responses = JSONObject().put("type", "reasoning").put("encrypted_content", "X".repeat(20000))
+            .put("summary", JSONArray().put(JSONObject().put("type", "summary_text").put("text", text)))
+        for (raw in listOf(native, messages, responses)) {
+            val replayed = row.copy(protocolItems = listOf(raw.toString()))
+            assertEquals(baseline + TokenTailCompression.textTokens(text), TokenTailCompression.messageTokens(replayed))
+            assertEquals(baseline, TokenTailCompression.messageTokens(replayed.copy(status = RunStatus.INTERRUPTED)))
+        }
+        val opaque = JSONObject().put("type", "reasoning").put("encrypted_content", "X".repeat(20000))
+        assertEquals(baseline, TokenTailCompression.messageTokens(row.copy(protocolItems = listOf(opaque.toString()),
+            reportedReasoning = listOf(ReportedReasoning("ui-only", text)))))
+        val redacted = JSONObject().put("role", "assistant").put("content", JSONArray().put(
+            JSONObject().put("type", "redacted_thinking").put("data", "X".repeat(20000))))
+        assertEquals(baseline, TokenTailCompression.messageTokens(row.copy(protocolItems = listOf(redacted.toString()))))
+    }
+
 }

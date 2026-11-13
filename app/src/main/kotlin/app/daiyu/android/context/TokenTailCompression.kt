@@ -65,7 +65,28 @@ internal object TokenTailCompression {
                     } ?: 0L
                 }
             } }
-            3L + payload + if (calls.length() == 0) 0L else textTokens(calls.toString())
+            3L + payload + visibleReasoningTokens(message) +
+                if (calls.length() == 0) 0L else textTokens(calls.toString())
+        }
+    }
+
+    private fun visibleReasoningTokens(message: Message): Long {
+        if (message.role != Message.ASSISTANT_ROLE || message.status != RunStatus.COMPLETED) return 0
+        fun parts(array: JSONArray?, reasoning: Boolean = false): Long = if (array == null) 0L else (0 until array.length()).sumOf { index ->
+            val part = array.optJSONObject(index) ?: return@sumOf 0L
+            when (part.optString("type")) {
+                "summary_text", "reasoning_text" -> textTokens(part.optString("text"))
+                "text", "input_text", "output_text" -> if (reasoning) textTokens(part.optString("text")) else 0L
+                "refusal" -> if (reasoning) textTokens(part.optString("refusal")) else 0L
+                "thinking" -> textTokens(part.optString("thinking"))
+                else -> 0L
+            }
+        }
+        return message.protocolItems.sumOf { raw ->
+            val item = JSONObject(raw)
+            val reasoning = item.optString("type") == "reasoning"
+            textTokens(item.optString("reasoning_content")) + parts(item.optJSONArray("content"), reasoning) +
+                if (reasoning) parts(item.optJSONArray("summary"), true) + textTokens(item.optString("reasoning_text")) else 0L
         }
     }
 

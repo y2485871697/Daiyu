@@ -16,7 +16,7 @@ import java.util.UUID
 
 /** Worker-only, read-only evidence, NOT a Registry/session/authorization factory.
  * The host supplies an already trusted conversation owner; disk metadata cannot select an owner,
- * executable, PID, storage root or a control operation. No directory creation, probes or journal I/O.
+ * executable, PID, storage root or a control operation. No directory creation, probes or journal writes.
  */
 internal class TerminalJobHistoryReader(
     filesDir: File,
@@ -37,11 +37,13 @@ internal class TerminalJobHistoryReader(
         fun names(): DirectoryStream<Path>
         /** null means ENOENT only; links, special files and all other errors must throw. */
         fun read(name: String, offset: Long, limit: Int, maxSize: Int): Slice?
+        fun journal(scope: String): Slice? = null
     }
 
     data class Record(val jobId: String, val owner: String, val scope: String,
-        val sessionId: String, val mode: String, val backend: String, val command: String? = null) {
-        val state: String get() = "unknown_after_process_restart"
+        val sessionId: String, val mode: String, val backend: String, val command: String? = null,
+        val exitCode: Int? = null, val scopeDrainRequired: Boolean = false) {
+        val state: String get() = if (exitCode != null) "exited" else "unknown_after_process_restart"
     }
     data class Scan(val records: List<Record>, val skipped: Int = 0, val error: String? = null)
 
@@ -52,6 +54,7 @@ internal class TerminalJobHistoryReader(
             val directory = openDirectory() ?: return Scan(emptyList())
             directory.use {
                 val records = mutableListOf<Record>()
+                val journals = mutableMapOf<String, JSONObject?>()
                 directory.names().use { entries ->
                     for (entry in entries) {
                         val name = entry.fileName.toString()
@@ -59,7 +62,7 @@ internal class TerminalJobHistoryReader(
                         try {
                             val id = name.removeSuffix(".json")
                             requireUuid(id)
-                            val record = readRecord(directory, id, owner)
+                            val record = readRecord(directory, id, owner, journals)
                             if (record != null) {
                                 records.add(record)
                             }
@@ -81,14 +84,17 @@ internal class TerminalJobHistoryReader(
         return try {
             val directory = checkNotNull(openDirectory())
             directory.use {
-                check(readRecord(directory, original.jobId, owner) == original)
+                val current = checkNotNull(readRecord(directory, original.jobId, owner, mutableMapOf()))
+                check(current.copy(exitCode = null) == original.copy(exitCode = null))
+                check(original.exitCode == null || current.exitCode == original.exitCode)
                 val log = directory.read("${original.jobId}.log", offset, limit, MAX_LOG_BYTES)
                 if (log == null) require(offset == 0L)
                 val bytes = log?.bytes ?: ByteArray(0)
                 val size = log?.size ?: 0L
                 JSONObject().put("ok", true).put("job_id", original.jobId).put("backend", original.backend)
                     .put("scope", original.scope).put("mode", original.mode).put("history_read_only", true)
-                    .put("state", original.state).put("execution", "unknown").put("exit_code", JSONObject.NULL)
+                    .put("state", current.state).put("execution", if (current.exitCode != null) "executed" else "unknown")
+                    .put("exit_code", current.exitCode ?: JSONObject.NULL)
                     .put("stdout", String(bytes, Charsets.UTF_8))
                     .put("stdout_base64", java.util.Base64.getEncoder().encodeToString(bytes))
                     .put("offset", offset).put("next_offset", offset + bytes.size).put("has_more", offset + bytes.size < size)
@@ -96,7 +102,7 @@ internal class TerminalJobHistoryReader(
             }
         } catch (_: Exception) {
             JSONObject().put("ok", false).put("error", "job_history_unavailable")
-                .put("state", original.state).put("execution", "unknown").put("exit_code", JSONObject.NULL)
+                .put("state", "unknown_after_process_restart").put("execution", "unknown").put("exit_code", JSONObject.NULL)
         }
     }
 
@@ -130,10 +136,23 @@ internal class TerminalJobHistoryReader(
     ) : Directory {
         private val path: Path get() = Paths.get("/proc/self/fd/${root.fd}")
         override fun names(): DirectoryStream<Path> = Files.newDirectoryStream(path)
-        override fun read(name: String, offset: Long, limit: Int, maxSize: Int): Slice? {
+        override fun read(name: String, offset: Long, limit: Int, maxSize: Int): Slice? =
+            readLeaf(path.toString(), name, offset, limit, maxSize)
+        override fun journal(scope: String): Slice? {
+            requireOwner(scope)
+            val journal = try { openDescriptor("/proc/self/fd/${anchor.fd}/terminal-journal", directory = true) }
+            catch (error: ErrnoException) {
+                if (error.errno == OsConstants.ENOENT) return null
+                throw error
+            }
+            return journal.use {
+                readLeaf("/proc/self/fd/${journal.fd}", "$scope.json", 0, MAX_JOURNAL_BYTES, MAX_JOURNAL_BYTES)
+            }
+        }
+        private fun readLeaf(parent: String, name: String, offset: Long, limit: Int, maxSize: Int): Slice? {
             require(name.isNotEmpty() && name != "." && name != ".." && '/' !in name && '\u0000' !in name)
             beforeLeafOpened?.invoke(name)
-            val leaf = try { openDescriptor("$path/$name", directory = false) }
+            val leaf = try { openDescriptor("$parent/$name", directory = false) }
             catch (error: ErrnoException) {
                 if (error.errno == OsConstants.ENOENT) return null
                 throw error
@@ -186,7 +205,8 @@ internal class TerminalJobHistoryReader(
         }
     }
 
-    private fun readRecord(directory: Directory, id: String, owner: String): Record? {
+    private fun readRecord(directory: Directory, id: String, owner: String,
+        journals: MutableMap<String, JSONObject?>): Record? {
         requireUuid(id)
         val data = checkNotNull(directory.read("$id.json", 0, MAX_METADATA_BYTES, MAX_METADATA_BYTES))
         require(data.size in 1..MAX_METADATA_BYTES.toLong() && data.bytes.size.toLong() == data.size)
@@ -200,11 +220,23 @@ internal class TerminalJobHistoryReader(
         val session = field("session_id").also(::requireUuid)
         val mode = field("mode").also { require(it in setOf("sync", "async", "daemon")) }
         val backend = field("backend").also { require(it.isNotBlank() && it.length <= 256 && it.none { c -> c.isISOControl() }) }
-        // Never propagate persisted state, exit_code, PID or process_start as live evidence.
+        // Legacy state, exit_code, PID and process_start never restore live evidence or control authority.
         val command = if (json.has("command")) field("command").also {
             require(it.isNotBlank() && it.length <= 2048 && '\u0000' !in it)
         } else null
-        return Record(id, recordedOwner, scope, session, mode, backend, command)
+        val record = Record(id, recordedOwner, scope, session, mode, backend, command,
+            scopeDrainRequired = json.opt("root") == true)
+        val completed = TerminalJobCompletionEvidence.persisted(json.optJSONObject("completion"), record)
+        if (completed != null) return record.copy(exitCode = completed)
+        if (!journals.containsKey(scope)) {
+            journals[scope] = runCatching {
+                directory.journal(scope)?.let { journal ->
+                    require(journal.size in 1..MAX_JOURNAL_BYTES.toLong() && journal.bytes.size.toLong() == journal.size)
+                    JSONObject(String(journal.bytes, Charsets.UTF_8))
+                }
+            }.getOrNull()
+        }
+        return record.copy(exitCode = TerminalJobCompletionEvidence.committed(journals[scope], record))
     }
     private fun requireOwner(owner: String) { require(owner.matches(Regex("[A-Za-z0-9_-]{1,128}"))) }
     private fun requireUuid(id: String) { require(UUID.fromString(id).toString() == id) }
@@ -212,6 +244,7 @@ internal class TerminalJobHistoryReader(
     companion object {
         private const val LINUX_O_CLOEXEC = 0x80000
         private const val LINUX_F_DUPFD_CLOEXEC = 1030
+        const val MAX_JOURNAL_BYTES = 4 * 1024 * 1024
         const val MAX_METADATA_BYTES = 16384
         const val MAX_LOG_BYTES = 262144
         const val MAX_PAGE_BYTES = 65536

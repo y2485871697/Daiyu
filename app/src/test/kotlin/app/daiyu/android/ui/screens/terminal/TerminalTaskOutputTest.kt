@@ -47,4 +47,11 @@ class TerminalTaskOutputTest {
         assertEquals("body", terminalPlainOutput("\u001b]0;title\u001b\\body\u001b]0;next\u0007"))
     }
 
+    @Test fun historicalSummarySeparatesConfirmedSuccessFailureAndMissingExit() {
+        assertEquals("状态未知", terminalTaskHistorySummary(null))
+        assertEquals("已完成", terminalTaskHistorySummary(0))
+        assertEquals("执行失败（退出码 1）", terminalTaskHistorySummary(1))
+        assertEquals("执行失败（退出码 127）", terminalTaskHistorySummary(127))
+    }
+
 }

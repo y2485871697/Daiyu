@@ -253,6 +253,12 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                 if (process is RootScopeCommandProcess && process.outputTruncated) job.truncated = true
                 job.script.delete(); job.outputComplete=true
             }
+            try { process.waitFor() }
+            catch (_: InterruptedException) { job.unknown = true; Thread.currentThread().interrupt() }
+            finally {
+                job.pumpFinished = true
+                synchronized(jobs) { releaseFinishedResources(job) }
+            }
         }.apply { isDaemon=true; name="terminal-log-${job.id}"; start() }
     }
     private fun poll(args:JSONObject):JSONObject = synchronized(jobs) { pollLocked(args) }
@@ -444,7 +450,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     // Runtime resources can end without expiring their historical records or logs.
     private fun releaseFinishedResources(job: Job) = synchronized(job) {
         if (!job.dispatchFinished || job.completion != null || job.startupCleanup != null ||
-            !job.outputComplete || job.reader?.isAlive != false) return@synchronized
+            !job.outputComplete || !job.pumpFinished) return@synchronized
         val process = job.handle?.process ?: return@synchronized
         if (process.isAlive) return@synchronized
         val exitCode = if (process is RootScopeCommandProcess) process.exitCodeOrNull() else process.exitValue()
@@ -452,6 +458,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             if (exitCode == null || job.unknown) "unknown" else "executed", process is RootScopeCommandProcess)
         job.handle = null
         job.reader = null
+        // Completion is a read-only historical fact, not a restorable process handle.
+        try { saveJob(job) } catch (_: Exception) { /* A failed durable receipt remains unknown on disk. */ }
     }
     private fun releaseStartupCleanup(job: Job, cleanup: PtyStartupCleanup) = synchronized(job) {
         if (job.startupCleanup !== cleanup) return@synchronized
@@ -466,6 +474,14 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val value=identity(job.backend).put("scope",job.scope).put("owner",job.owner).put("session_id",job.session).put("mode",job.mode)
             .put("pid",handle?.pid ?: -1L).put("process_start",handle?.start).put("state",job.state).put("job_id",job.id)
             .put("execution",if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown")
+        job.completion?.takeIf { it.execution == "executed" && it.exitCode != null }?.let { completion ->
+            value.put("completion", JSONObject().put("format", 1).put("ok", true)
+                .put("job_id", job.id).put("owner", job.owner).put("scope", job.scope)
+                .put("session_id", job.session).put("backend", job.backend.name).put("mode", job.mode)
+                .put("state", completion.state).put("execution", completion.execution)
+                .put("exit_code", completion.exitCode).put("output_complete", job.outputComplete)
+                .put("log_truncated", job.truncated).put("scope_drain_confirmed", completion.scopeDrained))
+        }
         value.put("command", job.command.trim().take(2048))
         var bytes=value.toString().toByteArray(Charsets.UTF_8)
         if (bytes.size > 16384) { value.remove("command"); bytes=value.toString().toByteArray(Charsets.UTF_8) }
@@ -495,6 +511,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     private data class OwnedProcess(val process: Process, val pid: Long, val start: String?)
     private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val command:String,val backend:SelectedBackend,val log:File,val script:File) {
         @Volatile var dispatchFinished=false
+        @Volatile var pumpFinished=false
         @Volatile var completion: JobCompletion? = null
         @Volatile var cancelRequested=false
         @Volatile var handle:OwnedProcess?=null

@@ -4085,7 +4085,7 @@ class MainActivity : ComponentActivity() {
                     onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, false) },
                     onStop = if (session.jobId == null) null else ({ if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, true) }))
                 } + visit.history.map { record -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
-                    record.command ?: record.jobId, "状态未知", id = record.jobId,
+                    record.command ?: record.jobId, app.daiyu.android.ui.screens.terminal.terminalTaskHistorySummary(record.exitCode), id = record.jobId,
                     onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalHistoryPage(visit, record, 0) }) },
                 output = app.daiyu.android.ui.screens.terminal.terminalTaskOutput(visit.output),
                 outputId = visit.outputId,
@@ -4148,7 +4148,11 @@ class MainActivity : ComponentActivity() {
                 if (terminalJobsPresented(visit)) {
                     visit.output = result.toString(2) // Replace one bounded page; never accumulate the whole log.
                     visit.outputId = record.jobId
-                    visit.historyPage = record
+                    val confirmedExit = if (result.optBoolean("ok") && result.optString("state") == "exited" &&
+                        result.optString("execution") == "executed") result.opt("exit_code") as? Int else null
+                    val updated = if (confirmedExit != null) record.copy(exitCode = confirmedExit) else record
+                    visit.history = visit.history.map { if (it == record) updated else it }
+                    visit.historyPage = updated
                     visit.nextOffset = result.optLong("next_offset", offset)
                     visit.hasMore = result.optBoolean("ok") && result.optBoolean("has_more")
                 }

@@ -33,6 +33,14 @@ class TerminalJobHistoryReaderTest {
                         TerminalJobHistoryReader.Slice(bytes, size)
                     }
                 }
+                override fun journal(scope: String): TerminalJobHistoryReader.Slice? {
+                    val path = File(anchor, "terminal-journal/$scope.json").toPath()
+                    if (!Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null
+                    check(Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    require(Files.size(path) <= TerminalJobHistoryReader.MAX_JOURNAL_BYTES)
+                    val bytes = Files.readAllBytes(path)
+                    return TerminalJobHistoryReader.Slice(bytes, bytes.size.toLong())
+                }
                 override fun close() = Unit
             }
         }
@@ -213,4 +221,121 @@ class TerminalJobHistoryReaderTest {
         }
         assertEquals(before, snapshot(files))
     }
+    private fun completion(directory: File, id: String, code: Int): JSONObject {
+        val source = JSONObject(File(directory, "$id.json").readText())
+        return JSONObject().put("format", 1).put("ok", true).put("state", "exited")
+            .put("execution", "executed").put("exit_code", code).put("output_complete", true).apply {
+                for (key in listOf("job_id", "owner", "scope", "session_id", "backend", "mode")) put(key, source.get(key))
+            }
+    }
+    private fun journal(files: File, result: JSONObject, state: String = "committed"): File {
+        val directory = File(files, "terminal-journal").apply { mkdirs() }
+        return File(directory, "original-run.json").apply { writeText(JSONObject().put("format", 4)
+            .put("binding", "a".repeat(64)).put("lifecycle", "active").put("entries", JSONObject()
+                .put("original-request", JSONObject().put("state", state).put("result", result))).toString()) }
+    }
+    @Test fun versionedCompletionKeepsZeroAndNonzeroExitFactsWithoutRestoringAuthority() = fixture { files, directory ->
+        for (code in listOf(0, 1, 127)) {
+            val id = record(directory)
+            val metadata = File(directory, "$id.json")
+            metadata.writeText(JSONObject(metadata.readText()).put("completion", completion(directory, id, code)).toString())
+        }
+        val before = snapshot(files)
+        val history = reader(files)
+        val records = history.list(owner).records
+        assertEquals(setOf(0, 1, 127), records.map { it.exitCode }.toSet())
+        records.forEach {
+            assertEquals("exited", it.state)
+            val page = history.page(owner, it)
+            assertEquals(it.exitCode, page.getInt("exit_code"))
+            assertEquals("executed", page.getString("execution"))
+            assertTrue(page.getBoolean("history_read_only"))
+            assertFalse(page.has("pid")); assertFalse(page.has("session_id"))
+        }
+        assertEquals(before, snapshot(files))
+    }
+    @Test fun oldDispatchedRecordCanRecoverOnlyItsExactCommittedFinalReceiptReadOnly() = fixture { files, directory ->
+        val id = record(directory) { it.put("state", "dispatched").put("execution", "unknown").remove("exit_code") }
+        val result = completion(directory, id, 127)
+        journal(files, result)
+        val before = snapshot(files)
+        val original = reader(files).list(owner).records.single()
+        assertEquals(127, original.exitCode)
+        val page = reader(files).page(owner, original)
+        assertEquals("exited", page.getString("state"))
+        assertEquals(127, page.getInt("exit_code"))
+        assertEquals(before, snapshot(files))
+    }
+    @Test fun pendingUnknownConflictingAndMismatchedReceiptsDoNotBecomeSuccess() = fixture { files, directory ->
+        val id = record(directory)
+        val good = completion(directory, id, 0)
+        for (field in listOf("job_id", "owner", "scope", "session_id", "backend", "mode", "execution", "state")) {
+            journal(files, JSONObject(good.toString()).put(field, "other"))
+            assertNull(field, reader(files).list(owner).records.single().exitCode)
+        }
+        for (field in listOf("exit_code", "output_complete", "ok")) {
+            journal(files, JSONObject(good.toString()).put(field, JSONObject.NULL))
+            assertNull(field, reader(files).list(owner).records.single().exitCode)
+        }
+        journal(files, good, "pending")
+        assertNull(reader(files).list(owner).records.single().exitCode)
+        val ledger = journal(files, good)
+        val value = JSONObject(ledger.readText())
+        value.getJSONObject("entries").put("duplicate", JSONObject().put("state", "committed")
+            .put("result", JSONObject(good.toString()).put("exit_code", 1)))
+        ledger.writeText(value.toString())
+        assertNull(reader(files).list(owner).records.single().exitCode)
+        for (bad in listOf(JSONObject(good.toString()).put("exit_code", "0"),
+            JSONObject(good.toString()).put("exit_code", 0.5), JSONObject(good.toString()).put("exit_code", Long.MAX_VALUE))) {
+            journal(files, bad)
+            assertNull(reader(files).list(owner).records.single().exitCode)
+        }
+    }
+    @Test fun malformedAndSymlinkJournalsDoNotHideOriginalLogsOrEnableControls() = fixture { files, directory ->
+        val id = record(directory)
+        File(directory, "$id.log").writeText("original")
+        val ledger = journal(files, completion(directory, id, 0))
+        val validJournal = ledger.readBytes()
+        ledger.writeText("{")
+        val reader = reader(files)
+        assertNull(reader.list(owner).records.single().exitCode)
+        val outside = Files.createTempFile("outside-journal", ".json")
+        try {
+            Files.write(outside, validJournal)
+            ledger.delete()
+            Files.createSymbolicLink(ledger.toPath(), outside)
+            val original = reader.list(owner).records.single()
+            assertNull(original.exitCode)
+            assertEquals("original", reader.page(owner, original).getString("stdout"))
+            Files.delete(ledger.toPath())
+        } finally { Files.deleteIfExists(outside) }
+    }
+    @Test fun completionUpgradeBetweenListAndPageIsAllowedButIdentityChangesStillFail() = fixture { files, directory ->
+        val id = record(directory)
+        val history = reader(files)
+        val original = history.list(owner).records.single()
+        val metadata = File(directory, "$id.json")
+        metadata.writeText(JSONObject(metadata.readText()).put("completion", completion(directory, id, 1)).toString())
+        assertEquals(1, history.page(owner, original).getInt("exit_code"))
+        val known = history.list(owner).records.single()
+        metadata.writeText(JSONObject(metadata.readText()).apply { remove("completion") }.toString())
+        assertFalse(history.page(owner, known).getBoolean("ok"))
+    }
+
+    @Test fun incompleteOrMisboundVersionedCompletionAndMissingRootDrainStayUnknown() = fixture { files, directory ->
+        val id = record(directory)
+        val metadata = File(directory, "$id.json")
+        val base = JSONObject(metadata.readText())
+        val good = completion(directory, id, 0)
+        for (field in listOf("format", "owner", "scope", "session_id", "job_id", "backend", "mode", "execution", "state", "exit_code", "output_complete")) {
+            metadata.writeText(JSONObject(base.toString()).put("completion", JSONObject(good.toString()).put(field, JSONObject.NULL)).toString())
+            assertNull(field, reader(files).list(owner).records.single().exitCode)
+        }
+        metadata.writeText(JSONObject(base.toString()).put("root", true).put("completion", good).toString())
+        assertNull(reader(files).list(owner).records.single().exitCode)
+        good.put("scope_drain_confirmed", true)
+        metadata.writeText(JSONObject(base.toString()).put("root", true).put("completion", good).toString())
+        assertEquals(0, reader(files).list(owner).records.single().exitCode)
+    }
+
 }

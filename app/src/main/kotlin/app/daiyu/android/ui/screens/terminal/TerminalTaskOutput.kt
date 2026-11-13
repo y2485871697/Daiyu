@@ -22,3 +22,9 @@ internal fun terminalTaskOutput(raw: String): String {
         if (encoded != null) "任务日志解码失败" else "暂无日志输出"
     }
 }
+
+internal fun terminalTaskHistorySummary(exitCode: Int?): String = when (exitCode) {
+    null -> "状态未知"
+    0 -> "已完成"
+    else -> "执行失败（退出码 $exitCode）"
+}

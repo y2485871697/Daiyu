@@ -104,6 +104,12 @@ class TerminalRegistryRetentionTest {
         assertEquals(firstId, replay.getString("job_id"))
         assertEquals(130, starts)
         val metadata = JSONObject(File(directory, "$firstId.json").readText())
+        val durable = metadata.getJSONObject("completion")
+        assertEquals(1, durable.getInt("format"))
+        assertEquals(firstId, durable.getString("job_id"))
+        assertEquals("executed", durable.getString("execution"))
+        assertEquals(0, durable.getInt("exit_code"))
+        assertTrue(durable.getBoolean("output_complete"))
         val reopened = TerminalRegistry(context(root)).apply {
             configure(metadata.getString("scope"), TerminalConfiguration())
             startProcess = { throw AssertionError("Replay must not launch") }
@@ -261,4 +267,27 @@ class TerminalRegistryRetentionTest {
         assertResourcesReleased(id)
         assertEquals("unknown", registry.stopOwnedJob(id).getString("execution"))
     }
+    @Test fun asyncAndDaemonNaturalExitPersistWithoutPollingOrFurtherCommands() = fixture { root, registry, session ->
+        for ((index, mode) in listOf("async", "daemon").withIndex()) {
+            val result = registry.execute("terminal_exec", command(session, index, mode))
+            val id = result.getString("job_id")
+            awaitPump(id)
+            val metadata = JSONObject(File(root, "terminal-jobs/$id.json").readText())
+            assertEquals(0, metadata.getJSONObject("completion").getInt("exit_code"))
+            assertResourcesReleased(id)
+        }
+    }
+
+    @Test fun failedCompletionSaveKeepsUnknownDiskEvidenceAndStillReleasesResources() = fixture { root, registry, session ->
+        var saves = 0
+        registry.beforeJobSave = { if (++saves == 4) throw java.io.IOException("injected completion save failure") }
+        val result = registry.execute("terminal_exec", command(session, 0))
+        val id = result.getString("job_id")
+        awaitPump(id)
+        assertEquals(4, saves)
+        assertFalse(JSONObject(File(root, "terminal-jobs/$id.json").readText()).has("completion"))
+        assertEquals("executed", registry.inspectJob(id).getString("execution"))
+        assertResourcesReleased(id)
+    }
+
 }

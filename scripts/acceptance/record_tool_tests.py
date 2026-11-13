@@ -236,7 +236,7 @@ LINUX_PIN_MODULES = (
 TERMINAL_COMMAND_PAGER_PLATFORM_CLASS = "app.daiyu.android.terminal.TerminalCommandPagerTest"
 TERMINAL_COMMAND_PAGER_MODULES = (
     "test_chroot_workspace_command_contract", "test_terminal_command_pager_smoke_scope",
-    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_terminal_job_status_contract", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )
 

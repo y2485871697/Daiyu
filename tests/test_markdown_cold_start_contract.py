@@ -21,10 +21,9 @@ class MarkdownColdStartContract(unittest.TestCase):
 
     def test_first_pending_completed_turn_has_no_premature_actions(self):
         source = (BASE / 'ChatMessageList.kt').read_text().split('internal fun AssistantTurn(', 1)[1]
-        self.assertIn('var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current))', source)
-        self.assertIn('sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody', source)
-        self.assertIn('if (hasDisplayBody) hasProjectedBody = true', source)
-        self.assertIn('showActions && actionTurn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady', source)
+        self.assertIn('val contentReady = projection?.sources == sources', source)
+        self.assertIn('val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady', source)
+        self.assertIn('showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled', source)
         self.assertIn('SideEffect { onContentReady(contentReady) }', source)
         self.assertIn('val revealSettled = reveal.settled', source)
         self.assertIn('SideEffect { onRevealSettled(revealSettled) }', source)

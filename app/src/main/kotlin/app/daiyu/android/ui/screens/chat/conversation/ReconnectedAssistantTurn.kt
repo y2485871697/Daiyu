@@ -39,6 +39,7 @@ internal fun ReconnectedAssistantTurn(
         onContentDisplayed(parts.parts.all { displayed[it.turn.listKey] == it })
         onRevealSettled(parts.parts.all { settled[it.turn.listKey] == it })
     }
+    val actionsReady = parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }
     val identityIndex = parts.parts.indexOfFirst { it.turn.hasVisibleResponse() }.coerceAtLeast(0)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         parts.parts.forEachIndexed { index, part -> key(part.turn.listKey) {
@@ -47,7 +48,7 @@ internal fun ReconnectedAssistantTurn(
                 onRevealSettled = { if (it) settled[part.turn.listKey] = part else settled.remove(part.turn.listKey) },
                 onContentDisplayed = { if (it) displayed[part.turn.listKey] = part else displayed.remove(part.turn.listKey) },
                 onContentReady = { if (it) ready[part.turn.listKey] = part else ready.remove(part.turn.listKey) },
-                showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex, actionTurn = turn,
+                showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn,
                 workflowContent = part.workflow, preparing = preparing)
             part.after.forEach { entry -> key(entry.id) { ChatTimelineDivider(entry) } }
         } }

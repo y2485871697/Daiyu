@@ -859,10 +859,7 @@ internal fun AssistantTurn(
         onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources,
         live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
-    var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { mutableStateOf(false) }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
-    val initialBodyPending = sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody
-    SideEffect { if (hasDisplayBody) hasProjectedBody = true }
     SideEffect { onContentReady(contentReady) }
     SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }
     val revealSettled = reveal.settled && reasoningReady && (bodyVisible || ordered.body.isEmpty())
@@ -886,7 +883,7 @@ internal fun AssistantTurn(
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp),
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        if (showActions && actionTurn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady) {
+        if (showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled) {
             // Preserve legacy text/tool actions. Mixed content is authoritative, so images
             // (or their metadata) alone must not offer body-text copy or speech actions.
             val hasTextActions = actionTurn.content.isEmpty() || actionTurn.content.any {

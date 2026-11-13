@@ -1626,10 +1626,19 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 }
             }
             assertEquals(1, calls.get())
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
+            ui.mainClock.advanceTimeBy(80)
+            ui.waitForIdle()
+            assertFalse(settled.get())
+            for (action in listOf("复制回答", "朗读", "分支", "重新生成", "删除")) {
+                ui.onNodeWithContentDescription(action, useUnmergedTree = true).assertDoesNotExist()
+            }
             advanceTerminalReveal(plain.length)
             body("typing-live", plain).assertTextEquals(plain)
             assertTrue(settled.get())
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithContentDescription("重新生成", useUnmergedTree = true).assertIsDisplayed()
             assertEquals(1, calls.get())
             assertTrue(opened.isEmpty())
         } finally { ui.mainClock.autoAdvance = true }
@@ -1688,9 +1697,13 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.waitForIdle()
             assertTrue(confirmed.none { turn.listKey in it })
             ui.onAllNodes(hasText(displayText), useUnmergedTree = true).assertCountEquals(0)
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithContentDescription("重新生成", useUnmergedTree = true).assertDoesNotExist()
             advanceTerminalReveal(displayText.length)
             ui.onNodeWithText(displayText, useUnmergedTree = true).assertTextEquals(displayText)
             assertTrue(confirmed.any { turn.listKey in it })
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithContentDescription("重新生成", useUnmergedTree = true).assertIsDisplayed()
         } finally { ui.mainClock.autoAdvance = true }
     }
 

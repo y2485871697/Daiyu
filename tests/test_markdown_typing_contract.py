@@ -84,6 +84,16 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("baselineLength != null", self.typing)
         self.assertIn("target.parts == parts", self.typing)
 
+    def test_message_actions_wait_for_the_exact_body_and_all_reconnect_reveals(self):
+        assistant = self.chat.split("internal fun AssistantTurn(", 1)[1].split(
+            "private fun AssistantTextContent(", 1)[0]
+        gate = assistant.split("if (showActions &&", 1)[1].split("{", 1)[0]
+        for condition in ("actionTurn.status != RunStatus.RUNNING", "generationComplete", "revealSettled"):
+            self.assertIn(condition, gate)
+        reconnect = (BASE / "ReconnectedAssistantTurn.kt").read_text()
+        self.assertIn("val actionsReady = parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }", reconnect)
+        self.assertIn("showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn", reconnect)
+
     def test_elapsed_time_drain_and_stale_target_guards_are_present(self):
         for token in ["if (target !== expected)", "frameNanos - lastFrame", "250_000_000.0",
                       "if (live || streaming) { seenLive = true; closed = false }", "if (parts == null || baselineLength == null) return target",

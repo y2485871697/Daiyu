@@ -68,6 +68,8 @@ jobs:
               'test_tool_card_html_contract.py', 'test_markdown_typing_contract.py',
               'test_markdown_body_visibility_contract.py', 'test_workflow_narration_contract.py',
               'test_chat_resume_scroll_contract.py', 'test_reasoning_typewriter_contract.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow':
+              patterns += ('test_markdown_cold_start_contract.py', 'test_message_timestamp_style_contract.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'composer-send':
               patterns = ('test_composer_surface_color_contract.py', 'test_chat_submission_preview_contract.py',
                           'test_compression_send_gate_contract.py', 'test_delegation_batch_and_send_contract.py')

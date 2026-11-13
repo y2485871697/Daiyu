@@ -31,9 +31,8 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         self.assertIn('endAligned = true', user)
         self.assertNotIn('endAligned = true', assistant)
         self.assertIn('val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true', assistant)
-        self.assertIn('val initialBodyPending = sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody', assistant)
-        self.assertIn('SideEffect { if (hasDisplayBody) hasProjectedBody = true }', assistant)
-        self.assertIn('if (turn.status != RunStatus.RUNNING && !initialBodyPending && reasoningReady)', assistant)
+        self.assertIn('val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady', assistant)
+        self.assertIn('if (showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled)', assistant)
         self.assertIn('allowSpeech = hasTextActions, showCopyAction = hasTextActions', turns)
 
     def test_production_user_hides_timestamp_without_changing_actions_or_assistant(self):
@@ -45,7 +44,7 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
                         'showRegenerateAction = false', 'endAligned = true'):
             self.assertIn(setting, user)
         self.assertIn('if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(', user)
-        self.assertIn('MessageActionBar(turn.actionKey, actions, timestamp = turn.timestamp,', assistant)
+        self.assertIn('MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,', assistant)
         models = (CHAT / 'ChatScreenModels.kt').read_text(encoding='utf-8')
         self.assertIn('val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey', models)
 

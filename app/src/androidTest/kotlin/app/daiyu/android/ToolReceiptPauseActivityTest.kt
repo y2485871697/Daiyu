@@ -98,6 +98,82 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
     }
 
+    fun testFirstReadSurvivesLivePhaseChangesAndPublishesWithoutAnotherModelEvent() {
+        mainThread { activity.select(fixture.database.conversations().single()) }
+        awaitReceipts()
+        mainThread {
+            val current = currentKey()
+            val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity)) as RetainedToolOutcomes.Snapshot
+            val scheduled = current.copy(execution = ExecutionState(ExecutionPhase.STREAMING,
+                activeToolCalls = setOf(ToolCallId("receipt-0"))))
+            val pending = Job()
+            val request = Any()
+            field("toolReceiptRead").get(activity)?.let { (it as Job).cancel() }
+            field("toolReceiptKey").set(activity, null)
+            field("toolReceiptSnapshot").set(activity, null)
+            field("toolReceiptRead").set(activity, pending)
+            field("toolReceiptRequested").set(activity, scheduled)
+            field("toolReceiptRequest").set(activity, request)
+            try {
+                repeat(3) {
+                    call("publishChat")
+                    assertSame("live phase must not cancel the exact-source read", pending,
+                        field("toolReceiptRead").get(activity))
+                    assertTrue(pending.isActive)
+                    assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                }
+                MainActivity::class.java.declaredMethods.single { it.name == "completeToolReceipts" }
+                    .apply { isAccessible = true }.invoke(activity, request, scheduled, snapshot)
+                assertEquals("completed evidence is published in this callback", expected, steps().map { it.state })
+                assertEquals(ToolActivityUi.SUCCESS, steps().first().activity)
+                assertEquals("a latest-phase refresh is still requested", currentKey(),
+                    field("toolReceiptRequested").get(activity))
+                assertNotSame(pending, field("toolReceiptRead").get(activity))
+            } finally { pending.cancel() }
+        }
+        awaitReceipts()
+        assertEquals("receipt refresh never opens a model session", 0, fixture.opens.get())
+    }
+
+    fun testLateReceiptCompletionCannotReplaceAnotherSourceOrRequest() {
+        mainThread { activity.select(fixture.database.conversations().single()) }
+        awaitReceipts()
+        mainThread {
+            val current = currentKey()
+            val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity)) as RetainedToolOutcomes.Snapshot
+            val complete = MainActivity::class.java.declaredMethods.single { it.name == "completeToolReceipts" }
+                .apply { isAccessible = true }
+            val pending = Job()
+            val request = Any()
+            field("toolReceiptRead").get(activity)?.let { (it as Job).cancel() }
+            field("toolReceiptKey").set(activity, null)
+            field("toolReceiptSnapshot").set(activity, null)
+            field("toolReceiptRead").set(activity, pending)
+            field("toolReceiptRequest").set(activity, request)
+            try {
+                for (stale in listOf(current.copy(conversation = ConversationId("other")),
+                    current.copy(data = current.data + 1), current.copy(generation = current.generation + 1),
+                    current.copy(sources = emptyList()))) {
+                    field("toolReceiptRequested").set(activity, stale)
+                    complete.invoke(activity, request, stale, snapshot)
+                    assertNull(loadedKey())
+                    assertSame(pending, field("toolReceiptRead").get(activity))
+                }
+                field("toolReceiptRequested").set(activity, current)
+                complete.invoke(activity, Any(), current, snapshot)
+                assertNull(loadedKey())
+                assertSame(request, field("toolReceiptRequest").get(activity))
+            } finally {
+                pending.cancel()
+                field("toolReceiptRead").set(activity, null)
+                field("toolReceiptRequested").set(activity, null)
+                field("toolReceiptRequest").set(activity, null)
+                call("publishChat")
+            }
+        }
+        awaitReceipts()
+    }
+
     fun testPauseRequestPausedAndResumeKeepSettledReceiptsWhileReadIsPending() {
         val conversation = fixture.database.conversations().single()
         val binding = checkNotNull(fixture.database.modelBinding(null))

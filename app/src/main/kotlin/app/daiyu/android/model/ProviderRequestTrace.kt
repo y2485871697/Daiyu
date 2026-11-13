@@ -57,7 +57,33 @@ internal class ProviderRequestTrace(
             else -> ModelTransportCause.PROVIDER_REJECTION
         }
         return ModelTransportDiagnostic(phase, cause, kind, elapsed(started), streamStarted?.let(::elapsed),
-            frames, lastFrame?.let(::elapsed), headersSeen, completed, eofSeen = eof, partialFrame = partialFrame, localDisconnectRequested = locallyDisconnected)
+            frames, lastFrame?.let(::elapsed), headersSeen, completed, eofSeen = eof, partialFrame = partialFrame,
+            localDisconnectRequested = locallyDisconnected, socketDetail = socketDetail(failure))
+    }
+
+    private fun socketDetail(failure: Throwable): ModelSocketDetail {
+        val seen = java.util.IdentityHashMap<Throwable, Boolean>()
+        var current: Throwable? = failure
+        repeat(8) {
+            val cause = current ?: return ModelSocketDetail.UNKNOWN
+            if (seen.put(cause, true) != null) return ModelSocketDetail.UNKNOWN
+            if (cause is java.net.SocketException || cause is java.io.EOFException) {
+                // Inspect fixed symptoms locally; no exception text or chain leaves this function.
+                val message = cause.message?.take(512)?.lowercase(java.util.Locale.ROOT).orEmpty()
+                val detail = when {
+                    "connection reset" in message -> ModelSocketDetail.RESET
+                    "socket closed" in message || "socket is closed" in message -> ModelSocketDetail.CLOSED
+                    "connection abort" in message -> ModelSocketDetail.ABORTED
+                    "broken pipe" in message -> ModelSocketDetail.BROKEN_PIPE
+                    "unexpected end of stream" in message -> ModelSocketDetail.END_OF_STREAM
+                    "network is unreachable" in message -> ModelSocketDetail.NETWORK_UNREACHABLE
+                    else -> ModelSocketDetail.UNKNOWN
+                }
+                if (detail != ModelSocketDetail.UNKNOWN) return detail
+            }
+            current = cause.cause
+        }
+        return ModelSocketDetail.UNKNOWN
     }
 
     internal class Reader(input: InputStream, val trace: ProviderRequestTrace) :

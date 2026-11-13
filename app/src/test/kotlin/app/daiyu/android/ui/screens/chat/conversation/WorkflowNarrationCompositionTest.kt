@@ -237,6 +237,124 @@ class WorkflowNarrationCompositionTest {
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 
+    @Test fun newPlainWorkflowAdmitsEachToolAfterItsVisibleNarration() = verifyVisualAdmission(true)
+    @Test fun newMarkdownWorkflowAdmitsEachToolAfterItsVisibleNarration() = verifyVisualAdmission(false)
+
+    private fun verifyVisualAdmission(plainText: Boolean) = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val before = MessageContentUi.Text("before", "前".repeat(500))
+        val firstTool = MessageContentUi.Tool(WorkStepUi("first", "lookup", "done", WorkStepState.OK))
+        val after = MessageContentUi.Text("after", "后".repeat(500))
+        val lastTool = MessageContentUi.Tool(WorkStepUi("last", "lookup", "done", WorkStepState.OK))
+        val steps = listOf(before, firstTool, after, lastTool)
+        val suffix = mutableStateOf(after)
+        val appended = mutableStateOf<List<MessageContentUi>>(emptyList())
+        val admission = WorkflowVisualAdmissions(emptySet()).scope("turn", false).owner("owner", steps, true)
+        val paused = mutableStateOf(false)
+        val expanded = mutableStateOf(true)
+        val mounted = mutableStateOf(true)
+        val parser: (String) -> List<MarkdownBlock> = { source ->
+            listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(source))))
+        }
+        var narration: WorkflowNarration? = null
+        var advances = 0
+        var time = 1_000_000_000L
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        suspend fun until(ready: () -> Boolean) = withTimeout(10_000) { while (!ready()) frame() }
+        fun visible(item: MessageContentUi, index: Int) = narration!!.entryVisible(item.workflowKey(index))
+        try {
+            composition.setContent {
+                if (mounted.value) CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    WorkflowNarrationContent(listOf(before, firstTool) + appended.value + listOf(suffix.value, lastTool), plainText,
+                        listOf(MarkdownTypingSource(before.itemId, before.text), MarkdownTypingSource(after.itemId, suffix.value.text)),
+                        running = true, paused = paused.value, expanded = expanded.value, stopped = false,
+                        revealResetEpoch = 0L, reasoningReady = { true }, onVisibleAdvance = { advances++ },
+                        admission = admission) { narration = it }
+                }
+            }
+            until { narration != null && narration!!.reveal.limit(before.itemId) > 0 }
+            assertTrue(narration!!.reveal.limit(before.itemId) < before.text.length)
+            assertFalse(visible(firstTool, 1))
+            assertEquals(0, narration!!.reveal.limit(after.itemId))
+            paused.value = true
+            repeat(3) { frame() }
+            val pausedLimit = narration!!.reveal.limit(before.itemId)
+            val pausedAdvances = advances
+            repeat(15) { frame() }
+            assertEquals(pausedLimit, narration!!.reveal.limit(before.itemId))
+            assertEquals(pausedAdvances, advances)
+            assertFalse(visible(firstTool, 1))
+            paused.value = false
+            until { narration!!.reveal.ready(before.itemId, before.text) }
+            assertFalse("A completed text budget alone must not expose its following tool", visible(firstTool, 1))
+            assertEquals(0, narration!!.reveal.limit(after.itemId))
+            frame()
+            assertFalse("One following frame must not expose the waiting tool", visible(firstTool, 1))
+            repeat(6) { index ->
+                appended.value = appended.value + MessageContentUi.Tool(
+                    WorkStepUi("appended-$index", "lookup", "done", WorkStepState.OK))
+                suffix.value = suffix.value.copy(text = suffix.value.text + "追")
+                frame()
+            }
+            assertTrue("Later streaming text must not restart the ready tool's frame admission", visible(firstTool, 1))
+            assertFalse(visible(lastTool, 3))
+            until { narration!!.reveal.limit(after.itemId) > 0 }
+            assertTrue(narration!!.reveal.limit(after.itemId) < after.text.length)
+            assertFalse(visible(lastTool, 3))
+            until { visible(lastTool, 3) }
+            assertTrue(narration!!.reveal.ready(after.itemId, suffix.value.text))
+
+            mounted.value = false
+            repeat(3) { frame() }
+            val remountAdvances = advances
+            mounted.value = true
+            repeat(30) { frame() }
+            until { narration!!.reveal.settled }
+            assertTrue(visible(firstTool, 1))
+            assertTrue(visible(lastTool, 3))
+            assertEquals(remountAdvances, advances)
+            expanded.value = false
+            repeat(3) { frame() }
+            expanded.value = true
+            repeat(20) { frame() }
+            assertTrue(visible(firstTool, 1))
+            assertTrue(visible(lastTool, 3))
+            assertEquals(remountAdvances, advances)
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
+    @Test fun restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount() {
+        val text = MessageContentUi.Text("text", "already visible")
+        val tool = MessageContentUi.Tool(WorkStepUi("tool", "lookup", "done", WorkStepState.OK))
+        val steps = listOf(text, tool)
+        val sources = listOf(MarkdownTypingSource(text.itemId, text.text))
+        val owners = WorkflowVisualAdmissions(setOf("restored"))
+        val restored = owners.scope("restored", false).owner("owner", steps, true)
+        assertTrue(restored.contains(tool.workflowKey(1)))
+        assertEquals(sources, restored.initialBaseline(sources, false))
+        val liveScope = owners.scope("live", false)
+        val live = liveScope.owner("owner", steps, true)
+        assertFalse(live.contains(tool.workflowKey(1)))
+        assertTrue(live.initialBaseline(sources, false).isEmpty())
+        live.admit(steps.mapIndexed { index, item -> item.workflowKey(index) })
+        assertSame(live, liveScope.owner("owner", steps, true))
+        assertEquals(sources, live.initialBaseline(sources, false))
+        val terminal = owners.scope("terminal", false).owner("owner", steps, false)
+        assertTrue(terminal.contains(tool.workflowKey(1)))
+        assertEquals(sources, terminal.initialBaseline(sources, false))
+        val collapsed = owners.scope("collapsed", false).owner("owner", steps, true)
+        assertEquals(sources, collapsed.initialBaseline(sources, true))
+    }
+
     @Test fun onlyTextAfterTheFirstUnreleasedThoughtIsBlocked() {
         val thought = ReportedReasoning("r", "thought")
         val before = MessageContentUi.Text("before", "visible")

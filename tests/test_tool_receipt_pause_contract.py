@@ -14,9 +14,20 @@ class ToolReceiptPauseContract(unittest.TestCase):
         self.assertIn('if (receiptsReady) null else', visible)
         prepare = host.split('private fun prepareToolReceipts()', 1)[1].split('private fun publishChat()', 1)[0]
         for fence in ('toolReceiptRead?.cancel()', 'withContext(Dispatchers.IO)',
-                      'toolReceiptRequest !== request', 'toolReceiptRequested != key', 'currentToolReceiptKey() != key'):
+                      'toolReceiptRequest !== request', 'toolReceiptRequested != key', '!key.canDisplayFor(currentToolReceiptKey())'):
             self.assertIn(fence, prepare)
-        self.assertNotIn('canDisplayFor', prepare)
+        self.assertIn('toolReceiptRequested?.canDisplayFor(key) == true', prepare)
+        complete = prepare.split('private fun completeToolReceipts(', 1)[1]
+        self.assertLess(complete.index('toolReceiptRequest = null'), complete.index('publishChat()'))
+        self.assertIn('if (activityUsable() && currentToolReceiptKey() != key) publishChat()', prepare)
+
+    def test_real_host_completion_regression_keeps_source_fences_and_latest_refresh(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()
+        for token in ('testFirstReadSurvivesLivePhaseChangesAndPublishesWithoutAnotherModelEvent',
+                      'testLateReceiptCompletionCannotReplaceAnotherSourceOrRequest',
+                      'it.name == "completeToolReceipts"', 'complete.invoke(activity, Any(), current, snapshot)',
+                      'assertEquals("receipt refresh never opens a model session", 0, fixture.opens.get())'):
+            self.assertIn(token, test)
 
     def test_compatibility_ignores_only_live_execution_and_requires_all_source_fields(self):
         source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()

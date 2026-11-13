@@ -28,6 +28,8 @@ internal object RuntimeDiagnostics {
         CACHE_HIT,
         CACHE_MISS,
         CACHE_BYPASS,
+        RECEIPT_ACCEPTED,
+        RECEIPT_STALE,
         FIRST_EVENT,
         FIRST_TEXT,
         FIRST_REASONING,
@@ -392,6 +394,7 @@ internal object RuntimeDiagnostics {
                         .put("response_headers_seen", transport.responseHeadersSeen).put("completion_received", transport.completionReceived)
                         .put("eof_seen", transport.eofSeen).put("partial_sse_frame", transport.partialFrame)
                         .put("local_disconnect_requested", transport.localDisconnectRequested)
+                        .put("socket_detail", transport.socketDetail.name)
                 }
             }
         }

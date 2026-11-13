@@ -26,7 +26,7 @@ class PreparationDisclosureAlphaContract(unittest.TestCase):
         source = (MAIN / 'ui/screens/chat/conversation/WorkProcessCard.kt').read_text(encoding='utf-8')
         self.assertIn('key(ownerKey, "reasoning", reported.itemId) {', source)
         self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', source)
-        self.assertLess(source.index('val reasoningState = rememberSaveableStateHolder()'), source.index('AnimatedVisibility(expanded)'))
+        self.assertLess(source.index('val reasoningState = rememberSaveableStateHolder()'), source.index('AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(expandFrom = Alignment.Top)'))
         self.assertIn('reasoningState.SaveableStateProvider(reported.itemId)', source)
         fixture = (TEST / 'ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text(encoding='utf-8')
         self.assertIn('assertDisclosure(first, expanded = false)', fixture)

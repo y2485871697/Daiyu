@@ -172,6 +172,7 @@ enum class ModelTransportPhase { PREPARING, SENDING, WAITING_HEADERS, READING_ST
 enum class ModelTransportCause { DNS, CONNECT, TIMEOUT, TLS, SOCKET, IO, PREMATURE_EOF,
     PARTIAL_SSE_FRAME, PROTOCOL, HTTP, PROVIDER_REJECTION, CONFIGURATION }
 enum class ModelRequestKind { POST, RESUME }
+enum class ModelSocketDetail { UNKNOWN, RESET, CLOSED, ABORTED, BROKEN_PIPE, END_OF_STREAM, NETWORK_UNREACHABLE }
 
 data class ModelTransportDiagnostic(
     val phase: ModelTransportPhase,
@@ -186,6 +187,7 @@ data class ModelTransportDiagnostic(
     val eofSeen: Boolean = false,
     val partialFrame: Boolean = false,
     val localDisconnectRequested: Boolean = false,
+    val socketDetail: ModelSocketDetail = ModelSocketDetail.UNKNOWN,
 ) {
     init {
         require(requestElapsedMs >= 0 && sseFrames >= 0)

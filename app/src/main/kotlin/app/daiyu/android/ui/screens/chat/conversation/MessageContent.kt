@@ -48,6 +48,7 @@ internal fun MessageContent(
     imageOffset: Int = 0,
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit = { _, body -> body() },
     fillWidth: Boolean = true,
+    entryVisible: (String) -> Boolean = { true },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
     val connectors = remember(content, workflowTimeline) { workflowConnectors(content, workflowTimeline) }
@@ -64,7 +65,7 @@ internal fun MessageContent(
             val index = range.first
             val source = content[index]
             val block = key(source.workflowKey(index)) { rememberWorkflowItem(source) }
-            val visible = precedingReady
+            val visible = precedingReady && entryVisible(block.workflowKey(index))
             key(block.workflowKey(index)) {
                 if (block is MessageContentUi.Tool) {
                     key(block.step.renderKey) {

@@ -31,7 +31,8 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('if (receiptsReady) questionCards =', publish)
         prepare = text.split('private fun prepareToolReceipts()', 1)[1].split('private fun publishChat()', 1)[0]
         self.assertIn('withContext(Dispatchers.IO)', prepare)
-        self.assertIn('currentToolReceiptKey() != key', prepare)
+        self.assertIn('!key.canDisplayFor(currentToolReceiptKey())', prepare)
+        self.assertIn('currentToolReceiptKey() != key) publishChat()', prepare)
         self.assertIn('toolReceiptRequested != key', prepare)
     def test_body_growth_is_not_a_reason_to_decode_checkpoints_again(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()

@@ -16,6 +16,50 @@ class ProviderRequestTraceTest {
         assertFalse(before.toString().contains("private-host"))
     }
 
+    @Test fun socketSymptomsAreClosedEnumsWithoutRetainingMessagesOrChangingRetryClassification() {
+        val canary = "private-key-https://secret.invalid/?token=hidden"
+        for ((symptom, detail) in listOf("Connection reset by peer" to ModelSocketDetail.RESET,
+            "Socket is closed" to ModelSocketDetail.CLOSED, "Software caused connection abort" to ModelSocketDetail.ABORTED,
+            "Broken pipe" to ModelSocketDetail.BROKEN_PIPE, "unexpected end of stream" to ModelSocketDetail.END_OF_STREAM,
+            "Network is unreachable" to ModelSocketDetail.NETWORK_UNREACHABLE, canary to ModelSocketDetail.UNKNOWN)) {
+            val socket = java.net.SocketException("$symptom $canary")
+            socket.addSuppressed(IllegalStateException(canary))
+            val direct = providerTransportFailure(socket, false, ProviderRequestTrace()) as ModelRequestException
+            assertEquals(ModelFailure.NETWORK, direct.failure)
+            assertEquals(ModelTransportCause.SOCKET, direct.diagnostic!!.transport!!.cause)
+            assertEquals(detail, direct.diagnostic!!.transport!!.socketDetail)
+            val wrapped = providerTransportFailure(java.io.IOException(canary, socket), false,
+                ProviderRequestTrace()) as ModelRequestException
+            assertEquals(ModelTransportCause.IO, wrapped.diagnostic!!.transport!!.cause)
+            assertEquals(detail, wrapped.diagnostic!!.transport!!.socketDetail)
+            for (safe in listOf(direct, wrapped)) {
+                assertNull(safe.cause); assertTrue(safe.suppressed.isEmpty())
+                assertFalse(safe.diagnostic.toString().contains(canary))
+                assertFalse(safe.stackTraceToString().contains(canary))
+            }
+        }
+    }
+
+    @Test fun socketSymptomTraversalStopsAtCyclesAndItsFixedDepth() {
+        val first = java.io.IOException("unknown")
+        val second = java.io.IOException("unknown", first)
+        first.initCause(second)
+        assertEquals(ModelSocketDetail.UNKNOWN, ProviderRequestTrace().diagnostic(first, ModelFailure.NETWORK).socketDetail)
+        var deep: Throwable = java.net.SocketException("Connection reset")
+        repeat(7) { deep = java.io.IOException("unknown", deep) }
+        assertEquals(ModelSocketDetail.RESET, ProviderRequestTrace().diagnostic(deep as Exception, ModelFailure.NETWORK).socketDetail)
+        deep = java.io.IOException("unknown", deep)
+        assertEquals(ModelSocketDetail.UNKNOWN, ProviderRequestTrace().diagnostic(deep as Exception, ModelFailure.NETWORK).socketDetail)
+        for (nonSocket in listOf(java.io.FileNotFoundException("/storage/emulated/0/Broken pipe.txt"),
+            java.io.IOException("Connection reset"))) {
+            assertEquals(ModelSocketDetail.UNKNOWN, ProviderRequestTrace().diagnostic(nonSocket, ModelFailure.NETWORK).socketDetail)
+        }
+        assertEquals(ModelSocketDetail.END_OF_STREAM, ProviderRequestTrace().diagnostic(
+            java.io.EOFException("unexpected end of stream"), ModelFailure.NETWORK).socketDetail)
+        assertEquals(ModelSocketDetail.UNKNOWN, ProviderRequestTrace().diagnostic(
+            IllegalStateException("Connection reset"), ModelFailure.PROTOCOL).socketDetail)
+    }
+
     @Test fun onlyCompleteDataFramesCountAndAgeUsesTheRequestMonotonicClock() {
         var time = 0L
         val trace = ProviderRequestTrace(now = { time })

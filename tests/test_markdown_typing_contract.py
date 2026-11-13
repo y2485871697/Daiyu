@@ -42,7 +42,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("while (shown < end)", self.typing)
 
     def test_mount_baseline_and_part_identity_are_not_text_guesses(self):
-        for token in ["remember(identity, resetEpoch) { sources.toList() }", "MarkdownTypingSource(it.itemId, it.text)",
+        for token in ["remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }", "MarkdownTypingSource(it.itemId, it.text)",
                       "rememberMarkdownProjection(baseline.map { it.text },", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
             self.assertIn(token, self.typing)
         workflow = (BASE / "AssistantWorkflowContent.kt").read_text()

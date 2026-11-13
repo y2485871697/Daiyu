@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
@@ -40,6 +41,54 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     private fun assertDisclosure(tag: String, expanded: Boolean) {
         ui.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(
             SemanticsProperties.StateDescription, if (expanded) "已展开" else "已折叠"))
+    }
+
+    fun testNewLiveNarrationAndToolAdmissionFinishBeforeAutomaticAnswerHandoff() {
+        val narration = "NARRATION " + "字".repeat(180)
+        val answer = "FINAL AFTER ADMISSION"
+        runBlocking {
+            projectMarkdown(listOf(narration))
+            projectMarkdown(listOf(narration), parser = streamingMarkdownParser)
+            projectMarkdown(listOf(answer))
+            projectMarkdown(listOf(answer), parser = streamingMarkdownParser)
+        }
+        val scope = WorkflowVisualScope(false)
+        var complete by mutableStateOf(false)
+        val advances = java.util.concurrent.atomic.AtomicInteger()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val blocks = listOf(MessageBlock.Text("narration", narration), tool("admission")) +
+                    if (complete) listOf(MessageBlock.Text("answer", answer)) else emptyList()
+                val turn = mapped(message(blocks, emptyList()).copy(
+                    status = if (complete) RunStatus.COMPLETED else RunStatus.RUNNING)).copy(isStreaming = !complete)
+                CompositionLocalProvider(LocalWorkflowVisualScope provides scope) {
+                    AssistantTurn(turn, ChatScreenActions(), onVisibleAdvance = { advances.incrementAndGet() })
+                }
+            } } }
+            ui.mainClock.advanceTimeBy(64)
+            mainThread { complete = true }
+            ui.mainClock.advanceTimeBy(64)
+            assertDisclosure("work-process-header", expanded = true)
+            ui.onNodeWithText(answer, useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithTag("tool-step:admission").assertDoesNotExist()
+            ui.waitUntil(10_000) {
+                ui.mainClock.advanceTimeByFrame()
+                val toolVisible = ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
+                if (!toolVisible) {
+                    assertDisclosure("work-process-header", expanded = true)
+                    ui.onNodeWithText(answer, useUnmergedTree = true).assertDoesNotExist()
+                }
+                toolVisible
+            }
+            assertTrue("The first live narration must actually advance", advances.get() > 0)
+            ui.waitUntil(10_000) {
+                ui.mainClock.advanceTimeBy(32)
+                ui.onAllNodesWithText(answer, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            ui.onNodeWithTag("tool-step:admission").assertDoesNotExist()
+            ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testLegacyTerminalAnswerStartsTypingOnlyAfterWorkflowDisposal() = verifyAnswerAdmission(mixed = false, terminal = true)

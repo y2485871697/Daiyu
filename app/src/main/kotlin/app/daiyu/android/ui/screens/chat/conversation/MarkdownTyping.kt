@@ -93,11 +93,12 @@ internal fun rememberMarkdownReveal(
     blockedSources: Set<String> = emptySet(),
     live: Boolean = streaming,
     paceTerminal: Boolean = false,
+    initialBaseline: List<MarkdownTypingSource>? = null,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
     val identity = MarkdownParserIdentity(parser)
-    val baseline = remember(identity, resetEpoch) { sources.toList() }
+    val baseline = remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
         streaming = !terminal)
     val baselineLength = remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix) {

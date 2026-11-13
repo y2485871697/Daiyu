@@ -138,7 +138,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         for removed in ('ToolDisclosureHeader("技术详情"', 'tool-step-technical:', 'var technical', '.rich?.technical'):
             self.assertNotIn(removed, shell)
-        self.assertIn('AnimatedVisibility(expanded)', shell)
+        self.assertIn('AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(expandFrom = Alignment.Top)', shell)
         self.assertIn('expandedOverride = !expanded', shell)
         body = (CHAT / "ToolBodyLayout.kt").read_text()
         self.assertIn('if (category in setOf("terminal", "background_job"))', body)

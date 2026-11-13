@@ -81,7 +81,7 @@ class ChatResumeScrollContract(unittest.TestCase):
             'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)',
             ' '.join(self.chat.split()),
         )
-        self.assertIn('remember(identity, resetEpoch) { sources.toList() }', self.typing)
+        self.assertIn('remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }', self.typing)
         self.assertIn('remember(identity, resetEpoch) { MarkdownTypingState(baseline) }', self.typing)
         self.assertIn(
             'return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, '

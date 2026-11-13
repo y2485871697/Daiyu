@@ -31,6 +31,17 @@ class ReconnectErrorDetailsTest {
         assertTrue(detail.contains("模型不支持低思考"))
         assertTrue(detail.contains("reasoning"))
     }
+    @Test fun fixedSocketSymptomIsDisplayedWithoutClaimingWhoDisconnected() {
+        val trace = ModelTransportDiagnostic(ModelTransportPhase.READING_STREAM, ModelTransportCause.SOCKET,
+            ModelRequestKind.POST, 100, 80, 3, 40, true, false, socketDetail = ModelSocketDetail.RESET)
+        val detail = reconnectErrorDetails(ModelFailure.NETWORK, ModelRequestDiagnostic(transport = trace))
+        assertTrue(detail.contains("连接症状 RESET"))
+        assertTrue(detail.contains("本地主动断开未请求"))
+        assertFalse(detail.contains("服务商主动"))
+        assertFalse(reconnectErrorDetails(ModelFailure.NETWORK, ModelRequestDiagnostic(transport =
+            trace.copy(socketDetail = ModelSocketDetail.UNKNOWN))).contains("连接症状"))
+    }
+
     @Test fun transportOnlyDetailsDistinguishEarlyEofWithoutInventingHttpOrCompletedAnswers() {
         val diagnostic = ModelRequestDiagnostic(transport = ModelTransportDiagnostic(
             ModelTransportPhase.READING_STREAM, ModelTransportCause.PREMATURE_EOF, ModelRequestKind.POST,

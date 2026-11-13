@@ -275,6 +275,9 @@ internal fun ChatMessageList(
     val currentTurns by rememberUpdatedState(turns)
     val assistantTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
     val currentAssistants by rememberUpdatedState(assistantTurns)
+    val workflowAdmissions = remember(revealResetEpoch) { WorkflowVisualAdmissions(assistantTurns.keys) }
+    assistantTurns.keys.forEach { workflowAdmissions.scope(it, initialPositionPending) }
+    SideEffect { workflowAdmissions.retain(assistantTurns.keys) }
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val displayedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val revealedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
@@ -707,7 +710,8 @@ internal fun ChatMessageList(
                 val turnContent: @Composable () -> Unit = {
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
-                        is ChatTurnUi.Assistant -> Column {
+                        is ChatTurnUi.Assistant -> androidx.compose.runtime.CompositionLocalProvider(
+                            LocalWorkflowVisualScope provides workflowAdmissions.scope(turn.listKey, initialPositionPending)) { Column {
                             ReconnectedAssistantTurn(turn, reconnectPartsByKey.getValue(turn.listKey), actions, imageLoader,
                                 dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id,
@@ -732,7 +736,7 @@ internal fun ChatMessageList(
                                     if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
                                 })
                             turnExtras(turn)
-                        }
+                        } }
                     }
                     fallbackAfter[turn.listKey].orEmpty().forEach { entry ->
                         key(entry.id) { ChatTimelineDivider(entry) }
@@ -962,13 +966,16 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
     dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit,
     plainNarration: Set<String>, plainText: Boolean) {
     val textSources = remember(steps) { steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) } }
+    val visualScope = LocalWorkflowVisualScope.current
+    val visualAdmission = remember(ownerKey, visualScope) { visualScope?.owner(ownerKey, steps, work.running) }
     val textPhase = textSources to work.running
-    var settledPhase by remember(ownerKey) { mutableStateOf(textPhase) }
+    val entriesSettled = visualAdmission?.settled(steps) != false
+    var settledPhase by remember(ownerKey) { mutableStateOf<Pair<List<MarkdownTypingSource>, Boolean>?>(null) }
     var disclosureExpanded by remember(ownerKey) { mutableStateOf(work.running && !stopped) }
     WorkProcessCard(work, ownerKey,
         allowLiveTiming = live, generationComplete = generationComplete, stopped = stopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff,
-        answerPending = answerPending, workflowTextSettled = !disclosureExpanded || textSources.isEmpty() || settledPhase == textPhase,
+        answerPending = answerPending, workflowTextSettled = !disclosureExpanded || ((textSources.isEmpty() || settledPhase == textPhase) && entriesSettled),
         onDisclosureHandoffReady = { if (it) onAnswerReleased() },
         onExpandedChange = { expanded ->
             disclosureExpanded = expanded
@@ -980,12 +987,13 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
             WorkflowNarrationContent(steps, plainText, textSources,
                 running = work.running, paused = work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING,
                 expanded = expanded, stopped = stopped, revealResetEpoch = revealResetEpoch,
-                reasoningReady = { stopped || handoff.ready(it) }, onVisibleAdvance = onVisibleAdvance) { narration ->
+                reasoningReady = { stopped || handoff.ready(it) }, onVisibleAdvance = onVisibleAdvance,
+                admission = visualAdmission) { narration ->
                 val narrationSettled = narration.reveal.settled
                 SideEffect { if (narrationSettled) settledPhase = textPhase }
                 val textBody = rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)
                 MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
-                    workflowTimeline = true,
+                    workflowTimeline = true, entryVisible = narration.entryVisible,
                     toolContent = toolContent, flowRunning = work.running,
                     reasoningReady = { stopped || handoff.ready(it) },
                     reasoningBody = { reported, connector ->

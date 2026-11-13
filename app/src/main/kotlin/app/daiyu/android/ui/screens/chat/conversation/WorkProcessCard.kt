@@ -3,6 +3,10 @@ package app.daiyu.android.ui.screens.chat.conversation
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -109,7 +113,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                     if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
             }
         }
-        AnimatedVisibility(visibility) {
+        AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)) {
             DisposableEffect(ownerKey) {
                 contentMounted = true
                 onDispose { contentMounted = false }
@@ -221,7 +226,8 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                         if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
                 }
             }
-            AnimatedVisibility(expanded) {
+            AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)) {
                 CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(step.name, stateLabel)) {
                     Column(Modifier.padding(bottom = 4.dp).then(
                         if (step.categoryDetails != null) Modifier.testTag("tool-category:${step.category}") else Modifier

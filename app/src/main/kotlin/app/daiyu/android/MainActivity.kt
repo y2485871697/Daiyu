@@ -7020,7 +7020,7 @@ class MainActivity : ComponentActivity() {
             toolReceiptKey = key; toolReceiptSnapshot = null
             return true
         }
-        if (toolReceiptRead?.isActive == true && toolReceiptRequested == key) return false
+        if (toolReceiptRead?.isActive == true && toolReceiptRequested?.canDisplayFor(key) == true) return false
         toolReceiptRead?.cancel()
         toolReceiptRequested = key
         val request = Any()
@@ -7031,17 +7031,31 @@ class MainActivity : ComponentActivity() {
                 val snapshot = withContext(Dispatchers.IO) {
                     RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows) }
                 }
-                if (!activityUsable() || toolReceiptRequest !== request || toolReceiptRequested != key ||
-                    currentToolReceiptKey() != key) return@launch
-                toolReceiptKey = key; toolReceiptSnapshot = snapshot
-                publishChat()
+                completeToolReceipts(request, key, snapshot)
             } finally {
                 if (toolReceiptRequest === request) {
                     toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
+                    if (activityUsable() && currentToolReceiptKey() != key) publishChat()
                 }
             }
         }
         return false
+    }
+
+    private fun completeToolReceipts(request: Any, key: ToolReceiptKey,
+        snapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot) {
+        if (!activityUsable() || toolReceiptRequest !== request || toolReceiptRequested != key ||
+            !key.canDisplayFor(currentToolReceiptKey())) {
+            RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.UI_PREPARE, RuntimeDiagnostics.Code.RECEIPT_STALE,
+                count = key.sources.size.toLong())
+            return
+        }
+        toolReceiptKey = key; toolReceiptSnapshot = snapshot
+        toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.UI_PREPARE, RuntimeDiagnostics.Code.RECEIPT_ACCEPTED,
+            count = key.sources.size.toLong())
+        // Publish evidence now; a changed live phase can independently request its fresh projection.
+        publishChat()
     }
 
     private fun publishChat() = publishChat(rowsChanged = true)

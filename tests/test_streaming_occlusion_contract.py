@@ -63,7 +63,12 @@ class StreamingOcclusionContract(unittest.TestCase):
         device = DEVICE.read_text()
         for token in ("testAppendingShortWorkflowKeepsIdentityAndHeaderUnclippedInEveryFrame",
                       "shortWorkflow(count)", "reply-identity:", "work-process-header",
-                      "range.value()", "node.boundsInRoot.height", "neighbor.boundsInRoot.bottom",
+                      "range.value()", "node.boundsInRoot.height", "node.size.height.toFloat()",
+                      "node.positionInRoot.y", "assertVerticallyUnclipped(node, tag)",
+                      "testSemanticVisibilityProbeDistinguishesPaddingFromTopClipping",
+                      "complete.size.height > complete.layoutInfo.coordinates.size.height",
+                      "clipped.boundsInRoot.height < clipped.size.height - 1f",
+                      "failure is junit.framework.AssertionFailedError", "neighbor.boundsInRoot.bottom",
                       "The outer follower must actually reveal each new tool"):
             self.assertIn(token, device)
 

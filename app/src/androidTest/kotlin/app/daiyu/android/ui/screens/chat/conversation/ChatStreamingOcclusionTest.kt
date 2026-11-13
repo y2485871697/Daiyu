@@ -8,11 +8,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -99,6 +103,44 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         return ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
     }
 
+    private fun assertVerticallyUnclipped(node: SemanticsNode, tag: String) {
+        assertEquals("The identity/header top must remain unclipped: $tag",
+            node.positionInRoot.y, node.boundsInRoot.top, 1f)
+        assertEquals("The whole identity/header must remain visible: $tag",
+            node.size.height.toFloat(), node.boundsInRoot.height, 1f)
+    }
+
+    fun testSemanticVisibilityProbeDistinguishesPaddingFromTopClipping() {
+        var shift by mutableStateOf(0.dp)
+        mainThread {
+            activity.setContent {
+                Box(Modifier.size(64.dp).clipToBounds()) {
+                    Box(Modifier.offset(y = shift).testTag("semantic-visibility-probe").padding(bottom = 2.dp)) {
+                        Box(Modifier.size(32.dp, 26.dp))
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        val complete = ui.onNodeWithTag("semantic-visibility-probe").fetchSemanticsNode()
+        assertTrue("The probe must distinguish tagged padding from inner layout geometry",
+            complete.size.height > complete.layoutInfo.coordinates.size.height)
+        assertVerticallyUnclipped(complete, "padded probe")
+
+        ui.runOnUiThread { shift = (-4).dp }
+        ui.waitForIdle()
+        val clipped = ui.onNodeWithTag("semantic-visibility-probe").fetchSemanticsNode()
+        assertTrue("The negative probe must really lose visible height",
+            clipped.boundsInRoot.height < clipped.size.height - 1f)
+        val failure = runCatching { assertVerticallyUnclipped(clipped, "clipped probe") }.exceptionOrNull()
+        assertTrue("The same visibility assertion must reject real top clipping",
+            failure is junit.framework.AssertionFailedError)
+
+        ui.runOnUiThread { shift = 0.dp }
+        ui.waitForIdle()
+        assertVerticallyUnclipped(ui.onNodeWithTag("semantic-visibility-probe").fetchSemanticsNode(), "restored probe")
+    }
+
     fun testAppendingShortWorkflowKeepsIdentityAndHeaderUnclippedInEveryFrame() {
         var count by mutableStateOf(1)
         val tail = shortWorkflow(1)
@@ -132,21 +174,19 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     val row = ui.onNodeWithTag("chat-turn:${tail.id}").fetchSemanticsNode()
                     val list = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot
                     assertTrue("This regression must remain shorter than a full reading viewport",
-                        row.layoutInfo.coordinates.size.height < composer.top - list.top - 35f * density)
+                        row.size.height < composer.top - list.top - 35f * density)
                     val range = viewport.config[SemanticsProperties.VerticalScrollAxisRange]
                     assertEquals("A short workflow must never scroll its identity out of its own viewport",
                         0f, range.value(), 1f)
                     for (tag in listOf("reply-identity:${tail.listKey}", "work-process-header")) {
                         val node = ui.onNodeWithTag(tag).fetchSemanticsNode()
-                        val coordinates = node.layoutInfo.coordinates
-                        val top = coordinates.positionInRoot().y
+                        val top = node.positionInRoot.y
                         assertTrue("Existing workflow top must not be locally cropped: $tag",
                             top >= viewport.boundsInRoot.top - 1f)
-                        assertEquals("The whole identity/header must remain visible: $tag",
-                            coordinates.size.height.toFloat(), node.boundsInRoot.height, 1f)
+                        assertVerticallyUnclipped(node, tag)
                     }
                     val identityTop = ui.onNodeWithTag("reply-identity:${tail.listKey}")
-                        .fetchSemanticsNode().layoutInfo.coordinates.positionInRoot().y
+                        .fetchSemanticsNode().positionInRoot.y
                     val neighbors = ui.onAllNodesWithTag("chat-turn:short-history-5").fetchSemanticsNodes()
                     neighbors.singleOrNull()?.takeIf { it.boundsInRoot.height > 1f }?.let { neighbor ->
                         sawVisibleNeighbor = true
@@ -154,7 +194,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                             neighbor.boundsInRoot.bottom <= identityTop + 1f)
                     }
                     val tool = ui.onAllNodesWithTag("tool-step:short-step-${next - 1}").fetchSemanticsNodes().singleOrNull()
-                    if (tool != null && tool.boundsInRoot.height >= tool.layoutInfo.coordinates.size.height - 1f) {
+                    if (tool != null && tool.boundsInRoot.height >= tool.size.height - 1f) {
                         sawNewTool = true
                         assertTrue("A fully revealed new tool must still clear the composer",
                             tool.boundsInRoot.bottom <= composer.top - 16f * density + 1f)

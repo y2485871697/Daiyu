@@ -56,7 +56,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('revealResetEpoch = revealResetEpoch', work)
         content = (CHAT / 'MessageContent.kt').read_text()
         self.assertIn('key(block.workflowKey(index))', content)
-        self.assertIn('key(block.step.owner, block.step.toolCallId)', content)
+        self.assertIn('key(block.step.renderKey)', content)
         self.assertIn('reasoningState.SaveableStateProvider("ordered-content")', work)
         self.assertIn('MessageContent(steps,', (CHAT / 'ChatMessageList.kt').read_text())
 
@@ -73,7 +73,9 @@ class ReasoningTypewriterContract(unittest.TestCase):
         typing = (CHAT / 'MarkdownTyping.kt').read_text()
         self.assertIn('return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, turn.status != RunStatus.RUNNING && prefix.size == turn.content.size,', ' '.join(typing.split()))
         self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', typing)
-        self.assertEqual(1, typing.count('withFrameNanos { motion.advance(current, it, end) { currentAdvance() } }'))
+        self.assertEqual(1, typing.count('withFrameNanos { frameNanos ->'))
+        self.assertIn('if (currentCanAdvance) motion.advance(current, frameNanos, end) { currentAdvance() }', typing)
+        self.assertIn('else { motion.pause(current); motion.visible(current) }', typing)
         self.assertIn('rememberUpdatedState(onVisibleAdvance)', typing)
 
 if __name__ == '__main__':

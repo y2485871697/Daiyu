@@ -1052,7 +1052,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         dismissIme(); ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
         mainThread { rendered = "usage" }
-        awaitControl("usage-heatmap")
+        awaitUniqueTag("usage-heatmap")
         ui.waitUntil(5_000) { usageFrame?.ready != null }
         val preparedOverview = checkNotNull(usageFrame?.ready)
         val modelTab = ui.onNodeWithTag("usage-tab:" + activity.getString(app.daiyu.android.R.string.stats_tab_models))
@@ -1061,7 +1061,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         try {
             mainThread { blockCopies = true }
             modelTab.performClick()
-            awaitControl("usage-model-pane")
+            awaitUniqueTag("usage-model-pane")
             modelTab.assertIsSelected()
             val selectedPixels = captureScreenNode(modelTab).toPixelMap()
             val selected = selectedPixels[selectedPixels.width / 4, selectedPixels.height / 2]

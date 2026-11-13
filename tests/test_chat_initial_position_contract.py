@@ -11,9 +11,10 @@ class ChatInitialPositionContract(unittest.TestCase):
     def test_selection_publishes_target_and_fresh_bottom_request_together(self):
         host = HOST.read_text()
         select = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('private fun sendDraft(', 1)[0]
-        self.assertIn('publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial))', select)
+        self.assertIn('refresh()\n        publishChat(rowsChanged = false, scrollRequest = ChatScrollRequest(++scrollSerial))', select)
         self.assertNotIn('publishChat(); jumpToBottom()', select)
         publish = host.split('private fun publishChat(rowsChanged:', 1)[1].split('private fun requestScroll(', 1)[0]
+        self.assertIn('val remapTurns = rowsChanged || chatState.conversationKey != selected?.id?.value ||', publish)
         self.assertIn('scrollRequest: ChatScrollRequest? = chatState.scrollRequest', publish)
         self.assertIn('scrollRequest = scrollRequest,', publish)
         self.assertIn('conversationKey = selected?.id?.value', publish)

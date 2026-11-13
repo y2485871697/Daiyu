@@ -33,7 +33,8 @@ class StreamingFreezeContract(unittest.TestCase):
         source = (APP / 'MainActivity.kt').read_text()
         remap = source.split('        val remapTurns = ', 1)[1].split('        chatState = ', 1)[0]
         self.assertNotIn('receiptsReady', remap)
-        self.assertIn('rowsChanged || workflowBoundaries != oldBoundaries', remap)
+        self.assertIn('rowsChanged || chatState.conversationKey != selected?.id?.value ||', remap)
+        self.assertIn('workflowBoundaries != oldBoundaries', remap)
         self.assertIn('toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)', source)
         self.assertIn('if (receiptsReady) questionCards = buildMap', source)
         self.assertIn('question.copy(binding = null, canAnswer = false)', source)

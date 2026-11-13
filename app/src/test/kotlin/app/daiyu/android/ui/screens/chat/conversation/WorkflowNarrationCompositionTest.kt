@@ -307,7 +307,18 @@ class WorkflowNarrationCompositionTest {
             }
             assertTrue("Later streaming text must not restart the ready tool's frame admission", visible(firstTool, 1))
             assertFalse(visible(lastTool, 3))
-            until { narration!!.reveal.limit(after.itemId) > 0 }
+            withTimeout(10_000) {
+                var waiting = 0
+                while (narration!!.reveal.limit(after.itemId) == 0) {
+                    frame()
+                    if (++waiting % 120 == 0) println("admission-wait before=${narration!!.reveal.limit(before.itemId)} " +
+                        "beforeReady=${narration!!.reveal.ready(before.itemId, before.text)} " +
+                        "tools=${appended.value.mapIndexed { index, item -> visible(item, index + 2) }} " +
+                        "afterEntry=${visible(suffix.value, appended.value.size + 2)} " +
+                        "blocked=${admission.blockedText(listOf(before, firstTool) + appended.value + listOf(suffix.value, lastTool))} " +
+                        "projection=${narration!!.projection?.sources?.map { it.length }} suffix=${suffix.value.text.length}")
+                }
+            }
             assertTrue(narration!!.reveal.limit(after.itemId) < after.text.length)
             assertFalse(visible(lastTool, 3))
             until { visible(lastTool, 3) }

@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 internal enum class ToolCardAction(val label: String) {
-    PAUSE_TASK("暂停"), RESUME_TASK("继续"), STOP_TASK("停止"), READ_TASK_RESULT("查看结果"), VIEW_ASSETS("查看全部产物"),
+    PAUSE_TASK("暂停"), RESUME_TASK("继续"), STOP_TASK("停止"), VIEW_ASSETS("查看全部产物"),
     OPEN_IMAGE("查看原图"), PLAY_VIDEO("播放"), PLAY_AUDIO("播放"), PAUSE_AUDIO("暂停"), SAVE_MEDIA("保存原件"),
     SEEK_AUDIO("定位播放"),
 }

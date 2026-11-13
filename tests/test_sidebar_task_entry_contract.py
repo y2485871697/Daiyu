@@ -33,13 +33,15 @@ class SidebarTaskEntryContractTest(unittest.TestCase):
         self.assertEqual(5, len(re.findall(r'\bDropdownMenuItem\(', menu)))
         self.assertNotIn('OptionSelectionSheet', menu)
 
-    def test_tool_result_still_has_a_real_route_to_the_shared_record_page(self):
+    def test_chat_results_stay_inline_and_obsolete_page_state_returns_to_chat(self):
         host = source('MainActivity.kt')
-        self.assertIn('ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }', host)
-        self.assertIn('"child-tasks" -> taskRecordsConversationId?.let', host)
-        self.assertIn('ChildTaskRecordsScreen(id, load = { target -> controller.childTasks(ConversationId(target)) }', host)
-        self.assertIn('private fun openChildTaskRecords(id: String)', host)
-        self.assertIn('retainedPage = "child-tasks"', host)
+        for fragment in ('READ_TASK_RESULT', 'openChildTaskRecords', 'ChildTaskRecordsScreen(', 'taskRecordsConversationId'):
+            self.assertNotIn(fragment, host)
+        self.assertIn('if (retainedPage == "child-tasks" || state?.containsKey("task-records-conversation") == true) retainedPage = "chat"', host)
+        task_card = source('ui/screens/chat/conversation/ChildTaskToolContent.kt')
+        self.assertNotIn('READ_TASK_RESULT', task_card)
+        self.assertIn('ChildTaskProgressContent(text, childTaskStatusText(row.status)', task_card)
+        self.assertIn('ChildTaskFrame(Modifier.testTag("tool-child-frame:', task_card)
 
     def test_shared_status_queries_and_task_controls_are_not_deleted(self):
         status = source('ui/screens/chat/conversation/SubAgentStatusDialog.kt')

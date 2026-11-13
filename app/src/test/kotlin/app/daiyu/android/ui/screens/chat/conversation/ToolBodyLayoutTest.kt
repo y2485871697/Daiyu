@@ -9,7 +9,8 @@ class ToolBodyLayoutTest {
             val details = ToolCategoryDetails.project(category, "{}", "readable receipt")
             val body = toolBodyLayout(category, details)
             val texts = body.documents.map { it.text } + listOfNotNull(body.prose?.text)
-            if (category != "user_question") assertEquals(category, 1, texts.count { it == "readable receipt" })
+            if (category !in setOf("user_question", "delegation", "child_control")) assertEquals(category, 1, texts.count { it == "readable receipt" })
+            else if (category != "user_question") assertFalse(texts.contains("readable receipt"))
         }
     }
 

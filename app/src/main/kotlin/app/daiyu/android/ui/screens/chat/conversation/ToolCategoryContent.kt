@@ -42,6 +42,10 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
     val rich = details.rich
     val body = toolBodyLayout(category, details)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        if (category in setOf("delegation", "child_control")) {
+            ChildTaskReceiptContent(details)
+            return@Column
+        }
         if (rich.bodyRestricted) {
             body.prose?.let { Document(it) }
             return@Column

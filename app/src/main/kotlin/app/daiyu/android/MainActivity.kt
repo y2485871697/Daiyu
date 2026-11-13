@@ -95,7 +95,6 @@ import app.daiyu.android.domain.runtime.ExecutionPhase
 import app.daiyu.android.domain.runtime.SupplementAdmission
 import app.daiyu.android.ui.actions.ConversationExportSelection
 import app.daiyu.android.ui.actions.SupplementEditor
-import app.daiyu.android.ui.screens.conversation.ChildTaskRecordsScreen
 import app.daiyu.android.storage.ProviderEditorSlot
 import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
@@ -1740,7 +1739,6 @@ class MainActivity : ComponentActivity() {
     }
     private var exportPickerPending by mutableStateOf(false)
     private var conversationExport = ConversationExportSelection()
-    private var taskRecordsConversationId by mutableStateOf<String?>(null)
     // Frozen entry context. Readers run on IO and must not inspect mutable Compose/host state.
     private class SearchPage(
         val route: String, val returnPage: String, val conversationId: String?,
@@ -2152,8 +2150,7 @@ class MainActivity : ComponentActivity() {
                 ?: state?.getString("pending-conversation-export")?.let(::listOf))
                 .takeIf { pendingBackupRequest == 105 })
         exportPickerPending = pendingBackupRequest == 105
-        taskRecordsConversationId = state?.getString("task-records-conversation")
-        if (taskRecordsConversationId != null) retainedPage = "child-tasks"
+        if (retainedPage == "child-tasks" || state?.containsKey("task-records-conversation") == true) retainedPage = "chat"
         if (intent?.action == ChatApplication.OPEN_PET_SETTINGS) retainedPage = "pet-settings"
         app.daiyu.android.diagnostics.WindowFramePerformance.install(this, controller.diagnostics)
         setContent {
@@ -2204,7 +2201,7 @@ class MainActivity : ComponentActivity() {
                 val rootBodyRoute = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage
                 val chatBodyVisible = rootBodyRoute !in setOf(
                     "balance-settings", "pet-settings", "pet-model-settings", "vision-settings", "manage",
-                    "conversation-search", "message-search", "usage", "child-tasks", "permission-check",
+                    "conversation-search", "message-search", "usage", "permission-check",
                     "shizuku-settings", "terminal", "linux-settings", "chat-workspace", "generation-settings",
                     "title-model-settings", "compression-settings", "reconnect-settings", "mcp-settings",
                     "browser-settings", "gui-settings", "skills", "voice-settings", "session-gateway",
@@ -2499,15 +2496,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     "usage" -> UsageStatsScreen(onBack = { closeUsagePage() }, load = { retainedData.stats() })
-                    "child-tasks" -> taskRecordsConversationId?.let { id ->
-                        ChildTaskRecordsScreen(id, load = { target -> controller.childTasks(ConversationId(target)) },
-                            loadLive = { target -> controller.liveChildTasks(ConversationId(target)) },
-                            onPause = { record -> controller.pauseChildTask(record) },
-                            onResume = { record -> controller.resumeChildTask(record) },
-                            onCommand = { command -> controller.directChildTask(command) },
-                            onStop = { record -> controller.stopChildTask(record) },
-                            onBack = { returnToChat() })
-                    }
                     "permission-check" -> app.daiyu.android.ui.screens.settings.PermissionCheckScreen(
                         onBack = { returnToChat(refreshState = false) },
                     )
@@ -5648,7 +5636,6 @@ class MainActivity : ComponentActivity() {
         if (step.categoryDetails?.rich?.bodyRestricted == true) return
         val owner = step.owner ?: return
         when (request.action) {
-            ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }
             ToolCardAction.PAUSE_TASK, ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK ->
                 controlChildTaskFromCard(step, request)
             ToolCardAction.OPEN_IMAGE, ToolCardAction.PLAY_VIDEO, ToolCardAction.SAVE_MEDIA -> generationMediaAction(step, request)
@@ -5723,7 +5710,6 @@ class MainActivity : ComponentActivity() {
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("pending-backup-request", pendingBackupRequest?.takeUnless { it == 101 || it == 103 } ?: 0)
         state.putStringArrayList("pending-conversation-exports", conversationExport.pendingConversationIds?.let { ArrayList(it) })
-        if (retainedPage == "child-tasks") state.putString("task-records-conversation", taskRecordsConversationId)
         super.onSaveInstanceState(state)
     }
     override fun onNewIntent(intent: Intent) {
@@ -6013,7 +5999,6 @@ class MainActivity : ComponentActivity() {
         dismissSidebarState()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
-        taskRecordsConversationId = null
         if (activityUsable()) {
             // A recreated video editor can only adopt its retained receipt after becoming visible.
             if (refreshState || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
@@ -7657,10 +7642,6 @@ class MainActivity : ComponentActivity() {
         backupGuard { showOpenedBackup(openedBackupUri(open)) }
     }
     private fun backupMenu() { checkBackupAvailable(); lastOpenedBackupUri = null; retainedPage = "backup" }
-    private fun openChildTaskRecords(id: String) {
-        retainedConversation(id)
-        dismissSidebar(); taskRecordsConversationId = id; retainedPage = "child-tasks"
-    }
     @Suppress("DEPRECATION") private fun pickConversationExports(ids: List<String>) {
         checkBackupAvailable()
         check(!controller.hasLiveChildTasks()) { "子任务运行中，暂不能导出" }

@@ -24,7 +24,7 @@ class ToolCardPresentationTest {
         }
         val card = ToolCardPresentations.present("inspect_child_tasks", "{}",
             "{\"tasks\":[],\"current_configuration_available\":true}")
-        assertTrue(card.details.fields.contains(ToolFieldUi("当前委派配置可用", "是")))
+        assertTrue(card.details.fields.isEmpty())
         assertEquals("child_control", card.category)
     }
 
@@ -109,8 +109,8 @@ class ToolCardPresentationTest {
     @Test fun actualTaskArraysAndTerminalFlagsAreBoundedMetadataNotSuccessInference() {
         val queued = ToolCardPresentations.present("start_child_tasks", "{\"tasks\":[{\"prompt\":\"private\"}]}",
             "{\"accepted\":true,\"completed\":false,\"tasks\":[{\"child_run_id\":\"secret\"}]}")
-        assertEquals("任务数：1", queued.summary)
-        assertEquals(listOf(ToolDetailSectionUi("任务", "任务数：1")), queued.sections)
+        assertEquals("", queued.summary)
+        assertTrue(queued.sections.isEmpty())
         assertFalse(queued.toString().contains("private"))
         assertFalse(queued.toString().contains("secret"))
         val pty = ToolCardPresentations.present("terminal_pty_read", "{}", "{\"wait_status\":7,\"state\":\"exited\",\"has_more\":false,\"total_bytes\":32}")
@@ -129,16 +129,18 @@ class ToolCardPresentationTest {
         ToolCardPresentations.categories.forEach { category ->
             val typed = ToolCategoryDetails.project(category, payload, payload)
             assertTrue(typed.heading.isNotBlank())
-            assertTrue(typed.notice.isNotBlank())
+            if (category in setOf("delegation", "child_control")) assertTrue(typed.notice.isEmpty())
+            else assertTrue(typed.notice.isNotBlank())
             assertFalse(typed.toString().contains("token=secret"))
         }
     }
-    @Test fun taskDetailsUseReturnedStatesWithoutPromotingAdmissionToCompletion() {
+    @Test fun taskLaunchDetailsDoNotPromoteReturnedStatesToHostLifecycle() {
         val detail = ToolCategoryDetails.project("delegation", "{\"tasks\":[{}]}",
-            """{"accepted":true,"tasks":[{"state":"queued"},{"state":"running","text":"private-output"}]}""")
-        assertEquals(listOf("排队中", "执行中"), detail.items.map { it.fields.single().value })
-        assertFalse(detail.fields.any { it.label == "任务已完成" })
-        assertFalse(detail.toString().contains("private-output"))
+            """{"accepted":true,"tasks":[{"state":"queued"},{"state":"running","text":"private-output"}]}""",
+            toolName = "start_child_tasks")
+        assertTrue(detail.fields.isEmpty()); assertTrue(detail.items.isEmpty())
+        assertTrue(detail.rich.entries.isEmpty()); assertTrue(detail.rich.documents.isEmpty())
+        assertNull(detail.rich.prose)
         assertTrue(ToolCategoryDetails.project("system_action", "{\"percent\":0,\"enabled\":false}", null)
             .fields.containsAll(listOf(ToolFieldUi("百分比", "0"), ToolFieldUi("已启用", "否"))))
     }

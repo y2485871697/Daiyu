@@ -1983,6 +1983,10 @@ class ChatController internal constructor(private val application:Application,
         return (retained.first.flatMap { it.snapshots() } + retained.second.mapNotNull { it.snapshot })
             .filter { it.record.owner.conversationId == conversationId.value }
     }
+    internal fun childTaskProgress(owner: app.daiyu.android.domain.delegation.ChildRunOwner): String =
+        synchronized(this) { childSupervisor }?.progress(owner).orEmpty().ifEmpty {
+            synchronized(this) { browserChildProgress[owner].orEmpty() }
+        }
     internal fun pauseChildTask(record: ChildTaskRecord): app.daiyu.android.domain.delegation.ChildTaskControlReceipt {
         val retained = synchronized(this) {
             if (closed || !ready || recoveryFailed) null else backgroundRuns[RunId(record.owner.parentRunId)]

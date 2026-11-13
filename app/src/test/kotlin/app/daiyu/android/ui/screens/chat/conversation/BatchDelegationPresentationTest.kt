@@ -19,7 +19,7 @@ class BatchDelegationPresentationTest {
             .joinToString("\n")
     }
 
-    @Test fun launchCardsKeepOneCountWithoutRawOrFallbackTaskLists() {
+    @Test fun launchCardsUseOnlyHostTasksWithoutRawOrFallbackTaskLists() {
         for (tool in listOf("run_child_models", "start_child_tasks")) for (key in listOf("results", "tasks")) {
             val row = JSONObject().put("child_run_id", "INTERNAL_CHILD").put("profile_id", "INTERNAL_PROFILE")
                 .put("task_id", "INTERNAL_TASK").put("result_id", "INTERNAL_RESULT").put("status", "dispatched")
@@ -27,7 +27,7 @@ class BatchDelegationPresentationTest {
             val result = JSONObject().put(key, JSONArray().put(row))
                 .put("message", "派发任务数 1 INTERNAL_CHILD DEBUG_MESSAGE").toString()
             val details = details(tool, result)
-            assertEquals(listOf(ToolFieldUi("请求任务数", "1")), toolBodyLayout("delegation", details).fields)
+            assertTrue(toolBodyLayout("delegation", details).fields.isEmpty())
             assertTrue(details.items.isEmpty())
             assertTrue(details.rich.entries.isEmpty())
             assertTrue(details.rich.documents.isEmpty())
@@ -84,17 +84,17 @@ class BatchDelegationPresentationTest {
     @Test fun launchSectionsNeverDeclareLifecycleCompletion() {
         for (tool in listOf("run_child_models", "start_child_tasks")) {
             val card = ToolCardPresentations.present(tool, arguments, """{"completed":true,"results":[{"status":"completed"}]}""")
-            assertEquals(listOf(ToolDetailSectionUi("任务", "任务数：1")), card.sections)
+            assertTrue(card.sections.isEmpty())
             val failed = ToolCardPresentations.present(tool, arguments, """{"status":"failed"}""")
             assertTrue(failed.sections.any { it.text == "未能分配任务" })
         }
     }
 
-    @Test fun resultReadsStillExposeTheActualResultAndProgress() {
+    @Test fun resultReadsExposeOneTaskBodyWithoutRepeatedProgressOrDebugMetadata() {
         val details = details("get_child_task", """{"text":"USER_RESULT","progress":"USER_PROGRESS","partial_result":"USER_PARTIAL"}""")
-        assertTrue(details.rich.documents.any { it.text == "USER_RESULT" })
-        assertTrue(details.rich.documents.any { it.text == "USER_PROGRESS" })
-        assertTrue(details.rich.documents.any { it.text == "USER_PARTIAL" })
+        assertTrue(details.rich.documents.isEmpty())
+        assertEquals(listOf("USER_RESULT"), details.rich.entries.flatMap { it.documents }.map { it.text })
+        assertEquals("状态未确认", details.rich.entries.single().fields.single().value)
     }
 
     @Test fun diagnosticsRemainScrubbedAndUnknownToolIsNotReclassified() {

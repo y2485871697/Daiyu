@@ -40,7 +40,7 @@ internal class RunChildTaskAccess(
                     .put("task_group_id", row.owner.taskGroupId).put("generation", row.owner.generation)
                     .put("child_run_id", row.owner.childRunId).put("assistant_message_id", row.owner.assistantMessageId)
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
-                    .put("expected_revision", row.revision).put("profile_id", row.profileId).put("status", row.status.name)
+                    .put("expected_revision", row.revision).put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("profile_id", row.profileId).put("status", row.status.name)
                     .put("queue_state", state?.queueState?.name).put("pause_state", state?.pauseState?.name).put("live_state_available", state != null)
                     .put("stop_requested", state?.stopRequested ?: JSONObject.NULL)
                     .put("journal_unconfirmed", state?.journalUnconfirmed ?: JSONObject.NULL)
@@ -93,6 +93,7 @@ internal class RunChildTaskAccess(
                 }
                 if (outcome in setOf("STALE", "NOT_FOUND", "ALREADY_SETTLED")) ExecutionReceipt.NotExecuted("child_not_live")
                 else ExecutionReceipt.Confirmed(JSONObject().put("child_run_id", owner.childRunId)
+                    .put("profile_id", row.profileId).put("agent_name", row.display?.agentName ?: JSONObject.NULL)
                     .put("outcome", outcome).put("new_request", false).toString())
             }
         }
@@ -120,7 +121,8 @@ internal class RunChildTaskAccess(
                 val partial = progress(owner)
                 ExecutionReceipt.Confirmed(JSONObject().put("child_run_id", owner.childRunId)
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
-                    .put("expected_revision", row.revision).put("status", row.status.name)
+                    .put("expected_revision", row.revision).put("profile_id", row.profileId)
+                    .put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("status", row.status.name)
                     .put("queue_state", state?.queueState?.name).put("pause_state", state?.pauseState?.name).put("settled", state?.settled ?: JSONObject.NULL)
                     .put("live_state_available", state != null)
                     .put("stop_requested", state?.stopRequested ?: JSONObject.NULL)

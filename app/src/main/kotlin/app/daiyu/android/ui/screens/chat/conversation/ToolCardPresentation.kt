@@ -55,10 +55,7 @@ internal object ToolCardPresentations {
             "system_action" -> listOf("hour", "minute", "seconds", "index", "duration_seconds", "percent")
             else -> emptyList()
         }
-        val params = listOf(numbers(args, paramKeys), when (toolName) {
-            "run_child_models", "start_child_tasks" -> arrayCount(args, "tasks", "任务数")
-            else -> ""
-        }).filter { it.isNotBlank() }.joinToString(" · ")
+        val params = numbers(args, paramKeys)
         val output = parse(result)
         val returned = when (toolName) {
             "launch_app" -> if (output?.optString("status") == "PLATFORM_LAUNCH_ACCEPTED_NOT_VERIFIED")
@@ -94,7 +91,7 @@ internal object ToolCardPresentations {
         }.filter { it.isNotBlank() }.joinToString(" · ")
         val summary = when {
             toolName in setOf("launch_app", "platform_permissions") && returned.isNotBlank() -> returned
-            kind.first == "delegation" -> params.ifBlank { "任务分工" }
+            kind.first in setOf("delegation", "child_control") -> ""
             kind.first == "personal_search" -> "仅显示检索范围与数量，私密正文已隐藏"
             params.isNotBlank() -> params
             result == null -> "等待执行回执"
@@ -103,8 +100,7 @@ internal object ToolCardPresentations {
         val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromResult(toolName, result, output) else null
         val details = ToolCategoryDetails.project(kind.first, arguments, result, toolName, target, screenScreenshot)
         val sections = buildList {
-            if (kind.first == "delegation") {
-                if (params.isNotBlank()) add(ToolDetailSectionUi("任务", params))
+            if (kind.first in setOf("delegation", "child_control")) {
                 details.rich.prose?.let { add(ToolDetailSectionUi("结果", it.text)) }
                 return@buildList
             }

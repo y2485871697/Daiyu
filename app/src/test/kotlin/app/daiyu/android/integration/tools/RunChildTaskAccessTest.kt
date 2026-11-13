@@ -67,6 +67,7 @@ class RunChildTaskAccessTest {
         assertEquals(old.owner.childRunId, history.getString("child_run_id"))
         assertEquals(old.owner.parentRunId, history.getString("parent_run_id"))
         assertFalse(history.has("role")); assertFalse(history.has("task_tier"))
+        assertTrue(history.isNull("agent_name"))
         assertEquals(description, access.tools().first().definition.description)
         unavailable = true
         val failed = JSONObject((invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload)
@@ -92,7 +93,8 @@ class RunChildTaskAccessTest {
         assertFalse(JSONObject(result.payload).getBoolean("new_request")); assertEquals(1, resumes.get())
     }
     @Test fun getFindsHistoricalTaskOutsideRecentWindowAndPagesWithoutResume() {
-        val completed = old.copy(status = ChildTaskStatus.COMPLETED, text = "abcdefgh")
+        val completed = old.copy(status = ChildTaskStatus.COMPLETED, text = "abcdefgh",
+            display = ChildTaskDisplay("冻结审查", "historical-model", "历史模型"))
         val access = RunChildTaskAccess("conversation", { emptyList() }, { completed.takeIf { row -> row.owner == it } },
             { emptyList() }, { "partial" }, { error("must not resume") }, { error("must not pause") }, { error("must not stop") },
             { error("configuration unavailable") })
@@ -102,6 +104,8 @@ class RunChildTaskAccessTest {
         }
         val result = invoke(access, caller("conversation"), "get_child_task", args.toString()) as DispatchOutcome.Confirmed
         val body = JSONObject(result.payload)
+        assertEquals("冻结审查", body.getString("agent_name"))
+        assertEquals(old.profileId, body.getString("profile_id"))
         assertEquals("cde", body.getString("text")); assertEquals(5, body.getInt("next_text_offset"))
         assertEquals("rti", body.getString("progress")); assertEquals("COMPLETED", body.getString("status"))
     }

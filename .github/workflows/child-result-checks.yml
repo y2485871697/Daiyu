@@ -54,7 +54,9 @@ jobs:
           from pathlib import Path
           records = []
           for pattern in ('test_delegation_batch_and_send_contract.py', 'test_child_stop_hot_configuration_contract.py',
-                          'test_subagent_resume_display_contract.py', 'test_subagent_collaboration_contract.py'):
+                          'test_subagent_resume_display_contract.py', 'test_subagent_collaboration_contract.py',
+                          'test_sidebar_task_entry_contract.py', 'test_child_task_card_contract.py',
+                          'test_chat_return_refresh_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -63,6 +65,7 @@ jobs:
           Path('child-result-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
           PYTEST
           python3 scripts/verify_boundaries.py
+          python3 scripts/verify_project_identity.py
       - name: 子任务领域及工具边界定向单测
         shell: bash
         run: |
@@ -93,6 +96,13 @@ jobs:
             --tests 'app.daiyu.android.integration.tools.RunChildTasksTest' \
             --tests 'app.daiyu.android.integration.tools.RunChildTaskAccessTest' \
             --tests 'app.daiyu.android.integration.tools.RunOrdinaryGenerationToolsTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChildTaskCardPresentationTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ToolBodyLayoutTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ToolRichDetailsTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ToolCardPresentationTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChildTaskPresentationTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.BatchDelegationPresentationTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ToolCardChildControlTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee child-result-checks/app-gradle.log
       - name: 核对定向报告与零安装包
         run: |
@@ -107,7 +117,8 @@ jobs:
                   'RunnerReceiptBatchTest', 'RunnerToolBoundaryTest', 'ChildUsagePipelineTest'} <= names, names
           assert {s.attrib['name'].rsplit('.', 1)[-1] for s in app} == {'SubAgentStatusRowsTest', 'LargeChildTaskBackupTest', 'SubAgentDescriptorTest',
               'SavedSubAgentRuntimeBindingsTest', 'RunChildModelsTest', 'RunChildTasksTest',
-              'RunChildTaskAccessTest', 'RunOrdinaryGenerationToolsTest'}
+              'RunChildTaskAccessTest', 'RunOrdinaryGenerationToolsTest',
+              'ChildTaskCardPresentationTest', 'ToolBodyLayoutTest', 'ToolRichDetailsTest', 'ToolCardPresentationTest', 'ChildTaskPresentationTest', 'BatchDelegationPresentationTest', 'ToolCardChildControlTest'}
           suites = domain + app
           assert suites and all(int(s.attrib['tests']) > 0 for s in suites)
           assert all(int(s.attrib.get(k, 0)) == 0 for s in suites for k in ('failures','errors','skipped'))

@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +32,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import app.daiyu.android.ChatController
 import app.daiyu.android.domain.ConversationId
+import app.daiyu.android.domain.delegation.ChildRunOwner
 import app.daiyu.android.domain.delegation.ChildTaskRecord
 import app.daiyu.android.storage.SQLiteChildTaskStore
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +47,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var records by remember(owner, step.toolCallId) { mutableStateOf(emptyList<ChildTaskRecord>()) }
     var rows by remember(owner, step.toolCallId) { mutableStateOf(emptyList<SubAgentStatusRow>()) }
+    var progress by remember(owner, step.toolCallId) { mutableStateOf(emptyMap<ChildRunOwner, String>()) }
     var loading by remember(owner, step.toolCallId) { mutableStateOf(true) }
     var failed by remember(owner, step.toolCallId) { mutableStateOf(false) }
     LaunchedEffect(controller, owner, step.toolCallId, lifecycle) {
@@ -62,10 +63,16 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
                             owner.messageId, step.toolName, step.toolCallId)
                         val owners = stored.map { it.owner }.toSet()
                         val live = controller.liveChildTasks(ConversationId(owner.conversationId)).filter { it.record.owner in owners }
-                        stored to subAgentStatusRows(stored, live)
+                        val merged = stored.associateByTo(linkedMapOf()) { it.owner }
+                        live.forEach { merged[it.record.owner] = it.record }
+                        val rows = subAgentStatusRows(merged.values.toList(), live).map { row ->
+                            if (row.status == "执行中" && live.none { it.record.owner == row.owner })
+                                row.copy(status = "状态未确认") else row
+                        }
+                        Triple(merged.values.toList(), rows, owners.associateWith(controller::childTaskProgress))
                     } }
-                    result.onSuccess { records = it.first; rows = it.second }
-                        .onFailure { records = emptyList(); rows = emptyList() }
+                    result.onSuccess { records = it.first; rows = it.second; progress = it.third }
+                        .onFailure { records = emptyList(); rows = emptyList(); progress = emptyMap() }
                     failed = result.isFailure
                     loading = false
                 }
@@ -74,12 +81,12 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
     }
     Column(Modifier.fillMaxWidth().testTag("tool-children:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         when {
-            loading -> Text("正在读取任务…", style = MiuixTheme.textStyles.footnote1)
-            failed -> Text("任务记录读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
-            rows.isEmpty() -> Text("暂无任务记录", style = MiuixTheme.textStyles.footnote1)
-            else -> ChildTaskList(rows, records) { row, action ->
+            loading -> ChildTaskFrame { Text("正在读取任务…", style = MiuixTheme.textStyles.footnote1) }
+            failed -> ChildTaskFrame { Text("任务暂时无法读取", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1) }
+            rows.isEmpty() -> ChildTaskFrame { Text("暂无任务记录", style = MiuixTheme.textStyles.footnote1) }
+            else -> ChildTaskList(rows, records, { row, action ->
                 onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner)))
-            }
+            }, progress)
         }
     }
 }
@@ -89,12 +96,13 @@ internal fun ChildTaskList(
     rows: List<SubAgentStatusRow>,
     records: List<ChildTaskRecord>,
     onAction: (SubAgentStatusRow, ToolCardAction) -> Unit,
+    progress: Map<ChildRunOwner, String> = emptyMap(),
 ) {
     var showCompleted by remember(rows.map { it.owner }) { mutableStateOf(false) }
-    val allCompleted = childTaskBatchCompleted(rows)
+    val allCompleted = rows.size > 1 && childTaskBatchCompleted(rows)
     val colors = MiuixTheme.colorScheme
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        if (allCompleted) {
+        if (allCompleted) ChildTaskFrame {
             Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("tool-child-batch-summary")
                 .semantics { stateDescription = if (showCompleted) "已展开" else "已折叠" }
                 .clickable(role = Role.Button, onClickLabel = if (showCompleted) "收起任务" else "查看任务结果") {
@@ -104,29 +112,21 @@ internal fun ChildTaskList(
                 Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp).settingsDisclosureRotation(showCompleted, expandedDegrees = 180f),
                     tint = colors.onSurfaceVariantSummary)
             }
-        } else {
-            Text(childTaskProgress(rows), style = MiuixTheme.textStyles.footnote1)
         }
         SettingsExpandableContent(!allCompleted || showCompleted) {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                rows.forEachIndexed { index, row -> key(row.owner) {
+                rows.forEach { row -> key(row.owner) {
                     val record = records.firstOrNull { it.owner == row.owner }
-                    ChildTaskDisclosure(row, taskTitle = childTaskTitle(record?.prompt, record?.index ?: index),
-                        agent = record?.display?.agentName ?: "子代理", details = {
-                            Text(ToolRichDetails.scrub(row.model, limit = 160), style = MiuixTheme.textStyles.footnote1)
-                            record?.let {
-                                ToolDocument(ToolDisclosureUi("任务", ToolRichDetails.scrub(it.prompt)))
-                                it.text.takeIf { text -> text.isNotBlank() }?.let { text ->
-                                    ToolDocument(ToolDisclosureUi("结果", ToolRichDetails.scrub(text)))
-                                }
-                                it.detail?.let { detail -> ToolDocument(ToolDisclosureUi("原因", ToolRichDetails.scrub(detail))) }
-                            }
+                    ChildTaskDisclosure(row, taskTitle = record?.display?.agentName?.takeIf { it.isNotBlank() }?.let { ToolRichDetails.scrub(it, limit = 80) } ?: "子代理", details = {
+                            val text = childTaskProgressText(record?.text, progress[row.owner])
+                                ?.let { ToolRichDetails.scrub(it) }
+                            ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId)
                         }, controls = {
                             val actions = when (row.status) {
                                 "已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
                                 "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
                                 "暂停中", "停止中" -> emptyList()
-                                else -> if (record?.text?.isNotBlank() == true) emptyList() else listOf(ToolCardAction.READ_TASK_RESULT)
+                                else -> emptyList()
                             }
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 actions.forEach { action -> ToolMiniAction(
@@ -146,11 +146,10 @@ internal fun ChildTaskDisclosure(
     details: @Composable () -> Unit,
     controls: @Composable () -> Unit,
     taskTitle: String = row.agent,
-    agent: String? = null,
 ) {
     var expanded by remember(row.owner) { mutableStateOf(false) }
     val colors = MiuixTheme.colorScheme
-    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    ChildTaskFrame(Modifier.testTag("tool-child-frame:${row.owner.childRunId}")) {
         Row(Modifier.fillMaxWidth().testTag("tool-child-summary:${row.owner.childRunId}")
             .heightIn(min = 44.dp).semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
             .clickable(role = Role.Button, onClickLabel = if (expanded) "折叠子任务" else "展开子任务") { expanded = !expanded },
@@ -158,10 +157,8 @@ internal fun ChildTaskDisclosure(
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(taskTitle, style = MiuixTheme.textStyles.footnote1, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                agent?.let { Text(ToolRichDetails.scrub(it, limit = 80), style = MiuixTheme.textStyles.footnote1,
-                    color = colors.onSurfaceVariantSummary) }
             }
-            Text(row.status, color = when {
+            Text(childTaskStatusText(row.status), color = when {
                 row.completed -> colors.primary
                 row.status in setOf("失败", "未执行", "结果未知", "状态未确认", "上下文超限") -> colors.error
                 else -> colors.onSurfaceVariantSummary

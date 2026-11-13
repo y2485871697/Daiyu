@@ -298,20 +298,11 @@ internal object ToolRichDetails {
                 list(output, "artifacts", "产物记录", listOf("id" to "标识", "mime" to "格式", "width" to "宽度", "height" to "高度"))
             }
             "delegation", "child_control" -> {
-                if (!launchingDelegation) {
-                    listOf("task_id" to "目标任务", "group_id" to "组", "kind" to "控制动作", "action" to "请求动作").forEach { (key, label) -> field(args, key, label) }
-                    documents(args, "guidance" to "指导内容", "instruction" to "指导内容", "task" to "任务说明")
-                    list(output, "results", "已读取子任务结果", listOf("child_run_id" to "子任务", "profile_id" to "代理", "status" to "返回状态"))
-                    list(output, "tasks", "工具返回任务记录", listOf("id" to "标识", "child_run_id" to "子任务", "task_id" to "任务", "profile_id" to "代理", "model" to "模型", "role" to "职责", "state" to "返回状态", "status" to "返回状态", "result_id" to "结果标识"))
-                    documents(output, "partial_result" to "已保留片段", "partial" to "已保留片段", "result" to "已读取结果", "checkpoint" to "检查点摘要")
-                    if (toolName == "get_child_task") {
-                        fields(output, "status" to "记录状态", "offset" to "读取偏移", "next_text_offset" to "正文下次偏移", "next_progress_offset" to "进度下次偏移")
-                        documents(output, "text" to "已读取结果", "progress" to "任务进度", "detail" to "任务详情")
-                    }
-                    if (toolName == "control_child_task") field(output, "outcome", "控制回执")
-                    // Live children are rendered by the host, never promoted from provider JSON.
+                if (!launchingDelegation && toolName != "direct_child_task") {
+                    entries += childTaskReceiptEntries(output) { scrub(it, hidden) }
                 }
             }
+
             "mcp" -> {
                 fields(args, "connection_id" to "连接", "transport" to "传输类型", "previous_revision" to "先前目录修订")
                 fields(output, "revision" to "目录修订", "connection_id" to "连接", "transport" to "传输类型")
@@ -329,14 +320,14 @@ internal object ToolRichDetails {
         }
         // Raw payloads are optional, explicit disclosure only, and always independently scrubbed.
         // get_cookies/set_cookies deliberately have no body disclosure, even on explicit expansion.
-        if (!cookies && category != "user_question" && !launchingDelegation) {
+        if (!cookies && category != "user_question" && category !in setOf("delegation", "child_control")) {
             documents(output, "message" to "操作回执", "error" to "错误回执")
             if (envelope !== output) documents(envelope, "message" to "操作回执", "error" to "错误回执")
             if (category !in setOf("delegation", "child_control")) document(output, "result", "操作回执")
         }
         val unreadableTerminalReceipt = category in setOf("terminal", "background_job") && output == null &&
             result?.trimStart()?.firstOrNull() in setOf('{', '[')
-        if (!cookies && category != "user_question" && !unreadableTerminalReceipt && !launchingDelegation) {
+        if (!cookies && category != "user_question" && !unreadableTerminalReceipt && category !in setOf("delegation", "child_control")) {
             if (!outputDocument && entries.isEmpty() && result != null && result.isNotBlank() &&
                 (output == null || category !in ToolCardPresentations.categories || category == "generic")) {
                 val cleaned = if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden)
@@ -399,6 +390,18 @@ internal object ToolRichDetails {
                     output == null -> "委派回执无法读取"
                     receiptStatus.any { it in setOf("unknown", "unconfirmed") } -> "委派结果未确认"
                     else -> ""
+                }
+                category in setOf("delegation", "child_control") -> when {
+                    output == null -> "任务状态暂不可用"
+                    entries.isNotEmpty() || toolName == "direct_child_task" -> ""
+                    toolName == "inspect_child_tasks" -> "暂无任务记录"
+                    toolName == "control_child_task" -> when (output.optString("outcome")) {
+                        "RESUMED" -> "任务已继续"
+                        "PAUSED" -> "任务已暂停"
+                        "PENDING", "REQUESTED" -> "已提交任务控制请求"
+                        else -> "任务状态未确认"
+                    }
+                    else -> "暂无任务进度"
                 }
                 receipt != null -> receipt
                 category == "device_read" && time != null -> formatDeviceTime(time, clean(output?.opt("timezone")))

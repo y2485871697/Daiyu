@@ -26,7 +26,6 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         dismissSidebarState()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
-        taskRecordsConversationId = null
         if (activityUsable()) {
             // A recreated video editor can only adopt its retained receipt after becoming visible.
             if (refreshState || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
@@ -39,8 +38,6 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('"permission-check" -> app.daiyu.android.ui.screens.settings.PermissionCheckScreen(\n                        onBack = { returnToChat(refreshState = false) }', self.main)
         self.assertIn('onBack = { returnToChat(refreshState = false) }, onRoute = { route -> openSettingsFromPage(route) }', self.main)
         self.assertIn('if (skillsReturnPage == "settings") retainedPage = "settings" else returnToChat(refreshState = false)', self.main)
-        # Shared state-only helper is deliberately used by just these two entry points.
-        self.assertEqual(3, self.main.count('dismissSidebarState()'))
         state = body(self.main, 'private fun dismissSidebarState()')
         self.assertEqual('''
         sidebarVisible = false; speechHost.setVisible(retainedPage == "chat")

@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 
 class ModelHttpTransportTest {
     private fun open(server: MockWebServer) = ModelHttpTransport.OkHttpModelConnection(
-        server.url("/model").toUrl(), ModelHttpTransport.client)
+        server.url("/model").newBuilder().host("127.0.0.1").build().toUrl(), ModelHttpTransport.client)
     private fun post(connection: ModelHttpConnection, value: String = "{\"model\":\"fixture\"}") {
         connection.requestMethod = "POST"
         connection.doOutput = true

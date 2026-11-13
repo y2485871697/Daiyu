@@ -61,7 +61,7 @@ class MarkdownEntryContract(unittest.TestCase):
         source = (BASE / 'RestoredMarkdown.kt').read_text()
         for token in ['MessageHistory.expand(messages)', 'it.role == Message.ASSISTANT_ROLE',
                       'it.status != RunStatus.RUNNING', 'filterIsInstance<MessageBlock.Text>()',
-                      'summaries + texts', 'cache.preparationSources(restoredMarkdownSources(messages))',
+                      'summaries + texts', 'prepareRestoredMarkdownSources(restoredMarkdownSources(messages), cache, parser, checkActive)',
                       'MarkdownParser.parse(source, checkActive)', 'checkActive()\n    synchronized(cache) { prepared.forEach(cache::put) }']:
             self.assertIn(token, source)
         self.assertNotIn('texts.joinToString', source)

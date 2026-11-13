@@ -144,7 +144,7 @@ jobs:
             filters+=(--tests app.daiyu.android.MarkdownTableWidthTest)
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == cold-start ]]; then
-            classes=(RestoredMarkdownTest MarkdownProjectionCacheTest MarkdownProjectionTest
+            classes=(RestoredMarkdownTest ToolPresentationCacheTest MarkdownProjectionCacheTest MarkdownProjectionTest
                      MarkdownPreparationCompositionTest MarkdownRevealTest ChatTurnMapperTest ChatInitialPositionPolicyTest
                      AssistantWorkflowCompositionTest)
             filters+=(--tests app.daiyu.android.context.ContextTimelineColdStartTest
@@ -200,7 +200,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'markdown-table':
               expected = {'MarkdownTableGridTest', 'MarkdownTableWidthTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'cold-start':
-              expected = {'RestoredMarkdownTest', 'MarkdownProjectionCacheTest', 'MarkdownProjectionTest',
+              expected = {'RestoredMarkdownTest', 'ToolPresentationCacheTest', 'MarkdownProjectionCacheTest', 'MarkdownProjectionTest',
                           'MarkdownPreparationCompositionTest', 'MarkdownRevealTest', 'ChatTurnMapperTest',
                           'ChatInitialPositionPolicyTest', 'ContextTimelineColdStartTest', 'AssistantWorkflowCompositionTest',
                           'SQLiteTextTest', 'SQLiteTextChunksTest', 'ConversationPreviewTest', 'MessageDisplayStoreTest',

@@ -20,7 +20,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('controller.database.draft(id, draft)', select)
         self.assertIn('selections[id] = selectionStart to selectionEnd', select)
         self.assertIn('selected = conversation; selectionReady = true; draft = targetDraft', select)
-        self.assertIn('publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()', select)
+        self.assertIn('publishChat(rowsChanged = false, scrollRequest = ChatScrollRequest(++scrollSerial))', select)
 
     def test_selection_feedback_precedes_async_history_and_keeps_pending_highlight(self):
         host = (SRC / 'MainActivity.kt').read_text()
@@ -44,7 +44,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('displayWindow = prepared?.display', selected)
         self.assertNotIn('database.messages(', selected)
         self.assertLess(selected.index('paneState = paneState.copy(selectedConversationId = conversation?.id?.value)'),
-                        selected.index('publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()'))
+                        selected.index('publishChat(rowsChanged = false, scrollRequest = ChatScrollRequest(++scrollSerial))'))
         pane = (SRC / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
         self.assertIn('val rowSelected = if (managing) checked else selected', pane)
         self.assertIn('this.selected = rowSelected', pane)
@@ -62,6 +62,43 @@ class SidebarSelectionContractTest(unittest.TestCase):
                          'oldJob.isCompleted', 'closingJob.isCompleted',
                          'assertEquals(0, fixture.opens.get())']:
             self.assertIn(fragment, test)
+
+    def test_display_preparation_is_private_cancelable_and_adopted_only_after_freshness(self):
+        host = (SRC / 'MainActivity.kt').read_text()
+        click = host.split('private fun selectPaneConversation(', 1)[1].split('private fun retainedConversation(', 1)[0]
+        io = click.split('withContext(Dispatchers.IO) {', 1)[1].split('if (paneSelectionRequest !== request', 1)[0]
+        self.assertIn('prepareRestoredMarkdown(snapshot.display)', io)
+        self.assertIn('prepare(id, snapshot) { context.ensureActive() }', io)
+        self.assertIn('snapshot.copy(presentations = presentations)', io)
+        self.assertNotIn('toolPresentations', io)
+        self.assertLess(click.index('if (revision != currentPaneRevision()) continue'),
+                        click.index('select(snapshot.conversation, snapshot)'))
+        selected = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('private fun sendDraft(', 1)[0]
+        self.assertIn('prepared?.presentations?.let { toolPresentations = it }', selected)
+        self.assertLess(selected.index('refresh()'), selected.index('publishChat(rowsChanged = false, scrollRequest'))
+        self.assertIn('val remapTurns = rowsChanged || chatState.conversationKey != selected?.id?.value ||', host)
+        helper = (SRC / 'ui/screens/chat/conversation/HistoryPresentationPreparation.kt').read_text()
+        self.assertIn('presentations: ToolPresentationCache = ToolPresentationCache()', helper)
+        self.assertIn('presentations.retainBlocks(blocks)', helper)
+        self.assertIn('checkActive()', helper)
+        for forbidden in ('controller', 'preferences', 'database', 'toolReceipt'):
+            self.assertNotIn(forbidden, helper)
+
+    def test_inert_drawer_preview_does_not_start_authority_hydration_until_close(self):
+        host = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('displayWindow != null && (sidebarVisible || refreshHistoryLoading)', host)
+        closing = host.split('private fun dismissSidebar()', 1)[1].split('private fun paneRefreshAllowed', 1)[0]
+        self.assertIn('dismissSidebarState()', closing)
+        self.assertIn('refresh()', closing)
+        self.assertIn('ChatTurnMapper.mapDisplay(window,\n                    presentations = toolPresentations,', host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneSwitchActivityTest.kt').read_text()
+        for name in ('testPreparedDisplayDoesNotReparseToolsOrHydrateAuthorityBehindDrawer',
+                     'testCancelledPresentationPreparationCannotInstallItsCacheIntoLastSelection',
+                     'testOptionalPresentationPreparationFailureStillPublishesIntactHistory'):
+            self.assertIn(name, test)
+        self.assertIn('assertEquals(0, hydrationReads.get())', test)
+        self.assertIn('assertEquals(4, builds.get())', test)
+        self.assertIn('assertFalse(onMain.get())', test)
 
     def test_search_and_new_conversation_keep_explicit_chat_navigation(self):
         host = (SRC / 'MainActivity.kt').read_text()

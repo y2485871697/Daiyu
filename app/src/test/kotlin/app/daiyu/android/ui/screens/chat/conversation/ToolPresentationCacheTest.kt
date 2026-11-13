@@ -171,4 +171,53 @@ class ToolPresentationCacheTest {
         assertEquals(aa.result.hashCode(), bb.result.hashCode())
         cache.present(aa); cache.present(bb); assertEquals(7, builds)
     }
+    private fun display(vararg blocks: MessageBlock) = app.daiyu.android.storage.MessageDisplayWindow(listOf(
+        1L to app.daiyu.android.storage.MessageDisplayRow(MessageId("m"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, blocks.toList(), RunStatus.COMPLETED, null, null, emptyList())))
+
+    @Test fun displayHistoryPreparationTransfersWorkerCacheWithoutReparsingMountedTools() {
+        val caller = Thread.currentThread()
+        val buildThreads = mutableListOf<Thread>()
+        val cache = ToolPresentationCache({ name, args, result ->
+            buildThreads += Thread.currentThread()
+            ToolCardPresentations.present(name, args, result)
+        }, maxEntries = 2, maxSourceChars = 64, maxLargeEntries = 1)
+        val blocks = List(12) { tool("duplicate", 30_000 + it) }
+        val window = display(*blocks.toTypedArray())
+        val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val prepared = try {
+            worker.submit<ToolPresentationCache> {
+                prepareHistoryPresentations("c", emptyList(), window, cache)
+            }.get(30, java.util.concurrent.TimeUnit.SECONDS)
+        } finally { worker.shutdownNow() }
+        assertSame(cache, prepared)
+        assertEquals(12, buildThreads.size)
+        assertTrue(buildThreads.all { it !== caller })
+        prepared.scope("c")
+        val expected = ChatTurnMapper.mapDisplay(window)
+        repeat(15) {
+            assertEquals(expected, ChatTurnMapper.mapDisplay(window, presentations = prepared))
+        }
+        assertEquals("The display mapper must retain every mounted projection, not just the small LRU", 12, buildThreads.size)
+        val changed = display(*(blocks.dropLast(1) + blocks.last().copy(result = "{\"ok\":false}")).toTypedArray())
+        ChatTurnMapper.mapDisplay(changed, presentations = prepared)
+        assertEquals(13, buildThreads.size)
+        assertSame(caller, buildThreads.last())
+    }
+
+    @Test fun presentationPreparationChecksCancellationAndNeverChangesAnotherOwnerCache() {
+        val old = ToolPresentationCache()
+        val block = tool("same", 128)
+        prepareHistoryPresentations("old", listOf(message(block)), presentations = old)
+        val before = ChatTurnMapper.map(listOf(message(block)), presentations = old)
+        var checks = 0
+        try {
+            prepareHistoryPresentations("new", listOf(message(block, block.copy(result = "{}"))),
+                checkActive = { if (++checks == 2) throw java.util.concurrent.CancellationException("cancel") })
+            fail("Cancelled preparation must not publish a cache")
+        } catch (_: java.util.concurrent.CancellationException) { }
+        assertEquals(2, checks)
+        assertEquals(before, ChatTurnMapper.map(listOf(message(block)), presentations = old))
+    }
+
 }

@@ -3,7 +3,8 @@ package app.daiyu.android
 import android.os.Looper
 import androidx.compose.runtime.MutableState
 import androidx.compose.ui.test.*
-import app.daiyu.android.domain.Conversation
+import app.daiyu.android.domain.*
+import app.daiyu.android.ui.screens.chat.conversation.*
 import app.daiyu.android.ui.model.ConversationPaneUiState
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -220,4 +221,145 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
             assertEquals(0, fixture.opens.get())
         } finally { release.countDown() }
     }
+    private fun seedToolHistory(conversation: Conversation): List<Pair<Long, Message>> {
+        val run = RunId("switch-tool-run")
+        val user = Message(MessageId("switch-tool-user"),
+            conversation.id, run, Message.USER_ROLE,
+            listOf(MessageBlock.Text("q", "old question")), RunStatus.COMPLETED)
+        val answer = user.copy(id = MessageId("switch-tool-answer"),
+            role = Message.ASSISTANT_ROLE, status = RunStatus.RUNNING,
+            blocks = List(4) { index -> MessageBlock.Tool(
+                ToolInvocation(ToolCallId("tool-$index"), "unknown_tool", "{}"),
+                "{\"ok\":true,\"data\":\"" + "x".repeat(70_000 + index) + "\"}") } +
+                MessageBlock.Text("a", "prepared history body"))
+        fixture.database.send(user, answer)
+        fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+        return fixture.database.messages(conversation.id)
+    }
+
+    fun testPreparedDisplayDoesNotReparseToolsOrHydrateAuthorityBehindDrawer() {
+        val (first, second) = prepareConversations()
+        val original = seedToolHistory(second)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val hydrationEntered = CountDownLatch(1)
+        val hydrationRelease = CountDownLatch(1)
+        val builds = java.util.concurrent.atomic.AtomicInteger()
+        val hydrationReads = java.util.concurrent.atomic.AtomicInteger()
+        val onMain = AtomicBoolean()
+        val preparer = activity.panePresentationPreparer
+        val readerField = MainActivity::class.java.getDeclaredField("loadedWindowReader").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val reader = readerField.get(activity) as (ConversationId, Long, Int) ->
+            List<Pair<Long, Message>>
+        val displayField = MainActivity::class.java.getDeclaredField("displayWindow\$delegate").apply { isAccessible = true }
+        mainThread {
+            activity.panePresentationPreparer = { id, snapshot, checkActive ->
+                if (Looper.myLooper() == Looper.getMainLooper()) onMain.set(true)
+                val cache = ToolPresentationCache({ name, args, result ->
+                    if (Looper.myLooper() == Looper.getMainLooper()) onMain.set(true)
+                    builds.incrementAndGet()
+                    ToolCardPresentations.present(name, args, result)
+                }, maxEntries = 1, maxSourceChars = 64, maxLargeEntries = 1)
+                val prepared = prepareHistoryPresentations(
+                    id, snapshot.messages.map { it.second }, snapshot.display, cache, checkActive)
+                entered.countDown()
+                check(release.await(60, TimeUnit.SECONDS))
+                prepared
+            }
+            val blocked: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, count ->
+                if (id == second.id) {
+                    hydrationReads.incrementAndGet()
+                    if (Looper.myLooper() == Looper.getMainLooper()) onMain.set(true)
+                    hydrationEntered.countDown()
+                    check(hydrationRelease.await(60, TimeUnit.SECONDS))
+                }
+                reader(id, before, count)
+            }
+            readerField.set(activity, blocked)
+        }
+        try {
+            click(second)
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            mainThread {
+                assertEquals(first.id, selectedConversation()?.id)
+                assertEquals(second.id.value, paneState().selectedConversationId)
+            }
+            assertEquals(4, builds.get())
+            release.countDown()
+            assertSelected(second, "draft-1")
+            mainThread {
+                assertNotNull((displayField.get(activity) as MutableState<*>).value)
+                repeat(3) { MainActivity::class.java.getDeclaredMethod("refresh").apply { isAccessible = true }.invoke(activity) }
+                assertEquals(0, hydrationReads.get())
+                assertEquals(4, builds.get())
+                MainActivity::class.java.getDeclaredMethod("dismissSidebar").apply { isAccessible = true }.invoke(activity)
+            }
+            assertTrue(hydrationEntered.await(10, TimeUnit.SECONDS))
+            mainThread { assertEquals(second.id, selectedConversation()?.id) }
+            assertFalse(onMain.get())
+            hydrationRelease.countDown()
+            awaitControl("same-owner authoritative replacement") { (displayField.get(activity) as MutableState<*>).value == null }
+            assertEquals(original, fixture.database.messages(second.id))
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            release.countDown(); hydrationRelease.countDown()
+            mainThread { activity.panePresentationPreparer = preparer; readerField.set(activity, reader) }
+        }
+    }
+
+    fun testCancelledPresentationPreparationCannotInstallItsCacheIntoLastSelection() {
+        val (_, second, third) = prepareConversations()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val preparer = activity.panePresentationPreparer
+        val acceptedCache = java.util.concurrent.atomic.AtomicReference<ToolPresentationCache>()
+        val cacheField = MainActivity::class.java.getDeclaredField("toolPresentations").apply { isAccessible = true }
+        mainThread {
+            activity.panePresentationPreparer = { id, snapshot, checkActive ->
+                val prepared = preparer(id, snapshot, checkActive)
+                if (id == third.id.value) acceptedCache.set(prepared)
+                if (id == second.id.value) {
+                    entered.countDown()
+                    check(release.await(60, TimeUnit.SECONDS))
+                }
+                prepared
+            }
+        }
+        try {
+            click(second)
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            lateinit var old: Job
+            mainThread { old = selectionJob() }
+            click(third)
+            assertSelected(third, "draft-2")
+            release.countDown()
+            awaitControl("cancelled preparation has returned") { old.isCompleted }
+            assertSelected(third, "draft-2")
+            mainThread { assertSame(acceptedCache.get(), cacheField.get(activity)) }
+        } finally {
+            release.countDown()
+            mainThread { activity.panePresentationPreparer = preparer }
+        }
+    }
+
+    fun testOptionalPresentationPreparationFailureStillPublishesIntactHistory() {
+        val (_, second) = prepareConversations()
+        val original = seedToolHistory(second)
+        val preparer = activity.panePresentationPreparer
+        mainThread { activity.panePresentationPreparer = { _, _, _ -> error("optional preparation failure") } }
+        try {
+            click(second)
+            assertSelected(second, "draft-1")
+            assertEquals(original, fixture.database.messages(second.id))
+            val stateField = MainActivity::class.java.getDeclaredField("chatState\$delegate").apply { isAccessible = true }
+            mainThread {
+                val state = (stateField.get(activity) as MutableState<*>).value as
+                    ChatScreenState
+                assertEquals(second.id.value, state.conversationKey)
+                assertTrue(state.turns.isNotEmpty())
+            }
+        } finally { mainThread { activity.panePresentationPreparer = preparer } }
+    }
+
 }

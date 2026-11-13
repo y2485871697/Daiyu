@@ -202,4 +202,29 @@ class RestoredMarkdownTest {
         assertEquals(1, calls)
     }
 
+    @Test fun displayOnlyStoppedHistoryPreparesActualSegmentsAndReasoningWithoutAuthority() {
+        val cache = MarkdownProjectionCache()
+        val calls = mutableListOf<String>()
+        val parser: (String) -> List<MarkdownBlock> = { calls += it; MarkdownParser.parse(it) }
+        val row = app.daiyu.android.storage.MessageDisplayRow(MessageId("answer"), ConversationId("chat"), RunId("run"),
+            Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("unused", "not rendered")), RunStatus.STOPPED, null, null,
+            listOf(
+                app.daiyu.android.storage.MessageDisplaySegment(MessageId("user"), Message.USER_ROLE,
+                    listOf(MessageBlock.Text("user", "not assistant")), null, emptyList()),
+                app.daiyu.android.storage.MessageDisplaySegment(MessageId("answer"), Message.ASSISTANT_ROLE,
+                    listOf(MessageBlock.Text("a", "**display one**")), null,
+                    listOf(ReportedReasoning("r", "**reasoning**", 1_200L))),
+                app.daiyu.android.storage.MessageDisplaySegment(MessageId("answer"), Message.ASSISTANT_ROLE,
+                    listOf(MessageBlock.Text("b", "display `two`")), null, emptyList())))
+        val window = app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row))
+        prepareRestoredMarkdown(window, cache, parser)
+        assertEquals(listOf("**reasoning**", "**display one**", "display `two`"), calls)
+        assertNotNull(cache.getPrepared(calls, parser))
+        prepareRestoredMarkdown(window, cache, parser)
+        assertEquals(3, calls.size)
+        val live = app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row.copy(status = RunStatus.RUNNING)))
+        prepareRestoredMarkdown(live, cache, parser)
+        assertEquals(3, calls.size)
+    }
+
 }

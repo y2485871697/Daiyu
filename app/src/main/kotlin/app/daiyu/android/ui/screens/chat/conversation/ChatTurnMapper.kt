@@ -79,6 +79,7 @@ object ChatTurnMapper {
     }
 
     internal fun mapDisplay(window: app.daiyu.android.storage.MessageDisplayWindow,
+        presentations: ToolPresentationCache? = null,
         timestamp: (Long?) -> String = { "" },
         boundariesAfter: Set<String> = emptySet(),
         reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect> = emptyList(),
@@ -102,8 +103,9 @@ object ChatTurnMapper {
             else listOf(RenderMessage(row.id, row.conversationId, row.runId, row.role, row.blocks, row.status,
                 row.error, row.createdAt, emptyList()))
         }
+        presentations?.retainBlocks(history.flatMap { it.blocks })
         return mapRows(history, owners, { _, _ -> null }, { _, _ -> null }, { _, _ -> null },
-            { _, _ -> null }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, null,
+            { _, _ -> null }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, presentations,
             { emptyList() }, reconnects, childTaskNames)
     }
 

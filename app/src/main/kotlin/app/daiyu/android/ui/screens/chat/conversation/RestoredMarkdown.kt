@@ -24,7 +24,33 @@ internal fun prepareRestoredMarkdown(
     parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser,
     checkActive: () -> Unit = {},
 ) {
-    val prepared = cache.preparationSources(restoredMarkdownSources(messages)).map { source ->
+    prepareRestoredMarkdownSources(restoredMarkdownSources(messages), cache, parser, checkActive)
+}
+
+internal fun prepareRestoredMarkdown(
+    window: app.daiyu.android.storage.MessageDisplayWindow,
+    cache: MarkdownProjectionCache = markdownProjectionCache,
+    parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser,
+    checkActive: () -> Unit = {},
+) {
+    val sources = window.rows.flatMap { (_, row) ->
+        if (row.role != Message.ASSISTANT_ROLE || row.status == RunStatus.RUNNING) emptyList()
+        else if (row.segments.isEmpty()) row.blocks.filterIsInstance<MessageBlock.Text>().map { it.text }
+        else row.segments.filter { it.role == Message.ASSISTANT_ROLE }.flatMap { segment ->
+            segment.reportedReasoning.filter { hasReportedReasoningText(it.text) }.map { it.text } +
+                segment.blocks.filterIsInstance<MessageBlock.Text>().map { it.text }
+        }
+    }
+    prepareRestoredMarkdownSources(sources, cache, parser, checkActive)
+}
+
+private fun prepareRestoredMarkdownSources(
+    sources: List<String>,
+    cache: MarkdownProjectionCache,
+    parser: (String) -> List<MarkdownBlock>,
+    checkActive: () -> Unit,
+) {
+    val prepared = cache.preparationSources(sources).map { source ->
         checkActive()
         val blocks = cache.getBlocks(source, parser) ?: if (parser === defaultMarkdownParser)
             MarkdownParser.parse(source, checkActive) else parser(source)

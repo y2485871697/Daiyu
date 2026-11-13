@@ -58,10 +58,12 @@ class ToolPresentationCache internal constructor(
     internal fun retain(messages: List<Message>) {
         // Mounted rows already own these projections. Do not let the smaller off-window
         // LRU evict them in scan order and reparse every result on each streaming update.
+        retainBlocks(messages.flatMap { it.blocks })
+    }
+
+    internal fun retainBlocks(blocks: List<MessageBlock>) {
         val sources = IdentityHashMap<MessageBlock.Tool, Boolean>()
-        messages.forEach { message -> message.blocks.forEach { block ->
-            if (block is MessageBlock.Tool) sources[block] = true
-        } }
+        blocks.forEach { block -> if (block is MessageBlock.Tool) sources[block] = true }
         mounted.keys.retainAll(sources.keys)
         sources.keys.forEach { if (!mounted.containsKey(it)) mounted[it] = null }
         if (entries.isEmpty()) return

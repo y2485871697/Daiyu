@@ -1241,11 +1241,17 @@ class MainActivity : ComponentActivity() {
         val conversations: List<Conversation>,
         val messages: List<Pair<Long, Message>>,
         val display: app.daiyu.android.storage.MessageDisplayWindow? = null,
+        val presentations: app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache? = null,
     )
     internal var paneConversationReader: (String) -> PaneConversationSnapshot = { id ->
         val conversations = controller.database.conversations()
         val conversation = conversations.single { it.id.value == id }
         PaneConversationSnapshot(conversation, conversations, emptyList(), controller.database.displayMessages(conversation.id))
+    }
+    internal var panePresentationPreparer: (String, PaneConversationSnapshot, () -> Unit) ->
+        app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache = { id, snapshot, checkActive ->
+        app.daiyu.android.ui.screens.chat.conversation.prepareHistoryPresentations(
+            id, snapshot.messages.map { it.second }, snapshot.display, checkActive = checkActive)
     }
     private var paneSelectionJob: Job? = null
     private var paneSelectionRequest: Any? = null
@@ -5423,7 +5429,7 @@ class MainActivity : ComponentActivity() {
     private fun loadRefreshedHistory(conversation: Conversation) {
         refreshHistoryPending = true
         if (refreshHistoryLoading || !activityUsable() || !controller.ready || controller.dataBusy ||
-            controller.problem?.startsWith("会话恢复失败") == true) return
+            (displayWindow != null && sidebarVisible) || controller.problem?.startsWith("会话恢复失败") == true) return
         refreshHistoryLoading = true
         refreshHistoryPending = false
         val id = conversation.id
@@ -5445,12 +5451,19 @@ class MainActivity : ComponentActivity() {
         val read = loadedWindowReader
         lifecycleScope.launch {
             try {
-                val rows = try {
+                val prepared = try {
                     withContext(Dispatchers.IO) {
-                        if (reloadTail) readAcceptedWindow(id, first)
+                        val rows = if (reloadTail) readAcceptedWindow(id, first)
                         else read(id, if (newOwner || last == null) Long.MAX_VALUE else last + 1,
                             if (count == 0) 50 else count + if (newOwner) 2 else 0)
                             .filter { first == null || it.first >= first }
+                        val context = coroutineContext
+                        val presentations = if (capturedDisplay == null) null else try {
+                            app.daiyu.android.ui.screens.chat.conversation.prepareHistoryPresentations(
+                                id.value, rows.map { it.second }, checkActive = { context.ensureActive() })
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) { null }
+                        rows to presentations
                     }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
@@ -5467,7 +5480,8 @@ class MainActivity : ComponentActivity() {
                     refreshHistoryPending = true
                     return@launch
                 }
-                if (rows == null) { streamingHistoryRefresh.invalidate(); toast("历史读取失败"); return@launch }
+                if (prepared == null) { streamingHistoryRefresh.invalidate(); toast("历史读取失败"); return@launch }
+                val (rows, presentations) = prepared
                 if (reloadTail) refreshHistoryTailConversation = null
                 val currentOwner = loadedHistoryOwner(id)
                 val refreshed = rows.map { entry ->
@@ -5476,6 +5490,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (capturedDisplay != null || refreshed != shown) {
                     displayWindow = null
+                    if (presentations != null) toolPresentations = presentations
                     shown = refreshed.toMutableList()
                     prepareMessageActionSnapshot()
                     publishChat()
@@ -6281,6 +6296,7 @@ class MainActivity : ComponentActivity() {
         val editor = editorGeneration
         val initial = !selectionReady
         val read = paneConversationReader
+        val prepare = panePresentationPreparer
         paneSelectionRequest = request
         pendingPaneConversationId = id
         paneState = paneState.copy(selectedConversationId = id)
@@ -6292,7 +6308,11 @@ class MainActivity : ComponentActivity() {
                         val snapshot = read(id)
                         val context = coroutineContext
                         try {
-                            app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.messages.map { it.second }) {
+                            if (snapshot.display != null) {
+                                app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.display) {
+                                    context.ensureActive()
+                                }
+                            } else app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.messages.map { it.second }) {
                                 context.ensureActive()
                             }
                         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -6300,7 +6320,10 @@ class MainActivity : ComponentActivity() {
                         } catch (_: Exception) {
                             // Optional AST preparation must not hide intact history.
                         }
-                        snapshot
+                        val presentations = try { prepare(id, snapshot) { context.ensureActive() } }
+                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) { null }
+                        snapshot.copy(presentations = presentations)
                     }
                     if (paneSelectionRequest !== request || !activityUsable() ||
                         (!initial && retainedPage != "chat") || selected?.id != owner || editorGeneration != editor) return@launch
@@ -6517,7 +6540,8 @@ class MainActivity : ComponentActivity() {
             // A submitted image revision is already persisted and frozen. Its DB acceptance
             // may precede the UI receipt; writing it again here could resurrect sent text.
             if (!imageHost.sending && !shizukuOwned && !videoSending) {
-                if (id == null) controller.database.draft(draft) else if (list.any { it.id == id }) controller.database.draft(id, draft)
+                if (id == null) controller.database.draft(draft)
+                else if (list.any { it.id == id && it.draft != draft }) controller.database.draft(id, draft)
             }
             selections[id] = selectionStart to selectionEnd
         }
@@ -6549,12 +6573,14 @@ class MainActivity : ComponentActivity() {
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
         displayWindow = prepared?.display
+        prepared?.presentations?.let { toolPresentations = it }
         if (refreshHistoryLoading) refreshHistoryPending = true
         shown = prepared?.messages.orEmpty().toMutableList()
         if (prepared != null && prepared.display == null) streamingHistoryRefresh.needsRead(
             controller.active?.takeIf { it.conversationId == conversation?.id }, true, controller.dataRevision, editorGeneration, false)
         childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false
-        publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()
+        refresh()
+        publishChat(rowsChanged = false, scrollRequest = ChatScrollRequest(++scrollSerial))
         refreshConfirmedModelLabel()
     }
     private fun compressionSendBlocked(conversationId: ConversationId? = selected?.id): Boolean {
@@ -6863,7 +6889,7 @@ class MainActivity : ComponentActivity() {
                 val loaded = displayWindow == null && (active == null || shown.any { (_, message) ->
                     message.conversationId == active.conversationId && message.id == active.id && message.runId == active.runId
                 })
-                if (!(displayWindow != null && refreshHistoryLoading) &&
+                if (!(displayWindow != null && (sidebarVisible || refreshHistoryLoading)) &&
                     streamingHistoryRefresh.needsRead(active, loaded, controller.dataRevision, editorGeneration,
                         force = refreshHistoryTailConversation == conversation.id)) loadRefreshedHistory(conversation)
             }
@@ -6993,7 +7019,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val toolPresentations = app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache()
+    private var toolPresentations = app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache()
     private var toolReceiptKey: ToolReceiptKey? = null
     private var toolReceiptSnapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null
     private var toolReceiptRead: kotlinx.coroutines.Job? = null
@@ -7139,7 +7165,8 @@ class MainActivity : ComponentActivity() {
             }
             val visibleChildNames = toolReceiptKey?.takeIf { loaded -> loaded.canDisplayFor(currentReceipts) }
                 ?.let { toolReceiptSnapshot?.childAgentNames }.orEmpty()
-            val remapTurns = rowsChanged || workflowBoundaries != oldBoundaries ||
+            val remapTurns = rowsChanged || chatState.conversationKey != selected?.id?.value ||
+                workflowBoundaries != oldBoundaries ||
                 reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
             chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
                 scrollRequest = scrollRequest,
@@ -7148,6 +7175,7 @@ class MainActivity : ComponentActivity() {
                 compressionActivity = null,
                 compressionActivities = visibleCompressions,
                 turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,
+                    presentations = toolPresentations,
                     timestamp = { time -> MessageTimestampFormatter.timestamp(time, appearance.messageTimestampsEnabled) },
                     reconnects = reconnects, boundariesAfter = workflowBoundaries, childTaskNames = visibleChildNames) } ?: ChatTurnMapper.map(shown.map { it.second },
                     messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },

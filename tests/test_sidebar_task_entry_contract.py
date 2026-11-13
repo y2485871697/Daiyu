@@ -49,8 +49,9 @@ class SidebarTaskEntryContractTest(unittest.TestCase):
         self.assertIn('controller.liveChildTasks(id)', status)
         card = source('MainActivity.kt')
         for callback in ('controller.pauseChildTask(target)', 'controller.resumeChildTask(target)',
-                         'controller.stopChildTask(target)', 'controller.directChildTask(command)'):
+                         'controller.stopChildTask(target)'):
             self.assertIn(callback, card)
+        self.assertIn('fun directChildTask(', source('ChatController.kt'))
         self.assertTrue((SRC / 'storage/SQLiteChildTaskStore.kt').is_file())
         self.assertTrue((SRC / 'ui/screens/conversation/ChildTaskRecordsScreen.kt').is_file())
 

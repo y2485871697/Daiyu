@@ -8,6 +8,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.ObserverModifierNode
+import androidx.compose.ui.node.currentValueOf
+import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.node.observeReads
+import androidx.compose.ui.platform.InspectorInfo
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
 import app.daiyu.android.ui.app.LocalBlurEnabled
 import app.daiyu.android.ui.app.LocalTopBarBlurStyle
@@ -70,7 +83,44 @@ internal fun TopBarBackdrop(
 
 internal fun Modifier.captureForTopBar(backdrop: LayerBackdrop?): Modifier =
     // The capture node draws content twice; replay one display list instead of the subtree.
-    if (Build.VERSION.SDK_INT < 33 || backdrop == null) this else layerBackdrop(backdrop).graphicsLayer()
+    if (Build.VERSION.SDK_INT < 33 || backdrop == null) this else layerBackdrop(backdrop).graphicsLayer().then(ResumeBackdropCaptureElement)
+
+private data object ResumeBackdropCaptureElement : ModifierNodeElement<ResumeBackdropCaptureNode>() {
+    override fun create() = ResumeBackdropCaptureNode()
+    override fun update(node: ResumeBackdropCaptureNode) = Unit
+    override fun InspectorInfo.inspectableProperties() { name = "resumeBackdropCapture" }
+}
+
+private class ResumeBackdropCaptureNode : Modifier.Node(), DrawModifierNode,
+    CompositionLocalConsumerModifierNode, ObserverModifierNode, LifecycleEventObserver {
+    private var lifecycle: Lifecycle? = null
+
+    override fun onAttach() = observeLifecycle()
+    override fun onObservedReadsChanged() = observeLifecycle()
+
+    private fun observeLifecycle() {
+        observeReads {
+            val current = currentValueOf(LocalLifecycleOwner).lifecycle
+            if (current !== lifecycle) {
+                lifecycle?.removeObserver(this)
+                lifecycle = current
+                current.addObserver(this)
+            }
+        }
+    }
+
+    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+        // The inner display list must be recorded again before resumed blur captures replay it.
+        if (event == Lifecycle.Event.ON_RESUME) invalidateDraw()
+    }
+
+    override fun ContentDrawScope.draw() = drawContent()
+
+    override fun onDetach() {
+        lifecycle?.removeObserver(this)
+        lifecycle = null
+    }
+}
 
 @Composable
 internal fun topBarContainerColor(backdrop: LayerBackdrop?, surfaceColor: Color = MiuixTheme.colorScheme.surface): Color =

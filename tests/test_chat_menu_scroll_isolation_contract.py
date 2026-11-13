@@ -82,6 +82,28 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
                       'assertSame(modifier, modifier.captureForTopBar(null))'):
             self.assertIn(token, renderer)
 
+    def test_resume_invalidates_inside_the_capture_display_list_without_remounting_content(self):
+        source = (APP / 'ui/components/TopBarBackdrop.kt').read_text()
+        helper = source.split('internal fun Modifier.captureForTopBar(', 1)[1].split('private data object', 1)[0]
+        self.assertIn('layerBackdrop(backdrop).graphicsLayer().then(ResumeBackdropCaptureElement)', helper)
+        node = source.split('private class ResumeBackdropCaptureNode', 1)[1].split('@Composable', 1)[0]
+        for token in ('CompositionLocalConsumerModifierNode', 'ObserverModifierNode', 'LifecycleEventObserver',
+                      'override fun onAttach() = observeLifecycle()',
+                      'override fun onObservedReadsChanged() = observeLifecycle()',
+                      'observeReads {', 'currentValueOf(LocalLifecycleOwner).lifecycle',
+                      'if (current !== lifecycle)', 'current.addObserver(this)',
+                      'if (event == Lifecycle.Event.ON_RESUME) invalidateDraw()',
+                      'override fun ContentDrawScope.draw() = drawContent()'):
+            self.assertIn(token, node)
+        owner = node.split('if (current !== lifecycle)', 1)[1].split('override fun onStateChanged', 1)[0]
+        self.assertLess(owner.index('lifecycle?.removeObserver(this)'), owner.index('current.addObserver(this)'))
+        detach = node.split('override fun onDetach()', 1)[1]
+        self.assertIn('lifecycle?.removeObserver(this)', detach)
+        self.assertIn('lifecycle = null', detach)
+        self.assertNotIn('delay(', node)
+        self.assertNotIn('withFrameNanos', node)
+        self.assertNotIn('key(', node)
+
     def test_refresh_and_toggle_keep_authoritative_io_and_pending_gates(self):
         source = (APP / 'MainActivity.kt').read_text()
         self.assertIn('onMore = { if (currentChat()) refreshAutomaticCompression() }', source)

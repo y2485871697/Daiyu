@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.delegation.SubAgentDescriptor
+import app.daiyu.android.delegation.SubAgentTaskTier
 import app.daiyu.android.CatalogFixturePort
 
 import app.daiyu.android.domain.*
@@ -40,6 +42,26 @@ class RunChildModelsTest {
             parent.runId, children = children) { grants, auth -> SkillRunSession.create(auth, grants.enabled, emptyList()) }
     }
     private fun definition(port: ModelPort) = ChildModelDefinition("provider/api-model", 1) { port }
+
+    @Test fun synchronousToolAdvertisesExactInitialRoleAndTierWithoutRunningAChild() {
+        val profile = SubAgentDescriptor("same-id", "审查", "implementation", SubAgentTaskTier.COMPLEX, "model", "model")
+        val model = ChildModelDefinition("pool", 0, ChildModelRole.IMPLEMENTATION) {
+            error("description must not open models")
+        }
+        assertEquals(profile.role, model.role.name.lowercase())
+        val children = RunChildModels(ChildModelBatch(mapOf("same-id" to model)), setOf("same-id"),
+            initialProfiles = listOf(profile))
+        try {
+            val definition = children.tool().definition
+            assertTrue(definition.description.contains(profile.toJson().toString()))
+            val registry = ToolRegistry().register(children.tool())
+            val advertised = CatalogModelBridge(registry.snapshot(), SessionCapabilities("session", setOf(RunChildModels.CAPABILITY)),
+                ToolLedger(InMemoryToolLedgerStore()), parent.conversationId, parent.runId,
+                TaskAuthorization("session", parent.runId.value)).definitions.single()
+            assertEquals(definition.description, advertised.description)
+            definition.schema.parse("""{"tasks":[{"profile_id":"same-id","prompt":"input"}]}""")
+        } finally { children.close() }
+    }
 
     @Test fun parentRunnerConsumesRealChildThroughOriginalCatalogAndLedger() {
         val opened = AtomicInteger(); val ledger = InMemoryToolLedgerStore()

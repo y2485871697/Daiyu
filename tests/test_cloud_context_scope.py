@@ -5,7 +5,7 @@ import unittest
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts/cooperation'))
-from evidence import CLOUD_SCOPES, SCOPES, UNIT_SCOPES, UNIT_REPORTS, CONTEXT_PACKAGES, CONTEXT_STORAGE_CLASSES, CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS, verify_xml, validate_record
+from evidence import CLOUD_SCOPES, SCOPES, UNIT_SCOPES, UNIT_REPORTS, CONTEXT_PACKAGES, CONTEXT_STORAGE_CLASSES, CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS, CONTEXT_EXACT_CLASSES, verify_xml, validate_record
 
 
 class ContextChecksScopeTest(unittest.TestCase):
@@ -15,6 +15,7 @@ class ContextChecksScopeTest(unittest.TestCase):
                    (CONTEXT_PACKAGES[1][0], CONTEXT_PACKAGES[1][1] + 'Fixture'),
                    ('app', CONTEXT_RESOLUTION_CLASS), ('app', CONTEXT_TOOL_CLASS)]
         classes.extend(('app', name) for name in sorted(CONTEXT_STORAGE_CLASSES))
+        classes.extend(sorted(CONTEXT_EXACT_CLASSES))
         with zipfile.ZipFile(path, 'w') as z:
             for index, (module, classname) in enumerate(classes):
                 if classname == omit:
@@ -34,14 +35,16 @@ class ContextChecksScopeTest(unittest.TestCase):
         core, app = CLOUD_SCOPES['context'].split(':app:testDebugUnitTest')
         self.assertIn(':core-domain:test --tests app.daiyu.android.domain.context.*', core)
         self.assertIn('--tests app.daiyu.android.context.*', app)
+        for module, name in CONTEXT_EXACT_CLASSES:
+            self.assertIn('--tests ' + name, core if module == 'core-domain' else app)
         self.assertIn(':app:compileDebugAndroidTestKotlin', CLOUD_SCOPES['context'])
         for value in ('assemble', 'connected', 'lintDebug'):
             self.assertNotIn(value, CLOUD_SCOPES['context'])
 
     def test_both_modules_and_actual_new_resolution_regression_are_required(self):
         with tempfile.TemporaryDirectory() as folder:
-            self.assertEqual(6, verify_xml(self.archive(folder), 'context')['tests_passed'])
-            for name in [CONTEXT_PACKAGES[0][1] + 'Fixture', CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS, *CONTEXT_STORAGE_CLASSES]:
+            self.assertEqual(8, verify_xml(self.archive(folder), 'context')['tests_passed'])
+            for name in [CONTEXT_PACKAGES[0][1] + 'Fixture', CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS, *CONTEXT_STORAGE_CLASSES, *(name for _, name in CONTEXT_EXACT_CLASSES)]:
                 with self.subTest(missing=name), self.assertRaisesRegex(ValueError, 'coverage_missing|module_report_missing'):
                     verify_xml(self.archive(folder, omit=name), 'context')
 

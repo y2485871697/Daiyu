@@ -83,7 +83,7 @@ class RunnerContextRuntimeTest {
         assertEquals(RunStatus.COMPLETED, result.status); assertEquals(0, compact)
         assertNull(store.snapshots.last().context!!.calibration)
     }
-    @Test fun fullUsageReplacementClearsPressureAndRealUsageWorksWithoutEstimate() {
+    @Test fun acceptedCloudCrossingStaysLatchedDespiteLaterSmallerOrMissingUsage() {
         for (estimate in listOf(false, true)) for (correction in listOf<Long?>(900L, 100L, null)) {
             val store = Store(); var compact = 0
             val runtime = object : RunContextRuntime {
@@ -104,13 +104,68 @@ class RunnerContextRuntimeTest {
             val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
                 BatteryTool { "unused" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, emptyList())
             assertEquals(RunStatus.COMPLETED, result.status)
-            assertEquals(if (correction == 900L) 1 else 0, compact)
+            assertEquals(1, compact)
             assertEquals(correction, store.snapshots.last().usage.single().snapshot.inputTokens)
-            if (correction == null || !estimate) assertNull(store.snapshots.last().context!!.calibration)
+            if (!estimate) assertNull(store.snapshots.last().context!!.calibration)
+            else assertEquals(correction ?: 900L, store.snapshots.last().context!!.calibration!!.billedTokens)
         }
     }
+    @Test fun belowThresholdAndImplausibleCloudReceiptsNeverCreatePressure() {
+        for (receipt in listOf(ModelEvent.Usage(799, 10), ModelEvent.Usage(1301, 10),
+                ModelEvent.Usage(900, 10, 901))) {
+            val store = Store(); var summaries = 0
+            val runtime = object : RunContextRuntime {
+                override val windowTokens = 1000L
+                override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+                override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                    request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                    admit: () -> Unit, cancelled: () -> Boolean): List<Message>? { summaries++; return null }
+            }
+            val model = ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    sink(ModelEvent.InputEstimate(900)); sink(receipt); sink(ModelEvent.TextFinal("text", "answer"))
+                }
+                override fun cancel() {}
+            } }
+            val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+                BatteryTool { "unused" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, emptyList())
+            assertEquals(RunStatus.COMPLETED, result.status)
+            assertEquals(0, summaries)
+            assertNull(store.snapshots.last().context!!.pressure)
+        }
+    }
+
+    @Test fun invalidFollowupUsageRetainsAcceptedRequestAnchor() {
+        for (receipt in listOf(ModelEvent.Usage(0, 10), ModelEvent.Usage(1301, 10), ModelEvent.Usage(900, 10, 901))) {
+            val store = Store()
+            val runtime = object : RunContextRuntime {
+                override val windowTokens = 1000L
+                override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+                override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                    request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                    admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = null
+            }
+            val model = ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    sink(ModelEvent.InputEstimate(100)); sink(ModelEvent.Usage(700, 10))
+                    val anchor = store.snapshots.last().context!!.calibration
+                    sink(receipt)
+                    assertEquals(anchor, store.snapshots.last().context!!.calibration)
+                    assertNull(store.snapshots.last().context!!.pressure)
+                    sink(ModelEvent.TextFinal("text", "answer"))
+                }
+                override fun cancel() {}
+            } }
+            val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+                BatteryTool { "unused" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, emptyList())
+            assertEquals(RunStatus.COMPLETED, result.status)
+            assertEquals(receipt.inputTokens, store.snapshots.last().usage.single().snapshot.inputTokens)
+            assertEquals(700L, store.snapshots.last().context!!.calibration!!.billedTokens)
+        }
+    }
+
     @Test fun reconnectRemapsContextAnchorsBeforeResumeAdmission() {
-        val store = Store(); var opens = 0; var nexts = 0; var resumes = 0
+        val store = Store(); var opens = 0; var nexts = 0; var resumes = 0; var summaries = 0
         lateinit var original: RequestCheckpoint
         val checkedStore = object : AtomicRuntimeStore {
             override fun commitCheckpoint(checkpoint: RunCheckpoint) {
@@ -134,7 +189,7 @@ class RunnerContextRuntimeTest {
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 70L
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                 request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
-                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = error("pressure was cleared")
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? { summaries++; return null }
         }
         val model = ModelPort {
             opens++
@@ -155,7 +210,9 @@ class RunnerContextRuntimeTest {
                     assertEquals(RequestOperation.RESUME, resumed.operation)
                     assertEquals(original.requestId, resumed.requestId); assertEquals(original.owner, resumed.owner)
                     assertNotEquals(original.attemptId, resumed.attemptId); assertAnchors(admitted, resumed)
-                    sink(ModelEvent.Usage(100, 12)); sink(ModelEvent.TextFinal("answer", "ok"))
+                    sink(ModelEvent.Usage(100, 12))
+                    assertEquals(resumed, store.snapshots.last().context!!.pressure)
+                    sink(ModelEvent.TextFinal("answer", "ok"))
                 }
                 override fun cancel() {}
             }
@@ -173,6 +230,7 @@ class RunnerContextRuntimeTest {
         assertEquals(RequestOperation.RESUME, request.operation)
         assertEquals(RequestInputCheckpoint(request, 100L, 100L, 70L), last.context!!.calibration)
         assertNull(last.context!!.pressure)
+        assertEquals(1, summaries)
         assertEquals(RequestUsageCheckpoint(request, ModelEvent.Usage(100, 12)), last.usage.single())
     }
     @Test fun manualCompressionIsDeferredPastToolsAndBeforeReopenEvenWithSupplementAndAutoDisabled() {

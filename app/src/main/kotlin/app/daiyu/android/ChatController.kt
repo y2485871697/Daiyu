@@ -3868,8 +3868,9 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged();return null
         }
         val childModels: Map<String, ChildModelDefinition> = childPreparation ?: emptyMap()
+        val currentChildConfiguration: () -> FrozenSubAgentModels? = { childPreparation?.forNewRequests() }
         val currentChildModels: () -> Map<String, ChildModelDefinition> = {
-            childPreparation?.forNewRequests() ?: emptyMap()
+            currentChildConfiguration() ?: emptyMap()
         }
         val currentChildProfiles: () -> Set<String> = { currentChildModels().keys }
         val interactiveSnapshot = interactiveMode.snapshot()
@@ -4155,7 +4156,9 @@ class ChatController internal constructor(private val application:Application,
                     }
                 },
                 resume = ::resumeChildTask, pause = ::pauseChildTask, stop = ::stopChildTask,
-                currentProfiles = currentChildProfiles)
+                currentProfiles = currentChildProfiles,
+                currentProfileMetadata = { currentChildConfiguration()?.descriptors.orEmpty() },
+                initialProfiles = childPreparation?.descriptors.orEmpty())
             val executionChildren = if (!withChildren || !ordinaryRun) null else executionChildTools(application,
                 checkNotNull(ordinaryAssistant), toolLedger, workspace, checkNotNull(ordinaryBrowserSettings), platformSnapshot.resultPolicy, shizukuAccess)
             val children = if (!withChildren) null else RunChildModels(
@@ -4164,7 +4167,8 @@ class ChatController internal constructor(private val application:Application,
                     usageRecorder = checkNotNull(runtimeStore).childUsage,
                     currentModels = currentChildModels, toolAssembly = executionChildren).also { batch ->
                     synchronized(this) { childModelBatches[batch] = conversationId.value }
-                }, childModels.keys, currentProfiles = currentChildProfiles)
+                }, childModels.keys, currentProfiles = currentChildProfiles,
+                initialProfiles = childPreparation?.descriptors.orEmpty())
             preparingChildren = children
             val devices = RunDeviceResources(application, resultPolicy = platformSnapshot.resultPolicy)
             preparingDevices = devices
@@ -4198,7 +4202,8 @@ class ChatController internal constructor(private val application:Application,
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(!withChildren) null else { owner, grants, authorization ->
-                    val admittedModels = currentChildModels()
+                    val admittedConfiguration = currentChildConfiguration()
+                    val admittedModels: Map<String, ChildModelDefinition> = admittedConfiguration ?: emptyMap()
                     val supervisor = checkNotNull(childSupervisor)
                     val ownerKey = SubAgentConfigKey.Conversation(conversationId.value)
                     val currentConfiguration = childPreferences.snapshot(ownerKey)
@@ -4206,7 +4211,8 @@ class ChatController internal constructor(private val application:Application,
                     synchronized(this) {
                         check(!closed)
                         val binding=supervisor.bind(owner,grants,authorization,admittedModels, executionChildren, ::backgroundTasksChanged)
-                        RunChildTasks(supervisor, binding, admittedModels.keys, currentChildModels, currentChildProfiles).also { tasks ->
+                        RunChildTasks(supervisor, binding, admittedModels.keys, currentChildModels, currentChildProfiles,
+                            initialProfiles = admittedConfiguration?.descriptors.orEmpty()).also { tasks ->
                             backgroundRuns[run] = tasks
                             resources?.takeIf { it.initial.runId == run && it.childrenPauseRequested }?.let { lifetime ->
                                 lifetime.pausedChildren = ChildPauseCapture(tasks, tasks.pauseGroup())

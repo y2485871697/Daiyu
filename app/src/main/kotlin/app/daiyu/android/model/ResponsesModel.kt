@@ -367,7 +367,7 @@ class ResponsesModel internal constructor(
             var completedPost = false
             try {
                 checkCancelled()
-                try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes))) }
+                try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes, settings.protocol))) }
                 catch (failure: Exception) { deliveryFailure = failure; throw failure }
                 checkCancelled()
                 // The payload and all budgets/allowlists are final before asking the UI. Never

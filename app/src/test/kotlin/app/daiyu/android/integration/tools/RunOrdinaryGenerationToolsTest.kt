@@ -24,7 +24,7 @@ class RunOrdinaryGenerationToolsTest {
                     GenerationProtocol.OPENAI_IMAGES_JSON -> "images/generations"
                     GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> "images/edits"
                     GenerationProtocol.OPENAI_VIDEO_MULTIPART -> "videos"
-                }, "model", "key")
+                }, "model", "unique-generation-fixture-secret")
         }, 4, false, emptySet()))
     private fun leaf(settings: GenerationSettingsSnapshot, inputs: Map<String, GenerationInput> = assets) =
         RunOrdinaryGenerationTools(owner, auth, settings,
@@ -36,6 +36,25 @@ class RunOrdinaryGenerationToolsTest {
     private fun rejected(action: () -> Unit) {
         try { action(); fail("invalid generation input accepted") } catch (_: IllegalArgumentException) { }
     }
+    @Test fun mediaDescriptionsExposeTrueRolesAndPathsWithoutGenerationOrCredentials() {
+        val snapshot = settings(GenerationProtocol.OPENAI_IMAGES_JSON, GenerationProtocol.OPENAI_VIDEO_MULTIPART)
+        val scope = leaf(snapshot)
+        try {
+            val image = scope.tools.single { it.definition.name == RunGenerationTools.IMAGE_TOOL }.definition.description
+            val video = scope.tools.single { it.definition.name == RunGenerationTools.VIDEO_TOOL }.definition.description
+            assertTrue(image.contains("\"role\":\"image_generation\""))
+            assertTrue(image.contains("\"dispatch_tools\":[\"generate_images\"]"))
+            assertTrue(video.contains("\"role\":\"video_generation\""))
+            assertTrue(video.contains("\"dispatch_tools\":[\"generate_videos\"]"))
+            assertTrue(image.contains("\"profile_id\":\"p0\"")); assertTrue(video.contains("\"profile_id\":\"p1\""))
+            assertTrue(image.contains("\"task_tier\":null")); assertTrue(video.contains("\"task_tier\":null"))
+            assertFalse(image.contains("https://example.test")); assertFalse(video.contains("https://example.test"))
+            assertFalse(image.contains("unique-generation-fixture-secret"))
+            assertFalse(video.contains("unique-generation-fixture-secret"))
+            assertFalse(image.contains("\"apiKey\"")); assertFalse(video.contains("\"credential\""))
+        } finally { scope.close() }
+    }
+
     @Test fun editProfileIsAdvertisedOnlyWithAllowedPngSource() {
         val settings = settings(GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART)
         assertEquals(1, leaf(settings).tools.size)

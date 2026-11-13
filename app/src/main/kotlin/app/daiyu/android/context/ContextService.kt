@@ -103,7 +103,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         checkCancellation(cancelled)
         // Empty history (including a not-yet-created conversation) has no compressible
         // evidence. Still enforce the pending budget below, without ensureIdle/nonexistent owner.
-        if (before.messages.isNotEmpty() && summarizer != null && (if (policy.tokenTail) policy.enabled && !policy.fitsSendBudget(TokenTailCompression.historyTokens(MessageHistory.expand(before.messages + pending), includeLatestScreen = false))
+        // Production preparation recovers a hard send limit, not the cloud-only 80% trigger.
+        if (before.messages.isNotEmpty() && summarizer != null && (if (policy.tokenTail) policy.enabled && !policy.fitsSendBudget(TokenTailCompression.historyTokens(MessageHistory.expand(ModelHistory.project(before.messages + pending)), includeLatestScreen = false))
                 else policy.shouldCompress(estimateTokens(before.messages + pending))))
             compress(id, policy, summarizer, pending, cancelled)
         val prepared = RuntimeDiagnostics.measure(Stage.CONTEXT_READ) { transactions.run { effective(it, id) } }

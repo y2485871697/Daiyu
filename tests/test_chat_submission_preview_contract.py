@@ -53,6 +53,22 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertIn('preparingSend -> "取消发送"', composer)
         self.assertIn('!preparingSend && state.mainContextCompressing', composer)
 
+    def test_pending_draft_is_only_hidden_for_its_exact_editor_and_ticket(self):
+        main = (APP / 'MainActivity.kt').read_text()
+        pending = main.split('val hideSubmittedDraft =', 1)[1].split('val regeneration =', 1)[0]
+        for guard in ('inlineMessageEditor == null',
+                      'pending.editorOwner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)',
+                      'pending.text == draft', 'controller.textSendState()?.ticket === pending.ticket'):
+            self.assertIn(guard, pending)
+        self.assertIn('ComposerUi(text = if (hideSubmittedDraft) "" else inlineMessageEditor?.text ?: draft', main)
+        self.assertIn('selectionStart = if (hideSubmittedDraft) 0 else', main)
+        self.assertIn('selectionEnd = if (hideSubmittedDraft) 0 else', main)
+        self.assertNotIn('draft =', pending)
+        composer = (CHAT / 'ChatComposer.kt').read_text()
+        self.assertIn('preparingSend -> ChatPreviewIcons.Pause', composer)
+        self.assertNotIn('preparingSend -> app.daiyu.android.ui.icons.DaiyuIcons.Stop', composer)
+        self.assertIn('preparingSend -> "取消发送"', composer)
+
     def test_unconsumed_receipt_has_real_activity_and_palette_regressions(self):
         activity = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/TextSendActivityTest.kt').read_text()
         for oracle in ('testCommittedReceiptKeepsPreparingControlUntilUiConsumesIt',

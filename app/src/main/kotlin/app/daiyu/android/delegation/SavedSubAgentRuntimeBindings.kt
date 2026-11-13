@@ -10,6 +10,7 @@ import app.daiyu.android.storage.ModelSettings
 internal class FrozenSubAgentModels(
     definitions: Map<String, ChildModelDefinition>, private val current: () -> Boolean,
     private val latest: (() -> FrozenSubAgentModels)? = null,
+    val descriptors: List<SubAgentDescriptor> = emptyList(),
 ) : Map<String, ChildModelDefinition> by definitions {
     fun isCurrent(): Boolean = current()
     fun forNewRequests(): FrozenSubAgentModels = latest?.invoke() ?: this
@@ -100,6 +101,9 @@ internal class SavedSubAgentRuntimeBindings(
             val selected = latestModels()
             check(latestConfig() == next) { "child_model_configuration_changed" }
             selected
-        }))
+        }), descriptors = selected.map { binding ->
+            SubAgentDescriptor(binding.profile.id, binding.profile.name, binding.profile.role,
+                binding.profile.tier.takeIf { binding.profile.supportsTaskTier }, binding.child.model, binding.modelName)
+        })
     }
 }

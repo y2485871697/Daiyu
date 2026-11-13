@@ -1,5 +1,6 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.delegation.SubAgentDescriptor
 import app.daiyu.android.ControllerGenerationResources
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
@@ -22,7 +23,11 @@ internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorizatio
         }
         if (profiles.isEmpty()) null else object : RegisteredTool {
             override val definition = ToolDefinition(if (video) RunGenerationTools.VIDEO_TOOL else RunGenerationTools.IMAGE_TOOL, 1,
-                "用已配置的独立生成模型执行prompt。profile_id只能选择已配置档案；编辑图片必须指定本次消息中PNG的source_asset_id，可选同尺寸PNG的mask_asset_id；视频可带一张source。结果必须下载并登记后才返回asset引用，未知付费请求禁止重发。",
+                "用已配置的独立生成模型执行prompt。profile_id只能选择已配置档案；编辑图片必须指定本次消息中PNG的source_asset_id，可选同尺寸PNG的mask_asset_id；视频可带一张source。结果必须下载并登记后才返回asset引用，未知付费请求禁止重发。" +
+                    SubAgentDescriptor.initialDescription(profiles.map { profile ->
+                        SubAgentDescriptor(profile.id, profile.label,
+                            if (video) "video_generation" else "image_generation", null, profile.model, profile.model)
+                    }),
                 RunGenerationTools.CAPABILITY, ToolEffect.WRITE, ToolSchema(buildList {
                     add(ArgumentField("prompt", ArgumentType.Text(32768, minimumLength = 1)))
                     add(ArgumentField("profile_id", ArgumentType.Text(128, profiles.map { it.id }.toSet()), required = profiles.size > 1))

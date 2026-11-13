@@ -76,6 +76,24 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertNotIn("enqueue(",text)
         catalog = (APP / "integration/tools/RunCatalogTools.kt").read_text()
         self.assertIn("childTaskAccess?.tools()?.forEach { registry.register(it) }",catalog)
+    def test_profile_metadata_reaches_all_initial_and_current_advertisements(self):
+        controller = (APP / "ChatController.kt").read_text()
+        self.assertIn("currentProfileMetadata = { currentChildConfiguration()?.descriptors.orEmpty() }", controller)
+        self.assertIn("initialProfiles = childPreparation?.descriptors.orEmpty()", controller)
+        self.assertIn("initialProfiles = admittedConfiguration?.descriptors.orEmpty()", controller)
+        bindings = (APP / "delegation/SavedSubAgentRuntimeBindings.kt").read_text()
+        self.assertIn("descriptors = selected.map { binding ->", bindings)
+        self.assertIn("binding.profile.tier.takeIf { binding.profile.supportsTaskTier }", bindings)
+        for name in ("RunChildModels.kt", "RunChildTasks.kt", "RunChildTaskAccess.kt"):
+            text = (APP / "integration/tools" / name).read_text()
+            self.assertIn("SubAgentDescriptor.initialDescription(initialProfiles)", text)
+        access = (APP / "integration/tools/RunChildTaskAccess.kt").read_text()
+        self.assertIn('put("available_profile_metadata"', access)
+        self.assertIn('put("configuration_scope", "current_new_text_requests")', access)
+        generation = (APP / "integration/tools/RunOrdinaryGenerationTools.kt").read_text()
+        self.assertIn('if (video) "video_generation" else "image_generation"', generation)
+        self.assertIn("SubAgentDescriptor.initialDescription(profiles.map", generation)
+
     def test_runtime_store_forwards_actual_selection_through_owner_guard(self):
         text = (APP / "storage/SQLiteRuntimeStore.kt").read_text()
         wrapper = text.split("internal val childTasks: ChildTaskStore = object : ChildTaskStore", 1)[1].split("@Synchronized private fun <T> childAccess", 1)[0]
@@ -109,7 +127,8 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn('check(latestConfig() == next)', bindings)
         controller = (APP / "ChatController.kt").read_text()
         callbacks = controller.split("val childPreparation = if (!withChildren)", 1)[1].split("val interactiveSnapshot =", 1)[0]
-        self.assertIn("childPreparation?.forNewRequests() ?: emptyMap()", callbacks)
+        self.assertIn("childPreparation?.forNewRequests()", callbacks)
+        self.assertIn("currentChildConfiguration() ?: emptyMap()", callbacks)
         self.assertIn("currentChildProfiles: () -> Set<String> = { currentChildModels().keys }", callbacks)
         choice = controller.split("internal fun finishChildStopChoice(", 1)[1].split("private fun capturePausedChildren", 1)[0]
         self.assertIn("capture.tasks.resumeGroup(capture.group)", choice)

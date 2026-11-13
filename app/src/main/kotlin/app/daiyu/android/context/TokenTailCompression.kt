@@ -41,14 +41,15 @@ internal object TokenTailCompression {
             message.blocks.lastOrNull { it is MessageBlock.Tool && it.invocation.name == "screen" && it.result != null }
         }
         return history.map { message ->
-            3L + message.blocks.sumOf { block -> when (block) {
+            val calls = JSONArray()
+            val payload = message.blocks.sumOf { block -> when (block) {
                 is MessageBlock.Text -> textTokens(block.text)
                 is MessageBlock.Image -> imageTokens(block.reference.width, block.reference.height)
                 is MessageBlock.Tool -> {
-                    val call = JSONArray().put(JSONObject().put("id", block.invocation.id.value)
+                    calls.put(JSONObject().put("id", block.invocation.id.value)
                         .put("type", "function").put("function", JSONObject().put("name", block.invocation.name)
                             .put("arguments", block.invocation.arguments)))
-                    textTokens(call.toString()) + (block.result?.let { result ->
+                    block.result?.let { result ->
                         val metadata = if (result.contains("\"image_asset\""))
                             NativeScreenImage.metadata(block.invocation.name, block.invocation.arguments, result)
                         else NativeScreenImage.parse(block.invocation.name, block.invocation.arguments, result)?.metadata
@@ -61,10 +62,20 @@ internal object TokenTailCompression {
                             imageTokens(image.getInt("width"), image.getInt("height")) + textTokens(
                                 "screen工具图像（call_id=${block.invocation.id.value}），坐标使用原始${image.getInt("width")}×${image.getInt("height")}像素。") else 0L
                         3 + textTokens(block.invocation.id.value) + textTokens(output) + pixels
-                    } ?: 0L)
+                    } ?: 0L
                 }
             } }
+            3L + payload + if (calls.length() == 0) 0L else textTokens(calls.toString())
         }
+    }
+
+    fun toolTokens(tools: List<ToolDefinition>): Long {
+        if (tools.isEmpty()) return 0
+        val definitions = JSONArray()
+        tools.forEach { tool -> definitions.put(JSONObject().put("type", "function").put("function",
+            JSONObject().put("name", tool.name).put("description", tool.description)
+                .put("parameters", JSONObject(tool.parameters)))) }
+        return textTokens(definitions.toString())
     }
 
     fun localBudget(budget: Long, billed: Long?, local: Long?): Long {

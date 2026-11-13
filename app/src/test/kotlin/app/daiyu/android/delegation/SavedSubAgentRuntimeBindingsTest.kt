@@ -8,6 +8,30 @@ import org.junit.Test
 import org.json.JSONObject
 
 class SavedSubAgentRuntimeBindingsTest {
+    @Test fun checkedBindingSnapshotPublishesRoleAndTierWithoutOpeningModelsOrLeakingCredentials() {
+        val created = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { created += it; noNetwork }
+        val executor = profile.copy(id = "executor", name = "审查", role = "implementation", tier = SubAgentTaskTier.COMPLEX)
+        val reviewer = profile.copy(name = "执行")
+        var latest = config.copy(profiles = listOf(executor, reviewer))
+        val initial = bindings.freeze(owner, latest, listOf(provider), { _, _ -> saved },
+            latestConfig = { latest }, latestModel = { error("description must not resolve a model") },
+            latestModels = { bindings.freeze(owner, latest, listOf(provider), { _, _ -> saved }) })
+        val execution = initial.descriptors.single { it.profileId == "executor" }
+        assertEquals("implementation", execution.role); assertEquals(SubAgentTaskTier.COMPLEX, execution.taskTier)
+        assertEquals(initial.getValue("executor").role.name.lowercase(), execution.role)
+        val review = initial.descriptors.single { it.profileId == profile.id }
+        assertEquals("review", review.role); assertNull(review.taskTier)
+        assertEquals(initial.getValue(profile.id).display!!.modelId, review.modelId)
+        assertFalse(execution.toJson().toString().contains(saved.apiKey))
+        assertFalse(execution.toJson().toString().contains(saved.endpoint))
+        latest = latest.copy(profiles = listOf(executor.copy(name = "new name", tier = SubAgentTaskTier.SIMPLE)))
+        val updated = initial.forNewRequests().descriptors.single()
+        assertEquals("new name", updated.name); assertEquals(SubAgentTaskTier.SIMPLE, updated.taskTier)
+        assertEquals(SubAgentTaskTier.COMPLEX, initial.descriptors.first().taskTier)
+        assertTrue(created.isEmpty())
+    }
+
     @Test fun deletedModelKeepsAcceptedSnapshotButRejectsNewAdmissionsAndNeverReadsMissingCatalog() {
         var deleted = false; var reads = 0
         val captured = mutableListOf<ProviderSnapshot>()

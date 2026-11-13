@@ -148,7 +148,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val primaryVisualEnabled = preparingSend || if (textAction) state.copy(enabled = visualEnabled).textActionEnabled()
         else visualEnabled && state.phase != ComposerPhase.IDLE
     val primaryIcon = when {
-        preparingSend -> app.daiyu.android.ui.icons.DaiyuIcons.Stop
+        preparingSend -> ChatPreviewIcons.Pause
         state.phase == ComposerPhase.PAUSED && !hasText -> ChatPreviewIcons.Play
         textAction && state.phase != ComposerPhase.IDLE -> ChatPreviewIcons.Append
         textAction -> ChatPreviewIcons.Send

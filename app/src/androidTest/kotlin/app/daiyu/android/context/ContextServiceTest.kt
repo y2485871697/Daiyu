@@ -229,6 +229,37 @@ class ContextServiceTest : InstrumentationTestCase() {
         assertEquals(0L, service.usage(owner.value).requests)
     }
 
+    fun testProductionLocalPressureBelowHardLimitDoesNotScheduleEightyPercentSummary() {
+        val owner = seed(3)
+        val original = service.displayHistory(owner)
+        val local = TokenTailCompression.historyTokens(MessageHistory.expand(original), includeLatestScreen = false)
+        val policy = CompressionPolicy(true, local + 100, reserveTokens = 0, tokenTail = true)
+        assertTrue(policy.shouldCompress(local))
+        var summaries = 0
+        val prepared = service.prepareSend(owner, policy, ContextSummarizer { summaries++; "facts" })
+        assertEquals(0, summaries)
+        assertEquals(original, prepared.messages)
+        assertTrue(compressionRows(owner).isEmpty())
+    }
+
+    fun testProductionHardLimitRecoveryIsRetainedAndOversizePendingStillRejected() {
+        val owner = seed(6)
+        val original = service.displayHistory(owner)
+        val local = TokenTailCompression.historyTokens(MessageHistory.expand(original), includeLatestScreen = false)
+        val policy = CompressionPolicy(true, local - 100, reserveTokens = 0, tokenTail = true)
+        var summaries = 0
+        val prepared = service.prepareSend(owner, policy, ContextSummarizer { summaries++; "facts" })
+        assertEquals(1, summaries)
+        assertNotNull(prepared.archiveId)
+        assertEquals(original, service.displayHistory(owner))
+        val pending = Message(MessageId("oversize"), owner, RunId("oversize"), "user",
+            listOf(MessageBlock.Text("input", "x".repeat(100000))), RunStatus.COMPLETED)
+        assertTrue(compressionFailure {
+            service.prepareSend(owner, policy.copy(enabled = false), pendingMessages = listOf(pending))
+        } is ContextCapacityExceededException)
+        assertEquals(original, service.displayHistory(owner))
+    }
+
     fun testPendingInputCountsTowardsBudgetButIsNotReturnedOrPersisted() {
         val owner = seed(1); val original = service.displayHistory(owner)
         val pending = Message(MessageId("pending"), owner, RunId("pending-run"), "user",

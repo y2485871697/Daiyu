@@ -1,5 +1,6 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.delegation.SubAgentDescriptor
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.runtime.RunExecutionOwner
@@ -80,6 +81,20 @@ class RunChildTasksTest {
     private fun close(supervisor: RetainedChildTasks, model: Held) {
         model.release.countDown(); val done = CountDownLatch(1); supervisor.closeWhenIdle { done.countDown() }
         assertTrue(done.await(5, TimeUnit.SECONDS))
+    }
+
+    @Test fun backgroundToolAdvertisesTheAdmittedProfileWithoutGrantingReviewTools() {
+        val supervisor = RetainedChildTasks(Journal())
+        val owner = owner()
+        val grants = SessionCapabilities("session", setOf(RunChildTasks.CAPABILITY))
+        val models = mapOf("review" to ChildModelDefinition("pool", 0) { error("no model request") })
+        val binding = supervisor.bind(owner, grants, TaskAuthorization("session", owner.runId.value), models)
+        val profile = SubAgentDescriptor("review", "执行", "review", null, "model", "model")
+        val tasks = RunChildTasks(supervisor, binding, models.keys, initialProfiles = listOf(profile))
+        try {
+            assertTrue(tasks.tool().definition.description.contains(profile.toJson().toString()))
+            assertEquals("text_only", profile.toJson().getString("tool_policy"))
+        } finally { tasks.close(); supervisor.closeWhenIdle {} }
     }
 
     @Test fun realDispatcherReturnsDurableAdmissionAndParentCloseDoesNotCancelChild() {

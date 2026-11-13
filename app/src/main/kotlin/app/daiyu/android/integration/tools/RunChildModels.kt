@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.delegation.SubAgentDescriptor
+
 import app.daiyu.android.domain.delegation.ChildModelBatch
 import app.daiyu.android.domain.delegation.ChildModelTask
 import app.daiyu.android.domain.runtime.RunExecutionOwner
@@ -7,7 +9,8 @@ import app.daiyu.android.domain.tools.*
 
 /** One parent-owned batch. Backend policy limits execution tools; no recursive delegation. */
 internal class RunChildModels(private val batch: ChildModelBatch, profiles: Set<String>,
-    private val currentProfiles: (() -> Set<String>)? = null) : AutoCloseable {
+    private val currentProfiles: (() -> Set<String>)? = null,
+    private val initialProfiles: List<SubAgentDescriptor> = emptyList()) : AutoCloseable {
     private val profiles = profiles.toSet()
     init { require(this.profiles.isNotEmpty() || currentProfiles != null) }
 
@@ -16,7 +19,7 @@ internal class RunChildModels(private val batch: ChildModelBatch, profiles: Set<
 
     fun tool(): RegisteredTool = object : RegisteredTool {
         override val definition = ToolDefinition(TOOL_NAME, 1,
-            "运行一批独立子任务，可能产生模型费用。执行角色可使用父任务已开放的可委派工具，审查角色仅文本审查。tool_names可收窄工具，空数组禁用；browser_access可收窄浏览器，默认full但不超过父权限。子任务不能递归委派，不自动重试。",
+            "运行一批独立子任务，可能产生模型费用。执行角色可使用父任务已开放的可委派工具，审查角色仅文本审查。tool_names可收窄工具，空数组禁用；browser_access可收窄浏览器，默认full但不超过父权限。子任务不能递归委派，不自动重试。" + SubAgentDescriptor.initialDescription(initialProfiles),
             CAPABILITY, ToolEffect.READ_ONLY,
             ToolSchema(listOf(ArgumentField("tasks", ArgumentType.ArrayValue(
                 ArgumentType.ObjectValue(ToolSchema(listOf(

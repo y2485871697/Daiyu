@@ -850,16 +850,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val billed = event.inputTokens
                             if (window != null) {
                                 val plausible = billed != null && billed > 0 && billed <= window * 130 / 100 &&
-                                    (event.cachedTokens == null || event.cachedTokens <= window)
+                                    (event.cachedTokens == null || (event.cachedTokens <= window && event.cachedTokens <= billed))
                                 val state = checkNotNull(contextState)
                                 if (plausible && local != null && local.request == request)
                                     contextInputOverhead = checkNotNull(billed) - local.historyTokens
                                 contextState = state.copy(
                                     calibration = if (plausible && local?.request == request) local?.copy(billedTokens = billed)
-                                        else state.calibration?.takeUnless { it.request == request },
+                                        else state.calibration,
                                     pressure = if (contextRuntime.automatic && plausible &&
                                         checkNotNull(billed) >= window * 80 / 100) request
-                                        else state.pressure?.takeUnless { it == request })
+                                        else state.pressure)
                             }
                             checkpoint(snapshot(usageSnapshot = nextUsage))
                             usage = nextUsage

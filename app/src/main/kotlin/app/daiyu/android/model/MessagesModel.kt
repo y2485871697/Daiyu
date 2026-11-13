@@ -141,7 +141,7 @@ class MessagesModel internal constructor(
             var configuringRequest = true
             try {
                 checkCancelled()
-                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes)))
+                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes, settings.protocol)))
                 checkCancelled()
                 val conn = ModelHttpTransport.open(URL(endpoint), connect, beforeConnect)
                 ownedConnection = conn; connectionTrace = conn to trace; connection = conn

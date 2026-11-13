@@ -543,7 +543,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val dg = content.green - fill.green
             val db = content.blue - fill.blue
             val contrast = dr * dr + dg * dg + db * db
-            assertTrue("active stop must have visible ink", contrast > 0f)
+            assertTrue("active pause must have visible ink", contrast > 0f)
             val coverage = (pixels.width / 3 until pixels.width * 2 / 3).maxOf { x ->
                 (pixels.height / 3 until pixels.height * 2 / 3).maxOf { y ->
                     val pixel = pixels[x, y]
@@ -552,7 +552,18 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 }
             }
             // A hollow one-pixel stroke may straddle pixels; disabled ink never exceeds .38.
-            assertTrue("stop ink must not use disabled alpha: $coverage", coverage > .48f)
+            assertTrue("pause ink must not use disabled alpha: $coverage", coverage > .48f)
+            mainThread {
+                state.value = state.value.copy(text = "", enabled = true, preparingSendKey = null,
+                    phase = ComposerPhase.RUNNING)
+            }
+            awaitVisualIdle()
+            val running = node("chat-control").assertContentDescriptionEquals("暂停").captureToImage().toPixelMap()
+            assertEquals(pixels.width, running.width)
+            assertEquals(pixels.height, running.height)
+            for (x in pixels.width / 3 until pixels.width * 2 / 3)
+                for (y in pixels.height / 3 until pixels.height * 2 / 3)
+                    assertPixel(pixels[x, y], running[x, y])
         }
     }
 
@@ -581,6 +592,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     fun testComposerVisibleControlsStayBalancedWithAvatarAcrossActionStates() {
         val states = listOf(
             Triple(composer().copy(text = "消息", phase = ComposerPhase.IDLE), "发送", 16f),
+            Triple(composer().copy(text = "", enabled = false, preparingSendKey = "ticket"), "取消发送", 14f),
             Triple(composer().copy(text = "", phase = ComposerPhase.RUNNING), "暂停", 14f),
             Triple(composer().copy(text = "", phase = ComposerPhase.PAUSED), "继续", 14f),
             Triple(composer().copy(text = "补充", phase = ComposerPhase.PAUSED,

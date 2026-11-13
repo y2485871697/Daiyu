@@ -20,7 +20,9 @@ CLOUD_SCOPES = {**SCOPES, 'delegation': (
     ':app:compileDebugAndroidTestKotlin')}
 CLOUD_SCOPES['context'] = (
     ':core-domain:test --tests app.daiyu.android.domain.context.* '
+    '--tests app.daiyu.android.domain.runtime.RunnerContextRuntimeTest '
     ':app:testDebugUnitTest --tests app.daiyu.android.context.* '
+    '--tests app.daiyu.android.model.RequestInputEstimateTest '
     '--tests app.daiyu.android.storage.ProviderRepositoryDeletionTest '
     '--tests app.daiyu.android.storage.ProviderRegistryTest :app:compileDebugAndroidTestKotlin')
 UNIT_SCOPES = {'unit', 'delegation', 'context'}
@@ -31,6 +33,10 @@ CONTEXT_PACKAGES = (
 CONTEXT_STORAGE_CLASSES = {
     'app.daiyu.android.storage.ProviderRepositoryDeletionTest',
     'app.daiyu.android.storage.ProviderRegistryTest',
+}
+CONTEXT_EXACT_CLASSES = {
+    ('core-domain', 'app.daiyu.android.domain.runtime.RunnerContextRuntimeTest'),
+    ('app', 'app.daiyu.android.model.RequestInputEstimateTest'),
 }
 CONTEXT_RESOLUTION_CLASS = 'app.daiyu.android.context.SavedCatalogSummaryResolutionTest'
 CONTEXT_TOOL_CLASS = 'app.daiyu.android.context.ContextToolDefinitionStabilityTest'
@@ -141,14 +147,15 @@ def verify_xml(archive, scope, platform=None):
                         classname = case.get('classname', '')
                         group = next((p for p in CONTEXT_PACKAGES
                                       if p[0] == module and classname.startswith(p[1])), None)
-                        if group is None and not (module == 'app' and classname in CONTEXT_STORAGE_CLASSES):
+                        if group is None and (module, classname) not in CONTEXT_EXACT_CLASSES and not (module == 'app' and classname in CONTEXT_STORAGE_CLASSES):
                             raise ValueError('context_unexpected_test')
                         if case.find('skipped') is None:
                             classes.add(classname)
                             if group is not None:
                                 covered.add(group)
                 if (covered != set(CONTEXT_PACKAGES)
-                        or not (CONTEXT_STORAGE_CLASSES | {CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS}) <= classes):
+                        or not (CONTEXT_STORAGE_CLASSES | {CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS} |
+                                {name for _, name in CONTEXT_EXACT_CLASSES}) <= classes):
                     raise ValueError('context_package_coverage_missing')
             if scope == 'delegation':
                 covered = set()

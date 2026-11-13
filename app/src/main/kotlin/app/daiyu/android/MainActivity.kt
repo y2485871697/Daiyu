@@ -7107,6 +7107,11 @@ class MainActivity : ComponentActivity() {
                 app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(pending.ticket.previewKey,
                     pending.text, settledAssistantId = receipt?.assistant?.id?.value, settledUserId = receipt?.userId)
             } ?: acceptedTextPreview?.takeIf { it.first == selected?.id }?.second
+            // Keep the source draft for admission/rejection, but show it only once in the pending bubble.
+            val hideSubmittedDraft = inlineMessageEditor == null && pendingTextSend?.let { pending ->
+                pending.editorOwner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
+                    pending.text == draft && controller.textSendState()?.ticket === pending.ticket
+            } == true
             val regeneration = controller.regenerationPreview()?.takeIf { it.target.conversationId == selected?.id }
             val submissionPreview = regeneration?.let { preview ->
                 val target = preview.target
@@ -7168,9 +7173,9 @@ class MainActivity : ComponentActivity() {
                     messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
                         else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
                     imageHost.sending -> "正在核实图片发送结果"; else -> null },
-                composer = ComposerUi(text = inlineMessageEditor?.text ?: draft,
-                    selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart,
-                    selectionEnd = inlineMessageEditor?.selectionEnd ?: selectionEnd,
+                composer = ComposerUi(text = if (hideSubmittedDraft) "" else inlineMessageEditor?.text ?: draft,
+                    selectionStart = if (hideSubmittedDraft) 0 else inlineMessageEditor?.selectionStart ?: selectionStart,
+                    selectionEnd = if (hideSubmittedDraft) 0 else inlineMessageEditor?.selectionEnd ?: selectionEnd,
                     editingMessageCanSubmit = inlineMessageEditor?.let { it.canSubmit && !editReferencePending(it) } == true,
                     editingMessageBlocked = messageEditBlocked,
                     mainContextCompressing = controller.isMainContextCompressing(selected?.id),

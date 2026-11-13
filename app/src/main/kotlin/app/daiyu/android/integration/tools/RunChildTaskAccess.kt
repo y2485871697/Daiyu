@@ -1,5 +1,6 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.delegation.SubAgentDescriptor
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.tools.*
 import org.json.JSONArray
@@ -15,10 +16,12 @@ internal class RunChildTaskAccess(
     private val pause: (ChildTaskRecord) -> ChildTaskControlReceipt,
     private val stop: (ChildTaskRecord) -> ChildTaskStop,
     private val currentProfiles: () -> Set<String>,
+    private val currentProfileMetadata: (() -> List<SubAgentDescriptor>)? = null,
+    private val initialProfiles: List<SubAgentDescriptor> = emptyList(),
 ) {
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = ToolDefinition("inspect_child_tasks", 1,
-            "读取本会话已有子任务、进度和结果（包括旧配置、暂停或停止的任务），以及新委派可用的当前配置。只读，不自动继续或重派。进度仅保留于当前进程。",
+            "读取本会话已有子任务、进度和结果（包括旧配置、暂停或停止的任务），以及新委派可用的当前配置。只读，不自动继续或重派。进度仅保留于当前进程。" + SubAgentDescriptor.initialDescription(initialProfiles),
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("offset", ArgumentType.Integer(0, 65536), required = false),
                 ArgumentField("max_chars", ArgumentType.Integer(1, 1024), required = false))))
@@ -48,10 +51,16 @@ internal class RunChildTaskAccess(
                     .put("next_text_offset", if (row.text.length > offset + maxChars) offset + maxChars else JSONObject.NULL)
                     .put("detail", row.detail))
             }
-            val profiles = runCatching { currentProfiles() }.getOrNull()
+            val metadata = runCatching { currentProfileMetadata?.invoke() }.getOrNull()
+            val profiles = if (currentProfileMetadata != null) metadata?.map { it.profileId }?.toSet()
+                else runCatching { currentProfiles() }.getOrNull()
             ExecutionReceipt.Confirmed(JSONObject().put("tasks", result)
                 .put("current_configuration_available", profiles != null)
-                .put("available_profiles", JSONArray(profiles?.toList() ?: emptyList<String>())).toString())
+                .put("configuration_scope", "current_new_text_requests")
+                .put("available_profiles", JSONArray(profiles?.toList() ?: emptyList<String>()))
+                .put("available_profile_metadata", JSONArray(metadata.orEmpty().map { it.toJson() }))
+                .put("historical_metadata_policy", "Existing tasks keep their own snapshots; historical role and tier were not recorded. Do not infer them from current profiles.")
+                .toString())
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("control_child_task", 1,

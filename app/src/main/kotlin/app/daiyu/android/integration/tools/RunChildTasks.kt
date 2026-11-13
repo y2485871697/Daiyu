@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.delegation.SubAgentDescriptor
+
 import app.daiyu.android.domain.ToolInvocation
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.tools.*
@@ -9,13 +11,14 @@ import org.json.JSONObject
 /** Opt-in background admission; parent closure seals submission, not the accepted children. */
 internal class RunChildTasks(private val supervisor: RetainedChildTasks, private val binding: ChildTaskBinding,
     profiles: Set<String>, private val currentModels: (() -> Map<String, ChildModelDefinition>)? = null,
-    private val currentProfiles: (() -> Set<String>)? = null) : AutoCloseable {
+    private val currentProfiles: (() -> Set<String>)? = null,
+    private val initialProfiles: List<SubAgentDescriptor> = emptyList()) : AutoCloseable {
     private val profiles = profiles.toSet()
     init { require(this.profiles.isNotEmpty() || currentProfiles != null) }
 
     fun tool(): RegisteredTool = object : RegisteredTool {
         override val definition = ToolDefinition(TOOL_NAME, 1,
-            "提交后台子任务，可能产生模型费用。回执仅确认排队持久化，主回复结束后继续。执行角色使用父任务允许的可委派工具；tool_names可收窄，空数组禁用；browser_access为full/read_only/disabled，默认full但不超过父权限。审查角色仅文本审查，不递归委派或自动重试；继续和追加保留原工具范围。",
+            "提交后台子任务，可能产生模型费用。回执仅确认排队持久化，主回复结束后继续。执行角色使用父任务允许的可委派工具；tool_names可收窄，空数组禁用；browser_access为full/read_only/disabled，默认full但不超过父权限。审查角色仅文本审查，不递归委派或自动重试；继续和追加保留原工具范围。" + SubAgentDescriptor.initialDescription(initialProfiles),
             CAPABILITY, ToolEffect.READ_ONLY,
             ToolSchema(listOf(ArgumentField("tasks", ArgumentType.ArrayValue(
                 ArgumentType.ObjectValue(ToolSchema(listOf(

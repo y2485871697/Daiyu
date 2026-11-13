@@ -37,7 +37,7 @@ internal class ProductionRunContext(
     override fun cancel() { cancellation?.cancel() }
     override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long =
         TokenTailCompression.historyTokens(MessageHistory.expand(history)) +
-            tools.sumOf { TokenTailCompression.textTokens(it.name + it.description + it.parameters) }
+            TokenTailCompression.toolTokens(tools)
 
     override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
         request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,

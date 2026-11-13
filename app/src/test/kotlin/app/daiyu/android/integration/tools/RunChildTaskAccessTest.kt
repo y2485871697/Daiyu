@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.delegation.SubAgentDescriptor
+import app.daiyu.android.delegation.SubAgentTaskTier
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.runtime.*
@@ -39,6 +41,42 @@ class RunChildTaskAccessTest {
         return ToolDispatcher(registry.snapshot(), caps, ToolLedger(InMemoryToolLedgerStore())).dispatchOwned(
             TaskAuthorization("session", owner.runId.value), listOf(ToolInvocation(ToolCallId("call"), name, body)), owner).single().outcome
     }
+    @Test fun currentMetadataIsAtomicFreshAndNeverBackfillsHistoricalTasks() {
+        val initial = listOf(SubAgentDescriptor(old.profileId, "审查", "implementation", SubAgentTaskTier.COMPLEX, "model", "model"))
+        var current = initial
+        var unavailable = false
+        var metadataReads = 0
+        val access = RunChildTaskAccess("conversation", { listOf(old) }, { old }, { emptyList() }, { "" },
+            { error("no resume") }, { error("no pause") }, { error("no stop") },
+            { error("IDs must come from the same metadata snapshot") },
+            currentProfileMetadata = { metadataReads++; check(!unavailable); current }, initialProfiles = initial)
+        val description = access.tools().first().definition.description
+        assertTrue(description.contains(initial.single().toJson().toString()))
+        current = listOf(initial.single().copy(name = "changed", taskTier = SubAgentTaskTier.SIMPLE))
+        val owner = caller("conversation")
+        val outcome = invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed
+        val body = JSONObject(outcome.payload)
+        assertTrue(body.getBoolean("current_configuration_available"))
+        assertEquals(1, metadataReads)
+        assertEquals(old.profileId, body.getJSONArray("available_profiles").getString(0))
+        val actual = body.getJSONArray("available_profile_metadata").getJSONObject(0)
+        assertEquals("changed", actual.getString("name")); assertEquals("simple", actual.getString("task_tier"))
+        assertEquals("implementation", actual.getString("role"))
+        val history = body.getJSONArray("tasks").getJSONObject(0)
+        assertEquals(old.profileId, history.getString("profile_id"))
+        assertEquals(old.owner.childRunId, history.getString("child_run_id"))
+        assertEquals(old.owner.parentRunId, history.getString("parent_run_id"))
+        assertFalse(history.has("role")); assertFalse(history.has("task_tier"))
+        assertEquals(description, access.tools().first().definition.description)
+        unavailable = true
+        val failed = JSONObject((invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload)
+        assertEquals(2, metadataReads)
+        assertFalse(failed.getBoolean("current_configuration_available"))
+        assertEquals(0, failed.getJSONArray("available_profile_metadata").length())
+        assertEquals(0, failed.getJSONArray("available_profiles").length())
+        assertEquals(1, failed.getJSONArray("tasks").length())
+    }
+
     @Test fun newParentCanInspectAndContinueOldPausedTaskWhenNewConfigurationIsUnavailable() {
         val resumes = AtomicInteger()
         val access = RunChildTaskAccess("conversation", { listOf(old) }, { old.takeIf { row -> row.owner == it } },

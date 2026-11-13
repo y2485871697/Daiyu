@@ -5,7 +5,7 @@ import app.daiyu.android.model.images.FrozenMessageImagePlan
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Measures the final request in local units, never bills base64 or opaque signatures as text. */
+/** Prices prompt fields in the final body, not JSON framing, settings or opaque bytes. */
 internal object RequestInputEstimate {
     internal fun payload(value: JSONObject): String? = when (value.optString("type")) {
         "input_image" -> value.opt("image_url") as? String
@@ -13,34 +13,89 @@ internal object RequestInputEstimate {
         "image" -> value.optJSONObject("source")?.takeIf { it.optString("type") == "base64" }?.opt("data") as? String
         else -> null
     }
+
     fun from(request: JSONObject, images: FrozenMessageImagePlan?,
-        screenImages: Map<String, Pair<Int, Int>> = emptyMap()): Long {
+        screenImages: Map<String, Pair<Int, Int>> = emptyMap(),
+        protocol: ProviderProtocol = when {
+            request.has("input") || request.has("instructions") -> ProviderProtocol.RESPONSES
+            request.has("contents") -> ProviderProtocol.GEMINI
+            request.has("system") -> ProviderProtocol.MESSAGES
+            else -> ProviderProtocol.CHAT_COMPLETIONS
+        }): Long {
         val sizes = images?.estimateImageSizes().orEmpty() + screenImages
-        var imageTokens = 0L
-        val opaque = setOf("signature", "thoughtSignature", "thought_signature", "encrypted_content", "encryptedContent")
-        fun clean(value: Any?, wire: Boolean): Any = when (value) {
-            is JSONArray -> JSONArray().also { out -> for (i in 0 until value.length()) out.put(clean(value.opt(i), wire)) }
-            is JSONObject -> {
-                val type = value.optString("type")
-                if (wire && type in setOf("input_image", "image_url", "image")) {
-                    val size = requireNotNull(payload(value)?.let(sizes::get)) { "Unrecognized frozen image estimate" }
-                    imageTokens += TokenTailCompression.imageTokens(size.first, size.second)
-                    JSONObject()
-                } else if (wire && type in setOf("redacted_thinking", "video", "input_video", "video_url")) JSONObject()
-                else JSONObject().also { out -> value.keys().forEach { key ->
-                    if (!wire || key !in opaque) {
-                        val business = (type == "tool_use" && key == "input") ||
-                            key in setOf("arguments", "args", "response", "metadata")
-                        out.put(key, clean(value.opt(key), wire && !business))
+        var tokens = 0L
+        fun add(value: Any?) {
+            if (value != null && value !== JSONObject.NULL) tokens += TokenTailCompression.textTokens(value.toString())
+        }
+        fun each(array: JSONArray?, consume: (JSONObject) -> Unit) {
+            if (array != null) for (i in 0 until array.length()) array.optJSONObject(i)?.let(consume)
+        }
+        fun content(value: Any?) {
+            when (value) {
+                is String -> add(value)
+                is JSONArray -> for (i in 0 until value.length()) content(value.opt(i))
+                is JSONObject -> when (value.optString("type")) {
+                    "text", "input_text", "output_text", "summary_text", "reasoning_text" -> add(value.opt("text"))
+                    "refusal" -> add(value.opt("refusal"))
+                    "thinking" -> add(value.opt("thinking"))
+                    "tool_use", "server_tool_use" -> {
+                        add(value.opt("name")); add(value.opt("input")); add(value.opt("id"))
+                    }
+                    "tool_result" -> { add(value.opt("tool_use_id")); content(value.opt("content")) }
+                    "image", "image_url", "input_image" -> {
+                        val size = requireNotNull(payload(value)?.let(sizes::get)) { "Unrecognized frozen image estimate" }
+                        tokens += TokenTailCompression.imageTokens(size.first, size.second)
+                    }
+                }
+            }
+        }
+        fun message(value: JSONObject) {
+            tokens += 3
+            content(value.opt("content"))
+            if (protocol == ProviderProtocol.CHAT_COMPLETIONS) add(value.opt("reasoning_content"))
+            add(value.opt("tool_call_id")); add(value.opt("name"))
+            each(value.optJSONArray("tool_calls")) { add(it) }
+            add(value.opt("function_call"))
+        }
+        request.optJSONArray("tools")?.takeIf { it.length() > 0 }?.let(::add)
+        add(if (protocol == ProviderProtocol.RESPONSES) request.optJSONObject("text")?.opt("format")
+            else request.opt("response_format"))
+        when (protocol) {
+            ProviderProtocol.RESPONSES -> {
+                content(request.opt("instructions"))
+                val input = request.opt("input")
+                if (input is String) { tokens += 3; add(input) }
+                else each(input as? JSONArray) { item -> when (item.optString("type")) {
+                    "", "message" -> message(item)
+                    "function_call" -> {
+                        tokens += 3; add(item.opt("name")); add(item.opt("arguments")); add(item.opt("call_id"))
+                    }
+                    "function_call_output" -> { tokens += 3; add(item.opt("call_id")); content(item.opt("output")) }
+                    "reasoning" -> {
+                        content(item.opt("summary")); content(item.opt("content")); add(item.opt("reasoning_text"))
                     }
                 } }
             }
-            null -> JSONObject.NULL
-            else -> value
+            ProviderProtocol.MESSAGES -> {
+                content(request.opt("system")); each(request.optJSONArray("messages"), ::message)
+            }
+            ProviderProtocol.CHAT_COMPLETIONS -> each(request.optJSONArray("messages"), ::message)
+            ProviderProtocol.GEMINI -> {
+                fun parts(value: JSONObject) = each(value.optJSONArray("parts")) { part ->
+                    add(part.opt("text"))
+                    part.optJSONObject("functionCall")?.let { call ->
+                        add(call.opt("name")); add(call.opt("args")); add(call.opt("id"))
+                    }
+                    part.optJSONObject("functionResponse")?.let { result ->
+                        add(result.opt("name")); add(result.opt("response")); add(result.opt("id"))
+                    }
+                }
+                request.optJSONObject("systemInstruction")?.let(::parts)
+                each(request.optJSONArray("contents")) { tokens += 3; parts(it) }
+                add(request.optJSONObject("generationConfig")?.opt("responseSchema"))
+            }
+            ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(protocol.wireName)
         }
-        val result = JSONObject()
-        request.keys().forEach { key -> result.put(key, clean(request.opt(key),
-            key in setOf("input", "messages", "contents", "system", "systemInstruction"))) }
-        return TokenTailCompression.textTokens(result.toString()) + imageTokens
+        return tokens
     }
 }

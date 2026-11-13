@@ -241,7 +241,26 @@ TERMINAL_COMMAND_PAGER_MODULES = (
 )
 
 
+COMPOSER_CONTEXT_PLATFORM_CLASSES = (
+    'app.daiyu.android.TextSendActivityTest',
+    'app.daiyu.android.ChatChromeActivityTest',
+    'app.daiyu.android.context.ContextServiceTest',
+    'app.daiyu.android.context.TokenTailCompressionTest',
+)
+COMPOSER_CONTEXT_MODULES = (
+    'test_chat_submission_preview_contract', 'test_composer_surface_color_contract',
+    'test_compression_send_gate_contract', 'test_delegation_batch_and_send_contract',
+    'test_context_usage_wiring_contract', 'test_cloud_context_scope',
+    'test_record_tool_tests_scope', 'test_acceptance_tool_receipt',
+    'test_composer_context_smoke_scope',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(COMPOSER_CONTEXT_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *COMPOSER_CONTEXT_MODULES, "-v"], "composer-context-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == TERMINAL_COMMAND_PAGER_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *TERMINAL_COMMAND_PAGER_MODULES, "-v"], "terminal-command-pager-targeted"

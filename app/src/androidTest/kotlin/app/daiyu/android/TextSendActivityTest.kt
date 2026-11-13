@@ -47,6 +47,8 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertTrue("send must reach the worker preparation gate", preparing.await(5, TimeUnit.SECONDS))
         assertFalse("model preparation must not run on main", preparationOnMain.get())
         node("chat-draft").assertIsNotEnabled()
+        assertDraft("")
+        assertSelection(0, 0)
         node("chat-send").assertDoesNotExist()
         node("text-send-cancel").assertIsEnabled()
         assertEquals(0, fixture.opens.get())
@@ -64,6 +66,18 @@ class TextSendActivityTest : WiredActivityTestCase() {
             assertEquals(checkNotNull(fixture.controller.textSendState()).text, preview.text)
             assertNull("preparation is not a durable receipt", preview.settledAssistantId)
             assertFalse("the preview never enters authoritative history", state.turns.any { it.id == preview.key })
+        }
+    }
+
+    private fun assertPendingDraftRetained(text: String, start: Int, end: Int) {
+        assertDraft("")
+        assertSelection(0, 0)
+        mainThread {
+            fun retained(name: String) = MainActivity::class.java.getDeclaredField(name)
+                .apply { isAccessible = true }.get(activity)
+            assertEquals(text, retained("draft"))
+            assertEquals(start, retained("selectionStart"))
+            assertEquals(end, retained("selectionEnd"))
         }
     }
 
@@ -90,7 +104,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
         val oldEditor = retainedControls(activity)
         node("chat-send").performClick()
         awaitPreparing()
-        assertDraft(text)
+        assertPendingDraftRetained(text, 2, 5)
         assertEquals(text, fixture.database.draft())
         assertTrue("preparation is not a database receipt", fixture.database.conversations().isEmpty())
 
@@ -160,7 +174,11 @@ class TextSendActivityTest : WiredActivityTestCase() {
                 }.apply { isAccessible = true }
                 val projected = getter.invoke(activity) as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
                 assertEquals(submission.ticket.previewKey, projected.composer.preparingSendKey)
-                assertEquals(text, projected.composer.text)
+                assertEquals("", projected.composer.text)
+                assertEquals(0, projected.composer.selectionStart)
+                assertEquals(0, projected.composer.selectionEnd)
+                val retainedDraft = MainActivity::class.java.getDeclaredField("draft").apply { isAccessible = true }
+                assertEquals("The exact source draft remains available for rejection", text, retainedDraft.get(activity))
                 assertFalse(projected.composer.enabled)
             }
             ui.waitForIdle()
@@ -243,7 +261,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
         node("chat-send").assertDoesNotExist()
         node("text-send-cancel").assertIsEnabled()
         node("text-send-cancel").assertExists()
-        assertDraft(text); assertSelection(2, 6)
+        assertPendingDraftRetained(text, 2, 6)
         assertEquals(text, fixture.database.draft())
         assertTrue(fixture.database.conversations().isEmpty())
         assertEquals(0, fixture.opens.get()); assertEquals(1, preparationCalls.get())
@@ -282,7 +300,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
         node("chat-draft").assertIsNotEnabled()
         node("chat-send").assertDoesNotExist()
         node("text-send-cancel").assertIsEnabled()
-        assertDraft(nextText)
+        assertPendingDraftRetained(nextText, nextText.length, nextText.length)
         assertEquals(0, fixture.opens.get())
         nextGate.countDown()
         awaitTextSendResult(activity)
@@ -315,7 +333,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
                 fail("selection must not replace a pending send owner")
             } catch (_: IllegalStateException) { }
         }
-        assertDraft(text); assertSelection(1, 3)
+        assertPendingDraftRetained(text, 1, 3)
         assertEquals(text, fixture.database.draft())
         assertTrue(fixture.database.messages(other.id).isEmpty())
         assertNull(fixture.controller.preferences.getString("selected", null))
@@ -359,7 +377,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
                 fail("the replacement must retain the pending owner until its result")
             } catch (_: IllegalStateException) { }
         }
-        assertDraft(text); assertSelection(1, 3)
+        assertPendingDraftRetained(text, 1, 3)
         assertEquals(text, fixture.database.conversations().single { it.id == source.id }.draft)
 
         releasePreparation.countDown()
@@ -475,7 +493,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
             }
             assertUserText(source.id, text)
             assertEquals("", fixture.database.conversations().single().draft)
-            assertDraft(text); assertSelection(2, 5)
+            assertPendingDraftRetained(text, 2, 5)
             node("chat-draft").assertIsNotEnabled()
 
             // Framework onDestroy runs while the SAME committed ticket is still UI-pending;
@@ -572,7 +590,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
             node("chat-draft").assertIsNotEnabled()
             node("chat-send").assertDoesNotExist()
             node("text-send-cancel").assertIsEnabled()
-            assertDraft(text)
+            assertPendingDraftRetained(text, 1, 4)
             assertEquals(text, fixture.database.conversations().single().draft)
             mainThread { assertSame(ticket, checkNotNull(fixture.controller.textSendState()).ticket) }
         }

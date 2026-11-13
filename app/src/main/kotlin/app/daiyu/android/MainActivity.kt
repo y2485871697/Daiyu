@@ -6471,6 +6471,8 @@ class MainActivity : ComponentActivity() {
                 else checkNotNull(controller.database.assistantId(source)) { "请先为当前会话绑定助手" }
             controller.database.create(assistant, modelSource = source).also {
                 reasoningPreference.retainAccepted(it.id.value, reasoning)
+                subAgentRepository.createConversation(app.daiyu.android.delegation.SubAgentConfigKey.Conversation(it.id.value),
+                    source?.let { id -> app.daiyu.android.delegation.SubAgentConfigKey.Conversation(id.value) })
             }
         }
         select(created)

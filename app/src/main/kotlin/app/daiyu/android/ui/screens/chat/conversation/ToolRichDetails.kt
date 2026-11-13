@@ -394,7 +394,7 @@ internal object ToolRichDetails {
                 category in setOf("delegation", "child_control") -> when {
                     output == null -> "任务状态暂不可用"
                     entries.isNotEmpty() || toolName == "direct_child_task" -> ""
-                    toolName == "inspect_child_tasks" -> "暂无任务记录"
+                    toolName == "inspect_child_tasks" -> childTaskInspectionSummary(output) { scrub(it, hidden) }
                     toolName == "control_child_task" -> when (output.optString("outcome")) {
                         "RESUMED" -> "任务已继续"
                         "PAUSED" -> "任务已暂停"

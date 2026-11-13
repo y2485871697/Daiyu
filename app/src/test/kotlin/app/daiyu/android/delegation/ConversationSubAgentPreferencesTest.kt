@@ -566,6 +566,30 @@ class ConversationSubAgentPreferencesTest {
         assertTrue(editor.removeProfileDraft(profile, null) is ConversationSubAgentPreferences.WriteResult.Saved)
     }
 
+    @Test fun newConversationCopiesCurrentOwnerIncludingLocalEditsLimitsAndPresetMetadata() {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val preset = repository.addPreset("原组")
+        val presetOwner = SubAgentConfigKey.Preset(preset.id)
+        val model = SubAgentParallelModel("provider", "api-model")
+        val profile = SubAgentProfile("execution", "原名称", providerId = "provider", modelId = "local-model",
+            tier = SubAgentTaskTier.COMPLEX, reasoning = ReasoningEffort.HIGH,
+            reasoningByModel = mapOf(SubAgentProfile.modelReasoningKey("provider", "local-model") to ReasoningEffort.HIGH), parallelLimit = 0)
+        repository.update(presetOwner) { it.copy(profiles = listOf(profile)) }
+        val source = SubAgentConfigKey.Conversation("source-for-new-chat")
+        repository.applyPreset(source, preset.id)
+        repository.update(source) { it.copy(enabled = false, profiles = listOf(profile.copy(name = "会话修改")),
+            parallelLimits = mapOf(model to 5)) }
+        val expected = repository.snapshot(source)
+        val child = SubAgentConfigKey.Conversation("new-chat")
+        assertEquals(expected, repository.createConversation(child, source))
+        assertEquals(expected, ConversationSubAgentPreferences(disk.reopen()).snapshot(child))
+        repository.update(child) { it.copy(enabled = true, profiles = emptyList()) }
+        assertEquals(expected, repository.snapshot(source))
+        assertEquals(listOf(profile), repository.snapshot(presetOwner).profiles)
+        assertNotEquals(expected.poolKey(source, profile.id), expected.poolKey(child, profile.id))
+    }
+
 }
 
 /** JVM preference fixture: commit is synchronous and reopen copies only serialized values. */
@@ -604,4 +628,6 @@ private class MemoryPreferences(initial: Map<String, Any?> = emptyMap()) : Share
         }
         override fun apply() { commit() }
     }
+
+
 }

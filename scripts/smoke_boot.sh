@@ -189,9 +189,11 @@ composer_context_sources = {Path("app/src/androidTest/kotlin") / (name.replace("
 child_task_card_target = {"app.daiyu.android.ui.screens.chat.conversation." + name for name in (
     "ChildTaskListTest", "ToolOperationCardTest", "ToolCardReadabilityTest", "SubAgentStatusDialogTest",
 )}
-child_task_card_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(child_task_card_target)
+child_task_card_inheritance_target = child_task_card_target | {"app.daiyu.android.ConversationSelectionInheritanceActivityTest"}
+child_task_card_only = mode == "smoke" and sorted(raw_filter.split(",")) in (
+    sorted(child_task_card_target), sorted(child_task_card_inheritance_target))
 child_task_card_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
-                           for name in child_task_card_target}
+                           for name in child_task_card_inheritance_target if name in raw_filter.split(",")}
 
 classes = {}
 for path in sorted(Path("app/src/androidTest").rglob("*")):

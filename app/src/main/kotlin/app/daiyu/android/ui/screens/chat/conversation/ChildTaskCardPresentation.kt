@@ -47,3 +47,26 @@ internal fun childTaskReceiptEntries(output: JSONObject?, clean: (String) -> Str
     if (rows != null) return (0 until minOf(rows.length(), 32)).mapNotNull { rows.optJSONObject(it)?.let(::entry) }
     return if (listOf("child_run_id", "status", "text", "result", "progress", "partial_result", "partial", "checkpoint").any(output::has)) listOf(entry(output)) else emptyList()
 }
+
+/** Configuration describes this inspection, never tasks created after it. */
+internal fun childTaskInspectionSummary(output: JSONObject, clean: (String) -> String): String {
+    val tasks = output.optJSONArray("tasks") ?: return "暂无任务记录"
+    if (tasks.length() != 0 || output.opt("current_configuration_available") !is Boolean) return "暂无任务记录"
+    if (output.opt("current_configuration_available") != true) return "本次未能读取可用子代理配置\n暂无任务记录"
+    val metadata = output.optJSONArray("available_profile_metadata")
+    val names = (0 until minOf(metadata?.length() ?: 0, 32)).mapNotNull { index ->
+        (metadata?.optJSONObject(index)?.opt("name") as? String)?.takeIf { it.isNotBlank() }
+            ?.let { clean(it).take(40) }
+    }
+    val profiles = output.optJSONArray("available_profiles")
+    val count = (0 until minOf(profiles?.length() ?: 0, 32)).mapNotNull { index ->
+        (profiles?.opt(index) as? String)?.takeIf { it.isNotBlank() }
+    }.distinct().size
+    val configuration = when {
+        names.isNotEmpty() -> "可用子代理：" + names.take(4).joinToString("、") + if (names.size > 4) "等${names.size}个" else ""
+        count > 0 -> "有${count}个可用子代理"
+        metadata != null || profiles != null -> "没有可用子代理"
+        else -> return "暂无任务记录"
+    }
+    return "本次查看时${configuration}\n暂无已派发任务记录"
+}

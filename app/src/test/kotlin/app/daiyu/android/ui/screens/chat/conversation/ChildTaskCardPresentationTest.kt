@@ -166,4 +166,35 @@ class ChildTaskCardPresentationTest {
             mapOf(frozenOwner to "不应展示")))
     }
 
+    @Test fun inspectionShowsRecordedAvailableConfigurationSeparatelyFromMissingTasks() {
+        val payload = JSONObject().put("tasks", JSONArray()).put("current_configuration_available", true)
+            .put("available_profiles", JSONArray(listOf("execution", "review")))
+            .put("available_profile_metadata", JSONArray().put(JSONObject().put("name", "执行"))
+                .put(JSONObject().put("name", "审查")))
+        val empty = rich(payload.toString(), "inspect_child_tasks")
+        assertEquals("本次查看时可用子代理：执行、审查\n暂无已派发任务记录", empty.prose!!.text)
+        assertTrue(empty.entries.isEmpty())
+        val task = JSONObject().put("agent_name", "历史名称").put("status", "COMPLETED").put("text", "历史结果")
+        val existing = rich(JSONObject(payload.toString()).put("tasks", JSONArray().put(task)).toString(), "inspect_child_tasks")
+        assertEquals("历史名称", existing.entries.single().title)
+        assertFalse(visible(existing).contains("执行、审查"))
+        assertEquals("本次查看时没有可用子代理\n暂无已派发任务记录", rich(JSONObject(payload.toString())
+            .put("available_profiles", JSONArray()).put("available_profile_metadata", JSONArray()).toString(), "inspect_child_tasks").prose!!.text)
+    }
+
+    @Test fun inspectionConfigurationStillRequiresExplicitRecordedEvidenceAndPrivacyPermission() {
+        val payload = JSONObject().put("tasks", JSONArray()).put("current_configuration_available", true)
+            .put("available_profile_metadata", JSONArray().put(JSONObject().put("name", "PRIVATE_SECRET")))
+            .put("token", "PRIVATE_SECRET")
+        val hidden = rich(payload.toString(), "inspect_child_tasks")
+        assertFalse(visible(hidden).contains("PRIVATE_SECRET"))
+        assertTrue(visible(hidden).contains("[已隐藏]"))
+        assertTrue(rich(JSONObject(payload.toString()).put("privacy_redacted", true).toString(), "inspect_child_tasks").bodyRestricted)
+        assertEquals("暂无任务记录", rich(JSONObject(payload.toString()).put("current_configuration_available", "true")
+            .toString(), "inspect_child_tasks").prose!!.text)
+        assertEquals("本次未能读取可用子代理配置\n暂无任务记录", rich(JSONObject(payload.toString())
+            .put("current_configuration_available", false).toString(), "inspect_child_tasks").prose!!.text)
+        assertFalse(visible(rich(payload.toString(), "get_child_task")).contains("PRIVATE_SECRET"))
+    }
+
 }

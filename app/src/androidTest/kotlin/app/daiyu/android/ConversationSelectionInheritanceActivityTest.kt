@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import app.daiyu.android.assistants.create
+import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.Conversation
 import app.daiyu.android.storage.ConversationModelBinding
 
@@ -65,4 +66,52 @@ class ConversationSelectionInheritanceActivityTest : WiredActivityTestCase() {
         assertEquals(binding, fixture.database.modelBinding(source.id))
         assertEquals(0, fixture.opens.get())
     }
+    private fun childRepository(): ConversationSubAgentPreferences =
+        (MainActivity::class.java.getDeclaredField("subAgentRepository\$delegate").apply { isAccessible = true }
+            .get(activity) as Lazy<*>).value as ConversationSubAgentPreferences
+
+    fun testNewChatCopiesActualChildConfigurationAndPersistsItWithoutLinkingSourceOrPreset() {
+        lateinit var child: Conversation
+        lateinit var expected: ConversationSubAgentConfig
+        mainThread {
+            val repository = childRepository()
+            val preset = repository.addPreset("继承测试组")
+            val presetOwner = SubAgentConfigKey.Preset(preset.id)
+            for (enabled in listOf(false, true)) {
+                val source = fixture.database.create(fixture.database.selectedAssistantId())
+                val binding = checkNotNull(fixture.database.modelBinding(source.id))
+                val original = SubAgentProfile("execution", "组内执行", providerId = binding.providerSlotId,
+                    modelId = binding.localModelIdentity, tier = SubAgentTaskTier.COMPLEX, parallelLimit = 0)
+                repository.update(presetOwner) { it.copy(profiles = listOf(original)) }
+                val sourceOwner = SubAgentConfigKey.Conversation(source.id.value)
+                assertTrue(repository.applyPreset(sourceOwner, preset.id) is ConversationSubAgentPreferences.WriteResult.Saved)
+                repository.update(sourceOwner) { it.copy(enabled = enabled,
+                    profiles = listOf(original.copy(name = "原会话局部修改"), original.copy(id = "review", name = "审查",
+                        role = "review", tier = null, parallelLimit = 3))) }
+                val inherited = repository.snapshot(sourceOwner)
+                activity.select(source)
+                activity.createNewConversation()
+                child = checkNotNull(selected())
+                val childOwner = SubAgentConfigKey.Conversation(child.id.value)
+                assertEquals(inherited, repository.snapshot(childOwner))
+                assertNotNull(repository.snapshot(childOwner).appliedPresetId)
+                assertEquals(enabled, repository.snapshot(childOwner).enabled)
+                assertFalse(repository.snapshot(sourceOwner).poolKey(sourceOwner, "execution") ==
+                    repository.snapshot(childOwner).poolKey(childOwner, "execution"))
+                repository.update(childOwner) { it.copy(profiles = it.profiles.map { card -> card.copy(name = "只改新会话") }) }
+                assertEquals(inherited, repository.snapshot(sourceOwner))
+                assertEquals("组内执行", repository.snapshot(presetOwner).profiles.single().name)
+                expected = repository.snapshot(childOwner)
+                activity.select(source)
+                assertEquals(inherited, repository.snapshot(sourceOwner))
+                activity.select(child)
+                assertEquals(expected, repository.snapshot(childOwner))
+            }
+        }
+        activity = recreateActivity(activity)
+        awaitControl("inherited child owner restored") { selected()?.id == child.id }
+        mainThread { assertEquals(expected, childRepository().snapshot(SubAgentConfigKey.Conversation(child.id.value))) }
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

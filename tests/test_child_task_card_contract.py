@@ -30,6 +30,11 @@ class ChildTaskCardContractTest(unittest.TestCase):
         activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         self.assertIn('Snapshot.read(controller.database, rows, display)', activity)
         self.assertIn('childTaskNames = visibleChildNames', activity)
+        create = activity[activity.index('internal fun createNewConversation()'):activity.index('internal fun select(conversation: Conversation?)')]
+        self.assertIn('subAgentRepository.createConversation', create)
+        self.assertIn('source?.let { id ->', create)
+        self.assertNotIn('applyPreset', create)
+
 
 
     def test_short_long_and_completed_content_share_a_non_code_frame(self):

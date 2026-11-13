@@ -92,6 +92,7 @@ jobs:
             --tests 'app.daiyu.android.backup.LargeChildTaskBackupTest' \
             --tests 'app.daiyu.android.delegation.SubAgentDescriptorTest' \
             --tests 'app.daiyu.android.delegation.SavedSubAgentRuntimeBindingsTest' \
+            --tests 'app.daiyu.android.delegation.ConversationSubAgentPreferencesTest' \
             --tests 'app.daiyu.android.integration.tools.RunChildModelsTest' \
             --tests 'app.daiyu.android.integration.tools.RunChildTasksTest' \
             --tests 'app.daiyu.android.integration.tools.RunChildTaskAccessTest' \
@@ -116,7 +117,7 @@ jobs:
           assert {'ChildModelBatchTest', 'ChildModelExecutionToolsTest', 'ChildTaskCommandTest',
                   'RunnerReceiptBatchTest', 'RunnerToolBoundaryTest', 'ChildUsagePipelineTest'} <= names, names
           assert {s.attrib['name'].rsplit('.', 1)[-1] for s in app} == {'SubAgentStatusRowsTest', 'LargeChildTaskBackupTest', 'SubAgentDescriptorTest',
-              'SavedSubAgentRuntimeBindingsTest', 'RunChildModelsTest', 'RunChildTasksTest',
+              'SavedSubAgentRuntimeBindingsTest', 'ConversationSubAgentPreferencesTest', 'RunChildModelsTest', 'RunChildTasksTest',
               'RunChildTaskAccessTest', 'RunOrdinaryGenerationToolsTest',
               'ChildTaskCardPresentationTest', 'ToolBodyLayoutTest', 'ToolRichDetailsTest', 'ToolCardPresentationTest', 'ChildTaskPresentationTest', 'BatchDelegationPresentationTest', 'ToolCardChildControlTest'}
           suites = domain + app

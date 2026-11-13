@@ -167,6 +167,12 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         assertMetric("输入（含缓存）", "0")
         assertMetric(R.string.stats_page_fresh_input_tokens, "0")
         selectTab(R.string.stats_tab_models)
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("usage-model-total").fetchSemanticsNodes().size == 1
+        }
+        usagePage().scrollToDescendant(hasTestTag("usage-model-total"))
+        node("usage-model-total").assertIsDisplayed()
         ui.onAllNodes(hasText("0") and hasAnyAncestor(hasTestTag("usage-model-total")),
             useUnmergedTree = true).assertCountEquals(7)
         ui.onAllNodesWithText("—").assertCountEquals(0)

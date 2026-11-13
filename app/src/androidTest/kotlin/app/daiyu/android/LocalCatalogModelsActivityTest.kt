@@ -240,7 +240,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         reveal("local-model-rename:extra-local").performClick()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))
         node("local-model-delete:extra-local").performClick()
-        awaitDialogTouchReady(node("dialog-confirm"))
+        awaitNodeTouchReady(node("dialog-confirm"))
         node("dialog-confirm").performClick()
         awaitVisualIdle()
         awaitControl("local delete completed") { !fixture.controller.dataBusy }
@@ -315,7 +315,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         mainThread { assertTrue(stale()); assertTrue(staleCancel()) }
         node("dialog-confirm").assertExists()
         assertEquals(before, fixture.settings.localModelCatalogSnapshot())
-        awaitDialogTouchReady(node("dialog-confirm"))
+        awaitNodeTouchReady(node("dialog-confirm"))
         node("dialog-confirm").performClick()
         awaitVisualIdle()
         awaitControl("fresh local delete completed") { !fixture.controller.dataBusy }

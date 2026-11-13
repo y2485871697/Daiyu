@@ -290,9 +290,13 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         }
         ui.waitForIdle()
     }
-    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     protected fun awaitDialogTouchReady(target: SemanticsNodeInteraction) {
         awaitDialogEnter(target)
+        awaitNodeTouchReady(target)
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    protected fun awaitNodeTouchReady(target: SemanticsNodeInteraction) {
         awaitNodeWindowFocus(target)
         val current = target.fetchSemanticsNode()
         val view = (current.root as androidx.compose.ui.platform.ViewRootForTest).view

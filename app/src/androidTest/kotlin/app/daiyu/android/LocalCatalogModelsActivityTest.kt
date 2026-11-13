@@ -240,9 +240,14 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         reveal("local-model-rename:extra-local").performClick()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))
         node("local-model-delete:extra-local").performClick()
+        awaitDialogTouchReady(node("dialog-confirm"))
         node("dialog-confirm").performClick()
+        awaitVisualIdle()
         awaitControl("local delete completed") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:extra-local").fetchSemanticsNodes().isEmpty() }
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("local-model:extra-local").fetchSemanticsNodes().isEmpty()
+        }
         assertEquals(listOf(current), checkNotNull(fixture.settings.localModelCatalogSnapshot()).models)
         assertEquals(saved, fixture.settings.load()); assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
@@ -310,9 +315,14 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         mainThread { assertTrue(stale()); assertTrue(staleCancel()) }
         node("dialog-confirm").assertExists()
         assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        awaitDialogTouchReady(node("dialog-confirm"))
         node("dialog-confirm").performClick()
+        awaitVisualIdle()
         awaitControl("fresh local delete completed") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:extra-local").fetchSemanticsNodes().isEmpty() }
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("local-model:extra-local").fetchSemanticsNodes().isEmpty()
+        }
         assertEquals(before.models.filterNot { it.id == "extra-local" },
             checkNotNull(fixture.settings.localModelCatalogSnapshot()).models)
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)

@@ -92,7 +92,12 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('val currentBack by rememberUpdatedState(onBack)', handler)
         registration = handler.split('DisposableEffect(dispatcher, lifecycleOwner, callback)', 1)[1]
         self.assertIn('dispatcher.addCallback(lifecycleOwner, callback)', registration)
-        self.assertIn('onDispose { callback.handleOnBackCancelled(); callback.remove() }', registration)
+        self.assertIn('lifecycleOwner.lifecycle.addObserver(observer)', registration)
+        disposal = registration.split('onDispose {', 1)[1]
+        for required in ('lifecycleOwner.lifecycle.removeObserver(observer)',
+                         'callback.handleOnBackCancelled()', 'callback.remove()'):
+            self.assertIn(required, disposal)
+        self.assertLess(disposal.index('callback.handleOnBackCancelled()'), disposal.index('callback.remove()'))
         self.assertIn('DisposableEffect(state, callback)', handler)
         self.assertIn('onDispose { session.invalidate() }', handler)
         self.assertIn('if (!callback.isEnabled) session.invalidate()', handler)
@@ -102,7 +107,13 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_route_preferences_and_lifecycle_revoke_the_old_gesture_not_page_state(self):
         self.assertIn('remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey)', self.host)
-        self.assertIn('onDispose { state.alive = false; state.reset() }', self.host)
+        lifecycle_effect = self.host.split('DisposableEffect(state, lifecycle)', 1)[1].split('    SideEffect {', 1)[0]
+        self.assertIn('state.reset(immediate = true)', lifecycle_effect)
+        self.assertIn('lifecycle.addObserver(observer)', lifecycle_effect)
+        disposal = lifecycle_effect.split('onDispose {', 1)[1]
+        for required in ('lifecycle.removeObserver(observer)', 'state.alive = false', 'state.reset()'):
+            self.assertIn(required, disposal)
+        self.assertLess(disposal.index('state.alive = false'), disposal.index('state.reset()'))
         self.assertIn('if (owner != null && this.owner !== owner) return', self.host)
         self.assertNotIn('animateFloatAsState', self.host)
         self.assertIn('var visualProgress by mutableFloatStateOf(0f)', self.host)

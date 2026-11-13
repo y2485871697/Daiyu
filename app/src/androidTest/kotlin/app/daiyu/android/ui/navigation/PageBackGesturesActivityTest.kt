@@ -1074,6 +1074,9 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             modelTab.assertIsSelected()
             val selectedPixels = captureScreenNode(modelTab).toPixelMap()
             val selected = selectedPixels[selectedPixels.width / 4, selectedPixels.height / 2]
+            val tabBeforeDrag = modelTab.fetchSemanticsNode().boundsInRoot
+            val surfaceBeforeDrag = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            val probeBeforeDrag = Offset(tabBeforeDrag.left + selectedPixels.width / 4, tabBeforeDrag.top + selectedPixels.height / 2)
             mainThread {
                 // Pin the actual Overview capture to model a child-only redraw with unchanged generation.
                 val source = checkNotNull(usageFrame)
@@ -1098,8 +1101,17 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 assertTrue("gesture submits a current-pixel copy without a warm redraw", blockedCopies > 0)
             }
             modelTab.assertIsSelected()
-            val pixels = captureScreenNode(modelTab).toPixelMap()
-            val actual = pixels[pixels.width / 4, pixels.height / 2]
+            val host = ui.onNodeWithTag("page-back-host")
+            val pixels = captureScreenNode(host).toPixelMap()
+            val hostBounds = host.fetchSemanticsNode().boundsInRoot
+            val surfaceAfterDrag = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            val shiftX = surfaceAfterDrag.left - surfaceBeforeDrag.left
+            val sampleX = (probeBeforeDrag.x + shiftX - hostBounds.left).toInt()
+            val sampleY = (probeBeforeDrag.y - hostBounds.top).toInt()
+            assertTrue("claimed gesture has a visible source translation", shiftX > 0f)
+            assertTrue("translated tab probe stays within the host", sampleX in 0 until pixels.width && sampleY in 0 until pixels.height)
+            val actual = pixels[sampleX, sampleY]
+            android.util.Log.d("DaiyuTestStep", "usage-pixels selected=$selected old=$old actual=$actual shift=$shiftX probe=$sampleX,$sampleY image=${usageFrame?.image != null}")
             assertEquals("drag must draw selected Models, not the prepared Overview bitmap", selected.red, actual.red, .03f)
             assertEquals(selected.green, actual.green, .03f)
             assertEquals(selected.blue, actual.blue, .03f)

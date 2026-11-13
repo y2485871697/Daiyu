@@ -193,22 +193,31 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             val incidents = (0 until rows.length()).map { rows.getJSONObject(it) }
                 .filter { it.optString("stage") == "BACK_PERFORMANCE" }
             assertEquals(3, incidents.size)
-            val timings = incidents[0].getJSONArray("capture_timings")
-            val slices = (0 until timings.length()).map { timings.getJSONObject(it) }
-            val prefix = slices.single { it.getString("phase") == "CAPTURE_LAUNCH" }
-            val wall = slices.single { it.getString("phase") == "CAPTURE_WALL" }
-            assertEquals("COMPLETE", prefix.getString("result"))
-            assertEquals("IN_FLIGHT", wall.getString("result"))
-            assertTrue(prefix.getLong("start_offset_ns") <= wall.getLong("start_offset_ns"))
-            assertTrue(wall.getLong("start_offset_ns") <= prefix.getLong("start_offset_ns") + prefix.getLong("elapsed_ns"))
+            fun assertCapturePairs(index: Int, wallResult: String) {
+                val timings = incidents[index].getJSONArray("capture_timings")
+                val slices = (0 until timings.length()).map { timings.getJSONObject(it) }
+                val prefixes = slices.filter { it.getString("phase") == "CAPTURE_LAUNCH" }
+                    .sortedBy { it.getLong("start_offset_ns") }
+                val walls = slices.filter { it.getString("phase") == "CAPTURE_WALL" }
+                    .sortedBy { it.getLong("start_offset_ns") }
+                assertEquals(4, slices.size)
+                assertEquals(2, prefixes.size)
+                assertEquals(2, walls.size)
+                prefixes.zip(walls).forEach { (prefix, wall) ->
+                    assertEquals("COMPLETE", prefix.getString("result"))
+                    assertEquals(wallResult, wall.getString("result"))
+                    assertTrue(prefix.getLong("start_offset_ns") <= wall.getLong("start_offset_ns"))
+                    assertTrue(wall.getLong("start_offset_ns") <= prefix.getLong("start_offset_ns") + prefix.getLong("elapsed_ns"))
+                }
+                assertTrue("warm launch ends before the final launch, not after its suspended drain",
+                    prefixes[0].getLong("start_offset_ns") + prefixes[0].getLong("elapsed_ns") <= prefixes[1].getLong("start_offset_ns"))
+            }
+            assertCapturePairs(0, "IN_FLIGHT")
             assertEquals(0, incidents[1].getJSONArray("capture_timings").length())
             assertEquals(0, incidents[1].getJSONArray("phases").length())
             val events = incidents[1].getJSONArray("timeline")
             assertTrue((0 until events.length()).any { events.getJSONObject(it).getString("event") == "OBSERVED_CAPTURE_IN_FLIGHT" })
-            val cancelledTimings = incidents[2].getJSONArray("capture_timings")
-            val cancelledWall = (0 until cancelledTimings.length()).map { cancelledTimings.getJSONObject(it) }
-                .single { it.getString("phase") == "CAPTURE_WALL" }
-            assertEquals("CANCELLED", cancelledWall.getString("result"))
+            assertCapturePairs(2, "CANCELLED")
         } finally {
             recorder.end(reason); runtime.clear(); runtime.enabled = enabled
         }

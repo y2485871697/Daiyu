@@ -131,7 +131,7 @@ internal object ModelHttpTransport {
             get() {
                 val current = requireNotNull(response)
                 val type = current.header("Content-Type")
-                // Original Eta accepts successful SSE replies with an omitted Content-Type only.
+                // The original transport accepts successful SSE replies with an omitted Content-Type only.
                 return type?.takeIf { it.isNotBlank() } ?: if (current.isSuccessful &&
                     headers["Accept"] == "text/event-stream") "text/event-stream" else type
             }

@@ -71,7 +71,8 @@ class JankDiagnosticsContract(unittest.TestCase):
             self.assertIn('JankDiagnostics.section("daiyu.menu-shadow=' + name + '")', menu)
         preview = (APP/'ui/navigation/PageBackPreviewLayers.kt').read_text()
         freeze = preview.split('private fun freeze(', 1)[1].split('    private fun capture(', 1)[0]
-        self.assertIn('frame.image = frame.ready?.takeIf { frame.readySize == frame.size }', freeze)
+        self.assertIn('freezeForNavigation(frame)', freeze)
+        self.assertNotIn('frame.ready?.takeIf', freeze)
         self.assertNotIn('scope.launch', freeze)
         self.assertIn('private val snapshot: suspend (Frame) -> ImageBitmap = { frame -> frame.layer.toImageBitmap() }', preview)
         self.assertNotIn('snapshot(frame)', freeze)

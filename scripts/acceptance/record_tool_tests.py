@@ -257,6 +257,19 @@ COMPOSER_CONTEXT_MODULES = (
 )
 
 
+
+CHILD_TASK_CARD_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.conversation." + name for name in (
+    "ChildTaskListTest", "ToolOperationCardTest", "ToolCardReadabilityTest", "SubAgentStatusDialogTest",
+))
+CHILD_TASK_CARD_MODULES = (
+    "test_delegation_batch_and_send_contract", "test_child_stop_hot_configuration_contract",
+    "test_subagent_resume_display_contract", "test_subagent_collaboration_contract",
+    "test_sidebar_task_entry_contract", "test_child_task_card_contract", "test_chat_return_refresh_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(COMPOSER_CONTEXT_PLATFORM_CLASSES)):
@@ -324,6 +337,9 @@ def command_for(python, env):
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(MARKDOWN_ENTRY_PLATFORM_CLASSES)):
         return [python, '-B', '-m', 'unittest', *MARKDOWN_ENTRY_MODULES, '-v'], 'markdown-entry-targeted'
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(CHILD_TASK_CARD_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *CHILD_TASK_CARD_MODULES, "-v"], "child-task-cards-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
 

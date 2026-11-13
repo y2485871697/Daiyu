@@ -150,6 +150,8 @@ jobs:
               --tests 'app.daiyu.android.model.ModelHttpTransportTest'
               --tests 'app.daiyu.android.model.ProviderRequestWireTest'
               --tests 'app.daiyu.android.model.ProviderHeadersTest'
+              --tests 'app.daiyu.android.model.ResponsesWebSearchTest'
+              --tests 'app.daiyu.android.model.NativeCompletionWebSearchTest'
               --tests 'app.daiyu.android.model.OfficialImageFilesTest'
               --tests 'app.daiyu.android.model.AssistantModelFactoryTest'
               --tests 'app.daiyu.android.context.ProviderSummary*Test'
@@ -181,7 +183,7 @@ jobs:
           import xml.etree.ElementTree as ET
           roots = {'domain': Path('core-domain/build/test-results/test'), 'app': Path('app/build/test-results/testDebugUnitTest')}
           required = {'domain': {'ContinuationTextTest', 'ChatRunnerRequestRetryTest', 'ChatRunnerBatchTransactionTest', 'ChatRunnerAttemptGateTest', 'ChatRunnerTransportResumeTest', 'ChatRunnerResumeCheckpointTest', 'ChatRunnerUsageCheckpointTest', 'RunnerHistorySegmentsTest', 'RunnerHistorySegmentsTimeTest', 'ProviderEventDeliveryGateTest', 'MessageHistoryTest'},
-                      'app': {'ProviderSummaryModelTest', 'ProviderSummaryUsagePortTest', 'ModelHttpTransportTest', 'ProviderRequestWireTest', 'ProviderHeadersTest', 'OfficialImageFilesTest', 'AssistantModelFactoryTest', 'ProviderRequestTraceTest', 'ProviderFailureBoundaryTest', 'ProviderHttpFailureTest', 'SseReaderTest', 'RuntimeDiagnosticsTest', 'AllProtocolRequestRetryTest', 'ResponsesBackgroundResumeTest', 'ReconnectRunnerTimelineTest', 'ModelErrorReconnectTest', 'UsageRecordingModelTest', 'ControllerAuxiliaryVisionTest', 'AuxiliaryVisionModelAdapterTest', 'ChatTimelineCodecTest', 'ReconnectPositionCodecTest', 'ReconnectPartsTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest'}}
+                      'app': {'ResponsesWebSearchTest', 'NativeCompletionWebSearchTest', 'ProviderSummaryModelTest', 'ProviderSummaryUsagePortTest', 'ModelHttpTransportTest', 'ProviderRequestWireTest', 'ProviderHeadersTest', 'OfficialImageFilesTest', 'AssistantModelFactoryTest', 'ProviderRequestTraceTest', 'ProviderFailureBoundaryTest', 'ProviderHttpFailureTest', 'SseReaderTest', 'RuntimeDiagnosticsTest', 'AllProtocolRequestRetryTest', 'ResponsesBackgroundResumeTest', 'ReconnectRunnerTimelineTest', 'ModelErrorReconnectTest', 'UsageRecordingModelTest', 'ControllerAuxiliaryVisionTest', 'AuxiliaryVisionModelAdapterTest', 'ChatTimelineCodecTest', 'ReconnectPositionCodecTest', 'ReconnectPartsTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest'}}
           if os.environ['CHECK_SCOPE'] == 'presentation':
               roots.pop('domain')
               required = {'app': {'ReconnectPartsTest', 'ReconnectPositionCodecTest', 'ChatTurnMapperTest', 'ChatProjectionTest', 'AssistantWorkflowContentTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'WorkflowNarrationCompositionTest', 'ReasoningHandoffTest'}}

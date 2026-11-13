@@ -215,7 +215,7 @@ class ResponsesWebSearchTest {
         assertFalse(connection.instanceFollowRedirects); assertTrue(connection.closed)
         val snapshot = settings.requestSnapshot()
         val summary = Connection(wire(message()))
-        SummaryProviderFactory.create(snapshot, 64, "Summarize only") { summary }
+        SummaryProviderFactory.create(snapshot, 64, "Summarize only", connect = { summary })
             .open(listOf(user()), emptyList<ToolDefinition>()).next(emptyList()) {}
         assertFalse(summary.body().has("tools"))
         assertTrue(snapshot.requestOptions.openAiWebSearchEnabled)

@@ -1,0 +1,12 @@
+gradle.taskGraph.whenReady { graph ->
+    def output = new File('test-refresh/task-graph.json')
+    output.parentFile.mkdirs()
+    output.text = groovy.json.JsonOutput.toJson(graph.allTasks*.path)
+    def forbidden = graph.allTasks.findAll { t ->
+        t.name ==~ /(?i)^(install|uninstall|connected|managedDevice).*/ ||
+            ((t.name ==~ /(?i)^(assemble|sign).*/ ||
+                t.name ==~ /(?i)^(package|bundle).*(apk|debug|release|androidtest)$/) &&
+                !t.name.toLowerCase().contains('androidtest'))
+    }
+    if (!forbidden.empty) throw new GradleException('Test refresh rejected application packaging: ' + forbidden*.path)
+}

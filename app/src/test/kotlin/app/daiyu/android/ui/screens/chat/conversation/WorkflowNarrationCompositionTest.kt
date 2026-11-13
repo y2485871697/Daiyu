@@ -99,13 +99,17 @@ class WorkflowNarrationCompositionTest {
             assertEquals(closedAdvances, advances)
 
             paused.value = true
-            setText(text + "旧".repeat(100) + "新".repeat(500))
+            val resumedText = text + "旧".repeat(100) + "新".repeat(500)
+            setText(resumedText)
+            until { narration?.projection?.sources == listOf(resumedText) }
             repeat(40) { frame() }
             assertEquals(600, narration!!.reveal.limit("narration"))
             assertEquals(closedAdvances, advances)
             paused.value = false
             repeat(5) { frame() }
-            assertTrue(narration!!.reveal.limit("narration") in 601 until 1100)
+            val resumedLimit = narration!!.reveal.limit("narration")
+            assertTrue("After resume: limit=$resumedLimit, projectionReady=${narration!!.projection?.sources == listOf(resumedText)}, advances=$advances, closedAdvances=$closedAdvances",
+                resumedLimit in 601 until resumedText.length)
             assertTrue(advances > closedAdvances)
             running.value = false
             repeat(25) { frame() }

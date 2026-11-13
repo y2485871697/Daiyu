@@ -585,6 +585,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             if (text == appended) { entered.countDown(); release.await() }
             MarkdownParser.parse(text)
         }
+        val autoAdvance = ui.mainClock.autoAdvance
         try {
             show {
                 CompositionLocalProvider(LocalMarkdownParser provides parser) {
@@ -593,16 +594,18 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 }
             }
             awaitNodes(hasText("Second paragraph."))
-            mainThread { turn = turn.copy(finalText = appended, status = RunStatus.COMPLETED) }
-            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.mainClock.autoAdvance = false
+            ui.runOnUiThread { turn = turn.copy(finalText = appended, status = RunStatus.COMPLETED) }
             ui.mainClock.advanceTimeBy(100)
+            ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
             ui.onNodeWithText("Second paragraph.", useUnmergedTree = true).assertIsDisplayed()
             assertTrue(confirmed.none { turn.listKey in it })
             release.countDown()
+            ui.mainClock.autoAdvance = true
             awaitNodes(hasText("Final paragraph."))
             ui.waitUntil(5_000) { confirmed.any { turn.listKey in it } }
-        } finally { release.countDown() }
+        } finally { release.countDown(); ui.mainClock.autoAdvance = autoAdvance }
     }
 
     fun testReorderedMixedTextKeepsEachPublishedBodyWithItsItemIdentity() {

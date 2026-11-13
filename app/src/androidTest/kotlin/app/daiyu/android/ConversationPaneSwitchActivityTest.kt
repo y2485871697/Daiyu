@@ -35,7 +35,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
         lateinit var conversations: List<Conversation>
         mainThread {
             conversations = List(3) { index ->
-                fixture.database.create().also {
+                fixture.database.create("default").also {
                     fixture.database.rename(it.id, "switch-$index")
                     fixture.database.draft(it.id, "draft-$index")
                 }

@@ -1,0 +1,194 @@
+name: 代鱼测试包增量回归
+run-name: 代鱼测试包增量回归 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 完整验证SHA
+        type: string
+        required: true
+      source_sha:
+        description: 未变化的生产应用完整SHA
+        type: string
+        required: true
+      source_run_id:
+        description: 成功compile应用包run（attempt1）
+        type: string
+        required: true
+      smoke_classes:
+        description: 完整定向测试类，逗号分隔
+        type: string
+        required: true
+      check_id:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: daiyu-test-refresh-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  EXPECTED_SHA: ${{ inputs.expected_sha }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+  SMOKE_MODE: smoke
+  SMOKE_TEST_CLASSES: ${{ inputs.smoke_classes }}
+  SKIP_JDK_VERSION_CHECK: 'true'
+jobs:
+  test-package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 核对精确验证身份
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -n "$SMOKE_TEST_CLASSES"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼增量Release包
+          path: source-delivery
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: 校验旧应用及双来源边界
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify_test_refresh.py source
+      - name: 测试包来源契约
+        run: python3 -B -m unittest discover -s tests -p test_test_refresh_contract.py -v
+      - uses: ./.github/actions/setup-temurin
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 准备固定离线语音 JNI（不打包）
+        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+      - name: 准备固定签名
+        env:
+          DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: python3 scripts/prepare_signing.py
+      - name: 仅构建测试APK，禁止应用打包
+        env:
+          DAIYU_REQUIRE_SIGNING: 'true'
+          DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: ./gradlew --no-daemon -I scripts/cooperation/test_refresh_only.init.gradle -PdaiyuProductionRelease=true :app:assembleReleaseAndroidTest
+      - name: 清理临时签名
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/daiyu-release.p12"
+      - name: 绑定原应用和新测试，独立记录SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify_test_refresh.py bind --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼测试刷新执行包
+          path: delivery/
+          if-no-files-found: error
+      - name: 上传测试包构建证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼测试刷新构建证据
+          path: test-refresh/
+          if-no-files-found: warn
+  smoke:
+    needs: test-package
+    runs-on: ubuntu-26.04
+    timeout-minutes: 215
+    strategy:
+      fail-fast: false
+      matrix:
+        api: ['26', '37.2']
+        shard: [0, 1, 2, 3]
+        include:
+          - api: '26'
+            target: google_apis
+            ram: 4096
+          - api: '37.2'
+            target: google_apis_ps16k
+            ram: 6144
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼测试刷新执行包
+          path: delivery
+      - name: 校验双来源执行包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          python3 scripts/verify_test_refresh.py check
+      - name: 启用模拟器加速
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 统一模拟器命令行工具
+        run: |
+          tools="$ANDROID_HOME/cmdline-tools"
+          test -x "$tools/16111833/bin/avdmanager"
+          rm -rf "$tools/latest"
+          ln -s "$tools/16111833" "$tools/latest"
+          mkdir -p smoke
+          rm -f smoke/prelaunch-ready.txt
+          free -m | tee smoke/host-memory.txt
+          cat "$tools/latest/source.properties" | tee smoke/commandline-tools.txt
+          "$tools/latest/bin/sdkmanager" --version
+      - name: 安装模拟器宿主依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libpulse0
+      - name: 预启动 ADB
+        run: adb start-server
+      - name: 安装并检查启动
+        timeout-minutes: 205
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          EMULATOR_RAM_MB: ${{ matrix.ram }}
+          SMOKE_SHARD_COUNT: '4'
+          DAILY_API: ${{ matrix.api }}
+          SMOKE_API: all
+          SMOKE_SHARD_INDEX: ${{ matrix.shard }}
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: ${{ matrix.target }}
+          disk-size: 8192M
+          ram-size: ${{ matrix.ram }}M
+          cores: 4
+          emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}
+          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ matrix.api == '26' && '-feature -GLDMA' || '' }} ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
+          emulator-boot-timeout: 180
+          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
+          disable-animations: true
+          script: bash -c 'set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+      - name: 上传双API证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 测试刷新-API${{ matrix.api }}-分片${{ matrix.shard }}
+          path: smoke/
+          if-no-files-found: warn

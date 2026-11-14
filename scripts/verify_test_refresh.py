@@ -19,6 +19,8 @@ VALIDATION_FILES = {
     '.github/workflows/test-refresh-regression.yml',
     '.github/workflows/chat-workflow-checks.yml',
     'scripts/verify_test_refresh.py', 'scripts/cooperation/test_refresh_only.init.gradle',
+    '.github/workflows/popup-layout-checks.yml',
+    'scripts/acceptance/record_tool_tests.py', 'scripts/verify_smoke_source.py',
 }
 VALIDATION_DIRS = ('tests/', 'app/src/test/', 'app/src/androidTest/')
 

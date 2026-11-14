@@ -20,7 +20,9 @@ class TestRefreshContract(unittest.TestCase):
                           'docs/重构清单.md', '.github/workflows/test-refresh-regression.yml'])
 
     def test_chat_checks_metadata_does_not_allow_other_workflows(self):
-        validate_changes(['.github/workflows/chat-workflow-checks.yml'])
+        validate_changes(['.github/workflows/chat-workflow-checks.yml',
+                          '.github/workflows/popup-layout-checks.yml',
+                          'scripts/acceptance/record_tool_tests.py', 'scripts/verify_smoke_source.py'])
         for name in ('.github/workflows/build.yml', '.github/workflows/unknown-checks.yml',
                      '.github/workflows/chat-workflow-checks.yml.bak', '.github/actions/example/action.yml'):
             with self.subTest(name=name), self.assertRaises(ValueError):
@@ -31,6 +33,8 @@ class TestRefreshContract(unittest.TestCase):
     def test_application_build_and_ambiguous_paths_fail_closed(self):
         for name in ('app/src/main/Example.kt', 'app/build.gradle.kts', 'settings.gradle.kts',
                      'scripts/prepare-speech-runtime.py', '.github/workflows/build.yml',
+                     'scripts/acceptance/unknown.py', 'scripts/verify_smoke_source.py.bak',
+                     '.github/workflows/popup-layout-checks.yml.bak',
                      'app/src/androidTest/../main/Example.kt', 'tests//a', 'tests\\a', '/tests/a'):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 validate_changes([name])

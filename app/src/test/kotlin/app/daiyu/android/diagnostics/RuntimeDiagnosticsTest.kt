@@ -151,4 +151,64 @@ class RuntimeDiagnosticsTest {
         } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
     }
 
+    private fun recoveryGeometry() = ChatRecoveryGeometry(
+        1216, 1900, 0, 160, true, 7, 23, 80, 3, false, true, true, false,
+        12, 30, 2400, (0..20).map { ChatRecoveryGeometry.Item(it, it * 100, 100) })
+
+    @Test fun contentRecoveryIsEdgeTriggeredBoundedAndRejectsOldTimeouts() {
+        var now = 1_000_000_000L
+        val incidents = mutableListOf<ChatRecoveryRecorder.Incident>()
+        val capture = ChatRecoveryRecorder({ now }, { 9 }) { incidents += it }
+        assertNull(capture.active(true))
+        capture.draw(recoveryGeometry())
+        assertFalse(capture.observing)
+        capture.active(false)
+        val first = capture.active(true)!!
+        assertNull(capture.active(true))
+        repeat(ChatRecoveryRecorder.MAX_FRAMES) { now += 1_000_000L; capture.draw(recoveryGeometry()) }
+        assertEquals(1, incidents.size)
+        assertEquals(ChatRecoveryRecorder.End.LIMIT, incidents.single().end)
+        assertEquals(16, incidents.single().frames.size)
+        assertTrue(incidents.single().frames.all { it.geometry.items.size == 6 })
+        capture.draw(recoveryGeometry()); assertEquals(1, incidents.size)
+        capture.active(false); capture.active(true)
+        capture.timeout(first)
+        assertTrue(capture.observing)
+        now += ChatRecoveryRecorder.WINDOW_NS
+        capture.draw(recoveryGeometry())
+        assertEquals(ChatRecoveryRecorder.End.TIMEOUT, incidents.last().end)
+        assertTrue(incidents.last().frames.isEmpty())
+        capture.active(false); capture.active(true); capture.draw(recoveryGeometry()); capture.active(false)
+        assertEquals(ChatRecoveryRecorder.End.INACTIVE, incidents.last().end)
+        assertEquals(1, incidents.last().frames.size)
+    }
+
+    @Test fun contentRecoveryUsesAutomaticNumericOnlyExportAndClearEpoch() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("content-recovery").toFile())
+        RuntimeDiagnostics.awaitWrites(); RuntimeDiagnostics.clear(); RuntimeDiagnostics.enabled = false
+        try {
+            var now = 1_000_000_000L
+            val capture = ChatRecoveryRecorder({ now })
+            capture.active(true); capture.active(false); capture.active(true)
+            repeat(ChatRecoveryRecorder.MAX_FRAMES) { now++; capture.draw(recoveryGeometry()) }
+            RuntimeDiagnostics.enabled = true; RuntimeDiagnostics.enabled = false
+            val rows = RuntimeDiagnostics.export()
+            assertEquals(1, rows.length())
+            val row = rows.getJSONObject(0)
+            assertEquals("CHAT_RECOVERY", row.getString("stage"))
+            assertEquals("NATIVE_DRAW_LAYOUT_NOT_PRESENTATION", row.getString("semantics"))
+            assertEquals(setOf("stage", "code", "time_ms", "serial", "elapsed_ns", "end", "semantics", "frames"),
+                row.keys().asSequence().toSet())
+            val frame = row.getJSONArray("frames").getJSONObject(0)
+            assertEquals(setOf("viewport", "attached", "first", "total_items", "reveal_epoch", "initial_pending",
+                "resume_pending", "following", "scrolling", "nested", "items", "offset_ns"), frame.keys().asSequence().toSet())
+            assertEquals(6, frame.getJSONArray("items").length())
+            assertTrue(row.toString().toByteArray().size + 1 < 16 * 1024)
+            capture.active(false); capture.active(true); capture.draw(recoveryGeometry())
+            RuntimeDiagnostics.clear()
+            capture.finish(ChatRecoveryRecorder.End.DETACHED)
+            assertEquals(0, RuntimeDiagnostics.export().length())
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+
 }

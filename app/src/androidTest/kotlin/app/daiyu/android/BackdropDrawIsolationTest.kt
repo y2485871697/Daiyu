@@ -44,6 +44,48 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 
 /** Real renderer draw counts, not composition counts or an emulator frame-time benchmark. */
 class BackdropDrawIsolationTest : WiredActivityTestCase() {
+    fun testOrdinaryReleaseRecordsChatRecoveryDrawsWithoutBroadLogging() {
+        val original = activity
+        val revision = mutableIntStateOf(2)
+        mainThread {
+            activity.setContent {
+                Box(Modifier.fillMaxSize().background(if (revision.intValue == 2) Color.Red else Color.Blue)) {
+                    app.daiyu.android.diagnostics.ObserveChatRecovery(true) {
+                        app.daiyu.android.diagnostics.ChatRecoveryGeometry(
+                            120, 140, revision.intValue, 17, true, 0, 0, 1,
+                            revision.intValue.toLong(), false, false, true, false, 0, 0, 140,
+                            listOf(app.daiyu.android.diagnostics.ChatRecoveryGeometry.Item(0, 0, 140)))
+                    }
+                }
+            }
+        }
+        app.daiyu.android.diagnostics.RuntimeDiagnostics.awaitWrites()
+        val previousEnabled = app.daiyu.android.diagnostics.RuntimeDiagnostics.enabled
+        app.daiyu.android.diagnostics.RuntimeDiagnostics.enabled = false
+        app.daiyu.android.diagnostics.RuntimeDiagnostics.clear()
+        try {
+            realPauseResume(original)
+            mainThread { revision.intValue = 3; activity.window.decorView.invalidate() }
+            Thread.sleep(app.daiyu.android.diagnostics.ChatRecoveryRecorder.WINDOW_MS + 100)
+            val rows = app.daiyu.android.diagnostics.RuntimeDiagnostics.export()
+            val recovery = (0 until rows.length()).map(rows::getJSONObject).filter { it.optString("stage") == "CHAT_RECOVERY" }
+            assertEquals("One lifecycle recovery, not one record per recomposition", 1, recovery.size)
+            val frames = recovery.single().getJSONArray("frames")
+            assertTrue("Real native draws must be observed", frames.length() in 1..16)
+            for (i in 0 until frames.length()) {
+                val frame = frames.getJSONObject(i)
+                assertTrue(frame.getBoolean("attached"))
+                assertEquals(120, frame.getJSONArray("viewport").getInt(0))
+                assertEquals(140, frame.getJSONArray("viewport").getInt(1))
+                assertTrue(frame.getJSONArray("viewport").getInt(2) in 2..3)
+            }
+            assertEquals("NATIVE_DRAW_LAYOUT_NOT_PRESENTATION", recovery.single().getString("semantics"))
+        } finally {
+            app.daiyu.android.diagnostics.RuntimeDiagnostics.clear()
+            app.daiyu.android.diagnostics.RuntimeDiagnostics.enabled = previousEnabled
+        }
+    }
+
     fun testRawCaptureNegativeControlAndNestedProductionCaptureDrawCounts() {
         if (Build.VERSION.SDK_INT < 33) return
         val counts = mutableListOf<List<Int>>()

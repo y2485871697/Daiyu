@@ -177,7 +177,7 @@ internal object RuntimeDiagnostics {
     private val sequence = AtomicLong()
     private val dropped = AtomicLong()
     private val generation = AtomicLong()
-    // Clear-only epoch: broad opt-in toggles must not invalidate automatic back evidence.
+    // Clear-only epoch: broad opt-in toggles must not invalidate automatic back/content evidence.
     private val backGeneration = AtomicLong()
     internal fun backEpoch(): Long = backGeneration.get()
 
@@ -223,6 +223,30 @@ internal object RuntimeDiagnostics {
                                 .put("overlaps_start_unattributed", frame.overlapsStart).put("vsync_offset_ns", frame.vsyncOffset))
                         } })
                     val row = value.toString()
+                    lock.withLock {
+                        if (incident.epoch != backGeneration.get()) return@withLock
+                        val missing = dropped.getAndSet(0)
+                        if (missing > 0) append(JSONObject().put("code", Code.DROPPED.name).put("count", missing).toString())
+                        append(row)
+                    }
+                } catch (_: Throwable) { dropped.incrementAndGet() }
+            }
+        } catch (_: Throwable) { dropped.incrementAndGet() }
+    }
+
+    internal fun chatRecovery(incident: ChatRecoveryRecorder.Incident) {
+        if (directory == null || incident.epoch != backGeneration.get()) return
+        try {
+            executor.execute {
+                try {
+                    if (incident.epoch != backGeneration.get()) return@execute
+                    val row = JSONObject().put("stage", "CHAT_RECOVERY").put("code", "INCIDENT")
+                        .put("time_ms", System.currentTimeMillis()).put("serial", incident.serial)
+                        .put("elapsed_ns", incident.elapsed).put("end", incident.end.name)
+                        .put("semantics", "NATIVE_DRAW_LAYOUT_NOT_PRESENTATION")
+                        .put("frames", JSONArray().apply { incident.frames.forEach { frame ->
+                            put(frame.geometry.json().put("offset_ns", frame.offset))
+                        } }).toString()
                     lock.withLock {
                         if (incident.epoch != backGeneration.get()) return@withLock
                         val missing = dropped.getAndSet(0)

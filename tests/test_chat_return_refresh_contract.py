@@ -148,5 +148,32 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('checks_only.init.gradle', flow)
 
 
+
+class ContentRecoveryWitnessContract(unittest.TestCase):
+    def test_chat_recovery_is_normal_release_native_draw_numeric_only_and_bounded(self):
+        root = Path(__file__).resolve().parents[1]
+        code = (root / "app/src/main/kotlin/app/daiyu/android/diagnostics/ChatRecoveryDiagnostics.kt").read_text()
+        runtime = (root / "app/src/main/kotlin/app/daiyu/android/diagnostics/RuntimeDiagnostics.kt").read_text()
+        chat = (root / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt").read_text()
+        self.assertIn("ObserveChatRecovery(pageActive && scrollResumed)", chat)
+        witness = chat.split("ObserveChatRecovery(pageActive && scrollResumed)", 1)[1].split("// Read confirmation", 1)[0]
+        for source in ("listState.layoutInfo", "positionInWindow()", "currentNestedTail.viewportOffset",
+                       "currentNestedTail.scrollOffset", "currentNestedTail.contentHeight",
+                       "ChatRecoveryGeometry.Item(it.index, it.offset, it.size)"):
+            self.assertIn(source, witness)
+        for forbidden in (".key", "scrollToItem", "scrollBy", "forceRemeasure", "invalidate", "turns"):
+            self.assertNotIn(forbidden, witness)
+        self.assertIn("ViewTreeObserver.OnDrawListener", code)
+        self.assertIn("MAX_FRAMES = 16", code)
+        self.assertIn("MAX_ITEMS = 6", code)
+        self.assertIn("WINDOW_MS = 750L", code)
+        self.assertNotIn("BuildConfig", code)
+        self.assertNotIn("invalidate", code)
+        self.assertIn("NATIVE_DRAW_LAYOUT_NOT_PRESENTATION", runtime)
+        self.assertIn("handler.removeCallbacksAndMessages(recorder)", code)
+        method = runtime.split("internal fun chatRecovery(", 1)[1].split("private val active", 1)[0]
+        self.assertNotIn("!enabled", method)
+        self.assertIn("incident.epoch != backGeneration.get()", method)
+
 if __name__ == '__main__':
     unittest.main()

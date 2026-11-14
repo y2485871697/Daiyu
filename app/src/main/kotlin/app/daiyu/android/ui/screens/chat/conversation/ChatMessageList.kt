@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.geometry.Offset
 import kotlin.math.abs
 import androidx.compose.ui.semantics.ScrollAxisRange
@@ -647,6 +648,21 @@ internal fun ChatMessageList(
             previousViewport = observedViewport
             motion.reset()
         }
+    }
+    app.daiyu.android.diagnostics.ObserveChatRecovery(pageActive && scrollResumed) {
+        val layout = listState.layoutInfo
+        val coordinates = clearanceLayout.coordinates?.takeIf { it.isAttached }
+        val origin = coordinates?.let { it.positionInWindow() }
+        app.daiyu.android.diagnostics.ChatRecoveryGeometry(
+            layout.viewportSize.width, layout.viewportSize.height,
+            origin?.x?.roundToInt() ?: Int.MIN_VALUE, origin?.y?.roundToInt() ?: Int.MIN_VALUE,
+            coordinates != null, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset,
+            layout.totalItemsCount, revealResetEpoch, initialPositionPending, resumeFollowPending,
+            followBottom, listState.isScrollInProgress,
+            currentNestedTail.viewportOffset, currentNestedTail.scrollOffset.roundToInt(), currentNestedTail.contentHeight,
+            layout.visibleItemsInfo.take(app.daiyu.android.diagnostics.ChatRecoveryRecorder.MAX_ITEMS).map {
+                app.daiyu.android.diagnostics.ChatRecoveryGeometry.Item(it.index, it.offset, it.size)
+            })
     }
     // Read confirmation observes existing measured layout only; it never changes follow/scroll.
     LaunchedEffect(listState) {

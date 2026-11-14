@@ -619,7 +619,7 @@ class PageBackGestureContractTest(unittest.TestCase):
     def test_nested_preview_owners_unregister_and_commit_is_guarded(self):
         for guard in ('state.previewOwners.add(previewOwner)', 'state.previewOwners.remove(previewOwner)',
                       'previewOwners.none { it.enabled && !it.previewEnabled }',
-                      'if (!alive || (transitionBlocked && swipeCommit == null) || committing) return', 'committing = true',
+                      'if (!alive || toolbarPending || (transitionBlocked && swipeCommit == null) || committing) return', 'committing = true',
                       'state.transitionBlocked = (activeDeparture && departure?.forward != true) ||',
                       '(state.previewAllowed && !state.active && state.gestureVisualActive)'):
             self.assertIn(guard, self.host)

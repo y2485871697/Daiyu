@@ -72,7 +72,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
     private fun listItem(key: String, tag: String): SemanticsNodeInteraction {
         node("chat-model-list").performScrollToKey(key)
         awaitVisualIdle()
-        return node(tag).assertIsDisplayed()
+        return node(tag).scrollToVisible().assertIsDisplayed()
     }
 
     fun testPetStatusSuppressionKeepsLoadingAndFailureSelectionDisabled() {

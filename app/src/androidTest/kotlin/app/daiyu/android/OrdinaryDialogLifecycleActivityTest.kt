@@ -10,6 +10,10 @@ import java.util.concurrent.TimeUnit
 
 /** The real host retains presentation, not an executable grant or a replayed user action. */
 class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
+    private val confirmedGptSpeedField = MainActivity::class.java.getDeclaredField("confirmedGptSpeed").apply { isAccessible = true }
+    private fun confirmedGptSpeed(): ChatGptSpeedSelection? = confirmedGptSpeedField.get(activity) as ChatGptSpeedSelection?
+    private fun chatModelPicker(): app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState? =
+        invokeHost(activity, "getChatModelPicker") as app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState?
     private fun lease(): DialogActionLease? = invokeHost(activity, "getOrdinaryDialogLease") as DialogActionLease?
     private fun activeLease(): DialogActionLease {
         lateinit var current: DialogActionLease
@@ -133,8 +137,18 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
                 status = app.daiyu.android.domain.RunStatus.RUNNING)
             db.send(user, answer); db.save(answer.copy(status = app.daiyu.android.domain.RunStatus.COMPLETED))
         }
+        val expectedHistory = db.messages(conversation.id).map { it.second.id }
+        assertEquals(50, expectedHistory.size)
+        val shownField = MainActivity::class.java.getDeclaredField("shown").apply { isAccessible = true }
+        val historyLoadingField = MainActivity::class.java.getDeclaredField("refreshHistoryLoading").apply { isAccessible = true }
         mainThread { activity.select(conversation) }
         awaitControl("history readers idle") { !fixture.controller.dataBusy }
+        ui.waitUntil(10_000) { ui.runOnIdle {
+            @Suppress("UNCHECKED_CAST")
+            val loaded = shownField.get(activity) as List<Pair<Long, app.daiyu.android.domain.Message>>
+            invokeHost(activity, "getDisplayWindow") == null && !historyLoadingField.getBoolean(activity) &&
+                loaded.map { it.second.id } == expectedHistory
+        } }
         awaitUniqueTag("chat-turn:dialog-fling-answer-69")
         dismissIme(); ui.waitForIdle()
         val originalListId = node("chat-messages").fetchSemanticsNode().id
@@ -154,7 +168,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
         node("chat-messages").performScrollToIndex(8)
         ui.waitForIdle()
         val reading = scrollValue()
-        assertTrue(reading > 0f && reading < tail)
+        assertTrue("History fixture must enter an interior reading position: reading=$reading tail=$tail", reading > 0f && reading < tail)
         val oldAutoAdvance = ui.mainClock.autoAdvance
         ui.mainClock.autoAdvance = false
         try {
@@ -197,23 +211,22 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
 
     fun testConfirmedContextRevisionStillChangesForRealConfigurationChanges() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.runOnIdle { invokeHost(activity, "getConfirmedGptSpeed") != null } }
+        ui.waitUntil(5_000) { ui.runOnIdle { confirmedGptSpeed() != null } }
         val revision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
         val before = fixture.settings.load()
         val capacity = if (before.contextWindowOverride == 32768) 65536 else 32768
         fixture.settings.save(before.copy(contextWindowOverride = capacity))
         mainThread { invokeHost(activity, "refreshConfirmedModelLabel") }
         ui.waitUntil(5_000) { ui.runOnIdle {
-            val confirmed = invokeHost(activity, "getConfirmedGptSpeed") as? ChatGptSpeedSelection
+            val confirmed = confirmedGptSpeed() as? ChatGptSpeedSelection
             confirmed?.editing?.settings?.contextWindowOverride == capacity &&
                 (invokeHost(activity, "getContextModelRevision") as Long) > revision
         } }
         val confirmedRevision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
         mainThread { invokeHost(activity, "openChatModels") }
         awaitUniqueTag("chat-model-search")
-        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
         ui.waitUntil(5_000) { ui.runOnIdle {
-            (pickerField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState)?.loading == false
+            chatModelPicker()?.loading == false
         } }
         mainThread { assertEquals(confirmedRevision, invokeHost(activity, "getContextModelRevision")) }
         assertEquals(capacity, fixture.settings.load().contextWindowOverride)
@@ -222,7 +235,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
 
     fun testChatModelLoadingKeepsTheWindowSearchAndContextRevision() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.runOnIdle { invokeHost(activity, "getConfirmedGptSpeed") != null } }
+        ui.waitUntil(5_000) { ui.runOnIdle { confirmedGptSpeed() != null } }
         setDraft("打开目录不改变聊天")
         dismissIme()
         val before = fixture.database.exportBackup()
@@ -236,13 +249,12 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
                 entered.countDown(); check(release.await(60, TimeUnit.SECONDS))
             } } catch (problem: Throwable) { failure.set(problem) }
         }.apply { start() }
-        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
         try {
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             mainThread { invokeHost(activity, "openChatModels") }
             awaitUniqueTag("chat-model-search")
             awaitNodeWindowFocus(node("chat-model-search"))
-            mainThread { assertTrue((pickerField.get(activity) as app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState).loading) }
+            mainThread { assertTrue(checkNotNull(chatModelPicker()).loading) }
             val root = focusedWindowRoot()
             node("chat-model-search").performTextReplacement("unfinished model search")
             dismissIme()
@@ -250,7 +262,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
             assertFalse(holder.isAlive)
             failure.get()?.let { throw it }
             ui.waitUntil(5_000) { ui.runOnIdle {
-                (pickerField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState)?.loading == false
+                chatModelPicker()?.loading == false
             } }
             awaitNodeWindowFocus(node("chat-model-search"))
             assertSame(root, focusedWindowRoot())
@@ -265,7 +277,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
             mainThread { invokeHost(activity, "openChatModels") }
             awaitUniqueTag("chat-model-search")
             ui.waitUntil(5_000) { ui.runOnIdle {
-                (pickerField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState)?.loading == false
+                chatModelPicker()?.loading == false
             } }
             node("chat-model-search").assertEditableText("")
             mainThread { assertEquals(revision, invokeHost(activity, "getContextModelRevision")) }

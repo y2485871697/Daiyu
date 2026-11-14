@@ -1,0 +1,157 @@
+name: 代鱼重连详情检查
+run-name: 代鱼重连详情检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 冻结检查源码SHA，必须等于既有应用和测试包源码
+        type: string
+        required: true
+      source_sha:
+        description: 既有compile应用和测试包完整SHA
+        type: string
+        required: true
+      source_run_id:
+        description: 成功compile来源run（attempt1），只复用、不打包
+        type: string
+        required: true
+      check_id:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: daiyu-reconnect-details-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  EXPECTED_SHA: ${{ inputs.expected_sha }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+  SOURCE_VARIANT: compile
+  SMOKE_MODE: smoke
+  SMOKE_TEST_CLASSES: app.daiyu.android.PlatformTest,app.daiyu.android.ControllerReconnectIntegrationTest,app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest,app.daiyu.android.ui.screens.chat.conversation.ReconnectBoundaryPlacementTest
+  SMOKE_API: all
+  SMOKE_SHARD_COUNT: '1'
+  SMOKE_SHARD_INDEX: '0'
+jobs:
+  details:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: '26'
+            target: google_apis
+            ram: 4096
+          - api: '37.2'
+            target: google_apis_ps16k
+            ram: 6144
+    env:
+      DAILY_API: ${{ matrix.api }}
+      EMULATOR_RAM_MB: ${{ matrix.ram }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 绑定冻结源码及独立工作流身份
+        shell: bash
+        env:
+          WORKFLOW_SOURCE_SHA: ${{ github.workflow_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$EXPECTED_SHA" = "$SOURCE_SHA"
+          mkdir -p smoke
+          python3 - <<'PYOWNER'
+          import json, os, re
+          from pathlib import Path
+          assert re.fullmatch(r'[0-9a-f]{40}', os.environ['EXPECTED_SHA'])
+          assert os.environ['SOURCE_RUN_ID'].isdecimal()
+          Path('smoke/execution-source.json').write_text(json.dumps(dict(
+              workflow_sha=os.environ['WORKFLOW_SOURCE_SHA'], event_sha=os.environ['GITHUB_SHA'],
+              checked_sha=os.environ['EXPECTED_SHA'],
+              source_sha=os.environ['SOURCE_SHA'], source_run_id=int(os.environ['SOURCE_RUN_ID']),
+              execution_run_id=int(os.environ['GITHUB_RUN_ID']), attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+              workflow_ref=os.environ['GITHUB_WORKFLOW_REF'], api=os.environ['DAILY_API'], shard_count=1, shard_index=0,
+              apk_built=False, full_regression_passed=False,
+              selected_classes=os.environ['SMOKE_TEST_CLASSES'].split(',')), ensure_ascii=False) + '\n')
+          PYOWNER
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼增量Release包
+          path: delivery
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: 核对冻结源码和同run应用测试包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$EXPECTED_SHA" = "$SOURCE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts" > smoke/source-artifacts.json
+          python3 - <<'PYARTIFACT'
+          import json, os
+          from pathlib import Path
+          artifacts = json.loads(Path('smoke/source-artifacts.json').read_text())
+          matches = [a for a in artifacts['artifacts'] if a['name'] == '代鱼增量Release包' and not a['expired']]
+          assert len(matches) == 1
+          artifact = matches[0]
+          assert artifact['workflow_run']['id'] == int(os.environ['SOURCE_RUN_ID'])
+          assert artifact['workflow_run']['head_sha'] == os.environ['SOURCE_SHA']
+          PYARTIFACT
+          GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_smoke_source.py
+      - name: 校验原始APK摘要
+        run: cd delivery && sha256sum -c SHA256SUMS
+      - name: 启用模拟器加速
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 统一模拟器命令行工具
+        run: |
+          tools="$ANDROID_HOME/cmdline-tools"
+          test -x "$tools/16111833/bin/avdmanager"
+          rm -rf "$tools/latest"
+          ln -s "$tools/16111833" "$tools/latest"
+          rm -f smoke/prelaunch-ready.txt
+          free -m | tee smoke/host-memory.txt
+          cat "$tools/latest/source.properties" | tee smoke/commandline-tools.txt
+          "$tools/latest/bin/sdkmanager" --version
+      - name: 安装模拟器宿主依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libpulse0
+      - name: 预启动ADB
+        run: adb start-server
+      - name: 双API重连详情回归（复用既有包）
+        timeout-minutes: 30
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: ${{ matrix.target }}
+          disk-size: 8192M
+          ram-size: ${{ matrix.ram }}M
+          cores: 4
+          emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}
+          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ matrix.api == '26' && '-feature -GLDMA' || '' }} ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
+          emulator-boot-timeout: 180
+          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
+          disable-animations: true
+          script: bash -c 'set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+      - name: 上传定向证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼重连详情证据-API${{ matrix.api }}
+          path: smoke/
+          if-no-files-found: error

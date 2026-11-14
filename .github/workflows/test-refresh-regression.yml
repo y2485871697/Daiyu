@@ -94,12 +94,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.expected_sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: 核对精确验证身份
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -n "$SMOKE_TEST_CLASSES"
+          mkdir -p test-refresh
+          python3 - <<'PYIDENTITY'
+          import json, os
+          from pathlib import Path
+          Path('test-refresh/execution-source.json').write_text(json.dumps(dict(
+              workflow_sha=os.environ['GITHUB_SHA'], checked_sha=os.environ['EXPECTED_SHA'],
+              run_id=os.environ['GITHUB_RUN_ID'], attempt=os.environ['GITHUB_RUN_ATTEMPT'])) + '\n')
+          PYIDENTITY
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: 代鱼增量Release包
@@ -109,7 +118,7 @@ jobs:
       - name: 校验旧应用及双来源边界
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/verify_test_refresh.py source
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_test_refresh.py source
       - name: 测试包来源契约
         run: python3 -B -m unittest discover -s tests -p test_test_refresh_contract.py -v
       - uses: ./.github/actions/setup-temurin
@@ -143,7 +152,7 @@ jobs:
       - name: 绑定原应用和新测试，独立记录SHA
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/verify_test_refresh.py bind --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner"
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_test_refresh.py bind --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: 代鱼测试刷新执行包
@@ -198,6 +207,7 @@ jobs:
                        classes=env['SMOKE_TEST_CLASSES'])
           Path('smoke').mkdir(exist_ok=True)
           Path('smoke/execution-source.json').write_text(json.dumps(owner) + '\n')
+          env['GITHUB_SHA'] = env['EXPECTED_SHA']
           if source_run:
               assert re.fullmatch('[1-9][0-9]*', source_run)
               def api(path):
@@ -283,7 +293,7 @@ jobs:
           emulator-boot-timeout: 180
           pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
           disable-animations: true
-          script: bash -c 'set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+          script: bash -c 'export GITHUB_SHA="$EXPECTED_SHA"; set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
       - name: 上传双API证据
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

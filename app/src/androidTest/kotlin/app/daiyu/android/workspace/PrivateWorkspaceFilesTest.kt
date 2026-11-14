@@ -19,6 +19,7 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         val bytes = "真实私有文件".toByteArray()
         val name = access.importFile(root, "original.txt", { ByteArrayInputStream(bytes) })
         val entry = access.list().entries.single()
+        assertEquals("original.txt", name)
         assertEquals(name, entry.name)
         assertTrue(File(files, "workspace/$name").isFile)
         val output = ByteArrayOutputStream()
@@ -51,17 +52,89 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
     fun testImportCollisionPreservesExistingTargetAndCleansStaging() = fixture { files, access ->
         val root = access.list().directory
         val workspace = File(files, "workspace")
-        var existing: File? = null
+        val existing = File(workspace, "collision.bin")
+        val name = access.importFile(root, "collision.bin", {
+            existing.writeText("keep")
+            ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        })
+        assertEquals("collision (1).bin", name)
+        assertEquals("keep", existing.readText())
+        assertTrue(byteArrayOf(1, 2, 3).contentEquals(File(workspace, name).readBytes()))
+        assertEquals(setOf("collision.bin", name), workspace.list()!!.toSet())
+    }
+    fun testChineseZipImportPreservesOriginalNameAndNumbersCopiesBeforeExtension() = fixture { files, access ->
+        val root = access.list().directory
+        val original = "代鱼-干净源码-main-a1fdf36b-20261115.zip"
+        val names = (0..2).map { index ->
+            access.importFile(root, original, { ByteArrayInputStream(byteArrayOf(index.toByte())) })
+        }
+        assertEquals(listOf(original, original.removeSuffix(".zip") + " (1).zip",
+            original.removeSuffix(".zip") + " (2).zip"), names)
+        names.forEachIndexed { index, name ->
+            assertTrue(byteArrayOf(index.toByte()).contentEquals(File(files, "workspace/$name").readBytes()))
+        }
+        assertEquals(names.toSet(), File(files, "workspace").list()!!.toSet())
+    }
+    fun testImportSkipsExistingDirectoryAndSymlinkWithoutFollowingOrReplacing() = fixture { files, access ->
+        val root = access.list().directory
+        val workspace = File(files, "workspace")
+        val directory = File(workspace, "copy.txt").apply { mkdir() }
+        File(directory, "keep").writeText("directory")
+        val outside = File(files, "outside.txt").apply { writeText("outside") }
+        val link = File(workspace, "copy (1).txt")
+        java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath())
+        val name = access.importFile(root, "copy.txt", { ByteArrayInputStream(byteArrayOf(7)) })
+        assertEquals("copy (2).txt", name)
+        assertEquals("directory", File(directory, "keep").readText())
+        assertTrue(java.nio.file.Files.isSymbolicLink(link.toPath()))
+        assertEquals("outside", outside.readText())
+        assertTrue(byteArrayOf(7).contentEquals(File(workspace, name).readBytes()))
+        assertEquals(setOf("copy.txt", "copy (1).txt", name), workspace.list()!!.toSet())
+    }
+    fun testImportPreservesLegitimateUuidPrefixAndExtensionlessNames() = fixture { _, access ->
+        val root = access.list().directory
+        val original = "f62a6f00-bbee-411f-8a2f-5c420b4a6d06-原名.zip"
+        assertEquals(original, access.importFile(root, original, { ByteArrayInputStream(byteArrayOf(1)) }))
+        for (name in listOf("README", ".hidden")) {
+            assertEquals(name, access.importFile(root, name, { ByteArrayInputStream(byteArrayOf(1)) }))
+            assertEquals("$name (1)", access.importFile(root, name, { ByteArrayInputStream(byteArrayOf(2)) }))
+        }
+    }
+    fun testConcurrentImportsKeepEveryCopyUnderDistinctReadableNames() = fixture { files, access ->
+        val root = access.list().directory
+        val ready = java.util.concurrent.CountDownLatch(4)
+        val start = java.util.concurrent.CountDownLatch(1)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
         try {
-            access.importFile(root, "collision.bin", {
-                val token = workspace.list()!!.single().removePrefix(".workspace-import-")
-                existing = File(workspace, "$token-collision.bin").apply { writeText("keep") }
-                ByteArrayInputStream(byteArrayOf(1, 2, 3))
-            })
-            fail("existing target replaced")
-        } catch (error: android.system.ErrnoException) { assertEquals(android.system.OsConstants.EEXIST, error.errno) }
-        assertEquals("keep", checkNotNull(existing).readText())
-        assertEquals(setOf(checkNotNull(existing).name), workspace.list()!!.toSet())
+            val copies = (0..3).map { value ->
+                pool.submit<Pair<String, Int>> {
+                    ready.countDown()
+                    check(start.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                    access.importFile(root, "并发.中文", { ByteArrayInputStream(byteArrayOf(value.toByte())) }) to value
+                }
+            }
+            assertTrue(ready.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            start.countDown()
+            val results = copies.map { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+            assertEquals(setOf("并发.中文", "并发 (1).中文", "并发 (2).中文", "并发 (3).中文"),
+                results.map { it.first }.toSet())
+            results.forEach { (name, value) ->
+                assertTrue(byteArrayOf(value.toByte()).contentEquals(File(files, "workspace/$name").readBytes()))
+            }
+            assertEquals(results.map { it.first }.toSet(), File(files, "workspace").list()!!.toSet())
+        } finally { start.countDown(); pool.shutdownNow() }
+    }
+    fun testImportRejectsDotSegmentsAndHiddenStagingNamesBeforeOpeningSource() = fixture { files, access ->
+        val root = access.list().directory
+        for (name in listOf(".", "..", ".workspace-import-hidden.zip")) {
+            var opened = false
+            try {
+                access.importFile(root, name, { opened = true; ByteArrayInputStream(byteArrayOf(1)) })
+                fail("reserved name accepted: $name")
+            } catch (failure: IllegalArgumentException) { assertEquals("workspace_invalid_name", failure.message) }
+            assertFalse(opened)
+        }
+        assertTrue(File(files, "workspace").list()!!.isEmpty())
     }
     fun testInputCloseCancellationDoesNotPublishOrLeaveStaging() = fixture { files, access ->
         val root = access.list().directory
@@ -74,9 +147,19 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         assertTrue(File(files, "workspace").list()!!.isEmpty())
     }
     fun testLongUnicodeSourceNameRespectsFilesystemByteLimit() = fixture { _, access ->
-        val name = access.importFile(access.list().directory, "汉".repeat(73) + ".txt", { ByteArrayInputStream(byteArrayOf(1)) })
-        assertTrue(name.toByteArray(Charsets.UTF_8).size <= 255)
-        assertEquals(name, access.list().entries.single().name)
+        val root = access.list().directory
+        val original = "汉".repeat(73) + ".txt"
+        assertEquals(original, access.importFile(root, original, { ByteArrayInputStream(byteArrayOf(1)) }))
+        val tooLong = "汉😀".repeat(80) + ".zip"
+        val first = access.importFile(root, tooLong, { ByteArrayInputStream(byteArrayOf(2)) })
+        val second = access.importFile(root, tooLong, { ByteArrayInputStream(byteArrayOf(3)) })
+        for (name in listOf(first, second)) {
+            assertTrue(name.toByteArray(Charsets.UTF_8).size <= 255)
+            assertTrue(name.endsWith(".zip"))
+            assertFalse(name.contains('\uFFFD'))
+        }
+        assertTrue(second.endsWith(" (1).zip"))
+        assertEquals(setOf(original, first, second), access.list().entries.map { it.name }.toSet())
     }
     fun testSymlinksCannotBeListedOrRedirectStaleDirectories() = fixture { files, access ->
         access.list()

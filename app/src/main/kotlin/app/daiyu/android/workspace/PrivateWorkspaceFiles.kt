@@ -99,22 +99,13 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
         check(directory.directory) { "workspace_not_directory" }
         val cleaned = name.substringAfterLast('/').substringAfterLast('\\')
             .map { if (it.isISOControl()) '_' else it }.joinToString("").ifBlank { "文件" }
-        val safeName = buildString {
-            var bytes = 0
-            val points = cleaned.codePoints().iterator()
-            while (points.hasNext()) {
-                val next = String(Character.toChars(points.nextInt()))
-                val length = next.toByteArray(Charsets.UTF_8).size
-                if (bytes + length > 200) break
-                append(next); bytes += length
-            }
-        }
+        require(cleaned != "." && cleaned != ".." && !cleaned.startsWith(STAGING)) { "workspace_invalid_name" }
         return pinned(directory, cancelled) { parent, _ ->
             val prefix = fdPath(parent)
             val token = UUID.randomUUID().toString()
             val temporary = "$prefix/$STAGING$token"
-            val finalName = "$token-$safeName"
-            val target = "$prefix/$finalName"
+            var finalName = importName(cleaned, 0)
+            var target = "$prefix/$finalName"
             var staged: Identity? = null
             var reserved: Identity? = null
             fun removeOwned(path: String, owned: Identity?) {
@@ -144,8 +135,20 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
                     // SELinux denies hard links. Lists share this short commit lock so they
                     // cannot observe the empty name reserved exclusively for this import.
                     try {
-                        val reservation = Os.open(target,
-                            OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_NOFOLLOW, 384)
+                        var duplicate = 0L
+                        lateinit var reservation: java.io.FileDescriptor
+                        while (true) {
+                            active(cancelled)
+                            try {
+                                reservation = Os.open(target,
+                                    OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_NOFOLLOW, 384)
+                                break
+                            } catch (failure: android.system.ErrnoException) {
+                                if (failure.errno != OsConstants.EEXIST) throw failure
+                                finalName = importName(cleaned, ++duplicate)
+                                target = "$prefix/$finalName"
+                            }
+                        }
                         try { reserved = identity(Os.fstat(reservation)) } finally { Os.close(reservation) }
                         check(identity(Os.lstat(target)) == reserved) { "workspace_entry_changed" }
                         Os.rename(temporary, target)
@@ -158,6 +161,27 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
                 removeOwned(target, reserved)
             }
         }
+    }
+
+    private fun importName(name: String, duplicate: Long): String {
+        val suffix = if (duplicate == 0L) "" else " ($duplicate)"
+        val suffixBytes = suffix.toByteArray(Charsets.UTF_8).size
+        val firstBytes = String(Character.toChars(name.codePointAt(0))).toByteArray(Charsets.UTF_8).size
+        val dot = name.lastIndexOf('.').takeIf { it > 0 && it < name.lastIndex &&
+            name.substring(it).toByteArray(Charsets.UTF_8).size + suffixBytes + firstBytes <= 255 } ?: name.length
+        val extension = name.substring(dot)
+        val budget = 255 - suffixBytes - extension.toByteArray(Charsets.UTF_8).size
+        return buildString {
+            var bytes = 0
+            val points = name.substring(0, dot).codePoints().iterator()
+            while (points.hasNext()) {
+                val next = String(Character.toChars(points.nextInt()))
+                val length = next.toByteArray(Charsets.UTF_8).size
+                if (bytes + length > budget) break
+                append(next); bytes += length
+            }
+            append(suffix); append(extension)
+        }.also(WorkspaceEntryPolicy::requireName)
     }
 
     fun exportFile(entry: Entry, openOutput: () -> OutputStream, cancelled: () -> Boolean = { false }) =

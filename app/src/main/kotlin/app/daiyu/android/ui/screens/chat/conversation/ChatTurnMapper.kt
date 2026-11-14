@@ -397,6 +397,11 @@ object ChatTurnMapper {
         val hasWorkflow = hasTools || message.reportedReasoning.any { hasReportedReasoningText(it.text) || it.activeSinceNanos != null }
         // Keep the unclassified tail out of process narration. The UI admits it only
         // after a real successor step or a terminal reply resolves its ownership.
+        val reasoning = reasoningAtBoundaries(message)
+        val firstTool = message.blocks.indexOfFirst { it is MessageBlock.Tool }.takeIf { it >= 0 } ?: message.blocks.size
+        val firstStep = minOf(firstTool, reasoning.keys.minOrNull() ?: message.blocks.size)
+        val leadingContent = if (hasWorkflow) message.blocks.take(firstStep).filterIsInstance<MessageBlock.Text>()
+            .map { MessageContentUi.Text(it.itemId, it.text, app.daiyu.android.model.LegacySearchDisplay.window(it)) } else emptyList()
         val lastText = workflowFinalTextIndex(message)
         val finalContent = message.blocks.mapIndexedNotNull { index, block ->
             (block as? MessageBlock.Text)?.takeIf { !hasWorkflow || lastText >= 0 && index >= lastText }
@@ -405,13 +410,12 @@ object ChatTurnMapper {
         val finalText = finalContent.joinToString("\n\n") { it.text }
         val segments = mutableListOf<WorkSegmentUi>()
         if (hasWorkflow) {
-            val reasoning = reasoningAtBoundaries(message)
             for (index in 0..message.blocks.size) {
                 reasoning[index].orEmpty().forEach { segments += WorkSegmentUi(reasoning = it) }
                 val block = message.blocks.getOrNull(index) ?: continue
                 when (block) {
                     is MessageBlock.Image -> Unit // Kept, in order, by mixedContent; never converted to narration.
-                    is MessageBlock.Text -> if (lastText < 0 || index < lastText) {
+                    is MessageBlock.Text -> if (index >= firstStep && (lastText < 0 || index < lastText)) {
                         segments += WorkSegmentUi(narration = block.text, narrationId = block.itemId)
                     }
                     is MessageBlock.Tool -> {
@@ -452,6 +456,7 @@ object ChatTurnMapper {
             workProcess = if (hasWorkflow) WorkProcessUi(segments, summary, running) else null,
             finalText = finalText,
             finalContent = finalContent,
+            leadingContent = leadingContent,
             status = message.status,
             error = message.error,
             reportedReasoning = message.reportedReasoning,

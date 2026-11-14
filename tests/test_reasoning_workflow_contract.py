@@ -142,7 +142,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         ordered = (CHAT / 'AssistantWorkflowContent.kt').read_text()
         for token in ['content.indexOfLast { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }',
                       'val split = lastStep + 1',
-                      'val steps = content.take(split)', 'content.drop(split)',
+                      'val leading = content.take(firstStep)', 'val steps = content.subList(firstStep, split)', 'content.drop(split)',
                       'val work = workProcess ?: reportedReasoning.filter',
                       'WorkProcessUi(reasoning.map { WorkSegmentUi(reasoning = it) }',
                       'if (item is MessageContentUi.Reasoning && !handoff.ready(item.reported)) break',

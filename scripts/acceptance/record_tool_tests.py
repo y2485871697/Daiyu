@@ -357,7 +357,23 @@ WORKSPACE_IMPORT_MODULES = (
 )
 
 
+WORKFLOW_BODY_PLATFORM_CLASSES = (
+    "app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest",
+    "app.daiyu.android.ui.screens.chat.conversation.ReconnectBoundaryPlacementTest",
+)
+WORKFLOW_BODY_MODULES = (
+    "test_reasoning_workflow_contract", "test_workflow_narration_contract",
+    "test_workflow_render_isolation_contract", "test_workflow_body_scope",
+    "test_markdown_typing_contract", "test_chat_resume_scroll_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_BODY_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *WORKFLOW_BODY_MODULES, "-v"], "workflow-body-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKSPACE_IMPORT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *WORKSPACE_IMPORT_MODULES, "-v"], "workspace-import-targeted"

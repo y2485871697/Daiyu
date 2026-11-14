@@ -11,14 +11,17 @@ internal data class AssistantWorkflowContent(
     val body: List<MessageContentUi>,
     val plainNarration: Set<String> = emptySet(),
     val pending: List<MessageContentUi> = emptyList(),
+    val leading: List<MessageContentUi> = emptyList(),
 )
 
 internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     if (content.isNotEmpty()) {
         val lastStep = content.indexOfLast { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }
         if (lastStep < 0) return AssistantWorkflowContent(null, emptyList(), content)
+        val firstStep = content.indexOfFirst { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }
+        val leading = content.take(firstStep)
         val split = lastStep + 1
-        val steps = content.take(split)
+        val steps = content.subList(firstStep, split)
         val work = workProcess ?: WorkProcessUi(steps.mapNotNull {
             when (it) {
                 is MessageContentUi.Reasoning -> WorkSegmentUi(reasoning = it.reported)
@@ -27,8 +30,8 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
             }
         }, summary = if (status == RunStatus.RUNNING) "进行中" else "已完成", running = status == RunStatus.RUNNING)
         val tail = content.drop(split)
-        return if (work.running) AssistantWorkflowContent(work, steps, emptyList(), pending = tail)
-        else AssistantWorkflowContent(work, steps, tail)
+        return if (work.running) AssistantWorkflowContent(work, steps, emptyList(), pending = tail, leading = leading)
+        else AssistantWorkflowContent(work, steps, tail, leading = leading)
     }
     val work = workProcess ?: reportedReasoning.filter {
         hasReportedReasoningText(it.text) || it.activeSinceNanos != null
@@ -49,8 +52,8 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     val body = finalContent.ifEmpty {
         if (finalText.isBlank()) emptyList() else listOf(MessageContentUi.Text("final", finalText))
     }
-    return if (work?.running == true) AssistantWorkflowContent(work, steps, emptyList(), narration, pending = body)
-    else AssistantWorkflowContent(work, steps, body, narration)
+    return if (work?.running == true) AssistantWorkflowContent(work, steps, emptyList(), narration, pending = body, leading = leadingContent)
+    else AssistantWorkflowContent(work, steps, body, narration, leading = leadingContent)
 }
 
 internal fun MessageContentUi.workflowKey(index: Int): String = when (this) {
@@ -77,7 +80,7 @@ internal fun rememberAssistantWorkflowContent(turn: ChatTurnUi.Assistant): Assis
     val work = remember(ordered.work) { ordered.work }
     val steps = remember(ordered.steps) { ordered.steps }
     val narration = remember(ordered.plainNarration) { ordered.plainNarration }
-    return remember(work, steps, ordered.body, narration, ordered.pending) {
-        AssistantWorkflowContent(work, steps, ordered.body, narration, ordered.pending)
+    return remember(work, steps, ordered.body, narration, ordered.pending, ordered.leading) {
+        AssistantWorkflowContent(work, steps, ordered.body, narration, ordered.pending, ordered.leading)
     }
 }

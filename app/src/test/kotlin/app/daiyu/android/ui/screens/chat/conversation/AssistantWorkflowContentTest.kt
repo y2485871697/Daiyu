@@ -14,6 +14,41 @@ class AssistantWorkflowContentTest {
     private val thought = ReportedReasoning("r1", "first summary", 0L, 1L, blockOffset = 0)
     private fun keys(content: List<MessageContentUi>) = content.mapIndexed { index, item -> item.workflowKey(index) }
 
+    @Test fun leadingBodyNeverBecomesNarrationAcrossStatesAndContentPaths() {
+        for (status in RunStatus.entries) for (dedicated in listOf(false, true)) {
+            for (reasoning in listOf(emptyList(), listOf(thought.copy(blockOffset = 1)))) {
+                val message = source(listOf(MessageBlock.Text("intro", "正文"), tool("t1"),
+                    MessageBlock.Text("middle", "流程叙述"), tool("t2"), MessageBlock.Text("answer", "结论")), reasoning, status)
+                val row = app.daiyu.android.storage.MessageDisplayRow(message.id, message.conversationId, message.runId,
+                    message.role, message.blocks, status, null, null, listOf(
+                        app.daiyu.android.storage.MessageDisplaySegment(message.id, message.role, message.blocks, null, reasoning)))
+                val display = app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row))
+                val turns = listOf(map(message, dedicated), ChatTurnMapper.mapDisplay(display).single() as ChatTurnUi.Assistant)
+                for (turn in turns) {
+                    val ordered = turn.workflowContent()
+                    assertEquals(listOf("text:intro"), keys(ordered.leading))
+                    assertEquals(listOf("正文"), ordered.leading.filterIsInstance<MessageContentUi.Text>().map { it.text })
+                    assertFalse(ordered.steps.any { it is MessageContentUi.Text && it.itemId == "intro" })
+                    assertFalse(turn.workProcess!!.segments.any { it.narration == "正文" })
+                    assertEquals(listOf("流程叙述"), ordered.steps.filterIsInstance<MessageContentUi.Text>().map { it.text })
+                    assertEquals(listOf("t1", "t2"), ordered.steps.filterIsInstance<MessageContentUi.Tool>().map { it.step.id })
+                    assertEquals(listOf("结论"), (ordered.body + ordered.pending).filterIsInstance<MessageContentUi.Text>().map { it.text })
+                    assertEquals(status == RunStatus.RUNNING, ordered.body.isEmpty())
+                }
+            }
+        }
+    }
+
+    @Test fun addingStepsKeepsTheAlreadyVisibleLeadingBodyIdentity() {
+        val intro = MessageBlock.Text("intro", "正文")
+        val before = map(source(listOf(intro))).workflowContent()
+        val after = map(source(listOf(intro, tool("t1")))).workflowContent()
+        assertEquals(before.body, after.leading)
+        assertTrue(after.body.isEmpty())
+        assertTrue(after.pending.isEmpty())
+        assertEquals(1, after.steps.size)
+    }
+
     @Test fun everySingleThoughtAndToolStartsInTheWorkflowAcrossAllRunStates() {
         for (status in RunStatus.entries) {
             for (message in listOf(source(reasoning = listOf(thought), status = status), source(listOf(tool("t1")), status = status))) {

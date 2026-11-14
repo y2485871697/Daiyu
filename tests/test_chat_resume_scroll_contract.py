@@ -77,7 +77,7 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn(
             'rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming, '
             'terminal = generationComplete, resetEpoch = revealResetEpoch, '
-            'onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources, '
+            'onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources, '
             'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)',
             ' '.join(self.chat.split()),
         )

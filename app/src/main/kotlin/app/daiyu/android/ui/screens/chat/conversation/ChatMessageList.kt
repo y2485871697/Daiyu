@@ -886,8 +886,8 @@ internal fun AssistantTurn(
     actionSlotOwner: Boolean = showActions,
 ) = key(turn.listKey) {
     val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)
-    val bodySources = remember(ordered.body) {
-        ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) }
+    val bodySources = remember(ordered.leading, ordered.body) {
+        (ordered.leading + ordered.body).filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) }
     }
     val sources = remember(bodySources) { bodySources.map { it.text } }
     val handoff = remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }
@@ -909,7 +909,7 @@ internal fun AssistantTurn(
     }
     val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,
         terminal = generationComplete, resetEpoch = revealResetEpoch,
-        onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources,
+        onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,
         live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
@@ -971,16 +971,20 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
     val answerPending = ordered.body.isNotEmpty()
     val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)
     val notifyVisibleAdvance = remember { { currentVisibleAdvance.value() } }
+    if (ordered.leading.isNotEmpty()) {
+        MessageContent(ordered.leading, actions, imageLoader, markdown = true, textBody = textBody)
+    }
     work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey, actions, imageLoader,
         live = turn.isStreaming && turn.status == RunStatus.RUNNING,
         generationComplete = turn.status != RunStatus.RUNNING, stopped = turn.reasoningStopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = notifyVisibleAdvance, handoff = handoff,
         entrances = entrances, answerPending = answerPending,
         onAnswerReleased = { if (reasoningReady && answerPending) onAnswerReleased() },
-        dedicatedTool = dedicatedTool, toolContent = toolContent, plainNarration = ordered.plainNarration, plainText = turn.content.isEmpty()) }
+        dedicatedTool = dedicatedTool, toolContent = toolContent, plainNarration = ordered.plainNarration, plainText = turn.content.isEmpty(),
+        imageOffset = ordered.leading.count { it is MessageContentUi.Image }) }
     if (ordered.body.isNotEmpty() && bodyVisible) {
         MessageContent(ordered.body, actions, imageLoader, markdown = true,
-            imageOffset = ordered.steps.count { it is MessageContentUi.Image },
+            imageOffset = (ordered.leading + ordered.steps).count { it is MessageContentUi.Image },
             entryBody = { key, body -> WorkflowEntry(key, bodyEntrances, observedLive,
                 stopped = turn.reasoningStopped, content = body) }, textBody = textBody)
     }
@@ -1025,7 +1029,7 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
     stopped: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff,
     entrances: WorkflowEntrances, answerPending: Boolean, onAnswerReleased: () -> Unit,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit,
-    plainNarration: Set<String>, plainText: Boolean) {
+    plainNarration: Set<String>, plainText: Boolean, imageOffset: Int) {
     val textSources = remember(steps) { steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) } }
     val visualScope = LocalWorkflowVisualScope.current
     val visualAdmission = remember(ownerKey, visualScope) { visualScope?.owner(ownerKey, steps, work.running) }
@@ -1054,7 +1058,7 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                 SideEffect { if (narrationSettled) settledPhase = textPhase }
                 val textBody = rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)
                 MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
-                    workflowTimeline = true, entryVisible = narration.entryVisible,
+                    workflowTimeline = true, entryVisible = narration.entryVisible, imageOffset = imageOffset,
                     toolContent = toolContent, flowRunning = work.running,
                     reasoningReady = { stopped || handoff.ready(it) },
                     reasoningBody = { reported, connector ->

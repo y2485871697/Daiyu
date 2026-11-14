@@ -17,6 +17,26 @@ class ReconnectPartsTest {
         ChatTurnMapper.map(rows, reconnects = lines).filterIsInstance<ChatTurnUi.Assistant>()
     private fun body(turn: ChatTurnUi.Assistant) = turn.content.filterIsInstance<MessageContentUi.Text>().joinToString("") { it.text }
 
+    @Test fun reconnectCutsPreserveLeadingBodyOutsideEveryWorkflow() {
+        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED)) {
+            val row = message("beforeafter", status).copy(blocks = listOf(
+                MessageBlock.Text("intro", "beforeafter"), completedTool(), MessageBlock.Text("answer", "answer")))
+            val event = line(6)
+            val turn = mapped(listOf(row), listOf(event)).single()
+            val parts = reconnectParts(turn, listOf(event)).parts
+            assertEquals(2, parts.size)
+            assertEquals("before", texts(parts.first().workflow.leading))
+            assertNull(parts.first().workflow.work)
+            assertTrue(parts.first().workflow.steps.isEmpty())
+            assertEquals(listOf(event), parts.first().after)
+            assertEquals("after", texts(parts.last().workflow.leading))
+            assertEquals(listOf("old"), parts.last().workflow.steps.filterIsInstance<MessageContentUi.Tool>().map { it.step.id })
+            assertEquals("answer", texts(parts.last().workflow.body + parts.last().workflow.pending))
+            assertFalse(parts.flatMap { it.workflow.steps }.any { it is MessageContentUi.Text && it.itemId == "intro" })
+            assertEquals(turn.actionKey, parts.last().turn.actionKey)
+        }
+    }
+
     @Test fun appendedTextStaysAfterTheOriginalBreakpoint() {
         val event = line(3)
         for (suffix in listOf("", "new", "new and more")) {

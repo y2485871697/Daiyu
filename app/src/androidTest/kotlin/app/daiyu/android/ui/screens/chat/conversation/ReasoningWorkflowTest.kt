@@ -43,6 +43,32 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             SemanticsProperties.StateDescription, if (expanded) "已展开" else "已折叠"))
     }
 
+    fun testLeadingBodyStaysOutsideTheWorkflowWhenToolsArriveAndTheCardToggles() {
+        var source by mutableStateOf(message(listOf(MessageBlock.Text("intro", "开头正文")), emptyList()))
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(mapped(source), ChatScreenActions())
+        } } }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("开头正文", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+        mainThread { source = source.copy(blocks = source.blocks + tool("leading"), status = RunStatus.RUNNING) }
+        awaitHeader()
+        fun assertLeading() {
+            ui.onAllNodesWithText("开头正文", useUnmergedTree = true).assertCountEquals(1)
+            val intro = ui.onNodeWithText("开头正文", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val work = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("Leading body must be above the workflow, never inside it", intro.bottom <= work.top)
+        }
+        assertLeading()
+        repeat(2) {
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.waitForIdle()
+            assertLeading()
+        }
+        mainThread { source = source.copy(blocks = source.blocks + MessageBlock.Text("answer", "最终结论"), status = RunStatus.COMPLETED) }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("最终结论", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+        assertLeading()
+        ui.onAllNodesWithContentDescription("复制回答").assertCountEquals(1)
+    }
+
     fun testNewLiveNarrationAndToolAdmissionFinishBeforeAutomaticAnswerHandoff() {
         val narration = "NARRATION " + "字".repeat(180)
         val answer = "FINAL AFTER ADMISSION"
@@ -58,7 +84,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                val blocks = listOf(MessageBlock.Text("narration", narration), tool("admission")) +
+                val blocks = listOf(tool("start"), MessageBlock.Text("narration", narration), tool("admission")) +
                     if (complete) listOf(MessageBlock.Text("answer", answer)) else emptyList()
                 val turn = mapped(message(blocks, emptyList()).copy(
                     status = if (complete) RunStatus.COMPLETED else RunStatus.RUNNING)).copy(isStreaming = !complete)

@@ -86,6 +86,7 @@ sealed interface ChatTurnUi {
         val finalContent: List<MessageContentUi.Text> = emptyList(),
         /** Ordered source projection used only for positioned reconnect dividers. */
         val reconnectSource: ReconnectSourceUi? = null,
+        val leadingContent: List<MessageContentUi.Text> = emptyList(),
     ) : ChatTurnUi {
         /** Reply actions address the final source, never the stable group identity. */
         val actionKey: String get() = sourceListKeys.lastOrNull() ?: listKey

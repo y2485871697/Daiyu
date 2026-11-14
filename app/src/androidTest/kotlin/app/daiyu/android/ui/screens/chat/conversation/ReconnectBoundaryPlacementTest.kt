@@ -18,6 +18,29 @@ class ReconnectBoundaryPlacementTest : WiredActivityTestCase() {
     private fun event(offset: Long, id: String = "one") = ChatTimelineEntry.Reconnect(id, anchor,
         1L, "running", 10L, "network", 0, "model", ReconnectPosition(offset))
 
+    fun testLeadingBodyAcrossReconnectRemainsAboveTheOnlyToolWorkflow() {
+        val tool = MessageBlock.Tool(ToolInvocation(ToolCallId("next"), "search", "{}"), "done")
+        val row = message("beforeafter").copy(blocks = listOf(MessageBlock.Text("intro", "beforeafter"),
+            tool, MessageBlock.Text("answer", "answer")))
+        val entry = event(6).copy(status = "succeeded")
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ChatMessageList(ChatTurnMapper.map(listOf(row), reconnects = listOf(entry)), ChatScreenActions(), timeline = listOf(entry))
+        } } }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("after").fetchSemanticsNodes().size == 1 &&
+            ui.onAllNodesWithText("answer").fetchSemanticsNodes().size == 1 }
+        val before = ui.onNodeWithText("before").fetchSemanticsNode().boundsInRoot
+        val divider = ui.onNodeWithTag("timeline:one").fetchSemanticsNode().boundsInRoot
+        val after = ui.onNodeWithText("after").fetchSemanticsNode().boundsInRoot
+        val work = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(before.bottom <= divider.top)
+        assertTrue(divider.bottom <= after.top)
+        assertTrue(after.bottom <= work.top)
+        ui.onAllNodesWithTag("work-process-surface", useUnmergedTree = true).assertCountEquals(1)
+        ui.onAllNodesWithTag("timeline:one").assertCountEquals(1)
+        ui.onAllNodesWithText("助手").assertCountEquals(1)
+        ui.onAllNodesWithContentDescription("复制回答").assertCountEquals(1)
+    }
+
     fun testAppendingAndSameIdStatusChangesKeepOneDividerBetweenPrefixAndSuffixWithOneAvatarAndOwnerActions() {
         var text by mutableStateOf("beforeafter")
         var entry by mutableStateOf(event(6))

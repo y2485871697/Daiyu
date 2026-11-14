@@ -96,13 +96,14 @@ class ChatTurnMapperTest {
         assertEquals(RunStatus.COMPLETED, turn.status)
     }
 
-    @Test fun oneCardOwnsNarrationAndAllToolsBeforeFinalText() {
+    @Test fun leadingBodyStaysOutsideTheCardWhileLaterNarrationAndAllToolsStayInside() {
         val original = message(text("a", "First I search"), tool("one"), tool("two"),
             text("b", "Then I check"), tool("three"), text("c", "The answer"))
         val turn = mapped(original)
         val work = turn.workProcess!!
         assertEquals("The answer", turn.finalText)
-        assertEquals(listOf("First I search", "Then I check"), work.segments.map { it.narration })
+        assertEquals(listOf("First I search"), turn.leadingContent.map { it.text })
+        assertEquals(listOf(null, "Then I check"), work.segments.map { it.narration })
         assertEquals(listOf("one", "two", "three"), work.segments.flatMap { it.steps }.map { it.id })
         assertEquals(listOf(2, 1), work.segments.map { it.steps.size })
         assertTrue(work.segments.flatMap { it.steps }.all { it.state == WorkStepState.UNKNOWN })

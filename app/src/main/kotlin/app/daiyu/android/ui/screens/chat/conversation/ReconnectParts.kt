@@ -9,7 +9,7 @@ data class ReconnectSourceUi(val owner: TimelineAnchor, val start: Long, val con
 internal data class ReconnectPart(val turn: ChatTurnUi.Assistant, val after: List<ChatTimelineEntry.Reconnect>,
     val workflow: AssistantWorkflowContent)
 
-private enum class ReconnectContentRole { WORKFLOW, BODY, PENDING }
+private enum class ReconnectContentRole { LEADING, WORKFLOW, BODY, PENDING }
 private data class ReconnectContent(val item: MessageContentUi, val role: ReconnectContentRole)
 internal data class ReconnectParts(val parts: List<ReconnectPart>, val placedIds: Set<String>)
 
@@ -35,7 +35,8 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
     val sourceWorkflow = turn.copy(content = source.content).workflowContent()
     val pending = source.content.mapIndexed { index, item ->
         val role = when {
-            index < sourceWorkflow.steps.size -> ReconnectContentRole.WORKFLOW
+            index < sourceWorkflow.leading.size -> ReconnectContentRole.LEADING
+            index < sourceWorkflow.leading.size + sourceWorkflow.steps.size -> ReconnectContentRole.WORKFLOW
             sourceWorkflow.pending.isNotEmpty() -> ReconnectContentRole.PENDING
             else -> ReconnectContentRole.BODY
         }
@@ -112,10 +113,10 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
             } }, summary = if (live) original.summary else "已完成", running = live && original.running,
             controlActivity = original.controlActivity.takeIf { live }) }
         val workflow = AssistantWorkflowContent(work, steps, items(ReconnectContentRole.BODY),
-            sourceWorkflow.plainNarration, items(ReconnectContentRole.PENDING))
+            sourceWorkflow.plainNarration, items(ReconnectContentRole.PENDING), items(ReconnectContentRole.LEADING))
         val reasoning = displayed.map { it.item }.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }
         ReconnectPart(turn.copy(
-            listKey = "${turn.listKey}:reconnect-part:$index", finalText = "", finalContent = emptyList(), content = displayed.map { it.item },
+            listKey = "${turn.listKey}:reconnect-part:$index", finalText = "", finalContent = emptyList(), leadingContent = emptyList(), content = displayed.map { it.item },
             status = if (live) turn.status else app.daiyu.android.domain.RunStatus.COMPLETED,
             sourceListKeys = turn.sourceListKeys.ifEmpty { listOf(turn.listKey) },
             workProcess = work, reportedReasoning = reasoning,

@@ -6806,7 +6806,7 @@ class MainActivity : ComponentActivity() {
             selectionStart = 0; selectionEnd = 0; editorGeneration++
         }
         when (result) {
-            is SupplementAdmission.Accepted -> toast("追加内容已保存，将在当前任务的安全边界继续")
+            is SupplementAdmission.Accepted -> Unit
             is SupplementAdmission.Rejected -> toast("追加未受理")
             is SupplementAdmission.Unconfirmed -> toast("追加结果未确认")
         }
@@ -6830,8 +6830,6 @@ class MainActivity : ComponentActivity() {
             val queued = controller.admitSupplement(owner, ticket.messageId, text) {
                 if (activityUsable()) refresh()
             }
-            if (queued && controller.runState(owner)?.phase == ExecutionPhase.WAITING_USER)
-                toast("追加已排队，等待当前提问处理")
             if (queued) window.decorView.postDelayed({
                 if (activityUsable() && supplementDraft.pending === ticket && supplementDraft.receipt == null)
                     toast("追加结果未确认，请查看会话")

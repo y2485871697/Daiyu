@@ -68,7 +68,7 @@ class RunControlsContractTest(unittest.TestCase):
         activity = (APP / 'MainActivity.kt').read_text()
         self.assertIn('editorMatches() && currentChatControlAvailable() && renderedOwner != null', activity)
         self.assertIn('!supplementMediaBlocked()', activity)
-        self.assertIn('追加已排队，等待当前提问处理', activity)
+        self.assertNotIn('追加已排队，等待当前提问处理', activity)
 
     def test_parent_pause_epoch_is_atomic_and_new_reservations_inherit(self):
         source = (DOMAIN / 'delegation/RetainedChildTasks.kt').read_text()

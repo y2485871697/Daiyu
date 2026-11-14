@@ -7,6 +7,21 @@ CHAT = APP / 'ui/screens/chat/conversation'
 
 
 class ChatSubmissionPreviewContractTest(unittest.TestCase):
+    def test_append_success_is_silent_but_failure_feedback_and_receipt_cleanup_remain(self):
+        main = (APP / 'MainActivity.kt').read_text()
+        settlement = main.split('private fun settleSupplementReceipt()', 1)[1].split('private fun supplementMediaBlocked', 1)[0]
+        admission = main.split('private fun submitSupplement(', 1)[1].split('private fun currentControlOwner()', 1)[0]
+        self.assertIn('is SupplementAdmission.Accepted -> Unit', settlement)
+        self.assertNotIn('追加内容已保存，将在当前任务的安全边界继续', main)
+        self.assertNotIn('追加已排队，等待当前提问处理', main)
+        self.assertIn('is SupplementAdmission.Rejected -> toast("追加未受理")', settlement)
+        self.assertIn('is SupplementAdmission.Unconfirmed -> toast("追加结果未确认")', settlement)
+        self.assertLess(settlement.index('updateDraft("")'), settlement.index('supplementDraft.finish('))
+        self.assertIn('if (draft.isNotEmpty()) return', settlement)
+        self.assertIn('controller.admitSupplement(owner, ticket.messageId, text)', admission)
+        self.assertIn('if (queued) window.decorView.postDelayed(', admission)
+        self.assertIn('toast("追加结果未确认，请查看会话")', admission)
+
     def test_preview_is_screen_projection_not_authoritative_rows(self):
         screen = (CHAT / 'ChatScreen.kt').read_text()
         self.assertIn('submissionTurns(state.turns, state.submissionPreview)', screen)

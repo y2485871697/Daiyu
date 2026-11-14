@@ -38,7 +38,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
 
     internal var onCompression: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {}
 
-    internal fun timeline(id: ConversationId) = transactions.run { db ->
+    internal fun timeline(id: ConversationId, displayAnchors: Set<String>? = null) = transactions.run { db ->
         // Most conversations have no timeline evidence. Do not decode their entire message
         // history merely to validate anchors for an empty display-only result. Keep this
         // probe in the same snapshot as the existing event/archive and anchor validation.
@@ -48,7 +48,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             arrayOf(id.value, id.value),
         ).use { it.moveToFirst() }
         if (!hasEvidence) return@run emptyList<app.daiyu.android.timeline.ChatTimelineEntry>()
-        val anchors = app.daiyu.android.timeline.TimelineAnchor.keys(read(db, id))
+        val anchors = displayAnchors ?: app.daiyu.android.timeline.TimelineAnchor.keys(read(db, id))
         val saved = app.daiyu.android.timeline.ChatTimelineStore.read(db, id.value).filter { it.anchor.listKey in anchors }
         val known = saved.map { it.id }.toSet()
         val legacy = db.rawQuery("SELECT id,summary,blob_hash,created FROM context_archives WHERE conversation_id=? ORDER BY created,id", arrayOf(id.value)).use { c ->

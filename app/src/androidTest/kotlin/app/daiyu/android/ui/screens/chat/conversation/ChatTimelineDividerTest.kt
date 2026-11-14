@@ -29,6 +29,32 @@ import kotlin.math.abs
 
 class ChatTimelineDividerTest : WiredActivityTestCase() {
     private val anchor = TimelineAnchor("conversation", "run", "message", 0)
+    fun testHistoricalDividersAreOpaqueOnTheirFirstFrameWithoutAdvancingEntranceTime() {
+        var expected = Color.Unspecified
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val colors = MiuixTheme.colorScheme
+                expected = colors.onSurfaceVariantSummary.copy(alpha = .5f).compositeOver(colors.background)
+                androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().background(colors.background).statusBarsPadding()) {
+                    ChatTimelineDivider(ChatTimelineEntry.Compression("baseline-compression", anchor, 1L, "summary", null, 4, null, null))
+                    ChatTimelineDivider(ChatTimelineEntry.Stopped("baseline-stop", anchor, 1L))
+                }
+            } } }
+            ui.mainClock.advanceTimeByFrame()
+            for (id in listOf("baseline-compression", "baseline-stop")) {
+                val pixels = ui.onNodeWithTag("timeline-line-left:$id").assertIsDisplayed().captureToImage().toPixelMap()
+                val pixel = pixels[pixels.width / 2, pixels.height / 2]
+                assertTrue("History line must already be opaque on its first frame: $id $pixel expected $expected",
+                    maxOf(abs(pixel.red - expected.red), abs(pixel.green - expected.green), abs(pixel.blue - expected.blue)) < .035f)
+            }
+            ui.onNodeWithText("主代理 · 已压缩 4 条消息").assertIsDisplayed()
+            ui.onNodeWithText("已停止").assertIsDisplayed()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
     fun testStoppedRunIsAPlainNonClickableDividerWithoutErrorDetails() {
         val entry = ChatTimelineEntry.Stopped("manual-stop", anchor, 1L)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {

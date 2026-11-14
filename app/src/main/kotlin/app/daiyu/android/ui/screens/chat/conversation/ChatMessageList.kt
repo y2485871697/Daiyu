@@ -534,7 +534,7 @@ internal fun ChatMessageList(
                         }
                         val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
                         if (currentTurns.filterIsInstance<ChatTurnUi.Assistant>().any {
-                            it.listKey in visibleKeys && !it.isStreaming &&
+                            it.listKey in visibleKeys && it.status != RunStatus.RUNNING &&
                                 (readyTurns[it.listKey] != it || revealedTurns[it.listKey] != it)
                         }) continue
                         val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset

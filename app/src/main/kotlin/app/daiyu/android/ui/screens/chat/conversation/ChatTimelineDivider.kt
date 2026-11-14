@@ -1,8 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import android.os.SystemClock
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -12,7 +10,6 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -58,9 +55,6 @@ internal fun reconnectLabel(status: String, elapsedMs: Long): String = when (sta
 @Composable
 internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = SystemClock::elapsedRealtime) {
     if (entry is ChatTimelineEntry.Compression && entry.messages <= 0 && entry.failure == null) return
-    var entered by remember(entry.id) { mutableStateOf(false) }
-    LaunchedEffect(entry.id) { entered = true }
-    val alpha by animateFloatAsState(if (entered) 1f else 0f, tween(180), label = "timeline-enter")
     var showDetails by remember(entry.id) { mutableStateOf(false) }
     val supplied = (entry as? ChatTimelineEntry.Reconnect)?.elapsedMs ?: 0L
     var elapsed by remember(entry.id) { mutableLongStateOf(supplied) }
@@ -88,7 +82,7 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
     val title = if (entry is ChatTimelineEntry.Compression && entry.failure == null) "压缩摘要" else "错误详情"
     val line = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .5f)
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-    Row(Modifier.fillMaxWidth().alpha(alpha).testTag("timeline:${entry.id}").padding(horizontal = 20.dp, vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().testTag("timeline:${entry.id}").padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f).height(.5.dp).background(line).testTag("timeline-line-left:${entry.id}"))
         Row(Modifier.clip(RoundedCornerShape(8.dp)).then(if (entry is ChatTimelineEntry.Stopped) Modifier else Modifier.clickable(

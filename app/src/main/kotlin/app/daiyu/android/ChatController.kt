@@ -293,7 +293,7 @@ class ChatController internal constructor(private val application:Application,
         }
         handler.post { synchronized(this) { if (!closed) notifyChanged() } }
     }
-    internal fun timelineHistory(id: ConversationId): List<app.daiyu.android.timeline.ChatTimelineEntry> {
+    internal fun timelineHistory(id: ConversationId, displayAnchors: Set<String>? = null): List<app.daiyu.android.timeline.ChatTimelineEntry> {
         check(Looper.myLooper() != Looper.getMainLooper())
         val live = synchronized(this) {
             val now = android.os.SystemClock.elapsedRealtime()
@@ -304,7 +304,7 @@ class ChatController internal constructor(private val application:Application,
             } + compressionFailureTimeline.values.filter { it.anchor.conversationId == id.value }
         }
         val liveIds = live.map { it.id }.toSet()
-        return (contextService.timeline(id).filterNot { it.id in liveIds }.map { entry ->
+        return (contextService.timeline(id, displayAnchors).filterNot { it.id in liveIds }.map { entry ->
             if (entry is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && entry.status == "running")
                 entry.copy(status = "stopped") else entry
         } + live).sortedWith(compareBy({ it.created }, { it.id }))

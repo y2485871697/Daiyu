@@ -23,6 +23,40 @@ class ChatTurnMapperTest {
     )
     private fun mapped(message: Message) = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
 
+    @Test fun stoppedDisplayTimelineMatchesMapperWithSupplementAndRepeatedSegments() {
+        val question = text("q", "supplement")
+        val row = app.daiyu.android.storage.MessageDisplayRow(MessageId("assistant"), ConversationId("conversation"),
+            RunId("run"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.STOPPED, null, 12L,
+            listOf(app.daiyu.android.storage.MessageDisplaySegment(MessageId("assistant"), Message.ASSISTANT_ROLE,
+                listOf(text("a", "first")), null, emptyList()),
+                app.daiyu.android.storage.MessageDisplaySegment(MessageId("user"), Message.USER_ROLE,
+                    listOf(question), null, emptyList()),
+                app.daiyu.android.storage.MessageDisplaySegment(MessageId("assistant"), Message.ASSISTANT_ROLE,
+                    listOf(text("b", "last")), null, emptyList())))
+        val user = app.daiyu.android.storage.MessageDisplayRow(MessageId("user"), row.conversationId, row.runId,
+            Message.USER_ROLE, listOf(question), RunStatus.COMPLETED, null, null, emptyList())
+        val window = app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row, 2L to user))
+        val anchor = app.daiyu.android.timeline.TimelineAnchor("conversation", "run", "assistant", 1)
+        val reconnect = app.daiyu.android.timeline.ChatTimelineEntry.Reconnect("reconnect", anchor, 1L,
+            "stopped", 2L, "NETWORK", 0, "model")
+        val compression = app.daiyu.android.timeline.ChatTimelineEntry.Compression("compression", anchor.copy(segment = 0),
+            1L, "summary", null, 2, null, null)
+        val timeline = app.daiyu.android.timeline.withStoppedDisplayRows(window, listOf(reconnect, compression))
+        assertEquals(listOf(compression), timeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped })
+        val stop = timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Stopped>().single()
+        assertEquals(anchor, stop.anchor)
+        assertEquals(12L, stop.created)
+        val turns = ChatTurnMapper.mapDisplay(window)
+        val keys = turns.flatMap { if (it is ChatTurnUi.Assistant) it.sourceListKeys else listOf(it.listKey) }.toSet()
+        assertEquals(keys, app.daiyu.android.timeline.displayTimelineAnchors(window))
+        assertTrue(stop.anchor.listKey in keys)
+        assertEquals(timeline, app.daiyu.android.timeline.withStoppedDisplayRows(window, timeline))
+        val completed = window.copy(rows = listOf(1L to row.copy(status = RunStatus.COMPLETED), 2L to user))
+        assertEquals(listOf(compression), app.daiyu.android.timeline.withStoppedDisplayRows(completed, timeline))
+        val succeeded = reconnect.copy(status = "succeeded")
+        assertTrue(succeeded in app.daiyu.android.timeline.withStoppedDisplayRows(window, listOf(succeeded)))
+    }
+
     @Test fun displayUsesExactReceiptStateAndActivityAcrossMergedHistorySegments() {
         val blocks = listOf(tool("repeat", "first"), tool("repeat", "second"), tool("unknown", null))
         val original = message(*blocks.toTypedArray())

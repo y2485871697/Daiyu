@@ -33,7 +33,7 @@ class ChatInitialPositionContract(unittest.TestCase):
         chat = CHAT.read_text()
         initial = chat.split('if (initialPositionPending) {', 1)[1].split('consumedScrollSerial = request.serial', 1)[0]
         for token in ('withFrameNanos', 'layout.viewportSize.height', 'layout.visibleItemsInfo',
-                      'readyTurns[it.listKey] != it', 'it.listKey in visibleKeys && !it.isStreaming', 'revealedTurns[it.listKey] != it',
+                      'readyTurns[it.listKey] != it', 'it.listKey in visibleKeys && it.status != RunStatus.RUNNING', 'revealedTurns[it.listKey] != it',
                       'layout.afterContentPadding - layout.viewportEndOffset', 'listState.canScrollForward',
                       'listState.scrollBy(overflow.toFloat())', 'aligned = true'):
             self.assertIn(token, initial)

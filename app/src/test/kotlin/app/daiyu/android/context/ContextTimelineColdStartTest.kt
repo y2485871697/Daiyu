@@ -108,6 +108,18 @@ class ContextTimelineColdStartTest {
         assertHistoryDecodeRequired(owner)
     }
 
+    @Test fun displayAnchorsLoadSavedTimelineWithoutRehydratingMessages() {
+        val owner = seed()
+        val saved = event(owner)
+        ChatTimelineStore.write(database.writableDatabase, saved)
+        ChatTimelineStore.write(database.writableDatabase, saved.copy(id = "orphan-display-event",
+            anchor = saved.anchor.copy(messageId = "missing-message")))
+        val anchors = TimelineAnchor.keys(database.messages(owner).map { it.second })
+        poisonMessages(owner)
+        assertEquals(listOf(saved), service.timeline(owner, anchors))
+        assertTrue(service.timeline(owner, emptySet()).isEmpty())
+    }
+
     @Test fun legacyArchiveKeepsSummaryAnchorAndHistoryValidation() {
         val owner = seed()
         val archive = checkNotNull(service.compress(owner, CompressionPolicy(keepTurns = 1),

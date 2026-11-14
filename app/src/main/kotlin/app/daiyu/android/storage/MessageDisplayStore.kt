@@ -31,8 +31,7 @@ internal object MessageDisplayStore {
         val tail = if (latestRunOnly) metadata.takeLastWhile { it.run == metadata.last().run } else metadata
         val ids = if (latestRunOnly && tail.any { it.role == Message.ASSISTANT_ROLE }) tail else metadata
         val rows = ids.map { row ->
-            fun decodePayload(payload: String): MessageDisplayRow {
-                val value = JSONObject(payload)
+            fun decodePayload(value: JSONObject): MessageDisplayRow {
                 require(value.keys().asSequence().toSet() == setOf("version", "id", "conversation", "run", "blocks", "history", "projections"))
                 require(value.getInt("version") == 3 && value.getString("id") == row.id &&
                     value.getString("conversation") == conversation.value && value.getString("run") == row.run)
@@ -66,7 +65,7 @@ internal object MessageDisplayStore {
             }
             val cached = db.rawQuery("SELECT 1 FROM message_display WHERE message_id=?", arrayOf(row.id)).use { it.moveToFirst() }
             val hit = if (!cached) null else try {
-                decodePayload(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", row.id)))
+                decodePayload(JSONObject(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", row.id))))
             } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
               catch (cancelled: android.os.OperationCanceledException) { throw cancelled }
               catch (_: Exception) { db.delete("message_display", "message_id=?", arrayOf(row.id)); null }
@@ -83,8 +82,9 @@ internal object MessageDisplayStore {
                 }
                 val segments = stripProtocols(history)
                 repairHistory(history, segments, projections)
-                val payload = envelope(row.id, conversation.value, row.run, blocks, segments, projections).toString()
-                val projection = decodePayload(payload)
+                val value = envelope(row.id, conversation.value, row.run, blocks, segments, projections)
+                val projection = decodePayload(value)
+                val payload = value.toString()
                 check(db.insertOrThrow("message_display", null, ContentValues().apply {
                     put("message_id", row.id); put("payload", payload)
                 }) != -1L)

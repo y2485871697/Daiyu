@@ -227,6 +227,13 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
         fun state() = (stateField.get(activity) as androidx.compose.runtime.MutableState<*>).value as
             app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
         mainThread {
+            val answer = original.last().second
+            fixture.database.save(answer.copy(status = RunStatus.STOPPED))
+            app.daiyu.android.timeline.ChatTimelineStore.write(fixture.database.writableDatabase,
+                app.daiyu.android.timeline.ChatTimelineEntry.Compression("first-display-compression",
+                    app.daiyu.android.timeline.TimelineAnchor(conversation.id.value, answer.runId.value, answer.id.value, 0),
+                    1L, "display summary", null, 2, null, null))
+            original = fixture.database.messages(conversation.id)
             val blocked: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, limit ->
                 entered.countDown()
                 check(release.await(60, TimeUnit.SECONDS))
@@ -240,6 +247,8 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             ui.waitUntil(5_000) { ui.onAllNodesWithText(rendered, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithText(rendered, useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithTag("timeline:first-display-compression", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithText("已停止", useUnmergedTree = true).assertIsDisplayed()
             ui.onAllNodesWithText("加载会话中", useUnmergedTree = true).assertCountEquals(0)
             lateinit var keys: List<String>
             var scroll = 0L
@@ -247,6 +256,8 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
                 assertTrue(ready.getBoolean(activity))
                 assertNotNull((display.get(activity) as androidx.compose.runtime.MutableState<*>).value)
                 assertTrue((shown.get(activity) as List<*>).isEmpty())
+                assertTrue(state().timeline.any { it.id == "first-display-compression" })
+                assertEquals(1, state().timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Stopped>().size)
                 keys = state().turns.map { it.listKey }
                 scroll = state().scrollRequest!!.serial
             }

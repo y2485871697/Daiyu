@@ -45,6 +45,35 @@ class MarkdownEntrySmokeScopeTests(unittest.TestCase):
         self.assertEqual(len(required), len(recorder.MARKDOWN_ENTRY_MODULES))
         self.assertNotIn('discover', command)
 
+    def test_session_entry_scope_adds_initial_position_and_static_timeline_without_full_discovery(self):
+        classes = CLASSES + (
+            'app.daiyu.android.ui.screens.chat.conversation.ChatInitialPositionTest',
+            'app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest',
+        )
+        self.assertEqual(classes, recorder.SESSION_ENTRY_PLATFORM_CLASSES)
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(selected)))
+            self.assertEqual('session-entry-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.SESSION_ENTRY_MODULES, '-v'], command)
+            self.assertNotIn('discover', command)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            for name in classes[len(CLASSES):]:
+                path = root / 'app/src/androidTest/kotlin' / (name.replace('.', '/') + '.kt')
+                path.parent.mkdir(parents=True, exist_ok=True)
+                package, _, short = name.rpartition('.')
+                path.write_text('package ' + package + '\nclass ' + short + ' : TestCase() {\n fun testFirstFrame() {}\n}\n')
+            selected = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=','.join(classes))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                selected.extend(json.loads((root / 'smoke/selection.json').read_text())['selected_classes'])
+            self.assertCountEqual(classes, selected)
+
     def test_partial_extended_duplicate_and_other_modes_keep_full_selection(self):
         classes = ','.join(CLASSES)
         for raw in ('', ','.join(CLASSES[:-1]), classes + ',app.daiyu.android.UnknownTest',

@@ -17,7 +17,12 @@ class MessageDisplayContract(unittest.TestCase):
         self.assertIn('dataRevision = revision.data', host)
         self.assertIn('titleRevision = revision.title', host)
         self.assertIn('displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,', host)
-        self.assertIn('if (displayWindow != null) return', host)
+        self.assertNotIn('if (displayWindow != null) return', host.split('private fun refreshTimeline()', 1)[1].split('private var messageMediaCommitRevision', 1)[0])
+        self.assertIn('controller.timelineHistory(snapshot.conversation.id, anchors)', host)
+        self.assertIn('timelineEntries = prepared?.timeline.orEmpty()', host)
+        self.assertIn('withStoppedDisplayRows(it, savedTimeline)', host)
+        self.assertIn('timelineReadAnchors == anchors', host)
+        self.assertIn('currentTimelineAnchors() != anchors', host)
 
     def test_projection_cannot_supply_protocol_or_capabilities(self):
         dto = (APP / 'storage/MessageDisplayWindow.kt').read_text()

@@ -114,6 +114,13 @@ markdown_entry_target = {
 markdown_entry_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(markdown_entry_target)
 markdown_entry_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                           for name in markdown_entry_target}
+session_entry_target = markdown_entry_target | {
+    'app.daiyu.android.ui.screens.chat.conversation.ChatInitialPositionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest',
+}
+session_entry_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(session_entry_target)
+session_entry_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
+                         for name in session_entry_target}
 cold_display_target = markdown_entry_target | {
     'app.daiyu.android.storage.SQLiteTextReadDatabaseTest',
     'app.daiyu.android.ChatContextUsageRestoreTest',
@@ -278,6 +285,8 @@ for path in sorted(doubao_motion_sources if doubao_motion_only else workspace_en
         continue
     if page_performance_only and path not in page_performance_sources:
         continue
+    if session_entry_only and path not in session_entry_sources:
+        continue
     if markdown_entry_only and path not in markdown_entry_sources:
         continue
     if cold_display_only and path not in cold_display_sources:
@@ -353,7 +362,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
+                discovery_scope="targeted" if doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

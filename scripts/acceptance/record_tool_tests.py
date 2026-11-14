@@ -127,6 +127,15 @@ MARKDOWN_ENTRY_MODULES = (
 )
 
 
+SESSION_ENTRY_PLATFORM_CLASSES = MARKDOWN_ENTRY_PLATFORM_CLASSES + (
+    'app.daiyu.android.ui.screens.chat.conversation.ChatInitialPositionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest',
+)
+SESSION_ENTRY_MODULES = MARKDOWN_ENTRY_MODULES + (
+    'test_chat_initial_position_contract', 'test_chat_timeline_contract', 'test_message_display_contract',
+)
+
+
 GUI_PARSER_PLATFORM_CLASS = "app.daiyu.android.gui.GuiVisualWindowParserAndroidTest"
 GUI_PARSER_MODULES = (
     "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
@@ -497,6 +506,9 @@ def command_for(python, env):
         return [python, "-B", "-m", "unittest", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
                 "test_rootless_content_smoke_scope",
                 "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", "-v"], "rootless-content-targeted"
+    if (env.get('SMOKE_MODE') == 'smoke'
+            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(SESSION_ENTRY_PLATFORM_CLASSES)):
+        return [python, '-B', '-m', 'unittest', *SESSION_ENTRY_MODULES, '-v'], 'session-entry-targeted'
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(MARKDOWN_ENTRY_PLATFORM_CLASSES)):
         return [python, '-B', '-m', 'unittest', *MARKDOWN_ENTRY_MODULES, '-v'], 'markdown-entry-targeted'

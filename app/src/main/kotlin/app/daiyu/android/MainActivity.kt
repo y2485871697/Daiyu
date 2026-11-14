@@ -254,7 +254,8 @@ class MainActivity : ComponentActivity() {
     private var voiceCallAnchor: String? = null
     private var voiceCallHasDialogue = false
     private var voiceCallModelName = "模型"
-    private fun voiceCallModelOwner(): ConversationId? = if (voiceCallModelPicker) voiceCallConversation?.id else selected?.id
+    private var chatModelConversation: ConversationId? = null
+    private fun voiceCallModelOwner(): ConversationId? = chatModelConversation
     private fun clearVoiceCallConversation() {
         voiceCallStarting = null
         val temporary = voiceCallConversation
@@ -406,9 +407,9 @@ class MainActivity : ComponentActivity() {
     private fun universalQuestionWaiting(message: Message): Boolean = controller.questionWaiting(message)
     private fun revokeUniversalVoice() {
         if (voiceCallPresentation.state?.presentation != DoubaoCallPresentation.CLOSING) voiceCallPresentation.clear()
-        voiceCallModelPicker = false
         universalAdmissionSnapshot = VoiceAdmission.REVOKED // Fence BEFORE drain/old callbacks.
         if (universalVoiceDelegate.isInitialized()) universalVoice.state.value.permitId?.let { universalVoice.revoke(it) }
+        if (voiceCallModelPicker) dismissChatModels()
         clearVoiceCallConversation()
         refreshVoiceCallService()
     }
@@ -481,7 +482,8 @@ class MainActivity : ComponentActivity() {
         voiceCallStarting = visit
         voiceCallAnchor = selected?.id?.value
         val generation = editorGeneration
-        controller.createVoiceCall(selected?.id) { temporary ->
+        controller.createVoiceCall(selected?.id) { created ->
+            val temporary = created?.conversation
             if (voiceCallStarting !== visit || !activityUsable() || !voiceForeground || retainedPage != "chat" ||
                 sidebarVisible || editorGeneration != generation) {
                 temporary?.let { controller.discardVoiceCall(it.id) }
@@ -491,7 +493,7 @@ class MainActivity : ComponentActivity() {
             if (temporary == null) { toast("当前任务尚未结束"); return@createVoiceCall }
             voiceCallConversation = temporary
             voiceCallHasDialogue = false
-            voiceCallModelName = confirmedModelLabel
+            voiceCallModelName = checkNotNull(created).modelName
             ensureVoiceCallService {
                 if (voiceCallConversation?.id != temporary.id || !activityUsable() || !voiceForeground ||
                     retainedPage != "chat" || sidebarVisible || editorGeneration != generation) {
@@ -1359,6 +1361,8 @@ class MainActivity : ComponentActivity() {
         val display: app.daiyu.android.storage.MessageDisplayWindow? = null,
         val presentations: app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache? = null,
         val toolReceipts: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null,
+        val timeline: List<app.daiyu.android.timeline.ChatTimelineEntry>? = null,
+        val timelineRevision: Long? = null,
     )
     internal var paneConversationReader: (String) -> PaneConversationSnapshot = { id ->
         val conversations = controller.database.conversations()
@@ -3667,8 +3671,8 @@ class MainActivity : ComponentActivity() {
 
     private fun closeVoiceCall(key: Long) {
         if (voiceCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
-            voiceCallModelPicker = false
             if (universalVoiceDelegate.isInitialized()) universalVoice.state.value.permitId?.let(universalVoice::stop)
+            if (voiceCallModelPicker) dismissChatModels()
             clearVoiceCallConversation()
             refreshVoiceCallService()
             publishChat()
@@ -6524,7 +6528,8 @@ class MainActivity : ComponentActivity() {
                     }
                     if (paneSelectionRequest !== request || !activityUsable() ||
                         (!initial && retainedPage != "chat") || selected?.id != owner || editorGeneration != editor) return@launch
-                    if (revision != currentPaneRevision()) continue
+                    if (revision != currentPaneRevision() || snapshot.timeline != null &&
+                        snapshot.timelineRevision != controller.timelineVersion) continue
                     dataRevision = revision.data
                     titleRevision = revision.title
                     select(snapshot.conversation, snapshot)
@@ -6546,8 +6551,12 @@ class MainActivity : ComponentActivity() {
                             controller.ready && !controller.dataBusy && retainedPage == "chat" &&
                             controller.problem?.startsWith("会话恢复失败") != true &&
                             selected?.id == snapshot.conversation.id && editorGeneration == generation &&
-                            revision == currentPaneRevision() && displayWindow === firstWindow && !refreshHistoryLoading) {
+                            revision == currentPaneRevision() && displayWindow === firstWindow && !refreshHistoryLoading &&
+                            (expanded.timeline == null || expanded.timelineRevision == controller.timelineVersion)) {
                             displayWindow = expanded.display
+                            expanded.timeline?.let { timelineEntries = it }
+                            expanded.timelineRevision?.takeIf { expanded.timeline != null }?.let { timelineReadRevision = it }
+                            if (expanded.timeline != null) timelineReadAnchors = currentTimelineAnchors()
                             expanded.presentations?.let { toolPresentations = it }
                             expanded.toolReceipts?.let(::adoptPreparedToolReceipts)
                             publishChat()
@@ -6577,6 +6586,14 @@ class MainActivity : ComponentActivity() {
         prepare: (String, PaneConversationSnapshot, () -> Unit) -> app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache,
         checkActive: () -> Unit): PaneConversationSnapshot {
         checkActive()
+        val timelineRevision = controller.timelineVersion
+        val timeline = try {
+            val anchors = snapshot.display?.let { app.daiyu.android.timeline.displayTimelineAnchors(it) }
+                ?: app.daiyu.android.timeline.TimelineAnchor.keys(snapshot.messages.map { it.second })
+            controller.timelineHistory(snapshot.conversation.id, anchors)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        checkActive()
         try {
             if (snapshot.display != null) {
                 app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(snapshot.display, checkActive = checkActive)
@@ -6594,7 +6611,8 @@ class MainActivity : ComponentActivity() {
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { null }
         checkActive()
-        return snapshot.copy(presentations = presentations, toolReceipts = receipts)
+        return snapshot.copy(presentations = presentations, toolReceipts = receipts,
+            timeline = timeline, timelineRevision = timelineRevision)
     }
 
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
@@ -6692,7 +6710,7 @@ class MainActivity : ComponentActivity() {
                 val conversation = retainedConversation(id)
                 prompt = ChoicePrompt(conversation.title, listOf("打开", "重命名", "删除", if (conversation.pinned) "取消置顶" else "置顶", "移动到文件夹"),
                     { action -> guard { when (action) {
-                        0 -> openRetainedConversation(id)
+                        0 -> { dismissSidebar(); returnToChat(); selectPaneConversation(id) }
                         1 -> editConversation(id, false)
                         2 -> confirmDelete(id)
                         3 -> { toggleRetainedPin(id); chooseConversation(query, folder) }
@@ -6822,6 +6840,14 @@ class MainActivity : ComponentActivity() {
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
         displayWindow = prepared?.display
+        timelineRead?.cancel(); timelineRead = null
+        timelineConversation = conversation?.id
+        timelineEntries = prepared?.timeline.orEmpty()
+        timelineReadRevision = if (prepared?.timeline != null) prepared.timelineRevision ?: -1L else -1L
+        timelineReadAnchors = prepared?.takeIf { it.timeline != null }?.let { snapshot ->
+            snapshot.display?.let { app.daiyu.android.timeline.displayTimelineAnchors(it) }
+                ?: app.daiyu.android.timeline.TimelineAnchor.keys(snapshot.messages.map { it.second })
+        }
         prepared?.presentations?.let { toolPresentations = it }
         if (refreshHistoryLoading) refreshHistoryPending = true
         shown = prepared?.messages.orEmpty().toMutableList()
@@ -7202,30 +7228,34 @@ class MainActivity : ComponentActivity() {
     private var timelineEntries: List<app.daiyu.android.timeline.ChatTimelineEntry> = emptyList()
     private var timelineRead: kotlinx.coroutines.Job? = null
     private var timelineReadRevision = -1L
+    private var timelineReadAnchors: Set<String>? = null
+    private fun currentTimelineAnchors(): Set<String> = displayWindow?.let {
+        app.daiyu.android.timeline.displayTimelineAnchors(it)
+    } ?: app.daiyu.android.timeline.TimelineAnchor.keys(shown.map { it.second })
     private fun refreshTimeline() {
-        if (displayWindow != null) return
         val id = selected?.id
         if (timelineConversation != id) {
             timelineRead?.cancel(); timelineRead = null
-            timelineConversation = id; timelineEntries = emptyList(); timelineReadRevision = -1L
+            timelineConversation = id; timelineEntries = emptyList(); timelineReadRevision = -1L; timelineReadAnchors = null
         }
         if (id == null || timelineRead?.isActive == true) return
         val revision = controller.timelineVersion
-        if (timelineReadRevision == revision) return
+        val anchors = currentTimelineAnchors()
+        if (timelineReadRevision == revision && timelineReadAnchors == anchors) return
         val generation = editorGeneration
         timelineRead = lifecycleScope.launch {
             try {
-                val entries = try { withContext(Dispatchers.IO) { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { controller.timelineHistory(id) } } }
+                val entries = try { withContext(Dispatchers.IO) { RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { controller.timelineHistory(id, anchors) } } }
                     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                     catch (_: Exception) { return@launch }
-                if (!activityUsable() || selected?.id != id || editorGeneration != generation) return@launch
-                timelineEntries = entries; timelineReadRevision = revision
+                if (!activityUsable() || selected?.id != id || editorGeneration != generation || revision != controller.timelineVersion || currentTimelineAnchors() != anchors) return@launch
+                timelineEntries = entries; timelineReadRevision = revision; timelineReadAnchors = anchors
                 publishChat(rowsChanged = false)
             } finally {
                 if (timelineRead === kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]) {
                     timelineRead = null
                     if (activityUsable() && selected?.id == id &&
-                        (controller.timelineVersion != revision || editorGeneration != generation)) refreshTimeline()
+                        (controller.timelineVersion != revision || editorGeneration != generation || currentTimelineAnchors() != anchors)) refreshTimeline()
                 }
             }
         }
@@ -7360,8 +7390,10 @@ class MainActivity : ComponentActivity() {
                 !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
             val allowed = composerAvailable && !controller.dataBusy
             val messageEditBlocked = inlineMessageEditor?.let { !messageEditTargetCurrent(it) } == true
-            val visibleTimeline = if (displayWindow != null) emptyList() else app.daiyu.android.timeline.withStoppedRuns(
-                shown.map { it.second }, timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty())
+            val savedTimeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty()
+            val visibleTimeline = displayWindow?.let {
+                app.daiyu.android.timeline.withStoppedDisplayRows(it, savedTimeline)
+            } ?: app.daiyu.android.timeline.withStoppedRuns(shown.map { it.second }, savedTimeline)
             val visibleCompressions = controller.compressionActivities.filter { it.conversationId == selected?.id?.value }
             val workflowBoundaries = visibleTimeline.filterNot { it is app.daiyu.android.timeline.ChatTimelineEntry.Stopped ||
                 it is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && it.position != null }
@@ -7639,6 +7671,7 @@ class MainActivity : ComponentActivity() {
             app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.MODEL_PICKER)
         dismissChatModels()
         voiceCallModelPicker = forVoiceCall
+        chatModelConversation = if (forVoiceCall) voiceCallConversation?.id else selected?.id
         controller.providerBalances.requestRefresh(lifecycleScope)
         val owner = Any(); chatModelOwner = owner
         reloadChatModels(owner)
@@ -7650,6 +7683,7 @@ class MainActivity : ComponentActivity() {
         }
         chatModelCancelled.set(true)
         chatModelProviderEditor = null; chatModelPicker = null; chatModelSettings = null; chatModelSession = null; chatModelOwner = null
+        chatModelConversation = null
         chatModelSelectionFailed = false; chatModelProviderChoices = emptyMap()
     }
     private fun reloadChatModels(owner: Any, retainPresentation: Boolean = false) {
@@ -7725,6 +7759,8 @@ class MainActivity : ComponentActivity() {
         val picker = chatModelPicker ?: return
         if (picker.switching) return
         val conversation = voiceCallModelOwner()
+        if (voiceCallModelPicker && (voiceCallConversation?.id != conversation ||
+                voiceCallPresentation.state?.presentation == DoubaoCallPresentation.CLOSING)) { dismissChatModels(); return }
         if (voiceCallModelPicker && voiceCallHasDialogue) { voiceConfigurationToast("仅对话前可更改"); return }
         if (voiceCallModelPicker && controller.taskConfigurationBusy(conversation)) {
             lifecycleScope.launch {

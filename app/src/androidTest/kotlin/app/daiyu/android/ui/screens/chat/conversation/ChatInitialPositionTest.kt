@@ -60,6 +60,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         "blocked" to (Color(0xFFE2CE19) to Color(0xFF903BDD)),
         "latest" to (Color(0xFF275BDD) to Color(0xFFC83772)),
         "stream" to (Color(0xFF21CE67) to Color(0xFFCF7B21)),
+        "waiting" to (Color(0xFF28BBD1) to Color(0xFFAB7432)),
     )
     private val draws = CopyOnWriteArrayList<Draw>()
     private val reads = CopyOnWriteArrayList<Set<String>>()
@@ -74,11 +75,14 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                         val graphics = LocalGraphicsContext.current
                         val scope = rememberCoroutineScope()
                         val visit = owner
-                        val live = visit == "stream"
+                        val live = visit == "stream" || visit == "waiting"
                         val turns = List(8) { ChatTurnUi.Assistant("$visit-history-$it") } +
                             ChatTurnUi.Assistant("$visit-tail", finalText = body,
                                 status = if (live) RunStatus.RUNNING else RunStatus.COMPLETED,
-                                isStreaming = live)
+                                isStreaming = live && visit != "waiting",
+                                workProcess = if (visit == "waiting") WorkProcessUi(listOf(WorkSegmentUi(
+                                    reasoning = app.daiyu.android.domain.ReportedReasoning("active-wait", "still thinking", 0L,
+                                        activeSinceNanos = System.nanoTime()))), "等待用户", running = true) else null)
                         Box(Modifier.size(320.dp, 240.dp).onGloballyPositioned {
                             viewportTop = it.boundsInRoot().top
                             viewportBottom = viewportTop + it.size.height
@@ -359,6 +363,22 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("chat-turn:stream-tail").assertExists()
         assertEquals(0, fixture.opens.get())
     }
+    fun testRunningNonStreamingReasoningDoesNotKeepTheConversationHidden() {
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            switchTo("waiting", "answer waits for reasoning handoff")
+            frames(12)
+            assertTrue("A running non-streaming workflow must draw without waiting for reasoning to finish",
+                draws.any { it.frameOwner == "waiting" })
+            assertOnlyAlignedDraws("waiting")
+            assertTrue(reads.flatten().none { it.startsWith("waiting-") })
+            ui.onNodeWithTag("chat-turn:waiting-tail").assertExists()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
     fun testContinuousStreamingUpdatesDoNotKeepTheEntireConversationHidden() {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)

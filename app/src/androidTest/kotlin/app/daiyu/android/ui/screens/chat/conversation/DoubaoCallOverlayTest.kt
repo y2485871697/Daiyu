@@ -557,6 +557,39 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithTag("voice-call-compressed").assertExists()
     }
 
+    fun testSearchSupersedesSuccessWithoutOldTimerHidingNewSearch() {
+        mount(initialState = session().copy(title = "GPT", modelSelectable = true, searching = true))
+        finishOpening()
+        ui.onNodeWithTag("voice-call-searching").assertExists()
+        ui.onNodeWithText("正在搜索").assertExists()
+        mainThread { call = call!!.copy(searching = false, searchCompletion = "one") }
+        ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-searched").assertExists()
+        mainThread { call = call!!.copy(searching = true, searchCompletion = null) }
+        ui.mainClock.advanceTimeBy(300); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-searching").assertExists()
+        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+        ui.mainClock.advanceTimeBy(2_700); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-searching").assertExists()
+        mainThread { call = call!!.copy(searching = false, searchCompletion = "two") }
+        ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-searched").assertExists()
+        ui.mainClock.advanceTimeBy(2_700); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+    }
+    fun testCompressionWinsSlotAndInterruptedSearchHasNoSuccessCheck() {
+        mount(initialState = session().copy(title = "GPT", modelSelectable = true, searching = true))
+        finishOpening()
+        mainThread { call = call!!.copy(compressing = true) }
+        ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-compressing").assertExists()
+        ui.onNodeWithTag("voice-call-searching").assertDoesNotExist()
+        mainThread { call = call!!.copy(compressing = false, searching = false, searchCompletion = null, captionEpoch = 1) }
+        ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
+        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+    }
+
     fun testBothCallKindsFollowCaptionTailWithoutOverridingManualScroll() {
         for (ordinary in listOf(false, true)) {
             if (ordinary) mainThread { call = session().copy(modelSelectable = true) }

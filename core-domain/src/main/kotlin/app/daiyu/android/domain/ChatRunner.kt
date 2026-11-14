@@ -885,6 +885,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             }
                             try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
+                        is ModelEvent.NativeSearch -> {
+                            try { if (!stagingTransportBatch) options.onNativeSearch(event.copy(
+                                itemId = checkNotNull(request).requestId + ":" + event.itemId)) } catch (_: Exception) {}
+                        }
                         is ModelEvent.ProtocolOutput -> {
                             segmentHistory.replaceSessionProtocol(current, event.items)
                             apply(current.copy(protocolItems = event.items))
@@ -989,6 +993,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 try { publish(current) } catch (_: Exception) {}
                                 batch.events.forEach { event ->
                                     try {
+                                        if (event is ModelEvent.NativeSearch && currentAttempt()) options.onNativeSearch(event.copy(
+                                            itemId = checkNotNull(request).requestId + ":" + event.itemId))
                                         if (event is ModelEvent.Usage) options.onUsage(event)
                                         if (event is ModelEvent.ReasoningDelta || event is ModelEvent.ReasoningFinal) options.onReasoning(event)
                                     } catch (_: Exception) {}

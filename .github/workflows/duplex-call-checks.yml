@@ -89,7 +89,7 @@ jobs:
           if [[ "$CHECK_SCOPE" == speech ]]; then
             classes=(app.daiyu.android.voice.providers.DoubaoPcmStreamTest app.daiyu.android.voice.StreamingPcmPlayerTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.voice.SpeechAudioFileTest app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.RemoteVoicePlaybackBudgetTest app.daiyu.android.VoiceHostTest app.daiyu.android.VoiceHostGateTest app.daiyu.android.voice.network.HttpVoiceNetworkTest app.daiyu.android.ActivityVoiceAccountPreviewHostTest app.daiyu.android.AccountPreviewSpeechPlayerTailTest app.daiyu.android.voice.account.PersonalVoicePreviewTest)
           else
-            classes=(app.daiyu.android.VoiceCallPresentationOwnerTest app.daiyu.android.voice.control.VoiceCallControllerTest app.daiyu.android.voice.control.SpeechActivityDetectorTest app.daiyu.android.voice.control.VoiceCallTempFilesTest app.daiyu.android.context.ProductionCompactionPlacementTest app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
+            classes=(app.daiyu.android.model.ResponsesWebSearchTest app.daiyu.android.model.NativeCompletionWebSearchTest app.daiyu.android.voice.control.VoiceNativeSearchActivityTest app.daiyu.android.VoiceCallPresentationOwnerTest app.daiyu.android.voice.control.VoiceCallControllerTest app.daiyu.android.voice.control.SpeechActivityDetectorTest app.daiyu.android.voice.control.VoiceCallTempFilesTest app.daiyu.android.context.ProductionCompactionPlacementTest app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
           fi
           filters=()
           for class in "${classes[@]}"; do filters+=(--tests "$class"); done
@@ -98,6 +98,13 @@ jobs:
             -PdaiyuCheckGraph=duplex-call-checks/task-graph.json \
             :app:compileDebugKotlin :app:testDebugUnitTest "${filters[@]}" \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee duplex-call-checks/gradle.log
+      - name: 搜索事件ACK与取消增量回归
+        if: inputs.check_scope == 'duplex'
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain -I scripts/cooperation/checks_only.init.gradle \
+            :core-domain:test --tests app.daiyu.android.domain.ChatRunnerBatchTransactionTest \
+            --tests app.daiyu.android.domain.ChatRunnerAttemptGateTest 2>&1 | tee duplex-call-checks/search-ack.log
       - name: 核对定向报告及零安装包
         run: |
           python3 - <<'PY'
@@ -105,7 +112,10 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          required = {'app.daiyu.android.VoiceCallPresentationOwnerTest',
+          required = {'app.daiyu.android.model.ResponsesWebSearchTest',
+                      'app.daiyu.android.model.NativeCompletionWebSearchTest',
+                      'app.daiyu.android.voice.control.VoiceNativeSearchActivityTest',
+                      'app.daiyu.android.VoiceCallPresentationOwnerTest',
                       'app.daiyu.android.voice.control.VoiceCallControllerTest',
                       'app.daiyu.android.voice.control.SpeechActivityDetectorTest',
                       'app.daiyu.android.voice.control.VoiceCallTempFilesTest',
@@ -118,6 +128,16 @@ jobs:
                       'app.daiyu.android.voice.network.WebSocketBoundsTest'}
           if os.environ['CHECK_SCOPE'] == 'speech':
               required = {'app.daiyu.android.voice.providers.DoubaoPcmStreamTest', 'app.daiyu.android.voice.StreamingPcmPlayerTest', 'app.daiyu.android.diagnostics.DiagnosticLogStoreTest', 'app.daiyu.android.voice.SpeechAudioFileTest', 'app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest', 'app.daiyu.android.RemoteVoicePlaybackBudgetTest', 'app.daiyu.android.VoiceHostTest', 'app.daiyu.android.VoiceHostGateTest', 'app.daiyu.android.voice.network.HttpVoiceNetworkTest', 'app.daiyu.android.ActivityVoiceAccountPreviewHostTest', 'app.daiyu.android.AccountPreviewSpeechPlayerTailTest', 'app.daiyu.android.voice.account.PersonalVoicePreviewTest'}
+          core_suites = []
+          if os.environ['CHECK_SCOPE'] == 'duplex':
+              core_suites = [ET.parse(p).getroot() for p in Path('core-domain/build/test-results/test').glob('TEST-*.xml')]
+              assert {s.attrib['name'] for s in core_suites} == {
+                  'app.daiyu.android.domain.ChatRunnerBatchTransactionTest',
+                  'app.daiyu.android.domain.ChatRunnerAttemptGateTest'}
+              for suite in core_suites:
+                  assert int(suite.attrib['tests']) > 0
+                  assert all(int(suite.attrib.get(k, 0)) == 0 for k in ('failures', 'errors', 'skipped'))
+                  assert not any(suite.findall('.//' + k) for k in ('failure', 'error', 'skipped'))
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           assert required == set(names) and len(names) == len(set(names)), (names, required)
@@ -141,7 +161,8 @@ jobs:
           assert not packages, packages
           record = dict(check_id=os.environ['CHECK_ID'], source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
-                        scope=os.environ['CHECK_SCOPE'] + '-targeted', classes=sorted(names), contracts=json.loads(Path('duplex-call-checks/contracts.json').read_text()),
+                        scope=os.environ['CHECK_SCOPE'] + '-targeted', classes=sorted(names),
+                        core_tests=sum(int(s.attrib['tests']) for s in core_suites), contracts=json.loads(Path('duplex-call-checks/contracts.json').read_text()),
                         compile_outcomes='production-and-androidtest-verified-from-task-log',
                         apk_built=False, instrumentation_run=False)
           Path('duplex-call-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
@@ -156,4 +177,5 @@ jobs:
             duplex-call-checks/
             app/build/test-results/testDebugUnitTest/
             app/build/reports/tests/testDebugUnitTest/
+            core-domain/build/test-results/test/
           if-no-files-found: error

@@ -30,6 +30,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         var nextTurn = 0
         var captionEpoch = 0L
         var reply = ""
+        var searching = false
+        var searchCompletion: String? = null
         var compressing = false
         var modelPicker = false
         var muted = false
@@ -116,7 +118,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
             else -> VoiceControlPhase.LISTENING
         }
         mutable.value = VoiceControlState(shown, session.permit.id, session.permit.profile,
-            session.nextTurn, 0, transcript, reply = session.reply, muted = session.muted, captionEpoch = session.captionEpoch)
+            session.nextTurn, 0, transcript, reply = session.reply, muted = session.muted, captionEpoch = session.captionEpoch,
+            searching = session.searching, searchCompletion = session.searchCompletion)
     }
     private fun listen(session: Call) {
         if (!current(session) || session.input != null || session.pending != null || session.compressing || session.muted || session.modelPicker) return
@@ -250,6 +253,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         }
         if (answer.final) return
         session.reply = value.text
+        session.searching = value.searching
+        session.searchCompletion = value.searchCompletion
         answer.text = value.text; answer.final = value.status == VoiceBodyStatus.COMPLETE
         if (answer.final) {
             answer.timer?.cancel()
@@ -268,7 +273,11 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         session.reply = ""
         interrupt(session)
     }
-    private fun interrupt(session: Call) { if (session.answer != null) releaseAnswer(session, true) }
+    private fun interrupt(session: Call) {
+        session.searching = false
+        session.searchCompletion = null
+        if (session.answer != null) releaseAnswer(session, true)
+    }
     private fun closeInput(session: Call): Boolean {
         session.rearm?.cancel(); session.rearm = null
         val input = session.input; session.input = null
@@ -299,7 +308,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         releaseAnswer(session, true)
         attempt { ports.revoke(session.permit) }
         if (failed) releaseFailed = true
-        mutable.value = state.value.copy(phase = VoiceControlPhase.STOPPED,
+        mutable.value = state.value.copy(phase = VoiceControlPhase.STOPPED, searching = false, searchCompletion = null,
             reason = if (failed || releaseFailed) VoiceControlStopReason.RELEASE_FAILED else reason)
     }
     override fun close() { call?.let { end(it, VoiceControlStopReason.CLOSED) }; closed = true }

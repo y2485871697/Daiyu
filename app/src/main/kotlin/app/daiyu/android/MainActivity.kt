@@ -257,6 +257,7 @@ class MainActivity : ComponentActivity() {
     private var chatModelConversation: ConversationId? = null
     private fun voiceCallModelOwner(): ConversationId? = chatModelConversation
     private fun clearVoiceCallConversation() {
+        if (voiceCallModelPicker) dismissChatModels()
         voiceCallStarting = null
         val temporary = voiceCallConversation
         voiceCallConversation = null

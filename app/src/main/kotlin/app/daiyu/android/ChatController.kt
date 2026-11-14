@@ -50,6 +50,7 @@ import java.util.concurrent.TimeUnit
 import app.daiyu.android.domain.runtime.SupplementAdmission
 import app.daiyu.android.domain.runtime.ExecutionState
 import app.daiyu.android.skills.SkillRunSession
+import app.daiyu.android.voice.control.VoiceAssistantOwner
 import app.daiyu.android.skills.SkillToolRegistry
 import app.daiyu.android.skills.SkillManagement
 import app.daiyu.android.model.catalog.ModelCatalogService
@@ -2398,6 +2399,10 @@ class ChatController internal constructor(private val application:Application,
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        if (nativeSearchOwner?.runId == lifetime.initial.runId.value && active?.status != RunStatus.COMPLETED) {
+            nativeSearchOwner = null
+            nativeSearchActivity = app.daiyu.android.voice.control.VoiceNativeSearchActivity()
+        }
         if (problem == lifetime.reconnectNotice) problem = null
         lifetime.reconnectNotice = null
         reconnectTimeline.values.filter { it.anchor.conversationId == lifetime.initial.conversationId.value &&
@@ -2425,6 +2430,22 @@ class ChatController internal constructor(private val application:Application,
         generationEntry?.takeIf { it.runner === lifetime.runner }?.session?.revokeAdmission()
         runRevocationListeners.toList().forEach { listener ->
             try {listener(lifetime.initial)} catch (_:Exception) { /* Optional feedback only. */ }
+        }
+    }
+    private var nativeSearchOwner: VoiceAssistantOwner? = null
+    private var nativeSearchActivity = app.daiyu.android.voice.control.VoiceNativeSearchActivity()
+    @Synchronized internal fun nativeSearchState(owner: VoiceAssistantOwner): app.daiyu.android.voice.control.VoiceNativeSearchState =
+        if (nativeSearchOwner == owner) nativeSearchActivity.state else app.daiyu.android.voice.control.VoiceNativeSearchState()
+    private fun publishNativeSearch(owner: Message, event: ModelEvent.NativeSearch) {
+        synchronized(this) {
+            if (!isRunUnfenced(owner)) return
+            val exact = VoiceAssistantOwner(owner.conversationId.value, owner.runId.value, owner.id.value)
+            if (nativeSearchOwner != exact) {
+                nativeSearchOwner = exact
+                nativeSearchActivity = app.daiyu.android.voice.control.VoiceNativeSearchActivity()
+            }
+            nativeSearchActivity.accept(event)
+            notifyChanged()
         }
     }
     private fun publishReasoning(owner:Message,event:ModelEvent) {
@@ -2466,13 +2487,16 @@ class ChatController internal constructor(private val application:Application,
         notifyChanged()
         return true
     }
-    internal fun createVoiceCall(source: ConversationId?, complete: (Conversation?) -> Unit) {
+    internal data class VoiceCallStart(val conversation: Conversation, val modelName: String)
+    internal fun createVoiceCall(source: ConversationId?, complete: (VoiceCallStart?) -> Unit) {
         val admitted = synchronized(this) { idleAvailable() }
         if (!admitted) { complete(null); return }
         executor.execute {
             val value = runCatching {
-                database.create(source?.let(database::assistantId) ?: assistantStore.selectedId.value,
+                val temporary = database.create(source?.let(database::assistantId) ?: assistantStore.selectedId.value,
                     modelSource = source, temporaryVoice = true)
+                try { VoiceCallStart(temporary, freezeConversationProvider(temporary.id).settings.model) }
+                catch (failure: Exception) { database.delete(temporary.id); throw failure }
             }.getOrNull()
             handler.post { complete(value) }
         }
@@ -2480,6 +2504,7 @@ class ChatController internal constructor(private val application:Application,
     internal fun discardVoiceCall(owner: ConversationId) {
         require(ConversationDatabase.isTemporaryVoice(owner.value))
         val attempt = object : Runnable {
+            private var failures = 0
             override fun run() {
                 if (synchronized(this@ChatController) { !idleAvailable() }) {
                     if (!closed) handler.postDelayed(this, 100)
@@ -2491,6 +2516,7 @@ class ChatController internal constructor(private val application:Application,
                         app.daiyu.android.voice.control.VoiceCallTempFiles.clear(application.cacheDir, owner.value)
                     } catch (_: Exception) {
                         synchronized(this@ChatController) { problem = "临时语音清理未完成" }
+                        if (!closed) handler.postDelayed(this, (500L shl (++failures).coerceAtMost(6)).coerceAtMost(30_000L))
                     }
                     notifyChanged()
                 }
@@ -4520,6 +4546,7 @@ class ChatController internal constructor(private val application:Application,
                         if (!closed && active?.id == assistant.id && active?.runId == run &&
                             active?.conversationId == conversationId) notifyChanged()
                     } },
+                    onNativeSearch = { event -> publishNativeSearch(assistant, event) },
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
                 afterTitleParentPersisted(it, user, assistant, pendingTitle)
                 synchronized(this) {

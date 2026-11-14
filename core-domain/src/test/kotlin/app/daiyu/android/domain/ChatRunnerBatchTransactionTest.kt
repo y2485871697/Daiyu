@@ -39,14 +39,16 @@ class ChatRunnerBatchTransactionTest {
     }
     private fun runner(port: ModelPort, runtime: Runtime, budget: Budget = Budget(),
                        onUsage: (ModelEvent.Usage) -> Unit = {}, onReasoning: (ModelEvent) -> Unit = {},
-                       tool: BatteryTool = BatteryTool { error("uncommitted tool must not execute") }): ChatRunner =
+                       tool: BatteryTool = BatteryTool { error("uncommitted tool must not execute") },
+                       onSearch: (ModelEvent.NativeSearch) -> Unit = {}): ChatRunner =
         ChatRunner(port, object : ConversationStore {
             override fun save(message: Message) = error("atomic store only")
         }, tool, RunnerOptions(runtimeStore = runtime,
             reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _, _ -> budget }),
-            onUsage = onUsage, onReasoning = onReasoning)) {}
+            onUsage = onUsage, onReasoning = onReasoning, onNativeSearch = onSearch)) {}
 
     private fun dirtyEvents() = listOf<ModelEvent>(
+        ModelEvent.NativeSearch("dirty-search", NativeSearchPhase.RUNNING),
         ModelEvent.TextDelta("t", "dirty"), ModelEvent.ReasoningDelta("reason", "dirty reasoning"),
         ModelEvent.ProtocolOutput(listOf("dirty protocol")),
         ModelEvent.ToolReady(ToolInvocation(ToolCallId("dirty-call"), "get_battery_status", "{}")),
@@ -67,6 +69,7 @@ class ChatRunnerBatchTransactionTest {
         val runtime = Runtime()
         val usages = CopyOnWriteArrayList<ModelEvent.Usage>()
         val reasoning = CopyOnWriteArrayList<ModelEvent>()
+        val searches = CopyOnWriteArrayList<ModelEvent.NativeSearch>()
         lateinit var runner: ChatRunner
         val session = object : Session() {
             override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
@@ -88,7 +91,7 @@ class ChatRunnerBatchTransactionTest {
                 assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(2, ModelEvent.TextDelta("t", "suffix"))))
             }
         }
-        runner = runner(ModelPort { session }, runtime, onUsage = usages::add, onReasoning = reasoning::add)
+        runner = runner(ModelPort { session }, runtime, onUsage = usages::add, onReasoning = reasoning::add, onSearch = searches::add)
         val result = FutureTask { runner.run(initial(), emptyList()) }
         val owner = Thread(result).apply { isDaemon = true; start() }
         try {
@@ -98,9 +101,31 @@ class ChatRunnerBatchTransactionTest {
             val message = result.get(5, TimeUnit.SECONDS)
             assertEquals(RunStatus.COMPLETED, message.status)
             assertEquals(listOf(MessageBlock.Text("t", "prefixsuffix")), message.blocks)
-            assertTrue(usages.isEmpty()); assertTrue(reasoning.isEmpty())
+            assertTrue(usages.isEmpty()); assertTrue(reasoning.isEmpty()); assertTrue(searches.isEmpty())
             runtime.writes.forEach(::assertClean)
         } finally { runner.stop(); owner.join(5000); assertFalse(owner.isAlive) }
+    }
+
+    @Test fun acceptedSearchIsPublishedAfterCommitAndKeepsIdentityAcrossCursorResume() {
+        val runtime = Runtime()
+        val searches = mutableListOf<ModelEvent.NativeSearch>()
+        val session = object : Session() {
+            override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(0, ModelEvent.NativeSearch("ws", NativeSearchPhase.RUNNING))))
+                assertEquals(0L, runtime.writes.last().transport?.sequence)
+                assertEquals(1, searches.size)
+                throw ModelRequestException(ModelFailure.NETWORK)
+            }
+            override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(1, ModelEvent.NativeSearch("ws", NativeSearchPhase.COMPLETED),
+                    ModelEvent.TextFinal("t", "answer"))))
+                assertEquals(1L, runtime.writes.last().transport?.sequence)
+            }
+        }
+        val message = runner(ModelPort { session }, runtime, onSearch = searches::add).run(initial(), emptyList())
+        assertEquals(RunStatus.COMPLETED, message.status)
+        assertEquals(listOf(NativeSearchPhase.RUNNING, NativeSearchPhase.COMPLETED), searches.map { it.phase })
+        assertEquals(1, searches.map { it.itemId }.distinct().size)
     }
 
     @Test fun firstEffectiveAcknowledgedBatchClosesErrorOnlyAfterAtomicCommit() {
@@ -191,12 +216,13 @@ class ChatRunnerBatchTransactionTest {
                 super.commitCheckpoint(checkpoint)
             }
         }
+        val searches = CopyOnWriteArrayList<ModelEvent.NativeSearch>()
         var ack: ModelDeliveryAck? = null
         var stale: ModelDeliveryAck? = null
         var resumes = 0
         val session = object : Session() {
             override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
-                ack = sink(batch(1, ModelEvent.TextDelta("t", "committed")))
+                ack = sink(batch(1, ModelEvent.NativeSearch("ws", NativeSearchPhase.RUNNING), ModelEvent.TextDelta("t", "committed")))
                 // Even a fast pause/resume must not reopen this delivery gate.
                 stale = sink(batch(99, ModelEvent.TextDelta("t", "dirty")))
                 throw ModelRequestException(ModelFailure.NETWORK)
@@ -207,7 +233,7 @@ class ChatRunnerBatchTransactionTest {
                 assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(2, ModelEvent.TextDelta("t", "suffix"))))
             }
         }
-        val runner = runner(ModelPort { session }, runtime)
+        val runner = runner(ModelPort { session }, runtime, onSearch = searches::add)
         val result = FutureTask { runner.run(initial(), emptyList()) }
         val owner = Thread(result).apply { isDaemon = true; start() }
         try {
@@ -223,6 +249,7 @@ class ChatRunnerBatchTransactionTest {
             val message = result.get(5, TimeUnit.SECONDS)
             assertEquals(ModelDeliveryAck.ACCEPTED, ack)
             assertEquals(ModelDeliveryAck.REJECTED, stale)
+            assertTrue(searches.isEmpty())
             assertEquals(if (mode == "stop") RunStatus.STOPPED else RunStatus.COMPLETED, message.status)
             assertEquals(if (mode == "stop") 0 else 1, resumes)
             assertTrue(runtime.writes.none { it.transport?.sequence == 99L })

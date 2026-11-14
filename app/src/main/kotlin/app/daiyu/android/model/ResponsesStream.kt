@@ -156,6 +156,21 @@ internal object ResponsesStream {
             MessagesRequest.jsonObject(arguments)
             return ToolInvocation(ToolCallId(id), name, arguments)
         }
+        fun search(id: String, phase: NativeSearchPhase) {
+            checkProtocol(id.isNotBlank() && id.length <= 200)
+            sink(ModelEvent.NativeSearch(id, phase))
+        }
+        fun searchItem(item: JSONObject) {
+            if (item.optString("type") != "web_search_call") return
+            val phase = when (item.optString("status")) {
+                "in_progress", "searching" -> NativeSearchPhase.RUNNING
+                "completed" -> NativeSearchPhase.COMPLETED
+                "failed" -> NativeSearchPhase.FAILED
+                "incomplete" -> NativeSearchPhase.INCOMPLETE
+                else -> return
+            }
+            search(item.getString("id"), phase)
+        }
         fun sameJson(a: Any?, b: Any?): Boolean = when {
             a is JSONObject && b is JSONObject -> a.keys().asSequence().toSet() == b.keys().asSequence().toSet() && a.keys().asSequence().all { sameJson(a.get(it), b.get(it)) }
             a is org.json.JSONArray && b is org.json.JSONArray -> a.length() == b.length() && (0 until a.length()).all { sameJson(a.get(it), b.get(it)) }
@@ -249,10 +264,16 @@ internal object ResponsesStream {
             when(event.getString("type")) {
                 "response.output_item.added" -> {
                     val item = event.getJSONObject("item")
+                    searchItem(item)
                     if (item.optString("type") == "reasoning") outputIndex(event)?.let {
                         reasoningId(item.getString("id"), it)
                     }
                 }
+                "response.web_search_call.in_progress", "response.web_search_call.searching" ->
+                    search(event.getString("item_id"), NativeSearchPhase.RUNNING)
+                "response.web_search_call.completed" -> search(event.getString("item_id"), NativeSearchPhase.COMPLETED)
+                "response.web_search_call.failed" -> search(event.getString("item_id"), NativeSearchPhase.FAILED)
+                "response.web_search_call.incomplete" -> search(event.getString("item_id"), NativeSearchPhase.INCOMPLETE)
                 "response.reasoning_summary_text.delta" -> {
                     val delta=event.getString("delta");chars+=delta.length
                     checkProtocol(chars<=2_000_000)
@@ -276,6 +297,12 @@ internal object ResponsesStream {
                 "response.output_item.done" -> {
                     val item=event.getJSONObject("item")
                     checkProtocol(item.optString("type") != "function_call_output")
+                    if (item.optString("type") == "web_search_call") {
+                        try { ResponsesSearchProtocol.validateItem(item) } catch (_: IllegalArgumentException) {
+                            throw ModelRequestException(ModelFailure.PROTOCOL)
+                        }
+                        searchItem(item)
+                    }
                     // Unindexed, renamed summaries need the complete output to prove identity.
                     if (item.optString("type") != "reasoning" || outputIndex(event) != null ||
                         item.optString("id") in reasoningAliases || summaries.isEmpty())
@@ -356,6 +383,7 @@ internal object ResponsesStream {
                         if (item.optString("type") == "reasoning" && finalSummary(item) == null)
                             pendingReasoning[item.getString("id")]?.let { summaryItem(JSONObject(it), i) }
                         summaryItem(item, i)
+                        searchItem(item)
                         if(item.getString("type")=="message") {
                             val content=item.getJSONArray("content")
                             val full=(0 until content.length()).joinToString("") { j ->

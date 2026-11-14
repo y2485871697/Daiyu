@@ -35,6 +35,7 @@ internal class VoiceCallPresentationOwner {
             },
             transcript = value.transcript, reply = value.reply, captionEpoch = value.captionEpoch, muted = value.muted, speaker = speaker,
             compressing = compressing,
+            searching = value.searching, searchCompletion = value.searchCompletion,
             compressionCompletion = completedCompression?.takeUnless { it == initialCompression },
             endedAtMillis = if (value.active) null else previous.endedAtMillis ?: now,
             reason = when (value.phase) {

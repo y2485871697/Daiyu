@@ -48,7 +48,11 @@ internal class AndroidUniversalOwnerObserver(
             if (closed.get()) return
             val snapshot = try { universalAssistantBody(owner, message, questionWaiting(message)) }
             catch (_: Exception) { VoiceAssistantBody(owner, "", VoiceBodyStatus.UNKNOWN) }
-            snapshot?.let(body)
+            snapshot?.let { value ->
+                val search = controller.nativeSearchState(owner)
+                body(value.copy(searching = value.status == VoiceBodyStatus.STREAMING && search.searching,
+                    searchCompletion = search.completion))
+            }
         }
         val listener: () -> Unit = listener@{
             if (closed.get()) return@listener

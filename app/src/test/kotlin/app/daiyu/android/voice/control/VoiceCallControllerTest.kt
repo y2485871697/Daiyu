@@ -81,6 +81,20 @@ class VoiceCallControllerTest {
     }
 
 
+    @Test fun speechInterruptsSearchAndRejectsLateSuccessWithoutClosingMicrophone() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.finishRecognition("查一下"); f.accept(owner)
+        val observation = f.observations.single()
+        observation.body(VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING, searching = true)); f.flush()
+        assertTrue(c.state.value.searching); assertEquals(2, f.inputs.size)
+        assertEquals(0, f.inputs.last().closes)
+        f.recognitions.last().speechStarted(); f.flush()
+        assertEquals(listOf(owner), f.stopped); assertTrue(observation.cancelled)
+        assertFalse(c.state.value.searching); assertNull(c.state.value.searchCompletion)
+        observation.body(VoiceAssistantBody(owner, "旧结果", VoiceBodyStatus.COMPLETE, searchCompletion = "late")); f.flush()
+        assertFalse(c.state.value.searching); assertNull(c.state.value.searchCompletion)
+        assertEquals("", c.state.value.reply)
+    }
     @Test fun microphoneStaysOpenWhileAnswerStreamsAndSpeechInterruptsExactRun() {
         val f = Fake(); val c = VoiceCallController(f)
         c.start(profile); f.finishRecognition("你好"); f.accept(owner)
@@ -191,6 +205,20 @@ class VoiceCallControllerTest {
         assertTrue(f.sends.isEmpty())
         c.setModelPicker(false)
         assertEquals(2, f.inputs.size)
+    }
+    @Test fun modelPickerCancellationClearsSearchAndRejectsLateSuccess() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.finishRecognition("搜索"); f.accept(owner)
+        f.observations.single().body(VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING, true))
+        f.flush(); assertTrue(c.state.value.searching)
+        val late = f.observations.single().body
+        c.setModelPicker(true)
+        assertFalse(c.state.value.searching); assertNull(c.state.value.searchCompletion)
+        c.setModelPicker(false)
+        late(VoiceAssistantBody(owner, "旧结果", VoiceBodyStatus.COMPLETE, false, "late")); f.flush()
+        assertFalse(c.state.value.searching); assertNull(c.state.value.searchCompletion)
+        assertEquals(listOf(owner), f.stopped)
+        assertTrue(c.state.value.active)
     }
     @Test fun continuousCallsAreNotLimitedByLegacyMaximumTurns() {
         val f = Fake(); val c = VoiceCallController(f)

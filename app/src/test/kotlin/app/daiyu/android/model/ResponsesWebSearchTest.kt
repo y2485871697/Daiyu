@@ -43,6 +43,42 @@ class ResponsesWebSearchTest {
         fun body() = JSONObject(sent.toString("UTF-8"))
     }
 
+    @Test fun voiceTextOnlyRetainsSelectedModelsNativeSearchSwitch() {
+        for (enabled in listOf(false, true)) {
+            val voice = options.copy(openAiWebSearchEnabled = enabled, voiceTextOnly = true)
+            val request = voice.apply(ResponsesRequest.body("fixture", JSONArray(), emptyList(), voice.openAiWebSearchEnabled), ProviderProtocol.RESPONSES)
+            assertEquals(enabled, request.has("tools"))
+            assertFalse(request.has("audio")); assertFalse(request.has("modalities"))
+        }
+    }
+    @Test fun realSearchLifecycleFramesReachRunnerCallbackWithoutLocalTool() {
+        fun frame(type: String, item: JSONObject? = null) = "data: " + JSONObject().put("type", type).apply {
+            if (item != null) put("item", item) else put("item_id", "ws")
+        } + "\n\n"
+        val body = frame("response.output_item.added", JSONObject().put("id", "ws").put("type", "web_search_call").put("status", "in_progress")) +
+            frame("response.web_search_call.searching") + frame("response.web_search_call.completed") +
+            frame("response.output_item.done", search()) + wire(search(), message())
+        val events = mutableListOf<ModelEvent>()
+        ResponsesStream.read(body.reader().buffered(), { false }, events::add)
+        assertEquals(NativeSearchPhase.RUNNING, events.filterIsInstance<ModelEvent.NativeSearch>().first().phase)
+        assertTrue(events.filterIsInstance<ModelEvent.NativeSearch>().any { it.phase == NativeSearchPhase.COMPLETED })
+        assertTrue(events.none { it is ModelEvent.ToolReady })
+        val observed = mutableListOf<ModelEvent.NativeSearch>()
+        ChatRunner(ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { events.forEach(sink) }
+            override fun cancel() {}
+        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("no local tools") },
+            app.daiyu.android.domain.runtime.RunnerOptions(onNativeSearch = observed::add)) {}.run(
+            Message(MessageId("a"), ConversationId("c"), RunId("r"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), listOf(user()))
+        assertTrue(observed.isNotEmpty()); assertTrue(observed.all { it.itemId.endsWith(":ws") })
+    }
+    @Test fun searchFailedAndIncompleteRemainNonSuccess() {
+        for ((status, phase) in listOf("failed" to NativeSearchPhase.FAILED, "incomplete" to NativeSearchPhase.INCOMPLETE)) {
+            val events = mutableListOf<ModelEvent>()
+            ResponsesStream.read(wire(search(status), message()).reader().buffered(), { false }, events::add)
+            assertEquals(listOf(phase), events.filterIsInstance<ModelEvent.NativeSearch>().map { it.phase })
+        }
+    }
     @Test fun optionCodecIsStrictBackwardCompatibleAndClosedByDefault() {
         assertFalse(ProviderRequestOptions.decode(null).openAiWebSearchEnabled)
         assertFalse(ProviderRequestOptions.decode("""{"custom_body":"","speed_mode":null,"codex":false}""").openAiWebSearchEnabled)

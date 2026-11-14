@@ -44,7 +44,7 @@ class CallEntryCorrectionsContractTest(unittest.TestCase):
         self.assertIn('enabled = pageActive && (callUi != null || voiceMenuEnabled),', button)
         self.assertIn('val admitted = actions.onVoiceLongPress()', button)
         self.assertIn('if (admitted && callUi == null) voiceModes = true', button)
-        self.assertIn('ChatVoiceModeMenu(voiceModes && voiceMenuEnabled && callUi == null,', self.composer)
+        self.assertIn('ChatVoiceModeMenu(pageActive && voiceModes && voiceMenuEnabled && callUi == null,', self.composer)
         screen = (CHAT / 'ChatScreen.kt').read_text()
         self.assertRegex(screen, r'val onVoiceLongPress:\s*\(\)\s*->\s*Boolean\s*=\s*\{\s*true\s*\}')
         selection = self.main.split('// A previously opened picker', 1)[1].split('ChatMenuAction.NEW_CHAT', 1)[0]

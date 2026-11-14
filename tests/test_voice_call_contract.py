@@ -36,6 +36,23 @@ class VoiceCallContractTest(unittest.TestCase):
         self.assertIn('allowedToolNames = if (voiceConversation) emptySet() else null', controller)
         self.assertIn('followChatModelWindow = voiceConversation', controller)
         self.assertIn('!voiceConversation && conversationChildrenEnabled', controller)
+    def test_search_is_native_model_policy_and_not_a_separate_local_tool(self):
+        controller = (SRC / 'ChatController.kt').read_text()
+        self.assertIn('frozen.requestOptions.copy(voiceTextOnly = true)', controller)
+        self.assertNotIn('RunVoiceSearchTools', controller)
+        self.assertIn('onNativeSearch = { event -> publishNativeSearch(assistant, event) }', controller)
+        owner = (SRC / 'voice/control/AndroidUniversalOwnerObserver.kt').read_text()
+        self.assertIn('controller.nativeSearchState(owner)', owner)
+        indicator = (SRC / 'ui/screens/chat/conversation/VoiceCallCompressionIndicator.kt').read_text()
+        self.assertIn('正在搜索', indicator)
+        self.assertIn('LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey)', indicator)
+        self.assertIn('delay(2_000)', indicator)
+    def test_call_picker_and_initial_model_are_scoped_to_actual_call_binding(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('voiceCallModelName = checkNotNull(created).modelName', main)
+        close = main.split('private fun closeVoiceCall(key: Long)', 1)[1].split('private fun voiceCallActions()', 1)[0]
+        self.assertLess(close.index('universalVoice::stop'), close.index('dismissChatModels()'))
+        self.assertIn('chatModelConversation = if (forVoiceCall) voiceCallConversation?.id else selected?.id', main)
     def test_compaction_success_only_after_durable_application(self):
         runtime = (SRC / 'context/ProductionRunContext.kt').read_text()
         candidate = runtime.split('override fun compactRequests', 1)[1]

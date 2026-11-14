@@ -93,6 +93,8 @@ data class DoubaoCallUi(
     val modelSelectable: Boolean = false,
     val compressing: Boolean = false,
     val compressionCompletion: String? = null,
+    val searching: Boolean = false,
+    val searchCompletion: String? = null,
     val responseLabel: String = "豆包",
     val captionEpoch: Long = 0,
 
@@ -157,7 +159,9 @@ private fun DoubaoCallSession(
     LaunchedEffect(state.captionEpoch, state.captionsEnabled) {
         captionFollow.followTail = true
     }
-    val compressionState = rememberVoiceCallCompressionState(state.compressing, state.compressionCompletion, state.presentation != DoubaoCallPresentation.CLOSING)
+    val compressionState = rememberVoiceCallCompressionState(state.compressing, state.compressionCompletion,
+        state.presentation != DoubaoCallPresentation.CLOSING, searching = state.searching,
+        searchCompletion = state.searchCompletion, resetKey = state.captionEpoch)
     val layer = rememberGraphicsLayer()
     val progress = motion.progress
     var snapshotReady by remember { mutableStateOf(false) }
@@ -426,7 +430,7 @@ private fun ExpandedCallContent(
                 Spacer(Modifier.width(5.dp))
                 Text(clock, Modifier.testTag("doubao-call-clock"), color = Color(0xFFAAA1B6), fontSize = 11.sp)
             }
-            if (state.modelSelectable) VoiceCallCompressionIndicator(state.compressing, state.compressionCompletion, running, compressionState)
+            if (state.modelSelectable) VoiceCallCompressionIndicator(state.compressing || state.searching, state.compressionCompletion, running, compressionState)
             Box(
                 Modifier.size(40.dp).testTag("doubao-call-minimize")
                     .semantics { contentDescription = "收起通话" }

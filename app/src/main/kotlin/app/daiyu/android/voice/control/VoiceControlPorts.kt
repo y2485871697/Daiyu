@@ -42,7 +42,8 @@ sealed interface VoiceControlReceipt {
 enum class VoiceAdmission { READY, PERMISSION_REQUIRED, REVOKED, QUESTION_WAITING, CONFIGURATION_CHANGED }
 enum class VoiceBodyStatus { STREAMING, COMPLETE, QUESTION_WAITING, FAILED, CANCELLED, UNKNOWN }
 /** Only assistant Text body blocks, excluding reasoning, tools, UI hints and other runs. */
-data class VoiceAssistantBody(val owner: VoiceAssistantOwner, val text: String, val status: VoiceBodyStatus)
+data class VoiceAssistantBody(val owner: VoiceAssistantOwner, val text: String, val status: VoiceBodyStatus,
+    val searching: Boolean = false, val searchCompletion: String? = null)
 
 fun interface VoiceControlCancellation { fun cancel() }
 interface VoiceControlRecognition {

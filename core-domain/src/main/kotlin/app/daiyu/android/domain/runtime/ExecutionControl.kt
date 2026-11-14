@@ -158,7 +158,9 @@ class RunnerOptions(
      * Runs outside the control lock; observer exceptions do not fail the run. */
     val onReasoning: (ModelEvent) -> Unit = {},
     val contextRuntime: RunContextRuntime? = null,
-    val diagnostics: RunDiagnostics? = null
+    val diagnostics: RunDiagnostics? = null,
+    /** Transient accepted hosted-search events; acknowledged batches notify only after commit. */
+    val onNativeSearch: (ModelEvent.NativeSearch) -> Unit = {}
 ) {
     init {
         require(batchExecutor == null || receiptBatchExecutor == null)

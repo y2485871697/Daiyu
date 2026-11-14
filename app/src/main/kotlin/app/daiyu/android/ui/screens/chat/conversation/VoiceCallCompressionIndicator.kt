@@ -25,22 +25,30 @@ import kotlinx.coroutines.delay
 internal class VoiceCallCompressionState {
     var dots by mutableIntStateOf(1)
     var success by mutableStateOf(false)
+    var searching by mutableStateOf(false)
     val check = Animatable(0f)
 }
 
 @Composable
-internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion: String?, running: Boolean): VoiceCallCompressionState {
+internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion: String?, running: Boolean,
+    searching: Boolean = false, searchCompletion: String? = null, resetKey: Long = 0): VoiceCallCompressionState {
     val state = remember { VoiceCallCompressionState() }
     var consumed by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(compressing, running) {
+    var consumedSearch by remember { mutableStateOf<String?>(null) }
+    val busy = compressing || searching
+    LaunchedEffect(busy, running, resetKey) {
         state.dots = 1
-        while (compressing && running) { delay(350); state.dots = state.dots % 3 + 1 }
+        while (busy && running) { delay(350); state.dots = state.dots % 3 + 1 }
     }
-    LaunchedEffect(compressing, completion) {
+    LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey) {
         state.success = false
         state.check.snapTo(0f)
-        if (!compressing && completion != null && completion != consumed) {
-            consumed = completion
+        val compressed = completion != null && completion != consumed
+        val searched = searchCompletion != null && searchCompletion != consumedSearch
+        consumed = completion
+        consumedSearch = searchCompletion
+        state.searching = !compressing && (searching || searched && !compressed)
+        if (!busy && (compressed || searched)) {
             state.success = true
             state.check.animateTo(1f, tween(280))
             delay(2_000)
@@ -54,14 +62,14 @@ internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion:
 internal fun VoiceCallCompressionIndicator(compressing: Boolean, completion: String?, running: Boolean = true,
     state: VoiceCallCompressionState = rememberVoiceCallCompressionState(compressing, completion, running)) {
     Box(Modifier.width(82.dp).height(24.dp), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
-        if (compressing) Row(Modifier.testTag("voice-call-compressing")) {
-            Text("正在压缩", color = Color(0xFF9483A8), fontSize = 10.sp)
+        if (compressing) Row(Modifier.testTag(if (state.searching) "voice-call-searching" else "voice-call-compressing")) {
+            Text(if (state.searching) "正在搜索" else "正在压缩", color = Color(0xFF9483A8), fontSize = 10.sp)
             Text(".".repeat(state.dots), Modifier.width(15.dp), color = Color(0xFF9483A8), fontSize = 10.sp)
         }
         AnimatedVisibility(state.success && !compressing, enter = fadeIn(tween(150)) + scaleIn(tween(180)),
             exit = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.65f)) {
-            Canvas(Modifier.size(19.dp).testTag("voice-call-compressed")
-                .semantics { contentDescription = "压缩完成" }) {
+            Canvas(Modifier.size(19.dp).testTag(if (state.searching) "voice-call-searched" else "voice-call-compressed")
+                .semantics { contentDescription = if (state.searching) "搜索完成" else "压缩完成" }) {
                 val start = Offset(size.width * .16f, size.height * .51f)
                 val corner = Offset(size.width * .41f, size.height * .76f)
                 val end = Offset(size.width * .86f, size.height * .25f)

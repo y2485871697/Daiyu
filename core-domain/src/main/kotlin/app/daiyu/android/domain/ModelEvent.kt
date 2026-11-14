@@ -8,6 +8,10 @@ sealed interface ModelEvent {
     data class ReasoningFinal(val itemId: String, val text: String) : ModelEvent
     /** Replacement snapshot cumulative within one ModelSession, including submitted outputs, excluding open history. */
     data class ProtocolOutput(val items: List<String>) : ModelEvent
+    /** Provider-reported hosted search only; never a locally executable tool. */
+    data class NativeSearch(val itemId: String, val phase: NativeSearchPhase) : ModelEvent {
+        init { require(itemId.isNotBlank() && itemId.length <= 512) }
+    }
     data class ToolReady(val invocation: ToolInvocation) : ModelEvent
     /** Complete provider-reported cumulative snapshot for one request, not a session total or
      * billing receipt. null is unknown, not zero. Cache reads are a subset of total input,
@@ -30,6 +34,7 @@ sealed interface ModelEvent {
         }
     }
 }
+enum class NativeSearchPhase { RUNNING, COMPLETED, FAILED, INCOMPLETE }
 data class ToolOutput(val callId: ToolCallId, val output: String)
 interface ModelSession {
     /** Applies to the next new request, never to transport resume of an in-flight request. */

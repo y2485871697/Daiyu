@@ -67,6 +67,7 @@ class VoiceRecognitionRefreshActivityTest : WiredActivityTestCase() {
         val reading = fixture.controller.voiceRuntime.configuration.value
         enter(); section("语音对话")
         reveal("voice-recognition-method", "语音设置").performClick()
+        var expectedKey = before.asrKey
         for (method in listOf("DOUBAO", "SYSTEM", "DOUBAO", "SYSTEM")) {
             val tag = if (method == "DOUBAO") "voice-asr-method:doubao" else "voice-asr-method:system"
             awaitNodeTouchReady(node(tag))
@@ -86,7 +87,9 @@ class VoiceRecognitionRefreshActivityTest : WiredActivityTestCase() {
             val current = checkNotNull(fixture.controller.voiceRuntime.conversationConfiguration.value)
             assertEquals(before.copy(dictation = method, revision = current.revision), current)
             if (method == "DOUBAO") {
-                node("settings-field:ASR API Key").performTextReplacement("synthetic-unsaved-draft")
+                node("settings-field:ASR API Key").assertTextContains(expectedKey)
+                    .performTextReplacement("synthetic-unsaved-draft")
+                expectedKey = "synthetic-unsaved-draft"
                 dismissIme()
             }
         }

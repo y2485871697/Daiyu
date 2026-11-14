@@ -169,8 +169,13 @@ class RunChildTasksTest {
             catalog.close()
             assertEquals(1L, child.cancelled.count)
             assertEquals(1, journal.enqueues.get()); assertEquals(1, child.opened.get())
+            child.release.countDown()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            while (journal.list("conversation").single().status == ChildTaskStatus.RUNNING &&
+                System.nanoTime() < deadline) Thread.sleep(5)
+            assertEquals(ChildTaskStatus.COMPLETED, journal.list("conversation").single().status)
+            assertEquals("retained result", journal.list("conversation").single().text)
         } finally { catalog.close(); close(supervisor, child) }
-        assertEquals("retained result", journal.list("conversation").single().text)
     }
 
     @Test fun wholeBatchValidationAndExplicitCapabilityPrecedeJournalAndNetwork() {

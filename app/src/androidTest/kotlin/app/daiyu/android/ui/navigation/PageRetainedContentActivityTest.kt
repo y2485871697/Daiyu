@@ -319,8 +319,11 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     }
                 } finally { ui.mainClock.autoAdvance = advancing }
             }
-            fun awaitReturnRefresh() = awaitControl("transition idle consumes the return refresh") {
-                invokeHost(activity, "getChatReturnRefresh") == null
+            fun awaitReturnRefresh() {
+                ui.waitForIdle()
+                awaitControl("transition idle consumes the return refresh") {
+                    invokeHost(activity, "getChatReturnRefresh") == null
+                }
             }
             val returned = returnWithRetainedRows()
             assertEquals("BACK_PRESS", returned.getString("kind"))
@@ -501,6 +504,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertNotNull("navigation must wait for transition idle before adopting the receipt", fixture.controller.videoSendState())
             }
         } finally { ui.mainClock.autoAdvance = advancing }
+        ui.waitForIdle()
         awaitControl("transition idle takes the video business refresh fallback") { fixture.controller.videoSendState() == null }
         awaitUniqueTag("chat-draft")
         assertDraft("")

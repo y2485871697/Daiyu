@@ -346,7 +346,21 @@ WORKSPACE_ENTRY_MODULES = (
 )
 
 
+WORKSPACE_IMPORT_PLATFORM_CLASSES = (
+    "app.daiyu.android.workspace.PrivateWorkspaceFilesTest", "app.daiyu.android.PrivateWorkspacePanelTest",
+)
+WORKSPACE_IMPORT_MODULES = (
+    "test_workspace_files_entry_contract", "test_workspace_entry_mutations_contract",
+    "test_linux_files_style_contract",
+    "test_workspace_import_scope", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKSPACE_IMPORT_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *WORKSPACE_IMPORT_MODULES, "-v"], "workspace-import-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKSPACE_ENTRY_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *WORKSPACE_ENTRY_MODULES, "-v"], "workspace-entry-targeted"

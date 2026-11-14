@@ -110,7 +110,8 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
             is ChatTimelineEntry.ContextLimit, is ChatTimelineEntry.Stopped -> ""
             is ChatTimelineEntry.Reconnect -> {
                 val legacy = app.daiyu.android.domain.ModelFailure.entries.firstOrNull { it.name == entry.reason }
-                legacy?.let { app.daiyu.android.model.reconnect.reconnectErrorDetails(it) } ?: entry.reason
+                app.daiyu.android.model.reconnect.reconnectErrorDetailsForDisplay(
+                    legacy?.let { app.daiyu.android.model.reconnect.reconnectErrorDetails(it) } ?: entry.reason)
             }
         }
         val model = (entry as? ChatTimelineEntry.Compression)?.model

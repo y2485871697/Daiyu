@@ -329,23 +329,36 @@ internal fun ChatMessageList(
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
             val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded || nestedTail.migrating || !clearanceLayout.active || clearanceLayout.correcting ||
+            if (nestedTail.migrating || !clearanceLayout.active || clearanceLayout.correcting ||
                 !canFollowBottom() || currentOcclusionPx <= 0 || !listState.canScrollForward) return
             val remeasurement = clearanceLayout.remeasurement ?: return
-            val layout = listState.layoutInfo
+            var layout = listState.layoutInfo
             if (layout.viewportSize.height <= 0) return
-            val last = layout.visibleItemsInfo.lastOrNull {
+            val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
+                nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
+                currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() }
+            if (!shortBoundedTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
+            var last = layout.visibleItemsInfo.lastOrNull {
                 it.index == currentTailIndex && it.key == currentTailKey
             } ?: return
             val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
             if (resumeFollowPending && tail != null && !tail.isStreaming &&
                 layout.visibleItemsInfo.any { it.key == tail.listKey } &&
                 (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) return
-            val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-            val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
-            if (correction == 0) return
             clearanceLayout.correcting = true
             try {
+                if (shortBoundedTail && last.size != nestedTail.contentHeight) {
+                    remeasurement.forceRemeasure()
+                    layout = listState.layoutInfo
+                    last = layout.visibleItemsInfo.lastOrNull {
+                        it.index == currentTailIndex && it.key == currentTailKey
+                    } ?: return
+                }
+                // A short body keeps its header: move the outer list before drawing, not its inner offset.
+                val tailClearance = if (shortBoundedTail) with(density) { 24.dp.roundToPx() } else currentFollowClearancePx
+                val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - tailClearance
+                val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
+                if (correction == 0) return
                 if (listState.dispatchRawDelta(correction.toFloat()) > 0f && clearanceLayout.active) {
                     // Raw delta may defer placement; finish it after the previous layout pass.
                     remeasurement.forceRemeasure()

@@ -134,6 +134,23 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "finally", "ui.mainClock.autoAdvance = true"):
             self.assertIn(token, case)
 
+    def test_short_growth_aligns_outer_geometry_before_drawing_without_inner_crop(self):
+        source = CHAT.read_text()
+        correction = source.split("fun correctFollowClearance() {", 1)[1].split("val requestedIndex", 1)[0]
+        for token in ("val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey",
+                      "nestedTail.contentHeight <= layout.viewportSize.height", "11.dp.roundToPx() + 24.dp.roundToPx()",
+                      "if (!shortBoundedTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return",
+                      "val tailClearance = if (shortBoundedTail)", "24.dp.roundToPx()",
+                      "dispatchRawDelta", "remeasurement.forceRemeasure()", "!canFollowBottom()",
+                      "shortBoundedTail && last.size != nestedTail.contentHeight", "layout = listState.layoutInfo"):
+            self.assertIn(token, correction)
+        device = DEVICE.read_text()
+        case = device.split("fun testShortReplyGrowingPastViewportKeepsTailPinnedDuringOuterCatchup()", 1)[1].split("fun testManualReadingDrawsThrough", 1)[0]
+        for token in ("for (shortHeight in listOf(160, 200))", "height = shortHeight.dp",
+                      "shortViewport.config[SemanticsProperties.VerticalScrollAxisRange].value()",
+                      "24f, (composer.top - shortBottom) / density"):
+            self.assertIn(token, case)
+
     def test_drawing_clip_uses_full_list_not_the_reading_clearance(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]

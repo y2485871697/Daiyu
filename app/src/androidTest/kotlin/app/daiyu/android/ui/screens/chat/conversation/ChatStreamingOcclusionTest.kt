@@ -343,6 +343,17 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             val composer = ui.onNodeWithTag("occlusion-composer").fetchSemanticsNode().boundsInRoot
+            for (shortHeight in listOf(160, 200)) {
+                ui.runOnUiThread { height = shortHeight.dp }
+                frame()
+                val shortViewport = ui.onNodeWithTag("chat-stream-viewport:tail").fetchSemanticsNode()
+                assertEquals("Short content retains its header instead of scrolling underneath it", 0f,
+                    shortViewport.config[SemanticsProperties.VerticalScrollAxisRange].value(), 1f)
+                val shortTail = ui.onNodeWithTag("occlusion-tail").fetchSemanticsNode().layoutInfo.coordinates
+                val shortBottom = shortTail.positionInRoot().y + shortTail.size.height
+                assertEquals("Even short growth stays above the composer on its first drawn frame",
+                    24f, (composer.top - shortBottom) / density, 2f / density)
+            }
             ui.runOnUiThread { height = 900.dp }
             var observedPartialViewport = false
             repeat(24) {

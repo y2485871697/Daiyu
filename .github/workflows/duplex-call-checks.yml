@@ -89,7 +89,7 @@ jobs:
           if [[ "$CHECK_SCOPE" == speech ]]; then
             classes=(app.daiyu.android.voice.providers.DoubaoPcmStreamTest app.daiyu.android.voice.StreamingPcmPlayerTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.voice.SpeechAudioFileTest app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.RemoteVoicePlaybackBudgetTest app.daiyu.android.VoiceHostTest app.daiyu.android.VoiceHostGateTest app.daiyu.android.voice.network.HttpVoiceNetworkTest app.daiyu.android.ActivityVoiceAccountPreviewHostTest app.daiyu.android.AccountPreviewSpeechPlayerTailTest app.daiyu.android.voice.account.PersonalVoicePreviewTest)
           else
-            classes=(app.daiyu.android.model.ResponsesWebSearchTest app.daiyu.android.model.NativeCompletionWebSearchTest app.daiyu.android.voice.control.VoiceNativeSearchActivityTest app.daiyu.android.VoiceCallPresentationOwnerTest app.daiyu.android.voice.control.VoiceCallControllerTest app.daiyu.android.voice.control.SpeechActivityDetectorTest app.daiyu.android.voice.control.VoiceCallTempFilesTest app.daiyu.android.context.ProductionCompactionPlacementTest app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
+            classes=(app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest app.daiyu.android.pet.AndroidPetModelPortTest app.daiyu.android.model.ResponsesWebSearchTest app.daiyu.android.model.NativeCompletionWebSearchTest app.daiyu.android.voice.control.VoiceNativeSearchActivityTest app.daiyu.android.VoiceCallPresentationOwnerTest app.daiyu.android.voice.control.VoiceCallControllerTest app.daiyu.android.voice.control.SpeechActivityDetectorTest app.daiyu.android.voice.control.VoiceCallTempFilesTest app.daiyu.android.context.ProductionCompactionPlacementTest app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
           fi
           filters=()
           for class in "${classes[@]}"; do filters+=(--tests "$class"); done
@@ -112,7 +112,9 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          required = {'app.daiyu.android.model.ResponsesWebSearchTest',
+          required = {'app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest',
+                      'app.daiyu.android.pet.AndroidPetModelPortTest',
+                      'app.daiyu.android.model.ResponsesWebSearchTest',
                       'app.daiyu.android.model.NativeCompletionWebSearchTest',
                       'app.daiyu.android.voice.control.VoiceNativeSearchActivityTest',
                       'app.daiyu.android.VoiceCallPresentationOwnerTest',

@@ -473,7 +473,7 @@ class AndroidPetModelPortTest {
     }
 
     @Test fun protocolFailureAndUnexpectedToolsAreNotSuccessfulPetReactions() {
-        val failures: List<(ModelEvent) -> Unit> = listOf({}, { throw IllegalStateException("incomplete") })
+        val failures: List<(ModelEvent) -> Unit> = listOf({}, {}, { throw IllegalStateException("incomplete") })
         failures.forEachIndexed { index, terminal ->
             val result = AtomicReference<PetModelResult>(); val finished = CountDownLatch(1)
             val lookups = AtomicInteger(); val opened = AtomicInteger()
@@ -484,6 +484,7 @@ class AndroidPetModelPortTest {
                 ModelPort { object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                         if (index == 0) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("t"), "forbidden", "{}")))
+                        else if (index == 1) sink(ModelEvent.NativeSearch("ws", NativeSearchPhase.RUNNING))
                         else { sink(ModelEvent.TextFinal("t", "not confirmed")); terminal(ModelEvent.TextFinal("t", "")) }
                     }
                     override fun cancel() {}

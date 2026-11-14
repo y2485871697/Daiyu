@@ -142,7 +142,7 @@ class AndroidPetModelPort internal constructor(
                             is ModelEvent.TextFinal -> texts[event.itemId] = event.text.take(8192)
                             is ModelEvent.InputEstimate -> Unit
                             is ModelEvent.Usage -> { input = event.inputTokens; output = event.outputTokens }
-                            is ModelEvent.ToolReady -> error("Pet model attempted a tool call")
+                            is ModelEvent.ToolReady, is ModelEvent.NativeSearch -> error("Pet model attempted a tool call")
                             is ModelEvent.ReasoningDelta, is ModelEvent.ReasoningFinal -> error("Pet model attempted reasoning")
                             is ModelEvent.ProtocolOutput -> Unit
                         }

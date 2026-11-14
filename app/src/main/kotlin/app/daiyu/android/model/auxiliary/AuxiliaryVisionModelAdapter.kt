@@ -94,7 +94,7 @@ internal class AuxiliaryVisionModelAdapter(
             session.next(emptyList()) { event ->
                 checkCancelled()
                 when (event) {
-                    is ModelEvent.ToolReady -> throw ModelRequestException(ModelFailure.PROTOCOL)
+                    is ModelEvent.ToolReady, is ModelEvent.NativeSearch -> throw ModelRequestException(ModelFailure.PROTOCOL)
                     is ModelEvent.TextDelta -> record(event.itemId, event.text, false)
                     is ModelEvent.TextFinal -> record(event.itemId, event.text, true)
                     is ModelEvent.ProtocolOutput -> {

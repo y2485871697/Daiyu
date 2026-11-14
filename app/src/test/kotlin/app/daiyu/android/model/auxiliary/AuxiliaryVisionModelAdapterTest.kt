@@ -318,6 +318,7 @@ class AuxiliaryVisionModelAdapterTest {
         protocols.forEach { protocol ->
             val failures = if (protocol == ProviderProtocol.RESPONSES) listOf(
                 responsePartial(),
+                responsePartial() + frame(json("response.web_search_call.in_progress").put("item_id", "unexpected-search")),
                 responsePartial() + frame(json("response.incomplete")),
                 responsePartial() + frame(json("response.failed")),
                 // next succeeds, but a provisional TextFinal absent from completed output is not evidence.

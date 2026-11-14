@@ -51,16 +51,30 @@ internal class ConversationWorkspaceAccess(private val context: Context,
         val privateWorkspaceRoots = listOf(defaultPath, java.io.File(context.filesDir.canonicalFile, "workspace").path).distinct()
         return ConversationWorkspaceEditor(raw, displayed, source, path, workspaces, workspacePaths, privateWorkspaceRoots)
     }
-    fun binding(sourceId: String, path: String): ConversationWorkspaceBinding =
-        ConversationWorkspaceSelection(context.filesDir).binding(sourceId, path)
+    private val recovery = PrivateWorkspaceRecovery.android(context)
+    private fun prepare(sourceId: String, path: String, cancelled: () -> Boolean = { false }) {
+        require(sourceId == "private") { "workspace_selection_root_required" }
+        val selected = java.io.File(path).toPath()
+        require(selected.isAbsolute && selected.normalize() == selected) { "workspace_selection_root_required" }
+        val roots = listOf(context.filesDir.absoluteFile, context.filesDir.toPath().toRealPath().toFile())
+            .map { java.io.File(it, "workspace").toPath() }
+        val root = roots.firstOrNull { selected.startsWith(it) } ?: error("workspace_selection_root_required")
+        recovery.prepare(root.relativize(selected).joinToString("/"), false, null, cancelled)
+    }
+
+    fun binding(sourceId: String, path: String): ConversationWorkspaceBinding {
+        prepare(sourceId, path)
+        return ConversationWorkspaceSelection(context.filesDir).binding(sourceId, path)
+    }
 
     fun directory(sourceId: String, path: String): ConversationWorkspaceDirectory {
+        prepare(sourceId, path)
         val selection = ConversationWorkspaceSelection(context.filesDir)
         val raw = ConversationWorkspaceCodec.encode(selection.binding(sourceId, path))
         return freeze(raw).use { run ->
             val host = run.resolved.hostDirectory
             val paths = PrivateWorkspacePaths(context.filesDir)
-            val files = PrivateWorkspaceFiles(paths)
+            val files = PrivateWorkspaceFiles(context)
             val relative = host.relativeTo(paths.ensureRoot()).invariantSeparatorsPath
             val shown = files.listAll(files.directoryAt(relative))
             ConversationWorkspaceDirectory(host.path, selection.parentPath(host), shown.entries.filter { it.directory }.map { it.name },
@@ -70,6 +84,7 @@ internal class ConversationWorkspaceAccess(private val context: Context,
 
     fun modifyEntry(sourceId: String, path: String, entry: PrivateWorkspaceFiles.Entry, name: String?,
         cancelled: () -> Boolean) {
+        prepare(sourceId, path, cancelled)
         val selection = ConversationWorkspaceSelection(context.filesDir)
         val raw = ConversationWorkspaceCodec.encode(selection.binding(sourceId, path))
         freeze(raw).use { run ->
@@ -77,18 +92,20 @@ internal class ConversationWorkspaceAccess(private val context: Context,
             val root = paths.ensureRoot()
             val relative = run.resolved.hostDirectory.relativeTo(root).invariantSeparatorsPath
             check(entry.relative.substringBeforeLast('/', "") == relative) { "workspace_entry_changed" }
-            val files = PrivateWorkspaceFiles(paths)
+            val files = PrivateWorkspaceFiles(context)
             if (name == null) files.deleteTree(entry, cancelled) else files.rename(entry, name, cancelled)
         }
     }
 
     fun createDirectory(sourceId: String, path: String, name: String, cancelled: () -> Boolean) {
+        prepare(sourceId, path, cancelled)
         val selection = ConversationWorkspaceSelection(context.filesDir)
         val raw = ConversationWorkspaceCodec.encode(selection.binding(sourceId, path))
         freeze(raw).use { run ->
-            val files = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(context.filesDir, run.resolved.hostDirectory),
-                allowDirectoryCreation = true)
-            files.createDirectory(null, name, cancelled)
+            val paths = PrivateWorkspacePaths(context.filesDir)
+            val files = PrivateWorkspaceFiles(context)
+            val relative = run.resolved.hostDirectory.relativeTo(paths.ensureRoot()).invariantSeparatorsPath
+            files.createDirectory(files.directoryAt(relative, cancelled), name, cancelled)
         }
     }
 

@@ -57,6 +57,7 @@ static int positive(const char *s) {
 }
 #include "daiyu_root_scope.h"
 #include "daiyu_rootfs_backup.h"
+#include "daiyu_workspace_repair.h"
 /* Called only before root_create(), when no scope or guest can exist. */
 static int root_pre_scope_failure(int result) {
     if(root_mode && signal(SIGPIPE,SIG_IGN)!=SIG_ERR) {
@@ -66,6 +67,8 @@ static int root_pre_scope_failure(int result) {
     return result;
 }
 int main(int argc, char **argv) {
+    int workspace_result = workspace_repair_main(argc, argv);
+    if (workspace_result >= 0) return workspace_result;
     int backup_result = rootfs_backup_main(argc, argv);
     if (backup_result >= 0) return backup_result;
     /* Read the actual inherited slave, without requiring a platform stty applet. */

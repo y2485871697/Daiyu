@@ -1,0 +1,40 @@
+name: 代鱼工作区权限恢复检查
+run-name: 代鱼工作区权限恢复检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        type: string
+        required: true
+      check_id:
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-workspace-recovery-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: 精确源码与真实Root元数据故障回归
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          mkdir -p workspace-checks
+          set -o pipefail
+          sudo python3 -B scripts/check_workspace_recovery.py 2>&1 | tee workspace-checks/native.log
+      - name: 上传原始结果
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼工作区恢复原始结果
+          path: workspace-checks/
+          if-no-files-found: error

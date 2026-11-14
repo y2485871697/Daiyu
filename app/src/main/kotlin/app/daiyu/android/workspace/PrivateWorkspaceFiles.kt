@@ -12,9 +12,11 @@ import java.util.UUID
 /** App-owned files only. Each operation walks pinned directory descriptors, never a SAF host path. */
 internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
     private val availableBytes: (File) -> Long = { it.usableSpace },
-    private val allowDirectoryCreation: Boolean = false) {
+    private val allowDirectoryCreation: Boolean = false,
+    private val recovery: PrivateWorkspaceRecovery? = null) {
     private val readOnly: Boolean get() = paths.readOnly
-    constructor(context: Context) : this(PrivateWorkspacePaths(context.filesDir))
+    constructor(context: Context) : this(PrivateWorkspacePaths(context.filesDir),
+        recovery = PrivateWorkspaceRecovery.android(context))
 
     internal data class Identity(val device: Long, val inode: Long, val mode: Int, val size: Long, val modified: Long)
     class Entry internal constructor(val relative: String, val name: String, val directory: Boolean,
@@ -204,6 +206,8 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
     fun delete(entry: Entry, cancelled: () -> Boolean = { false }) {
         check(!readOnly) { "workspace_read_only" }
         check(entry.relative.isNotEmpty()) { "workspace_root_protected" }
+        active(cancelled)
+        if (paths.recoveryAllowed) recovery?.prepare(entry.relative, false, entry.identities.last(), cancelled)
         val parentRelative = entry.relative.substringBeforeLast('/', "")
         val parent = Entry(parentRelative, "", true, 0, entry.identities.dropLast(1))
         pinned(parent, cancelled) { descriptor, _ ->
@@ -221,6 +225,8 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
     fun rename(entry: Entry, name: String, cancelled: () -> Boolean = { false }) = synchronized(publicationLock) {
         check(canModify(entry)) { "workspace_entry_protected" }
         WorkspaceEntryPolicy.requireName(name)
+        active(cancelled)
+        if (paths.recoveryAllowed) recovery?.prepare(entry.relative, false, entry.identities.last(), cancelled)
         val parentRelative = entry.relative.substringBeforeLast('/', "")
         val targetRelative = listOf(parentRelative, name).filter { it.isNotEmpty() }.joinToString("/")
         check(WorkspaceEntryPolicy.mutable(targetRelative, paths.rootfsMutations)) { "workspace_entry_protected" }
@@ -238,6 +244,8 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
     /** No-follow deletion; a cancelled nonempty-directory operation may have removed some children. */
     fun deleteTree(entry: Entry, cancelled: () -> Boolean = { false }) = synchronized(publicationLock) {
         check(canModify(entry)) { "workspace_entry_protected" }
+        active(cancelled)
+        if (paths.recoveryAllowed) recovery?.prepare(entry.relative, true, entry.identities.last(), cancelled)
         val parentRelative = entry.relative.substringBeforeLast('/', "")
         val parent = Entry(parentRelative, "", true, 0, entry.identities.dropLast(1))
         pinned(parent, cancelled) { descriptor, _ ->
@@ -273,6 +281,8 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
 
     private fun <T> pinned(entry: Entry?, cancelled: () -> Boolean, relative: String = entry?.relative.orEmpty(),
         block: (ParcelFileDescriptor, List<Identity>) -> T): T {
+        active(cancelled)
+        if (paths.recoveryAllowed) recovery?.prepare(relative, false, entry?.identities?.last(), cancelled)
         active(cancelled)
         paths.ensureRoot()
         val descriptors = mutableListOf<ParcelFileDescriptor>()

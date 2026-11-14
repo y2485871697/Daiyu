@@ -510,4 +510,73 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         catch (failure: IllegalStateException) { assertEquals("workspace_read_only", failure.message) }
         assertTrue(File(root, "new").isDirectory)
     }
+    fun testRecoveryRunsBeforeDeleteOnceAndNeverReplaysFailedDeletion() = fixture { files, _ ->
+        val workspace = File(files, "workspace").apply { mkdir() }
+        val folder = File(workspace, "backup").apply { mkdir() }
+        File(folder, "file").writeText("keep")
+        val calls = mutableListOf<Pair<String, Boolean>>()
+        val recovery = PrivateWorkspaceRecovery { relative, recursive, _, cancelled ->
+            assertFalse(cancelled())
+            calls += relative to recursive
+        }
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths(files), recovery = recovery)
+        val entry = access.list().entries.single()
+        calls.clear()
+        access.deleteTree(entry)
+        assertEquals(1, calls.count { it == ("backup" to true) })
+        assertFalse(folder.exists())
+        assertTrue(workspace.isDirectory)
+    }
+
+    fun testRecoveryFailureAndCancellationNeverStartMutation() = fixture { files, _ ->
+        val workspace = File(files, "workspace").apply { mkdir() }
+        val target = File(workspace, "keep").apply { writeText("keep") }
+        val entry = PrivateWorkspaceFiles(PrivateWorkspacePaths(files)).list().entries.single()
+        var calls = 0
+        val rejected = PrivateWorkspaceFiles(PrivateWorkspacePaths(files), recovery = PrivateWorkspaceRecovery { _, _, _, _ ->
+            calls++
+            error("workspace_recovery_failed")
+        })
+        try { rejected.deleteTree(entry); fail("failed recovery allowed deletion") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_recovery_failed", failure.message) }
+        assertEquals(1, calls)
+        assertEquals("keep", target.readText())
+        try { rejected.deleteTree(entry) { true }; fail("cancelled operation allowed") }
+        catch (_: InterruptedException) { }
+        assertEquals(1, calls)
+        assertEquals("keep", target.readText())
+    }
+
+    fun testRootfsAndStorageChooserNeverReceiveRecovery() = fixture { files, _ ->
+        val rootfs = File(files, "rootfs").apply { mkdir() }
+        File(rootfs, "keep").writeText("keep")
+        var calls = 0
+        val recovery = PrivateWorkspaceRecovery { _, _, _, _ -> calls++ }
+        for (paths in listOf(PrivateWorkspacePaths.existingRoot(files, rootfs),
+            PrivateWorkspacePaths.editableRootfs(files, rootfs), PrivateWorkspacePaths.storageRoot(files))) {
+            PrivateWorkspaceFiles(paths, recovery = recovery).list()
+        }
+        assertEquals(0, calls)
+        assertEquals("keep", File(rootfs, "keep").readText())
+    }
+
+    fun testRenameAndDeleteRecoverExactTargetBeforeParent() = fixture { files, _ ->
+        val workspace = File(files, "workspace").apply { mkdir() }
+        File(workspace, "old").writeText("bytes")
+        val calls = mutableListOf<String>()
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths(files), recovery = PrivateWorkspaceRecovery { relative, _, expected, _ ->
+            if (relative.isNotEmpty()) assertNotNull(expected)
+            calls += relative
+        })
+        val first = access.list().entries.single()
+        calls.clear()
+        access.rename(first, "new")
+        assertEquals("old", calls.first())
+        val renamed = access.list().entries.single()
+        calls.clear()
+        access.delete(renamed)
+        assertEquals("new", calls.first())
+        assertFalse(File(workspace, "new").exists())
+    }
+
 }

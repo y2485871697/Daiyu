@@ -9,6 +9,7 @@ internal class PrivateWorkspacePaths private constructor(private val filesDir: F
     constructor(filesDir: File) : this(filesDir, listOf("workspace"), true)
     internal val storage: File get() = filesDir.toPath().toRealPath().toFile()
     internal val readOnly: Boolean get() = !create
+    internal val recoveryAllowed: Boolean get() = create && rootParts == listOf("workspace")
     val root: File get() = rootParts.fold(filesDir) { parent, name -> File(parent, name) }
 
     /** Called on the owning worker. Existing home files are neither moved nor deleted. */

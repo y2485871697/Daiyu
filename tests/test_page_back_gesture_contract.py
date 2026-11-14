@@ -175,6 +175,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         for method in ('testToolbarFinalCopyRejectsSwipeThatWasDownBeforeToolbar',
                        'testToolbarFinalCopyRejectsPredictiveStartAndProgress'):
             self.assertIn('fun ' + method + '()', source)
+        self.assertIn('if (contention == 1) toolbar.performSemanticsAction(SemanticsActions.OnClick)', source)
 
     def test_swipe_is_full_page_and_lets_children_arbitrate_before_claiming(self):
         for guard in ('canNavigateBack && swipeDismissEnabled && resumed && !imeVisible',

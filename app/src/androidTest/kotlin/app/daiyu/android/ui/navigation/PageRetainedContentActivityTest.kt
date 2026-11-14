@@ -302,8 +302,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertEquals(0, fixture.opens.get())
             }
             fun awaitReturnRefresh() = awaitControl("transition idle consumes the return refresh") {
-                app.daiyu.android.MainActivity::class.java.getDeclaredField("chatReturnRefresh")
-                    .apply { isAccessible = true }.get(activity) == null
+                invokeHost(activity, "getChatReturnRefresh") == null
             }
             val returned = returnWithRetainedRows()
             assertEquals("BACK_PRESS", returned.getString("kind"))
@@ -333,15 +332,13 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             for (full in listOf(false, true)) recordSynchronous(startWindow = true, expectedRefresh = if (full) 1 else 0) {
                 val before = invokeHost(activity, "getChatState") as ChatScreenState
                 invokeHost(activity, "returnToChat", false)
-                val field = app.daiyu.android.MainActivity::class.java.getDeclaredField("chatReturnRefresh")
-                    .apply { isAccessible = true }
-                val pending = checkNotNull(field.get(activity))
+                val pending = checkNotNull(invokeHost(activity, "getChatReturnRefresh"))
                 invokeHost(activity, "returnToChat", full)
-                assertSame("same-owner return requests coalesce", pending, field.get(activity))
+                assertSame("same-owner return requests coalesce", pending, invokeHost(activity, "getChatReturnRefresh"))
                 invokeHost(activity, "returnToChat", false)
                 invokeHost(activity, "finishChatReturn", pending)
                 invokeHost(activity, "finishChatReturn", pending)
-                assertNull("settled work consumes the request exactly once", field.get(activity))
+                assertNull("settled work consumes the request exactly once", invokeHost(activity, "getChatReturnRefresh"))
                 val after = invokeHost(activity, "getChatState") as ChatScreenState
                 assertTrue("settled publication recalculates current composer admission", after.composer.enabled)
                 assertEquals(before.composer.text, after.composer.text)

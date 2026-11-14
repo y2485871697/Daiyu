@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ImageBitmap
@@ -849,17 +850,23 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             val source = checkNotNull(frame)
             mainThread { blockCopy = true }
             ui.mainClock.autoAdvance = false
+            fun clickToolbar() {
+                val toolbar = ui.onNodeWithTag("toolbar-final-copy")
+                if (contention == 1) toolbar.performSemanticsAction(SemanticsActions.OnClick) {
+                    assertTrue("toolbar OnClick must be handled", it())
+                } else toolbar.performClick()
+            }
             if (contention == 1) ui.onNodeWithTag("page-back-host").performTouchInput {
                 down(Offset(width * .02f, height * .6f))
             }
-            ui.onNodeWithTag("toolbar-final-copy").performClick()
+            clickToolbar()
             ui.mainClock.advanceTimeByFrame()
             ui.waitUntil(5_000) { waiting == 1 }
             assertEquals("toolbar keeps its live child until the fresh final copy completes", "settings", screen)
             assertEquals(0, backCount)
             assertTrue(source.frozen)
             assertNull("warm pixels never stand in for the final child", source.image)
-            ui.onNodeWithTag("toolbar-final-copy").performClick()
+            clickToolbar()
             assertEquals("repeated toolbar taps share one request", 1, waiting)
             if (contention == 1) ui.onNodeWithTag("page-back-host").performTouchInput {
                 moveTo(Offset(width * .70f, height * .6f), 160)

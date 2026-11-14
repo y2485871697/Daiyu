@@ -904,8 +904,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         val probe = PageBackInsetsProbe()
         val frames = mutableMapOf<Any, PageBackPreviewLayers.Frame>()
         var gesture: PageBackGestureState? = null
-        val firstInsets = IntSize(12, 12)
-        val recoveredInsets = if (stableChange) IntSize(20, 20) else firstInsets
+        val firstInsets = IntSize(12, 0)
+        val recoveredInsets = if (stableChange) IntSize(20, 0) else firstInsets
         fun color(page: String) = when (page) { "chat" -> Color.Red; "settings" -> Color.Blue; else -> Color.Green }
         fun parent(page: String) = when (page) { "chat" -> null; "settings" -> "chat"; else -> "settings" }
         fun awaitFrame(page: String) {
@@ -918,7 +918,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         fun applyInsets(value: IntSize) {
             mainThread { probe.apply(value) }
             ui.waitForIdle()
-            ui.waitUntil(5_000) { probe.observed == value }
+            ui.waitUntil(5_000) { probe.observed == value && probe.observedImeBottom == 0 }
         }
         try {
             mainThread {
@@ -938,7 +938,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                             androidx.compose.runtime.SideEffect { gesture = currentGesture }
                             PageBackHandler(enabled = target != null, onBack = back)
                             Box(Modifier.fillMaxSize().background(color(rendered))) {
-                                Box(Modifier.size(48.dp).testTag("nested-return-button").clickable(onClick = back))
+                                app.daiyu.android.ui.components.MiuixBackButton(onClick = back,
+                                    modifier = Modifier.testTag("nested-return-button"))
                             }
                         }
                     }
@@ -970,6 +971,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             for ((index, target) in listOf("settings", "chat").withIndex()) {
                 val source = screen
                 assertEquals(recoveredInsets, probe.observed)
+                assertEquals("system-bar recovery must not manufacture an IME", 0, probe.observedImeBottom)
                 if (kind == 1) ui.onNodeWithTag("nested-return-button").performClick()
                 else {
                     if (kind == 2) mainThread {
@@ -989,6 +991,10 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     assertTarget(color(target), progress)
                     if (kind == 2) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
                     else ui.onNodeWithTag("page-back-host").performTouchInput { up() }
+                }
+                if (kind == 1) ui.waitUntil(5_000) {
+                    if (screen != target) ui.mainClock.advanceTimeByFrame()
+                    screen == target
                 }
                 assertEquals("each commit returns exactly one level", target, screen)
                 assertEquals(index + 1, backCount)

@@ -50,7 +50,11 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         workflow = chat.split('private fun AssistantWorkflow(', 1)[1]
         self.assertIn('WorkProcessCard(work, ownerKey,', workflow)
         self.assertIn('MessageContent(steps, actions, imageLoader, markdown = true', workflow)
-        self.assertEqual(1, assistant.count('textBody = textBody'))
+        self.assertIn(
+            'MessageContent(ordered.leading, actions, imageLoader, markdown = true, textBody = textBody)',
+            assistant,
+        )
+        self.assertEqual(2, assistant.count('textBody = textBody'))
         self.assertNotIn('MessageContent(turn.content', assistant)
         self.assertNotIn('ReportedReasoningCard(', assistant)
         typing = (BASE / 'MarkdownTyping.kt').read_text()

@@ -126,6 +126,8 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         self.assertIn('val coordinates = drawerNode.layoutInfo.coordinates', sample)
         self.assertIn('val placed = drawerNode.layoutInfo.isPlaced', sample)
         self.assertIn('val attached = coordinates.isAttached', sample)
+        self.assertIn('Closed control must no longer place the drawer', tests)
+        self.assertIn('assertEquals(message, baseline.placed, frame.placed)', tests)
 
     def test_refresh_and_toggle_keep_authoritative_io_and_pending_gates(self):
         source = (APP / 'MainActivity.kt').read_text()

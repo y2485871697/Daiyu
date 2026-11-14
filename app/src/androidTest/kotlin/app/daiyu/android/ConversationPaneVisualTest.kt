@@ -202,7 +202,6 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                 original.lifecycle.addObserver(lifecycle)
             }
             ui.mainClock.autoAdvance = false
-            var openBaselineX: Float? = null
             // Two open returns plus an explicitly closed control; never replace Main's content.
             for (open in listOf(true, true, false)) {
                 if (!open) mainThread { invokeHost(original, "dismissSidebar") }
@@ -210,11 +209,11 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                 instrumentation.runOnMainSync { frames.clear(); sample!!.invoke("baseline"); armed = true }
                 val baseline = frames.first()
                 assertEquals(open, baseline.open)
-                assertTrue("home=$home open=$open baseline=$baseline must be placed and attached", baseline.placed && baseline.attached)
-                assertTrue("Baseline geometry must be finite", baseline.x.isFinite() && baseline.projectedWidth.isFinite())
-                if (open) openBaselineX = baseline.x
-                else assertTrue("Closed control must observe the drawer's actual translation",
-                    kotlin.math.abs(baseline.x - checkNotNull(openBaselineX)) > baseline.width * .5f)
+                assertTrue("home=$home open=$open baseline=$baseline must be attached", baseline.attached)
+                if (open) {
+                    assertTrue("Opened drawer must be placed: $baseline", baseline.placed)
+                    assertTrue("Baseline geometry must be finite", baseline.x.isFinite() && baseline.projectedWidth.isFinite())
+                } else assertFalse("Closed control must no longer place the drawer: $baseline", baseline.placed)
                 val expectedEpoch = resumeEpoch + if (home) 2 else 1
                 if (home) {
                     // Consume the inactive composition before STOP suspends its frame clock.
@@ -239,13 +238,16 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                         frames.any { it.kind == "draw" && it.epoch == expectedEpoch && it.lifecycle == Lifecycle.State.RESUMED })
                     frames.forEachIndexed { index, frame ->
                         val message = "home=$home sample=$index baseline=$baseline frame=$frame"
-                        assertTrue(message, frame.placed && frame.attached)
-                        assertTrue(message, frame.x.isFinite() && frame.projectedWidth.isFinite())
+                        assertTrue(message, frame.attached)
+                        assertEquals(message, baseline.placed, frame.placed)
                         assertEquals(message, open, frame.open)
-                        assertEquals(message, baseline.x, frame.x, .03f)
-                        assertEquals(message, baseline.width, frame.width)
-                        assertEquals(message, baseline.projectedWidth, frame.projectedWidth, .03f)
-                        assertEquals(message, baseline.rootWidth, frame.rootWidth)
+                        if (open) {
+                            assertTrue(message, frame.x.isFinite() && frame.projectedWidth.isFinite())
+                            assertEquals(message, baseline.x, frame.x, .03f)
+                            assertEquals(message, baseline.width, frame.width)
+                            assertEquals(message, baseline.projectedWidth, frame.projectedWidth, .03f)
+                            assertEquals(message, baseline.rootWidth, frame.rootWidth)
+                        }
                     }
                     assertEquals(task, original.taskId)
                     assertFalse(original.isDestroyed || original.isFinishing)

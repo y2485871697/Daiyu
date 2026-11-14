@@ -251,6 +251,9 @@ class SourceTests(unittest.TestCase):
                    workflow_id=397560064, status='completed', conclusion='success')
         jobs = [dict(name='增量Release编译（不运行全量）', conclusion='success')]
         source.verify(env, record, run, jobs, [])
+        targeted = dict(env, SMOKE_MODE='smoke', SMOKE_TEST_CLASSES='app.daiyu.android.ChatStatusBarInsetsTest')
+        source.verify(targeted, record, run, jobs, [])
+        self.assert_chat_status_bar_singleton_discovery()
         source.verify(dict(env, GITHUB_SHA='b' * 40), record, run, jobs, ['tests/test_stream_refresh_cost_contract.py'])
         with self.assertRaises(ValueError):
             source.verify(dict(env, GITHUB_SHA='b' * 40), record, run, jobs, ['app/src/main/kotlin/Changed.kt'])
@@ -266,6 +269,37 @@ class SourceTests(unittest.TestCase):
             source.verify(env, record, run, [dict(name='增量Release编译（不运行全量）', conclusion='failure')], [])
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         self.assertIn("inputs.source_variant == 'compile') && '代鱼增量Release包'", smoke)
+
+    def assert_chat_status_bar_singleton_discovery(self):
+        selector = (ROOT / 'scripts/smoke_boot.sh').read_text().split("<<'PYCOUNT'\n", 1)[1].split('\nPYCOUNT', 1)[0]
+        target = 'app.daiyu.android.ChatStatusBarInsetsTest'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'smoke').mkdir()
+            test = root / 'app/src/androidTest/kotlin/app/daiyu/android/ChatStatusBarInsetsTest.kt'
+            test.parent.mkdir(parents=True)
+            test.write_text('package app.daiyu.android\nclass ChatStatusBarInsetsTest : TestCase() {\n'
+                            ' fun testVisibility() {}\n fun testHome() {}\n}\n')
+            selected = []
+            for index in range(4):
+                env = dict(os.environ, SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=target,
+                           SMOKE_SHARD_COUNT='4', SMOKE_SHARD_INDEX=str(index),
+                           SMOKE_SCRIPT_DIR=str(ROOT / 'scripts'))
+                guard = "from unittest.mock import patch\nfrom pathlib import Path\n"
+                guard += "with patch.object(Path, 'rglob', side_effect=AssertionError('full androidTest scan')):\n"
+                guard += '    exec(' + repr(selector) + ')\n'
+                result = subprocess.run(['python3', '-c', guard], cwd=root, env=env,
+                                        capture_output=True, text=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                manifest = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                self.assertEqual('targeted', manifest['discovery_scope'])
+                self.assertEqual({target: 2}, manifest['all_classes'])
+                self.assertEqual([target], selection['requested_classes'])
+                selected += selection['selected_classes']
+                self.assertEqual(2 if selection['selected_classes'] else 0, selection['expected_tests'])
+                self.assertEqual('planned' if selection['selected_classes'] else 'filtered-empty-shard', selection['status'])
+            self.assertEqual([target], selected)
 
     def test_daily_source_is_release_but_cannot_be_relabelled_full(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123', SOURCE_VARIANT='daily')

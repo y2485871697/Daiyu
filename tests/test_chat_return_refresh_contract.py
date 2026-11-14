@@ -175,5 +175,32 @@ class ContentRecoveryWitnessContract(unittest.TestCase):
         self.assertNotIn("!enabled", method)
         self.assertIn("incident.epoch != backGeneration.get()", method)
 
+
+    def test_chat_status_bar_space_ignores_visibility_but_keeps_live_bottom_insets(self):
+        root = Path(__file__).resolve().parents[1]
+        chat = (root / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatScreen.kt").read_text()
+        self.assertIn(".windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)", chat)
+        self.assertNotIn("statusBarsPadding", chat)
+        self.assertIn(".windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))", chat)
+        self.assertNotIn("systemBarsIgnoringVisibility", chat)
+        self.assertNotIn("navigationBarsIgnoringVisibility", chat)
+        self.assertNotIn("getInsetsIgnoringVisibility", chat)
+
+    def test_status_bar_regression_observes_native_draws_before_visibility_and_home_resume(self):
+        root = Path(__file__).resolve().parents[1]
+        android = (root / "app/src/androidTest/kotlin/app/daiyu/android/ChatStatusBarInsetsTest.kt").read_text()
+        for source in ("ViewTreeObserver.OnDrawListener", "controller.hide(status)", "controller.show(status)",
+                       "getInsetsIgnoringVisibility(status)", "GLOBAL_ACTION_HOME", "Lifecycle.Event.ON_RESUME",
+                       "restoreOriginalHost(original)", 'node("chat-messages")', "awaitImeFrame",
+                       "testStatusBarVisibilityKeepsEveryNativeChatDrawStableAndImeLive",
+                       "testHomeReturnKeepsChatGeometryFromFirstNativeDraw"):
+            self.assertIn(source, android)
+        for forbidden in ("setContent", "captureScreenNode", "takeScreenshot", "SDK_INT", "Thread.sleep"):
+            self.assertNotIn(forbidden, android)
+        self.assertLess(android.index("observer.addOnDrawListener(listener)"), android.index("mainThread(change)"))
+        flow = (root / "scripts/smoke_boot.sh").read_text()
+        self.assertIn("app.daiyu.android.ChatStatusBarInsetsTest", flow)
+        self.assertIn("chat_status_bar_only", flow)
+
 if __name__ == '__main__':
     unittest.main()

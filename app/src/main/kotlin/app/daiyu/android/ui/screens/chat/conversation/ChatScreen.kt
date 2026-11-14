@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -119,7 +119,7 @@ internal fun DaiyuChatScreen(
     Box(Modifier.fillMaxSize().onGloballyPositioned { overlayOrigin = it.positionInRoot() }) {
     Column(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
-            .statusBarsPadding(),
+            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility),
     ) {
         ChatTopBar(state.title, actions, modifier = dismissInputOnTap, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,

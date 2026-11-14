@@ -22,6 +22,7 @@ class TestRefreshContract(unittest.TestCase):
     def test_chat_checks_metadata_does_not_allow_other_workflows(self):
         validate_changes(['.github/workflows/chat-workflow-checks.yml',
                           '.github/workflows/popup-layout-checks.yml',
+                          '.github/workflows/reconnect-details-checks.yml', 'scripts/smoke_boot.sh',
                           'scripts/acceptance/record_tool_tests.py', 'scripts/verify_smoke_source.py'])
         for name in ('.github/workflows/build.yml', '.github/workflows/unknown-checks.yml',
                      '.github/workflows/chat-workflow-checks.yml.bak', '.github/actions/example/action.yml'):
@@ -35,6 +36,8 @@ class TestRefreshContract(unittest.TestCase):
                      'scripts/prepare-speech-runtime.py', '.github/workflows/build.yml',
                      'scripts/acceptance/unknown.py', 'scripts/verify_smoke_source.py.bak',
                      '.github/workflows/popup-layout-checks.yml.bak',
+                     '.github/workflows/reconnect-details-checks.yml.bak', 'scripts/smoke_boot.sh.bak',
+                     'scripts/unknown.sh', '.github/workflows/reconnect-details-checks.yml/extra',
                      'app/src/androidTest/../main/Example.kt', 'tests//a', 'tests\\a', '/tests/a'):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 validate_changes([name])

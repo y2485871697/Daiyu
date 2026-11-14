@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -94,7 +95,7 @@ class PopupTitleGeometryTest : WiredActivityTestCase() {
             for (back in listOf(false, true)) for (close in listOf(false, true)) {
                 show("assistant-sheet", dark, fontScale) {
                     AssistantPreviewDialog(true, title, {}, onBack = if (back) ({}) else null, showCloseButton = close) {
-                        Box(Modifier.height(44.dp).testTag("title-body"))
+                        Box(Modifier.fillMaxWidth().height(44.dp).testTag("title-body"))
                     }
                 }
                 assertCentered(title, "assistant-sheet", "title-body", if (!back && !close) 12f else null)
@@ -107,7 +108,7 @@ class PopupTitleGeometryTest : WiredActivityTestCase() {
         for (close in listOf(false, true)) for (rtl in listOf(false, true)) {
             show("chat-selection-sheet", fontScale = 1.3f, rtl = rtl) {
                 ChatSelectionSheet("选择模型", {}, showCloseButton = close, subtitle = "副标题仍按原位置显示") {
-                    Box(Modifier.height(44.dp).testTag("title-body"))
+                    Box(Modifier.fillMaxWidth().height(44.dp).testTag("title-body"))
                 }
             }
             assertCentered("选择模型", "chat-selection-sheet")
@@ -134,7 +135,7 @@ class PopupTitleGeometryTest : WiredActivityTestCase() {
     fun testCompressionStyleBottomHeadingUsesModerateGap() {
         for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
             show("usage-glass-dialog", dark, fontScale) {
-                UsageGlassDialog("压缩会话", {}) { Box(Modifier.height(44.dp).testTag("title-body")) }
+                UsageGlassDialog("压缩会话", {}) { Box(Modifier.fillMaxWidth().height(44.dp).testTag("title-body")) }
             }
             assertCentered("压缩会话", "usage-glass-dialog", "title-body", 12f)
         }

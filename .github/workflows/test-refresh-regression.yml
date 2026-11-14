@@ -42,7 +42,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: daiyu-test-refresh-${{ github.ref }}
+  group: daiyu-test-refresh-${{ github.ref }}${{ inputs.smoke_classes == 'app.daiyu.android.PopupTitleGeometryTest,app.daiyu.android.AssistantPickerVisualTest,app.daiyu.android.SharedSheetSpacingActivityTest,app.daiyu.android.CollaborationEmptyStateTest' && '-popup-title' || '' }}
   cancel-in-progress: false
 env:
   EXPECTED_SHA: ${{ inputs.expected_sha }}

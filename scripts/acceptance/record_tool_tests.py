@@ -310,6 +310,7 @@ POPUP_TITLE_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
     "PopupTitleGeometryTest", "AssistantPickerVisualTest", "SharedSheetSpacingActivityTest", "CollaborationEmptyStateTest",
 ))
 POPUP_TITLE_MODULES = (
+    "test_test_refresh_contract",
     "test_popup_title_contract", "test_shared_sheet_spacing_contract", "test_assistant_picker_frame_contract",
     "test_chat_attachment_sizing_contract", "test_voice_tone_selection_contract",
     "test_bottom_sheet_edge_contract", "test_voice_personal_menu_contract",

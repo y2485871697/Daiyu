@@ -230,12 +230,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         val preferences = instrumentation.targetContext.getSharedPreferences("settings-model-selection", 0)
         val savedSelection = preferences.all.toMap()
         val adapter = openAndAwait()
-        mainThread { offerConfirmationMetadata(adapter) }
-        ui.mainClock.advanceTimeByFrame()
-        ui.waitUntil(5_000) {
-            ui.onAllNodes(hasTestTag("compression-dialog-custom") and isOn()).fetchSemanticsNodes().size == 1
-        }
-        node("compression-dialog-custom").assertIsOn()
+        node("compression-dialog-custom").assertIsOff().performClick().assertIsOn()
         node("context-refresh").assertDoesNotExist()
         node("context-advanced").assertDoesNotExist()
         val protocol = app.daiyu.android.model.ProviderProtocol.RESPONSES

@@ -851,7 +851,7 @@ class MainActivity : ComponentActivity() {
         var error by mutableStateOf<String?>(null)
     }
     private var composerShortcutPick by mutableStateOf<ComposerShortcutPick?>(null)
-    private fun composerShortcutAvailable() = activityUsable() && selectionReady && retainedPage == "chat" &&
+    private fun composerShortcutAvailable() = activityUsable() && chatReturnRefresh == null && selectionReady && retainedPage == "chat" &&
         !sidebarVisible && inlineMessageEditor == null && controller.ready && !controller.dataBusy && chatState.composer.enabled &&
         pendingTextSend == null && controller.textSendState() == null && !imageHost.sending && !videoSending &&
         !shizukuWritesBlocked && terminalEditor == null && virtualDisplayEditor == null && guiEditor == null
@@ -1152,6 +1152,8 @@ class MainActivity : ComponentActivity() {
         contextManagementVisit = ContextManagementVisit(owner, adapter)
     }
 
+    private class ChatReturnRefresh(val conversation: ConversationId?, val editor: Long, var full: Boolean)
+    private var chatReturnRefresh by mutableStateOf<ChatReturnRefresh?>(null)
     private var retainedPageState by mutableStateOf("chat")
     private var offlineSpeechReturnPage = "chat"
     private var usageReturnPage = "chat"
@@ -1161,6 +1163,7 @@ class MainActivity : ComponentActivity() {
         get() = retainedPageState
         set(value) {
             app.daiyu.android.diagnostics.synchronousTrace("daiyu.back.route-change") {
+            if (value != "chat") chatReturnRefresh = null
             if (value != retainedPageState) {
                 revokeWorkspaceVisit()
                 resetRootExitConfirmation()
@@ -1374,7 +1377,7 @@ class MainActivity : ComponentActivity() {
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
-            if (field != value) { closeBrowserVisualVisit() }
+            if (field != value) { chatReturnRefresh = null; closeBrowserVisualVisit() }
             if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
@@ -2309,7 +2312,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                        composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
+                                        composer = projectedVoiceComposer().let { it.copy(enabled = it.enabled && routeActive && chatReturnRefresh == null) }.copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
                                             contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
                                             contextTokensText = contextUsageLabels.second,
                                             voiceModes = buildSet {
@@ -2394,6 +2397,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                val returnRefreshRequest = chatReturnRefresh
                 app.daiyu.android.ui.navigation.PageBackGestureHost(
                     routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,
                     contentKey = when (retainedPage) {
@@ -2414,7 +2418,9 @@ class MainActivity : ComponentActivity() {
                     previewScopeKey = selected?.id,
                     retainedRootKey = "chat",
                     retainedRootVisible = chatBodyVisible,
-                    retainedRootActive = retainedPage == "chat",
+                    retainedRootActive = retainedPage == "chat" && returnRefreshRequest == null,
+                    idleRequestKey = returnRefreshRequest,
+                    onTransitionIdle = { finishChatReturn(returnRefreshRequest) },
                     retainedRootScopeKey = appearance,
                     retainedRootContent = rootChatContent,
                 ) {
@@ -3118,7 +3124,7 @@ class MainActivity : ComponentActivity() {
         val renderedInlineVisit = inlineMessageEditor?.visit
         val renderedActionVisit = messageActionVisit
         val renderedSpeechOwner = speechHost.owner
-        fun editorMatches() = activityUsable() && voiceForeground && messageActionVisit === renderedActionVisit &&
+        fun editorMatches() = activityUsable() && voiceForeground && chatReturnRefresh == null && messageActionVisit === renderedActionVisit &&
             selectionReady && pendingTextSend == null && controller.textSendState() == null &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
             inlineMessageEditor?.visit === renderedInlineVisit
@@ -3259,7 +3265,7 @@ class MainActivity : ComponentActivity() {
                 renderedRevealAdvance?.invoke()
             }
         },
-        onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
+        onInteractiveModeChange = { enabled -> if (currentChat()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },
         onVoiceLongPress = { admitVoiceModePicker() && currentChat() },
         onVoice = voice@{
@@ -3441,9 +3447,10 @@ class MainActivity : ComponentActivity() {
             val generation = controlTouchGeneration
             window.decorView.post { if (controlTouchGeneration == generation) { controlTouchActive = false; controlTouchOwner = null } }
         },
-        onModelClick = { guard { if (currentChat()) openChatModels() } }, onReasoningClick = { thinkingPicker = true },
-        onAssistantClick = { openAssistantPicker() }, onCopy = { id -> copyMessage(id) },
+        onModelClick = { guard { if (currentChat()) openChatModels() } }, onReasoningClick = { if (currentChat()) thinkingPicker = true },
+        onAssistantClick = { if (currentChat()) openAssistantPicker() }, onCopy = { id -> copyMessage(id) },
         onMenuAction = { action -> guard {
+            if (chatReturnRefresh != null) return@guard
             if (inlineMessageEditor != null) {
                 if (currentChat()) when (action) {
                     ChatMenuAction.ATTACH_IMAGE -> pickEditImages()
@@ -5751,7 +5758,7 @@ class MainActivity : ComponentActivity() {
         consumeOpenedAttachments()
     }
     override fun onResume() {
-        super.onResume(); suspendMessageActionEditor(); voiceForeground = true; speechHost.setForeground(true)
+        super.onResume(); chatReturnRefresh = null; suspendMessageActionEditor(); voiceForeground = true; speechHost.setForeground(true)
         resumeOrdinaryDialogActions()
         if (retainedPage == "session-gateway" && gatewayReloadPending) loadSessionGateway(restore = true)
         chatReferencePick?.pickerAway = false
@@ -5824,6 +5831,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        chatReturnRefresh = null
         suspendMessageActionEditor()
         suspendOrdinaryDialogActions()
         resetRootExitConfirmation()
@@ -5937,6 +5945,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        chatReturnRefresh = null
         toolPresentations.clear()
         suspendOrdinaryDialogActions()
         humanBrowsers.values.forEach { it.close() }
@@ -6028,10 +6037,21 @@ class MainActivity : ComponentActivity() {
         dismissSidebarState()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
-        if (activityUsable()) {
-            // A recreated video editor can only adopt its retained receipt after becoming visible.
-            if (refreshState || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
+        if (activityUsable() && voiceForeground) {
+            val pending = chatReturnRefresh?.takeIf { it.conversation == selected?.id && it.editor == editorGeneration }
+            if (pending == null) chatReturnRefresh = ChatReturnRefresh(selected?.id, editorGeneration, refreshState)
+            else pending.full = pending.full || refreshState
+            chatState = chatState.copy(composer = chatState.composer.copy(enabled = false))
         }
+    }
+
+    private fun finishChatReturn(request: ChatReturnRefresh?) {
+        if (request == null || chatReturnRefresh !== request || !activityUsable() || !voiceForeground ||
+            retainedPage != "chat" || !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return
+        chatReturnRefresh = null
+        if (request.conversation != selected?.id || request.editor != editorGeneration) return
+        // Adopt receipts only after the existing transition has finished, never inside its commit.
+        if (request.full || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
     }
     private fun openSkillManagement() {
         skillsReturnPage = if (retainedPage == "settings") "settings" else "chat"
@@ -6749,7 +6769,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private fun currentChatControlAvailable() = voiceForeground && retainedPage == "chat" && !sidebarVisible
+    private fun currentChatControlAvailable() = voiceForeground && chatReturnRefresh == null && retainedPage == "chat" && !sidebarVisible
     private fun supplementEditor() = SupplementEditor(selected?.id?.value, editorGeneration, draftRevision, draft)
     private fun receiptSupplementEditor(): SupplementEditor {
         val current = supplementEditor()
@@ -7144,7 +7164,7 @@ class MainActivity : ComponentActivity() {
             }.toMap()
             val state = controlOwner?.let { controller.runState(it) }
             val phase = composerPhaseForRun(state?.pauseRequested)
-            val composerAvailable = !sidebarVisible && controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true &&
+            val composerAvailable = chatReturnRefresh == null && !sidebarVisible && controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true &&
                 controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
                 !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
             val allowed = composerAvailable && !controller.dataBusy

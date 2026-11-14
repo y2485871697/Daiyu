@@ -383,6 +383,8 @@ internal fun PageBackGestureHost(
     retainedRootActive: Boolean = retainedRootVisible,
     retainedRootScopeKey: Any? = null,
     retainedRootContent: (@Composable (Boolean) -> Unit)? = null,
+    idleRequestKey: Any? = null,
+    onTransitionIdle: () -> Unit = {},
     previewCapture: suspend (PageBackPreviewLayers.Frame) -> ImageBitmap = { it.layer.toImageBitmap() },
     content: @Composable () -> Unit,
 ) {
@@ -608,6 +610,11 @@ internal fun PageBackGestureHost(
             diagnosticSettling -> "settle"
             else -> "idle"
         }
+    }
+
+    val currentTransitionIdle by rememberUpdatedState(onTransitionIdle)
+    LaunchedEffect(layers, visualRouteKey, resumed, activeDeparture, state.active, state.gestureVisualActive, idleRequestKey) {
+        if (resumed && !activeDeparture && !state.active && !state.gestureVisualActive) currentTransitionIdle()
     }
 
     val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.returnSkipped && !departure.forwardSkipped && state.previewAllowed

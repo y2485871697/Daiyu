@@ -237,7 +237,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         assertFalse(app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS)
         runtime.enabled = false
         runtime.clear()
-        fun recordSynchronous(startWindow: Boolean, expectedRefresh: Int = 1, action: () -> Unit): org.json.JSONObject {
+        fun recordSynchronous(startWindow: Boolean, expectedRefresh: Int = 1, expectedPublish: Int = 1, action: () -> Unit): org.json.JSONObject {
             runtime.clear()
             mainThread {
                 if (startWindow) recorder.start(Any(), app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.BACK_PRESS)
@@ -256,10 +256,10 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val phases = incident.getJSONArray("phases")
             val refreshCount = (0 until phases.length()).map { phases.getJSONObject(it) }
                 .filter { it.getString("phase") == "CHAT_REFRESH" }.sumOf { it.getInt("count") }
-            val publish = (0 until phases.length()).map { phases.getJSONObject(it) }
-                .single { it.getString("phase") == "CHAT_PUBLISH" }
+            val publishCount = (0 until phases.length()).map { phases.getJSONObject(it) }
+                .filter { it.getString("phase") == "CHAT_PUBLISH" }.sumOf { it.getInt("count") }
             assertEquals("count synchronous refreshes, not merely visible compositions", expectedRefresh, refreshCount)
-            assertEquals(1, publish.getInt("count"))
+            assertEquals(expectedPublish, publishCount)
             assertFalse("unchanged rendered history must not perform another cold SHA", (0 until phases.length())
                 .any { phases.getJSONObject(it).getString("phase") == "MESSAGE_ACTION_REVISION" })
             return incident
@@ -284,8 +284,9 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             setDraft("return refresh count draft")
             openSettings() // Keep production MainActivity content and its real returnToChat wiring.
             ui.waitForIdle()
-            fun returnWithRetainedRows(): org.json.JSONObject = recordSynchronous(startWindow = false, expectedRefresh = 0) {
+            fun returnWithRetainedRows(): org.json.JSONObject = recordSynchronous(startWindow = false, expectedRefresh = 0, expectedPublish = 0) {
                 val before = invokeHost(activity, "getChatState") as ChatScreenState
+                val staleControls = retainedControls(activity)
                 activity.onBackPressedDispatcher.onBackPressed()
                 assertEquals("chat", invokeHost(activity, "getRetainedPage"))
                 assertEquals(false, invokeHost(activity, "getSidebarVisible"))
@@ -294,6 +295,15 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 assertEquals(before.contentRevision, after.contentRevision)
                 assertEquals(before.scrollRequest, after.scrollRequest)
                 assertEquals(before.composer.text, after.composer.text)
+                assertFalse("pending return cannot admit the retained composer", after.composer.enabled)
+                staleControls.onSend(before.composer.text)
+                staleControls.onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.SETTINGS)
+                assertEquals("stale callbacks cannot leave the pending return", "chat", invokeHost(activity, "getRetainedPage"))
+                assertEquals(0, fixture.opens.get())
+            }
+            fun awaitReturnRefresh() = awaitControl("transition idle consumes the return refresh") {
+                app.daiyu.android.MainActivity::class.java.getDeclaredField("chatReturnRefresh")
+                    .apply { isAccessible = true }.get(activity) == null
             }
             val returned = returnWithRetainedRows()
             assertEquals("BACK_PRESS", returned.getString("kind"))
@@ -303,19 +313,23 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 .single { it.getString("phase") == "ROUTE" }
             assertEquals(1, route.getInt("count"))
             // route_changed is a later Compose observation; the synchronous route is asserted above.
+            awaitReturnRefresh()
             awaitUniqueTag("chat-draft")
             assertDraft("return refresh count draft")
-            for (page in listOf("permission-check", "skills")) {
+            for (page in listOf("permission-check", "skills", "providers")) {
                 mainThread {
                     if (page == "skills") invokeHost(activity, "openSkillManagement")
+                    else if (page == "providers") invokeHost(activity, "modelSettings")
                     else invokeHost(activity, "setRetainedPage", page)
                 }
                 ui.waitForIdle()
                 returnWithRetainedRows()
+                awaitReturnRefresh()
                 awaitUniqueTag("chat-draft")
                 assertDraft("return refresh count draft")
             }
-            recordSynchronous(startWindow = true) { invokeHost(activity, "returnToChat") }
+            recordSynchronous(startWindow = true, expectedRefresh = 0, expectedPublish = 0) { invokeHost(activity, "returnToChat") }
+            awaitReturnRefresh()
             repeat(3) {
                 recordSynchronous(startWindow = true) { invokeHost(activity, "refresh") }
             }
@@ -442,8 +456,9 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             assertEquals(editor.text, (invokeHost(activity, "getChatState") as ChatScreenState).composer.text)
             activity.onBackPressedDispatcher.onBackPressed()
             assertEquals("chat", invokeHost(activity, "getRetainedPage"))
-            assertNull("navigation must take the business refresh fallback", fixture.controller.videoSendState())
+            assertNotNull("navigation must wait for transition idle before adopting the receipt", fixture.controller.videoSendState())
         }
+        awaitControl("transition idle takes the video business refresh fallback") { fixture.controller.videoSendState() == null }
         awaitUniqueTag("chat-draft")
         assertDraft("")
         assertEquals(0, fixture.opens.get())

@@ -80,6 +80,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var sliderValue by mutableStateOf(0.2f)
     private var inputText by mutableStateOf("a text field with selectable content")
     private var immediateCaptureRequests = 0
+    private var idleRequest by mutableStateOf(0)
+    private val idleRoutes = mutableListOf<String>()
     private lateinit var horizontal: ScrollState
 
     private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, rtl: Boolean = false, immediateCapture: Boolean = false, lifecycleOwner: androidx.lifecycle.LifecycleOwner? = null, onPageComposition: () -> Unit = {}) {
@@ -99,6 +101,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                         backTargetKey = if (renderedRoute == "test-page") "previous-page" else null,
                         captureFromContent = !horizontalChild && !clickableRows && !sliderChild && !textChild,
+                        idleRequestKey = idleRequest,
+                        onTransitionIdle = { idleRoutes.add(renderedRoute) },
                         previewCapture = { frame ->
                             if (immediateCapture && frame.navigationFrozen) {
                                 immediateCaptureRequests++
@@ -821,6 +825,49 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeByFrame()
             ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private fun assertIdleWaitsForMotion(commit: Boolean) {
+        predictive = false
+        navigateOnBack = true
+        mount(capturePreviousPage = true, immediateCapture = true)
+        ui.mainClock.autoAdvance = false
+        try {
+            idleRoutes.clear()
+            ui.onNodeWithTag("page-back-surface").performTouchInput {
+                down(Offset(width * .1f, height * .6f))
+                moveTo(Offset(width * (if (commit) .8f else .4f), height * .6f), 180)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            assertTrue("drag cannot notify transition idle", idleRoutes.isEmpty())
+            mainThread { idleRequest++ }
+            ui.mainClock.advanceTimeByFrame()
+            assertTrue("a request during drag still waits", idleRoutes.isEmpty())
+            ui.onNodeWithTag("page-back-surface").performTouchInput {
+                if (!commit) {
+                    moveTo(Offset(width * .2f, height * .6f), 100)
+                    advanceEventTime(200)
+                }
+                up()
+            }
+            ui.mainClock.advanceTimeBy(48)
+            assertTrue("return or cancel settle cannot notify idle", idleRoutes.isEmpty())
+            ui.mainClock.advanceTimeBy(1200)
+            ui.waitForIdle()
+            assertEquals(listOf(if (commit) "previous-page" else "test-page"), idleRoutes)
+            assertEquals(if (commit) 1 else 0, backCount)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testTransitionIdleWaitsForCommittedDeparture() = assertIdleWaitsForMotion(commit = true)
+    fun testTransitionIdleWaitsForCancelledGesture() = assertIdleWaitsForMotion(commit = false)
+
+    fun testTransitionIdleConsumesNewRequestOnAlreadyIdleRoute() {
+        mount(capturePreviousPage = true)
+        idleRoutes.clear()
+        mainThread { idleRequest++ }
+        ui.waitForIdle()
+        assertEquals(listOf("test-page"), idleRoutes)
     }
 
     fun testHorizontalSwipeCommitsTheRecordedDepartureWithPredictionDisabled() {

@@ -68,6 +68,7 @@ internal fun SubAgentSettingsScreen(
             }
             return@PageBackStack
         }
+        val pageReturn = app.daiyu.android.ui.navigation.LocalPageBackToolbarReturn.current
         var add by remember { mutableStateOf(false) }
         var rename by remember { mutableStateOf<SubAgentPreset?>(null) }
         var delete by remember { mutableStateOf<SubAgentPreset?>(null) }
@@ -79,7 +80,7 @@ internal fun SubAgentSettingsScreen(
             WithoutPressRipple {
                 Scaffold(containerColor = settingsPageBackground(),
                     topBar = { TopAppBar(title = { Text("子代理组") }, navigationIcon = {
-                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
+                        IconButton(onClick = { if (pageReturn == null) onBack() else pageReturn(onBack) }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
                     }, colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())) },
                     floatingActionButtonPosition = FabPosition.Center,
                     floatingActionButton = {
@@ -145,6 +146,7 @@ internal fun SubAgentSettingsScreen(
 @Composable
 private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: String, onBack: () -> Unit,
     isCurrentRoute: Boolean, modelSource: SubAgentModelSource) {
+    val pageReturn = app.daiyu.android.ui.navigation.LocalPageBackToolbarReturn.current
     val accent = app.daiyu.android.ui.components.subagent.conversationAgentColors().accent
     val state = editor.observe()
     val lastLoadedConfig = remember(editor) { arrayOfNulls<ConversationSubAgentConfig>(1) }
@@ -164,7 +166,7 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
     WithoutPressRipple {
         Scaffold(containerColor = settingsPageBackground(),
             topBar = { TopAppBar(title = { Text(groupName) }, navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = accent) }
+                IconButton(onClick = { if (pageReturn == null) onBack() else pageReturn(onBack) }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = accent) }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())) },
             floatingActionButtonPosition = FabPosition.Center,
             floatingActionButton = {

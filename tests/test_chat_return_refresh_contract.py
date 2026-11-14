@@ -22,16 +22,20 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
 
     def test_return_keeps_cleanup_order_guards_and_only_the_final_refresh(self):
         returned = body(self.main, 'private fun returnToChat(refreshState: Boolean)')
-        self.assertEqual('''
-        dismissSidebarState()
-        dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
-        cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
-        if (activityUsable()) {
-            // A recreated video editor can only adopt its retained receipt after becoming visible.
-            if (refreshState || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
-        }
-    ''', returned)
-        self.assertEqual(1, returned.count('refresh()'))
+        for cleanup in ('dismissSidebarState()', 'dismissChatModels()', 'cancelRestorePreview()', 'retainedPage = "chat"'):
+            self.assertIn(cleanup, returned)
+        self.assertIn('chatReturnRefresh = ChatReturnRefresh(selected?.id, editorGeneration, refreshState)', returned)
+        self.assertIn('pending.full = pending.full || refreshState', returned)
+        self.assertIn('chatState.composer.copy(enabled = false)', returned)
+        self.assertNotIn('refresh()', returned)
+        self.assertNotIn('publishChat(', returned)
+        settled = body(self.main, 'private fun finishChatReturn(')
+        for guard in ('chatReturnRefresh !== request', '!activityUsable()', '!voiceForeground',
+                      'retainedPage != "chat"', 'Lifecycle.State.RESUMED', 'request.conversation != selected?.id',
+                      'request.editor != editorGeneration'):
+            self.assertIn(guard, settled)
+        self.assertIn('if (request.full || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)', settled)
+        self.assertLess(settled.index('chatReturnRefresh = null'), settled.index('if (request.full'))
         self.assertIn('private fun returnToChat() = returnToChat(refreshState = true)', self.main)
         self.assertIn('private val listener: () -> Unit = { refresh() }', self.main)
         self.assertIn('"settings", "permission-check" -> returnToChat(refreshState = false)', self.main)
@@ -48,6 +52,37 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         dismissSidebarState()
         if (activityUsable()) refresh()
     ''', dismiss)
+
+    def test_return_idle_masks_admission_and_cancels_on_existing_owner_boundaries(self):
+        self.assertIn('retainedRootActive = retainedPage == "chat" && returnRefreshRequest == null', self.main)
+        self.assertIn('onTransitionIdle = { finishChatReturn(returnRefreshRequest) }', self.main)
+        self.assertIn('idleRequestKey = returnRefreshRequest', self.main)
+        self.assertIn('it.enabled && routeActive && chatReturnRefresh == null', self.main)
+        for signature in ('private fun composerShortcutAvailable()', 'private fun currentChatControlAvailable()'):
+            self.assertIn('chatReturnRefresh == null', self.main.split(signature, 1)[1].split('\n', 1)[0])
+        self.assertIn('voiceForeground && chatReturnRefresh == null && messageActionVisit', self.main)
+        self.assertIn('val composerAvailable = chatReturnRefresh == null', self.main)
+        self.assertIn('if (chatReturnRefresh != null) return@guard', self.main)
+        self.assertIn('if (value != "chat") chatReturnRefresh = null', self.main)
+        for signature in ('override fun onPause()', 'override fun onResume()', 'override fun onDestroy()'):
+            self.assertIn('chatReturnRefresh = null', body(self.main, signature))
+        self.assertIn('if (field != value) { chatReturnRefresh = null;', self.main)
+        host = (APP / 'ui/navigation/PageBackGestures.kt').read_text()
+        idle = host.split('val currentTransitionIdle by rememberUpdatedState', 1)[1].split('val showDeparture', 1)[0]
+        self.assertIn('idleRequestKey', idle)
+        self.assertIn('resumed && !activeDeparture && !state.active && !state.gestureVisualActive', idle)
+        self.assertNotIn('delay(', idle)
+        self.assertNotIn('visualProgress', idle)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
+        for method in ('testTransitionIdleWaitsForCommittedDeparture', 'testTransitionIdleWaitsForCancelledGesture',
+                       'testTransitionIdleConsumesNewRequestOnAlreadyIdleRoute'):
+            self.assertIn('fun ' + method + '()', regression)
+
+    def test_custom_subagent_toolbars_share_the_final_copy_entry(self):
+        source = (APP / 'ui/SubAgentSettingsScreen.kt').read_text()
+        self.assertEqual(2, source.count('LocalPageBackToolbarReturn.current'))
+        self.assertEqual(2, source.count('if (pageReturn == null) onBack() else pageReturn(onBack)'))
+        self.assertNotIn('IconButton(onClick = onBack)', source)
 
     def test_fixed_sync_phases_wrap_original_entry_bodies_not_composables_or_io(self):
         refresh = body(self.main, 'private fun refresh()')
@@ -124,10 +159,10 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('fixture.controller.videoSendState()', video)
         self.assertIn('invokeHost(activity, "settleRetainedVideoReceipt")', video)
         self.assertIn('activity.onBackPressedDispatcher.onBackPressed()', video)
-        self.assertIn('navigation must take the business refresh fallback', video)
-        self.assertIn('listOf("permission-check", "skills")', regression)
-        self.assertIn('recordSynchronous(startWindow = true) { invokeHost(activity, "returnToChat") }', regression)
-        self.assertIn('1, publish.getInt("count")', regression)
+        self.assertIn('transition idle takes the video business refresh fallback', video)
+        self.assertIn('listOf("permission-check", "skills", "providers")', regression)
+        self.assertIn('recordSynchronous(startWindow = true, expectedRefresh = 0, expectedPublish = 0) { invokeHost(activity, "returnToChat") }', regression)
+        self.assertIn('expectedPublish, publishCount', regression)
         self.assertLess(regression.index('action()'), regression.index('recorder.end('))
         self.assertLess(regression.index('recorder.end('), regression.index('runtime.export()'))
         flow = (ROOT / '.github/workflows/screen-observation-jank-checks.yml').read_text()

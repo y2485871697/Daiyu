@@ -82,21 +82,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
-          path: .validation
+          path: validation-tools
           persist-credentials: false
       - name: 执行本次五类定向库存与工具契约
-        working-directory: .validation
+        working-directory: validation-tools
         run: python3 scripts/acceptance/record_tool_tests.py --python python3
       - name: 绑定本次执行脚本与冻结测试源码
         run: |
-          cp .validation/scripts/smoke_boot.sh smoke/frozen-smoke.sh
+          cp validation-tools/scripts/smoke_boot.sh scripts/frozen-child-smoke.sh
           python3 - <<'PYTOOLS'
           import hashlib, json, os
           from pathlib import Path
           path = Path('smoke/execution-source.json')
           record = json.loads(path.read_text())
           record['execution_tools_sha'] = os.environ['GITHUB_SHA']
-          record['execution_script_sha256'] = hashlib.sha256(Path('smoke/frozen-smoke.sh').read_bytes()).hexdigest()
+          record['execution_script_sha256'] = hashlib.sha256(Path('scripts/frozen-child-smoke.sh').read_bytes()).hexdigest()
           path.write_text(json.dumps(record, ensure_ascii=False) + '\n')
           PYTOOLS
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
@@ -152,7 +152,7 @@ jobs:
           emulator-boot-timeout: 180
           pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
           disable-animations: true
-          script: bash -c 'export GITHUB_SHA="$EXPECTED_SHA"; set +e; test -s smoke/prelaunch-ready.txt && bash smoke/frozen-smoke.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+          script: bash -c 'export GITHUB_SHA="$EXPECTED_SHA"; set +e; test -s smoke/prelaunch-ready.txt && bash scripts/frozen-child-smoke.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
       - name: 上传定向契约及子任务证据
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -160,5 +160,5 @@ jobs:
           name: 代鱼子任务设备证据-API${{ matrix.api }}
           path: |
             smoke/
-            .validation/tool-evidence/
+            validation-tools/tool-evidence/
           if-no-files-found: error

@@ -179,3 +179,16 @@ class PauseReceiptSmokeScopeTest(unittest.TestCase):
                     self.assertEqual(0, selection["expected_tests"])
             self.assertEqual(4, empty)
             self.assertCountEqual(recorder.PAUSE_RECEIPT_PLATFORM_CLASSES, selected)
+
+    def test_refresh_receipts_use_an_independent_pending_group(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/test-refresh-regression.yml").read_text()
+        concurrency = workflow.split("concurrency:", 1)[1].split("\nenv:", 1)[0]
+        classes = ",".join((
+            "app.daiyu.android.ToolReceiptPauseActivityTest",
+            "app.daiyu.android.RetainedToolOutcomesTest",
+            "app.daiyu.android.ControllerRunControlTest",
+            "app.daiyu.android.QuestionBarrierIntegrationTest",
+        ))
+        self.assertIn("inputs.smoke_classes == '" + classes + "' && '-tool-receipts' || ''", concurrency)
+        self.assertIn("cancel-in-progress: false", concurrency)

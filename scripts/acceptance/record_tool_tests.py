@@ -380,7 +380,22 @@ DOUBAO_MOTION_MODULES = ("test_doubao_call_sheet_contract", "test_doubao_motion_
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope")
 
 
+VOICE_REFRESH_PLATFORM_CLASSES = (
+    "app.daiyu.android.VoiceSettingsStructureActivityTest",
+    "app.daiyu.android.VoiceQuotaSelectionActivityTest",
+)
+VOICE_REFRESH_MODULES = (
+    "test_voice_recognition_layout_contract", "test_voice_settings_parity_contract",
+    "test_voice_settings_palette_contract", "test_voice_refresh_smoke_scope",
+    "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VOICE_REFRESH_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *VOICE_REFRESH_MODULES, "-v"], "voice-refresh-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(DOUBAO_MOTION_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *DOUBAO_MOTION_MODULES, "-v"], "doubao-motion-targeted"

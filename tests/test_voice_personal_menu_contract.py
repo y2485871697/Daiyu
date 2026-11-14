@@ -65,16 +65,16 @@ class VoicePersonalMenuContractTest(unittest.TestCase):
         shell = (SRC / "ui/screens/chat/conversation/ChatSelectionSheet.kt").read_text()
         for token in ('if (height == null) Modifier.heightIn(max = available)',
                       'padding(bottom = 8.dp)',
-                      'padding(bottom = 6.dp)',
+                      'padding(bottom = 12.dp)',
                       'heightIn(min = if (showCloseButton) 40.dp else 0.dp)',
                       'Column(Modifier.fillMaxWidth().weight(1f, fill = height != null)',
                       'if (showCloseButton) Box(Modifier.size(40.dp)',
-                      'PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)'):
+                      'PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled, automaticPopup = automaticPopup)'):
             self.assertIn(token, shell)
 
     def test_android_spacing_regression_measures_local_gap_not_the_scrim(self):
         visual = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoicePersonalVisualActivityTest.kt').read_text()
-        for token in ('bounds.first().top - title.bottom', '8f * menuDensity',
+        for token in ('bounds.first().top - title.bottom', '12f * menuDensity',
                       'sheet.bottom - bounds.last().bottom', '17f * menuDensity',
                       'listOf(false, true)', 'listOf(1f, 1.3f)',
                       'assertHeightIsAtLeast(56.dp)', 'testDisabledSyncAndBackOrOutsideNeverDispatchAnAction'):

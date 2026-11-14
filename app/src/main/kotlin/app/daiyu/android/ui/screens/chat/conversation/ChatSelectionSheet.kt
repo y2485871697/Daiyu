@@ -43,7 +43,7 @@ internal fun ChatSelectionSheet(
     subtitleFontSize: TextUnit = 12.sp,
     footer: @Composable RowScope.() -> Unit = {},
     dismissEnabled: Boolean = true,
-    titleTextAlign: TextAlign? = null,
+    titleTextAlign: TextAlign = TextAlign.Center,
     automaticPopup: app.daiyu.android.diagnostics.PopupPerformanceCapture.Type? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -61,10 +61,10 @@ internal fun ChatSelectionSheet(
             .padding(start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp)) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp)
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
-            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)
-                .heightIn(min = if (showCloseButton) 40.dp else 0.dp), verticalAlignment = Alignment.Top) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                .heightIn(min = if (showCloseButton) 40.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(title, modifier = Modifier.fillMaxWidth(), color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = titleTextAlign)
+                    Text(title, modifier = Modifier.fillMaxWidth().padding(start = if (showCloseButton) 40.dp else 0.dp), color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = titleTextAlign)
                     subtitle?.let { Text(it, color = colors.muted, fontSize = subtitleFontSize, lineHeight = 18.sp,
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) }
                 }

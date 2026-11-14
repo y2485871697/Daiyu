@@ -81,7 +81,7 @@ internal fun VoiceTonePicker(
     LaunchedEffect(search) { listState.scrollToItem(0) }
     val colors = usagePalette()
     ChatSelectionSheet(title = title, height = 500.dp, onDismiss = onDismiss,
-        showCloseButton = false, titleTextAlign = TextAlign.Start) {
+        showCloseButton = false, titleTextAlign = TextAlign.Center) {
         Column(modifier.fillMaxSize()) {
             GroupedPickerSearch(query, { query = it }, "搜索音色", "搜索音色",
                 Modifier.testTag("voice-tone-search"))

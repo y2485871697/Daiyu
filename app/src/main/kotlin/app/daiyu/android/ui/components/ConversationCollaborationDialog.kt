@@ -121,7 +121,8 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                         .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
                         ConversationAgentHandle()
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 29.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                            Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         key(editor, choosing, current?.presetApplicationToken) {
                             Column(Modifier.fillMaxWidth().weight(1f).testTag("subagent-collaboration-body")

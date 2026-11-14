@@ -48,13 +48,15 @@ internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () ->
         contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp, dragHandle = { BottomSheetDefaults.DragHandle() }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)
             .semantics { contentDescription = "子代理组操作面板" }) {
-            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
+            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.testTag("subagent-preset-badge")) {
                     Icon(Icons.Rounded.AccountTree, null,
                         Modifier.padding(8.dp).size(24.dp).testTag("subagent-preset-glyph"), tint = palette.primary)
                 }
-                Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(Modifier.size(40.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
             SubAgentPresetActionRow("重命名组", Icons.Rounded.Edit, MaterialTheme.colorScheme.onSurface, onRename)

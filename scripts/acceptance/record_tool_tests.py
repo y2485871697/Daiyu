@@ -306,10 +306,25 @@ RENAME_PRESENTATION_MODULES = (
 )
 
 
+POPUP_TITLE_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
+    "PopupTitleGeometryTest", "AssistantPickerVisualTest", "SharedSheetSpacingActivityTest", "CollaborationEmptyStateTest",
+))
+POPUP_TITLE_MODULES = (
+    "test_popup_title_contract", "test_shared_sheet_spacing_contract", "test_assistant_picker_frame_contract",
+    "test_chat_attachment_sizing_contract", "test_voice_tone_selection_contract",
+    "test_bottom_sheet_edge_contract", "test_voice_personal_menu_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == LINUX_SETTINGS_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *LINUX_SETTINGS_MODULES, "-v"], "linux-settings-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(POPUP_TITLE_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *POPUP_TITLE_MODULES, "-v"], "popup-title-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == RENAME_PRESENTATION_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *RENAME_PRESENTATION_MODULES, "-v"], "rename-presentation-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

@@ -481,8 +481,8 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
     SkillSheet(entry.skill.name, onDismiss) {
         Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(entry.skill.name, style = MiuixTheme.textStyles.title3.copy(fontSize = 20.sp, lineHeight = 28.sp),
-                color = colors.onSurface)
+            Text(entry.skill.name, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 20.sp, lineHeight = 28.sp), color = colors.onSurface)
             Text(entry.skill.description.ifBlank { "暂无描述" }, modifier = Modifier.testTag("skill-description:${entry.id}"),
                 style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 24.sp), color = colors.onSurface)
             if (engineeringUi) listOf("ID" to entry.id, "来源" to (entry.skill.source ?: "本地或内置"),
@@ -506,8 +506,9 @@ private fun SkillConfirmationSheet(title: String, onDismiss: () -> Unit, confirm
     SkillSheet(title, onDismiss) {
         Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MiuixTheme.textStyles.title3.copy(fontSize = 20.sp, lineHeight = 28.sp),
-                color = MiuixTheme.colorScheme.onSurface)
+            Text(title, modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 20.sp, lineHeight = 28.sp), color = MiuixTheme.colorScheme.onSurface)
             content()
         }
         androidx.compose.material3.HorizontalDivider(color = conversationAgentColors().line)

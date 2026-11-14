@@ -350,7 +350,8 @@ private fun McpToolDescriptionSheet(tool: McpRemoteTool, onDismiss: () -> Unit) 
         Column(Modifier.fillMaxSize().testTag("mcp-tool-description-sheet").padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
             ConversationAgentHandle()
             Text(tool.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
-                modifier = Modifier.testTag("mcp-tool-description-title").padding(bottom = 16.dp))
+                modifier = Modifier.fillMaxWidth().testTag("mcp-tool-description-title").padding(bottom = 12.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Column(Modifier.weight(1f).fillMaxWidth().testTag("mcp-tool-description-scroll").verticalScroll(rememberScrollState())) {
                 Text(tool.description.ifBlank { "此工具暂无描述。" }, color = colors.text, fontSize = 14.sp, lineHeight = 22.sp,
                     modifier = Modifier.testTag("mcp-tool-description"))

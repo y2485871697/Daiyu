@@ -92,9 +92,9 @@ fun ConversationWorkspaceSheet(
                 modifier = Modifier.testTag("conversation-workspace-sheet")) {
                 Column(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
                     ConversationAgentHandle()
-                    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(if (choosing) { if (editingWorkspace) "更改工作目录" else "选择工作目录" } else "会话工作区", style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.weight(1f))
+                            modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     }
                     if (!choosing) {
                         val selecting = selectionMode

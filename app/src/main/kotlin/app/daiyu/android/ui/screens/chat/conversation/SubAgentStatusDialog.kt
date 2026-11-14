@@ -80,9 +80,9 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
     ConversationAgentSheet(onDismiss, radius = 26, useDefaultHeight = true) {
         Column(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp).testTag("subagent-status")) {
             ConversationAgentHandle()
-            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp).heightIn(min = 28.dp), verticalAlignment = Alignment.Top) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 28.dp), verticalAlignment = Alignment.Top) {
                 Text("子代理状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
-                    modifier = Modifier.weight(1f))
+                    modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
             }
             when {
                 loading -> Text("正在读取任务状态…", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))

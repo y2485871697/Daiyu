@@ -26,7 +26,7 @@ class SharedSheetSpacingContractTest(unittest.TestCase):
         self.assertIn("if (showCloseButton) Box(Modifier.size(40.dp)", sheet)
         self.assertIn("clickable(enabled = dismissEnabled", sheet)
         self.assertIn(".padding(bottom = 8.dp)", sheet)
-        self.assertIn(".padding(bottom = 6.dp)", sheet)
+        self.assertIn(".padding(bottom = 12.dp)", sheet)
 
     def test_shared_callers_cannot_restore_the_old_compact_opt_in(self):
         calls = 0
@@ -63,7 +63,7 @@ class SharedSheetSpacingContractTest(unittest.TestCase):
         self.assertIn("if (compact) Alignment.Center else Alignment.BottomCenter", usage)
         self.assertIn("if (useDefaultHeight && !compact) Modifier.height(defaultBottomSheetHeight(maxHeight))", usage)
         self.assertIn("if (!compact) Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp)", usage)
-        self.assertIn("padding(bottom = if (compact) 10.dp else 6.dp)", usage)
+        self.assertIn("padding(bottom = if (compact) 10.dp else 12.dp)", usage)
 
     def test_assistant_workspaces_keep_height_without_phantom_heading_or_footer(self):
         assistant = source("ui/screens/assistants/AssistantPreviewComponents.kt")
@@ -72,7 +72,7 @@ class SharedSheetSpacingContractTest(unittest.TestCase):
         self.assertEqual(2, assistant.count("footer: (@Composable RowScope.() -> Unit)? = null"))
         self.assertIn("heightIn(min = if (onBack != null || showCloseButton) 40.dp * s else 0.dp)", assistant)
         self.assertIn("Spacer(Modifier.height(8.dp * s))", assistant)
-        self.assertIn("padding(bottom = 6.dp * s)", assistant)
+        self.assertIn("padding(bottom = 12.dp * s)", assistant)
         footer = assistant.split("if (footer != null) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn('testTag("assistant-sheet-footer")', footer)
         self.assertIn("content = footer", footer)
@@ -88,7 +88,7 @@ class SharedSheetSpacingContractTest(unittest.TestCase):
     def test_android_geometry_covers_default_short_empty_subtitle_footer_and_fixed_height(self):
         tests = ROOT / "app/src/androidTest/kotlin/app/daiyu/android"
         options = (tests / "OptionSelectionSheetActivityTest.kt").read_text()
-        for token in ("bounds.first().top - title.bottom", "8f * menuDensity", "sheet.bottom - bounds.last().bottom", "17f * menuDensity"):
+        for token in ("bounds.first().top - title.bottom", "12f * menuDensity", "sheet.bottom - bounds.last().bottom", "17f * menuDensity"):
             self.assertIn(token, options)
         shared = (tests / "SharedSheetSpacingActivityTest.kt").read_text()
         for token in ("testEmptyAndSingleOptionSheetsWrapWithoutOptIn", "testSubtitleAndFooterSpacingPreserveCallbacks", "testExplicitHeightAndCloseTouchTargetStayUnchanged", "testSettingsSectionSpacingStaysScopedToSheet", "listOf(false, true)", "listOf(1f, 1.3f)", "LocalDensity.current", "fixture.opens.get()"):

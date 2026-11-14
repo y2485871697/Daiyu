@@ -80,7 +80,7 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
                 val title = ui.onNodeWithText("选择接口").fetchSemanticsNode().boundsInRoot
                 val bounds = (0..1).map { node("choice:$it").fetchSemanticsNode().boundsInRoot }
                 assertTrue("title and first option must not overlap", bounds.first().top - title.bottom >= -1f)
-                assertTrue("hidden close must not reserve a title row", bounds.first().top - title.bottom <= 8f * menuDensity + 1f)
+                assertTrue("hidden close must not reserve a title row", bounds.first().top - title.bottom <= 12f * menuDensity + 1f)
                 assertTrue("last option must stay inside the surface", sheet.bottom - bounds.last().bottom >= -1f)
                 assertTrue("short content must not leave a minimum-height tail", sheet.bottom - bounds.last().bottom <= 17f * menuDensity + 1f)
                 node("choice:1").performClick()

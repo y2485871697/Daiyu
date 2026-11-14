@@ -188,7 +188,7 @@ internal fun DaiyuChoiceSheet(
                     ).padding(16.dp),
             ) {
                 Text(title, style = MiuixTheme.textStyles.headline1, color = colors.onSurface,
-                    modifier = Modifier.padding(bottom = 12.dp))
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
                     itemsIndexed(options) { index, option ->
                         val select = { finishSelection { onSelect(index) } }

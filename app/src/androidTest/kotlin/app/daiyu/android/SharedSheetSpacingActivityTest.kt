@@ -64,11 +64,11 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
             assertTrue("empty/one-row surfaces must not inherit a 180dp minimum", sheet.height < 180f * menuDensity)
             assertEquals("handle gap belongs to the shared shell", 22f * menuDensity, title.top - sheet.top, 2f)
             if (count == 0) {
-                assertTrue("empty body should leave only title and surface padding", sheet.bottom - title.bottom <= 23f * menuDensity + 1f)
+                assertTrue("empty body should leave only title and surface padding", sheet.bottom - title.bottom <= 29f * menuDensity + 1f)
             } else {
                 val choice = bounds("short-choice")
                 node("short-choice").assertHeightIsAtLeast(48.dp)
-                assertGap(choice.top - title.bottom, 8f)
+                assertGap(choice.top - title.bottom, 12f)
                 assertGap(sheet.bottom - choice.bottom, 17f)
             }
             ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
@@ -97,7 +97,7 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
             val footer = bounds("sheet-confirm")
             node("subtitle-choice").assertIsDisplayed()
             node("sheet-confirm").assertIsDisplayed()
-            assertGap(choice.top - subtitle.bottom, 8f)
+            assertGap(choice.top - subtitle.bottom, 12f)
             assertEquals("footer must immediately follow its short body", 0f, footer.top - choice.bottom, 1f)
             assertGap(bounds("chat-selection-sheet").bottom - footer.bottom, 17f)
             node("sheet-confirm").performTouchInput { click() }
@@ -150,7 +150,7 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
             val title = ui.onNodeWithText("分组选择").fetchSemanticsNode().boundsInRoot
             assertEquals("page section padding must stay unchanged", (if (grouped) 19f else 24f) * menuDensity,
                 pageHeight - section.height, 2f)
-            assertGap(section.top - title.bottom, 8f)
+            assertGap(section.top - title.bottom, 12f)
             node("preview-dialog-viewport").performTouchInput { click(androidx.compose.ui.geometry.Offset(2f, 2f)) }
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
@@ -184,7 +184,7 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
                         sheet.bottom - bounds("assistant-workspace-body").bottom <= 18f * menuDensity + 1f)
                 }
                 val title = ui.onNodeWithText("助手工作区").fetchSemanticsNode().boundsInRoot
-                assertGap(bounds("assistant-workspace-body").top - title.bottom, 8f)
+                assertGap(bounds("assistant-workspace-body").top - title.bottom, 12f)
                 ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
             }
         }
@@ -243,7 +243,7 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
             val choice = bounds("usage-choice")
             val sheet = bounds("usage-glass-dialog")
             assertEquals((if (compact) 8f else 25f) * menuDensity, title.top - sheet.top, 2f)
-            assertEquals((if (compact) 10f else 6f) * menuDensity, choice.top - title.bottom, 2f)
+            assertEquals((if (compact) 10f else 12f) * menuDensity, choice.top - title.bottom, 2f)
             assertEquals((if (compact) 10f else 15f) * menuDensity, sheet.bottom - choice.bottom, 2f)
         }
         assertEquals(0, fixture.opens.get())

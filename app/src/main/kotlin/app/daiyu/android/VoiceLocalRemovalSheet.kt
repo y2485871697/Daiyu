@@ -28,9 +28,9 @@ internal fun VoiceLocalRemovalSheet(onConfirm: () -> Unit, onDismiss: () -> Unit
                 Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 29.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("确认本次操作", style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.weight(1f))
+                        modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
-                HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
+                HorizontalDivider(color = conversationAgentColors().line)
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(top = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ConversationAgentButton("取消", modifier = Modifier.weight(1f).fillMaxHeight().testTag("dialog-cancel"),

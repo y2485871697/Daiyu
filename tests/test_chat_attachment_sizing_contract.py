@@ -33,7 +33,7 @@ class ChatAttachmentSizingContract(unittest.TestCase):
             self.assertNotIn(token, self.attachment)
         self.assertIn("subtitle: String? = null", self.shell)
         self.assertRegex(self.shell, r"subtitle\?\.let\s*\{\s*Text\(it,[\s\S]*?\.padding\(top = 4\.dp\)\)\s*\}")
-        self.assertIn("Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)", self.shell)
+        self.assertIn("Row(Modifier.fillMaxWidth().padding(bottom = 12.dp)", self.shell)
         self.assertIn(".heightIn(min = if (showCloseButton) 40.dp else 0.dp)", self.shell)
 
     def test_four_entries_keep_mapping_click_semantics_and_dismiss_order(self):

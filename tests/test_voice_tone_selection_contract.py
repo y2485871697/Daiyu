@@ -19,7 +19,7 @@ class VoiceToneSelectionContractTest(unittest.TestCase):
         self.assertIn('internal fun Modifier.pickerGroupSurface(', SHARED)
         self.assertIn('"搜索音色", "搜索音色"', TONE)
         self.assertIn('height = 500.dp', TONE)
-        self.assertIn('showCloseButton = false, titleTextAlign = TextAlign.Start', TONE)
+        self.assertIn('showCloseButton = false, titleTextAlign = TextAlign.Center', TONE)
         self.assertNotIn('SettingsSectionTitle(section)', DIALOGS)
 
     def test_classification_and_card_heading_are_voice_specific(self):

@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -136,14 +137,16 @@ internal fun AssistantPreviewSheet(
         Box(Modifier.align(Alignment.CenterHorizontally).width(29.dp * s).height(3.dp * s)
             .clip(CircleShape).background(colors.toolbar.copy(alpha = .24f)))
         Spacer(Modifier.height(8.dp * s))
-        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 6.dp * s)
+        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 12.dp * s)
             .heightIn(min = if (onBack != null || showCloseButton) 40.dp * s else 0.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
             if (onBack != null) AssistantPreviewIcon(AssistantPreviewIcons.Back, "返回", onBack)
+            else if (showCloseButton) Spacer(Modifier.size(40.dp * s))
             Text(title, modifier = Modifier.weight(1f), color = colors.text,
                 fontSize = (18f * s).sp, lineHeight = (26f * s).sp,
-                fontWeight = FontWeight(650), letterSpacing = (-.3f * s).sp)
+                fontWeight = FontWeight(650), letterSpacing = (-.3f * s).sp, textAlign = TextAlign.Center)
             if (showCloseButton) AssistantPreviewIcon(AssistantPreviewIcons.Close, "关闭", onClose)
+            else if (onBack != null) Spacer(Modifier.size(40.dp * s))
         }
         Column(Modifier.fillMaxWidth().weight(1f), content = content)
         if (footer != null) {

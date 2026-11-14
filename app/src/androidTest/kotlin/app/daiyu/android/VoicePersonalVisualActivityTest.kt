@@ -76,7 +76,7 @@ class VoicePersonalVisualActivityTest : WiredActivityTestCase() {
             val title = ui.onNodeWithText(if (settings) "声音设置" else "添加声音")
                 .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             val titleGap = bounds.first().top - title.bottom
-            assertTrue("title stays close to the first action", titleGap >= -1f && titleGap <= 8f * menuDensity + 1f)
+            assertTrue("title stays close to the first action", titleGap >= -1f && titleGap <= 12f * menuDensity + 1f)
             val bottomGap = sheet.bottom - bounds.last().bottom
             assertTrue("short menus do not reserve empty bottom space", bottomGap >= -1f && bottomGap <= 17f * menuDensity + 1f)
             val viewport = node("preview-dialog-viewport").fetchSemanticsNode().boundsInRoot

@@ -799,7 +799,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     fun testColdUncoordinatedReturnDoesNotEnableLatePreview() = assertUncoordinatedReturnDoesNotWaitForCopy(false)
 
     @OptIn(ExperimentalActivityApi::class)
-    private fun assertToolbarFinalCopy(cancelOnPause: Boolean = false, veto: Boolean = false, failCopy: Boolean = false, nested: Boolean = false, contention: Int = 0, ordinarySystem: Boolean = false) {
+    private fun assertToolbarFinalCopy(cancelOnPause: Boolean = false, veto: Boolean = false, failCopy: Boolean = false, nested: Boolean = false, contention: Int = 0, ordinarySystem: Boolean = false, cancelPredictionFirst: Boolean = false) {
         val gate = CompletableDeferred<Unit>()
         var waiting = 0
         var blockCopy = false
@@ -813,7 +813,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                         val rendered = screen
                         PageBackGestureHost(rendered, canNavigateBack = rendered == "settings",
-                            swipeDismissEnabled = true, predictiveBackEnabled = contention == 2,
+                            swipeDismissEnabled = true, predictiveBackEnabled = contention == 2 || cancelPredictionFirst,
                             dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                             backTargetKey = if (rendered == "settings") "chat" else null,
                             captureFromContent = true, previewCapture = { source ->
@@ -858,6 +858,15 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) { frame?.ready != null }
             val source = checkNotNull(frame)
             sourceState = state
+            if (cancelPredictionFirst) {
+                mainThread {
+                    activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 1f, 0f, BackEventCompat.EDGE_LEFT))
+                    activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(100f, 1f, .2f, BackEventCompat.EDGE_LEFT))
+                    activity.onBackPressedDispatcher.dispatchOnBackCancelled()
+                }
+                ui.mainClock.advanceTimeBy(1000)
+                assertFalse(checkNotNull(state).predictive)
+            }
             mainThread { blockCopy = true }
             ui.mainClock.autoAdvance = false
             fun clickToolbar() {
@@ -922,6 +931,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             assertEquals("the parent must not draw inside the outgoing visual route", 0, unshieldedParentDraws)
             ui.mainClock.advanceTimeByFrame()
             if (veto) {
+                mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                assertEquals("a repeated BACK cannot resubmit during the pending handoff", 1, backCount)
                 ui.mainClock.advanceTimeBy(64)
                 assertEquals("settings", screen)
                 assertFalse("a veto releases the precommit lock", checkNotNull(state).toolbarPending)
@@ -952,6 +963,11 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             ui.mainClock.autoAdvance = true
         }
     }
+
+    fun testCancelledPredictionThenOrdinaryBackWaitsForFinalCopy() {
+        if (Build.VERSION.SDK_INT >= 34) assertToolbarFinalCopy(ordinarySystem = true, cancelPredictionFirst = true)
+    }
+    fun testOrdinarySystemVetoCoalescesBackThroughHandoff() = assertToolbarFinalCopy(ordinarySystem = true, veto = true)
 
     fun testOrdinarySystemReturnWaitsForFinalChildCopy() = assertToolbarFinalCopy(ordinarySystem = true)
     fun testOrdinaryNestedSystemReturnKeepsEveryHandoffFrame() = assertToolbarFinalCopy(nested = true, ordinarySystem = true)

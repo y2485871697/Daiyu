@@ -171,7 +171,11 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('state.ordinaryReturn = toolbarBack', self.host)
         self.assertIn('val pendingReturn = layers.pendingReturnImage(frame)', self.host)
         self.assertIn('pendingReturn != null -> pendingReturn', self.host)
-        self.assertIn('toolbarReturnJob?.isActive != true', commit)
+        self.assertIn('!toolbarDispatching', commit)
+        self.assertIn('(toolbarPending && !toolbarDispatching)', commit)
+        self.assertIn('try { back() } finally { state.toolbarDispatching = false }', self.host)
+        reset = self.host.split('    fun reset(', 1)[1].split('private class PageBackCallbackSession', 1)[0]
+        self.assertIn('predictive = false', reset)
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         bridge = layers.split('    fun pendingReturnImage(', 1)[1].split('    suspend fun awaitToolbarReturn', 1)[0]
         for guard in ('active && !closed', 'pending?.frame === frame', 'frames[currentKey] === frame', 'frame.canDrawPreview'):

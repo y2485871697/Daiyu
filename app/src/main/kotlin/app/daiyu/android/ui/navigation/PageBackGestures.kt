@@ -120,7 +120,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     var ordinaryReturn: ((() -> Unit) -> Unit)? = null
 
     fun commitBack(back: () -> Unit) {
-        if (!alive || toolbarPending || (transitionBlocked && swipeCommit == null) || committing) return
+        if (!alive || (toolbarPending && !toolbarDispatching) || (transitionBlocked && swipeCommit == null) || committing) return
         BackPerformance.safely {
             if (diagnosticToken == null || diagnosticToken != BackPerformance.recorder.token()) {
                 startDiagnostic(BackPerformanceRecorder.Kind.BACK_PRESS)
@@ -129,7 +129,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
         }
         val visual = swipeCommit
         swipeCommit = null
-        if (visual == null && progress == 0f && !predictive && previewAllowed && toolbarReturnJob?.isActive != true) {
+        if (visual == null && progress == 0f && !predictive && previewAllowed && !toolbarDispatching) {
             ordinaryReturn?.let { it(back); return }
         }
         committing = true
@@ -144,6 +144,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     private var swipeCommit: SwipeCommit? = null
     var toolbarReturnJob: Job? = null
     var toolbarPending = false
+    var toolbarDispatching = false
     var dispatching = false
         private set
 
@@ -201,6 +202,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
             diagnosticToken = null
             this.owner = null
             active = false
+            predictive = false
             progress = 0f
             val start = visualProgress
             if (immediate || !alive || start <= 0f || !previewAllowed) {
@@ -565,8 +567,8 @@ internal fun PageBackGestureHost(
                         layers.awaitToolbarReturn(request)
                         if (state.alive && state.resumed && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
                             layers.ownsToolbarReturn(request)) {
-                            state.toolbarPending = false
-                            back()
+                            state.toolbarDispatching = true
+                            try { back() } finally { state.toolbarDispatching = false }
                             // Give both root and nested route publication a frame to consume the ticket.
                             repeat(2) { withFrameNanos { }; yield() }
                         }

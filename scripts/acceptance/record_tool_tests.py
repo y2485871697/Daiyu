@@ -318,7 +318,23 @@ POPUP_TITLE_MODULES = (
 )
 
 
+COMPRESSION_DIALOG_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
+    "ContextManagementPanelTest", "CompressionConversationDialogTest",
+    "ContextManagementEntryActivityTest", "ControllerContextManagementEntryTest",
+))
+COMPRESSION_DIALOG_MODULES = (
+    "test_context_dialog_initialization_contract", "test_compression_presentation_resume_contract",
+    "test_context_route_lifecycle_contract", "test_compression_protocol_help_contract",
+    "test_summary_protocol_preference_contract", "test_record_tool_tests_scope",
+    "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(COMPRESSION_DIALOG_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *COMPRESSION_DIALOG_MODULES, "-v"], "compression-dialog-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == LINUX_SETTINGS_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *LINUX_SETTINGS_MODULES, "-v"], "linux-settings-targeted"

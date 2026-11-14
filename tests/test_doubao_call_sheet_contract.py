@@ -153,6 +153,7 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertNotIn('progress.snapTo(', close)
         self.assertIn('if (!morphing || !snapshotReady)', overlay)
         self.assertIn('val bitmap = frozenBitmap ?: return@drawWithContent', overlay)
+        self.assertIn('if (!morphing || (closing && frozenBitmap == null && progress.value == 1f))', overlay)
         self.assertNotIn('else drawLayer(layer)', overlay)
         self.assertIn('running = !closing && !morphing', overlay)
 

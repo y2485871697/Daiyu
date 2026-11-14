@@ -23,6 +23,8 @@ class DoubaoCallOverlayZeroDurationTest : ComposeActivityTestCase(object : Motio
         var call by mutableStateOf<DoubaoCallUi?>(DoubaoCallUi(501L, null,
             startedAtMillis = SystemClock.elapsedRealtime()))
         var completions = 0
+        val motion = DoubaoCallMotionState()
+        ui.mainClock.autoAdvance = false
         try {
             mainThread {
                 activity.setContent {
@@ -36,15 +38,26 @@ class DoubaoCallOverlayZeroDurationTest : ComposeActivityTestCase(object : Motio
                                     onCloseAnimationFinished = { key ->
                                         if (call?.sessionKey == key) { completions++; call = null }
                                     },
-                                ), Rect(w / 2 - 16f, h - 40f, w / 2 + 16f, h - 8f))
+                                ), Rect(w / 2 - 16f, h - 40f, w / 2 + 16f, h - 8f), motion = motion)
                             }
                             if (call == null) Text("入口已恢复", Modifier.testTag("zero-scale-entry"))
                         }
                     }
                 }
             }
-            ui.onNodeWithTag("doubao-call-hang-up").performClick()
-            ui.waitForIdle()
+            ui.waitUntil(10_000L) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                ui.runOnIdle { !motion.transforming }
+            }
+            val closingAt = ui.mainClock.currentTime
+            ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled().performClick()
+            ui.waitUntil(10_000L) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                ui.runOnIdle { call == null }
+            }
+            assertTrue(ui.mainClock.currentTime - closingAt < DoubaoGenieGeometry.DURATION_MILLIS)
             ui.onNodeWithTag("zero-scale-entry").assertExists()
             ui.runOnIdle { assertEquals(1, completions) }
         } finally {

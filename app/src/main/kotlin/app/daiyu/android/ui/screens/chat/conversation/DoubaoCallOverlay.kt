@@ -294,7 +294,8 @@ private fun DoubaoCallSession(
                         }
                         snapshotReady = true
                     }
-                    if (!morphing) {
+                    // Preserve the last visible frame while the closing raster is prepared.
+                    if (!morphing || (closing && frozenBitmap == null && progress.value == 1f)) {
                         translate(-padding, -padding) { drawLayer(layer) }
                     } else {
                         // Never replay the full live display list once per strip.
@@ -558,7 +559,7 @@ internal fun CallWave(
     val frame = DoubaoGenieGeometry.orbFrame(phaseMillis ?: elapsed,
         responding = state == DoubaoCallVisualState.RESPONDING, compact = compact,
         still = muted || ended || reducedMotion)
-    Box(modifier.testTag(if (compact) "doubao-call-mini-orb" else "doubao-call-orb"), contentAlignment = Alignment.Center) {
+    Box(modifier.testTag(if (compact) "doubao-call-mini-orb" else "doubao-call-orb-pixels"), contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
             val unit = size.minDimension / if (compact) 37f else 80f
             val center = this.center

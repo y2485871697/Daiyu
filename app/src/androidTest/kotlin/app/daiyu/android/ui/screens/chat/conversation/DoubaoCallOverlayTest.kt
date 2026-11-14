@@ -110,11 +110,24 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         }
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
+        awaitMotionStart(1f)
+    }
+
+    private fun awaitMotionStart(target: Float) {
+        // Raster capture completes on the Android renderer, not the virtual Compose clock.
+        ui.waitUntil(10_000L) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            ui.runOnIdle { motion.progress.isRunning && motion.progress.targetValue == target }
+        }
+        ui.mainClock.advanceTimeByFrame()
     }
 
     private fun finishOpening() {
         ui.mainClock.advanceTimeBy(500L)
         ui.waitForIdle()
+        ui.runOnIdle { assertFalse(motion.transforming); assertEquals(1f, motion.progress.value, 0f) }
+        ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled()
     }
 
     private fun displayedSeconds(useUnmergedTree: Boolean = false): Long {
@@ -206,6 +219,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.mainClock.advanceTimeBy(90L)
         ui.runOnIdle { assertFalse(motion.transforming); assertEquals(1f, motion.progress.value, 0f) }
         ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled().performClick()
+        awaitMotionStart(0f)
         ui.mainClock.advanceTimeBy(380L)
         ui.runOnIdle { assertNotNull(call); assertTrue(motion.transforming) }
         ui.mainClock.advanceTimeBy(120L)
@@ -222,11 +236,13 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             assertTrue(completed.isEmpty())
         }
         ui.onNodeWithTag("test-call-entry").assertIsNotEnabled()
+        awaitMotionStart(0f)
         ui.mainClock.advanceTimeBy(500L)
         ui.waitForIdle()
         ui.runOnIdle { assertNull(call); assertEquals(1, completed.size) }
         ui.onNodeWithTag("doubao-call-expanded").assertDoesNotExist()
         ui.onNodeWithTag("test-call-entry").assertIsEnabled().performClick()
+        awaitMotionStart(1f)
         finishOpening()
         ui.onNodeWithTag("doubao-call-expanded").assertExists()
     }
@@ -312,9 +328,9 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         mainThread { call = call!!.copy(muted = false) }
         ui.onNodeWithTag("doubao-call-minimize").performClick()
         val key = call!!.sessionKey
-        val before = ui.onNodeWithTag("doubao-call-mini-orb").captureToImage().toPixelMap()
+        val before = captureScreenNode(ui.onNodeWithTag("doubao-call-mini-orb")).toPixelMap()
         ui.mainClock.advanceTimeBy(190L)
-        val after = ui.onNodeWithTag("doubao-call-mini-orb").captureToImage().toPixelMap()
+        val after = captureScreenNode(ui.onNodeWithTag("doubao-call-mini-orb")).toPixelMap()
         var changed = 0
         for (y in 0 until before.height) for (x in 0 until before.width) {
             if (before[x, y] != after[x, y]) changed++
@@ -332,14 +348,14 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         mainThread { call = call!!.copy(muted = false, visualState = DoubaoCallVisualState.RESPONDING) }
         ui.mainClock.advanceTimeBy(80L)
         mainThread { call = call!!.copy(presentation = DoubaoCallPresentation.CLOSING) }
-        ui.mainClock.advanceTimeBy(32L) // capture raster before suspending the geometric reverse
+        awaitMotionStart(0f) // Freeze only after the closing raster actually exists.
         mainThread { fixtureScope.launch { motion.progress.stop(); motion.progress.snapTo(1f) } }
         ui.waitForIdle()
-        val first = ui.onNodeWithTag("doubao-call-expanded").captureToImage().toPixelMap()
+        val first = captureScreenNode(ui.onNodeWithTag("doubao-call-expanded")).toPixelMap()
         SystemClock.sleep(1_100L)
         mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.ERROR, reply = "late pixels", muted = true) }
         ui.mainClock.advanceTimeBy(180L)
-        val second = ui.onNodeWithTag("doubao-call-expanded").captureToImage().toPixelMap()
+        val second = captureScreenNode(ui.onNodeWithTag("doubao-call-expanded")).toPixelMap()
         assertEquals(first.width, second.width); assertEquals(first.height, second.height)
         for (y in 0 until first.height) for (x in 0 until first.width) {
             assertEquals("Frozen raster changed at $x,$y", first[x, y], second[x, y])
@@ -364,6 +380,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
                 muted = false, speaker = true, captionsEnabled = true,
                 endedAtMillis = if (provideEndTimestamp) call!!.startedAtMillis + 12_000L else null)
         }
+        awaitMotionStart(0f)
         // Closing deliberately clears the merged accessibility tree. Inspect the unmerged
         // component content instead: a cached display-list alone would not freeze these inputs
         // (nor any live clip/shadow child layers referencing them).
@@ -406,6 +423,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         mount()
         finishOpening()
         ui.onNodeWithTag("doubao-call-hang-up").performClick()
+        awaitMotionStart(0f)
         for (tag in listOf("doubao-call-hang-up", "doubao-call-mute", "doubao-call-speaker",
             "doubao-call-captions", "doubao-call-minimize")) {
             ui.onNodeWithTag(tag).assertDoesNotExist()
@@ -429,6 +447,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             closingProgress = motion.progress.value
             call = call!!.copy(presentation = DoubaoCallPresentation.CLOSING)
         }
+        awaitMotionStart(0f)
         ui.runOnIdle { assertEquals(0, hangUps); assertTrue(completed.isEmpty()) }
         // Position uses the eased progress, not elapsed / 420.
         ui.mainClock.advanceTimeBy(40L)
@@ -465,10 +484,10 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.waitForIdle()
         ui.runOnIdle { assertTrue(motion.transforming) }
         val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
-        val frozen = ui.onRoot().captureToImage().toPixelMap()
+        val frozen = captureScreenNode(ui.onRoot()).toPixelMap()
         mainThread { motion.transforming = false }
         ui.waitForIdle()
-        val live = ui.onRoot().captureToImage().toPixelMap()
+        val live = captureScreenNode(ui.onRoot()).toPixelMap()
         val density = instrumentation.targetContext.resources.displayMetrics.density
         var compared = 0
         var visibleShadow = false

@@ -32,8 +32,8 @@ class DoubaoCallOrbPixelsTest : ComposeActivityTestCase() {
                     }
                 }
             }
-            fun pixels() = ui.onNodeWithTag(if (compact) "doubao-call-mini-orb" else "doubao-call-orb")
-                .captureToImage().toPixelMap()
+            fun pixels() = captureScreenNode(ui.onNodeWithTag(
+                if (compact) "doubao-call-mini-orb" else "doubao-call-orb-pixels")).toPixelMap()
             fun nearColor(expected: Color, actual: Color, tolerance: Float = .025f) {
                 assertEquals(expected.red, actual.red, tolerance)
                 assertEquals(expected.green, actual.green, tolerance)
@@ -42,9 +42,9 @@ class DoubaoCallOrbPixelsTest : ComposeActivityTestCase() {
             val start = pixels()
             assertEquals(80, start.width)
             nearColor(Color(0xFFA18AC7), start[40, 40]) // purple, not white bars
-            nearColor(Color(0xFFEEE6FB), start[50, 40]) // exact base at unlit centre
+            nearColor(Color(0xFFEEE6FB), start[49, 40]) // exact base at unlit centre
             nearColor(Color(0xFFF6F2FC), start[40, 3]) // 7px halo outside 33px ball
-            assertTrue("inset light must brighten the outer ball", start[40, 8].red > start[50, 40].red)
+            assertTrue("inset light must brighten the outer ball", start[40, 8].red > start[49, 40].red)
             assertTrue("inner hairline must remain visible", start[40, 14].red < start[40, 13].red)
             mainThread { phase = 725f }
             val later = pixels()

@@ -15,7 +15,7 @@ class PageBackRepeatContractTest(unittest.TestCase):
         registration = self.host.split('Box(modifier.fillMaxSize()', 1)[1].split('val owner = Any()', 1)[0]
         self.assertNotIn('&& !departing', registration)
         self.assertIn('val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)', self.host)
-        self.assertIn('if (state.active || entering || state.committing || state.dispatching)', registration)
+        self.assertIn('if (state.active || entering || state.committing || state.dispatching || state.toolbarPending)', registration)
         self.assertNotIn('state.transitionBlocked', registration)
         # A plain duplicate callback is still blocked; only a newly claimed swipe interrupts.
         self.assertIn('(transitionBlocked && swipeCommit == null) || committing', self.host)

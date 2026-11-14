@@ -72,6 +72,9 @@ import kotlin.math.abs
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.currentCoroutineContext
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean, val returnDirection: Float,
@@ -115,7 +118,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
         private set
 
     fun commitBack(back: () -> Unit) {
-        if (!alive || (transitionBlocked && swipeCommit == null) || committing) return
+        if (!alive || toolbarPending || (transitionBlocked && swipeCommit == null) || committing) return
         BackPerformance.safely {
             if (diagnosticToken == null || diagnosticToken != BackPerformance.recorder.token()) {
                 startDiagnostic(BackPerformanceRecorder.Kind.BACK_PRESS)
@@ -134,6 +137,8 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     }
     private class SwipeCommit(val progress: Float, val predictive: Boolean, val direction: Float, val velocity: Float)
     private var swipeCommit: SwipeCommit? = null
+    var toolbarReturnJob: Job? = null
+    var toolbarPending = false
     var dispatching = false
         private set
 
@@ -259,6 +264,7 @@ internal fun Modifier.pageBackPreviewSource(): Modifier {
 }
 
 internal val LocalPageBackGesture = compositionLocalOf<PageBackGestureState?> { null }
+internal val LocalPageBackToolbarReturn = compositionLocalOf<((() -> Unit) -> Unit)?> { null }
 
 /** Keeps nested page handlers in the dispatcher's existing last-enabled-first order. */
 @Composable
@@ -517,6 +523,7 @@ internal fun PageBackGestureHost(
     DisposableEffect(state, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
+                state.toolbarReturnJob?.cancel()
                 state.predictiveGeneration++
                 state.reset(immediate = true)
             }
@@ -525,6 +532,7 @@ internal fun PageBackGestureHost(
         onDispose {
             lifecycle.removeObserver(observer)
             state.alive = false
+            state.toolbarReturnJob?.cancel()
             state.reset()
         }
     }
@@ -536,6 +544,38 @@ internal fun PageBackGestureHost(
         frame.returnDirection = state.returnDirection
         frame.animateReturn = animateBackEnabled && resumed && state.previewAllowed
         if (departure?.forward == true && !state.previewAllowed) departure.forwardSkipped = true
+    }
+    val toolbarBack: (() -> Unit) -> Unit = { back ->
+        if (state.alive && state.resumed && !state.transitionBlocked && !state.active &&
+            !state.committing && !state.dispatching && state.toolbarReturnJob?.isActive != true) {
+            if (!animateBackEnabled || !state.previewAllowed || visualBackTargetKey == null) back()
+            else {
+                state.toolbarPending = true
+                val job = scope.launch(start = CoroutineStart.LAZY) {
+                    val request = layers.prepareToolbarReturn(frame, visualBackTargetKey)
+                    try {
+                        // Capture the visible child before its business callback disposes it.
+                        layers.awaitToolbarReturn(request)
+                        if (state.alive && state.resumed && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+                            layers.ownsToolbarReturn(request)) {
+                            state.toolbarPending = false
+                            back()
+                            // Give both root and nested route publication a frame to consume the ticket.
+                            repeat(2) { withFrameNanos { }; yield() }
+                        }
+                    } finally {
+                        state.toolbarPending = false
+                        if (!currentCoroutineContext().isActive || !state.alive ||
+                            !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || stack.routeKey(routeKey) == visualRouteKey) {
+                            layers.abandon(request)
+                            layers.resume(frame)
+                        }
+                    }
+                }
+                state.toolbarReturnJob = job
+                job.start()
+            }
+        }
     }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val currentBack by rememberUpdatedState(dispatchBack)
@@ -578,7 +618,7 @@ internal fun PageBackGestureHost(
         departing = false
         state.transitionBlocked = false
     }
-    CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath,
+    CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackToolbarReturn provides toolbarBack, LocalPageBackStackPath provides stackPath,
         LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }) {
         Box(modifier.fillMaxSize().testTag("page-back-host").clipToBounds().background(background).onSizeChanged { viewport = it }.then(
             if (canNavigateBack && swipeDismissEnabled && resumed && !imeVisible) Modifier.pointerInput(state, layoutDirection) {
@@ -587,7 +627,7 @@ internal fun PageBackGestureHost(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val gestureWidth = size.width
                     val threshold = gestureWidth * 0.5f + viewConfiguration.touchSlop
-                    if (state.active || entering || state.committing || state.dispatching) return@awaitEachGesture
+                    if (state.active || entering || state.committing || state.dispatching || state.toolbarPending) return@awaitEachGesture
                     val interruptingReturn = returning
                     val owner = Any()
                     val predictiveGeneration = state.predictiveGeneration

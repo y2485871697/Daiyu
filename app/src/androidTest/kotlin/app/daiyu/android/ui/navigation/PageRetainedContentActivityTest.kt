@@ -475,7 +475,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         var observedStack: PageBackStackRegistry? = null
         val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, androidx.compose.ui.graphics.ImageBitmap>()
         val insetsProbe = PageBackInsetsProbe()
-        val initialInsets = IntSize(12, 12)
+        // Legacy platform insets cannot preserve separate synthetic navigation-bar and IME types.
+        val initialInsets = IntSize(12, 0)
         var immediateCaptureRequests = 0
         val draft = ComposerUi("retained draft", selectionStart = 2, selectionEnd = 5)
         val actions = ChatScreenActions()
@@ -558,7 +559,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             dismissIme()
             if (insetsRecovery) {
                 mainThread { insetsProbe.apply(initialInsets) }
-                ui.waitUntil(5_000) { insetsProbe.observed == initialInsets }
+                ui.waitUntil(5_000) { insetsProbe.observed == initialInsets && insetsProbe.observedImeBottom == 0 }
             }
             val answer = ui.onNodeWithText("Retained formatted answer")
             ui.waitUntil(5_000) { ui.onAllNodesWithText("Retained formatted answer").fetchSemanticsNodes().isNotEmpty() }
@@ -628,7 +629,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     ui.waitUntil(5_000) { insetsProbe.observed == IntSize.Zero }
                     ui.mainClock.advanceTimeByFrame()
                     mainThread { insetsProbe.apply(initialInsets) }
-                    ui.waitUntil(5_000) { insetsProbe.observed == initialInsets }
+                    ui.waitUntil(5_000) { insetsProbe.observed == initialInsets && insetsProbe.observedImeBottom == 0 }
                     assertTrue("the real Compose system bars observed the zero recovery edge", IntSize.Zero in insetsProbe.observations)
                 }
                 captureScreenNode(ui.onNodeWithTag("page-back-host"))
@@ -641,6 +642,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val beforeReturnDraws = liveDraws
             ui.mainClock.autoAdvance = false
             if (nested) {
+                if (insetsRecovery) assertEquals("system-bar recovery must not manufacture an IME", 0, insetsProbe.observedImeBottom)
                 val preparedDetail = checkNotNull(detailFrame)
                 val preparedSettings = checkNotNull(settingsFrame)
                 assertTrue("prepared child owns this visit: key=${preparedDetail.key} frozen=${preparedDetail.frozen} released=${preparedDetail.releaseRequested}",
@@ -656,7 +658,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     }
                 }
                 ui.mainClock.advanceTimeByFrame()
-                assertTrue("child gesture locks its prepared pixels: key=${preparedDetail.key} frozen=${preparedDetail.frozen} image=${preparedDetail.image != null} animate=${preparedDetail.animateReturn} target=${preparedDetail.backTargetKey}",
+                assertTrue("child gesture locks its prepared pixels: key=${preparedDetail.key} frozen=${preparedDetail.frozen} image=${preparedDetail.image != null} animate=${preparedDetail.animateReturn} target=${preparedDetail.backTargetKey} latest=${preparedDetail === detailFrame} bars=${insetsProbe.observed} ime=${insetsProbe.observedImeBottom}",
                     preparedDetail.frozen && preparedDetail.canDrawPreview && preparedDetail.animateReturn)
                 ui.onNodeWithTag("page-back-target").assertExists()
                 val firstDragHost = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
@@ -886,6 +888,12 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 } else {
                     ui.onNode(hasContentDescription(instrumentation.targetContext.getString(app.daiyu.android.R.string.action_back)) and hasClickAction())
                         .assertIsDisplayed().assertIsEnabled().performClick()
+                }
+                ui.waitUntil(5_000) {
+                    var reached = false
+                    instrumentation.runOnMainSync { reached = invokeHost(activity, "getRetainedPage") == target }
+                    if (!reached) ui.mainClock.advanceTimeByFrame()
+                    reached
                 }
                 mainThread { assertEquals("production return pops exactly one level", target,
                     invokeHost(activity, "getRetainedPage")) }

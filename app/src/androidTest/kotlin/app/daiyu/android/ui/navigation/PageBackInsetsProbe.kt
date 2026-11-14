@@ -3,6 +3,7 @@ package app.daiyu.android.ui.navigation
 import android.view.View
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.ime
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalDensity
@@ -22,6 +23,9 @@ internal class PageBackInsetsProbe {
     var observed = IntSize.Zero
         private set
     val observations = mutableSetOf<IntSize>()
+    var observedImeBottom = 0
+        private set
+    private var lastObservation: Pair<IntSize, Int>? = null
 
     @Composable
     fun Observe() {
@@ -29,11 +33,18 @@ internal class PageBackInsetsProbe {
         val density = LocalDensity.current
         val bars = WindowInsets.systemBars
         val value = IntSize(bars.getTop(density), bars.getBottom(density))
+        val imeBottom = WindowInsets.ime.getBottom(density)
         SideEffect {
             if (view == null) original = ViewCompat.getRootWindowInsets(host)
             view = host
             observed = value
-            if (observations.add(value)) android.util.Log.i("PageBackInsetsProbe", "observed=$value")
+            observations.add(value)
+            observedImeBottom = imeBottom
+            val observation = value to imeBottom
+            if (lastObservation != observation) {
+                android.util.Log.i("PageBackInsetsProbe", "observed=$value imeBottom=$imeBottom")
+                lastObservation = observation
+            }
         }
     }
 

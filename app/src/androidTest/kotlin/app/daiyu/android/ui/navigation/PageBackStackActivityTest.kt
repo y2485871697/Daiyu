@@ -796,6 +796,109 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     fun testReturnAdvancesWhileCaptureIsPending() = assertReturnDoesNotWaitForCopy(true)
     fun testColdReturnDoesNotWaitOrEnableLatePreview() = assertReturnDoesNotWaitForCopy(false)
 
+    private fun assertToolbarFinalCopy(cancelOnPause: Boolean = false, veto: Boolean = false, failCopy: Boolean = false, nested: Boolean = false) {
+        val gate = CompletableDeferred<Unit>()
+        var waiting = 0
+        var blockCopy = false
+        var frame: PageBackPreviewLayers.Frame? = null
+        var state: PageBackGestureState? = null
+        try {
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        val rendered = screen
+                        PageBackGestureHost(rendered, canNavigateBack = rendered == "settings",
+                            swipeDismissEnabled = true, predictiveBackEnabled = false,
+                            dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
+                            backTargetKey = if (rendered == "settings") "chat" else null,
+                            captureFromContent = true, previewCapture = { source ->
+                                if (source.contentKey == "settings" && source.navigationFrozen && blockCopy) {
+                                    waiting++
+                                    gate.await()
+                                    if (failCopy) error("injected final copy failure")
+                                }
+                                source.layer.toImageBitmap()
+                            }) {
+                            val current = LocalPageBackPreviewFrame.current
+                            val gesture = LocalPageBackGesture.current
+                            androidx.compose.runtime.SideEffect { frame = current; state = gesture }
+                            PageBackHandler(enabled = rendered == "settings") {
+                                backCount++
+                                if (!veto) { if (nested) localPage = null else screen = "chat" }
+                            }
+                            PageBackStack(if (nested) localPage else null) {
+                            Box(Modifier.fillMaxSize().pageBackPreviewSource()
+                                .background(if (rendered == "chat") Color.Red else Color.Green)) {
+                                if (rendered == "settings") app.daiyu.android.ui.components.MiuixBackButton(
+                                    onClick = { activity.onBackPressedDispatcher.onBackPressed() },
+                                    modifier = Modifier.testTag("toolbar-final-copy"))
+                            }
+                            }
+                        }
+                    }
+                }
+            }
+            dismissIme()
+            captureScreenNode(ui.onNodeWithTag("page-back-host"))
+            mainThread { screen = "settings" }
+            if (nested) mainThread { localPage = 1 }
+            ui.mainClock.advanceTimeBy(1000)
+            captureScreenNode(ui.onNodeWithTag("page-back-host"))
+            ui.waitUntil(5_000) { frame?.ready != null }
+            val source = checkNotNull(frame)
+            mainThread { blockCopy = true }
+            ui.mainClock.autoAdvance = false
+            ui.onNodeWithTag("toolbar-final-copy").performClick()
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitUntil(5_000) { waiting == 1 }
+            assertEquals("toolbar keeps its live child until the fresh final copy completes", "settings", screen)
+            assertEquals(0, backCount)
+            assertTrue(source.frozen)
+            assertNull("warm pixels never stand in for the final child", source.image)
+            ui.onNodeWithTag("toolbar-final-copy").performClick()
+            assertEquals("repeated toolbar taps share one request", 1, waiting)
+            if (cancelOnPause) {
+                realPauseResume(activity)
+                mainThread { gate.complete(Unit) }
+                ui.mainClock.advanceTimeBy(64)
+                assertEquals("pause cancels the old callback, including after resume", 0, backCount)
+                assertEquals("settings", screen)
+                mainThread { blockCopy = false }
+                ui.onNodeWithTag("toolbar-final-copy").performClick()
+            } else mainThread { gate.complete(Unit) }
+            ui.waitUntil(5_000) {
+                if (backCount == 0) ui.mainClock.advanceTimeByFrame()
+                backCount == 1
+            }
+            ui.mainClock.advanceTimeByFrame()
+            if (veto) {
+                ui.mainClock.advanceTimeBy(64)
+                assertEquals("settings", screen)
+                assertFalse("a veto releases the precommit lock", checkNotNull(state).toolbarPending)
+                assertFalse("a veto releases the frozen source", source.frozen)
+            } else {
+                assertEquals(if (nested) "settings" else "chat", screen)
+                if (nested) assertNull("nested toolbar pops only the child", localPage)
+                if (!failCopy) {
+                    ui.waitUntil(5_000) { ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty() }
+                    val before = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                    ui.mainClock.advanceTimeBy(32)
+                    val after = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                    assertTrue("the accepted fresh child uses the original return motion", after.left > before.left)
+                } else ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            }
+        } finally {
+            gate.complete(Unit)
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testToolbarWaitsForFinalChildCopyAndCoalescesRepeatedTaps() = assertToolbarFinalCopy()
+    fun testToolbarNestedPopKeepsFinalCopyUntilRegistryConsumesTicket() = assertToolbarFinalCopy(nested = true)
+    fun testToolbarPauseDiscardsPrecommitAndNewTapCanReturn() = assertToolbarFinalCopy(cancelOnPause = true)
+    fun testToolbarVetoReleasesPrecommitPixels() = assertToolbarFinalCopy(veto = true)
+    fun testToolbarFailedFinalCopyReturnsOnceWithoutLatePreview() = assertToolbarFinalCopy(failCopy = true)
+
     @OptIn(ExperimentalActivityApi::class)
     private fun assertNestedInsetsRecovery(kind: Int, stableChange: Boolean = false) {
         val probe = PageBackInsetsProbe()

@@ -365,6 +365,22 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
+    fun prepareToolbarReturn(frame: Frame, target: Any): Departure {
+        pending?.motion?.cancel()
+        return Departure(frame, target, 0f, predictive = false, direction = frame.returnDirection,
+            targetImage = frames[target]?.image).also {
+            pending = it
+            freeze(frame)
+        }
+    }
+
+    fun ownsToolbarReturn(departure: Departure): Boolean = active && !closed && pending === departure &&
+        frames[currentKey] === departure.frame && !departure.frame.releaseRequested
+
+    suspend fun awaitToolbarReturn(departure: Departure) {
+        departure.frame.capture?.join()
+    }
+
     fun abandon(departure: Departure) {
         if (pending === departure) {
             BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_APPLIED, departure.motion?.diagnosticToken)

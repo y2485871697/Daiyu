@@ -523,6 +523,26 @@ class PageBackGestureContractTest(unittest.TestCase):
         for forbidden in ('back()', 'dispatchBack', 'launch', 'predictiveBackEnabled', 'swipeDismissEnabled'):
             self.assertNotIn(forbidden, enter)
 
+    def test_shared_toolbar_captures_the_current_child_before_business_pop(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        button = (APP / 'ui/components/MiuixBackButton.kt').read_text()
+        self.assertIn('LocalPageBackToolbarReturn.current', button)
+        self.assertIn('pageReturn(onClick)', button)
+        prepare = layers.split('    fun prepareToolbarReturn(', 1)[1].split('    fun ownsToolbarReturn(', 1)[0]
+        self.assertLess(prepare.index('pending = it'), prepare.index('freeze(frame)'))
+        self.assertNotIn('PageBackCompletionMotion', prepare)
+        self.assertIn('departure.frame.capture?.join()', layers)
+        self.assertIn('layers.ownsToolbarReturn(request)', self.host)
+        self.assertIn('lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)', self.host)
+        self.assertIn('state.toolbarReturnJob?.cancel()', self.host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        for name in ('testToolbarWaitsForFinalChildCopyAndCoalescesRepeatedTaps',
+                     'testToolbarPauseDiscardsPrecommitAndNewTapCanReturn',
+                     'testToolbarNestedPopKeepsFinalCopyUntilRegistryConsumesTicket',
+                     'testToolbarVetoReleasesPrecommitPixels',
+                     'testToolbarFailedFinalCopyReturnsOnceWithoutLatePreview'):
+            self.assertIn(name, test)
+
     def test_button_returns_use_original_500ms_curve_and_keep_gesture_spring(self):
         self.assertIn('import top.yukonga.miuix.kmp.nav.runtime.NavProgrammaticEasing', self.host)
         self.assertIn('if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))', self.host)

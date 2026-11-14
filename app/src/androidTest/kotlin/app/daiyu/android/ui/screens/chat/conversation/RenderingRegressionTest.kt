@@ -47,19 +47,56 @@ class RenderingRegressionTest : WiredActivityTestCase() {
     fun testNarrowToolbarKeepsFourActionsReachable() {
         var direction by mutableStateOf(LayoutDirection.Ltr)
         val code = MarkdownBlock.Code((1..80).joinToString("\n") { "line $it" }, "long-language-label")
+        android.util.Log.i("DaiyuTestStep", "narrow-toolbar:show begin")
         show { CompositionLocalProvider(LocalLayoutDirection provides direction) {
             key(direction) { Box(Modifier.width(100.dp)) { MarkdownCodeBlock(code, Int.MAX_VALUE, true) } }
         } }
+        android.util.Log.i("DaiyuTestStep", "narrow-toolbar:show done")
         for (layout in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
+            android.util.Log.i("DaiyuTestStep", "narrow-toolbar:$layout direction begin")
             ui.runOnIdle { direction = layout }
             ui.waitForIdle()
+            android.util.Log.i("DaiyuTestStep", "narrow-toolbar:$layout direction done")
             val range = ui.onNodeWithTag("markdown-code-actions", true).fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
             assertTrue(range.maxValue() > 0f)
             for (name in listOf("download", "expand", "unlock", "copy")) {
-                ui.onNodeWithTag("markdown-code-$name", true).performScrollTo().assertIsDisplayed()
+                android.util.Log.i("DaiyuTestStep", "narrow-toolbar:$layout/$name begin")
+                revealToolbarAction(name, layout).assertIsDisplayed()
                     .assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(36.dp).assertHasClickAction()
+                android.util.Log.i("DaiyuTestStep", "narrow-toolbar:$layout/$name done")
             }
         }
+    }
+    private fun revealToolbarAction(name: String, layout: LayoutDirection): SemanticsNodeInteraction {
+        val toolbar = ui.onNodeWithTag("markdown-code-actions", true)
+        val action = ui.onNodeWithTag("markdown-code-$name", true)
+        fun remainingDelta(): Float {
+            val viewport = toolbar.fetchSemanticsNode().boundsInRoot
+            val target = action.fetchSemanticsNode()
+            val left = target.positionInRoot.x
+            val right = left + target.size.width
+            assertTrue("$layout/$name: viewport too narrow: $viewport, actionWidth=${target.size.width}",
+                viewport.width + 1f >= target.size.width)
+            return when {
+                left < viewport.left - 0.5f -> left - viewport.left
+                right > viewport.right + 0.5f -> right - viewport.right
+                else -> 0f
+            }
+        }
+        var sign = 1f
+        repeat(8) { step ->
+            val before = remainingDelta()
+            if (before == 0f) return action
+            android.util.Log.i("DaiyuTestStep", "narrow-toolbar:$layout/$name scroll:$step delta=$before sign=$sign")
+            toolbar.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+                assertTrue("$layout/$name: ScrollBy rejected", scroll(sign * before, 0f))
+            }
+            ui.waitForIdle()
+            val after = remainingDelta()
+            if (after == 0f) return action
+            if (kotlin.math.abs(after) >= kotlin.math.abs(before) - 0.5f) sign = -sign
+        }
+        throw AssertionError("$layout/$name: not fully reachable after 8 ScrollBy steps; remainingDelta=${remainingDelta()}")
     }
     fun testTableAlignmentRemainsPhysicalUnderRtl() {
         var direction by mutableStateOf(LayoutDirection.Ltr)

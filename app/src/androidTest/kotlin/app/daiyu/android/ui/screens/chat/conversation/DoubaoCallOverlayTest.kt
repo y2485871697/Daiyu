@@ -161,8 +161,14 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
     fun testShortPanelKeepsControlsReachableByBodyScrollWithoutDraggingThePanel() {
         mount(430.dp); finishOpening()
         val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
-        ui.onNodeWithTag("doubao-call-hang-up").performScrollTo().assertIsDisplayed()
-        ui.onNodeWithTag("doubao-call-speaker").performScrollTo().assertIsDisplayed().performClick()
+        ui.mainClock.autoAdvance = true
+        try {
+            ui.onNodeWithTag("doubao-call-hang-up").performScrollTo().assertIsDisplayed()
+            ui.onNodeWithTag("doubao-call-speaker").performScrollTo().assertIsDisplayed().performClick()
+            awaitVisualIdle()
+        } finally {
+            ui.mainClock.autoAdvance = false
+        }
         assertEquals(1, speakerToggles)
         assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
     }
@@ -181,11 +187,11 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithText("正在连接", substring = true).assertDoesNotExist()
         ui.onNodeWithText("正在建立通话连接").assertDoesNotExist()
         ui.onNodeWithTag("doubao-call-orb", useUnmergedTree = true).assertExists()
-        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
         ui.onNodeWithText("我在听，你说").assertIsDisplayed()
         ui.onNodeWithText("正在连接", substring = true).assertDoesNotExist()
         ui.onNodeWithTag("doubao-call-mini-orb", useUnmergedTree = true).assertExists()
-        ui.onNodeWithTag("doubao-call-expand").performClick()
+        ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
         ui.onNodeWithText("我在听，你说").assertIsDisplayed()
         assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
         assertEquals(DuplexPhase.CONNECTING, source.state.phase)
@@ -197,13 +203,13 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.RESPONDING, muted = false) }
         ui.onNodeWithText("豆包正在回应").assertIsDisplayed()
         ui.onNodeWithText("我在听，你说").assertDoesNotExist()
-        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
         ui.onNodeWithText("豆包正在回应").assertIsDisplayed()
         ui.onNodeWithTag("doubao-call-mini-orb", useUnmergedTree = true).assertExists()
         mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.LISTENING) }
         ui.onNodeWithText("我在听，你说").assertIsDisplayed()
         ui.onNodeWithText("豆包正在回应").assertDoesNotExist()
-        ui.onNodeWithTag("doubao-call-expand").performClick()
+        ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
         ui.onNodeWithText("我在听，你说").assertIsDisplayed()
         ui.onNodeWithText("不用着急，我一直在这里").assertIsDisplayed()
         mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.RESPONDING) }
@@ -218,7 +224,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithTag("doubao-call-hang-up").assertIsNotEnabled()
         ui.mainClock.advanceTimeBy(90L)
         ui.runOnIdle { assertFalse(motion.transforming); assertEquals(1f, motion.progress.value, 0f) }
-        ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled().performClick()
+        ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled().performClick().also { awaitVisualIdle() }
         awaitMotionStart(0f)
         ui.mainClock.advanceTimeBy(380L)
         ui.runOnIdle { assertNotNull(call); assertTrue(motion.transforming) }
@@ -229,7 +235,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
     fun testHangUpStopsOwnerImmediatelyThenClearsAndRestoresEntryAfterReverse() {
         mount()
         finishOpening()
-        ui.onNodeWithTag("doubao-call-hang-up").performClick()
+        ui.onNodeWithTag("doubao-call-hang-up").performClick().also { awaitVisualIdle() }
         ui.runOnIdle {
             assertEquals(1, hangUps)
             assertEquals(DoubaoCallPresentation.CLOSING, call?.presentation)
@@ -241,7 +247,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.waitForIdle()
         ui.runOnIdle { assertNull(call); assertEquals(1, completed.size) }
         ui.onNodeWithTag("doubao-call-expanded").assertDoesNotExist()
-        ui.onNodeWithTag("test-call-entry").assertIsEnabled().performClick()
+        ui.onNodeWithTag("test-call-entry").assertIsEnabled().performClick().also { awaitVisualIdle() }
         awaitMotionStart(1f)
         finishOpening()
         ui.onNodeWithTag("doubao-call-expanded").assertExists()
@@ -255,7 +261,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         assertTrue(originalSeconds >= 65L)
         ui.onNodeWithTag("doubao-call-mute").assertIsSelected()
         ui.onNodeWithTag("doubao-call-speaker").assertIsNotSelected()
-        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
         ui.onNodeWithTag("doubao-call-mini").assertExists()
         ui.onNodeWithTag("doubao-call-hang-up").assertDoesNotExist()
         ui.runOnIdle {
@@ -284,10 +290,11 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             displayedSeconds() > miniSeconds)
         // The original mini's main region restores on a real tap, not just its arrow button.
         ui.onNodeWithTag("doubao-call-drag-handle").performTouchInput { click() }
+        awaitVisualIdle()
         ui.onNodeWithTag("doubao-call-expanded").assertExists()
-        ui.onNodeWithTag("doubao-call-mute").assertIsSelected().performClick()
-        ui.onNodeWithTag("doubao-call-speaker").assertIsNotSelected().performClick()
-        ui.onNodeWithTag("doubao-call-captions").assertIsSelected().performClick()
+        ui.onNodeWithTag("doubao-call-mute").assertIsSelected().performClick().also { awaitVisualIdle() }
+        ui.onNodeWithTag("doubao-call-speaker").assertIsNotSelected().performClick().also { awaitVisualIdle() }
+        ui.onNodeWithTag("doubao-call-captions").assertIsSelected().performClick().also { awaitVisualIdle() }
         ui.runOnIdle {
             assertEquals(1, muteToggles); assertEquals(1, speakerToggles); assertEquals(1, captionToggles)
             assertFalse(call!!.muted); assertTrue(call!!.speaker); assertFalse(call!!.captionsEnabled)
@@ -326,7 +333,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         mount()
         finishOpening()
         mainThread { call = call!!.copy(muted = false) }
-        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
         val key = call!!.sessionKey
         val before = captureScreenNode(ui.onNodeWithTag("doubao-call-mini-orb")).toPixelMap()
         ui.mainClock.advanceTimeBy(190L)
@@ -351,11 +358,17 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         awaitMotionStart(0f) // Freeze only after the closing raster actually exists.
         mainThread { fixtureScope.launch { motion.progress.stop(); motion.progress.snapTo(1f) } }
         ui.waitForIdle()
-        val first = captureScreenNode(ui.onNodeWithTag("doubao-call-expanded")).toPixelMap()
+        ui.runOnIdle {
+            assertEquals(DoubaoCallPresentation.CLOSING, call!!.presentation)
+            assertTrue(motion.transforming)
+            assertEquals(1f, motion.progress.value, 0f)
+            assertTrue(completed.isEmpty())
+        }
+        val first = captureScreenNode(ui.onRoot()).toPixelMap()
         SystemClock.sleep(1_100L)
         mainThread { call = call!!.copy(visualState = DoubaoCallVisualState.ERROR, reply = "late pixels", muted = true) }
         ui.mainClock.advanceTimeBy(180L)
-        val second = captureScreenNode(ui.onNodeWithTag("doubao-call-expanded")).toPixelMap()
+        val second = captureScreenNode(ui.onRoot()).toPixelMap()
         assertEquals(first.width, second.width); assertEquals(first.height, second.height)
         for (y in 0 until first.height) for (x in 0 until first.width) {
             assertEquals("Frozen raster changed at $x,$y", first[x, y], second[x, y])
@@ -422,7 +435,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
     fun testClosingRemovesAllControlSemanticsButDoesNotBlockChatOutsidePanel() {
         mount()
         finishOpening()
-        ui.onNodeWithTag("doubao-call-hang-up").performClick()
+        ui.onNodeWithTag("doubao-call-hang-up").performClick().also { awaitVisualIdle() }
         awaitMotionStart(0f)
         for (tag in listOf("doubao-call-hang-up", "doubao-call-mute", "doubao-call-speaker",
             "doubao-call-captions", "doubao-call-minimize")) {
@@ -532,9 +545,9 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithTag("voice-call-compressed").assertExists()
         ui.mainClock.advanceTimeBy(2_700); ui.waitForIdle()
         ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
-        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
         ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
-        ui.onNodeWithTag("doubao-call-expand").performClick()
+        ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
         ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
         ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
         mainThread { call = call!!.copy(compressing = true) }
@@ -561,9 +574,9 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             mainThread { call = call!!.copy(reply = call!!.reply + "\n新增回答") }
             ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
             ui.runOnIdle { assertEquals(held, position().value(), 2f) }
-            ui.onNodeWithTag("doubao-call-minimize").performClick()
+            ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
             ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
-            ui.onNodeWithTag("doubao-call-expand").performClick()
+            ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
             ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
             ui.runOnIdle { assertEquals(held, position().value(), 2f) }
         }

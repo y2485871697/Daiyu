@@ -32,8 +32,8 @@ class DoubaoCallOrbPixelsTest : ComposeActivityTestCase() {
                     }
                 }
             }
-            fun pixels() = captureScreenNode(ui.onNodeWithTag(
-                if (compact) "doubao-call-mini-orb" else "doubao-call-orb-pixels")).toPixelMap()
+            fun pixels() = ui.onNodeWithTag(
+                if (compact) "doubao-call-mini-orb" else "doubao-call-orb-pixels").captureToImage().toPixelMap()
             fun nearColor(expected: Color, actual: Color, tolerance: Float = .025f) {
                 assertEquals(expected.red, actual.red, tolerance)
                 assertEquals(expected.green, actual.green, tolerance)

@@ -29,12 +29,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Path
@@ -57,6 +58,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -340,7 +342,9 @@ private fun DoubaoCallSession(
                         }
                     }
                 }
-                .shadow(14.dp, shape, clip = false, ambientColor = Color(0xFFB7A6CE), spotColor = Color(0xFFB7A6CE))
+                .dropShadow(shape, Shadow(radius = 14.dp, color = Color(0xFFB7A6CE),
+                    offset = DpOffset(0.dp, 4.dp), alpha = .24f))
+                .dropShadow(shape, Shadow(radius = 7.dp, color = Color(0xFFB7A6CE), alpha = .12f))
                 .clip(shape)
                 .background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
                 .border(1.dp, Color.White, shape),

@@ -90,7 +90,7 @@ class MarkdownEntryContract(unittest.TestCase):
         self.assertIn('sources.sumOf { it.length.toLong() } <= INTERACTIVE_MARKDOWN_CHARS', source)
         self.assertIn('interactiveMarkdownDispatcher else markdownDispatcher', source)
         self.assertIn('withContext(dispatcher)', source)
-        self.assertIn('cache.get(sources, parser) ?: cache.getPrepared(sources, parser)', source)
+        self.assertIn('cache.get(sources, parser, windows) ?: if (windowed) null else cache.getPrepared(sources, parser)', source)
         self.assertIn('if (predecessor == null) cached?.let { return it }', source)
         self.assertIn('currentCoroutineContext().ensureActive()\n    cache.put(projection)', source)
 

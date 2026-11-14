@@ -5,10 +5,11 @@ import app.daiyu.android.domain.MessageImageReference
 
 /** Ordered presentation for mixed messages; never flatten images into text/URI placeholders. */
 sealed interface MessageContentUi {
-    data class Text(val itemId: String, val text: String) : MessageContentUi
+    data class Text(val itemId: String, val text: String, val markdownWindow: app.daiyu.android.MarkdownSourceWindow? = null) : MessageContentUi
     data class Image(val image: MessageImageUi) : MessageContentUi
     data class Video(val video: MessageVideoUi) : MessageContentUi
-    data class Reasoning(val reported: app.daiyu.android.domain.ReportedReasoning) : MessageContentUi
+    data class Reasoning(val reported: app.daiyu.android.domain.ReportedReasoning,
+        val markdownWindow: app.daiyu.android.MarkdownSourceWindow? = null) : MessageContentUi
     data class Tool(
         val step: WorkStepUi,
         val arguments: String = "",

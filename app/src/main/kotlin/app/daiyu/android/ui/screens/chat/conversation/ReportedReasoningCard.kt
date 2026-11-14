@@ -53,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+internal val LocalReasoningSourceWindows = androidx.compose.runtime.staticCompositionLocalOf<Map<String, app.daiyu.android.MarkdownSourceWindow>> { emptyMap() }
+
 private const val ReasoningDisclosureDurationMillis = 220
 
 /** Independent disclosure: collapse never hides or rewrites the answer, images or tool card. */
@@ -87,11 +89,12 @@ internal fun ReportedReasoningCard(
             val text = summary.text.takeIf(::hasReportedReasoningText).orEmpty()
             // Keep the parser lane and reveal owner through thought/tool/terminal transitions.
             val streamingProjection = remember(ownerKey, summary.itemId) { !generationComplete }
-            val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection)
+            val sourceWindow = LocalReasoningSourceWindows.current[summary.itemId]
+            val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))
             val revealEnabled = !manuallyCollapsed && (!stopped || currentOverride == true) && hasReportedReasoningText(text)
             val reveal = key(revealEnabled) {
                 rememberMarkdownReveal(
-                    listOf(MarkdownTypingSource(summary.itemId, text)), projection,
+                    listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
                     streaming = isThinking && revealEnabled, terminal = !isThinking,
                     resetEpoch = revealResetEpoch,
                     onVisibleAdvance = onVisibleAdvance,
@@ -164,9 +167,10 @@ internal fun ReportedReasoningCard(
                             val projection = display.projection
                             val displayed = projection?.sources?.singleOrNull() ?: summary.text
                             RevealedMessageMarkdown(
-                                displayed, projection?.blocks?.get(displayed), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
+                                displayed, projection?.blocksAt(0), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
                                 generationComplete = generationComplete && projection != null && displayed == summary.text,
                                 deferBlockReveal = true,
+                                sourceWindow = projection?.windows?.singleOrNull() ?: LocalReasoningSourceWindows.current[summary.itemId],
                             )
                         }
                     }

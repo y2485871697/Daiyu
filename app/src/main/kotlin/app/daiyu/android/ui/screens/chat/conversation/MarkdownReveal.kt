@@ -27,7 +27,7 @@ internal fun markdownBlockLength(block: MarkdownBlock): Int = when (block) {
     is MarkdownBlock.Quote -> markdownBlocksLength(block.blocks)
     is MarkdownBlock.Items -> block.items.sumOf { markdownBlocksLength(it.blocks).coerceAtLeast(1).toLong() }
         .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-    is MarkdownBlock.Table -> (sequenceOf(block.header) + block.rows.asSequence()).sumOf { row ->
+    is MarkdownBlock.Table -> ((if (block.headerVisible) sequenceOf(block.header) else emptySequence()) + block.rows.asSequence()).sumOf { row ->
         row.sumOf { markdownInlineLength(it).coerceAtLeast(1).toLong() }
     }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     MarkdownBlock.Rule -> 1
@@ -36,9 +36,9 @@ internal fun markdownBlockLength(block: MarkdownBlock): Int = when (block) {
 /** Cell offsets stay row-major even when the renderer splits a wide table into groups. */
 internal fun markdownTableCellOffsets(table: MarkdownBlock.Table): List<List<Int>> {
     var offset = 0L
-    return (listOf(table.header) + table.rows).map { row -> row.map { cell ->
+    return (listOf(table.header) + table.rows).mapIndexed { rowIndex, row -> row.map { cell ->
         val start = offset.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        offset += markdownInlineLength(cell).coerceAtLeast(1)
+        if (rowIndex != 0 || table.headerVisible) offset += markdownInlineLength(cell).coerceAtLeast(1)
         start
     } }
 }
@@ -67,7 +67,7 @@ internal fun markdownBlocksDisplayText(blocks: List<MarkdownBlock>): String = bu
                 item.blocks.forEach(::block)
                 if (length == before) append('\uFFFC')
             }
-            is MarkdownBlock.Table -> (sequenceOf(node.header) + node.rows.asSequence()).forEach { row ->
+            is MarkdownBlock.Table -> ((if (node.headerVisible) sequenceOf(node.header) else emptySequence()) + node.rows.asSequence()).forEach { row ->
                 row.forEach { cell ->
                     val before = length
                     inlines(cell)
@@ -126,12 +126,15 @@ internal class MarkdownTextBoundaries(private val text: String) {
     }
 }
 
-internal data class MarkdownTypingSource(val id: String, val text: String)
+internal data class MarkdownTypingSource(val id: String, val text: String,
+    val window: app.daiyu.android.MarkdownSourceWindow? = null)
 internal data class MarkdownTypingPart(val source: MarkdownTypingSource, val length: Int,
     val displayed: String = source.text,
 )
 
 internal fun markdownTypingAppends(previous: List<MarkdownTypingSource>, next: List<MarkdownTypingSource>): Boolean {
+    if (!markdownWindowsAppend(previous.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty(),
+            next.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty())) return false
     if (previous.all { it.text.isEmpty() }) return true
     if (next.size < previous.size) return false
     return previous.indices.all { index ->

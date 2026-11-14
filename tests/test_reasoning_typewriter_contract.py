@@ -8,7 +8,7 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class ReasoningTypewriterContract(unittest.TestCase):
     def test_reasoning_uses_same_reveal_and_formatted_leaf(self):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        for token in ['val reveal = key(revealEnabled)', 'rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text)',
+        for token in ['val reveal = key(revealEnabled)', 'rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text, sourceWindow)',
                       'RevealedMessageMarkdown(', 'display.reveal, summary.itemId',
                       'resetEpoch = revealResetEpoch', 'onVisibleAdvance = onVisibleAdvance']:
             self.assertIn(token, source)

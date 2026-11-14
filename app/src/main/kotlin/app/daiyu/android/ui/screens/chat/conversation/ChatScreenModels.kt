@@ -128,6 +128,8 @@ data class WorkSegmentUi(
     val steps: List<WorkStepUi> = emptyList(),
     val reasoning: app.daiyu.android.domain.ReportedReasoning? = null,
     val narrationId: String? = null,
+    val narrationWindow: app.daiyu.android.MarkdownSourceWindow? = null,
+    val reasoningWindow: app.daiyu.android.MarkdownSourceWindow? = null,
 )
 
 data class WorkStepOwnerUi(val conversationId: String, val runId: String, val messageId: String)

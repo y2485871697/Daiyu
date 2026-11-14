@@ -14,8 +14,8 @@ private data class ReconnectContent(val item: MessageContentUi, val role: Reconn
 internal data class ReconnectParts(val parts: List<ReconnectPart>, val placedIds: Set<String>)
 
 private fun MessageContentUi.units(): Long = when (this) {
-    is MessageContentUi.Text -> text.length.toLong()
-    is MessageContentUi.Reasoning -> reported.text.length.toLong()
+    is MessageContentUi.Text -> (markdownWindow?.let { it.end - it.start } ?: text.length).toLong()
+    is MessageContentUi.Reasoning -> (markdownWindow?.let { it.end - it.start } ?: reported.text.length).toLong()
     else -> 1L
 }
 
@@ -39,7 +39,12 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
             sourceWorkflow.pending.isNotEmpty() -> ReconnectContentRole.PENDING
             else -> ReconnectContentRole.BODY
         }
-        ReconnectContent(item, role)
+        val windowed = when (item) {
+            is MessageContentUi.Text -> item.copy(markdownWindow = app.daiyu.android.MarkdownSourceWindow(item.text, 0, item.text.length, turn.status == app.daiyu.android.domain.RunStatus.RUNNING))
+            is MessageContentUi.Reasoning -> item.copy(markdownWindow = app.daiyu.android.MarkdownSourceWindow(item.reported.text, 0, item.reported.text.length, turn.status == app.daiyu.android.domain.RunStatus.RUNNING))
+            else -> item
+        }
+        ReconnectContent(windowed, role)
     }.toMutableList()
     var headIndex = 0
     var consumed = source.start
@@ -56,23 +61,23 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
                 consumed += length
             } else {
                 val count = (offset - consumed).coerceAtLeast(0L).toInt()
-                val text = when (item) {
-                    is MessageContentUi.Text -> item.text
-                    is MessageContentUi.Reasoning -> item.reported.text
-                    else -> ""
-                }
-                // A malformed persisted coordinate must never split a surrogate pair.
-                val safe = if (count in 1 until text.length && text[count - 1].isHighSurrogate() &&
-                    text[count].isLowSurrogate()) count - 1 else count
+                // Keep the exact persisted UTF-16 window; the mapped parser owns indivisible glyphs.
+                val safe = count
                 if (safe > 0) {
                     when (item) {
                         is MessageContentUi.Text -> {
-                            head += tagged.copy(item = item.copy(text = text.take(safe)))
-                            pending[headIndex] = tagged.copy(item = item.copy(text = text.drop(safe)))
+                            val window = checkNotNull(item.markdownWindow)
+                            val before = window.copy(end = window.start + safe)
+                            val after = window.copy(start = window.start + safe)
+                            head += tagged.copy(item = item.copy(text = before.displaySource(), markdownWindow = before))
+                            pending[headIndex] = tagged.copy(item = item.copy(text = after.displaySource(), markdownWindow = after))
                         }
                         is MessageContentUi.Reasoning -> {
-                            head += tagged.copy(item = item.copy(reported = item.reported.copy(text = text.take(safe), activeSinceNanos = null)))
-                            pending[headIndex] = tagged.copy(item = item.copy(reported = item.reported.copy(text = text.drop(safe))))
+                            val window = checkNotNull(item.markdownWindow)
+                            val before = window.copy(end = window.start + safe)
+                            val after = window.copy(start = window.start + safe)
+                            head += tagged.copy(item = item.copy(reported = item.reported.copy(text = before.displaySource(), activeSinceNanos = null), markdownWindow = before))
+                            pending[headIndex] = tagged.copy(item = item.copy(reported = item.reported.copy(text = after.displaySource()), markdownWindow = after))
                         }
                         else -> Unit
                     }
@@ -96,9 +101,9 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
         val steps = items(ReconnectContentRole.WORKFLOW)
         val work = sourceWorkflow.work?.takeIf { steps.isNotEmpty() }?.let { original -> original.copy(
             segments = steps.mapNotNull { item -> when (item) {
-                is MessageContentUi.Reasoning -> WorkSegmentUi(reasoning = item.reported)
+                is MessageContentUi.Reasoning -> WorkSegmentUi(reasoning = item.reported, reasoningWindow = item.markdownWindow)
                 is MessageContentUi.Tool -> WorkSegmentUi(steps = listOf(item.step))
-                is MessageContentUi.Text -> WorkSegmentUi(narration = item.text)
+                is MessageContentUi.Text -> WorkSegmentUi(narration = item.text, narrationId = item.itemId, narrationWindow = item.markdownWindow)
                 else -> null
             } }, summary = if (live) original.summary else "已完成", running = live && original.running,
             controlActivity = original.controlActivity.takeIf { live }) }

@@ -29,7 +29,7 @@ class MarkdownTypingContract(unittest.TestCase):
             self.assertIn(token, mapper)
 
     def test_full_sources_still_project_once_not_per_frame(self):
-        self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)", self.chat)
+        self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING, windows = bodySources.map { it.window })", self.chat)
         self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
@@ -42,7 +42,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("while (shown < end)", self.typing)
 
     def test_mount_baseline_and_part_identity_are_not_text_guesses(self):
-        for token in ["remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }", "MarkdownTypingSource(it.itemId, it.text)",
+        for token in ["remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }", "MarkdownTypingSource(it.itemId, it.text, it.markdownWindow)",
                       "rememberMarkdownProjection(baseline.map { it.text },", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
             self.assertIn(token, self.typing)
         workflow = (BASE / "AssistantWorkflowContent.kt").read_text()
@@ -57,12 +57,12 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn('val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete)', assistant)
         text_body = self.chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
-                      'RevealedMessageMarkdown(displayed, accepted?.blocks?.get(displayed),',
-                      'generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)'):
+                      'RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),',
+                      'generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,'):
             self.assertIn(token, text_body)
         self.assertEqual(1, assistant.count('textBody = textBody'))
         self.assertIn('WorkflowNarrationContent(steps, plainText, textSources,', self.chat)
-        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", self.ui)
+        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", self.ui)
         content = (BASE / "MessageContent.kt").read_text()
         self.assertIn('key(block.workflowKey(index))', content)
         self.assertIn("textBody: @Composable (MessageContentUi.Text, Modifier)", content)
@@ -115,7 +115,7 @@ class MarkdownTypingContract(unittest.TestCase):
         table = self.ui.split("private fun MarkdownTable(", 1)[1].split("private fun headingSize", 1)[0]
         self.assertNotIn("renderInline", table)
         self.assertNotIn("IntrinsicSize", self.ui)
-        for token in ["MarkdownText.tableColumnWidthEms(table.header)", "style.fontSize.toDp()", "remember(columnEms, em)",
+        for token in ["MarkdownText.tableColumnWidthEms(table.widthHeader ?: table.header)", "style.fontSize.toDp()", "remember(columnEms, em)",
                       "table.header.size > 32", "horizontalScroll(rememberScrollState())", "Row(Modifier.drawWithCache", "rememberMarkdownVisibility(visibility, offsets[column], lengths[column])"]:
             self.assertIn(token, table)
         hints = (APP / "MarkdownText.kt").read_text().split("internal fun tableCellWidthEm", 1)[1].split("internal fun renderInline", 1)[0]
@@ -137,16 +137,41 @@ class MarkdownTypingContract(unittest.TestCase):
             self.assertIn(token, self.projection)
         self.assertIn("{ defaultMarkdownParser }", self.ui)
         for token in ["private var remaining = 1024", "private fun isRule(line: String, cancel: ParseCheck)",
-                      "stripAtxClosingHashes(title.groupValues[2], cancel)", "separators.all { cancel.step();", "repeat(after - i) { cancel.step();"]:
+                      "stripAtxClosingHashes(cancel.slice(line, title.groups[2]?.range?.first ?: line.length), cancel)", "separators.all { cancel.step();", "repeat(after - i) { offset -> cancel.step();"]:
             self.assertIn(token, self.parser)
 
     def test_link_prepass_reuses_the_budgeted_destination_scan_and_safety_boundary(self):
         self.assertNotIn("parenthesisEnds", self.parser)
         self.assertIn("val destination = destinations[i]", self.parser)
         self.assertEqual(1, self.parser.count("linkDestination(source, p + 1, work, cancel)"))
-        for token in ["if (work.exhausted) return listOf(MarkdownInline.Text(source))", "destinations[open] = destination",
-                      "p = destination.second", "MarkdownText.isSafeLink(destination.first)", "plain.append(source, i, destination.second)"]:
+        for token in ["if (work.exhausted) return listOf(mappedText(source, cancel))", "destinations[open] = destination",
+                      "p = destination.second", "MarkdownText.isSafeLink(destination.first)", "else append(i, destination.second)"]:
             self.assertIn(token, self.parser)
+
+    def test_window_identity_reaches_request_cache_typing_and_leaf(self):
+        for token in ('MarkdownProjectionRequest(sources, requestedWindows)',
+                      'markdownWindowsAppend(it.windows, requestedWindows)', 'sourceWindow = sourceWindow'):
+            self.assertIn(token, self.ui)
+        for token in ('windowMarkdownBlocks(window, parser)', 'windowBlocks[window]',
+                      'markdownWindowsAppend(it.windows, snapshot.windows)'):
+            self.assertIn(token, self.projection)
+        self.assertIn('projection?.windows.orEmpty() == sources.map { it.window }', self.typing)
+        self.assertIn('source.window == window && state.value', self.typing)
+        self.assertIn('windows: List<MarkdownSourceWindow?>', self.cache)
+        self.assertIn('projection.windows.filterNotNull()', self.cache)
+        self.assertIn('sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow', self.chat)
+
+    def test_reconnect_window_keeps_original_streaming_phase_in_its_identity(self):
+        source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MarkdownSource.kt').read_text()
+        windows = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/MarkdownWindowProjection.kt').read_text()
+        reconnect = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReconnectParts.kt').read_text()
+        self.assertIn('val streaming: Boolean = false', source)
+        self.assertEqual(2, reconnect.count('turn.status == app.daiyu.android.domain.RunStatus.RUNNING'))
+        self.assertIn('val streaming = window.streaming || parser === streamingMarkdownParser', windows)
+        self.assertIn('val parser: MarkdownParserIdentity, val streaming: Boolean', windows)
+        self.assertIn('MarkdownDocuments.get(window.source, parser, streaming)', windows)
+        self.assertIn('MarkdownDocuments.put(window.source, parser, streaming, parsed)', windows)
+        self.assertIn('before.streaming == after.streaming', self.projection)
 
     def test_executable_regression_sources_exist_without_claiming_they_ran(self):
         test = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageMarkdownTest.kt").read_text()

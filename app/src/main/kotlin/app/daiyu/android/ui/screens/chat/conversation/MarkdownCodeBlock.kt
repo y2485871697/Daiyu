@@ -152,7 +152,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                         verticalAlignment = Alignment.CenterVertically) {
                     CodeAction(CodeBlockIcons.Download, "下载代码", "markdown-code-download",
                         enabled = pendingDownloadId == null && !preparingDownload) {
-                        val content = block.text
+                        val content = block.exportText ?: block.text
                         val fileName = markdownCodeFileName(block.language)
                         val id = UUID.randomUUID().toString()
                         val snapshot = markdownCodeDownloadSnapshot(context.cacheDir, id)
@@ -183,7 +183,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                     CodeAction(if (copied) DaiyuIcons.Check else DaiyuIcons.Copy,
                         if (copied) "已复制代码" else "复制代码", "markdown-code-copy",
                         tint = if (copied) colors.success else colors.muted) {
-                        runCatching { clipboard.setText(AnnotatedString(block.text)) }
+                        runCatching { clipboard.setText(AnnotatedString(block.exportText ?: block.text)) }
                             .onSuccess { copied = true }
                             .onFailure { android.widget.Toast.makeText(context, "复制失败", android.widget.Toast.LENGTH_SHORT).show() }
                     }
@@ -203,7 +203,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
         }
     }
     if (expanded) CompositionLocalProvider(LocalToolOutputContext provides null) {
-        ToolOutputDialog(ToolDisclosureUi(block.language, block.text, code = true),
+        ToolOutputDialog(ToolDisclosureUi(block.language, block.exportText ?: block.text, code = true),
             onDismiss = { expanded = false })
     }
 }

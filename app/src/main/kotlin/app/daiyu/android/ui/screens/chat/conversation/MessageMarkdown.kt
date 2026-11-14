@@ -85,19 +85,23 @@ internal fun MessageMarkdown(text: String, modifier: Modifier = Modifier, markdo
 internal val LocalMarkdownParser = staticCompositionLocalOf<(String) -> List<MarkdownBlock>> { defaultMarkdownParser }
 
 @Composable
-internal fun rememberMarkdownProjection(sources: List<String>, streaming: Boolean = false): MarkdownProjection? {
+internal fun rememberMarkdownProjection(sources: List<String>, streaming: Boolean = false,
+    windows: List<app.daiyu.android.MarkdownSourceWindow?> = emptyList(),
+): MarkdownProjection? {
     val configuredParser = LocalMarkdownParser.current
     val parser = if (streaming && configuredParser === defaultMarkdownParser) streamingMarkdownParser else configuredParser
     val parserIdentity = MarkdownParserIdentity(parser)
-    val cached = remember(sources, parserIdentity) {
-        markdownProjectionCache.get(sources, parser) ?: markdownProjectionCache.getPrepared(sources, parser)
+    val requestedWindows = windows.takeIf { it.any { window -> window != null } }.orEmpty()
+    val cached = remember(sources, requestedWindows, parserIdentity) {
+        markdownProjectionCache.get(sources, parser, requestedWindows) ?: if (requestedWindows.isEmpty())
+            markdownProjectionCache.getPrepared(sources, parser) else null
     }
-    val requested by rememberUpdatedState(sources)
+    val requested by rememberUpdatedState(MarkdownProjectionRequest(sources, requestedWindows))
     val completed by produceState<MarkdownProjection?>(cached, parserIdentity) {
-        collectMarkdownProjections(snapshotFlow { requested }, parser) { value = it }
+        collectMarkdownRequests(snapshotFlow { requested }, parser) { value = it }
     }
-    // Cached returns are exact; an in-flight append may display its last completed snapshot.
-    return cached ?: completed?.takeIf { it.parser === parser && isMarkdownAppend(it.sources, sources) }
+    return cached ?: completed?.takeIf { it.parser === parser && isMarkdownAppend(it.sources, sources) &&
+        markdownWindowsAppend(it.windows, requestedWindows) }
 }
 
 /** Read animation state at the text leaf, not at the assistant row or its tool cards. */
@@ -105,10 +109,11 @@ internal fun rememberMarkdownProjection(sources: List<String>, streaming: Boolea
 internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, reveal: MarkdownReveal,
     partId: String, modifier: Modifier = Modifier, generationComplete: Boolean = true,
     deferBlockReveal: Boolean = false,
+    sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
 ) {
     if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, modifier,
-        generationComplete = generationComplete, visibility = reveal.visibility(partId))
-    else ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)
+        generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)
+    else ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)
 }
 
 @Composable
@@ -116,18 +121,20 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
     visibleCharacters: Int = Int.MAX_VALUE,
     generationComplete: Boolean = true,
     visibility: State<Int>? = null,
+    sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
 ) {
-    val body = rememberMarkdownBodySnapshot(text, blocks)
+    val body = rememberMarkdownBodySnapshot(text, blocks, sourceWindow)
     if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())
     else ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters, generationComplete && body.text == text, visibility)
 }
 
 @Composable
-internal fun rememberMarkdownBodySnapshot(text: String, blocks: List<MarkdownBlock>?): MarkdownBodySnapshot? {
+internal fun rememberMarkdownBodySnapshot(text: String, blocks: List<MarkdownBlock>?,
+    sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null): MarkdownBodySnapshot? {
     val parser = LocalMarkdownParser.current
     val published = remember(MarkdownParserIdentity(parser)) { MarkdownBodyPublication() }
     // Keep the displayed source and AST together while an appended chunk parses off-thread.
-    val body = markdownBodySnapshot(text, blocks, published.body)
+    val body = markdownBodySnapshot(text, blocks, published.body, sourceWindow)
     SideEffect { published.body = body }
     return body
 }
@@ -271,7 +278,7 @@ private fun MarkdownListItem(item: MarkdownBlock.Item, ordered: Boolean, number:
             true -> "☑"; false -> "☐"
             null -> if (ordered) "$number." else "•"
         }
-        BasicText(bullet, Modifier.widthIn(min = 24.dp).padding(end = 6.dp), messageBodyStyle())
+        BasicText(if (item.showMarker) bullet else "", Modifier.widthIn(min = 24.dp).padding(end = 6.dp), messageBodyStyle())
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             MarkdownBlocks(item.blocks, openLink, visibility, generationComplete)
         }
@@ -290,7 +297,8 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
         val groups = remember(table) { table.header.indices.chunked(32).map { columns ->
             table.copy(header = columns.map { table.header[it] },
                 rows = table.rows.map { row -> columns.map { row[it] } },
-                alignment = columns.map { table.alignment[it] })
+                alignment = columns.map { table.alignment[it] },
+                widthHeader = table.widthHeader?.let { header -> columns.map { header[it] } })
         } }
         val groupOffsets = remember(offsets) { table.header.indices.chunked(32).map { columns ->
             offsets.map { row -> columns.map { row[it] } }
@@ -303,7 +311,7 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
         return
     }
     val style = messageBodyStyle()
-    val columnEms = remember(table.header) { MarkdownText.tableColumnWidthEms(table.header) }
+    val columnEms = remember(table.widthHeader ?: table.header) { MarkdownText.tableColumnWidthEms(table.widthHeader ?: table.header) }
     val em = with(LocalDensity.current) { style.fontSize.toDp() }
     val widths = remember(columnEms, em) { columnEms.map { (em * it + 24.dp).coerceIn(120.dp, 248.dp) } }
     val cellLengths = remember(table) { (listOf(table.header) + table.rows).map { row ->
@@ -320,10 +328,11 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
     Column(Modifier.widthIn(max = tableWidth).fillMaxWidth().testTag("markdown-table")
         .border(gridWidth, gridColor, tableShape).clip(tableShape).padding(gridInset).clip(innerShape)
         .horizontalScroll(rememberScrollState())) {
-        for (rowIndex in 0..table.rows.size) {
+        for (rowIndex in (if (table.headerVisible) 0 else 1)..table.rows.size) {
             val row = if (rowIndex == 0) table.header else table.rows[rowIndex - 1]
             MarkdownTableRow(row, rowIndex, offsets[rowIndex], cellLengths[rowIndex], table.alignment, widths,
-                visibility, openLink, style, gridStroke, gridColor, headerBackground)
+                visibility, openLink, style, gridStroke, gridColor, headerBackground,
+                firstVisibleRow = rowIndex == if (table.headerVisible) 0 else 1)
         }
     }
 }
@@ -332,12 +341,13 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
 private fun MarkdownTableRow(row: List<List<MarkdownInline>>, rowIndex: Int, offsets: List<Int>, lengths: List<Int>,
     alignment: List<MarkdownBlock.Alignment>, widths: List<androidx.compose.ui.unit.Dp>, visibility: State<Int>,
     openLink: (String) -> Unit, style: TextStyle, gridStroke: Int, gridColor: Color, headerBackground: Color,
+    firstVisibleRow: Boolean,
 ) {
     val shown = remember(visibility, offsets) { derivedStateOf { visibility.value > offsets[0] } }
     if (!shown.value) return
     Row(Modifier.drawWithCache {
         val grid = markdownTableGridRects(widths.map { it.roundToPx() }, size.height.toInt(),
-            gridStroke, drawTop = rowIndex > 0, rtl = layoutDirection == LayoutDirection.Rtl)
+            gridStroke, drawTop = !firstVisibleRow, rtl = layoutDirection == LayoutDirection.Rtl)
         onDrawBehind {
             if (rowIndex == 0) drawRect(headerBackground)
             grid.forEach { rect ->

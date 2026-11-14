@@ -27,9 +27,10 @@ internal class MarkdownReveal(
     fun limit(id: String): Int = limits[id]?.value ?: 0
     fun visibility(id: String): State<Int> = limits[id] ?: hiddenMarkdownVisibility
     private val readiness = target?.parts?.associate { part ->
-        part.source.id to (part.source.text to derivedStateOf { limit(part.source.id) >= part.length })
+        part.source.id to (part.source to derivedStateOf { limit(part.source.id) >= part.length })
     }.orEmpty()
-    fun ready(id: String, text: String): Boolean = readiness[id]?.let { (source, state) -> source == text && state.value } == true
+    fun ready(id: String, text: String, window: app.daiyu.android.MarkdownSourceWindow? = null): Boolean =
+        readiness[id]?.let { (source, state) -> source.text == text && source.window == window && state.value } == true
 }
 
 /** Keep leaf State identities across accepted network snapshots, not just reveal frames. */
@@ -65,14 +66,17 @@ internal fun rememberMarkdownReveal(
     val prefix = turn.content.takeWhile { it !is MessageContentUi.Reasoning || reasoningReady(it.reported) }
     val sources = remember(prefix, turn.finalText, turn.content.isEmpty(), enabled) {
         if (turn.content.isEmpty()) listOf(MarkdownTypingSource("final", turn.finalText))
-        else prefix.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
+        else prefix.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) }
     }
     val requested = sources.map { it.text }
-    val acceptsProjection = projection?.let { isMarkdownAppend(it.sources.take(requested.size), requested) } == true
+    val requestedWindows = sources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
+    val acceptsProjection = projection?.let { isMarkdownAppend(it.sources.take(requested.size), requested) &&
+        markdownWindowsAppend(it.windows.take(requested.size), requestedWindows) } == true
     val prefixProjection = remember(projection, requested.size, acceptsProjection) {
         projection?.takeIf { acceptsProjection }?.let { parsed ->
             if (requested.size >= parsed.sources.size) parsed
-            else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser, parsed.displayText)
+            else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser, parsed.displayText,
+                parsed.windows.take(requested.size), parsed.windowBlocks, parsed.windowDisplayText)
         }
     }
     return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming,
@@ -100,22 +104,24 @@ internal fun rememberMarkdownReveal(
     val identity = MarkdownParserIdentity(parser)
     val baseline = remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
-        streaming = !terminal)
+        streaming = !terminal, windows = baseline.map { it.window })
     val baselineLength = remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix) {
-        markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix)
+        markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix,
+            windows = baseline.map { it.window })
     }
     val partIds = sources.map { it.id }
     val compatible = projection?.let { allowBaselinePrefix || isMarkdownAppend(baseline.map { it.text }, it.sources) ||
         !markdownTypingAppends(baseline, sources) } == true
     val parts = remember(partIds, projection, compatible) {
         projection?.takeIf { compatible }?.let { parsed -> partIds.take(parsed.sources.size).mapIndexed { index, id ->
-            val displayed = MarkdownTypingSource(id, parsed.sources[index])
-            val displayText = parsed.displayText.getValue(displayed.text)
+            val displayed = MarkdownTypingSource(id, parsed.sources[index], parsed.windows.getOrNull(index))
+            val displayText = parsed.displayTextAt(index)
             MarkdownTypingPart(displayed, displayText.length, displayText)
         } }
     }
     val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
-    val exactProjection = projection?.sources == sources.map { it.text }
+    val exactProjection = projection?.sources == sources.map { it.text } &&
+        projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
     val targetTerminal = terminal && exactProjection
     val target = remember(motion, parts, baselineLength, streaming, targetTerminal, live, paceTerminal) {
         motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)
@@ -155,7 +161,10 @@ internal fun markdownTypingBaselineLength(
     projection: MarkdownProjection?,
     baseline: List<String>,
     allowPrefix: Boolean,
-): Int? = projection?.takeIf { it.sources == baseline || (allowPrefix && isMarkdownAppend(it.sources, baseline)) }?.let { parsed ->
-    parsed.sources.sumOf { parsed.displayText.getValue(it).length.toLong() }
+    windows: List<app.daiyu.android.MarkdownSourceWindow?> = emptyList(),
+): Int? = projection?.takeIf { (it.sources == baseline || (allowPrefix && isMarkdownAppend(it.sources, baseline))) &&
+    (it.windows == windows.takeIf { requested -> requested.any { window -> window != null } }.orEmpty() ||
+        allowPrefix && markdownWindowsAppend(it.windows, windows.takeIf { requested -> requested.any { window -> window != null } }.orEmpty())) }?.let { parsed ->
+    parsed.sources.indices.sumOf { parsed.displayTextAt(it).length.toLong() }
         .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }

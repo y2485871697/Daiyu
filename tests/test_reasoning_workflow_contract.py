@@ -39,7 +39,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
         self.assertIn('embedded: Boolean = false', source)
         self.assertIn('embedded = true', source)
-        self.assertIn('rememberMarkdownProjection(listOf(text), streaming = streamingProjection)', source)
+        self.assertIn('rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))', source)
         self.assertIn('generationComplete && projection != null && displayed == summary.text', source)
         self.assertIn('ReasoningDisclosureDurationMillis = 220', source)
         content = (CHAT / 'MessageContent.kt').read_text()

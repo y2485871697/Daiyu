@@ -863,7 +863,7 @@ internal fun AssistantTurn(
 ) = key(turn.listKey) {
     val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)
     val bodySources = remember(ordered.body) {
-        ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
+        ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) }
     }
     val sources = remember(bodySources) { bodySources.map { it.text } }
     val handoff = remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }
@@ -872,8 +872,8 @@ internal fun AssistantTurn(
             .forEach(handoff::complete)
     }
     val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)
-    val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)
-    val contentReady = projection?.sources == sources
+    val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING, windows = bodySources.map { it.window })
+    val contentReady = projection?.sources == sources && projection?.windows.orEmpty() == bodySources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
     val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady
     var answerReleased by rememberSaveable(turn.listKey) {
         mutableStateOf(ordered.work == null && reasoningReady && ordered.body.isNotEmpty())
@@ -988,9 +988,10 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
             val end by remember(visibility, boundaries) { androidx.compose.runtime.derivedStateOf { boundaries.end(visibility.value) } }
             Text(displayed.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
-        } else RevealedMessageMarkdown(displayed, accepted?.blocks?.get(displayed),
+        } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),
             currentReveal.value, text.itemId, modifier,
-            generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)
+            generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,
+            sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow)
     } }
 }
 
@@ -1001,7 +1002,7 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
     entrances: WorkflowEntrances, answerPending: Boolean, onAnswerReleased: () -> Unit,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit,
     plainNarration: Set<String>, plainText: Boolean) {
-    val textSources = remember(steps) { steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) } }
+    val textSources = remember(steps) { steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) } }
     val visualScope = LocalWorkflowVisualScope.current
     val visualAdmission = remember(ownerKey, visualScope) { visualScope?.owner(ownerKey, steps, work.running) }
     val textPhase = textSources to work.running

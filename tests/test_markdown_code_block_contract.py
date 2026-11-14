@@ -38,7 +38,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn('MarkdownCodeText(block, visibleCharacters, Modifier.testTag("markdown-code-text")', self.code)
         self.assertIn('BasicText(markdownCodeDisplayText(block, visible)', self.reveal)
         policy = (BASE / "MarkdownCodePolicy.kt").read_text()
-        self.assertIn("visibleText.length == block.text.length", policy)
+        self.assertIn("block.windowEnd && visibleText.length == block.text.length", policy)
         self.assertIn('visibleText.removeSuffix("\\n")', policy)
         self.assertNotIn(".trim(", policy)
         self.assertNotIn(".trimEnd(", policy)
@@ -67,7 +67,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn('Icon(icon, description, Modifier.size(16.dp)', self.code)
 
     def test_copy_uses_full_code_not_revealed_text(self):
-        self.assertIn('clipboard.setText(AnnotatedString(block.text))', self.code)
+        self.assertIn('clipboard.setText(AnnotatedString(block.exportText ?: block.text))', self.code)
         self.assertNotIn('clipboard.setText(AnnotatedString(text))', self.code)
         self.assertIn("DaiyuIcons.Copy", self.code)
         self.assertIn('"复制代码"', self.code)
@@ -103,14 +103,14 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertEqual(2, chat.count("generationComplete = turn.status != RunStatus.RUNNING"))
         self.assertIn("turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady", chat)
         self.assertIn("val currentComplete = rememberUpdatedState(generationComplete)", chat)
-        self.assertIn("generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)", chat)
+        self.assertIn("generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,", chat)
         self.assertEqual(2, chat.count("textBody = textBody"))
         self.assertIn("generationComplete && body.text == text", self.markdown)
         self.assertIn("MarkdownBlocks(block.blocks, openLink, visibility, generationComplete)", self.markdown)
         self.assertIn("MarkdownBlocks(item.blocks, openLink, visibility, generationComplete)", self.markdown)
 
     def test_expansion_reuses_shared_output_dialog_without_a_close_cross(self):
-        for token in ["LocalToolOutputContext provides null", "ToolDisclosureUi(block.language, block.text, code = true)",
+        for token in ["LocalToolOutputContext provides null", "ToolDisclosureUi(block.language, block.exportText ?: block.text, code = true)",
                       "onDismiss = { expanded = false }"]:
             self.assertIn(token, self.code)
         dialog = (BASE / "ToolOutputDialog.kt").read_text()
@@ -121,7 +121,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn("clipboard.setText(AnnotatedString(document.text))", dialog)
 
     def test_download_freezes_code_and_writes_only_utf8_to_selected_document(self):
-        for token in ['ActivityResultContracts.CreateDocument("text/plain")', "val content = block.text",
+        for token in ['ActivityResultContracts.CreateDocument("text/plain")', "val content = block.exportText ?: block.text",
                       "pendingDownloadId by rememberSaveable", "pendingDownloadId = id", "pendingDownloadId = null",
                       "snapshot.writeText(content, Charsets.UTF_8)", "snapshot.inputStream()", "input.copyTo(output)",
                       'require(uri.scheme == "content")', "Dispatchers.IO", 'openOutputStream(uri, "wt")',

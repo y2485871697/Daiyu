@@ -59,7 +59,7 @@ private data class WorkflowAdmissionEntry(val key: String, val tool: Boolean,
 private fun workflowAdmissionPlan(steps: List<MessageContentUi>): List<WorkflowAdmissionEntry> {
     val preceding = mutableListOf<MarkdownTypingSource>()
     return steps.mapIndexed { index, item ->
-        if (item is MessageContentUi.Text && item.text.isNotBlank()) preceding += MarkdownTypingSource(item.itemId, item.text)
+        if (item is MessageContentUi.Text && item.text.isNotBlank()) preceding += MarkdownTypingSource(item.itemId, item.text, item.markdownWindow)
         WorkflowAdmissionEntry(item.workflowKey(index), item is MessageContentUi.Tool, preceding.toList())
     }
 }
@@ -92,7 +92,7 @@ internal fun WorkflowNarrationContent(
 ) {
     run {
         val texts = remember(sources) { sources.map { it.text } }
-        val projection = rememberMarkdownProjection(texts, streaming = running)
+        val projection = rememberMarkdownProjection(texts, streaming = running, windows = sources.map { it.window })
         val baselineOnly = !expanded || stopped
         val blocked = workflowBlockedTextSources(steps, reasoningReady) +
             if (baselineOnly) emptySet() else admission?.blockedText(steps).orEmpty()
@@ -113,7 +113,7 @@ internal fun WorkflowNarrationContent(
             if (baselineOnly || paused) return@LaunchedEffect
             snapshotFlow {
                 currentPlan.firstOrNull { !gate.contains(it.key) }?.takeIf { entry ->
-                    !entry.tool || entry.precedingText.all { currentReveal.ready(it.id, it.text) }
+                    !entry.tool || entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }
                 }?.key
             }.collectLatest { candidate ->
                 if (candidate != null) {
@@ -124,7 +124,7 @@ internal fun WorkflowNarrationContent(
                     }
                     val current = currentPlan.firstOrNull { !gate.contains(it.key) }
                     if (current?.key == candidate &&
-                        (!current.tool || current.precedingText.all { currentReveal.ready(it.id, it.text) })) {
+                        (!current.tool || current.precedingText.all { currentReveal.ready(it.id, it.text, it.window) })) {
                         gate.admit(listOf(candidate))
                     }
                 }

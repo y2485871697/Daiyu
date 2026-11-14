@@ -101,4 +101,20 @@ class RenderingParserRegressionTest {
         }
     }
 
+    @Test fun boundedLongRunsAndNestedPartialClosersDoNotLeakMatchedStars() {
+        assertEquals(listOf(b(b(t("a")))), MarkdownParser.inline("****a****"))
+        assertEquals(listOf(e(t("a "), e(e(t("b")), t(" c")))), MarkdownParser.inline("*a **b* c**"))
+        for (source in listOf("****a****", "*a **b* c**", "*****a*****")) {
+            assertEquals(source, plain(MarkdownParser.inline(source)),
+                plain((MarkdownParser.parseStreaming(source).single() as MarkdownBlock.Paragraph).content))
+        }
+        assertEquals("**a b c", plain(MarkdownParser.inline("****a* b* c")))
+        val atBudget = "*".repeat(48) + "a" + "*".repeat(48)
+        assertEquals("a", plain(MarkdownParser.inline(atBudget)))
+        for (count in listOf(49, 65)) {
+            val overBudget = "*".repeat(count) + "a" + "*".repeat(count)
+            assertEquals(overBudget, plain(MarkdownParser.inline(overBudget)))
+        }
+    }
+
 }

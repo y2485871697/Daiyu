@@ -20,11 +20,11 @@ class MarkdownStreamProgressContract(unittest.TestCase):
     def test_stream_queue_finishes_running_parse_and_conflates_pending_appends(self):
         source = (BASE / 'MarkdownProjection.kt').read_text()
         for token in ['Channel.CONFLATED', 'worker?.cancelAndJoin()',
-                      '!isMarkdownAppend(previous!!, sources)',
-                      'projectMarkdown(snapshot, parser, cache, published)', 'publish(projection)', 'published = projection']:
+                      'markdownWindowsAppend(it.windows, snapshot.windows)',
+                      'projectMarkdown(next.sources, parser, cache, published, next.windows)', 'publish(projection)', 'published = projection']:
             self.assertIn(token, source)
         ui = (BASE / 'MessageMarkdown.kt').read_text()
-        self.assertIn('collectMarkdownProjections(snapshotFlow { requested }, parser)', ui)
+        self.assertIn('collectMarkdownRequests(snapshotFlow { requested }, parser)', ui)
         self.assertNotIn('(cached, sources, parserIdentity)', ui)
 
     def test_render_and_typing_use_the_completed_snapshot_but_readiness_stays_exact(self):
@@ -44,8 +44,8 @@ class MarkdownStreamProgressContract(unittest.TestCase):
             self.assertIn(token, assistant)
         leaf = chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ['rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
-                      'rememberUpdatedState(generationComplete)', 'accepted?.blocks?.get(displayed)',
-                      'generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)']:
+                      'rememberUpdatedState(generationComplete)', 'accepted?.blocksAt(index)',
+                      'generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,']:
             self.assertIn(token, leaf)
         workflow = chat.split('private fun AssistantWorkflow(', 1)[1]
         self.assertIn('WorkProcessCard(work, ownerKey,', workflow)
@@ -54,12 +54,12 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         self.assertNotIn('MessageContent(turn.content', assistant)
         self.assertNotIn('ReportedReasoningCard(', assistant)
         typing = (BASE / 'MarkdownTyping.kt').read_text()
-        self.assertIn('MarkdownTypingSource(id, parsed.sources[index])', typing)
+        self.assertIn('MarkdownTypingSource(id, parsed.sources[index], parsed.windows.getOrNull(index))', typing)
         self.assertIn('partIds.take(parsed.sources.size).mapIndexed', typing)
-        self.assertIn('parsed.displayText.getValue(displayed.text)', typing)
+        self.assertIn('parsed.displayTextAt(index)', typing)
         self.assertIn('projection?.sources == sources.map { it.text }', typing)
         reasoning = (BASE / 'ReportedReasoningCard.kt').read_text()
-        self.assertIn('displayed, projection?.blocks?.get(displayed)', reasoning)
+        self.assertIn('displayed, projection?.blocksAt(0)', reasoning)
         self.assertIn('generationComplete && projection != null && displayed == summary.text', reasoning)
 
     def test_resume_follow_accepts_displayed_streaming_prefix_without_relaxing_exact_readiness(self):
@@ -71,10 +71,10 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         self.assertIn('onContentDisplayed(false)', chat)
         typing = (BASE / 'MarkdownTyping.kt').read_text()
         self.assertIn('remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix)', typing)
-        self.assertIn('markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix)', typing)
+        self.assertIn('markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix,', typing)
         self.assertIn('it.sources == baseline || (allowPrefix && isMarkdownAppend(it.sources, baseline))', typing)
         self.assertIn('val exact = exactProjection && baselineLength != null && target != null &&', typing)
-        self.assertIn('parsed.sources.sumOf', typing)
+        self.assertIn('parsed.sources.indices.sumOf', typing)
 
     def test_real_regressions_cover_bounded_progress_replacement_and_ui_publication(self):
         unit = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/MarkdownProjectionTest.kt').read_text()

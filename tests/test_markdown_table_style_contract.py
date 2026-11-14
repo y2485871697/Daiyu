@@ -38,7 +38,7 @@ class MarkdownTableStyleContract(unittest.TestCase):
     def test_grid_uses_cached_disjoint_pixel_fills_not_crossing_strokes(self):
         self.assertIn("Row(Modifier.drawWithCache", self.table)
         self.assertIn("markdownTableGridRects(widths.map { it.roundToPx() }", self.table)
-        self.assertIn("drawTop = rowIndex > 0", self.table)
+        self.assertIn("drawTop = !firstVisibleRow", self.table)
         self.assertIn("layoutDirection == LayoutDirection.Rtl", self.table)
         self.assertIn("drawRect(gridColor,", self.table)
         self.assertNotIn("drawLine(gridColor,", self.table)
@@ -47,11 +47,16 @@ class MarkdownTableStyleContract(unittest.TestCase):
             self.assertIn(token, grid)
 
     def test_existing_width_reveal_and_grouping_stay_in_place(self):
-        for token in ["table.header.size > 32", "indices.chunked(32)", "MarkdownText.tableColumnWidthEms(table.header)",
+        for token in ["table.header.size > 32", "indices.chunked(32)", "MarkdownText.tableColumnWidthEms(table.widthHeader ?: table.header)",
                       "style.fontSize.toDp()", "derivedStateOf { visibility.value > offsets[0] }", "rememberMarkdownVisibility(visibility, offsets[column], lengths[column])",
                       "MarkdownInlineText(cell, openLink", "SelectionContainer"]:
             source = self.table if token != "SelectionContainer" else (ROOT / (BASE + "MessageMarkdown.kt")).read_text()
             self.assertIn(token, source)
+
+    def test_window_continuations_hide_only_the_header_and_keep_width_context(self):
+        self.assertIn('widthHeader = table.widthHeader?.let', self.table)
+        self.assertIn('if (table.headerVisible) 0 else 1', self.table)
+        self.assertIn('firstVisibleRow = rowIndex == if (table.headerVisible) 0 else 1', self.table)
 
     def test_android_pixel_regressions_cover_theme_corners_grid_and_scrolling(self):
         test = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MarkdownTableStyleTest.kt").read_text()

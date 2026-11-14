@@ -43,14 +43,19 @@ internal fun ReconnectedAssistantTurn(
     val identityIndex = parts.parts.indexOfFirst { it.turn.hasVisibleResponse() }.coerceAtLeast(0)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         parts.parts.forEachIndexed { index, part -> key(part.turn.listKey) {
-            AssistantTurn(part.turn, actions, imageLoader, dedicatedTool, toolContent, speaking,
-                revealResetEpoch, onVisibleAdvance,
-                onRevealSettled = { if (it) settled[part.turn.listKey] = part else settled.remove(part.turn.listKey) },
-                onContentDisplayed = { if (it) displayed[part.turn.listKey] = part else displayed.remove(part.turn.listKey) },
-                onContentReady = { if (it) ready[part.turn.listKey] = part else ready.remove(part.turn.listKey) },
-                showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn,
-                actionSlotOwner = index == parts.parts.lastIndex,
-                workflowContent = part.workflow, preparing = preparing)
+            androidx.compose.runtime.CompositionLocalProvider(LocalReasoningSourceWindows provides
+                part.turn.content.filterIsInstance<MessageContentUi.Reasoning>().mapNotNull { item ->
+                    item.markdownWindow?.let { item.reported.itemId to it }
+                }.toMap()) {
+                AssistantTurn(part.turn, actions, imageLoader, dedicatedTool, toolContent, speaking,
+                    revealResetEpoch, onVisibleAdvance,
+                    onRevealSettled = { if (it) settled[part.turn.listKey] = part else settled.remove(part.turn.listKey) },
+                    onContentDisplayed = { if (it) displayed[part.turn.listKey] = part else displayed.remove(part.turn.listKey) },
+                    onContentReady = { if (it) ready[part.turn.listKey] = part else ready.remove(part.turn.listKey) },
+                    showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn,
+                    actionSlotOwner = index == parts.parts.lastIndex,
+                    workflowContent = part.workflow, preparing = preparing)
+            }
             part.after.forEach { entry -> key(entry.id) { ChatTimelineDivider(entry) } }
         } }
     }

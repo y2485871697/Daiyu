@@ -15,19 +15,19 @@ class MarkdownReturnContract(unittest.TestCase):
 
     def test_first_composition_uses_exact_cached_ast_before_producer_runs(self):
         ui = self.ui.split("internal fun rememberMarkdownProjection(", 1)[1].split("\n@Composable", 1)[0]
-        self.assertIn("markdownProjectionCache.get(sources, parser) ?: markdownProjectionCache.getPrepared(sources, parser)", ui)
+        self.assertIn("markdownProjectionCache.get(sources, parser, requestedWindows) ?: if (requestedWindows.isEmpty())", ui)
         self.assertLess(ui.index("markdownProjectionCache.getPrepared(sources, parser)"), ui.index("produceState<MarkdownProjection?>"))
         self.assertIn("produceState<MarkdownProjection?>(cached, parserIdentity)", ui)
-        self.assertIn("collectMarkdownProjections(snapshotFlow { requested }, parser) { value = it }", ui)
-        self.assertIn("return cached ?: completed?.takeIf { it.parser === parser && isMarkdownAppend(it.sources, sources) }", ui)
+        self.assertIn("collectMarkdownRequests(snapshotFlow { requested }, parser) { value = it }", ui)
+        self.assertIn("markdownWindowsAppend(it.windows, requestedWindows)", ui)
         self.assertNotIn("MarkdownParser.parse", ui)
         self.assertNotIn("runBlocking", ui)
-        self.assertIn("remember(sources, parserIdentity)", ui)
+        self.assertIn("remember(sources, requestedWindows, parserIdentity)", ui)
         self.assertIn("remember(MarkdownParserIdentity(parser))", self.ui)
 
     def test_cache_has_source_parser_identity_and_two_memory_limits(self):
         for token in ["maxEntries: Int = 64", "maxSourceChars: Int = 262_144", "parser === other.parser",
-                      "private data class Key(val sources: List<String>, val parser: MarkdownParserIdentity)",
+                      "private data class Key(val sources: List<String>, val parser: MarkdownParserIdentity, val windows: List<MarkdownSourceWindow?> = emptyList())",
                       "System.identityHashCode(parser)", "@Synchronized",
                       "LinkedHashMap<Key, Entry>(16, .75f, true)", "it.length.toLong()",
                       "if (chars > maxSourceChars) return", "entries.remove(key)",
@@ -40,7 +40,7 @@ class MarkdownReturnContract(unittest.TestCase):
         self.assertIn("internal class MarkdownProjection(", self.projection)
         self.assertNotIn("data class MarkdownProjection(", self.projection)
         self.assertIn("Dispatchers.Default.limitedParallelism(1)", self.projection)
-        self.assertIn("val cached = cache.get(sources, parser) ?: cache.getPrepared(sources, parser)", self.projection)
+        self.assertIn("val cached = cache.get(sources, parser, windows) ?: if (windowed) null else cache.getPrepared(sources, parser)", self.projection)
         self.assertIn("if (predecessor == null) cached?.let { return it }", self.projection)
         self.assertIn("withContext(dispatcher)", self.projection)
         self.assertIn("parser(source)", self.projection)
@@ -49,9 +49,9 @@ class MarkdownReturnContract(unittest.TestCase):
         self.assertNotIn("catch (", self.projection)
 
     def test_uncached_streaming_geometry_and_current_readiness_are_not_replaced_by_plaintext(self):
-        for token in ["val body = rememberMarkdownBodySnapshot(text, blocks)", "markdownBodySnapshot(text, blocks, published.body)", "if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())",
+        for token in ["val body = rememberMarkdownBodySnapshot(text, blocks, sourceWindow)", "markdownBodySnapshot(text, blocks, published.body, sourceWindow)", "if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())",
                       "ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters, generationComplete && body.text == text, visibility)",
-                      "else previous?.takeIf { text.startsWith(it.text) }"]:
+                      "else previous?.takeIf { text.startsWith(it.text) && markdownWindowsAppend(listOf(it.window), listOf(window)) }"]:
             self.assertIn(token, self.ui + self.projection)
         self.assertIn("messageBodyStyle()", self.ui)
         self.assertIn("remember(uriHandler, feedbackView)", self.ui)

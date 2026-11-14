@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.MarkdownBlock
+import app.daiyu.android.MarkdownSourceWindow
 
 internal class MarkdownParserIdentity(private val parser: (String) -> List<MarkdownBlock>) {
     override fun equals(other: Any?): Boolean = other is MarkdownParserIdentity && parser === other.parser
@@ -12,19 +13,20 @@ internal class MarkdownProjectionCache(
     private val maxEntries: Int = 64,
     private val maxSourceChars: Int = 262_144,
 ) {
-    private data class Key(val sources: List<String>, val parser: MarkdownParserIdentity)
+    private data class Key(val sources: List<String>, val parser: MarkdownParserIdentity, val windows: List<MarkdownSourceWindow?> = emptyList())
 
     private data class Entry(val projection: MarkdownProjection, val sourceChars: Long)
     private val entries = LinkedHashMap<Key, Entry>(16, .75f, true)
     private var sourceChars = 0L
 
     @Synchronized
-    fun get(sources: List<String>, parser: (String) -> List<MarkdownBlock>): MarkdownProjection? =
-        entries[Key(sources, MarkdownParserIdentity(parser))]?.projection
+    fun get(sources: List<String>, parser: (String) -> List<MarkdownBlock>,
+        windows: List<MarkdownSourceWindow?> = emptyList()): MarkdownProjection? =
+        entries[Key(sources, MarkdownParserIdentity(parser), windows.takeIf { it.any { item -> item != null } }.orEmpty())]?.projection
 
     private fun sourceProjection(source: String, parser: (String) -> List<MarkdownBlock>): MarkdownProjection? {
         val key = entries.entries.lastOrNull {
-            it.value.projection.parser === parser && it.value.projection.blocks.containsKey(source)
+            it.value.projection.windows.isEmpty() && it.value.projection.parser === parser && it.value.projection.blocks.containsKey(source)
         }?.key ?: return null
         return entries[key]?.projection
     }
@@ -59,10 +61,11 @@ internal class MarkdownProjectionCache(
 
     @Synchronized
     fun put(projection: MarkdownProjection) {
-        val chars = projection.sources.sumOf { it.length.toLong() }
+        val chars = projection.sources.sumOf { it.length.toLong() } +
+            projection.windows.filterNotNull().map { it.source }.distinct().sumOf { it.length.toLong() * 4 }
         if (chars > maxSourceChars) return
-        val snapshot = MarkdownProjection(projection.sources.toList(), projection.blocks, projection.parser, projection.displayText)
-        val key = Key(snapshot.sources, MarkdownParserIdentity(snapshot.parser))
+        val snapshot = MarkdownProjection(projection.sources.toList(), projection.blocks, projection.parser, projection.displayText, projection.windows.toList(), projection.windowBlocks, projection.windowDisplayText)
+        val key = Key(snapshot.sources, MarkdownParserIdentity(snapshot.parser), snapshot.windows)
         entries.remove(key)?.let { sourceChars -= it.sourceChars }
         entries[key] = Entry(snapshot, chars)
         sourceChars += chars

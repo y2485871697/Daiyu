@@ -9,11 +9,11 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
     def test_body_and_thought_both_defer_frame_reads_to_markdown_leaves(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         reasoning = (BASE / 'ReportedReasoningCard.kt').read_text()
-        self.assertIn('generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true)', chat)
+        self.assertIn('generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,', chat)
         self.assertIn('deferBlockReveal = true', reasoning)
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         self.assertIn('visibility = reveal.visibility(partId)', ui)
-        self.assertIn('else ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)', ui)
+        self.assertIn('else ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)', ui)
 
     def test_text_leaf_pairs_each_accepted_source_with_its_own_ast(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
@@ -21,7 +21,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)',
                       'currentSources.value.indexOfFirst { it.id == text.itemId }',
                       'accepted?.sources?.getOrNull(index)?.takeIf { text.text.startsWith(it) }',
-                      'RevealedMessageMarkdown(displayed, accepted?.blocks?.get(displayed)',
+                      'RevealedMessageMarkdown(displayed, accepted?.blocksAt(index)',
                       'generationComplete = currentComplete.value && displayed == text.text'):
             self.assertIn(token, chat)
 

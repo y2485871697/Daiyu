@@ -20,10 +20,44 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
             self.assertIn(cleanup, chat)
         self.assertIn('dismissSidebar()', other)
         self.assertIn('retainedPage = returnPage', other)
-        restore = source.split('private fun returnToChat(refreshState: Boolean)', 1)[1].split('private fun openSkillManagement()', 1)[0]
-        for cleanup in ('dismissSidebarState()', 'dismissChatModels()', 'cancelRestorePreview()',
-                        'retainedPage = "chat"', 'if (refreshState || controller.videoSendState() != null) refresh()'):
-            self.assertIn(cleanup, restore)
+        def normalized_code(block):
+            return ' '.join('\n'.join(line.partition('//')[0]
+                                      for line in block.splitlines()).split())
+
+        self.assertIn('private fun returnToChat() = returnToChat(refreshState = true)', source)
+        restore, finish = source.split('private fun returnToChat(refreshState: Boolean) {', 1)[1].split(
+            'private fun finishChatReturn(request: ChatReturnRefresh?) {', 1)
+        finish = finish.split('private fun openSkillManagement()', 1)[0]
+        self.assertEqual(normalized_code("""
+            dismissSidebarState()
+            dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
+            cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
+            if (activityUsable() && voiceForeground) {
+                val pending = chatReturnRefresh?.takeIf { it.conversation == selected?.id && it.editor == editorGeneration }
+                if (pending == null) chatReturnRefresh = ChatReturnRefresh(selected?.id, editorGeneration, refreshState)
+                else pending.full = pending.full || refreshState
+                chatState = chatState.copy(composer = chatState.composer.copy(enabled = false))
+            }
+        }
+        """), normalized_code(restore))
+        self.assertEqual(normalized_code("""
+            if (request == null || chatReturnRefresh !== request || !activityUsable() || !voiceForeground ||
+                retainedPage != "chat" || !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return
+            chatReturnRefresh = null
+            if (request.conversation != selected?.id || request.editor != editorGeneration) return
+            if (request.full || controller.videoSendState() != null) refresh() else publishChat(rowsChanged = false)
+        }
+        """), normalized_code(finish))
+        self.assertEqual(1, (restore + finish).count('refresh()'))
+        host = source.split('val returnRefreshRequest = chatReturnRefresh', 1)[1].split(
+            'BackHandler(enabled = retainedPage != "chat") {', 1)[0]
+        self.assertIn('app.daiyu.android.ui.navigation.PageBackGestureHost(', host)
+        self.assertIn(normalized_code("""
+            retainedRootActive = retainedPage == "chat" && returnRefreshRequest == null,
+            idleRequestKey = returnRefreshRequest,
+            onTransitionIdle = { finishChatReturn(returnRefreshRequest) },
+        """), normalized_code(host))
+        self.assertEqual(1, host.count('finishChatReturn('))
 
     def test_page_passes_a_deferred_configuration_reader_to_the_menu_leaf(self):
         activity = (APP / 'MainActivity.kt').read_text()

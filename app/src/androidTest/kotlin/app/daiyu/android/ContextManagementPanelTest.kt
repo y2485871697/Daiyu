@@ -64,7 +64,8 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         override fun nextArchivePage() { error("no archive entry") }
         override fun previousArchivePage() { error("no archive entry") }
     }
-    private fun show(actions: Actions, presentation: ContextManagementPresentation = ContextManagementPresentation()) {
+    private fun show(actions: Actions, presentation: ContextManagementPresentation = ContextManagementPresentation(),
+        awaitConfiguration: Boolean = true) {
         val source = SettingsModelSource(fixture.application, fixture.controller.providers)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -73,7 +74,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
                     presentation = presentation)
             }
         } }
-        awaitUniqueTag("context-management")
+        if (awaitConfiguration) awaitUniqueTag("context-management") else awaitVisualIdle()
     }
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testRepeatedCompressionModelSelectionKeepsPickerAndOnlyChangesDraft() {
@@ -130,23 +131,120 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         assertEquals(listOf("refresh"), actions.events)
         assertEquals(0, fixture.opens.get())
     }
-    fun testOpeningWhileRefreshIsPendingHasNoExtraWaitControlsAndCanClose() {
-        val actions = Actions(holdRefresh = true); show(actions)
+    fun testOpeningWhileRefreshIsPendingNeverShowsAnUnloadedConfigurationAndBackCloses() {
+        val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false)
         assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
         assertNull(actions.state.value.snapshot)
-        node("context-management").performScrollToIndex(0)
-        node("compression-dialog-operation").assertDoesNotExist()
-        node("context-cancel").assertDoesNotExist()
-        ui.onNodeWithText("正在准备会话信息…").assertDoesNotExist()
-        ui.onNodeWithText("取消并等待退出").assertDoesNotExist()
-        node("compression-dialog-custom").assertExists()
-        node("context-compress").assertIsNotEnabled()
-        node("context-close").assertIsEnabled().performClick()
+        node("context-management").assertDoesNotExist()
+        node("compression-dialog-custom").assertDoesNotExist()
+        node("compression-dialog-model").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         awaitVisualIdle()
         assertEquals(listOf("refresh", "close"), actions.events)
         assertNull(actions.selection)
+        assertEquals(1, routeCloses)
         assertEquals(0, fixture.opens.get())
     }
+
+    fun testDelayedSavedCustomModelAndProtocolAppearTogetherInTheFirstConfiguration() {
+        fixture.application.getSharedPreferences("settings-model-selection", android.content.Context.MODE_PRIVATE)
+            .edit().putString("compression.label", "saved provider / saved model")
+            .putString("compression.key", "saved/key").commit()
+        val actions = Actions(holdRefresh = true)
+        val presentation = ContextManagementPresentation()
+        show(actions, presentation, awaitConfiguration = false)
+        node("compression-dialog-custom").assertDoesNotExist()
+        assertNull(presentation.draft)
+        val saved = binding("saved", ProviderProtocol.RESPONSES)
+        mainThread {
+            actions.state.value = actions.state.value.copy(operation = null, snapshot = snapshot().copy(
+                savedConfiguration = snapshot().configuration!!.copy(summaryModel = saved,
+                    summaryProtocol = ProviderProtocol.RESPONSES)))
+        }
+        awaitUniqueTag("context-management")
+        node("compression-dialog-custom").assertIsOn()
+        node("compression-dialog-model").assertTextContains("saved provider / saved model")
+        node("compression-dialog-api:responses").assertIsSelected()
+        assertEquals(saved, presentation.binding)
+        assertEquals(ProviderProtocol.RESPONSES, presentation.draft!!.protocol)
+        awaitVisualIdle()
+        val bounds = node("context-management").fetchSemanticsNode().boundsInRoot
+        repeat(5) {
+            ui.mainClock.advanceTimeByFrame()
+            node("compression-dialog-custom").assertIsOn()
+            assertEquals(bounds, node("context-management").fetchSemanticsNode().boundsInRoot)
+        }
+        assertEquals(listOf("refresh"), actions.events)
+        assertNull(actions.selection)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDelayedDisabledConfigurationDoesNotInferCustomModelFromAStaleLabel() {
+        fixture.application.getSharedPreferences("settings-model-selection", android.content.Context.MODE_PRIVATE)
+            .edit().putString("compression.label", "old custom model")
+            .putString("compression.key", "old/key").commit()
+        val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false)
+        node("compression-dialog-custom").assertDoesNotExist()
+        mainThread { actions.state.value = actions.state.value.copy(operation = null, snapshot = snapshot()) }
+        awaitUniqueTag("context-management")
+        node("compression-dialog-custom").assertIsOff()
+        node("compression-dialog-model").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testInitialLoadFailureKeepsRetryAndCloseWithoutShowingFalseDefaults() {
+        val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false)
+        mainThread { actions.state.value = actions.state.value.copy(operation = null,
+            requiresRefresh = true, notice = "配置读取失败，请刷新") }
+        awaitUniqueTag("compression-dialog-refresh")
+        node("compression-dialog-custom").assertDoesNotExist()
+        node("compression-dialog-refresh").performClick()
+        awaitVisualIdle()
+        assertEquals(listOf("refresh", "refresh"), actions.events)
+        node("compression-dialog-custom").assertDoesNotExist()
+        mainThread { actions.state.value = actions.state.value.copy(operation = null,
+            requiresRefresh = true, notice = "配置读取失败，请刷新") }
+        node("context-close").assertIsEnabled().performClick()
+        awaitVisualIdle()
+        assertEquals(listOf("refresh", "refresh", "close"), actions.events)
+        assertEquals(1, routeCloses)
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testInvalidCompletedConfigurationKeepsTheRealFailureInsteadOfDefaultModelSettings() {
+        val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false)
+        mainThread { actions.state.value = actions.state.value.copy(operation = null,
+            snapshot = snapshot().copy(configuration = null, savedConfiguration = null),
+            notice = "压缩配置不可用，请重新保存设置") }
+        awaitUniqueTag("compression-dialog-refresh")
+        ui.onNodeWithText("压缩配置不可用，请重新保存设置").assertExists()
+        node("compression-dialog-custom").assertDoesNotExist()
+        node("context-compress").assertDoesNotExist()
+        node("context-close").performClick()
+        assertEquals(1, routeCloses)
+        assertNull(actions.selection)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPausedBeforeFirstConfigurationHasExplicitResumeAndCloseWithoutFalseDefaults() {
+        var resumes = 0
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ContextManagementRoute(null,
+                    SettingsModelSource(fixture.application, fixture.controller.providers),
+                    onClose = { routeCloses++ }, onResume = { resumes++ })
+            }
+        } }
+        awaitUniqueTag("compression-dialog-refresh")
+        node("compression-dialog-custom").assertDoesNotExist()
+        node("compression-dialog-refresh").performClick()
+        awaitVisualIdle()
+        assertEquals(1, resumes)
+        node("context-close").performClick()
+        awaitVisualIdle()
+        assertEquals(1, routeCloses)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testOneConfirmationSubmitsExactSelectionAndClosesWithoutAnotherConfirmation() {
         val actions = Actions(); show(actions)
         node("context-compress").performClick()

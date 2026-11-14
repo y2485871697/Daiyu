@@ -177,13 +177,13 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                 try {
                     node("chat-menu:COMPRESS_CONTEXT").performTouchInput { click() }
                     assertStationaryFrames()
-                    node("context-management").assertExists()
                 } finally { ui.mainClock.autoAdvance = true }
                 lateinit var openedAdapter: ContextManagementControllerAdapter
                 mainThread { openedAdapter = adapter() }
                 awaitControl("compression snapshot ready before dismissal") {
                     openedAdapter.state.value.operation == null && openedAdapter.state.value.snapshot != null
                 }
+                awaitUniqueTag("context-management")
                 ui.waitForIdle()
                 ui.mainClock.autoAdvance = false
                 try {

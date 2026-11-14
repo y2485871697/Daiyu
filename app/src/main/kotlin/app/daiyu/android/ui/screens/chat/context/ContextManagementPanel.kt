@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.context
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
@@ -9,12 +10,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import app.daiyu.android.context.CatalogSummaryBindings
 import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.context.SummaryModelBinding
 import app.daiyu.android.context.ContextManagementSelection
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.storage.ProviderCatalogRunTarget
+import app.daiyu.android.ui.components.UsageGlassDialog
+import app.daiyu.android.ui.components.UsageBody
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import app.daiyu.android.ui.screens.settings.SettingsModelPicker
 import app.daiyu.android.ui.screens.settings.SettingsModelSource
 
@@ -54,7 +60,9 @@ internal fun ContextManagementRoute(
     }
     DisposableEffect(adapter) { onDispose { adapter?.close() } }
     val dismiss = { if (isCurrent()) { adapter?.close(); onClose() } }
-    val initial = remember(adapter, state?.snapshot?.savedConfiguration) {
+    val configurationReady = state?.snapshot?.savedConfiguration != null && state.operation == null && !state.requiresRefresh
+    val initial = remember(adapter, state?.snapshot?.savedConfiguration, configurationReady) {
+        if (!configurationReady) return@remember null
         val binding = state?.snapshot?.savedConfiguration?.summaryModel
         val protocol = state?.snapshot?.savedConfiguration?.summaryProtocol
             ?: runCatching { binding?.let(CatalogSummaryBindings::decode)?.protocol }.getOrNull()
@@ -66,8 +74,24 @@ internal fun ContextManagementRoute(
     val draft = presentation.draft ?: initial
     val binding = if (presentation.draft == null) state?.snapshot?.savedConfiguration?.summaryModel else presentation.binding
     SideEffect {
-        if (presentation.draft == null && state?.snapshot != null && state.operation == null && !state.requiresRefresh)
-            presentation.retain(initial, state.snapshot.savedConfiguration?.summaryModel)
+        if (presentation.draft == null && initial != null)
+            presentation.retain(initial, state?.snapshot?.savedConfiguration?.summaryModel)
+    }
+    if (draft == null) {
+        BackHandler(onBack = dismiss)
+        if (adapter == null || state?.notice != null) {
+            UsageGlassDialog(title = "压缩会话", onDismiss = dismiss) {
+                UsageBody(state?.notice ?: "会话已暂停，请重新读取配置")
+                AssistantPreviewButton("刷新后重新选择", {
+                    if (isCurrent()) {
+                        presentation.reset()
+                        if (adapter == null) onResume() else adapter.refresh()
+                    }
+                }, Modifier.testTag("compression-dialog-refresh"), enabled = state?.operation == null)
+                AssistantPreviewButton("取消", dismiss, Modifier.testTag("context-close"))
+            }
+        }
+        return
     }
     if (presentation.choosingModel) {
         SettingsModelPicker("压缩模型", source, draft.modelKey,

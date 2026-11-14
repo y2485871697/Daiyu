@@ -213,6 +213,7 @@ class RenamePresentationActivityTest : WiredActivityTestCase() {
                 data.repository.snapshot(data.editor.owner).profiles.single().modelId == "other-local"
             }
             awaitNodeWindowFocus(node("chat-model-picker"))
+            dismissIme()
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
             node("subagent-gpt-speed-worker").assertDoesNotExist()

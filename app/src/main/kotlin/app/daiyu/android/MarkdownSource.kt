@@ -139,7 +139,7 @@ internal class MarkdownSourceTrace(private val source: String) {
     }
 
     fun positions(text: String): IntArray = checkNotNull(texts[text]).origins
-    fun at(text: String, index: Int): Int = checkNotNull(texts[text]).let { it.origins.getOrElse(index) { it.end } }
+    fun at(text: String, index: Int): Int = checkNotNull(texts[text]).let { mapped -> mapped.origins.getOrElse(index) { mapped.end } }
     fun record(node: Any, origins: IntArray) { nodes[node] = origins }
     fun recordList(nodes: List<MarkdownInline>, text: String) { this.nodes[nodes] = positions(text) }
     fun rule(line: String) { rules += at(line, line.indexOfFirst { !it.isWhitespace() }.coerceAtLeast(0)) }

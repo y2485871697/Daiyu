@@ -76,7 +76,10 @@ class LegacyReconnectRestoreTest {
         SQLiteText.read(database.readableDatabase, "messages", it, "id", "answer")
     }
     private fun eventBytes(events: List<ChatTimelineEntry.Reconnect>) = events.map {
-        SQLiteText.read(database.readableDatabase, "chat_timeline_events", "payload", "id", it.id)
+        database.readableDatabase.rawQuery("SELECT payload FROM chat_timeline_events WHERE id=?", arrayOf(it.id)).use { cursor ->
+            check(cursor.moveToFirst())
+            cursor.getString(0)
+        }
     }
     private suspend fun verify(fixture: Fixture, events: List<ChatTimelineEntry.Reconnect>, expected: String): List<ReconnectPart> {
         val loaded = database.messages(fixture.conversation).map { it.second }

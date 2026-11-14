@@ -5,6 +5,20 @@ import org.junit.Test
 import java.nio.file.Files
 
 class PopupPerformanceTest {
+    @Test fun popupRootsMatchCompilerFunctionBoundariesWithoutSourceLineCoupling() {
+        for (name in listOf("app.daiyu.android.ui.screens.assistants.AssistantPickerDialog",
+            "app.daiyu.android.ui.screens.chat.conversation.ChatModelPicker",
+            "app.daiyu.android.ui.components.PreviewDialog",
+            "app.daiyu.android.ui.screens.chat.conversation.ChatMessageList",
+            "app.daiyu.android.ui.screens.chat.conversation.DaiyuChatScreen")) {
+            assertTrue(popupCompositionRoot("$name (Fixture.kt:999)"))
+            assertFalse(popupCompositionRoot("${name}Child (Fixture.kt:999)"))
+            assertFalse(popupCompositionRoot("$name.<anonymous> (Fixture.kt:999)"))
+        }
+        assertFalse(popupCompositionRoot("androidx.compose.material3.Text (Text.kt:1)"))
+        assertFalse(popupCompositionRoot("app.daiyu.android.MainActivity.<anonymous> (MainActivity.kt:1)"))
+    }
+
     private class Fixture {
         var now = 1_000_000_000L
         var epoch = 0L

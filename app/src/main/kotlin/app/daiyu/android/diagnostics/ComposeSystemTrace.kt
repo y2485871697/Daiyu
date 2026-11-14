@@ -22,6 +22,7 @@ internal object ComposeSystemTrace {
         observed = PopupPerformance.capture.recorder::compositionObserved,
         limited = PopupPerformance.capture.recorder::compositionLimited,
         completed = PopupPerformance.capture.recorder::composition,
+        rootName = ::popupCompositionRoot,
     )
 
     fun install() {

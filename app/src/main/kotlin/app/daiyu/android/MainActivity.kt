@@ -1809,6 +1809,8 @@ class MainActivity : ComponentActivity() {
             val owner=selected?.id
             assistantSelectionOwner=AssistantSelectionOwner(owner?.value,editorGeneration,
                 if(global || owner==null) assistantStore.selectedId.value else controller.database.assistantId(owner), global || owner==null)
+            app.daiyu.android.diagnostics.WindowFramePerformance.forContext(this)?.requestPopup(
+                app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.ASSISTANT_PICKER)
             assistantPicker=true
         }
     }
@@ -1842,8 +1844,10 @@ class MainActivity : ComponentActivity() {
         assistantSelectionOwner = null
         assistantEditReturnPage = "chat"
         assistantEditReturnToSidebar = false
-        dismissSidebar()
-        if (returnPage == "chat") returnToChat() else retainedPage = returnPage
+        if (returnPage == "chat") returnToChat() else {
+            dismissSidebar()
+            retainedPage = returnPage
+        }
     }
     private var assistantAvatarRevision by mutableStateOf(0L)
     private var collaborationOwner by mutableStateOf<String?>(null)
@@ -7405,6 +7409,8 @@ class MainActivity : ComponentActivity() {
 
     private fun openChatModels() {
         requireActivityUsable()
+        app.daiyu.android.diagnostics.WindowFramePerformance.forContext(this)?.requestPopup(
+            app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.MODEL_PICKER)
         dismissChatModels()
         controller.providerBalances.requestRefresh(lifecycleScope)
         val owner = Any(); chatModelOwner = owner

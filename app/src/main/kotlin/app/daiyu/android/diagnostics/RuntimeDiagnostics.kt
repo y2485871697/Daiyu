@@ -247,6 +247,23 @@ internal object RuntimeDiagnostics {
         } catch (_: Throwable) { dropped.incrementAndGet() }
     }
 
+    internal fun popupRequest(type: PopupPerformanceCapture.Type,
+        requestEpoch: Long = backEpoch(), at: Long = System.nanoTime()) {
+        if (directory == null || requestEpoch != backGeneration.get()) return
+        try {
+            executor.execute {
+                try {
+                    val row = JSONObject().put("stage", "POPUP_PERFORMANCE").put("code", "OPEN_REQUEST")
+                        .put("time_ms", System.currentTimeMillis()).put("kind", type.name)
+                        .put("event_ns", at).toString()
+                    lock.withLock {
+                        if (requestEpoch == backGeneration.get()) append(row)
+                    }
+                } catch (_: Throwable) { dropped.incrementAndGet() }
+            }
+        } catch (_: Throwable) { dropped.incrementAndGet() }
+    }
+
     internal fun popupBoundary(boundary: PopupPerformanceCapture.Boundary) {
         if (directory == null || boundary.epoch != backGeneration.get()) return
         try {

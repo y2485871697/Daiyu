@@ -46,6 +46,9 @@ internal class WindowFramePerformance private constructor(
     private var route = "startup"
     @Volatile private var scrollPhase = BackPerformanceRecorder.Scroll.IDLE
     internal fun scroll(phase: BackPerformanceRecorder.Scroll) { scrollPhase = phase }
+    internal fun requestPopup(type: PopupPerformanceCapture.Type) {
+        if (resumed && !closed) RuntimeDiagnostics.popupRequest(type)
+    }
     private val contexts = LinkedHashMap<Window, LinkedHashMap<Any, String>>()
     private fun path(window: Window) = (listOf(route) + (contexts[window]?.values?.toList() ?: emptyList())).joinToString("/")
     internal fun context(window: Window, token: Any, label: String?) {

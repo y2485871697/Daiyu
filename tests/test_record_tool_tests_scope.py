@@ -412,3 +412,71 @@ class ChildTaskCardScopeTest(unittest.TestCase):
                     self.assertTrue(call.call_args.kwargs["env"]["PYTHONPATH"].startswith(str(Path("tests").resolve())))
             finally:
                 os.chdir(old)
+
+
+class PopupScrollScopeTest(unittest.TestCase):
+    CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest')
+    MODULES = ('test_streaming_occlusion_contract', 'test_preview_dialog_status_bar_contract', 'test_assistant_picker_frame_contract', 'test_chat_menu_scroll_isolation_contract', 'test_popup_performance_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
+
+    def test_exact_scope_keeps_all_four_classes_and_only_explicit_contracts(self):
+        self.assertEqual(self.CLASSES, recorder.POPUP_SCROLL_PLATFORM_CLASSES)
+        self.assertEqual(self.MODULES, recorder.POPUP_SCROLL_MODULES)
+        self.assertEqual(len(self.CLASSES), len(set(self.CLASSES)))
+        for classes in itertools.permutations(self.CLASSES):
+            for python in ("python", "python3"):
+                command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(classes)))
+                self.assertEqual("popup-scroll-targeted", scope)
+                self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+                self.assertNotIn("discover", command)
+
+    def test_partial_duplicate_extended_or_other_modes_do_not_reduce_coverage(self):
+        full = ",".join(self.CLASSES)
+        invalid = [",".join(group) for size in range(len(self.CLASSES)) for group in itertools.combinations(self.CLASSES, size)]
+        invalid += [full + ",unknown", full + "," + self.CLASSES[0], " " + full, full + " ", full + ","]
+        for classes in invalid:
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=classes))[1])
+        for mode in ("", "compile", "candidate", "daily", "release", "checks", "build"):
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=full))[1])
+
+    def test_real_sources_are_targeted_and_allocated_once_across_all_shards(self):
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        helper = SpeechPlatformDiscoveryTest()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper.fixture(root)
+            for name in self.CLASSES:
+                relative = Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text((ROOT / relative).read_text())
+            selected = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=",".join(self.CLASSES))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertCountEqual(self.CLASSES, inventory["all_classes"])
+                self.assertTrue(all(count > 0 for count in inventory["all_classes"].values()))
+                self.assertEqual(sum(inventory["all_classes"][name] for name in selection["selected_classes"]), selection["expected_tests"])
+                selected.extend(selection["selected_classes"])
+            self.assertCountEqual(self.CLASSES, selected)
+
+    def test_receipt_preserves_actual_failure_and_source_identity(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA="d" * 40, GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(self.CLASSES))
+                with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess, "call", return_value=9) as call, patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(9, recorder.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual("popup-scroll-targeted", receipt["scope"])
+                    self.assertEqual(9, receipt["exit_code"])
+                    self.assertEqual(dict(sha="d" * 40, run_id=42, attempt=1), receipt["identity"])
+                    self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], receipt["command"])
+                    call.assert_called_once()
+                    self.assertEqual(receipt["command"], call.call_args.args[0])
+                    self.assertTrue(call.call_args.kwargs["env"]["PYTHONPATH"].startswith(str(Path("tests").resolve())))
+            finally:
+                os.chdir(old)

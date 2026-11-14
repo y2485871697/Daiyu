@@ -8,6 +8,23 @@ CHAT = APP / 'ui/screens/chat/conversation'
 
 
 class ChatMenuScrollIsolationContract(unittest.TestCase):
+    def test_outside_assistant_dismiss_finishes_chat_cleanup_with_one_refresh(self):
+        source = (APP / 'MainActivity.kt').read_text()
+        close = source.split('private fun dismissAssistantFlow()', 1)[1].split('private var assistantAvatarRevision', 1)[0]
+        chat, other = close.split('if (returnPage == "chat") returnToChat() else {', 1)
+        self.assertNotIn('dismissSidebar()', chat)
+        self.assertNotIn('refresh()', close)
+        for cleanup in ('assistantEditingId = null', 'assistantPicker = false',
+                        'assistantSelectionOwner = null', 'assistantEditReturnPage = "chat"',
+                        'assistantEditReturnToSidebar = false'):
+            self.assertIn(cleanup, chat)
+        self.assertIn('dismissSidebar()', other)
+        self.assertIn('retainedPage = returnPage', other)
+        restore = source.split('private fun returnToChat(refreshState: Boolean)', 1)[1].split('private fun openSkillManagement()', 1)[0]
+        for cleanup in ('dismissSidebarState()', 'dismissChatModels()', 'cancelRestorePreview()',
+                        'retainedPage = "chat"', 'if (refreshState || controller.videoSendState() != null) refresh()'):
+            self.assertIn(cleanup, restore)
+
     def test_page_passes_a_deferred_configuration_reader_to_the_menu_leaf(self):
         activity = (APP / 'MainActivity.kt').read_text()
         call = activity.split('DaiyuChatScreen(chatState.copy(', 1)[1].split('callUi =', 1)[0]

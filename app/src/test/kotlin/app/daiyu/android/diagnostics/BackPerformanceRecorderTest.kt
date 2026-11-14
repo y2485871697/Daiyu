@@ -355,10 +355,47 @@ class BackPerformanceRecorderTest {
         }
     }
 
-    private fun Fixture.compositions() = BackCompositionSamples(
+    private fun Fixture.compositions(rootName: ((String) -> Boolean)? = null) = BackCompositionSamples(
         clock = { now }, observed = recorder::compositionObserved,
-        limited = recorder::compositionLimited, completed = recorder::composition,
+        limited = recorder::compositionLimited, completed = recorder::composition, rootName = rootName,
     )
+
+    @Test fun rejectedPopupRootsDoNotReadClockOrSpendTheCallbackBudget() {
+        val f = Fixture(); val token = f.start()
+        var reads = 0; var observed = 0; var completed = 0
+        val samples = BackCompositionSamples(clock = { reads++; f.now }, observed = { observed++ },
+            limited = { fail() }, completed = { _, _, _, _, _ -> completed++ }, rootName = { it == "root" })
+        repeat(BackCompositionSamples.MAX_CALLS + 1) {
+            samples.start(token, "unrelated"); samples.end(token)
+        }
+        assertEquals(0, reads); assertEquals(0, observed); assertEquals(0, completed)
+        samples.start(token, "root"); f.now += 2_000_000L; samples.end(token)
+        assertEquals(2, reads); assertEquals(1, observed); assertEquals(1, completed)
+        assertTrue(samples.enabled(token))
+    }
+
+    @Test fun popupRootFilteringStillSubtractsEveryChildAndIgnoresTheOutsideParentEnd() {
+        val f = Fixture(); val token = f.start(); val samples = f.compositions { it == "root" }
+        samples.start(token, "outside-parent")
+        samples.start(token, "root"); f.now += 1_000_000L
+        samples.start(token, "not-a-root-child"); f.now += 20_000_000L; samples.end(token)
+        f.now += 3_000_000L; samples.end(token); samples.end(token); f.end()
+        val rows = f.rows.single().compositions
+        assertEquals(listOf(20_000_000L, 4_000_000L), rows.map { it.self })
+        assertEquals(listOf(20_000_000L, 24_000_000L), rows.map { it.inclusive })
+        assertEquals(listOf("not-a-root-child", "root"), rows.map { it.function })
+    }
+
+    @Test fun filteredPopupRootsCannotRebindAnUnfinishedRootAcrossTokens() {
+        val f = Fixture(); val old = f.start(); val samples = f.compositions { it == "root" }
+        samples.start(old, "root"); f.now += 2_000_000L; f.frame()
+        val next = f.start(); samples.end(next)
+        samples.start(next, "unrelated"); samples.end(next)
+        samples.start(next, "root"); f.now += 20_000_000L; samples.end(next); f.end()
+        assertTrue(f.rows.first().compositions.isEmpty())
+        assertEquals("root", f.rows.last().compositions.single().function)
+        assertEquals(20_000_000L, f.rows.last().compositions.single().self)
+    }
 
     @Test fun compositionCallbacksOutsideWindowsDoNotReadClockOrSave() {
         var reads = 0

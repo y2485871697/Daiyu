@@ -276,11 +276,17 @@ CHILD_TASK_CARD_MODULES = (
 )
 
 
+POPUP_SCROLL_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest')
+POPUP_SCROLL_MODULES = ('test_streaming_occlusion_contract', 'test_preview_dialog_status_bar_contract', 'test_assistant_picker_frame_contract', 'test_chat_menu_scroll_isolation_contract', 'test_popup_performance_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
+
 RENDERING_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.RenderingRegressionTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.MarkdownTableStyleTest', 'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest', 'app.daiyu.android.RestoredMarkdownActivityTest')
 RENDERING_MODULES = ('test_reasoning_workflow_contract', 'test_work_timeline_connector_contract', 'test_workflow_render_isolation_contract', 'test_markdown_typing_contract', 'test_markdown_body_visibility_contract', 'test_markdown_table_style_contract', 'test_markdown_code_block_contract', 'test_markdown_entry_contract', 'test_markdown_cold_start_contract', 'test_markdown_return_contract', 'test_markdown_stream_progress_contract', 'test_markdown_stream_optimization_contract', 'test_message_display_contract', 'test_rendering_smoke_scope', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt')
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(POPUP_SCROLL_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *POPUP_SCROLL_MODULES, "-v"], "popup-scroll-targeted"
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(RENDERING_PLATFORM_CLASSES)):
         return [python, '-B', '-m', 'unittest', *RENDERING_MODULES, '-v'], 'rendering-targeted'

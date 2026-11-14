@@ -57,6 +57,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -174,12 +175,14 @@ private fun StreamingTailContainer(
     }) { measurables, constraints ->
         val viewport = measurables.single().measure(constraints.copy(minHeight = 0))
         layout(viewport.width, state.contentHeight) {
-            val origin = state.itemOrigin
             // onPlaced runs after this item's parent placement, before its child
             // placement. No assumption about LazyListState publishing a measure.
-            val q = if (!state.bounded) 0 else if (follows() && origin != null)
-                ((listCoordinates()?.size?.height ?: 0) - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
-            else state.viewportOffset.coerceIn(0, state.maxOffset)
+            val q = if (!state.bounded) 0 else {
+                val origin = state.itemOrigin
+                if (follows() && origin != null)
+                    ((listCoordinates()?.size?.height ?: 0) - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
+                else state.viewportOffset.coerceIn(0, state.maxOffset)
+            }
             state.viewportOffset = q
             viewport.placeRelative(0, q)
         }
@@ -344,10 +347,13 @@ internal fun ChatMessageList(
     // A non-following viewport keeps its reader anchor while visible. Once off-screen,
     // its full-height row must be ordinary content before the reader re-enters it.
     LaunchedEffect(listState, turnKeys, assistantOwnerKey) {
-        snapshotFlow {
-            val candidates = nestedStates.filter { (key, viewport) ->
+        val cleanupCandidates = derivedStateOf {
+            nestedStates.filter { (key, viewport) ->
                 !(key == assistantOwnerKey && followBottom) && viewport.bounded && !viewport.migrating
             }
+        }
+        snapshotFlow {
+            val candidates = cleanupCandidates.value
             if (candidates.isEmpty()) return@snapshotFlow emptyList()
             val layout = listState.layoutInfo
             if (layout.totalItemsCount == 0) emptyList() else candidates.mapNotNull { (key, viewport) ->

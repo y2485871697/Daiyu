@@ -34,9 +34,10 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
         app.daiyu.android.diagnostics.ObserveDialogFrames(if (bottomSheet) "sheet" else "dialog", automaticPopup)
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         val dimAmount = remember(window) { window?.attributes?.dimAmount ?: 0f }
-        SideEffect {
+        DisposableEffect(window, bottomSheet) {
             window?.setDimAmount(0f)
             if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()
+            onDispose { }
         }
         DialogMotionProvider(motion, onDismiss, onOutsideDismiss = onOutsideDismiss) {
             Box(Modifier.fillMaxSize().testTag("preview-dialog-viewport").dialogDismissInputGuard()) {

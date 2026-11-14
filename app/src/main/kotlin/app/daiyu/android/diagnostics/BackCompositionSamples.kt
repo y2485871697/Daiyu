@@ -6,6 +6,7 @@ internal class BackCompositionSamples(
     private val observed: (BackPerformanceRecorder.Token) -> Unit,
     private val limited: (BackPerformanceRecorder.Token) -> Unit,
     private val completed: (BackPerformanceRecorder.Token, String, Long, Long, Long) -> Unit,
+    private val rootName: ((String) -> Boolean)? = null,
 ) {
     private var token: BackPerformanceRecorder.Token? = null
     private var depth = 0
@@ -29,6 +30,7 @@ internal class BackCompositionSamples(
     fun start(source: BackPerformanceRecorder.Token?, name: String) {
         if (!enabled(source)) return
         val owner = source ?: return
+        if (depth == 0 && rootName?.invoke(name) == false) return
         if (calls == MAX_CALLS || depth == MAX_DEPTH) {
             names.fill(null)
             depth = 0

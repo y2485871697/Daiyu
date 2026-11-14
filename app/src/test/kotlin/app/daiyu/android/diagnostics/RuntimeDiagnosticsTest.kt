@@ -6,6 +6,33 @@ import org.junit.Test
 import java.nio.file.Files
 
 class RuntimeDiagnosticsTest {
+    @Test fun popupRequestsKeepTheirOwnTimestampAndEpochWithoutOpeningACapture() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("runtime-popup-request").toFile())
+        RuntimeDiagnostics.awaitWrites(); RuntimeDiagnostics.clear(); RuntimeDiagnostics.enabled = false
+        try {
+            val epoch = RuntimeDiagnostics.backEpoch()
+            val token = PopupPerformance.capture.recorder.compositionToken()
+            RuntimeDiagnostics.popupRequest(PopupPerformanceCapture.Type.ASSISTANT_PICKER, epoch, 123L)
+            RuntimeDiagnostics.popupRequest(PopupPerformanceCapture.Type.MODEL_PICKER, epoch, 456L)
+            RuntimeDiagnostics.awaitWrites()
+            val rows = RuntimeDiagnostics.export()
+            assertEquals(2, rows.length())
+            for (index in 0..1) {
+                val row = rows.getJSONObject(index)
+                assertEquals("POPUP_PERFORMANCE", row.getString("stage"))
+                assertEquals("OPEN_REQUEST", row.getString("code"))
+                assertEquals(if (index == 0) "ASSISTANT_PICKER" else "MODEL_PICKER", row.getString("kind"))
+                assertEquals(if (index == 0) 123L else 456L, row.getLong("event_ns"))
+                assertFalse(row.has("sampling_start")); assertFalse(row.has("opened_ns"))
+                assertFalse(row.has("text")); assertFalse(row.has("host"))
+            }
+            assertEquals(token, PopupPerformance.capture.recorder.compositionToken())
+            RuntimeDiagnostics.clear()
+            RuntimeDiagnostics.popupRequest(PopupPerformanceCapture.Type.ASSISTANT_PICKER, epoch, 789L)
+            RuntimeDiagnostics.awaitWrites(); assertEquals(0, RuntimeDiagnostics.export().length())
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+
     @Test fun traceIsBoundedPairsFailuresAndNeverRecordsExceptionOrBusinessText() {
         RuntimeDiagnostics.install(Files.createTempDirectory("runtime-trace").toFile())
         RuntimeDiagnostics.awaitWrites()

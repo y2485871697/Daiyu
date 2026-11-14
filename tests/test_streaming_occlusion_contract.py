@@ -25,20 +25,39 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_idle_viewport_cleanup_does_not_subscribe_to_each_scroll_layout(self):
         source = CHAT.read_text()
         cleanup = source.split('LaunchedEffect(listState, turnKeys, assistantOwnerKey)', 1)[1].split('val boundaryRequests', 1)[0]
-        candidates = cleanup.index('val candidates = nestedStates.filter')
-        idle = cleanup.index('if (candidates.isEmpty()) return@snapshotFlow emptyList()')
-        layout = cleanup.index('val layout = listState.layoutInfo')
+        cache = cleanup.index('val cleanupCandidates = derivedStateOf')
+        scan = cleanup.index('nestedStates.filter', cache)
+        flow = cleanup.index('snapshotFlow {', scan)
+        candidates = cleanup.index('val candidates = cleanupCandidates.value', flow)
+        idle = cleanup.index('if (candidates.isEmpty()) return@snapshotFlow emptyList()', candidates)
+        layout = cleanup.index('val layout = listState.layoutInfo', idle)
+        self.assertLess(cache, scan)
+        self.assertLess(scan, flow)
+        self.assertLess(flow, candidates)
         self.assertLess(candidates, idle)
         self.assertLess(idle, layout)
         self.assertNotIn('layoutInfo', cleanup[:idle])
+        self.assertNotIn('nestedStates.filter', cleanup[flow:layout])
         for token in ('!(key == assistantOwnerKey && followBottom)', 'viewport.bounded', '!viewport.migrating'):
-            self.assertIn(token, cleanup[candidates:idle])
+            self.assertIn(token, cleanup[scan:flow])
         self.assertIn('candidates.mapNotNull', cleanup[layout:])
         collect = cleanup.split('.collect { offscreen ->', 1)[1]
         self.assertIn('(key != assistantOwnerKey || !followBottom) && viewport.bounded && !viewport.migrating', collect)
         for token in ('viewport.bounded = false', 'viewport.scrollOffset = 0f',
                       'viewport.viewportOffset = 0', 'viewport.boundaryDelta = 0f'):
             self.assertIn(token, collect)
+
+    def test_unbounded_placement_does_not_observe_unused_item_origin(self):
+        source = CHAT.read_text()
+        viewport = source.split('private fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
+        placement = viewport.split('layout(viewport.width, state.contentHeight)', 1)[1]
+        guard = placement.index('val q = if (!state.bounded) 0 else {')
+        origin = placement.index('val origin = state.itemOrigin')
+        self.assertLess(guard, origin)
+        self.assertNotIn('itemOrigin', placement[:guard])
+        self.assertIn('state.viewportOffset = q', placement)
+        self.assertIn('viewport.placeRelative(0, q)', placement)
+        self.assertIn('list.localPositionOf(coordinates, Offset.Zero).y', viewport)
 
     def test_occlusion_clearance_uses_the_same_bounded_frame_motion(self):
         source = CHAT.read_text()

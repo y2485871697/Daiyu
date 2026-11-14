@@ -71,3 +71,11 @@ internal object PopupPerformance {
     val capture = PopupPerformanceCapture(epoch = RuntimeDiagnostics::backEpoch,
         incident = RuntimeDiagnostics::popupIncident, boundary = RuntimeDiagnostics::popupBoundary)
 }
+
+// Compiler-qualified subtree roots; descendants keep their original self-time accounting.
+internal fun popupCompositionRoot(name: String): Boolean =
+    name.startsWith("app.daiyu.android.ui.screens.assistants.AssistantPickerDialog (") ||
+    name.startsWith("app.daiyu.android.ui.screens.chat.conversation.ChatModelPicker (") ||
+    name.startsWith("app.daiyu.android.ui.components.PreviewDialog (") ||
+    name.startsWith("app.daiyu.android.ui.screens.chat.conversation.ChatMessageList (") ||
+    name.startsWith("app.daiyu.android.ui.screens.chat.conversation.DaiyuChatScreen (")

@@ -7,6 +7,17 @@ SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
 
 
 class PreviewDialogStatusBarContractTest(unittest.TestCase):
+    def test_fixed_window_configuration_is_keyed_to_window_and_presentation(self):
+        source = (SRC / "ui/components/PreviewDialog.kt").read_text()
+        fixed = source.split('DisposableEffect(window, bottomSheet) {', 1)[1].split('onDispose { }', 1)[0]
+        self.assertEqual(1, source.count('window?.setDimAmount(0f)'))
+        self.assertEqual(1, source.count('window?.setWindowAnimations(0)'))
+        self.assertIn('window?.setDimAmount(0f)', fixed)
+        self.assertIn('if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()', fixed)
+        self.assertNotIn('SideEffect {', source)
+        self.assertIn('scrimColor ?: Color.Black.copy(alpha = dimAmount)', source)
+        self.assertIn('radius = scrimBlurRadius, saturation = 1f', source)
+
     def test_preview_does_not_force_status_text_or_navigation_bar_appearance(self):
         source = (SRC / "ui/components/PreviewDialog.kt").read_text()
         self.assertNotIn("isAppearanceLightStatusBars", source)

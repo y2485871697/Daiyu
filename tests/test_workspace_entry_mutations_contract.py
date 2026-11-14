@@ -15,7 +15,7 @@ class WorkspaceEntryMutationsContract(unittest.TestCase):
     def test_action_rows_match_voice_reference_and_preserve_dismissal(self):
         ui = source('ui/components/WorkspaceEntryDialogs.kt')
         for token in ['ChatSelectionSheet(', 'Modifier.size(24.dp)', 'Modifier.weight(1f)', 'DaiyuIcons.ChevronRight',
-                      'Modifier.size(18.dp)', 'heightIn(min = 56.dp)', 'onDismiss = onDismiss', 'preview = true', 'deletionAppearance = true']:
+                      'Modifier.size(18.dp)', 'heightIn(min = 56.dp)', 'onDismiss = onDismiss', 'showCloseButton = false', 'deletionAppearance = true']:
             self.assertIn(token, ui)
         self.assertNotIn('java.io', ui)
     def test_cards_keep_long_press_without_more_button(self):
@@ -38,7 +38,7 @@ class WorkspaceEntryMutationsContract(unittest.TestCase):
         rename = ui.split('"rename" ->', 1)[1].split('"delete" ->', 1)[0]
         self.assertIn('WorkspaceNameDialog(', rename)
         self.assertIn('"取消"', source('ui/components/WorkspaceNameDialog.kt'))
-        self.assertIn('DaiyuConfirmDialog(', ui)
+        self.assertIn('"delete" -> ChatSelectionSheet(', ui)
         self.assertIn('"workspace-cancel"', source('ui/components/ConversationWorkspaceSheet.kt'))
     def test_rename_uses_creation_field_and_hint_without_search_or_close(self):
         ui = source('ui/components/WorkspaceEntryDialogs.kt')
@@ -87,3 +87,18 @@ class WorkspaceEntryMutationsContract(unittest.TestCase):
         self.assertNotIn('persistConversationWorkspaces(', method)
         self.assertNotIn('saveWorkspaceOnWorker(', method)
         self.assertNotIn('choosing = false', method)
+
+    def test_delete_confirmation_has_only_title_and_actions_with_original_guards(self):
+        ui = source('ui/components/WorkspaceEntryDialogs.kt')
+        delete = ui.split('"delete" -> ChatSelectionSheet(', 1)[1].split('"actions" ->', 1)[0]
+        for token in ['title = "删除${if (directory) "文件夹" else "文件"}"',
+                      'showCloseButton = false', 'AssistantPreviewButton("取消"',
+                      'AssistantPreviewButton("删除"', 'testTag("dialog-cancel")',
+                      'testTag("dialog-confirm")', 'primary = false',
+                      'danger = true', 'deletionAppearance = true',
+                      'onDismiss = { if (enabled()) onDismiss() }',
+                      'if (enabled()) { stage = "submitted"; onDelete() }', ') {}']:
+            self.assertIn(token, delete)
+        for token in ['将删除', '无法撤销', 'Text(', 'DaiyuIcons.Close', 'DaiyuConfirmDialog(']:
+            self.assertNotIn(token, delete)
+        self.assertEqual(2, delete.count('if (enabled()) onDismiss()'))

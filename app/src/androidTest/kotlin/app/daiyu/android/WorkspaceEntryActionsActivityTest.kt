@@ -12,6 +12,15 @@ import java.io.File
 import java.util.UUID
 
 class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
+    private fun assertDeleteConfirmation(title: String) {
+        awaitUniqueTag("dialog-confirm")
+        ui.onNodeWithText(title).assertIsDisplayed()
+        ui.onNodeWithText("将删除", substring = true).assertDoesNotExist()
+        ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+        node("dialog-cancel").assertIsDisplayed().assertIsEnabled().assertTextContains("取消")
+        node("dialog-confirm").assertIsDisplayed().assertIsEnabled().assertTextContains("删除")
+    }
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     @Suppress("UNCHECKED_CAST")
     private fun retainedLongClickCallback(target: SemanticsNodeInteraction): () -> Unit {
@@ -73,10 +82,12 @@ class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
             assertEquals("keep", File(rootfs, "renamed/keep").readText())
             reveal("linux-rootfs-entry:renamed", "Rootfs文件测试").performTouchInput { longClick() }
             node("workspace-entry-action:delete").performClick()
+            assertDeleteConfirmation("删除文件夹")
             node("dialog-cancel").performClick()
             assertTrue(File(rootfs, "renamed").isDirectory)
             reveal("linux-rootfs-entry:renamed", "Rootfs文件测试").performTouchInput { longClick() }
             node("workspace-entry-action:delete").performClick()
+            assertDeleteConfirmation("删除文件夹")
             node("dialog-confirm").performClick()
             ui.waitUntil(5_000) { !File(rootfs, "renamed").exists() }
             assertTrue(File(rootfs, "etc").isDirectory)
@@ -122,6 +133,13 @@ class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
             assertEquals(before, fixture.database.workspaceBinding(null))
             node("workspace-folder:$name").performTouchInput { longClick() }
             node("workspace-entry-action:delete").performClick()
+            assertDeleteConfirmation("删除文件夹")
+            node("dialog-cancel").performClick()
+            assertEquals("remove", File(folder, "child").readText())
+            assertEquals(before, fixture.database.workspaceBinding(null))
+            node("workspace-folder:$name").performTouchInput { longClick() }
+            node("workspace-entry-action:delete").performClick()
+            assertDeleteConfirmation("删除文件夹")
             node("dialog-confirm").performClick()
             ui.waitUntil(5_000) { !folder.exists() }
             node("workspace-save").assertIsEnabled()

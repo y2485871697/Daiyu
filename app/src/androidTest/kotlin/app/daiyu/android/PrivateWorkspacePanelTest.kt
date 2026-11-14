@@ -13,6 +13,15 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 class PrivateWorkspacePanelTest : WiredActivityTestCase() {
+    private fun assertDeleteConfirmation(title: String) {
+        awaitUniqueTag("dialog-confirm")
+        ui.onNodeWithText(title).assertIsDisplayed()
+        ui.onNodeWithText("将删除", substring = true).assertDoesNotExist()
+        ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+        node("dialog-cancel").assertIsDisplayed().assertIsEnabled().assertTextContains("取消")
+        node("dialog-confirm").assertIsDisplayed().assertIsEnabled().assertTextContains("删除")
+    }
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     @Suppress("UNCHECKED_CAST")
     private fun retainedLongClickCallback(target: SemanticsNodeInteraction): () -> Unit {
@@ -52,14 +61,14 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             reveal("workspace-private-entry:sub/keep.txt", "私有文件测试").performTouchInput { longClick() }
             node("workspace-entry-action:cancel").assertDoesNotExist()
             node("workspace-entry-action:delete").performClick()
-            ui.onNodeWithText("删除文件").assertIsDisplayed()
+            assertDeleteConfirmation("删除文件")
             awaitUniqueTag("dialog-cancel")
             node("dialog-cancel").assertIsDisplayed().assertIsEnabled().performClick()
             ui.onNodeWithText("删除文件").assertDoesNotExist()
             assertEquals("keep", File(sub, "keep.txt").readText())
             reveal("workspace-private-entry:sub/keep.txt", "私有文件测试").performTouchInput { longClick() }
             node("workspace-entry-action:delete").performClick()
-            ui.onNodeWithText("删除文件").assertIsDisplayed()
+            assertDeleteConfirmation("删除文件")
             awaitUniqueTag("dialog-confirm")
             node("dialog-confirm").assertIsDisplayed().assertIsEnabled().performClick()
             ui.waitUntil(5_000) { !File(sub, "keep.txt").exists() }

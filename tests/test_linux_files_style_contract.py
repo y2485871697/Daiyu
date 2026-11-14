@@ -182,8 +182,9 @@ class LinuxFilesStyleContract(unittest.TestCase):
                     self.assertIn(text, read(name))
 
         dialogs = (COMPONENTS / 'WorkspaceEntryDialogs.kt').read_text()
-        self.assertIn('DaiyuConfirmDialog(', dialogs)
-        self.assertIn('无法撤销。', dialogs)
+        delete = dialogs.split('"delete" -> ChatSelectionSheet(', 1)[1].split('"actions" ->', 1)[0]
+        self.assertIn('showCloseButton = false', delete)
+        self.assertNotIn('无法撤销。', delete)
         self.assertIn('deletionAppearance = true', dialogs)
 
     def test_settings_share_compact_topbar_without_changing_non_settings_defaults(self):

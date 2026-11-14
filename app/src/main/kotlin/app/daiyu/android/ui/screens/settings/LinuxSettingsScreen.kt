@@ -226,20 +226,6 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                         }
                     }
                 }
-                item("linux-tools-heading") { SettingsSectionTitle("可选工具") }
-                listOf("Python / uv 环境", "Node.js 环境", "SSH", "APK 分析").forEachIndexed { index, title ->
-                    item("linux-tool-$index") {
-                        SettingsCard(Modifier.padding(bottom = 12.dp)) {
-                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(title, style = MiuixTheme.textStyles.body1)
-                                Text("工具状态未检测", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    Button(onClick = {}, enabled = false, modifier = Modifier.testTag("linux-tool-install:$index")) { Text("安装") }
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
         if (!filesOnly) LinuxSettingsTabs(tab, enabled = !fileOperationBusy) {

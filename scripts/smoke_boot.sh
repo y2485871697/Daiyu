@@ -158,6 +158,10 @@ pause_receipt_only = (mode in ('smoke', 'candidate') and sorted(raw_filter.split
 pause_receipt_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                          for name in (requested if pause_receipt_only else pause_receipt_target)}
 
+linux_settings_target = "app.daiyu.android.ui.screens.settings.LinuxSettingsScreenTest"
+linux_settings_only = mode == "smoke" and raw_filter == linux_settings_target
+linux_settings_source = Path("app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/LinuxSettingsScreenTest.kt")
+
 linux_pin_target = {
     "app.daiyu.android.terminal.LinuxLeaseRecoveryDeviceTest",
     "app.daiyu.android.terminal.TerminalEnvironmentHostDeviceTest",
@@ -242,6 +246,8 @@ for path in sorted([rename_presentation_source] if rename_presentation_only else
         continue
     if pause_receipt_only and path not in pause_receipt_sources:
         continue
+    if linux_settings_only and path != linux_settings_source:
+        continue
     if linux_pin_only and path not in linux_pin_sources:
         continue
     if terminal_screen_only and path != terminal_screen_source:
@@ -283,7 +289,7 @@ if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shar
     raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and not chat_status_bar_only and not rename_presentation_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys
@@ -303,7 +309,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
+                discovery_scope="targeted" if rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

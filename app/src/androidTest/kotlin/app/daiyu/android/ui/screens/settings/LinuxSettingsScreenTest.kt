@@ -106,14 +106,17 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         dismissChoice()
         assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
     }
-    fun testOriginalGroupsHaveNoTechnicalPreviewAndUnavailableToolsAreNotMarkedInstalled() {
+    fun testBasicGroupsKeepEnvironmentControlsWithoutOptionalTools() {
         show()
         node("linux-distribution-choice").assertIsDisplayed()
         revealLinux("linux-execution-choice").assertIsDisplayed()
         node("linux-tab:basic").assertIsSelected()
         node("linux-tab:files").assertHasClickAction()
         for (tag in listOf("linux-workspace", "linux-shared-folders", "linux-file-browser")) node(tag).assertDoesNotExist()
-        revealLinux("linux-tool-install:0").assertIsNotEnabled()
+        for (index in 0..3) node("linux-tool-install:$index").assertDoesNotExist()
+        for (text in listOf("可选工具", "Python / uv 环境", "Node.js 环境", "SSH", "APK 分析", "工具状态未检测")) {
+            ui.onAllNodesWithText(text).assertCountEquals(0)
+        }
         for (text in listOf("预览安装（不下载）", "安装说明与诊断", "手工登记环境（高级）", "固定发行版 proot 安装（不自动注册）", "已安装")) {
             ui.onAllNodesWithText(text).assertCountEquals(0)
         }

@@ -7,6 +7,16 @@ SCREEN = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/settings/Linux
 
 
 class LinuxInstallButtonLayoutContract(unittest.TestCase):
+    def test_basic_page_removes_the_entire_optional_tools_section(self):
+        source = SCREEN.read_text()
+        for token in ['linux-tools-heading', 'linux-tool-', '可选工具',
+                      'Python / uv 环境', 'Node.js 环境', 'APK 分析', '工具状态未检测']:
+            self.assertNotIn(token, source)
+        self.assertIn('item("linux-status")', source)
+        self.assertIn('item("linux-configuration")', source)
+        self.assertIn('LinuxSettingsTabs(tab, enabled = !fileOperationBusy)', source)
+        self.assertIn('WorkspaceSettingsScreen(', source)
+
     def test_information_card_keeps_original_copy_typography_and_alignment(self):
         source = SCREEN.read_text()
         info = source.split('item("linux-status") {', 1)[1].split('if (!installed || pendingRequest)', 1)[0]
@@ -24,7 +34,7 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
     def test_single_initial_install_button_is_inside_existing_configuration_card(self):
         source = SCREEN.read_text()
         status, config = source.split('item("linux-configuration") {', 1)
-        config = config.split('item("linux-tools-heading")', 1)[0]
+        config = config.split('if (!filesOnly) LinuxSettingsTabs', 1)[0]
         self.assertEqual(source.count('testTag("linux-install-environment")'), 1)
         self.assertEqual(config.count('SettingsCard('), 1)
         self.assertIn('SettingsCard(Modifier.testTag("linux-environment-configuration"))', config)
@@ -35,7 +45,7 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
 
     def test_install_button_is_full_width_primary_with_direct_request_and_owner_gate(self):
         source = SCREEN.read_text()
-        config = source.split('item("linux-configuration") {', 1)[1].split('item("linux-tools-heading")', 1)[0]
+        config = source.split('item("linux-configuration") {', 1)[1].split('if (!filesOnly) LinuxSettingsTabs', 1)[0]
         for token in [
             'Button(enabled = installEnabled,', 'ButtonDefaults.buttonColorsPrimary()',
             'Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)',
@@ -119,7 +129,7 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
 
     def test_primary_button_is_visible_but_cannot_replace_an_uncancelled_request(self):
         source = SCREEN.read_text()
-        config = source.split('item("linux-configuration") {', 1)[1].split('item("linux-tools-heading")', 1)[0]
+        config = source.split('item("linux-configuration") {', 1)[1].split('if (!filesOnly) LinuxSettingsTabs', 1)[0]
         for token in ['(!installed || pendingRequest)', 'displayedInstallation?.let {',
                       'it.unavailableReason == null && !it.busy && !it.unknown && !it.recoveryBlocked',
                       '!it.cleanupPending && !it.registrationPending && !it.registered',
@@ -147,7 +157,7 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
         choose = source.split('fun choose(', 1)[1].split('val currentInstallation', 1)[0]
         self.assertNotIn('page.select(', choose)
         self.assertNotIn('selectLinux(', choose)
-        config = source.split('item("linux-configuration") {', 1)[1].split('item("linux-tools-heading")', 1)[0]
+        config = source.split('item("linux-configuration") {', 1)[1].split('if (!filesOnly) LinuxSettingsTabs', 1)[0]
         for token in ['if (needsSwitch)', 'testTag("linux-switch-environment")', 'Text("切换环境"',
                       'currentSwitchTarget.value == target', 'choiceCurrent()', 'page.select(reference)']:
             self.assertIn(token, config)

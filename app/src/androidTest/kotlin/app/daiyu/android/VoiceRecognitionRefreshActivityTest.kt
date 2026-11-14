@@ -115,7 +115,8 @@ class VoiceRecognitionRefreshActivityTest : WiredActivityTestCase() {
             awaitNodeTouchReady(node("voice-mimo-open"))
             node("voice-mimo-open").performClick()
             awaitUniqueTag("voice-mimo-preview-card")
-            reveal("voice-preview", "语音设置").assertTextContains("试听").assertIsNotEnabled()
+            reveal("voice-preview", "语音设置")
+                .assert(hasAnyDescendant(hasText("试听", substring = false))).assertHasNoClickAction()
             ui.onAllNodes(hasText("正在准备", substring = true)).assertCountEquals(0)
             assertEquals(0, fixture.opens.get())
         } finally { personal.remove(voice.id) }

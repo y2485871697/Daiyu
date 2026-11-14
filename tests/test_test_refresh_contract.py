@@ -70,6 +70,25 @@ class TestRefreshContract(unittest.TestCase):
             validate_changes(['core-domain/src/test/kotlin/ExampleTest.kt',
                               'core-domain/src/main/kotlin/Example.kt'])
 
+    def test_frozen_test_revision_keeps_workflow_and_reuse_identity_separate(self):
+        workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
+        package = workflow.split('  test-package:', 1)[1].split('  smoke:', 1)[0]
+        self.assertIn('ref: ${{ inputs.expected_sha }}', package)
+        self.assertIn('fetch-depth: 0', package)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"', package)
+        for action in ('source', 'bind'):
+            self.assertIn('GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_test_refresh.py ' + action, package)
+        self.assertIn("Path('test-refresh/execution-source.json')", package)
+        self.assertIn("workflow_sha=os.environ['GITHUB_SHA'], checked_sha=os.environ['EXPECTED_SHA']", package)
+        smoke = workflow.split('  smoke:', 1)[1]
+        self.assertLess(smoke.index("owner = dict(workflow_sha=env['GITHUB_SHA']"),
+                        smoke.index("env['GITHUB_SHA'] = env['EXPECTED_SHA']"))
+        self.assertLess(smoke.index("env['GITHUB_SHA'] = env['EXPECTED_SHA']"), smoke.index('if source_run:'))
+        self.assertIn("assert run['head_sha'] == pair['test_sha']", smoke)
+        self.assertIn("assert artifact['workflow_run']['head_sha'] == pair['test_sha']", smoke)
+        self.assertIn("env.update(GITHUB_SHA=pair['test_sha'], GITHUB_RUN_ID=source_run, GITHUB_RUN_ATTEMPT=attempt)", smoke)
+        self.assertIn('export GITHUB_SHA="$EXPECTED_SHA"', smoke)
+
     def test_task_graph_and_artifact_boundaries(self):
         workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
         self.assertIn(':app:assembleReleaseAndroidTest', workflow)

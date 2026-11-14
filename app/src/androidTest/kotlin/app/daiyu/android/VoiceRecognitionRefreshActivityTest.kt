@@ -98,18 +98,26 @@ class VoiceRecognitionRefreshActivityTest : WiredActivityTestCase() {
     }
 
     fun testAllSettingsPreviewEntriesOmitPreparationSubtitle() {
-        systemProfiles(); enter()
-        for (title in listOf("朗读", "语音对话")) {
-            section(title)
-            reveal("voice-preview", "语音设置").assertTextContains("试听")
-            ui.onAllNodes(hasText("正在准备", substring = true)).assertCountEquals(0)
+        systemProfiles()
+        val personal = fixture.controller.voiceRuntime.personal
+        val voice = runBlocking {
+            personal.importSample(app.daiyu.android.voice.providers.DoubaoSpeech.pcmToWav(ByteArray(48_000)),
+                "MiMo UI fixture", "ui-fixture-owner")
         }
-        section("我的声音")
-        awaitNodeTouchReady(node("voice-mimo-open"))
-        node("voice-mimo-open").performClick()
-        awaitUniqueTag("voice-mimo-preview-card")
-        reveal("voice-preview", "MiMo 语音").assertTextContains("试听")
-        ui.onAllNodes(hasText("正在准备", substring = true)).assertCountEquals(0)
-        assertEquals(0, fixture.opens.get())
+        try {
+            enter()
+            for (title in listOf("朗读", "语音对话")) {
+                section(title)
+                reveal("voice-preview", "语音设置").assertTextContains("试听")
+                ui.onAllNodes(hasText("正在准备", substring = true)).assertCountEquals(0)
+            }
+            section("我的声音")
+            awaitNodeTouchReady(node("voice-mimo-open"))
+            node("voice-mimo-open").performClick()
+            awaitUniqueTag("voice-mimo-preview-card")
+            reveal("voice-preview", "语音设置").assertTextContains("试听").assertIsNotEnabled()
+            ui.onAllNodes(hasText("正在准备", substring = true)).assertCountEquals(0)
+            assertEquals(0, fixture.opens.get())
+        } finally { personal.remove(voice.id) }
     }
 }

@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         default: ''
+      smoke_api:
+        description: 仅补齐尚未通过的API，不重复已有成功范围
+        type: choice
+        options: [all, '26', '37.2']
+        default: all
       check_id:
         type: string
         required: true
@@ -23,7 +28,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: daiyu-doubao-motion-${{ github.ref }}
+  group: daiyu-doubao-motion-${{ github.ref }}-${{ inputs.smoke_api }}
   cancel-in-progress: false
 env:
   EXPECTED_SHA: ${{ inputs.expected_sha }}
@@ -80,9 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {api: '26', target: google_apis, ram: 4096}
-          - {api: '37.2', target: google_apis_ps16k, ram: 6144}
+        include: ${{ fromJSON(inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096}]' || inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144}]' || '[{"api":"26","target":"google_apis","ram":4096},{"api":"37.2","target":"google_apis_ps16k","ram":6144}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -162,7 +165,8 @@ jobs:
           disk-size: 8192M
           ram-size: ${{ matrix.ram }}M
           cores: 4
-          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel -feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb
+          emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}
+          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ matrix.api == '26' && '-feature -GLDMA' || '' }} ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
           emulator-boot-timeout: 180
           pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
           disable-animations: true

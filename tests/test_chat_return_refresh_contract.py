@@ -203,18 +203,25 @@ class ContentRecoveryWitnessContract(unittest.TestCase):
                        "testStatusBarVisibilityKeepsEveryNativeChatDrawStableAndImeLive",
                        "testHomeReturnKeepsChatGeometryFromFirstNativeDraw"):
             self.assertIn(source, android)
-        for forbidden in ("setContent", "captureScreenNode", "takeScreenshot", "SDK_INT", "Thread.sleep"):
+        for forbidden in ("setContent", "captureScreenNode", "takeScreenshot", "Thread.sleep"):
             self.assertNotIn(forbidden, android)
         native = body(android, "private fun assertNativeDraws(")
         self.assertLess(native.index("observer.addOnDrawListener(listener)"), native.index("change()"))
-        self.assertIn("assertNativeGeometry(view, geometry, expected", native)
-        oracle = body(android, "private fun assertNativeGeometry(")
+        self.assertIn("if (withIme) atBottom(expected, frame.geometry.list.bottom) else expected", native)
+        self.assertIn("nativeExpected(expected, it) == it.geometry", native)
+        self.assertIn("nativeExpected(expected, settled), settled.geometry", native)
+        self.assertIn("SYSTEM_UI_FLAG_FULLSCREEN", android)
+        readiness = body(android, "private fun statusReady(")
+        self.assertIn("Build.VERSION.SDK_INT < 30", readiness)
+        self.assertIn("getInsetsIgnoringVisibility(status).top == physicalTop", readiness)
+        oracle = body(android, "private fun nativeFrame(")
         for source in ("view.getLocationInWindow(position)", "position[1] + view.height",
-                       "maxOf(ime.bottom, navigation.bottom)", "baseline.list.top",
-                       "baseline.composer.height", "expected, geometry()"):
+                       "Type.ime()", "Type.navigationBars()", "getInsetsIgnoringVisibility"):
             self.assertIn(source, oracle)
-        self.assertNotIn("delta", oracle)
-        self.assertNotIn("coerce", oracle)
+        self.assertIn("maxOf(frame.imeBottom, frame.navigationBottom)", android)
+        for method in ("fun testStatusBarVisibilityKeepsEveryNativeChatDrawStableAndImeLive()",
+                       "fun testHomeReturnKeepsChatGeometryFromFirstNativeDraw()"):
+            self.assertNotIn("SDK_INT", body(android, method))
         flow = (root / "scripts/smoke_boot.sh").read_text()
         self.assertIn("app.daiyu.android.ChatStatusBarInsetsTest", flow)
         self.assertIn("chat_status_bar_only", flow)

@@ -17,6 +17,7 @@ from verify_smoke_source import verify as verify_source
 VALIDATION_FILES = {
     'docs/重构清单.md', '更新说明.md',
     '.github/workflows/test-refresh-regression.yml',
+    '.github/workflows/chat-workflow-checks.yml',
     'scripts/verify_test_refresh.py', 'scripts/cooperation/test_refresh_only.init.gradle',
 }
 VALIDATION_DIRS = ('tests/', 'app/src/test/', 'app/src/androidTest/')

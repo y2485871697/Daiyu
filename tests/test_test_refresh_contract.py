@@ -19,6 +19,15 @@ class TestRefreshContract(unittest.TestCase):
                           'app/src/test/kotlin/ExampleTest.kt', 'tests/example.py',
                           'docs/重构清单.md', '.github/workflows/test-refresh-regression.yml'])
 
+    def test_chat_checks_metadata_does_not_allow_other_workflows(self):
+        validate_changes(['.github/workflows/chat-workflow-checks.yml'])
+        for name in ('.github/workflows/build.yml', '.github/workflows/unknown-checks.yml',
+                     '.github/workflows/chat-workflow-checks.yml.bak', '.github/actions/example/action.yml'):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                validate_changes([name])
+        with self.assertRaises(ValueError):
+            validate_changes(['.github/workflows/chat-workflow-checks.yml', '.github/workflows/build.yml'])
+
     def test_application_build_and_ambiguous_paths_fail_closed(self):
         for name in ('app/src/main/Example.kt', 'app/build.gradle.kts', 'settings.gradle.kts',
                      'scripts/prepare-speech-runtime.py', '.github/workflows/build.yml',

@@ -106,10 +106,11 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_short_growth_does_not_use_partial_height_as_an_internal_follow_target(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        self.assertIn("val followOffset = (body.height - viewportHeight().coerceAtLeast(1)).coerceAtLeast(0)", viewport)
+        self.assertIn("val followOffset = if (body.height > viewportHeight().coerceAtLeast(1)) maximum else 0", viewport)
+        self.assertNotIn("val followOffset = (body.height - viewportHeight()", viewport)
         self.assertIn("state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()", viewport)
         self.assertNotIn("if (state.bounded && follows()) maximum.toFloat()", viewport)
-        self.assertIn(".clipToBounds()", viewport)
+        self.assertIn("clipRect(bottom = bottom)", viewport)
         self.assertIn("state.viewportOffset.coerceIn(0, state.maxOffset)", viewport)
         device = DEVICE.read_text()
         for token in ("testAppendingShortWorkflowKeepsIdentityAndHeaderUnclippedInEveryFrame",
@@ -122,6 +123,31 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "failure is junit.framework.AssertionFailedError", "neighbor.boundsInRoot.bottom",
                       "The outer follower must actually reveal each new tool"):
             self.assertIn(token, device)
+
+    def test_short_to_long_growth_exercises_partial_viewport_before_outer_catchup(self):
+        source = DEVICE.read_text()
+        case = source.split("fun testShortReplyGrowingPastViewportKeepsTailPinnedDuringOuterCatchup()", 1)[1].split("fun testContinuousEveryFrameGrowth", 1)[0]
+        for token in ("height = 120.dp", "height = 900.dp", "tailTop() > 40f * density",
+                      "ui.mainClock.autoAdvance = false", "repeat(24)", "frame()",
+                      'ui.onNodeWithTag("occlusion-tail").assertIsDisplayed()', "assertTailClearance()",
+                      "24f, (composer.top - bottom) / density", "observedPartialViewport",
+                      "finally", "ui.mainClock.autoAdvance = true"):
+            self.assertIn(token, case)
+
+    def test_drawing_clip_uses_full_list_not_the_reading_clearance(self):
+        source = CHAT.read_text()
+        viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        drawing = viewport.split(".drawWithContent {", 1)[1].split(".scrollable", 1)[0]
+        self.assertIn("list.size.height - origin - state.viewportOffset", drawing)
+        self.assertIn("clipRect(bottom = bottom)", drawing)
+        self.assertNotIn("clearance()", drawing)
+        self.assertNotIn(".clipToBounds()", viewport)
+        device = DEVICE.read_text()
+        case = device.split("fun testManualReadingDrawsThroughClearanceInsteadOfExposingPageBackground()", 1)[1].split("fun testContinuousEveryFrameGrowth", 1)[0]
+        for token in ("manualNonzeroPosition()", "painted = true", "sampleY > viewport.boundsInRoot.bottom",
+                      "composer.top - 8f * density", "captureToImage().toPixelMap()",
+                      "color.red < .1f", "color.green > .9f", "color.blue > .9f"):
+            self.assertIn(token, case)
 
     def test_full_extent_invalidates_outer_measure_and_exact_ownership_survives_consumption(self):
         source = CHAT.read_text()

@@ -1,10 +1,13 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,12 +42,12 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     private var showCompression by mutableStateOf(false)
     private var appendAssistant by mutableStateOf(false)
 
-    private fun mount(interactive: Boolean = false) {
+    private fun mount(interactive: Boolean = false, painted: Boolean = false) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
-                    BoxWithConstraints(Modifier.size(320.dp, viewportHeight)) {
+                    BoxWithConstraints(Modifier.size(320.dp, viewportHeight).testTag("occlusion-host")) {
                         ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { bottomInset ->
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
@@ -56,7 +59,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                                 composerBottomInset = bottomInset, turnExtras = { turn ->
                                   if (turn.id == "tail") {
                                     if (interactive) {
-                                        Column {
+                                        Column(if (painted) Modifier.background(Color.Cyan) else Modifier) {
                                             Text("inner content start", Modifier.testTag("inner-start"))
                                             Box(Modifier.height(height - 160.dp))
                                             Text("manual content anchor", Modifier.testTag("manual-anchor"))
@@ -330,6 +333,51 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         assertTrue("The same running owner must not retain an empty offscreen extent", sawRealStart && observedUnwrapped)
         assertTrue(running)
         assertFalse(appendAssistant)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testShortReplyGrowingPastViewportKeepsTailPinnedDuringOuterCatchup() {
+        mainThread { height = 120.dp }
+        mount()
+        assertTrue("Short reply starts below the list top", tailTop() > 40f * density)
+        ui.mainClock.autoAdvance = false
+        try {
+            val composer = ui.onNodeWithTag("occlusion-composer").fetchSemanticsNode().boundsInRoot
+            ui.runOnUiThread { height = 900.dp }
+            var observedPartialViewport = false
+            repeat(24) {
+                frame()
+                if (tailTop() > 20f * density) observedPartialViewport = true
+                ui.onNodeWithTag("occlusion-tail").assertIsDisplayed()
+                assertTailClearance()
+                val coordinates = ui.onNodeWithTag("occlusion-tail").fetchSemanticsNode().layoutInfo.coordinates
+                val bottom = coordinates.positionInRoot().y + coordinates.size.height
+                assertEquals("Latest content remains pinned while the outer origin catches up",
+                    24f, (composer.top - bottom) / density, 2f / density)
+            }
+            assertTrue("Regression must exercise a positive outer origin", observedPartialViewport)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        assertTailClearance()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testManualReadingDrawsThroughClearanceInsteadOfExposingPageBackground() {
+        mount(interactive = true, painted = true)
+        manualNonzeroPosition()
+        val viewport = ui.onNodeWithTag("chat-stream-viewport:tail").fetchSemanticsNode()
+        val composer = ui.onNodeWithTag("occlusion-composer").fetchSemanticsNode().boundsInRoot
+        val host = ui.onNodeWithTag("occlusion-host")
+        val hostBounds = host.fetchSemanticsNode().boundsInRoot
+        val sampleY = composer.top - 8f * density
+        assertTrue("Probe must be below the finite reading window", sampleY > viewport.boundsInRoot.bottom)
+        val pixels = host.captureToImage().toPixelMap()
+        val x = (viewport.boundsInRoot.center.x - hostBounds.left).toInt()
+        val y = (sampleY - hostBounds.top).toInt()
+        assertTrue("Probe lies within the captured message layer", x in 0 until pixels.width && y in 0 until pixels.height)
+        val color = pixels[x, y]
+        assertTrue("Message background continues through the editor clearance, not page white: $color",
+            color.red < .1f && color.green > .9f && color.blue > .9f)
         assertEquals(0, fixture.opens.get())
     }
 

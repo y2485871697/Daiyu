@@ -12,7 +12,7 @@ import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.MutatePriority
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
@@ -149,7 +149,15 @@ internal fun StreamingTailContainer(
     }, content = {
         Layout(content = { Column(content = { content() }) }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
-            .clipToBounds()
+            .drawWithContent {
+                // The finite reading window must not cut the backdrop above the floating editor.
+                val list = listCoordinates()?.takeIf { it.isAttached }
+                val origin = state.itemOrigin
+                val bottom = if (state.bounded && list != null && origin != null)
+                    (list.size.height - origin - state.viewportOffset).coerceAtLeast(0f)
+                else size.height
+                clipRect(bottom = bottom) { this@drawWithContent.drawContent() }
+            }
             .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)
             .semantics {
                 verticalScrollAxisRange = ScrollAxisRange(
@@ -166,9 +174,9 @@ internal fun StreamingTailContainer(
             } else body.height
             val maximum = (body.height - height).coerceAtLeast(0)
             state.maxOffset = maximum
-            // A partial slice below the current item origin is not a full reading viewport.
             // Keep short replies at their top while the outer follower reveals appended rows.
-            val followOffset = (body.height - viewportHeight().coerceAtLeast(1)).coerceAtLeast(0)
+            // Once the body fills a reading viewport, pin its tail to the actual visible slice.
+            val followOffset = if (body.height > viewportHeight().coerceAtLeast(1)) maximum else 0
             state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()
                 else Snapshot.withoutReadObservation { state.scrollOffset.coerceIn(0f, maximum.toFloat()) }
             layout(body.width, height) {

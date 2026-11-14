@@ -42,6 +42,15 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 
 class PageRetainedContentActivityTest : WiredActivityTestCase() {
+    private fun awaitOrdinaryReturnCommit(committed: () -> Boolean) {
+        ui.waitUntil(5_000) {
+            var reached = false
+            instrumentation.runOnMainSync { reached = committed() }
+            if (!reached) ui.mainClock.advanceTimeByFrame()
+            reached
+        }
+    }
+
     private class Parent : LifecycleOwner {
         val registry = LifecycleRegistry(this)
         override val lifecycle: Lifecycle get() = registry
@@ -238,7 +247,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         runtime.enabled = false
         runtime.clear()
         fun recordSynchronous(startWindow: Boolean, expectedRefresh: Int = 1, expectedPublish: Int = 1, action: () -> Unit): org.json.JSONObject {
-            runtime.clear()
+            if (startWindow) runtime.clear()
             mainThread {
                 if (startWindow) recorder.start(Any(), app.daiyu.android.diagnostics.BackPerformanceRecorder.Kind.BACK_PRESS)
                 action()
@@ -284,22 +293,31 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             setDraft("return refresh count draft")
             openSettings() // Keep production MainActivity content and its real returnToChat wiring.
             ui.waitForIdle()
-            fun returnWithRetainedRows(): org.json.JSONObject = recordSynchronous(startWindow = false, expectedRefresh = 0, expectedPublish = 0) {
-                val before = invokeHost(activity, "getChatState") as ChatScreenState
-                val staleControls = retainedControls(activity)
-                activity.onBackPressedDispatcher.onBackPressed()
-                assertEquals("chat", invokeHost(activity, "getRetainedPage"))
-                assertEquals(false, invokeHost(activity, "getSidebarVisible"))
-                val after = invokeHost(activity, "getChatState") as ChatScreenState
-                assertSame("pure navigation must keep the published turns", before.turns, after.turns)
-                assertEquals(before.contentRevision, after.contentRevision)
-                assertEquals(before.scrollRequest, after.scrollRequest)
-                assertEquals(before.composer.text, after.composer.text)
-                assertFalse("pending return cannot admit the retained composer", after.composer.enabled)
-                staleControls.onSend(before.composer.text)
-                staleControls.onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.SETTINGS)
-                assertEquals("stale callbacks cannot leave the pending return", "chat", invokeHost(activity, "getRetainedPage"))
-                assertEquals(0, fixture.opens.get())
+            fun returnWithRetainedRows(): org.json.JSONObject {
+                val advancing = ui.mainClock.autoAdvance
+                ui.mainClock.autoAdvance = false
+                try {
+                    val before = ui.runOnUiThread { invokeHost(activity, "getChatState") as ChatScreenState }
+                    val staleControls = ui.runOnUiThread { retainedControls(activity) }
+                    runtime.clear()
+                    ui.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
+                    awaitOrdinaryReturnCommit { invokeHost(activity, "getRetainedPage") == "chat" }
+                    return recordSynchronous(startWindow = false, expectedRefresh = 0, expectedPublish = 0) {
+                        assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+                        assertEquals(false, invokeHost(activity, "getSidebarVisible"))
+                        val after = invokeHost(activity, "getChatState") as ChatScreenState
+                        assertSame("pure navigation must keep the published turns", before.turns, after.turns)
+                        assertEquals(before.contentRevision, after.contentRevision)
+                        assertEquals(before.scrollRequest, after.scrollRequest)
+                        assertEquals(before.composer.text, after.composer.text)
+                        assertNotNull("committed return has not reached transition idle", invokeHost(activity, "getChatReturnRefresh"))
+                        assertFalse("pending return cannot admit the retained composer", after.composer.enabled)
+                        staleControls.onSend(before.composer.text)
+                        staleControls.onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.SETTINGS)
+                        assertEquals("stale callbacks cannot leave the pending return", "chat", invokeHost(activity, "getRetainedPage"))
+                        assertEquals(0, fixture.opens.get())
+                    }
+                } finally { ui.mainClock.autoAdvance = advancing }
             }
             fun awaitReturnRefresh() = awaitControl("transition idle consumes the return refresh") {
                 invokeHost(activity, "getChatReturnRefresh") == null
@@ -311,7 +329,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val route = (0 until returnedPhases.length()).map { returnedPhases.getJSONObject(it) }
                 .single { it.getString("phase") == "ROUTE" }
             assertEquals(1, route.getInt("count"))
-            // route_changed is a later Compose observation; the synchronous route is asserted above.
+            // route_changed is a later Compose observation; the committed route is asserted above.
             awaitReturnRefresh()
             awaitUniqueTag("chat-draft")
             assertDraft("return refresh count draft")
@@ -472,10 +490,17 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             assertNull(app.daiyu.android.MainActivity::class.java.getDeclaredField("videoReceiptRequest")
                 .apply { isAccessible = true }.get(activity))
             assertEquals(editor.text, (invokeHost(activity, "getChatState") as ChatScreenState).composer.text)
-            activity.onBackPressedDispatcher.onBackPressed()
-            assertEquals("chat", invokeHost(activity, "getRetainedPage"))
-            assertNotNull("navigation must wait for transition idle before adopting the receipt", fixture.controller.videoSendState())
         }
+        val advancing = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
+            awaitOrdinaryReturnCommit { invokeHost(activity, "getRetainedPage") == "chat" }
+            ui.runOnUiThread {
+                assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+                assertNotNull("navigation must wait for transition idle before adopting the receipt", fixture.controller.videoSendState())
+            }
+        } finally { ui.mainClock.autoAdvance = advancing }
         awaitControl("transition idle takes the video business refresh fallback") { fixture.controller.videoSendState() == null }
         awaitUniqueTag("chat-draft")
         assertDraft("")
@@ -752,9 +777,9 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 }
                 ui.mainClock.advanceTimeByFrame()
                 ui.onNodeWithTag("page-back-host").performTouchInput { up() }
-            } else ui.runOnIdle {
-                activity.onBackPressedDispatcher.onBackPressed()
-                assertEquals("business return is synchronous", "chat", route)
+            } else {
+                ui.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
+                awaitOrdinaryReturnCommit { route == "chat" }
             }
             if (!swipe) assertTrue("ordinary-motion fixture accepted its unchanged final source", immediateCaptureRequests > 0)
             assertEquals("both committed releases invoke their callbacks", if (nested) 2 else 1, detailBacks)
@@ -764,7 +789,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val departure = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
             ui.mainClock.advanceTimeBy(64)
             val advanced = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
-            assertTrue("departure must animate after synchronous pop", if (rtl) advanced.right < departure.right else advanced.left > departure.left)
+            assertTrue("departure must animate after committed pop", if (rtl) advanced.right < departure.right else advanced.left > departure.left)
             val hostBounds = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
             val returnProgress = if (rtl) (hostBounds.right - advanced.right) / hostBounds.width
                 else (advanced.left - hostBounds.left) / hostBounds.width

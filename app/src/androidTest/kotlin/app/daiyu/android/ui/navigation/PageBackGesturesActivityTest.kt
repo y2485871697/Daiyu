@@ -716,6 +716,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         val fromRight = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         if (Build.VERSION.SDK_INT >= 34) assertEquals("both system edges use the LTR page transition", initial.left + initial.width * .6f, fromRight.left, 2f)
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ui.waitUntil(5_000) { nestedCount == 1 }
+        ui.waitForIdle()
         assertEquals(1, nestedCount)
         assertEquals(0, backCount)
         mainThread { predictive = false }
@@ -724,6 +726,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertTrue(abs(initial.width - disabled.width) <= 1f)
         assertTrue(abs(initial.left - disabled.left) <= 1f)
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ui.waitUntil(5_000) { backCount == 1 }
+        ui.waitForIdle()
         assertEquals(1, backCount)
         assertEquals(0, fixture.opens.get())
     }
@@ -1265,13 +1269,20 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             else assertEquals(0f, checkNotNull(observedState).visualProgress, 0f)
             owner.registry.currentState = androidx.lifecycle.Lifecycle.State.STARTED
             owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
-            dispatcher.onBackPressed()
+            if (Build.VERSION.SDK_INT >= 34) dispatcher.onBackPressed()
             assertEquals("old predictive completion must not pop after pause", 0, backCount)
+        }
+        ui.waitForIdle()
+        assertEquals("pause and old completion must not cause a deferred pop", 0, backCount)
+        mainThread {
+            val dispatcher = activity.onBackPressedDispatcher
             dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT))
             dispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .6f, BackEventCompat.EDGE_LEFT))
             dispatcher.onBackPressed()
-            assertEquals("a new predictive session remains usable", 1, backCount)
         }
+        ui.waitUntil(5_000) { backCount == 1 }
+        ui.waitForIdle()
+        assertEquals("a new back request remains usable", 1, backCount)
     }
 
     fun testPauseNeverRestoresAcceptedDepartureOnResume() {

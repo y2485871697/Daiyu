@@ -916,23 +916,35 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertEquals("settings", screen)
                 mainThread { blockCopy = false }
                 ui.onNodeWithTag("toolbar-final-copy").performClick()
-            } else mainThread { gate.complete(Unit) }
+            } else ui.runOnUiThread { gate.complete(Unit) }
             ui.waitUntil(5_000) {
-                ui.mainClock.advanceTimeByFrame()
-                if (!veto && !failCopy) {
-                    val pixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
-                    val pixel = pixels[pixels.width - 3, pixels.height / 2]
-                    assertTrue("every handoff frame keeps the departing child visible: $pixel",
-                        pixel.green > .9f && pixel.red < .1f && pixel.blue < .1f)
+                if (veto) {
+                    var committed = false
+                    instrumentation.runOnMainSync {
+                        committed = backCount == 1
+                        if (committed) {
+                            assertTrue("the repeated BACK is tested before the handoff releases", checkNotNull(state).toolbarPending)
+                            activity.onBackPressedDispatcher.onBackPressed()
+                            assertEquals("a repeated BACK cannot resubmit during the pending handoff", 1, backCount)
+                        }
+                    }
+                    if (!committed) ui.mainClock.advanceTimeByFrame()
+                    committed
+                } else {
+                    ui.mainClock.advanceTimeByFrame()
+                    if (!failCopy) {
+                        val pixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+                        val pixel = pixels[pixels.width - 3, pixels.height / 2]
+                        assertTrue("every handoff frame keeps the departing child visible: $pixel",
+                            pixel.green > .9f && pixel.red < .1f && pixel.blue < .1f)
+                    }
+                    backCount == 1 && (failCopy ||
+                        ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty())
                 }
-                backCount == 1 && (veto || failCopy ||
-                    ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty())
             }
             assertEquals("the parent must not draw inside the outgoing visual route", 0, unshieldedParentDraws)
             ui.mainClock.advanceTimeByFrame()
             if (veto) {
-                mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-                assertEquals("a repeated BACK cannot resubmit during the pending handoff", 1, backCount)
                 ui.mainClock.advanceTimeBy(64)
                 assertEquals("settings", screen)
                 assertFalse("a veto releases the precommit lock", checkNotNull(state).toolbarPending)
@@ -1146,9 +1158,16 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
         ui.mainClock.autoAdvance = false
         try {
-            if (dispatchSystemBack) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            else ui.onNodeWithTag("page-return-button").performClick()
-            assertEquals("the business callback runs without waiting for animation", "chat", screen)
+            if (dispatchSystemBack) {
+                ui.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
+                ui.waitUntil(5_000) {
+                    var committed = false
+                    instrumentation.runOnMainSync { committed = screen == "chat" }
+                    if (!committed) ui.mainClock.advanceTimeByFrame()
+                    committed
+                }
+            } else ui.onNodeWithTag("page-return-button").performClick()
+            assertEquals("the business callback commits before the return animation finishes", "chat", screen)
             assertEquals(1, backCount)
             awaitDepartureCapture()
             ui.mainClock.advanceTimeBy(64)

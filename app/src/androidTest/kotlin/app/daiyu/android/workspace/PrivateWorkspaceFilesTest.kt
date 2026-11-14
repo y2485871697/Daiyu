@@ -579,4 +579,25 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         assertFalse(File(workspace, "new").exists())
     }
 
+    fun testProductionContextClientChecksMetadataBeforeOrdinaryFileOperations() {
+        val context = instrumentation.targetContext
+        val access = PrivateWorkspaceFiles(context)
+        val name = "ownership-client-${UUID.randomUUID()}"
+        val root = access.list().directory
+        try {
+            access.createDirectory(root, name)
+            val folder = access.list().entries.single { it.name == name }
+            val imported = access.importFile(folder, "bytes.txt", { ByteArrayInputStream("keep".toByteArray()) })
+            val file = access.list(folder).entries.single { it.name == imported }
+            val output = ByteArrayOutputStream()
+            access.exportFile(file, { output })
+            assertEquals("keep", output.toString("UTF-8"))
+            access.rename(file, "renamed.txt")
+            access.deleteTree(access.list().entries.single { it.name == name })
+            assertFalse(File(context.filesDir, "workspace/$name").exists())
+        } finally {
+            File(context.filesDir, "workspace/$name").deleteRecursively()
+        }
+    }
+
 }

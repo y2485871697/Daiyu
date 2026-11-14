@@ -889,10 +889,22 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 }
                 mainThread { assertEquals("production return pops exactly one level", target,
                     invokeHost(activity, "getRetainedPage")) }
-                ui.waitUntil(5_000) {
-                    ui.mainClock.advanceTimeByFrame()
-                    ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty()
+                fun hasDeparture() = ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty()
+                repeat(2) {
+                    if (!hasDeparture()) {
+                        ui.mainClock.advanceTimeByFrame()
+                        ui.waitForIdle()
+                    }
                 }
+                val samplingClock = ui.mainClock.currentTime
+                try {
+                    ui.waitUntil(5_000) { hasDeparture() }
+                } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+                    throw AssertionError("production departure missing: child=$child level=$index target=$target " +
+                        "samplingClock=$samplingClock clockNow=${ui.mainClock.currentTime}", failure)
+                }
+                assertEquals("async waiting must not consume animation time at level=$index",
+                    samplingClock, ui.mainClock.currentTime)
                 val before = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
                 ui.mainClock.advanceTimeBy(32)
                 val after = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot

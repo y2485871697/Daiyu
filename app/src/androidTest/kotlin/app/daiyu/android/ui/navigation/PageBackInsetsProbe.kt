@@ -18,6 +18,7 @@ internal class PageBackInsetsProbe {
     private var original: WindowInsetsCompat? = null
     private var legacyListener: View.OnApplyWindowInsetsListener? = null
     private var retainedInsets: android.view.WindowInsets? = null
+    private var restoreComposeInsets: (() -> Unit)? = null
     var observed = IntSize.Zero
         private set
     val observations = mutableSetOf<IntSize>()
@@ -32,12 +33,23 @@ internal class PageBackInsetsProbe {
             if (view == null) original = ViewCompat.getRootWindowInsets(host)
             view = host
             observed = value
-            observations.add(value)
+            if (observations.add(value)) android.util.Log.i("PageBackInsetsProbe", "observed=$value")
         }
     }
 
     fun apply(value: IntSize) {
         val host = checkNotNull(view)
+        if (android.os.Build.VERSION.SDK_INT < 30 && restoreComposeInsets == null) {
+            // Use Compose's own injected-insets mode: old APIs otherwise clamp to physical root bars.
+            val holder = Class.forName("androidx.compose.foundation.layout.WindowInsetsHolder")
+            val flag = holder.getDeclaredField("testInsets").apply { isAccessible = true }
+            val previous = flag.getBoolean(null)
+            val companion = holder.getDeclaredField("Companion").get(null)
+            val setter = companion.javaClass.getDeclaredMethod("setUseTestInsets", Boolean::class.javaPrimitiveType!!)
+                .apply { isAccessible = true }
+            setter.invoke(companion, true)
+            restoreComposeInsets = { setter.invoke(companion, previous); Unit }
+        }
         val initial = original ?: WindowInsetsCompat.Builder().build()
         val insets = Insets.of(0, value.width, 0, value.height)
         val delivered = WindowInsetsCompat.Builder(initial)
@@ -57,11 +69,16 @@ internal class PageBackInsetsProbe {
             }
             retainedInsets = checkNotNull(delivered.toWindowInsets())
         }
+        android.util.Log.i("PageBackInsetsProbe", "requested=$value builder=${delivered.getInsets(WindowInsetsCompat.Type.systemBars())} " +
+            "platform=${delivered.toWindowInsets()?.systemWindowInsetTop}/${delivered.toWindowInsets()?.systemWindowInsetBottom} " +
+            "rewrapped=${delivered.toWindowInsets()?.let { WindowInsetsCompat.toWindowInsetsCompat(it).getInsets(WindowInsetsCompat.Type.systemBars()) }}")
         ViewCompat.dispatchApplyWindowInsets(host, delivered)
     }
 
     fun restore() {
         val host = view ?: return
+        restoreComposeInsets?.invoke()
+        restoreComposeInsets = null
         retainedInsets = null
         legacyListener?.let { host.setOnApplyWindowInsetsListener(it) }
         legacyListener = null

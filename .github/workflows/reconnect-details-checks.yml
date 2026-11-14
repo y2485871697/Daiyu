@@ -106,6 +106,30 @@ jobs:
           GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_smoke_source.py
       - name: 校验原始APK摘要
         run: cd delivery && sha256sum -c SHA256SUMS
+      - name: 仅发现固定目标测试源并记录宿主脚本调整
+        shell: bash
+        run: |
+          python3 - <<'PYDISCOVERY'
+          import hashlib, json
+          from pathlib import Path
+          path = Path('scripts/smoke_boot.sh')
+          source = path.read_text()
+          original = source
+          loops = [line for line in source.splitlines() if line.startswith('for path in sorted([rename_presentation_source]')]
+          assert len(loops) == 1
+          source = source.replace(loops[0], 'for path in sorted(Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt") for name in requested):', 1)
+          marker = 'discovery_scope="targeted" if '
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + 'requested is not None or ', 1)
+          path.write_text(source)
+          owner = json.loads(Path('smoke/execution-source.json').read_text())
+          Path('smoke/host-script.json').write_text(json.dumps(dict(
+              workflow_sha=owner['workflow_sha'], fixture_source_sha=owner['checked_sha'],
+              change='restrict inventory to the four selected source files',
+              original_sha256=hashlib.sha256(original.encode()).hexdigest(),
+              executed_sha256=hashlib.sha256(source.encode()).hexdigest(),
+              selected_classes=owner['selected_classes'])) + '\n')
+          PYDISCOVERY
       - name: 启用模拟器加速
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

@@ -11,6 +11,10 @@ on:
         description: 本次定向检查标识
         type: string
         required: true
+      recognition_refresh:
+        description: 仅检查语音识别刷新及试听状态
+        type: boolean
+        default: false
       local_removal:
         description: 仅检查本机音色移除确认弹层
         type: boolean
@@ -29,6 +33,7 @@ jobs:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       SKIP_JDK_VERSION_CHECK: 'true'
       LOCAL_REMOVAL_CHECK: ${{ inputs.local_removal }}
+      RECOGNITION_REFRESH_CHECK: ${{ inputs.recognition_refresh }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -74,6 +79,10 @@ jobs:
           if os.environ['LOCAL_REMOVAL_CHECK'] == 'true':
               patterns = ('test_voice_local_removal_sheet_contract.py', 'test_voice_personal_menu_contract.py',
                           'test_voice_account_notice_contract.py', 'test_shared_sheet_spacing_contract.py')
+          if os.environ['RECOGNITION_REFRESH_CHECK'] == 'true':
+              assert os.environ['LOCAL_REMOVAL_CHECK'] != 'true', 'check scopes are exclusive'
+              patterns = ('test_voice_recognition_layout_contract.py', 'test_voice_settings_parity_contract.py',
+                          'test_voice_settings_palette_contract.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
@@ -96,6 +105,9 @@ jobs:
           tasks=(:app:compileDebugKotlin :app:compileDebugAndroidTestKotlin)
           if [ "$LOCAL_REMOVAL_CHECK" = true ]; then
             tasks+=(:app:testDebugUnitTest --tests app.daiyu.android.voice.account.PersonalVoicesTest --tests app.daiyu.android.VoiceAccountPanelLeafTest)
+          fi
+          if [ "$RECOGNITION_REFRESH_CHECK" = true ]; then
+            tasks+=(:app:testDebugUnitTest --tests app.daiyu.android.VoiceHostTest --tests app.daiyu.android.voice.account.PersonalVoicePreviewTest)
           fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
@@ -125,6 +137,13 @@ jobs:
                   assert int(suite.attrib['tests']) > 0, name
                   assert all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), name
                   unit.append(dict(name=name, tests=int(suite.attrib['tests']), failures=0, errors=0, skipped=0))
+          if os.environ['RECOGNITION_REFRESH_CHECK'] == 'true':
+              for name in ('app.daiyu.android.VoiceHostTest', 'app.daiyu.android.voice.account.PersonalVoicePreviewTest'):
+                  path = Path('app/build/test-results/testDebugUnitTest') / ('TEST-' + name + '.xml')
+                  suite = ET.parse(path).getroot()
+                  assert int(suite.attrib['tests']) > 0, name
+                  assert all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), name
+                  unit.append(dict(name=name, tests=int(suite.attrib['tests']), failures=0, errors=0, skipped=0))
           record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), compile_outcomes=outcomes,
                         contracts=json.loads(Path('voice-selector-checks/contracts.json').read_text()),
@@ -141,4 +160,6 @@ jobs:
             voice-selector-checks/
             app/build/test-results/testDebugUnitTest/TEST-app.daiyu.android.voice.account.PersonalVoicesTest.xml
             app/build/test-results/testDebugUnitTest/TEST-app.daiyu.android.VoiceAccountPanelLeafTest.xml
+            app/build/test-results/testDebugUnitTest/TEST-app.daiyu.android.VoiceHostTest.xml
+            app/build/test-results/testDebugUnitTest/TEST-app.daiyu.android.voice.account.PersonalVoicePreviewTest.xml
           if-no-files-found: error

@@ -24,7 +24,7 @@ VALIDATION_FILES = {
     '.github/workflows/reconnect-details-checks.yml', 'scripts/smoke_boot.sh',
     'scripts/acceptance/record_tool_tests.py', 'scripts/verify_smoke_source.py',
 }
-VALIDATION_DIRS = ('tests/', 'app/src/test/', 'app/src/androidTest/')
+VALIDATION_DIRS = ('tests/', 'app/src/test/', 'app/src/androidTest/', 'core-domain/src/test/')
 
 
 def validate_changes(changed):

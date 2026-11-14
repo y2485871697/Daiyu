@@ -17,6 +17,7 @@ class TestRefreshContract(unittest.TestCase):
     def test_only_reviewed_validation_paths_are_allowed(self):
         validate_changes(['app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneSwitchActivityTest.kt',
                           'app/src/test/kotlin/ExampleTest.kt', 'tests/example.py',
+                          'core-domain/src/test/kotlin/app/daiyu/android/domain/delegation/RetainedChildTasksPauseTest.kt',
                           'docs/重构清单.md', '.github/workflows/test-refresh-regression.yml'])
 
     def test_chat_checks_metadata_does_not_allow_other_workflows(self):
@@ -41,9 +42,15 @@ class TestRefreshContract(unittest.TestCase):
                      '.github/workflows/popup-layout-checks.yml.bak',
                      '.github/workflows/reconnect-details-checks.yml.bak', 'scripts/smoke_boot.sh.bak',
                      'scripts/unknown.sh', '.github/workflows/reconnect-details-checks.yml/extra',
-                     'app/src/androidTest/../main/Example.kt', 'tests//a', 'tests\\a', '/tests/a'):
+                     'app/src/androidTest/../main/Example.kt', 'tests//a', 'tests\\a', '/tests/a',
+                     'core-domain/src/main/kotlin/Example.kt', 'core-domain/build.gradle.kts',
+                     'core-domain/src/test/../main/Example.kt', 'core-domain/src/testExtra/Example.kt'):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 validate_changes([name])
+
+        with self.assertRaises(ValueError):
+            validate_changes(['core-domain/src/test/kotlin/ExampleTest.kt',
+                              'core-domain/src/main/kotlin/Example.kt'])
 
     def test_task_graph_and_artifact_boundaries(self):
         workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()

@@ -332,7 +332,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('currentKey == frame.key', layers)
         self.assertIn('!navigation && active && !closed', layers)
         self.assertIn('frame.captures.any { !it.isCompleted }', layers)
-        self.assertIn('previewEpoch != epoch || frame.generation != generation', layers)
+        self.assertIn('previewEpoch != epoch || frame.captureEpoch != captureEpoch || frame.generation != generation', layers)
         self.assertIn('if (frame.ready == null) withFrameNanos { } else delay(64)', layers)
         self.assertIn('retainedRootKey = "chat"', self.main)
         self.assertEqual(1, self.main.count('chatPageState.SaveableStateProvider('))
@@ -704,7 +704,14 @@ class PageBackGestureContractTest(unittest.TestCase):
         pause = layers.split('fun setActive(value: Boolean)', 1)[1].split('private fun schedule(', 1)[0]
         self.assertIn('if (active == value) return', pause)
         self.assertNotIn('clearPreviews()', pause)
-        self.assertIn('previewEpoch++', pause)
+        self.assertNotIn('previewEpoch++', pause)
+        self.assertIn('if (frame.key == currentKey || !frame.navigationFrozen)', pause)
+        self.assertIn('frame.captureEpoch++', pause)
+        self.assertIn('frame.captureEpoch == captureEpoch', layers)
+        self.assertIn('active || coveredFinalRead', layers)
+        self.assertIn('navigation && frame.key != currentKey && frame.navigationFrozen', layers)
+        clear = layers.split('fun clearPreviews()', 1)[1].split('fun close()', 1)[0]
+        self.assertIn('previewEpoch++', clear)
         self.assertIn('frame.captures.toList().forEach { it.cancel() }', pause)
         reset = pause.split('frames[currentKey]?.let { frame ->', 1)[1]
         self.assertIn('frame.image = null', reset)
@@ -722,9 +729,22 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('assertSame("HOME must not erase a covered target", image, target.image)', test)
         self.assertIn('assertTrue("resumed gesture moves before commit", release.left > initial.left)', test)
 
+    def test_pending_historical_read_has_pause_and_destructive_invalidation_counterexamples(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        case = test.split('fun testCoveredFinalCopySurvivesPauseBeforeOrAfterResumeWithoutWeakeningInvalidation()', 1)[1].split('fun testNestedLayerMovementThenImmediateEntryKeepsTargetAndLiveVerticalPosition()', 1)[0]
+        for required in ('for (boundary in 0..7)', 'layers.freezeCurrent()', 'layers.enter("settings")', 'layers.setActive(false)',
+                         '1 -> layers.setActive(true)', '2 -> layers.clearPreviews()', '3 -> layers.close()',
+                         '4 -> layers.frame("chat")', '5 -> target.size = IntSize(3, 2)',
+                         '6 -> target.recorded(size)', 'if (boundary == 7) layers.setActive(false)',
+                         'a submitted source layer must not release before its read drains',
+                         'copies[1].complete(finalPixels)', 'assertSame(target, layers.find("chat", size))',
+                         'assertNull(target.ready)',
+                         'target.layer.isReleased', 'assertEquals("resume never submits another read for the covered page", 2, copies.size)'):
+            self.assertIn(required, case)
+
     def test_preview_gate_evidence_uses_fixed_bounded_events_not_routes_or_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        begin = layers.split('fun beginGesture(frame: Frame, target: Frame?): Boolean {', 1)[1].split('fun resume(', 1)[0]
+        begin = layers.split('fun beginGesture(frame: Frame, target: Frame?, missingTargetReason: Int = 0): Boolean {', 1)[1].split('fun resume(', 1)[0]
         for event in ('PREVIEW_AFTER_RESUME', 'PREVIEW_READY', 'PREVIEW_TARGET_MISSING',
                       'PREVIEW_SOURCE_MISSING', 'PREVIEW_TARGET_STALE', 'PREVIEW_SOURCE_STALE'):
             self.assertIn('Event.' + event, begin)
@@ -738,13 +758,16 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_gesture_pins_prepared_pixels_before_motion_and_unlocks_at_rest(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        begin = layers.split('fun beginGesture(frame: Frame, target: Frame?): Boolean {', 1)[1].split('fun resume(', 1)[0]
+        begin = layers.split('fun beginGesture(frame: Frame, target: Frame?, missingTargetReason: Int = 0): Boolean {', 1)[1].split('fun resume(', 1)[0]
         self.assertNotIn('hasFreshImage', begin)
         self.assertIn('freeze(frame)', begin)
         self.assertIn('return canBegin', begin)
         self.assertIn('if (frame.frozen) return', layers)
         self.assertIn('gesturePreviewReady = beginPreview()', self.host)
-        self.assertIn('beginPreview = { layers.beginGesture(frame, currentTarget) }', self.host)
+        self.assertIn('layers.beginGesture(frame, layers.find(visualBackTargetKey, viewport),', self.host)
+        self.assertIn('layers.missingTargetReason(visualBackTargetKey, viewport)', self.host)
+        self.assertIn('PREVIEW_CONTEXT_CHANGED, token, contextChangeReason', layers)
+        self.assertIn('contextChangeReason = changed, snapshot = previewCapture', self.host)
         self.assertIn('if (!previewAllowed) frame.animateReturn = false', self.host)
         self.assertIn('state.previewAllowed && (state.active || state.gestureVisualActive) -> frame.image', self.host)
         self.assertIn('departure != null && showDeparture && !departure.forward ->', self.host)

@@ -25,11 +25,13 @@ import kotlinx.coroutines.withContext
 
 /** Historical previews own pixels; live pages prepare them after drawing settles. */
 internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope,
+    private val contextChangeReason: Int = 0,
     private val snapshot: suspend (Frame) -> ImageBitmap = { frame -> frame.layer.toImageBitmap() }) {
     internal class Frame(val key: Any, val layer: GraphicsLayer, var sourceKey: Any = key, var contentKey: Any = key,
         private val onRecorded: (Frame) -> Unit) {
         var size = IntSize.Zero
         var generation = 0L
+        var captureEpoch = 0L
         var readyGeneration = -1L
         var readySize = IntSize.Zero
         var childChangeCaptured: Boolean? = null
@@ -126,12 +128,16 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         active = value
         if (!value) {
             resumedSinceGesture = true
-            previewEpoch++
             pending?.motion?.cancel()
             pending = null
             frames.values.forEach { frame ->
                 frame.warmup?.cancel()
-                frame.captures.toList().forEach { it.cancel() }
+                // A covered ancestor's final read was submitted before its content left.
+                // Let that immutable read drain; only the live page and warm reads expire.
+                if (frame.key == currentKey || !frame.navigationFrozen) {
+                    frame.captureEpoch++
+                    frame.captures.toList().forEach { it.cancel() }
+                }
             }
             // Ancestors cannot redraw while covered. Keep their immutable target pixels.
             frames[currentKey]?.let { frame ->
@@ -170,7 +176,17 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
-    fun beginGesture(frame: Frame, target: Frame?): Boolean {
+    // Fixed diagnostic codes; no route keys or pixels enter the performance record.
+    fun missingTargetReason(key: Any?, size: IntSize): Int {
+        if (key == null) return 1
+        val target = frames[key] ?: return 2
+        if (size == IntSize.Zero) return 3
+        if (target.size != size) return 4
+        if (target.captures.any { !it.isCompleted }) return 5
+        return if (target.canDrawPreview) 0 else 6
+    }
+
+    fun beginGesture(frame: Frame, target: Frame?, missingTargetReason: Int = 0): Boolean {
         val token = captureBackPerformanceToken()
         if (resumedSinceGesture) {
             BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_AFTER_RESUME, token)
@@ -178,7 +194,10 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
         if (target == null) {
             observeCaptures(token)
-            BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_TARGET_MISSING, token)
+            BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_TARGET_MISSING, token, missingTargetReason)
+            if (contextChangeReason != 0) {
+                BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_CONTEXT_CHANGED, token, contextChangeReason)
+            }
             return false
         }
         if (target.readyGeneration >= 0 && target.readyGeneration < target.generation) {
@@ -244,6 +263,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         if (navigation) { if (!frame.frozen || frame.generation == 0L) return }
         else if (frame.frozen || frame.hasFreshImage) return
         val epoch = previewEpoch
+        val captureEpoch = frame.captureEpoch
         val generation = frame.generation
         val size = frame.size
         JankDiagnostics.section("daiyu.back-preview=freeze-start") {
@@ -258,7 +278,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                         val image = withContext(NonCancellable) { snapshot(frame) }
                         result = if (isActive) BackPerformanceRecorder.CaptureResult.DISCARDED
                             else BackPerformanceRecorder.CaptureResult.CANCELLED
-                        if (isActive && active && !closed && !frame.releaseRequested && previewEpoch == epoch &&
+                        val coveredFinalRead = navigation && frame.key != currentKey && frame.navigationFrozen
+                        if (isActive && (active || coveredFinalRead) && !closed && !frame.releaseRequested &&
+                            previewEpoch == epoch && frame.captureEpoch == captureEpoch &&
                             (if (navigation) frame.frozen && frame.generation == generation else !frame.frozen) &&
                             frames[frame.key] === frame && frame.size == size && image.width == size.width && image.height == size.height) {
                             frame.readyGeneration = generation
@@ -289,7 +311,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                     // Only an on-screen gesture may follow a cancelled warm copy with a fresh one.
                     // Never enqueue another read after navigation has disposed the source content.
                     capture(frame, sourceToken, navigation = true)
-                } else if (previewEpoch != epoch || frame.generation != generation) schedule(frame, sourceToken)
+                } else if (previewEpoch != epoch || frame.captureEpoch != captureEpoch || frame.generation != generation) schedule(frame, sourceToken)
             }
         }
     }

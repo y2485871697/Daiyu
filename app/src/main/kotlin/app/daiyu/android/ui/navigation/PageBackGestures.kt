@@ -402,8 +402,18 @@ internal fun PageBackGestureHost(
     val bars = WindowInsets.systemBars
     val insetsKey = IntSize(bars.getTop(density), bars.getBottom(density))
     val scope = rememberCoroutineScope()
+    val previousPreviewContext = remember { arrayOfNulls<List<Any?>>(1) }
     val layers = remember(graphics, themeKey, configuration, insetsKey, density, layoutDirection, previewScopeKey) {
-        PageBackPreviewLayers(graphics, scope, previewCapture)
+        // Only the changed-input bitmask is logged, never the configuration or scope values.
+        val inputs = listOf(graphics, themeKey, android.content.res.Configuration(configuration),
+            insetsKey, density, layoutDirection, previewScopeKey)
+        val changed = previousPreviewContext[0]?.let { previous ->
+            inputs.indices.fold(0) { mask, index ->
+                if (previous[index] != inputs[index]) mask or (1 shl index) else mask
+            }
+        } ?: 0
+        previousPreviewContext[0] = inputs
+        PageBackPreviewLayers(graphics, scope, contextChangeReason = changed, snapshot = previewCapture)
     }
     DisposableEffect(layers) { onDispose { layers.close() } }
     var pauseEpoch by remember(layers) { mutableStateOf(0L) }
@@ -477,7 +487,10 @@ internal fun PageBackGestureHost(
     val currentTarget by rememberUpdatedState(target)
     val state = remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey) {
         PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope, diagnosticOwner,
-            beginPreview = { layers.beginGesture(frame, currentTarget) }) { value, predictive, direction, velocity, previewAllowed, back ->
+            beginPreview = {
+                layers.beginGesture(frame, layers.find(visualBackTargetKey, viewport),
+                    layers.missingTargetReason(visualBackTargetKey, viewport))
+            }) { value, predictive, direction, velocity, previewAllowed, back ->
             if (!previewAllowed) frame.animateReturn = false
             val request = if (value > 0f && currentTarget != null && visualBackTargetKey != null) {
                 layers.prepare(frame, visualBackTargetKey, value, predictive, direction, velocity)

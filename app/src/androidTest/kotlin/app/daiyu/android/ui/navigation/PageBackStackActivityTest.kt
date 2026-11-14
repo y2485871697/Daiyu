@@ -321,6 +321,74 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun testCoveredFinalCopySurvivesPauseBeforeOrAfterResumeWithoutWeakeningInvalidation() {
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        ui.waitForIdle()
+        mainThread {
+            // Complete across resume, clear, close, replacement, size, generation, and a paused live source.
+            for (boundary in 0..7) {
+                val scheduler = TestCoroutineScheduler()
+                val clock = object : MonotonicFrameClock {
+                    override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
+                }
+                val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
+                val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
+                val layers = PageBackPreviewLayers(graphics, scope) {
+                    CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
+                }
+                try {
+                    val size = IntSize(2, 2)
+                    layers.enter("chat")
+                    val target = layers.frame("chat")
+                    layers.setActive(true)
+                    target.recorded(size); scheduler.runCurrent()
+                    copies.single().complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                    layers.freezeCurrent()
+                    assertEquals("the final read is already submitted before leaving chat", 2, copies.size)
+                    if (boundary == 7) layers.setActive(false)
+                    layers.enter("settings")
+                    layers.frame("settings")
+                    assertNull("the target is not ready before its final read drains", layers.find("chat", size))
+                    assertEquals(5, layers.missingTargetReason("chat", size))
+                    layers.setActive(false)
+                    assertEquals("only an already covered final read survives pause", boundary != 7, checkNotNull(target.capture).isActive)
+                    when (boundary) {
+                        1 -> layers.setActive(true)
+                        2 -> layers.clearPreviews()
+                        3 -> layers.close()
+                        4 -> layers.frame("chat")
+                        5 -> target.size = IntSize(3, 2)
+                        6 -> target.recorded(size)
+                    }
+                    if (boundary == 3 || boundary == 4) {
+                        assertFalse("a submitted source layer must not release before its read drains", target.layer.isReleased)
+                    }
+                    val finalPixels = ImageBitmap(2, 2)
+                    copies[1].complete(finalPixels); scheduler.runCurrent()
+                    if (boundary < 2) {
+                        assertSame("covered final pixels survive pause without re-reading hidden content", finalPixels, target.image)
+                        assertSame(target, layers.find("chat", size))
+                        assertEquals(0, layers.missingTargetReason("chat", size))
+                        layers.setActive(true); scheduler.runCurrent()
+                        assertSame(target, layers.find("chat", size))
+                    } else {
+                        assertNull("invalidated or paused-live reads must still be rejected", target.image)
+                        assertNull(target.ready)
+                        assertNull(layers.find("chat", size))
+                        if (boundary == 3) assertTrue("release waits for the submitted copy to drain", target.layer.isReleased)
+                    }
+                    assertEquals("resume never submits another read for the covered page", 2, copies.size)
+                } finally {
+                    layers.close()
+                    copies.forEach { if (!it.isCompleted) it.complete(ImageBitmap(2, 2)) }
+                    scheduler.runCurrent(); scope.cancel()
+                }
+            }
+        }
+    }
+
     fun testNestedLayerMovementThenImmediateEntryKeepsTargetAndLiveVerticalPosition() {
         var shift by mutableStateOf(0f)
         val frames = mutableMapOf<Any, PageBackPreviewLayers.Frame>()

@@ -91,6 +91,7 @@ class RenderingRegressionTest : WiredActivityTestCase() {
             toolbar.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
                 assertTrue("$layout/$name: ScrollBy rejected", scroll(sign * before, 0f))
             }
+            ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
             val after = remainingDelta()
             if (after == 0f) return action

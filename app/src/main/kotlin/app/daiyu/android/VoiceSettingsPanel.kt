@@ -67,8 +67,8 @@ internal fun VoiceSettingsPanel(
     val accountVoices by accounts.voices.state.collectAsState()
     val scope = rememberCoroutineScope()
     val drafts = remember { mutableMapOf<VoiceProfile, VoiceConfiguration>() }
-    var draft by remember { mutableStateOf(saved ?: VoiceConfiguration()) }
-    var cloud by remember { mutableStateOf(preferences.cloudEnabled(profile, draft.engine != "SYSTEM")) }
+    var draft by remember(profile) { mutableStateOf(drafts[profile] ?: saved ?: VoiceConfiguration()) }
+    var cloud by remember(profile) { mutableStateOf(preferences.cloudEnabled(profile, draft.engine != "SYSTEM")) }
     val draftBases = remember { mutableMapOf<VoiceProfile, VoiceConfiguration>() }
     var realtimeDirty by remember { mutableStateOf(false) }
     var realtimeCatalog by remember { mutableStateOf(realtimeSpeechVoices) }
@@ -115,12 +115,12 @@ internal fun VoiceSettingsPanel(
         dictation = draft.dictation, asrKey = draft.asrKey, asrResource = draft.asrResource)
     fun realtimeConfiguration() = (saved ?: VoiceConfiguration()).copy(
         duplexKey = draft.duplexKey, duplexProvider = draft.duplexProvider, duplexVoice = draft.duplexVoice, instructions = draft.instructions)
-    fun save(value: VoiceConfiguration, speechOnly: Boolean = false, onSaved: () -> Unit = {}) {
+    fun save(value: VoiceConfiguration, speechOnly: Boolean = false, onSaved: () -> Unit = {}, onFailed: () -> Unit = {}) {
         if (!current() || busy) return
         val next = if (speechOnly) (saved ?: VoiceConfiguration()).withSpeech(value) else value
-        if (next.engine != "SYSTEM" && next.voice.isBlank()) { notice = "请选择音色后保存。"; return }
+        if (next.engine != "SYSTEM" && next.voice.isBlank()) { notice = "请选择音色后保存。"; onFailed(); return }
         val target = profile
-        if (!stopAudio()) return
+        if (!stopAudio()) { onFailed(); return }
         busy = true
         scope.launch {
             try {
@@ -130,6 +130,7 @@ internal fun VoiceSettingsPanel(
                 if (alive.get()) { onSaved(); notice = "" }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { if (alive.get()) {
+                onFailed()
                 notice = "未保存，请检查模型、接口地址、音色和密钥。"
             } }
             finally { busy = false }
@@ -327,8 +328,10 @@ internal fun VoiceSettingsPanel(
                             onSelect = { index ->
                                 if (current() && !busy) {
                                     val method = if (index == 0) "SYSTEM" else "DOUBAO"
+                                    val previousMethod = draft.dictation
                                     changeDraft(draft.copy(dictation = method))
-                                    save((saved ?: VoiceConfiguration()).copy(dictation = method))
+                                    save((saved ?: VoiceConfiguration()).copy(dictation = method),
+                                        onFailed = { changeDraft(draft.copy(dictation = previousMethod)) })
                                 }
                             },
                         ) } } }
@@ -409,7 +412,7 @@ internal fun VoiceSettingsPanel(
                             } }
                             item { OfflineSpeechPackCard(context, ::current) }
                             item { SettingsCard(Modifier.testTag("voice-recognition-method-card")) { SettingsRow("识别方式", tag = "voice-recognition-method",
-                                summary = if (saved?.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
+                                summary = if (draft.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
                                 showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
                         }
                         "READ_ALOUD", "CONVERSATION" -> {
@@ -418,7 +421,7 @@ internal fun VoiceSettingsPanel(
                             } }
                             if (section == "CONVERSATION" && draft.dictation != "DOUBAO") item { OfflineSpeechPackCard(context, ::current, conversationStyle = true) }
                             if (section == "CONVERSATION") item { SettingsCard(Modifier.testTag("voice-recognition-method-card")) { SettingsRow("识别方式", tag = "voice-recognition-method",
-                                summary = if (saved?.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
+                                summary = if (draft.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
                                 showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
                             item { VoiceSettingsCard {
                                 SettingsSwitchRow("云端朗读", cloud, busy = busy, tag = "voice-cloud-enable", summary = "关闭时使用系统语音。") { enabled ->

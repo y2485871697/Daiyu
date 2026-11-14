@@ -315,7 +315,7 @@ internal fun VoiceAccountPanel(
                                     }
                                 }) {
                                 DaiyuIcon(if (playing) DaiyuIcons.Stop else ChatPreviewIcons.Play,
-                                    if (playing) { if (previewState.loading) "正在准备，点击停止" else "停止试听" } else "播放试听")
+                                    if (playing) "停止试听" else "播放试听")
                             }
                             IconButton(enabled = enabled, modifier = Modifier.size(48.dp).testTag("voice-menu:${voice.id}"),
                                 minHeight = 48.dp, minWidth = 48.dp, backgroundColor = Color.Transparent,

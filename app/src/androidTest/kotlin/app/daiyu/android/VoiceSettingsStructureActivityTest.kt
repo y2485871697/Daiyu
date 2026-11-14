@@ -147,6 +147,41 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         node("settings-field:声音名称").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
+    fun testConversationRecognitionRefreshesOnFirstFrameAcrossProfileSwitches() {
+        systemProfiles()
+        runBlocking {
+            fixture.controller.voiceRuntime.save(VoiceConfiguration(dictation = "DOUBAO"), VoiceProfile.CONVERSATION)
+        }
+        val reading = fixture.controller.voiceRuntime.configuration.value
+        val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
+        enter()
+        repeat(3) {
+            for (id in listOf("CONVERSATION", "RECOGNITION")) {
+                val conversationSection = id == "CONVERSATION"
+                val title = if (conversationSection) "语音对话" else "语音识别"
+                val summary = if (conversationSection) "豆包识别 · 需要联网" else "本机识别 · 无需账户"
+                node("voice-section-select").performClick()
+                node("voice-section-option:$id").assertExists()
+                ui.mainClock.autoAdvance = false
+                try {
+                    node("voice-section-option:$id").performClick()
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    node("voice-section-select").assertTextContains(title)
+                    node("voice-recognition-method").assertTextContains(summary)
+                    if (!conversationSection) node("voice-offline-pack-card").assertExists()
+                    else node("voice-offline-pack-card").assertDoesNotExist()
+                } finally {
+                    ui.mainClock.autoAdvance = true
+                    ui.waitForIdle()
+                }
+            }
+        }
+        assertEquals(reading, fixture.controller.voiceRuntime.configuration.value)
+        assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testRecognitionAndMimoReturnToTheirOwnHomes() {
         systemProfiles(); enter()
         reveal("voice-recognition-method", "语音设置").performClick()

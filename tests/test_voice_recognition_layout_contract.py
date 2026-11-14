@@ -46,6 +46,31 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         self.assertIn('section = entry.first; choosingSection = false', selector)
         self.assertIn('if (target != profile) drafts[profile] = draft', selector)
 
+    def test_profile_switch_uses_current_profile_on_first_composition(self):
+        self.assertIn('var draft by remember(profile) { mutableStateOf(drafts[profile] ?: saved ?: VoiceConfiguration()) }', self.panel)
+        self.assertIn('var cloud by remember(profile)', self.panel)
+        self.assertEqual(2, self.panel.count('summary = if (draft.dictation == "DOUBAO")'))
+        self.assertNotIn('summary = if (saved?.dictation == "DOUBAO")', self.panel)
+        self.assertIn('onFailed = { changeDraft(draft.copy(dictation = previousMethod)) }', self.asr)
+        device = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/VoiceSettingsStructureActivityTest.kt").read_text()
+        regression = body(device, 'fun testConversationRecognitionRefreshesOnFirstFrameAcrossProfileSwitches()')
+        self.assertIn('ui.mainClock.autoAdvance = false', regression)
+        self.assertIn('ui.mainClock.advanceTimeByFrame()', regression)
+        self.assertIn('repeat(3)', regression)
+        self.assertIn('assertDoesNotExist()', regression)
+
+    def test_all_preview_buttons_omit_preparation_copy_and_keep_stop_and_errors(self):
+        preview = (SRC / "VoiceSettingsPreview.kt").read_text()
+        account = (SRC / "VoiceAccountPanel.kt").read_text()
+        self.assertNotIn('正在准备', preview)
+        self.assertNotIn('正在准备', account)
+        self.assertIn('if (active) "停止试听" else "试听"', preview)
+        self.assertIn('if (playing) "停止试听" else "播放试听"', account)
+        self.assertIn('error.isNotBlank() -> error', preview)
+        self.assertIn('state.phase == SpeechPhase.ERROR || state.phase == SpeechPhase.UNAVAILABLE', preview)
+        self.assertIn('if (active) stop()', preview)
+        self.assertIn('preview.stop()', account)
+
     def test_section_selector_keeps_original_arrow(self):
         selector = body(self.panel, 'if (child == null) Column(')
         self.assertIn('DaiyuIcon(DaiyuIcons.ChevronDown, contentDescription = "选择语音分组"', selector)
@@ -108,7 +133,7 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         self.assertIn('if (current() && !busy)', choice)
         self.assertIn('val method = if (index == 0) "SYSTEM" else "DOUBAO"', choice)
         self.assertIn('changeDraft(draft.copy(dictation = method))', choice)
-        self.assertIn('save((saved ?: VoiceConfiguration()).copy(dictation = method))', choice)
+        self.assertIn('save((saved ?: VoiceConfiguration()).copy(dictation = method),', choice)
         self.assertNotIn('save(draft', choice)
         self.assertIn('"voice-asr-method:system" else "voice-asr-method:doubao"', choice)
         self.assertNotIn('识别音频会发送到豆包', self.asr)

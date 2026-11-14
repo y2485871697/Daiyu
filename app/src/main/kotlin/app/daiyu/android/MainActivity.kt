@@ -1246,6 +1246,7 @@ class MainActivity : ComponentActivity() {
         val messages: List<Pair<Long, Message>>,
         val display: app.daiyu.android.storage.MessageDisplayWindow? = null,
         val presentations: app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache? = null,
+        val toolReceipts: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null,
     )
     internal var paneConversationReader: (String) -> PaneConversationSnapshot = { id ->
         val conversations = controller.database.conversations()
@@ -6376,6 +6377,7 @@ class MainActivity : ComponentActivity() {
                             revision == currentPaneRevision() && displayWindow === firstWindow && !refreshHistoryLoading) {
                             displayWindow = expanded.display
                             expanded.presentations?.let { toolPresentations = it }
+                            expanded.toolReceipts?.let(::adoptPreparedToolReceipts)
                             publishChat()
                         }
                     }
@@ -6414,7 +6416,13 @@ class MainActivity : ComponentActivity() {
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { null }
         checkActive()
-        return snapshot.copy(presentations = presentations)
+        val receipts = try {
+            app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database,
+                snapshot.messages.map { it.second }, snapshot.display)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        checkActive()
+        return snapshot.copy(presentations = presentations, toolReceipts = receipts)
     }
 
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
@@ -6645,6 +6653,7 @@ class MainActivity : ComponentActivity() {
         prepared?.presentations?.let { toolPresentations = it }
         if (refreshHistoryLoading) refreshHistoryPending = true
         shown = prepared?.messages.orEmpty().toMutableList()
+        prepared?.toolReceipts?.let(::adoptPreparedToolReceipts)
         if (prepared != null && prepared.display == null) streamingHistoryRefresh.needsRead(
             controller.active?.takeIf { it.conversationId == conversation?.id }, true, controller.dataRevision, editorGeneration, false)
         childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false
@@ -7098,6 +7107,12 @@ class MainActivity : ComponentActivity() {
         app.daiyu.android.ui.RetainedToolOutcomes.sources(shown.map { it.second }, displayWindow),
         controller.active?.takeIf { it.conversationId == selected?.id }?.let(controller::runState))
 
+    private fun adoptPreparedToolReceipts(snapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot) {
+        toolReceiptRead?.cancel(); toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
+        toolReceiptSnapshot = snapshot
+        toolReceiptKey = currentToolReceiptKey()
+    }
+
     private fun prepareToolReceipts(): Boolean {
         val key = currentToolReceiptKey()
         if (toolReceiptKey == key) return true
@@ -7232,6 +7247,19 @@ class MainActivity : ComponentActivity() {
                 retainedReceipts?.invoke(message, block)
                     ?: if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)
             }
+            fun displayLiveOwner(owner: WorkStepOwnerUi) = controller.active?.takeIf {
+                it.conversationId.value == owner.conversationId && it.runId.value == owner.runId && it.id.value == owner.messageId
+            }
+            val retainedDisplayReceipts = toolReceiptKey?.let { loaded ->
+                toolReceiptSnapshot?.displayRowReader(loaded, currentReceipts,
+                    liveState = { owner -> displayLiveOwner(owner)?.let(controller::runState) },
+                    stopping = { owner -> displayLiveOwner(owner)?.let(controller::runStopping) == true })
+            }
+            val visibleDisplayReceipts = { owner: WorkStepOwnerUi, block: MessageBlock.Tool ->
+                retainedDisplayReceipts?.invoke(owner, block) ?: if (receiptsReady || block.result == null) null
+                else app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi(WorkStepState.PENDING,
+                    app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi.READING)
+            }
             val visibleChildNames = toolReceiptKey?.takeIf { loaded -> loaded.canDisplayFor(currentReceipts) }
                 ?.let { toolReceiptSnapshot?.childAgentNames }.orEmpty()
             val remapTurns = rowsChanged || chatState.conversationKey != selected?.id?.value ||
@@ -7244,7 +7272,7 @@ class MainActivity : ComponentActivity() {
                 compressionActivity = null,
                 compressionActivities = visibleCompressions,
                 turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,
-                    presentations = toolPresentations,
+                    toolReceipt = visibleDisplayReceipts, presentations = toolPresentations,
                     timestamp = { time -> MessageTimestampFormatter.timestamp(time, appearance.messageTimestampsEnabled) },
                     reconnects = reconnects, boundariesAfter = workflowBoundaries, childTaskNames = visibleChildNames) } ?: ChatTurnMapper.map(shown.map { it.second },
                     messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },

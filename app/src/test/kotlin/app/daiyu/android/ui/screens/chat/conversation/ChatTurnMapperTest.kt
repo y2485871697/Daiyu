@@ -23,6 +23,32 @@ class ChatTurnMapperTest {
     )
     private fun mapped(message: Message) = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
 
+    @Test fun displayUsesExactReceiptStateAndActivityAcrossMergedHistorySegments() {
+        val blocks = listOf(tool("repeat", "first"), tool("repeat", "second"), tool("unknown", null))
+        val original = message(*blocks.toTypedArray())
+        val row = app.daiyu.android.storage.MessageDisplayRow(original.id, original.conversationId, original.runId,
+            original.role, emptyList(), original.status, null, null,
+            listOf(app.daiyu.android.storage.MessageDisplaySegment(original.id, original.role, blocks.take(1), null, emptyList()),
+                app.daiyu.android.storage.MessageDisplaySegment(original.id, original.role, blocks.drop(1), null, emptyList())))
+        val window = app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row))
+        val expected = listOf(ToolReceiptUi(WorkStepState.OK), ToolReceiptUi(WorkStepState.FAILED),
+            ToolReceiptUi(WorkStepState.UNKNOWN))
+        val owner = WorkStepOwnerUi(original.conversationId.value, original.runId.value, original.id.value)
+        val turn = ChatTurnMapper.mapDisplay(window, toolReceipt = { identity, block ->
+            assertEquals(owner, identity)
+            expected[blocks.indexOfFirst { it === block }]
+        }).single() as ChatTurnUi.Assistant
+        val steps = turn.workProcess!!.segments.flatMap { it.steps }
+        assertEquals(expected.map { it.state }, steps.map { it.state })
+        assertEquals(expected.map { it.activity }, steps.map { it.activity })
+        assertEquals(3, steps.map { it.renderKey }.distinct().size)
+        val pending = ChatTurnMapper.mapDisplay(window, toolReceipt = { _, block ->
+            if (block.result != null) ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING) else null
+        }).single() as ChatTurnUi.Assistant
+        assertEquals(listOf(ToolActivityUi.READING, ToolActivityUi.READING, ToolActivityUi.UNKNOWN),
+            pending.workProcess!!.segments.flatMap { it.steps }.map { it.activity })
+    }
+
     @Test fun replyIdentityBelongsToEachMessageInsteadOfTheCurrentAssistant() {
         val a = message(text("a", "first"))
         val b = message(text("b", "second")).copy(id = MessageId("second"), runId = RunId("second-run"))

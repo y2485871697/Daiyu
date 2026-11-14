@@ -74,6 +74,37 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         assertEquals(WorkStepState.UNKNOWN, project(historical).workProcess!!.segments.first().steps.first().state)
     }
 
+    fun testDisplayRowsReadDurableReceiptsWithoutAuthorityOrCrossOwnerReuse() {
+        val done = run(listOf(DispatchOutcome.Confirmed("ok", false), DispatchOutcome.Confirmed("bad", true),
+            DispatchOutcome.NotExecuted("cancelled_before_dispatch")), "display-row")
+        val window = database.displayMessages(done.conversationId)
+        val sources = RetainedToolOutcomes.sources(emptyList(), window)
+        val key = RetainedToolOutcomes.ReadKey(done.conversationId, 3, 4, sources, null)
+        val snapshot = RetainedToolOutcomes.Snapshot.read(database, emptyList(), window)
+        val reader = snapshot.displayRowReader(key, key)
+        val turn = ChatTurnMapper.mapDisplay(window, toolReceipt = reader).filterIsInstance<ChatTurnUi.Assistant>().single()
+        assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED, WorkStepState.NOT_EXECUTED),
+            turn.workProcess!!.segments.flatMap { it.steps }.map { it.state })
+        val source = sources.single()
+        val owner = WorkStepOwnerUi(source.conversation, source.run, source.message)
+        val first = source.tools.first()
+        assertEquals(WorkStepState.OK, reader(owner, first)?.state)
+        assertNull(reader(owner.copy(conversationId = "other"), first))
+        assertNull(reader(owner.copy(runId = "other"), first))
+        assertNull(reader(owner.copy(messageId = "other"), first))
+        assertNull(reader(owner, first.copy(result = "changed")))
+        assertNull(snapshot.displayRowReader(key, key.copy(generation = 5))(owner, first))
+        assertNull(snapshot.displayRowReader(key, key.copy(data = 5))(owner, first))
+        assertNull(snapshot.displayRowReader(key, key.copy(conversation = ConversationId("other")))(owner, first))
+        val changedSource = source.copy(tools = source.tools.mapIndexed { index, block ->
+            if (index == 0) block.copy(result = "changed") else block })
+        val changed = key.copy(sources = listOf(changedSource))
+        val partial = snapshot.displayRowReader(key, changed)
+        assertNull(partial(owner, changedSource.tools.first()))
+        assertEquals(WorkStepState.FAILED, partial(owner, changedSource.tools[1])?.state)
+        assertEquals(done, database.messages(done.conversationId).last().second)
+    }
+
     fun testUnknownIsNotTurnedIntoConfirmedErrorOrSuccess() {
         val stopped = run(listOf(DispatchOutcome.Unknown("lost_receipt")), "unknown")
         val tool = stopped.blocks.filterIsInstance<MessageBlock.Tool>().single()

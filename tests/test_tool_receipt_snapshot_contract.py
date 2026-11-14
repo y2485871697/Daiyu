@@ -34,6 +34,28 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('!key.canDisplayFor(currentToolReceiptKey())', prepare)
         self.assertIn('currentToolReceiptKey() != key) publishChat()', prepare)
         self.assertIn('toolReceiptRequested != key', prepare)
+    def test_display_projection_consumes_receipts_without_forging_authoritative_messages(self):
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        display_call = host.split('else displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,', 1)[1].split('} ?: ChatTurnMapper.map(', 1)[0]
+        self.assertIn('toolReceipt = visibleDisplayReceipts', display_call)
+        mapper = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatTurnMapper.kt').read_text()
+        display = mapper.split('internal fun mapDisplay(', 1)[1].split('private data class RenderMessage', 1)[0]
+        self.assertIn('receipt(message, block)?.state', display)
+        self.assertIn('receipt(message, block)?.activity', display)
+        self.assertNotIn('Message(', display.replace('RenderMessage(', ''))
+
+    def test_pane_prepares_receipts_on_worker_and_adopts_before_first_publication(self):
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        prepare = host.split('private fun preparePaneSnapshot(', 1)[1].split('private fun retainedConversation', 1)[0]
+        self.assertIn('RetainedToolOutcomes.Snapshot.read(controller.database,', prepare)
+        self.assertIn('toolReceipts = receipts', prepare)
+        self.assertIn('prepared?.toolReceipts?.let(::adoptPreparedToolReceipts)', host)
+        self.assertIn('expanded.toolReceipts?.let(::adoptPreparedToolReceipts)', host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()
+        self.assertIn('testPaneReentryPublishesSettledDisplayReceiptsBeforeAuthoritativeHistory', test)
+        self.assertIn('the first display publication already has exact receipts', test)
+        self.assertIn('display consumes completed evidence without waiting for history', test)
+
     def test_body_growth_is_not_a_reason_to_decode_checkpoints_again(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
         source = text.split('internal fun sources(', 1)[1].split('internal class Snapshot', 1)[0]

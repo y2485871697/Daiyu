@@ -13,6 +13,7 @@ import app.daiyu.android.domain.delegation.ChildRunOwner
 import app.daiyu.android.ui.screens.chat.conversation.childTaskReceiptOwners
 import app.daiyu.android.question.QuestionCheckpointEvidence
 import app.daiyu.android.ui.screens.chat.conversation.WorkStepState
+import app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi
 import app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi
 import app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi
 import app.daiyu.android.ui.screens.chat.conversation.toolReceiptPresentation
@@ -95,6 +96,32 @@ internal object RetainedToolOutcomes {
                     disposition == ToolDisposition.NOT_EXECUTED)
                     toolReceiptPresentation(disposition, liveOwner = false, phase = ExecutionPhase.IDLE,
                         runStatus = message.status) else null
+            }
+        }
+
+        fun displayRowReader(loaded: ReadKey, current: ReadKey,
+            liveState: (WorkStepOwnerUi) -> ExecutionState? = { null },
+            stopping: (WorkStepOwnerUi) -> Boolean = { false }):
+            (WorkStepOwnerUi, MessageBlock.Tool) -> ToolReceiptUi? {
+            val compatible = loaded.canDisplayFor(current)
+            if (!compatible && (loaded.conversation != current.conversation || loaded.data != current.data ||
+                    loaded.generation != current.generation)) return { _, _ -> null }
+            val loadedSources = loaded.sources.associateBy { Owner(it.conversation, it.run, it.message) }
+            val currentSources = current.sources.associateBy { Owner(it.conversation, it.run, it.message) }
+            val currentPositions = positions(current.sources)
+            return reader@ { identity, block ->
+                val owner = Owner(identity.conversationId, identity.runId, identity.messageId)
+                val source = currentSources[owner] ?: return@reader null
+                val index = currentPositions[owner]?.get(block) ?: return@reader null
+                if (loadedSources[owner]?.tools?.getOrNull(index) != block) return@reader null
+                val disposition = records[owner]?.get(Result(block.invocation, block.result, index)) ?: return@reader null
+                if (!compatible && disposition != ToolDisposition.SUCCEEDED && disposition != ToolDisposition.FAILED &&
+                    disposition != ToolDisposition.NOT_EXECUTED) return@reader null
+                val live = if (compatible) liveState(identity) else null
+                toolReceiptPresentation(disposition, liveOwner = live != null && source.status == RunStatus.RUNNING,
+                    phase = live?.phase ?: ExecutionPhase.IDLE, pauseRequested = live?.pauseRequested == true,
+                    stopRequested = compatible && stopping(identity), runStatus = source.status,
+                    activeCall = block.invocation.id in live?.activeToolCalls.orEmpty())
             }
         }
 

@@ -79,6 +79,7 @@ object ChatTurnMapper {
     }
 
     internal fun mapDisplay(window: app.daiyu.android.storage.MessageDisplayWindow,
+        toolReceipt: (WorkStepOwnerUi, MessageBlock.Tool) -> ToolReceiptUi? = { _, _ -> null },
         presentations: ToolPresentationCache? = null,
         timestamp: (Long?) -> String = { "" },
         boundariesAfter: Set<String> = emptySet(),
@@ -104,8 +105,10 @@ object ChatTurnMapper {
                 row.error, row.createdAt, emptyList(), coordinateBlocks = row.coordinateBlocks))
         }
         presentations?.retainBlocks(history.flatMap { it.blocks })
-        return mapRows(history, owners, { _, _ -> null }, { _, _ -> null }, { _, _ -> null },
-            { _, _ -> null }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, presentations,
+        fun receipt(message: RenderMessage, block: MessageBlock.Tool) = toolReceipt(
+            WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value), block)
+        return mapRows(history, owners, { _, _ -> null }, { message, block -> receipt(message, block)?.state }, { _, _ -> null },
+            { message, block -> receipt(message, block)?.activity }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, presentations,
             { emptyList() }, reconnects, childTaskNames)
     }
 

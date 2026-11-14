@@ -98,6 +98,66 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
     }
 
+    fun testPaneReentryPublishesSettledDisplayReceiptsBeforeAuthoritativeHistory() {
+        val conversation = fixture.database.conversations().single()
+        mainThread { activity.select(conversation) }
+        awaitReceipts()
+        mainThread { activity.select(null) }
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val readerField = field("loadedWindowReader")
+        @Suppress("UNCHECKED_CAST")
+        val reader = readerField.get(activity) as (ConversationId, Long, Int) -> List<Pair<Long, Message>>
+        val displayField = field("displayWindow\$delegate")
+        fun display() = (displayField.get(activity) as State<*>).value
+        mainThread {
+            val blocked: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, limit ->
+                entered.countDown(); check(release.await(60, TimeUnit.SECONDS)); reader(id, before, limit)
+            }
+            readerField.set(activity, blocked)
+            MainActivity::class.java.declaredMethods.single { it.name == "selectPaneConversation" }
+                .apply { isAccessible = true }.invoke(activity, conversation.id.value)
+        }
+        try {
+            assertTrue("authority read entered", entered.await(8, TimeUnit.SECONDS))
+            mainThread {
+                assertNotNull(display())
+                assertTrue((field("shown").get(activity) as List<*>).isEmpty())
+                assertEquals("the first display publication already has exact receipts", expected, steps().map { it.state })
+                assertTrue(checkNotNull(loadedKey()).canDisplayFor(currentKey()))
+                val current = currentKey()
+                val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity)) as RetainedToolOutcomes.Snapshot
+                val pending = Job()
+                val request = Any()
+                field("toolReceiptRead").get(activity)?.let { (it as Job).cancel() }
+                field("toolReceiptKey").set(activity, null)
+                field("toolReceiptSnapshot").set(activity, null)
+                field("toolReceiptRead").set(activity, pending)
+                field("toolReceiptRequested").set(activity, current)
+                field("toolReceiptRequest").set(activity, request)
+                try {
+                    repeat(3) {
+                        call("publishChat")
+                        assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                        assertSame(pending, field("toolReceiptRead").get(activity))
+                    }
+                    MainActivity::class.java.declaredMethods.single { it.name == "completeToolReceipts" }
+                        .apply { isAccessible = true }.invoke(activity, request, current, snapshot)
+                    assertNotNull(display())
+                    assertEquals("display consumes completed evidence without waiting for history", expected, steps().map { it.state })
+                } finally { pending.cancel() }
+            }
+            release.countDown()
+            awaitControl("authority takes over without status regression") { display() == null }
+            awaitReceipts()
+            mainThread { assertEquals(expected, steps().map { it.state }) }
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            release.countDown()
+            mainThread { readerField.set(activity, reader) }
+        }
+    }
+
     fun testFirstReadSurvivesLivePhaseChangesAndPublishesWithoutAnotherModelEvent() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()

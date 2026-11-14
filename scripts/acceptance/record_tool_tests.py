@@ -264,6 +264,9 @@ CHILD_TASK_CARD_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.conv
 CHILD_TASK_CARD_INHERITANCE_CLASSES = CHILD_TASK_CARD_PLATFORM_CLASSES + (
     "app.daiyu.android.ConversationSelectionInheritanceActivityTest",
 )
+CHILD_TASK_CARD_THEME_CLASSES = CHILD_TASK_CARD_INHERITANCE_CLASSES + (
+    "app.daiyu.android.ChatThemeInteractionActivityTest",
+)
 CHILD_TASK_CARD_MODULES = (
     "test_delegation_batch_and_send_contract", "test_child_stop_hot_configuration_contract",
     "test_subagent_resume_display_contract", "test_subagent_collaboration_contract",
@@ -342,7 +345,8 @@ def command_for(python, env):
         return [python, '-B', '-m', 'unittest', *MARKDOWN_ENTRY_MODULES, '-v'], 'markdown-entry-targeted'
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
-                sorted(CHILD_TASK_CARD_PLATFORM_CLASSES), sorted(CHILD_TASK_CARD_INHERITANCE_CLASSES))):
+                sorted(CHILD_TASK_CARD_PLATFORM_CLASSES), sorted(CHILD_TASK_CARD_INHERITANCE_CLASSES),
+                sorted(CHILD_TASK_CARD_THEME_CLASSES))):
         return [python, "-B", "-m", "unittest", *CHILD_TASK_CARD_MODULES, "-v"], "child-task-cards-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 

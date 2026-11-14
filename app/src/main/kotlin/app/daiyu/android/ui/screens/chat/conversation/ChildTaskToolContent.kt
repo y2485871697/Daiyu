@@ -103,8 +103,6 @@ internal fun ChildTaskList(
                 ?.let { ToolRichDetails.scrub(it, limit = 80) } ?: "子代理"
             val text = childTaskProgressText(record?.text, progress[row.owner])?.let { ToolRichDetails.scrub(it) }
             ChildTaskDisclosure(row, taskTitle = agentName, details = {
-                ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName, expanded = true)
-            }, preview = {
                 ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName)
             }, controls = {
                 val actions = when (row.status) {
@@ -128,7 +126,6 @@ internal fun ChildTaskDisclosure(
     details: @Composable () -> Unit,
     controls: @Composable () -> Unit,
     taskTitle: String = row.agent,
-    preview: @Composable () -> Unit = {},
 ) {
     val colors = MiuixTheme.colorScheme
     var expanded by rememberSaveable(row.owner) { mutableStateOf(false) }
@@ -151,7 +148,9 @@ internal fun ChildTaskDisclosure(
                 .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-arrow:${row.owner.childRunId}"),
                 tint = colors.onSurfaceVariantSummary)
         }
-        if (expanded) details() else preview()
-        controls()
+        if (expanded) {
+            details()
+            controls()
+        }
     }
 }

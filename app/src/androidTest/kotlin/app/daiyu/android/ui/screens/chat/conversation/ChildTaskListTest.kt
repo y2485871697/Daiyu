@@ -33,7 +33,17 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
-    fun testCompletedBatchKeepsCollapsedPreviewsAndIndependentArrows() {
+    private fun assertPreviewLayout(tag: String, lines: Int, overflow: Boolean) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        ui.onNodeWithTag(tag, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        val layout = layouts.single()
+        assertEquals(lines, layout.lineCount)
+        assertEquals(overflow, layout.hasVisualOverflow)
+        assertEquals(overflow, layout.isLineEllipsized(lines - 1))
+    }
+
+    fun testCompletedBatchStartsWithOnlyNamesStatusesAndIndependentArrows() {
         val records = (0 until 10).map { task(it) }
         var actions = 0
         show(subAgentStatusRows(records, emptyList()), records) { _, _ -> actions++ }
@@ -42,9 +52,12 @@ class ChildTaskListTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-child-arrow:internal-child-$index", useUnmergedTree = true).assertExists()
             ui.onNodeWithTag("tool-child-summary:internal-child-$index")
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
-            ui.onNodeWithTag("tool-child-progress:internal-child-$index").scrollToVisible()
-                .assertIsDisplayed().assertTextEquals("第 ${index + 1} 项结果").assertHasNoClickAction()
+            ui.onNodeWithTag("tool-child-progress:internal-child-$index").assertDoesNotExist()
         }
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").scrollToVisible().performClick()
+        ui.onNodeWithTag("tool-child-progress:internal-child-0")
+            .assertIsDisplayed().assertTextEquals("第 1 项结果").assertHasNoClickAction()
+        ui.onNodeWithTag("tool-child-progress:internal-child-1").assertDoesNotExist()
         ui.onNodeWithText("展开").assertDoesNotExist()
         ui.onNodeWithText("收起").assertDoesNotExist()
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
@@ -52,8 +65,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
         assertEquals(0, actions)
     }
 
-
-    fun testLiveArrowExpandsAndCollapsesWithoutHidingPreviewOrChangingOtherTasks() {
+    fun testLiveArrowShowsSixLinePreviewAndDialogWithoutChangingOtherTasks() {
         val body = (1..8).joinToString("\n") { "第${it}段执行结果" }
         val records = listOf(task(0).copy(text = body), task(1))
         var actions = 0
@@ -64,23 +76,28 @@ class ChildTaskListTest : WiredActivityTestCase() {
         val open = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开")
         header.assert(closed)
         ui.onNodeWithTag("tool-child-arrow:internal-child-0", useUnmergedTree = true).assertExists()
-        preview.assertTextEquals(toolOutputPreview(body).text).assertHasClickAction().performClick()
+        preview.assertDoesNotExist()
+        header.performClick()
+        header.assert(open)
+        preview.assertTextEquals(body).assertHasClickAction()
+        assertPreviewLayout("tool-child-progress:internal-child-0", 6, true)
+        preview.performClick()
         ui.onNodeWithTag("tool-output-title", useUnmergedTree = true).assertTextEquals("审查")
         ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(body)
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitForIdle()
-        header.assert(closed).scrollToVisible().performClick()
         header.assert(open)
-        preview.assertTextEquals(body).assertHasNoClickAction()
+        assertPreviewLayout("tool-child-progress:internal-child-0", 6, true)
         ui.onNodeWithTag("tool-child-summary:internal-child-1").assert(closed)
+        ui.onNodeWithTag("tool-child-progress:internal-child-1").assertDoesNotExist()
         header.scrollToVisible().performClick()
         header.assert(closed)
-        preview.assertTextEquals(toolOutputPreview(body).text).assertHasClickAction().assertIsDisplayed()
+        preview.assertDoesNotExist()
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
         assertEquals(0, actions)
     }
 
-    fun testReadReceiptArrowRetainsCollapsedOverflowPreviewAndNamedDialog() {
+    fun testReadReceiptArrowShowsSixLinePreviewAndNamedDialogOnlyWhenExpanded() {
         val body = (1..9).joinToString("\n") { "第${it}段审查结论" }
         val details = ToolCategoryDetails.project("child_control", "{}",
             org.json.JSONObject().put("agent_name", "历史审查").put("status", "COMPLETED").put("text", body).toString(), "get_child_task")
@@ -93,20 +110,23 @@ class ChildTaskListTest : WiredActivityTestCase() {
         val header = ui.onNodeWithTag("tool-child-receipt-header:0")
         val preview = ui.onNodeWithTag("tool-child-progress:receipt-0")
         val closed = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠")
+        val open = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开")
         header.assert(closed)
         ui.onNodeWithTag("tool-child-receipt-arrow:0", useUnmergedTree = true).assertExists()
+        preview.assertDoesNotExist()
         header.performClick()
-        header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
-        preview.assertTextEquals(body).assertHasNoClickAction()
-        header.scrollToVisible().performClick()
-        header.assert(closed)
-        preview.assertTextEquals(toolOutputPreview(body).text).assertHasClickAction().performClick()
+        header.assert(open)
+        assertPreviewLayout("tool-child-progress:receipt-0", 6, true)
+        preview.assertHasClickAction().performClick()
         ui.onNodeWithTag("tool-output-title", useUnmergedTree = true).assertTextEquals("历史审查")
         ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(body)
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitForIdle()
+        header.assert(open)
+        preview.assertIsDisplayed()
+        header.scrollToVisible().performClick()
         header.assert(closed)
-        preview.assertTextEquals(toolOutputPreview(body).text).assertIsDisplayed()
+        preview.assertDoesNotExist()
         ui.onNodeWithText("子任务记录").assertDoesNotExist()
     }
 
@@ -127,6 +147,9 @@ class ChildTaskListTest : WiredActivityTestCase() {
         val events = mutableListOf<Pair<ChildRunOwner, ToolCardAction>>()
         show(subAgentStatusRows(listOf(record), listOf(live)), listOf(record)) { row, action -> events += row.owner to action }
         ui.onNodeWithTag("tool-child-batch-summary").assertDoesNotExist()
+        ui.onNodeWithText("压缩并继续").assertDoesNotExist()
+        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
         ui.onNodeWithText("压缩并继续").scrollToVisible().assertIsDisplayed().performClick()
         assertEquals(listOf(record.owner to ToolCardAction.RESUME_TASK), events)
         ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertIsDisplayed()
@@ -137,6 +160,8 @@ class ChildTaskListTest : WiredActivityTestCase() {
         var actions = 0
         show(subAgentStatusRows(listOf(record), emptyList()), listOf(record)) { _, _ -> actions++ }
         ui.onNodeWithTag("tool-child-frame:internal-child-1").assertIsDisplayed()
+        ui.onNodeWithText("暂时无法确认任务状态").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-summary:internal-child-1").performClick()
         ui.onNodeWithText("暂时无法确认任务状态").assertIsDisplayed()
         for (text in listOf("child_result_unconfirmed", "冻结模型", record.prompt, "查看结果", "原因", "结果未知 1 项"))
             ui.onNodeWithText(text).assertDoesNotExist()
@@ -162,6 +187,9 @@ class ChildTaskListTest : WiredActivityTestCase() {
             ui.onNodeWithText(debug).assertDoesNotExist()
         ui.onNodeWithText("展开").assertDoesNotExist()
         ui.onNodeWithText("收起").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-progress:receipt-0").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-receipt-header:0").performClick()
+        assertPreviewLayout("tool-child-progress:receipt-0", 6, true)
         val frame = ui.onNodeWithTag("tool-child-receipt:0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val body = ui.onNodeWithTag("tool-child-progress:receipt-0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue(frame.left <= body.left && frame.right >= body.right)
@@ -181,12 +209,12 @@ class ChildTaskListTest : WiredActivityTestCase() {
         val record = task(0)
         show(subAgentStatusRows(listOf(record), emptyList()), listOf(record)) { _, _ -> fail("No tool execution") }
         val preview = ui.onNodeWithTag("tool-child-progress:internal-child-0")
-        preview.assertTextEquals("第 1 项结果").assertHasNoClickAction().performTouchInput { click() }
-        ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        preview.assertDoesNotExist()
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
         preview.assertTextEquals("第 1 项结果").assertHasNoClickAction().performTouchInput { click() }
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
+        preview.assertDoesNotExist()
         val name = ui.onNodeWithTag("tool-child-name:internal-child-0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val status = ui.onNodeWithTag("tool-child-status:internal-child-0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val header = ui.onNodeWithTag("tool-child-summary:internal-child-0", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -205,15 +233,14 @@ class ChildTaskListTest : WiredActivityTestCase() {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { ChildTaskReceiptContent(details) }
         } }
         ui.waitForIdle()
-        ui.onNodeWithTag("tool-child-progress:receipt-0").assertTextEquals(text).assertHasNoClickAction()
-            .performTouchInput { click() }
-        ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-progress:receipt-0").assertDoesNotExist()
         ui.onNodeWithTag("tool-child-receipt-header:0").performClick()
         ui.onNodeWithTag("tool-child-progress:receipt-0").assertTextEquals(text).assertHasNoClickAction()
             .performTouchInput { click() }
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
-        ui.onNodeWithTag("tool-child-receipt-header:0").performClick()
-        ui.onNodeWithTag("tool-child-progress:receipt-0").assertTextEquals(text).assertIsDisplayed()
+        ui.onNodeWithTag("tool-child-receipt-header:0")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开")).performClick()
+        ui.onNodeWithTag("tool-child-progress:receipt-0").assertDoesNotExist()
     }
 
     fun testSoftWrappedOverflowUnderCharacterLimitOpensButFittingTextDoesNot() {
@@ -233,8 +260,8 @@ class ChildTaskListTest : WiredActivityTestCase() {
             val layout = layouts.single()
             assertEquals(width == 90.dp, layout.hasVisualOverflow)
             if (width == 90.dp) {
-                assertEquals(3, layout.lineCount)
-                assertTrue(layout.isLineEllipsized(2))
+                assertEquals(6, layout.lineCount)
+                assertTrue(layout.isLineEllipsized(5))
                 preview.assertHasClickAction().performClick()
                 ui.onNodeWithTag("tool-output-title", useUnmergedTree = true).assertTextEquals("历史执行")
                 ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(text)
@@ -245,6 +272,85 @@ class ChildTaskListTest : WiredActivityTestCase() {
                 ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
             }
         }
+    }
+
+    fun testExactlySixLinesAreNotTruncatedOrClickableInLiveAndReceiptCards() {
+        val body = (1..6).joinToString("\n") { "第${it}行" }
+        val record = task(0).copy(text = body)
+        val payload = org.json.JSONObject().put("agent_name", "读取代理").put("status", "COMPLETED").put("text", body).toString()
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ChildTaskList(subAgentStatusRows(listOf(record), emptyList()), listOf(record), { _, _ -> fail("No execution") })
+                    ToolCategoryContent("child_control", ToolCategoryDetails.project("child_control", "{}", payload, "get_child_task"))
+                }
+            }
+        } }
+        ui.waitForIdle()
+        for (tag in listOf("internal-child-0", "receipt-0"))
+            ui.onNodeWithTag("tool-child-progress:$tag").assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
+        ui.onNodeWithTag("tool-child-receipt-header:0").scrollToVisible().performClick()
+        for (tag in listOf("internal-child-0", "receipt-0")) {
+            ui.onNodeWithTag("tool-child-progress:$tag").scrollToVisible().assertTextEquals(body)
+                .assertHasNoClickAction().performTouchInput { click() }
+            assertPreviewLayout("tool-child-progress:$tag", 6, false)
+        }
+        ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+    }
+
+    fun testTaskToolReceiptsShareHeaderOnlyStateAndIndependentSixLinePreviews() {
+        val body = (1..9).joinToString("\n") { "第${it}行批量任务结果" }
+        for (tool in listOf("inspect_child_tasks", "get_child_task", "control_child_task")) {
+            val entries = org.json.JSONArray()
+                .put(org.json.JSONObject().put("agent_name", "历史执行").put("status", "COMPLETED").put("text", body))
+                .put(org.json.JSONObject().put("agent_name", "历史审查").put("status", "FAILED").put("text", "未完成"))
+            val payload = org.json.JSONObject().put("tasks", entries).toString()
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        androidx.compose.runtime.key(tool) {
+                            ToolCategoryContent("child_control", ToolCategoryDetails.project("child_control", "{}", payload, tool))
+                        }
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            for (index in 0..1) {
+                ui.onNodeWithTag("tool-child-progress:receipt-$index").assertDoesNotExist()
+                ui.onNodeWithTag("tool-child-receipt-header:$index")
+                    .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
+            }
+            ui.onNodeWithTag("tool-child-receipt-header:0").performClick()
+            assertPreviewLayout("tool-child-progress:receipt-0", 6, true)
+            ui.onNodeWithTag("tool-child-progress:receipt-1").assertDoesNotExist()
+            ui.onNodeWithTag("tool-child-progress:receipt-0").performClick()
+            ui.onNodeWithTag("tool-output-title", useUnmergedTree = true).assertTextEquals("历史执行")
+            ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(body)
+            ui.onNodeWithText("复制全文").assertIsDisplayed()
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitForIdle()
+            ui.onNodeWithTag("tool-child-receipt-header:0")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开")).performClick()
+            ui.onNodeWithTag("tool-child-progress:receipt-0").assertDoesNotExist()
+            ui.onNodeWithTag("tool-child-receipt-header:1").performClick()
+            ui.onNodeWithTag("tool-child-progress:receipt-1").assertTextEquals("未完成").assertHasNoClickAction()
+        }
+    }
+
+    fun testFittingBodyOverOldCharacterWindowKeepsAllFiveLinesWithoutDialog() {
+        val body = (1..5).joinToString("\n") { "i".repeat(60) }
+        assertTrue(body.length > 240)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Box(Modifier.width(300.dp)) { ChildTaskProgressContent(body, "已完成", "fitting", "执行") }
+            }
+        } }
+        ui.waitForIdle()
+        assertPreviewLayout("tool-child-progress:fitting", 5, false)
+        ui.onNodeWithTag("tool-child-progress:fitting").assertTextEquals(body).assertHasNoClickAction()
+            .performTouchInput { click() }
+        ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
     }
 
 }

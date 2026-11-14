@@ -42,7 +42,7 @@ internal fun ChildTaskFrame(modifier: Modifier = Modifier, content: @Composable 
 }
 
 @Composable
-internal fun ChildTaskProgressContent(text: String?, status: String, tag: String, agentName: String, expanded: Boolean = false) {
+internal fun ChildTaskProgressContent(text: String?, status: String, tag: String, agentName: String) {
     val body = text ?: when (status) {
         "进行中" -> "正在处理任务…"
         "排队中" -> "等待开始任务"
@@ -53,17 +53,15 @@ internal fun ChildTaskProgressContent(text: String?, status: String, tag: String
         else -> "暂无新的任务进度"
     }
     var opened by remember(tag) { mutableStateOf(false) }
-    val preview = remember(body) { toolOutputPreview(body) }
-    var layoutOverflow by remember(body) { mutableStateOf(false) }
-    val truncated = !expanded && (preview.truncated || layoutOverflow)
+    var truncated by remember(body) { mutableStateOf(false) }
     val click = if (truncated) Modifier.conversationClickable(onClickLabel = "查看${agentName}的任务内容") {
         opened = true
     } else Modifier
-    BasicText(if (expanded) body else preview.text, Modifier.fillMaxWidth().heightIn(min = 20.dp)
+    BasicText(body, Modifier.fillMaxWidth().heightIn(min = 20.dp)
         .testTag("tool-child-progress:$tag").then(click),
         style = MiuixTheme.textStyles.footnote1.copy(color = conversationColors().text),
-        maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
-        onTextLayout = { layoutOverflow = it.hasVisualOverflow })
+        maxLines = 6, overflow = TextOverflow.Ellipsis,
+        onTextLayout = { truncated = it.hasVisualOverflow })
     if (opened && truncated) CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(agentName, status)) {
         ToolOutputDialog(ToolDisclosureUi(agentName, body), onDismiss = { opened = false },
             titleOverride = agentName, plainText = true)
@@ -94,7 +92,7 @@ internal fun ChildTaskReceiptContent(details: ToolCategoryDetailsUi) {
                         .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-receipt-arrow:$index"),
                         tint = conversationColors().muted)
                 }
-                ChildTaskProgressContent(entry.documents.firstOrNull()?.text, status, "receipt-$index", entry.title, expanded)
+                if (expanded) ChildTaskProgressContent(entry.documents.firstOrNull()?.text, status, "receipt-$index", entry.title)
             }
         }
         if (rich.entries.isEmpty()) rich.prose?.let { notice ->

@@ -289,32 +289,48 @@ class ChildTaskCardScopeTest(unittest.TestCase):
                 self.assertEqual("child-task-cards-targeted", scope)
                 self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
 
-    def test_exact_cards_plus_new_conversation_inheritance_stays_targeted(self):
-        classes = (*self.CLASSES, "app.daiyu.android.ConversationSelectionInheritanceActivityTest")
-        self.assertEqual(classes, recorder.CHILD_TASK_CARD_INHERITANCE_CLASSES)
-        command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(reversed(classes))))
-        self.assertEqual("child-task-cards-targeted", scope)
-        self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+    def test_exact_cards_plus_inheritance_and_theme_stay_targeted(self):
         from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
         helper = SpeechPlatformDiscoveryTest()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            helper.fixture(root)
-            for name in classes:
-                relative = Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
-                path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text((ROOT / relative).read_text())
-            seen = []
-            for shard in range(4):
-                result = helper.select(root, shard, classes=",".join(classes))
-                self.assertEqual(0, result.returncode, result.stderr)
-                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
-                selection = json.loads((root / "smoke/selection.json").read_text())
-                self.assertEqual("targeted", inventory["discovery_scope"])
-                self.assertCountEqual(classes, inventory["all_classes"])
-                seen.extend(selection["selected_classes"])
-            self.assertCountEqual(classes, seen)
+        for classes in (recorder.CHILD_TASK_CARD_INHERITANCE_CLASSES, recorder.CHILD_TASK_CARD_THEME_CLASSES):
+            self.assertEqual((*self.CLASSES, "app.daiyu.android.ConversationSelectionInheritanceActivityTest"), classes[:5])
+            self.assertEqual(len(classes), len(set(classes)))
+            if len(classes) == 6:
+                self.assertEqual("app.daiyu.android.ChatThemeInteractionActivityTest", classes[-1])
+            for ordered in (classes, tuple(reversed(classes))):
+                command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(ordered)))
+                self.assertEqual("child-task-cards-targeted", scope)
+                self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+                self.assertNotIn("discover", command)
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper.fixture(root)
+                for name in classes:
+                    relative = Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                    path = root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text((ROOT / relative).read_text())
+                seen = []
+                for shard in range(4):
+                    result = helper.select(root, shard, classes=",".join(classes))
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                    selection = json.loads((root / "smoke/selection.json").read_text())
+                    self.assertEqual("targeted", inventory["discovery_scope"])
+                    self.assertCountEqual(classes, inventory["all_classes"])
+                    seen.extend(selection["selected_classes"])
+                self.assertCountEqual(classes, seen)
+
+    def test_six_class_duplicates_unknown_and_malformed_filters_still_keep_full(self):
+        classes = recorder.CHILD_TASK_CARD_THEME_CLASSES
+        raw = ",".join(classes)
+        invalid = [raw + ",unknown", raw + ",", " " + raw, raw + " ", raw.replace(",", ", ", 1)]
+        invalid += [raw + "," + name for name in classes]
+        invalid += [raw.replace(name, "app.daiyu.android.OtherTest") for name in classes]
+        for value in invalid:
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value))[1])
+        for mode in ("", "build", "compile", "candidate", "daily", "release", "checks"):
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
 
     def test_partial_extended_duplicate_malformed_and_other_modes_keep_full(self):
         raw = ",".join(self.CLASSES)

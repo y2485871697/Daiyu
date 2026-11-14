@@ -133,10 +133,11 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
         } }
         awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertDoesNotExist()
-        node("child-action").assertIsDisplayed().performClick()
+        node("child-action").assertDoesNotExist()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠")).performClick()
         awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertIsDisplayed()
+        node("child-action").assertIsDisplayed().performClick()
         ui.onNodeWithText("第二项详情").assertDoesNotExist()
         ui.runOnIdle { first = first.copy(status = "已暂停") }
         awaitVisualIdle()
@@ -150,6 +151,7 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
         node("tool-child-summary:one").performClick()
         awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertDoesNotExist()
+        node("child-action").assertDoesNotExist()
         ui.onNodeWithText("第二项详情").assertIsDisplayed()
         node("tool-child-summary:one").performClick()
         awaitVisualIdle()

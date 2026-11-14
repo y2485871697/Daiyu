@@ -11,7 +11,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /** The real host retains presentation, not an executable grant or a replayed user action. */
-class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
+class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : androidx.compose.ui.MotionDurationScale {
+    override val scaleFactor = 1f
+}) {
     private val confirmedGptSpeedField = MainActivity::class.java.getDeclaredField("confirmedGptSpeed").apply { isAccessible = true }
     private fun confirmedGptSpeed(): ChatGptSpeedSelection? = confirmedGptSpeedField.get(activity) as ChatGptSpeedSelection?
     private fun chatModelPicker(): app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState? =

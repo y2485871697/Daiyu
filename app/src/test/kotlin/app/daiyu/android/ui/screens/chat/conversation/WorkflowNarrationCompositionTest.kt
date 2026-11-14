@@ -263,6 +263,10 @@ class WorkflowNarrationCompositionTest {
         val parser: (String) -> List<MarkdownBlock> = { source ->
             listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(source))))
         }
+        // Keep the admission clock independent of parser-worker scheduling.
+        repeat(7) { appendedChars ->
+            projectMarkdown(listOf(before.text, after.text + "追".repeat(appendedChars)), parser)
+        }
         var narration: WorkflowNarration? = null
         var advances = 0
         var time = 1_000_000_000L

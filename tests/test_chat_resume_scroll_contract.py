@@ -46,7 +46,7 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('motion.reset()', alignment)
         self.assertIn('snapshotFlow {', follow)
         self.assertIn('Triple(canFollowBottom(),', follow)
-        self.assertIn('if (!canFollow)', follow)
+        self.assertIn('if (target == null) { motion.reset(); return@collect }', follow)
         self.assertIn('listState.scrollToItem(index)', follow)
         self.assertIn('layout.viewportSize, layout.beforeContentPadding to layout.afterContentPadding, resumeReady to currentNestedTail.contentHeight', ' '.join(follow.split()))
         self.assertIn('readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail', follow)

@@ -199,7 +199,7 @@ child_task_card_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".
 rendering_target = {'app.daiyu.android.ui.screens.chat.conversation.MarkdownTableStyleTest', 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest', 'app.daiyu.android.RestoredMarkdownActivityTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.RenderingRegressionTest'}
 rendering_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(rendering_target)
 rendering_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt') for name in rendering_target}
-popup_scroll_target = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest')
+popup_scroll_target = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest')
 popup_scroll_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(popup_scroll_target)
 popup_scroll_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt") for name in popup_scroll_target}
 chat_status_bar_target = "app.daiyu.android.ChatStatusBarInsetsTest"

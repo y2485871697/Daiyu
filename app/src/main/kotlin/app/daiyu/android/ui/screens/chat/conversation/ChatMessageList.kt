@@ -548,6 +548,7 @@ internal fun ChatMessageList(
         // Process each measured target update through a frame; collectLatest would cancel a
         // pending motion step whenever the streaming item's size changes again.
         snapshotFlow {
+            if (!canFollowBottom()) return@snapshotFlow null
             val layout = listState.layoutInfo
             val index = currentTailIndex
             val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
@@ -558,8 +559,8 @@ internal fun ChatMessageList(
             Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
                 Triple(layout.viewportSize, layout.beforeContentPadding to layout.afterContentPadding,
                     resumeReady to currentNestedTail.contentHeight))
-        }.collect { (canFollow, _, _) ->
-            if (!canFollow) { motion.reset(); return@collect }
+        }.collect { target ->
+            if (target == null) { motion.reset(); return@collect }
             var observedViewport = previousViewport
             while (canFollowBottom()) {
                 val index = currentTailIndex

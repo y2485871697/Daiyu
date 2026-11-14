@@ -415,10 +415,10 @@ class ChildTaskCardScopeTest(unittest.TestCase):
 
 
 class PopupScrollScopeTest(unittest.TestCase):
-    CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest')
-    MODULES = ('test_streaming_occlusion_contract', 'test_preview_dialog_status_bar_contract', 'test_assistant_picker_frame_contract', 'test_chat_menu_scroll_isolation_contract', 'test_popup_performance_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
+    CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest')
+    MODULES = ('test_streaming_occlusion_contract', 'test_streaming_follow_contract', 'test_chat_resume_scroll_contract', 'test_preview_dialog_status_bar_contract', 'test_assistant_picker_frame_contract', 'test_chat_menu_scroll_isolation_contract', 'test_popup_performance_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
 
-    def test_exact_scope_keeps_all_four_classes_and_only_explicit_contracts(self):
+    def test_exact_scope_keeps_all_five_classes_and_only_explicit_contracts(self):
         self.assertEqual(self.CLASSES, recorder.POPUP_SCROLL_PLATFORM_CLASSES)
         self.assertEqual(self.MODULES, recorder.POPUP_SCROLL_MODULES)
         self.assertEqual(len(self.CLASSES), len(set(self.CLASSES)))

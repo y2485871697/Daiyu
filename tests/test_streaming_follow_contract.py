@@ -26,6 +26,19 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("motion.reset()", alignment)
         self.assertNotIn("LaunchedEffect(turns", self.follow)
 
+    def test_disabled_follow_does_not_observe_layout_until_ownership_returns(self):
+        guard = "if (!canFollowBottom()) return@snapshotFlow null"
+        observation = self.follow.split("snapshotFlow {", 1)[1].split("}.collect { target ->", 1)[0]
+        self.assertLess(observation.index(guard), observation.index("val layout = listState.layoutInfo"))
+        self.assertLess(observation.index(guard), observation.index("val tail = currentTurns.lastOrNull()"))
+        self.assertIn("if (target == null) { motion.reset(); return@collect }", self.follow)
+        self.assertIn("LaunchedEffect(listState, revealResetEpoch)", self.follow)
+        self.assertIn("while (canFollowBottom())", self.follow)
+        for dependency in ("!initialPositionPending", "pageActive", "scrollResumed", "followBottom",
+                           "!currentDragging", "currentTailIndex >= 0", "consumedScrollSerial",
+                           "!currentNestedTail.migrating"):
+            self.assertIn(dependency, self.guard)
+
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
         self.assertIn("val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())", self.follow)
         self.assertIn("if (followDistance <= 0f)", self.follow)
@@ -54,7 +67,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)", self.follow)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
-        self.assertIn("if (!canFollow)", self.follow)
+        self.assertIn("if (target == null) { motion.reset(); return@collect }", self.follow)
         self.assertIn("scrollResumed && followBottom && !currentDragging", self.guard)
         self.assertIn("followBottom = false; wasDragged = false", self.source)
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)

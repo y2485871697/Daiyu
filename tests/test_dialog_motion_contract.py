@@ -67,12 +67,29 @@ class DialogMotionContractTest(unittest.TestCase):
                 continue
             text = path.read_text()
             with self.subTest(path=relative):
-                self.assertNotRegex(text, r"(?m)^import androidx\.compose\.ui\.window\.Dialog(?:[ \t]+as[^\n]*)?$")
-                self.assertNotIn("androidx.compose.ui.window.Dialog(", text)
+                # The reviewed full-screen gallery owns its own edge-to-edge window and status bars.
+                if relative != "ui/media/ChatMediaPreviewHost.kt":
+                    self.assertNotRegex(text, r"(?m)^import androidx\.compose\.ui\.window\.Dialog(?:[ \t]+as[^\n]*)?$")
+                    self.assertNotIn("androidx.compose.ui.window.Dialog(", text)
                 self.assertNotRegex(text, r"(?m)^import androidx\.compose\.material3\.AlertDialog(?:[ \t]+as[^\n]*)?$")
                 self.assertNotIn("androidx.compose.material3.AlertDialog(", text)
                 if "import androidx.compose.material3.*" in text and re.search(r"(?<![\w.])AlertDialog\(", text):
                     self.assertIn("DaiyuAlertDialog as AlertDialog", text)
+
+    def test_only_the_reviewed_fullscreen_gallery_window_bypasses_center_motion(self):
+        text = self.text("ui/media/ChatMediaPreviewHost.kt")
+        body = text.split("private fun ChatMediaPreviewDialog(", 1)[1].split("\n@Composable", 1)[0]
+        self.assertEqual(["import androidx.compose.ui.window.Dialog"],
+                         re.findall(r"(?m)^import androidx\.compose\.ui\.window\.Dialog(?:[ \t]+as[^\n]*)?$", text))
+        self.assertEqual(1, len(re.findall(r"(?<![\w.])Dialog\s*\(", text)))
+        self.assertEqual(1, len(re.findall(r"(?<![\w.])Dialog\s*\(", body)))
+        self.assertNotIn("androidx.compose.ui.window.Dialog(", text)
+        for token in ("DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)",
+                      "ChatMediaPreviewHideStatusBars()", "Box(Modifier.fillMaxSize().background(Color.Black))",
+                      "onDismissRequest = onDismiss"):
+            self.assertIn(token, body)
+        for forbidden in ("DaiyuDialog", "DialogMotionProvider", "bottomSheet = true", "prepareDaiyuCenterMotion"):
+            self.assertNotIn(forbidden, text)
 
     def test_original_assistant_spring_and_stationary_scrim(self):
         motion = self.text("ui/components/DialogMotion.kt")

@@ -42,7 +42,7 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn('test_refresh_only.init.gradle', workflow)
         self.assertIn('verify_test_refresh.py source', workflow)
         self.assertIn('verify_test_refresh.py bind', workflow)
-        self.assertIn('verify_test_refresh.py check', workflow)
+        self.assertIn("subprocess.check_call(['python3', 'scripts/verify_test_refresh.py', 'check'], env=env)", workflow)
         self.assertIn('source-delivery', workflow)
         guard = (ROOT / 'scripts/cooperation/test_refresh_only.init.gradle').read_text()
         self.assertIn("!t.name.toLowerCase().contains('androidtest')", guard)

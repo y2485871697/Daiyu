@@ -77,6 +77,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.ensureActive
+import app.daiyu.android.model.LegacySearchDisplay
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantSelectionOwner
@@ -8179,7 +8180,7 @@ internal class VoiceHost(
 /** Image references are not text: no private path, hash, ID or metadata enters the clipboard. */
 internal fun copyableImageHostText(message: Message): String? {
     if (message.blocks.none { it is MessageBlock.Tool || it is MessageBlock.Text && it.text.isNotBlank() }) return null
-    return message.blocks.joinToString("\n") { block -> when (block) {
+    return message.blocks.map(LegacySearchDisplay::display).joinToString("\n") { block -> when (block) {
         is MessageBlock.Text -> block.text
         is MessageBlock.Tool -> "${block.invocation.name}: ${block.result ?: "未完成"}"
         is MessageBlock.Image -> "[图片]"

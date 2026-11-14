@@ -66,5 +66,25 @@ class LegacySearchDisplayTest {
         val turn = turns.single() as app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.Assistant
         assertTrue(turn.finalText.contains(plain))
     }
+    @Test fun wholeReplyCopyUsesPreparedDisplayWithoutChangingAuthoritativeSources() {
+        val item = item()
+        val old = MessageBlock.Text("m", ResponsesSearchProtocol.legacyDisplayText(item, plain))
+        val tail = MessageBlock.Text("tail", "\\*literal\\*")
+        val owner = Message(MessageId("copy"), ConversationId("c"), RunId("r"), "assistant", listOf(old), RunStatus.COMPLETED,
+            historySegments = listOf(
+                MessageHistorySegment(MessageId("copy"), "assistant", listOf(old), listOf(item.toString())),
+                MessageHistorySegment(MessageId("copy"), "assistant", listOf(tail))))
+        val original = owner.copy()
+        LegacySearchDisplay.prepare(owner)
+        val mapper = app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapper
+        val turn = mapper.map(listOf(owner)).single()
+        val sources = mapper.sourceMessages(turn, listOf(owner))
+        val copy = sources.first().copy(blocks = sources.flatMap { it.blocks })
+        assertEquals(ResponsesSearchProtocol.displayText(item, plain) + "\n" + tail.text,
+            app.daiyu.android.copyableImageHostText(copy))
+        assertEquals(original, owner)
+        assertEquals(ResponsesSearchProtocol.legacyDisplayText(item, plain), old.text)
+        assertEquals(old.text, app.daiyu.android.copyableImageHostText(owner.copy(blocks = listOf(old.copy()))))
+    }
 
 }

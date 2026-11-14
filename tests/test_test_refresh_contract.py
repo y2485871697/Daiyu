@@ -20,11 +20,14 @@ class TestRefreshContract(unittest.TestCase):
                           'docs/重构清单.md', '.github/workflows/test-refresh-regression.yml'])
 
     def test_chat_checks_metadata_does_not_allow_other_workflows(self):
-        validate_changes(['.github/workflows/chat-workflow-checks.yml',
+        validate_changes(['.github/workflows/compression-dialog-checks.yml',
+                          '.github/workflows/chat-workflow-checks.yml',
                           '.github/workflows/popup-layout-checks.yml',
                           '.github/workflows/reconnect-details-checks.yml', 'scripts/smoke_boot.sh',
                           'scripts/acceptance/record_tool_tests.py', 'scripts/verify_smoke_source.py'])
         for name in ('.github/workflows/build.yml', '.github/workflows/unknown-checks.yml',
+                     '.github/workflows/compression-dialog-checks.yml.bak',
+                     '.github/workflows/compression-dialog-checks.yml/extra',
                      '.github/workflows/chat-workflow-checks.yml.bak', '.github/actions/example/action.yml'):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 validate_changes([name])

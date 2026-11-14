@@ -318,7 +318,7 @@ class RetainedChildTasksPauseTest {
             assertEquals(ChildTaskPauseState.PENDING, snapshot(supervisor, binding).pauseState)
             model.releaseRead.countDown()
             await { snapshot(supervisor, binding).settled }
-            assertEquals(ChildTaskPauseState.ACTIVE, snapshot(supervisor, binding).pauseState)
+            assertEquals(ChildTaskPauseState.FINISHED, snapshot(supervisor, binding).pauseState)
             assertEquals(0, pausedNotifications.get())
             assertEquals(ChildTaskStatus.COMPLETED, snapshot(supervisor, binding).record.status)
             assertEquals(0, model.resumes.get())
@@ -348,7 +348,7 @@ class RetainedChildTasksPauseTest {
             model.releaseRead.countDown()
             await { snapshot(supervisor, binding).settled }
             assertEquals(ChildTaskStatus.UNKNOWN, snapshot(supervisor, binding).record.status)
-            assertEquals(ChildTaskPauseState.ACTIVE, snapshot(supervisor, binding).pauseState)
+            assertEquals(ChildTaskPauseState.FINISHED, snapshot(supervisor, binding).pauseState)
             assertEquals(ChildTaskControlReceipt.STALE, supervisor.resume(binding, child))
             assertEquals(1, model.opens.get()); assertEquals(1, model.reads.get()); assertEquals(0, model.resumes.get())
         } finally { drain(supervisor, model) }

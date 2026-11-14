@@ -45,6 +45,58 @@ class LinuxRootfsBackupAccessTest {
         rejected { gate.acquire(installation, listOf("root"), export = true) }
         assertTrue(File(old, ".runner-pin-orphan").exists())
     }
+    @Test fun retainedSharedOccupancyKeepsSelectedEnvironmentUsableButStillPreventsExport() = fixture { files, _, installation ->
+        val gate = LinuxRootfsBackupAccess(files, fileKey = ::hostLinuxFileKey, bootIdentity = { "android:10" })
+        val directory = File(files, "user-terminal/linux-selection")
+        val selected = LinuxEnvironmentStore(directory, directorySync = {}, fileKey = ::hostLinuxFileKey,
+            rootfsAccess = gate).apply { select(installation) }
+        val common = File(files, "linux-rootfs-access-v1")
+        assertEquals("CLAIMED", runLinuxPinChild(common, "claim"))
+        assertEquals("CLAIMED", runLinuxPinChild(directory, "claim"))
+        val originals = listOf(common, directory).map { parent ->
+            parent.listFiles()!!.single { it.name.startsWith(".runner-pin-") }.let { it to it.readBytes() }
+        }
+        selected.inspectTrustedSelection(installation)
+        assertEquals("FILES_READY", selected.status().getString("state"))
+        val expected = LinuxGenerationRef(installation.environmentId, installation.generation)
+        val lease = selected.acquire(expected)
+        assertEquals("env:generation", lease.backend(files).environmentId)
+        val running = lease.claimExecution()
+        lease.close()
+        rejected { selected.clearSelection() }
+        rejected { selected.acquireRootfsBackup(installation) }
+        running.close()
+        selected.acquire(expected).close()
+        rejected { selected.select(installation.copy(generation = "replacement")) }
+        rejected { selected.acquireRootfsBackup(installation) }
+        originals.forEach { (file, bytes) -> assertArrayEquals(bytes, file.readBytes()) }
+        assertEquals(1, common.listFiles()!!.count { it.name.startsWith(".runner-pin-") })
+        assertEquals(1, directory.listFiles()!!.count { it.name.startsWith(".runner-pin-") })
+    }
+
+    @Test fun sharedClaimsAcrossIndependentGenerationsKeepBothInstallationsAndExportFence() = fixture { files, _, installation ->
+        val gate = LinuxRootfsBackupAccess(files, fileKey = ::hostLinuxFileKey, bootIdentity = { "android:10" })
+        val directory = File(files, "linux-rootfs-access-v1")
+        assertEquals("CLAIMED", runLinuxPinChild(directory, "claim"))
+        val retained = directory.listFiles()!!.single { it.name.startsWith(".runner-pin-") }
+        assertEquals("environment", retained.readLines()[1])
+        assertEquals("generation", retained.readLines()[2])
+        val bytes = retained.readBytes()
+        gate.reserve(installation.copy(environmentId = "other", generation = "independent"), listOf("different identity")).close()
+        gate.acquire(installation.copy(environmentId = "other", generation = "independent"), listOf("different identity")).close()
+        assertArrayEquals(bytes, retained.readBytes())
+        rejected { gate.acquire(installation, listOf("root"), export = true) }
+    }
+
+    @Test fun retainedExclusiveOccupancyStillBlocksStatusInspectionAndNewExecution() = fixture { files, _, installation ->
+        val gate = LinuxRootfsBackupAccess(files, fileKey = ::hostLinuxFileKey, bootIdentity = { "android:10" })
+        assertEquals("CLAIMED", runLinuxPinChild(File(files, "linux-rootfs-access-v1"), "exclusive-claim"))
+        rejected { gate.inspectAdmission() }
+        rejected { gate.reserve(installation, listOf("root")) }
+        rejected { gate.acquire(installation, listOf("root")) }
+        rejected { gate.acquire(installation, listOf("root"), export = true) }
+    }
+
     @Test fun sameFilesDirectoryAlwaysUsesTheSameGate() = fixture { files, gate, installation ->
         assertSame(gate, LinuxRootfsBackupAccess.forFiles(files))
         gate.acquire(installation, listOf("root"), export = true).use {

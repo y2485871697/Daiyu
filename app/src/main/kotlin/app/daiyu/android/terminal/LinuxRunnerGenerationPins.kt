@@ -29,14 +29,16 @@ internal class LinuxRunnerGenerationPins(
 
     private data class KnownPin(val bytes: ByteArray, val key: Any)
 
-    fun <T> admitted(requireEmpty: Boolean = false, action: () -> T): T = exclusive {
+    fun <T> admitted(requireEmpty: Boolean = false, allowRetained: Boolean = false, action: () -> T): T = exclusive {
         if (guard.unsettled.isNotEmpty()) throw LinuxRunnerGenerationUnknown()
         if (guard.recoverySyncPending) { directorySync(directory); guard.recoverySyncPending = false }
         recoverAfterReboot()
         val files = pinFiles()
-        if (files.size > MAX_PINS ||
-            files.map { it.name }.toSet() != guard.known.keys) throw LinuxRunnerGenerationUnknown()
-        files.forEach { file ->
+        if (files.size > MAX_PINS) throw LinuxRunnerGenerationUnknown()
+        val retained = files.filter { it.name !in guard.known }
+        if (retained.isNotEmpty() && (!allowRetained || requireEmpty)) throw LinuxRunnerGenerationUnknown()
+        retained.forEach(::validateRetained)
+        files.filter { it.name in guard.known }.forEach { file ->
             val known = checkNotNull(guard.known[file.name])
             if (Files.isSymbolicLink(file.toPath()) || !file.isFile || file.length() > MAX_PIN_BYTES ||
                 fileKey(file.toPath()) != known.key || !file.readBytes().contentEquals(known.bytes))
@@ -47,19 +49,27 @@ internal class LinuxRunnerGenerationPins(
     }
 
     fun claim(generation: LinuxGenerationRef, identities: List<String>, requireEmpty: Boolean = false,
-        stillCurrent: () -> Unit): Pin = admitted(requireEmpty = requireEmpty) {
-        check(guard.known.size < MAX_PINS) { "linux_runner_pin_limit" }
+        allowRetained: Boolean = false, stillCurrent: () -> Unit): Pin =
+        admitted(requireEmpty = requireEmpty, allowRetained = allowRetained) {
+        check(pinFiles().size < MAX_PINS) { "linux_runner_pin_limit" }
         stillCurrent()
         val id = PREFIX + UUID.randomUUID().toString().replace("-", "")
         val identity = MessageDigest.getInstance("SHA-256").digest(identities.joinToString("\u0000").toByteArray())
             .joinToString("") { "%02x".format(it) }
         check(!Files.exists(File(directory, id).toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) { "linux_runner_pin_collision" }
-        val bytes = "1\n${generation.environmentId}\n${generation.generation}\n$identity\n$id\n".toByteArray(Charsets.UTF_8)
+        val access = if (requireEmpty) "exclusive" else "shared"
+        val bytes = "2\n${generation.environmentId}\n${generation.generation}\n$identity\n$id\n$access\n".toByteArray(Charsets.UTF_8)
         check(bytes.size <= MAX_PIN_BYTES)
         // Register in memory only after both file and directory are durable. A failed claim is UNKNOWN.
-        TerminalDurability.replace(File(directory, id), bytes, directorySync = directorySync)
-        val known = KnownPin(bytes, checkNotNull(fileKey(File(directory, id).toPath())) { "linux_runner_pin_identity" })
-        currentBoot()?.let { observeBoot(File(directory, id), known.bytes, known.key, it) }
+        val known = try {
+            TerminalDurability.replace(File(directory, id), bytes, directorySync = directorySync)
+            KnownPin(bytes, checkNotNull(fileKey(File(directory, id).toPath())) { "linux_runner_pin_identity" }).also {
+                currentBoot()?.let { boot -> observeBoot(File(directory, id), it.bytes, it.key, boot, claimed = true) }
+            }
+        } catch (failure: Throwable) {
+            guard.unsettled.add(id)
+            throw failure
+        }
         guard.known[id] = known
         Pin(id)
     }
@@ -95,6 +105,27 @@ internal class LinuxRunnerGenerationPins(
     private fun pinFiles(): List<File> = checkNotNull(directory.listFiles()) { "linux_runner_pin_directory" }
         .filter { it.name.startsWith(PREFIX) }
 
+    /** An unjoined run retains shared occupancy, not ownership or a successful result. */
+    private fun validateRetained(file: File) {
+        if (Files.isSymbolicLink(file.toPath()) || !file.isFile || file.length() > MAX_PIN_BYTES)
+            throw LinuxRunnerGenerationUnknown()
+        val bytes = file.readBytes()
+        val pin = bytes.toString(Charsets.UTF_8).split('\n')
+        if (pin.size != 7 || pin[0] != "2" || pin[4] != file.name || pin[5] != "shared" || pin[6].isNotEmpty() ||
+            !file.name.matches(Regex("\\.runner-pin-[0-9a-f]{32}")) ||
+            !pin[1].matches(Regex("[A-Za-z0-9_-]{1,128}")) ||
+            !pin[2].matches(Regex("[A-Za-z0-9_-]{1,128}")) ||
+            !pin[3].matches(Regex("[0-9a-f]{64}"))) throw LinuxRunnerGenerationUnknown()
+        val witness = bootFile(file.name)
+        if (Files.isSymbolicLink(witness.toPath()) || !witness.isFile || witness.length() > MAX_BOOT_BYTES)
+            throw LinuxRunnerGenerationUnknown()
+        val record = witness.readText(Charsets.UTF_8).split('\n')
+        if (record.size != 7 || record[0] != "2" || record[1] != currentBoot() ||
+            !validBoot(record[1]) || record[2] != file.name || record[3] != hash(bytes) ||
+            fileKey(file.toPath())?.let(::encodedKey) != record[4] || record[5] != "claim" || record[6].isNotEmpty())
+            throw LinuxRunnerGenerationUnknown()
+    }
+
     private fun validBoot(value: String) = value.matches(Regex(
         "kernel:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|android:[0-9]{1,10}"))
     private fun currentBoot(): String? = bootIdentity()?.takeIf(::validBoot)
@@ -105,8 +136,10 @@ internal class LinuxRunnerGenerationPins(
     // Unix NIO keys include device/inode and have a stable representation across boots.
     private fun encodedKey(key: Any) = Base64.getUrlEncoder().withoutPadding().encodeToString(key.toString().toByteArray(Charsets.UTF_8))
 
-    private fun observeBoot(file: File, bytes: ByteArray, key: Any, boot: String) {
-        val record = "1\n$boot\n${file.name}\n${hash(bytes)}\n${encodedKey(key)}\n".toByteArray(Charsets.UTF_8)
+    private fun observeBoot(file: File, bytes: ByteArray, key: Any, boot: String, claimed: Boolean = false) {
+        val text = if (claimed) "2\n$boot\n${file.name}\n${hash(bytes)}\n${encodedKey(key)}\nclaim\n"
+            else "1\n$boot\n${file.name}\n${hash(bytes)}\n${encodedKey(key)}\n"
+        val record = text.toByteArray(Charsets.UTF_8)
         check(record.size <= MAX_BOOT_BYTES) { "linux_runner_boot_record_limit" }
         TerminalDurability.replace(bootFile(file.name), record, directorySync = directorySync)
     }
@@ -155,8 +188,10 @@ internal class LinuxRunnerGenerationPins(
                 throw LinuxRunnerGenerationUnknown()
             val lines = witness.readText(Charsets.UTF_8).split('\n')
             val id = PREFIX + witness.name.removePrefix(BOOT_PREFIX)
-            if (lines.size != 6 || lines[0] != "1" || !validBoot(lines[1]) || lines[2] != id ||
-                !lines[3].matches(Regex("[0-9a-f]{64}")) || lines[4].isEmpty() || lines[5].isNotEmpty() ||
+            val validFormat = (lines.size == 6 && lines[0] == "1" && lines[5].isEmpty()) ||
+                (lines.size == 7 && lines[0] == "2" && lines[5] == "claim" && lines[6].isEmpty())
+            if (!validFormat || !validBoot(lines[1]) || lines[2] != id ||
+                !lines[3].matches(Regex("[0-9a-f]{64}")) || lines[4].isEmpty() ||
                 !id.matches(Regex("\\.runner-pin-[0-9a-f]{32}"))) throw LinuxRunnerGenerationUnknown()
             val file = File(directory, id)
             if (!Files.exists(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
@@ -179,7 +214,9 @@ internal class LinuxRunnerGenerationPins(
                 throw LinuxRunnerGenerationUnknown()
             val bytes = file.readBytes()
             val lines = bytes.toString(Charsets.UTF_8).split('\n')
-            if (lines.size != 6 || lines[0] != "1" || lines[4] != file.name || lines[5].isNotEmpty() ||
+            val validFormat = (lines.size == 6 && lines[0] == "1" && lines[5].isEmpty()) ||
+                (lines.size == 7 && lines[0] == "2" && lines[5] in setOf("shared", "exclusive") && lines[6].isEmpty())
+            if (!validFormat || lines[4] != file.name ||
                 !file.name.matches(Regex("\\.runner-pin-[0-9a-f]{32}")) ||
                 !lines[1].matches(Regex("[A-Za-z0-9_-]{1,128}")) ||
                 !lines[2].matches(Regex("[A-Za-z0-9_-]{1,128}")) ||

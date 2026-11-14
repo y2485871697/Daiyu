@@ -89,7 +89,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     }
 
     fun status(): JSONObject = synchronized(control) {
-        try { runnerPins.admitted { } }
+        try { runnerPins.admitted(allowRetained = true) { } }
         catch (_: LinuxRunnerGenerationUnknown) {
             if (selectionPathIdentityUnavailable()) return@synchronized state("BROKEN").put("error", "linux_installation_unavailable")
             return@synchronized state("RUNNER_UNKNOWN").put("error", "linux_runner_generation_unknown")
@@ -109,7 +109,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     }
 
     internal fun inspectTrustedSelection(expected: LinuxInstallation) = synchronized(control) {
-        runnerPins.admitted {
+        runnerPins.admitted(allowRetained = true) {
             check(load() == expected) { "linux_trusted_installation_mismatch" }
             validate(expected)
             rootfsAccess?.inspectAdmission()
@@ -122,7 +122,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     fun acquire(expected: LinuxGenerationRef): Lease = acquireSelected(expected)
 
     private fun acquireSelected(expected: LinuxGenerationRef?): Lease = try {
-        synchronized(control) { runnerPins.admitted {
+        synchronized(control) { runnerPins.admitted(allowRetained = true) {
             val installation = load() ?: throw IllegalStateException("linux_environment_not_selected")
             check(expected == null || expected == LinuxGenerationRef(installation.environmentId, installation.generation)) {
                 "linux_generation_mismatch"
@@ -232,7 +232,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
             val rootExecution = rootAccess?.claimExecution()
             unstartedRootExecution = rootExecution
             val pin = try {
-                runnerPins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities) {
+                runnerPins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities, allowRetained = true) {
                     check(load() == installation) { "linux_selection_changed" }
                     check(validate(installation) == identities) { "linux_installation_changed" }
                 }

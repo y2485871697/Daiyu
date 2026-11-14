@@ -49,6 +49,51 @@ class LinuxLeaseRecoveryDeviceTest : InstrumentationTestCase() {
         } finally { files.deleteRecursively() }
     }
 
+    fun testSameBootSharedOccupancyPreservesSelectedGenerationAndBlocksExport() {
+        val files = File(instrumentation.targetContext.cacheDir, "linux-shared-${UUID.randomUUID()}").apply { mkdirs() }.canonicalFile
+        try {
+            val rootfs = File(files, "rootfs").apply { File(this, "bin").mkdirs(); File(this, "bin/sh").writeText("never executed") }
+            val proot = File(files, "proot").apply { writeText("never executed"); setExecutable(true) }
+            val loader = File(files, "loader").apply { writeText("never executed") }
+            fun hash(file: File) = MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+            val installation = LinuxInstallation("debian", "env", "generation", rootfs, proot, hash(proot), loader, hash(loader))
+            val directory = File(files, "user-terminal/linux-selection")
+            val gate = LinuxRootfsBackupAccess.forFiles(files) { androidLinuxBootIdentity(instrumentation.targetContext) }
+            val store = LinuxEnvironmentStore(directory, directorySync = TerminalDurability::syncDirectory, rootfsAccess = gate)
+            store.select(installation)
+            val retained = listOf(directory, File(files, "linux-rootfs-access-v1")).map { parent ->
+                File(parent, ".runner-pin-" + "a".repeat(32)).apply {
+                    writeText("2\nenv\ngeneration\n${"b".repeat(64)}\n$name\nshared\n")
+                }
+            }
+            val originals = retained.map { it.readBytes() to strictLinuxFileKey(it.toPath()) }
+            retained.zip(originals).forEach { (pin, original) ->
+                val boot = checkNotNull(androidLinuxBootIdentity(instrumentation.targetContext))
+                val key = java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(checkNotNull(original.second).toString().toByteArray(Charsets.UTF_8))
+                File(pin.parentFile, ".runner-boot-" + "a".repeat(32))
+                    .writeText("2\n$boot\n${pin.name}\n${hash(pin)}\n$key\nclaim\n")
+            }
+            val selection = TerminalTrustedLinuxSelection(directory, listOf(installation), rootfsAccess = gate)
+            val expected = LinuxGenerationRef(installation.environmentId, installation.generation)
+            assertEquals(expected, selection.status().selected)
+            val lease = store.acquire(expected)
+            val execution = lease.claimExecution()
+            lease.close()
+            execution.close()
+            assertEquals(expected, selection.status().selected)
+            try { store.acquireRootfsBackup(installation); fail("unknown shared run still excludes export") }
+            catch (expectedFailure: IllegalStateException) { }
+            try { store.clearSelection(); fail("unknown shared run still excludes selection replacement") }
+            catch (expectedFailure: IllegalStateException) { }
+            retained.zip(originals).forEach { (pin, original) ->
+                assertTrue(original.first.contentEquals(pin.readBytes()))
+                assertEquals(original.second, strictLinuxFileKey(pin.toPath()))
+                assertEquals(1, pin.parentFile!!.listFiles()!!.count { it.name.startsWith(".runner-pin-") })
+            }
+        } finally { files.deleteRecursively() }
+    }
+
     fun testPrivateWorkspaceFreezeCreatesNoExecutionPinAndPreservesSelectedGeneration() {
         val files = File(instrumentation.targetContext.cacheDir, "linux-freeze-${UUID.randomUUID()}").apply { mkdirs() }.canonicalFile
         try {

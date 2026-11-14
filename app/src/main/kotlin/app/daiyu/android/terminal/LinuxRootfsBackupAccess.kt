@@ -15,11 +15,11 @@ internal class LinuxRootfsBackupAccess internal constructor(
     private var exporting = false
     private var reservations = 0
 
-    @Synchronized fun inspectAdmission() = pins.admitted {
+    @Synchronized fun inspectAdmission() = pins.admitted(allowRetained = true) {
         check(!exporting) { "linux_rootfs_in_use" }
     }
 
-    @Synchronized fun reserve(installation: LinuxInstallation, identities: List<String>): Reservation = pins.admitted {
+    @Synchronized fun reserve(installation: LinuxInstallation, identities: List<String>): Reservation = pins.admitted(allowRetained = true) {
         check(!exporting) { "linux_rootfs_in_use" }
         reservations++
         Reservation(installation, identities.toList())
@@ -49,7 +49,7 @@ internal class LinuxRootfsBackupAccess internal constructor(
 
     @Synchronized fun acquire(installation: LinuxInstallation, identities: List<String>, export: Boolean = false): AutoCloseable {
         val pin = pins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities,
-            requireEmpty = export) {
+            requireEmpty = export, allowRetained = !export) {
             check(!exporting) { "linux_rootfs_in_use" }
             if (export) {
                 check(reservations == 0) { "linux_rootfs_in_use" }

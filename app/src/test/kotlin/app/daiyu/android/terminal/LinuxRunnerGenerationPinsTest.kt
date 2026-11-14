@@ -164,6 +164,80 @@ class LinuxRunnerGenerationPinsTest {
         rejects { LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }.admitted { } }
     }
 
+    @Test fun deadOwnerSharedPinAllowsNewSharedWorkWithoutSettlingOldRun() = fixture { root ->
+        assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
+        val old = root.listFiles()!!.single { it.name.startsWith(".runner-pin-") }
+        val bytes = old.readBytes(); val key = hostLinuxFileKey(old.toPath())
+        val pins = recovering(root, "android:10")
+        pins.admitted(allowRetained = true) { }
+        assertEquals("ADMITTED", runLinuxPinChild(root, "shared-admit"))
+        val next = pins.claim(generation, listOf("installation"), allowRetained = true) { }
+        assertEquals(2, root.listFiles()!!.count { it.name.startsWith(".runner-pin-") })
+        rejects { pins.admitted(requireEmpty = true, allowRetained = true) { } }
+        next.settleAfterTermination()
+        assertArrayEquals(bytes, old.readBytes()); assertEquals(key, hostLinuxFileKey(old.toPath()))
+        assertEquals(1, root.listFiles()!!.count { it.name.startsWith(".runner-pin-") })
+        rejects { pins.admitted { } }
+        recovering(root, "android:11").admitted(requireEmpty = true) { }
+        assertFalse(old.exists())
+    }
+
+    @Test fun legacyAndExclusiveUnknownPinsNeverBecomeSharedOccupancy() = fixture { root ->
+        val legacy = legacyPin(root)
+        rejects { recovering(root, "android:10").admitted(allowRetained = true) { } }
+        assertTrue(legacy.exists())
+        val exclusiveRoot = File(root, "exclusive").apply { mkdirs() }
+        assertEquals("CLAIMED", runLinuxPinChild(exclusiveRoot, "exclusive-claim"))
+        rejects { recovering(exclusiveRoot, "android:10").admitted(allowRetained = true) { } }
+        recovering(exclusiveRoot, "android:11").admitted(requireEmpty = true) { }
+    }
+
+    @Test fun retainedSharedPinRequiresExactBootSourceContentAndInode() = fixture { root ->
+        assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
+        val pins = recovering(root, "android:10")
+        pins.admitted(allowRetained = true) { }
+        for (boot in listOf(null, "android:9", "kernel:00000000-0000-0000-0000-000000000001"))
+            rejects { recovering(root, boot).admitted(allowRetained = true) { } }
+        val old = root.listFiles()!!.single { it.name.startsWith(".runner-pin-") }
+        val original = old.readBytes()
+        old.appendText("changed")
+        rejects { pins.admitted(allowRetained = true) { } }
+        old.writeBytes(original)
+        val replacement = File(root, "replacement").apply { writeBytes(original) }
+        Files.move(replacement.toPath(), old.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        HostLinuxIdentity.replaced(old.toPath())
+        rejects { pins.admitted(allowRetained = true) { } }
+    }
+
+    @Test fun retainedSharedPinCannotUseChangedWitnessOrMissingBootIdentity() = fixture { root ->
+        assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
+        rejects { recovering(root, null).admitted(allowRetained = true) { } }
+        val witness = root.listFiles()!!.single { it.name.startsWith(".runner-boot-") }
+        witness.writeText(witness.readText().replace(witness.readLines()[3], "0".repeat(64)))
+        rejects { recovering(root, "android:10").admitted(allowRetained = true) { } }
+        assertTrue(root.listFiles()!!.any { it.name.startsWith(".runner-pin-") })
+    }
+
+    @Test fun missingOriginalClaimWitnessCannotBeManufacturedByObservation() = fixture { root ->
+        assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
+        val original = root.listFiles()!!.single { it.name.startsWith(".runner-pin-") }.readBytes()
+        assertTrue(root.listFiles()!!.single { it.name.startsWith(".runner-boot-") }.delete())
+        val pins = recovering(root, "android:10")
+        rejects { pins.admitted(allowRetained = true) { } }
+        rejects { pins.admitted(allowRetained = true) { } }
+        assertEquals("1", root.listFiles()!!.single { it.name.startsWith(".runner-boot-") }.readLines()[0])
+        assertArrayEquals(original, root.listFiles()!!.single { it.name.startsWith(".runner-pin-") }.readBytes())
+        recovering(root, "android:11").admitted(requireEmpty = true) { }
+    }
+
+    @Test fun failedClaimStillFencesSharedAdmissionInTheOriginalOwner() = fixture { root ->
+        var failSync = true
+        val pins = recovering(root, "android:10") { if (failSync) throw IOException("claim sync") }
+        assertThrows(IOException::class.java) { pins.claim(generation, listOf("installation"), allowRetained = true) { } }
+        failSync = false
+        rejects { pins.admitted(allowRetained = true) { } }
+    }
+
     @Test fun twoActualJvmsCannotBothClaimTheSameInstallationDomain() = fixture { root ->
         val one = startLinuxPinChild(root, "race")
         val two = startLinuxPinChild(root, "race")
@@ -204,8 +278,15 @@ internal object LinuxRunnerPinProcess {
             }
         }
         try {
-            if (operation == "admit") { pins.admitted { }; println("ADMITTED") }
-            else { pins.claim(LinuxGenerationRef("environment", "generation"), listOf("installation")) { }; println("CLAIMED") }
+            when (operation) {
+                "admit" -> { pins.admitted { }; println("ADMITTED") }
+                "shared-admit" -> { pins.admitted(allowRetained = true) { }; println("ADMITTED") }
+                else -> {
+                    pins.claim(LinuxGenerationRef("environment", "generation"), listOf("installation"),
+                        requireEmpty = operation == "exclusive-claim") { }
+                    println("CLAIMED")
+                }
+            }
         } catch (_: IllegalStateException) { println("DENIED") }
     }
 }

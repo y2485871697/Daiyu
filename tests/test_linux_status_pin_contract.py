@@ -37,6 +37,28 @@ class LinuxStatusPinContractTest(unittest.TestCase):
         for token in ("unstartedRootExecution = rootExecution", "closeUnstartedClaim()", "failure.addSuppressed(cleanup)"):
             self.assertIn(token, claim)
 
+    def test_retained_shared_admission_never_weakens_exclusive_management(self):
+        pins = (TERMINAL / "LinuxRunnerGenerationPins.kt").read_text()
+        for token in ('allowRetained: Boolean = false', 'retained.forEach(::validateRetained)',
+                      'pin[0] != "2"', 'pin[5] != "shared"', 'record[1] != currentBoot()',
+                      'record[3] != hash(bytes)', 'fileKey(file.toPath())?.let(::encodedKey) != record[4]',
+                      'check(pinFiles().size < MAX_PINS)', 'guard.unsettled.add(id)'):
+            self.assertIn(token, pins)
+        self.assertIn('if (requireEmpty) "exclusive" else "shared"', pins)
+        store = (TERMINAL / "LinuxEnvironmentStore.kt").read_text()
+        for start, end in (("fun select(", "fun clearSelection("),
+                           ("fun clearSelection(", "fun status("),
+                           ("internal fun acquireRootfsBackup(", "private fun validate(")):
+            section = store[store.index(start):store.index(end)]
+            self.assertIn('runnerPins.admitted(requireEmpty = true)', section)
+            self.assertNotIn('allowRetained = true', section)
+        common = (TERMINAL / "LinuxRootfsBackupAccess.kt").read_text()
+        self.assertIn('requireEmpty = export, allowRetained = !export', common)
+        self.assertIn('requireNoLegacyPins()', common)
+        for token in ('inspectTrustedSelection', 'acquireSelected', 'claimExecution'):
+            self.assertIn(token, store)
+        self.assertEqual(4, store.count('allowRetained = true'))
+
     def test_upgrade_observation_is_background_only_and_boot_identity_is_android_wired(self):
         source = (TERMINAL / "LinuxBootRecoveryReceiver.kt").read_text()
         manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()

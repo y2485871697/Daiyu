@@ -121,6 +121,28 @@ static int ws_tree(int fd,struct ws_recovery *state,unsigned depth) {
     int saved=errno;
     closedir(directory); errno=saved; return result;
 }
+/* Ancestors require search, not directory-list permission (Android /data). */
+static int ws_open_storage(const char *path) {
+    if(!path || path[0]!='/' || strlen(path)>4096) { errno=EINVAL; return -1; }
+    int fd=open("/",O_PATH|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+    if(fd<0) return -1;
+    const char *part=path+1;
+    while(*part) {
+        const char *end=strchr(part,'/');
+        size_t size=end ? (size_t)(end-part) : strlen(part);
+        if(!size || size>255 || (size==1 && part[0]=='.') ||
+            (size==2 && !strncmp(part,"..",2)) || (end && !end[1])) {
+            close(fd); errno=EINVAL; return -1;
+        }
+        char name[256]; memcpy(name,part,size); name[size]=0;
+        int next=openat(fd,name,(end?O_PATH:O_RDONLY)|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+        int saved=errno; close(fd); fd=next; errno=saved;
+        if(fd<0) return -1;
+        if(!end) return fd;
+        part=end+1;
+    }
+    close(fd); errno=EINVAL; return -1;
+}
 static int workspace_repair_main(int argc,char **argv) {
     int repair=argc>1 && !strcmp(argv[1],"--workspace-repair");
     int inspect=argc>1 && !strcmp(argv[1],"--workspace-check");
@@ -142,7 +164,8 @@ static int workspace_repair_main(int argc,char **argv) {
     if(sigaction(SIGALRM,&action,NULL)<0) return 74;
     alarm((unsigned)((left+999)/1000));
     struct ws_recovery state={.repair=repair,.deadline=(int64_t)deadline};
-    int storage=root_open_directory(argv[2]),held=-1,result=74;
+    int storage=ws_open_storage(argv[2]),held=-1,result=74;
+    int ancestors[2048],ancestor_count=0;
     if(storage<0) goto done;
     struct stat anchor;
     if(fstat(storage,&anchor)<0 || (uint64_t)anchor.st_dev!=device || (uint64_t)anchor.st_ino!=inode ||
@@ -164,20 +187,26 @@ static int workspace_repair_main(int argc,char **argv) {
         char *slash=strchr(part,'/');
         if(slash) *slash=0;
         if(!*part || !strcmp(part,".") || !strcmp(part,"..") || strlen(part)>255 || (slash && !slash[1])) { result=64; goto done; }
-        if(ws_metadata(held,&state)<0) { if(!repair && errno==EACCES) result=77; goto done; }
+        if(!repair && ws_metadata(held,&state)<0) { if(errno==EACCES) result=77; goto done; }
+        if(ancestor_count>=2048) goto done;
         int next=ws_open(held,part,&state,&before);
         if(next<0) { if(!repair && errno==EACCES) result=77; goto done; }
-        close(held); held=next;
+        if(repair) ancestors[ancestor_count++]=held;
+        else close(held);
+        held=next;
         if(!slash) break;
         part=slash+1;
     }
     struct stat target;
     if(fstat(held,&target)<0 || (target_inode && ((uint64_t)target.st_ino!=target_inode || (uint64_t)target.st_dev!=target_device))) goto done;
+    /* Reject a stale target before changing any necessary ancestor metadata. */
+    for(int i=0;i<ancestor_count;i++) if(ws_metadata(ancestors[i],&state)<0) goto done;
     int checked=!strcmp(argv[8],"1") ? ws_tree(held,&state,0) : ws_metadata(held,&state);
     if(checked<0) { if(!repair && errno==EACCES) result=77; goto done; }
     if(ws_active(&state)<0) goto done;
     result=printf("DWSP1 OK\n")<0?74:0;
 done:
+    for(int i=0;i<ancestor_count;i++) close(ancestors[i]);
     if(held>=0) close(held);
     if(storage>=0) close(storage);
     return result;

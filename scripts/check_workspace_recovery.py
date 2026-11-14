@@ -42,20 +42,35 @@ class NativeWorkspaceRecoveryTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_helper(self, relative="", tree=False, repair=False, expected=None, expired=False):
+    def run_helper(self, relative="", tree=False, repair=False, expected=None, expired=False, as_app=False):
         anchor = self.storage.stat()
         expected = expected or (0, 0)
         args = [str(self.executable), "--workspace-repair" if repair else "--workspace-check",
                 str(self.storage), str(anchor.st_dev), str(anchor.st_ino), relative,
                 str(expected[0]), str(expected[1]), "1" if tree else "0", "DWSP1",
                 str(int(time.monotonic() * 1000) + (-1 if expired else 8000))]
-        return subprocess.run(args, capture_output=True, timeout=15)
+        identity = {"user": UID, "group": UID, "extra_groups": []} if as_app else {}
+        return subprocess.run(args, capture_output=True, timeout=15, **identity)
 
     def dirty(self, path, text=None):
         path.mkdir() if text is None else path.write_text(text)
         os.chown(path, 0, 0)
         os.setxattr(path, ATTR, UNSCOPED)
         return path
+
+    def test_app_check_crosses_search_only_ancestors_without_root(self):
+        os.chmod(self.temp.name, 0o711)
+        os.chmod(self.build.name, 0o755)
+        self.assertEqual(b"DWSP1 OK\n", self.run_helper(as_app=True).stdout)
+        folder = self.dirty(self.workspace / "root-output")
+        os.chmod(folder, 0o700)
+        self.assertEqual(77, self.run_helper("root-output", as_app=True).returncode)
+        self.assertEqual(0, folder.stat().st_uid)
+        self.assertEqual(UNSCOPED, os.getxattr(folder, ATTR))
+        self.assertEqual(0, self.run_helper("root-output", repair=True).returncode)
+        checked = self.run_helper("root-output", as_app=True)
+        self.assertEqual((0, b"DWSP1 OK\n"), (checked.returncode, checked.stdout))
+        self.assertEqual(0o700, folder.stat().st_mode & 0o777)
 
     def test_repair_preserves_contents_mode_mtime_and_inode(self):
         folder = self.dirty(self.workspace / "backup")
@@ -117,6 +132,21 @@ class NativeWorkspaceRecoveryTest(unittest.TestCase):
         self.assertEqual(0, folder.stat().st_uid)
         self.assertNotEqual(0, self.run_helper("target", repair=True, expired=True).returncode)
         self.assertEqual(0, folder.stat().st_uid)
+
+    def test_stale_target_does_not_repair_dirty_ancestors(self):
+        parent = self.dirty(self.workspace / "parent")
+        target = self.dirty(parent / "target")
+        identity = target.stat()
+        self.assertNotEqual(0, self.run_helper("parent/target", repair=True,
+            expected=(identity.st_dev, identity.st_ino + 1)).returncode)
+        for path in (parent, target):
+            self.assertEqual((0, 0), (path.stat().st_uid, path.stat().st_gid))
+            self.assertEqual(UNSCOPED, os.getxattr(path, ATTR))
+        self.assertEqual(0, self.run_helper("parent/target", repair=True,
+            expected=(identity.st_dev, identity.st_ino)).returncode)
+        for path in (parent, target):
+            self.assertEqual((UID, UID), (path.stat().st_uid, path.stat().st_gid))
+            self.assertEqual(LABEL, os.getxattr(path, ATTR))
 
     def test_same_device_bind_mount_is_rejected(self):
         outside = self.dirty(self.storage / "outside")

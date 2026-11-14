@@ -1269,7 +1269,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             else assertEquals(0f, checkNotNull(observedState).visualProgress, 0f)
             owner.registry.currentState = androidx.lifecycle.Lifecycle.State.STARTED
             owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
-            if (Build.VERSION.SDK_INT >= 34) dispatcher.onBackPressed()
+            dispatcher.onBackPressed()
             assertEquals("old predictive completion must not pop after pause", 0, backCount)
         }
         ui.waitForIdle()
@@ -1280,7 +1280,16 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             dispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .6f, BackEventCompat.EDGE_LEFT))
             dispatcher.onBackPressed()
         }
-        ui.waitUntil(5_000) { backCount == 1 }
+        try { ui.waitUntil(5_000) { backCount == 1 } }
+        catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            val state = checkNotNull(observedState)
+            val frame = checkNotNull(observedFrame)
+            throw AssertionError("new back timed out: count=$backCount alive=${state.alive} resumed=${state.resumed} " +
+                "pending=${state.toolbarPending} blocked=${state.transitionBlocked} committing=${state.committing} " +
+                "active=${state.active} predictive=${state.predictive} progress=${state.progress} " +
+                "returnJob=${state.toolbarReturnJob} capture=${frame.capture} frozen=${frame.navigationFrozen} " +
+                "released=${frame.releaseRequested}", timeout)
+        }
         ui.waitForIdle()
         assertEquals("a new back request remains usable", 1, backCount)
     }

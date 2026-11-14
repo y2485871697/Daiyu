@@ -27,7 +27,8 @@ class WorkflowRenderIsolationContract(unittest.TestCase):
         renderer = source.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
                       'rememberUpdatedState(generationComplete)', 'return remember(plainNarration) { { text, modifier ->',
-                      'accepted?.blocks?.get(displayed)', 'currentReveal.value', 'currentComplete.value'):
+                      'accepted?.blocksAt(index)', 'sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow',
+                      'currentReveal.value', 'currentComplete.value'):
             self.assertIn(token, renderer)
 
     def test_workflow_and_items_keep_exact_equality_and_identity_gates(self):

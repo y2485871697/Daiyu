@@ -67,14 +67,42 @@ internal object ResponsesSearchProtocol {
             fields(citation, citationFields)
             require(citation.opt("type") == "url_citation") { "不支持此引用类型" }
             val start = offset(citation.opt("start_index")); val end = offset(citation.opt("end_index"))
-            // Bounds accept existing UTF-16 histories too; display clamps legacy offsets to a Unicode boundary.
+            // Retain the historic UTF-16 acceptance bound for raw replay; display no longer uses offsets.
             require(start <= end && end <= value.length) { "网页引用位置无效" }
             url(text(citation, "url", MAX_URL)); text(citation, "title", MAX_TITLE)
         }
     }
 
-    /** Citation offsets address Unicode characters within one part, never the merged message. */
+    /** Preserve provider Markdown; validated citations occupy a separate top-level section. */
     fun displayText(item: JSONObject, plain: String): String {
+        validateItem(item)
+        if (item.opt("type") != "message") return plain
+        val sources = linkedMapOf<String, Pair<String, String>>()
+        val content = item.getJSONArray("content")
+        repeat(content.length()) { index ->
+            val part = content.getJSONObject(index)
+            if (part.opt("type") == "output_text") part.optJSONArray("annotations")?.let { annotations ->
+                repeat(annotations.length()) { position ->
+                    val citation = annotations.getJSONObject(position)
+                    val target = url(citation.getString("url"))
+                    val uri = URI(target)
+                    val port = uri.port.takeUnless { it == -1 || it == 80 && uri.scheme == "http" || it == 443 && uri.scheme == "https" }
+                    val key = "${uri.scheme}://${uri.host.lowercase(java.util.Locale.ROOT)}:${port ?: ""}${uri.rawPath.orEmpty()}?${uri.rawQuery.orEmpty()}#${uri.rawFragment.orEmpty()}"
+                    val title = citation.getString("title")
+                    val previous = sources[key]
+                    if (previous == null || previous.second.isBlank() && title.isNotBlank()) sources[key] = target to title
+                }
+            }
+        }
+        if (sources.isEmpty()) return plain
+        val section = sources.values.mapIndexed { index, (target, title) ->
+            "${index + 1}. [${label(title.ifBlank { "网页来源 ${index + 1}" })}](<$target>)"
+        }.joinToString("\n", "来源：\n\n")
+        return app.daiyu.android.MarkdownParser.appendStandaloneSection(plain, section)
+    }
+
+    // Exact compatibility witness only. Never publish this escaped representation for new output.
+    fun legacyDisplayText(item: JSONObject, plain: String): String {
         validateItem(item)
         if (item.opt("type") != "message") return plain
         val sources = linkedMapOf<String, String>()

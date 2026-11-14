@@ -42,6 +42,7 @@ internal object MarkdownParser {
     internal const val MAX_TABLE_PADDING = 4_096L
 
     private class ParseCheck(private val checkCancelled: (() -> Unit)?, val streaming: Boolean = false) {
+        var openRootFence: String? = null
         private var remaining = 1024
         fun now() { checkCancelled?.invoke() }
         fun step() {
@@ -61,6 +62,28 @@ internal object MarkdownParser {
 
     fun parseStreaming(source: String, checkCancelled: () -> Unit): List<MarkdownBlock> =
         parseChecked(source, ParseCheck(checkCancelled, streaming = true))
+
+    /** Keep a generated section outside an unfinished top-level fence without changing its body. */
+    fun appendStandaloneSection(source: String, section: String): String {
+        val state = ParseCheck(null)
+        parseChecked(source, state)
+        return source + state.openRootFence?.let { "\n$it" }.orEmpty() + "\n\n" + section
+    }
+
+    private fun openingFence(line: String): MatchResult? = fence.matchEntire(line)?.takeUnless {
+        it.groupValues[1][0] == '`' && it.groupValues[2].contains('`')
+    }
+
+    private fun closesFence(line: String, delimiter: String): Boolean {
+        val closing = line.trimStart(' ')
+        return line.length - closing.length <= 3 &&
+            closing.takeWhile { it == delimiter[0] }.length >= delimiter.length &&
+            closing.dropWhile { it == delimiter[0] }.isBlank()
+    }
+
+    private fun containerFence(current: String?, line: String): String? =
+        if (current != null) current.takeUnless { closesFence(line, current) }
+        else openingFence(line)?.groupValues?.get(1)
 
     private fun parseChecked(source: String, cancel: ParseCheck): List<MarkdownBlock> {
         cancel.now()
@@ -137,8 +160,8 @@ internal object MarkdownParser {
             if (line.isBlank()) { i++; continue }
             // A temporary EOF dash can still become the next list item, not a Setext heading.
             if (pendingTail && !tailLineTerminated && i == lines.lastIndex && setext.matches(line)) break
-            val opening = fence.matchEntire(line)
-            if (opening != null && !(opening.groupValues[1][0] == '`' && opening.groupValues[2].contains('`'))) {
+            val opening = openingFence(line)
+            if (opening != null) {
                 val delimiter = opening.groupValues[1]
                 val openingIndent = line.takeWhile { it == ' ' }.length
                 val body = StringBuilder()
@@ -147,9 +170,7 @@ internal object MarkdownParser {
                 while (i < lines.size) {
                     cancel.step()
                     val closing = lines[i].trimStart(' ')
-                    if (lines[i].length - closing.length <= 3 &&
-                        closing.takeWhile { it == delimiter[0] }.length >= delimiter.length &&
-                        closing.dropWhile { it == delimiter[0] }.isBlank()) { closed = true; i++; break }
+                    if (closesFence(lines[i], delimiter)) { closed = true; i++; break }
                     if (pendingTail && !tailLineTerminated && i == lines.lastIndex && closing.isNotEmpty() &&
                         lines[i].length - closing.length <= 3 && closing.all { it == delimiter[0] } && closing.length < delimiter.length) {
                         i++; continue
@@ -158,6 +179,7 @@ internal object MarkdownParser {
                     if (i < lines.lastIndex) body.append('\n')
                     i++
                 }
+                if (depth == 0 && !closed) cancel.openRootFence = delimiter
                 result += MarkdownBlock.Code(body.toString(), opening.groupValues[2].trim().substringBefore(' '), closed)
                 continue
             }
@@ -169,20 +191,21 @@ internal object MarkdownParser {
             if (isRule(line, cancel)) { result += MarkdownBlock.Rule; i++; continue }
             if (quote.matches(line)) {
                 val inner = mutableListOf<String>()
-                var containsFence = false
+                var currentFence: String? = null
                 while (i < lines.size) {
                     cancel.step()
                     val match = quote.matchEntire(lines[i])
                     if (match != null) {
                         inner += match.groupValues[1]
-                        containsFence = containsFence || fence.matches(match.groupValues[1])
+                        currentFence = containerFence(currentFence, match.groupValues[1])
                         i++; continue
                     }
                     // Common lazy continuation of a quoted paragraph, but not after a blank,
                     // heading, nested container or code opener.
                     val previous = inner.lastOrNull()
-                    if (!containsFence && !startsBlock(i) && previous != null && previous.isNotBlank() &&
-                        !heading.matches(previous) && !quote.matches(previous) && !marker.matches(previous) &&
+                    if (currentFence == null && !startsBlock(i) && previous != null && previous.isNotBlank() &&
+                        !heading.matches(previous) && !setext.matches(previous) && indentedCodePrefix(previous, cancel) == null &&
+                        !quote.matches(previous) && !marker.matches(previous) &&
                         !fence.matches(previous) && !isRule(previous, cancel)) {
                         inner += lines[i]; i++; continue
                     }
@@ -205,7 +228,7 @@ internal object MarkdownParser {
                     val contentIndent = indent + m.groupValues[2].length + m.groupValues[3].length
                     val check = task.matchEntire(m.groupValues[4])
                     val inner = mutableListOf(check?.groupValues?.get(3) ?: m.groupValues[4])
-                    var containsFence = fence.matches(inner.first())
+                    var currentFence = containerFence(null, inner.first())
                     i++
                     while (i < lines.size) {
                         cancel.step()
@@ -220,13 +243,13 @@ internal object MarkdownParser {
                         val spaces = next.takeWhile { it == ' ' }.length
                         if (spaces >= contentIndent || next.startsWith('\t')) {
                             val content = if (next.startsWith('\t')) next.drop(1) else next.drop(contentIndent)
-                            inner += content; containsFence = containsFence || fence.matches(content)
+                            inner += content; currentFence = containerFence(currentFence, content)
                             i++; continue
                         }
                         val previous = inner.lastOrNull()
-                        if (containsFence || marker.matches(next) || startsBlock(i) || previous == null || previous.isBlank() ||
-                            heading.matches(previous) || setext.matches(previous) || isRule(previous, cancel) ||
-                            previous.startsWith("    ") || previous.startsWith('\t')) break
+                        if (currentFence != null || marker.matches(next) || startsBlock(i) || previous == null || previous.isBlank() ||
+                            heading.matches(previous) || setext.matches(previous) || fence.matches(previous) || quote.matches(previous) ||
+                            isRule(previous, cancel) || indentedCodePrefix(previous, cancel) != null) break
                         inner += next; i++ // ordinary lazy paragraph continuation
                     }
                     items += MarkdownBlock.Item(blocks(inner, depth + 1, cancel, pendingAt(i),
@@ -255,20 +278,23 @@ internal object MarkdownParser {
                 separators.all { cancel.step(); separator.matches(it.trim()) }) {
                 val tableStart = i
                 i += 2
-                val rawRows = mutableListOf<List<String>>()
+                val rawRows = mutableListOf<Pair<List<String>, Int?>>()
                 var totalCells = cells.size.toLong() // include the header in the node budget
                 var padding = 0L
                 var overBudget = totalCells > MAX_TABLE_CELLS
                 while (i < lines.size && lines[i].isNotBlank() && !startsBlock(i)) {
                     cancel.step()
-                    val row = splitCells(lines[i], cancel) ?: break
+                    var pendingCell: Int? = null
+                    val row = splitCells(lines[i], cancel, pendingTail && !tailLineTerminated && i == lines.lastIndex) {
+                        pendingCell = it
+                    } ?: break
                     if (!overBudget) {
                         // Long arithmetic and early saturation: no width * height Int overflow,
                         // and no padding/inline ASTs until the entire table has passed preflight.
                         totalCells += cells.size.toLong()
                         padding += maxOf(0, cells.size - row.size).toLong()
                         overBudget = totalCells > MAX_TABLE_CELLS || padding > MAX_TABLE_PADDING
-                        if (overBudget) rawRows.clear() else rawRows += row
+                        if (overBudget) rawRows.clear() else rawRows += row to pendingCell
                     }
                     i++
                 }
@@ -283,10 +309,9 @@ internal object MarkdownParser {
                     it.trim().endsWith(':') -> MarkdownBlock.Alignment.RIGHT
                     else -> MarkdownBlock.Alignment.LEFT
                 } }
-                val rows = rawRows.mapIndexed { rowIndex, row -> cells.indices.map {
+                val rows = rawRows.map { (row, pendingCell) -> cells.indices.map { column ->
                     cancel.step()
-                    inline(row.getOrElse(it) { "" }, cancel,
-                        pendingAt(i) && rowIndex == rawRows.lastIndex && it == cells.lastIndex)
+                    inline(row.getOrElse(column) { "" }, cancel, column == pendingCell)
                 } }
                 result += MarkdownBlock.Table(cells.map { cancel.step(); inline(it, cancel) }, rows, align); continue
             }
@@ -311,7 +336,9 @@ internal object MarkdownParser {
     /** Escaped pipes and pipes in matching code spans are cell content, not separators. */
     internal fun splitCells(line: String): List<String>? = splitCells(line, ParseCheck(null))
 
-    private fun splitCells(line: String, cancel: ParseCheck, pendingTail: Boolean = false): List<String>? {
+    private fun splitCells(line: String, cancel: ParseCheck, pendingTail: Boolean = false,
+        pendingCell: (Int) -> Unit = {},
+    ): List<String>? {
         val cells = mutableListOf<String>()
         var start = 0
         var i = 0
@@ -341,7 +368,9 @@ internal object MarkdownParser {
         if (firstPipe < 0) return null
         cells += line.substring(start).trim()
         if (line.substring(0, firstPipe).isBlank()) cells.removeAt(0)
-        if (line.substring(lastPipe + 1).isBlank()) cells.removeAt(cells.lastIndex)
+        val terminated = line.substring(lastPipe + 1).isBlank()
+        if (terminated) cells.removeAt(cells.lastIndex)
+        if (pendingTail && !terminated && cells.isNotEmpty()) pendingCell(cells.lastIndex)
         return cells.takeIf { it.isNotEmpty() }
     }
 
@@ -438,7 +467,7 @@ internal object MarkdownParser {
             if (source[p] == ']' && stack.isNotEmpty()) {
                 val open = stack.removeLast()
                 bracketEnds[open] = p
-                if (allowLinks && source.getOrNull(open - 1) != '!' && source.getOrNull(p + 1) == '(') {
+                if (allowLinks && !imagePrefix(source, open) && source.getOrNull(p + 1) == '(') {
                     val destination = linkDestination(source, p + 1, work, cancel)
                     if (work.exhausted) return listOf(MarkdownInline.Text(source))
                     if (destination != null) {
@@ -484,7 +513,7 @@ internal object MarkdownParser {
                 }
                 plain.append(source, i, runEnd); i = runEnd; continue
             }
-            if (allowLinks && c == '[' && source.getOrNull(i - 1) != '!') {
+            if (allowLinks && c == '[' && !imagePrefix(source, i)) {
                 val close = bracketEnds[i]
                 val destination = destinations[i]
                 // Discard partial formatting too: exhaustion must preserve the exact original,
@@ -515,16 +544,18 @@ internal object MarkdownParser {
                 while (end < source.length && source[end] == c) { cancel.step(); end++ }
                 val count = end - i
                 if ((c != '~' && count <= 3) || (c == '~' && count == 2)) {
-                    val before = source.getOrNull(i - 1)
-                    val after = source.getOrNull(end)
-                    val left = after != null && !after.isWhitespace() &&
-                        (!after.isPunctuation() || before == null || before.isWhitespace() || before.isPunctuation())
-                    val right = before != null && !before.isWhitespace() &&
-                        (!before.isPunctuation() || after == null || after.isWhitespace() || after.isPunctuation())
+                    val before = if (i > 0) source.codePointBefore(i) else null
+                    val after = if (end < source.length) source.codePointAt(end) else null
+                    val beforeSpace = before == null || Character.isWhitespace(before)
+                    val afterSpace = after == null || Character.isWhitespace(after)
+                    val beforePunctuation = before?.isMarkdownPunctuation() == true
+                    val afterPunctuation = after?.isMarkdownPunctuation() == true
+                    val left = !afterSpace && (!afterPunctuation || beforeSpace || beforePunctuation)
+                    val right = !beforeSpace && (!beforePunctuation || afterSpace || afterPunctuation)
                     flush(); tokens += Token(delimiter = c, count = count,
-                        open = left && (c != '_' || !right || before?.isPunctuation() == true),
-                        close = right && (c != '_' || !left || after?.isPunctuation() == true),
-                        pendingOpen = after == null && (c != '_' || before == null || before.isWhitespace() || before.isPunctuation()))
+                        open = left && (c != '_' || !right || beforePunctuation),
+                        close = right && (c != '_' || !left || afterPunctuation),
+                        pendingOpen = after == null && (c != '_' || beforeSpace || beforePunctuation))
                     i = end; continue
                 }
                 plain.append(source, i, end); i = end; continue
@@ -543,7 +574,21 @@ internal object MarkdownParser {
         return delimiters(tokens, depth, cancel, pendingTail = pendingTail)
     }
 
-    private fun Char.isPunctuation(): Boolean = !isLetterOrDigit() && !isWhitespace()
+    private fun Int.isMarkdownPunctuation(): Boolean = when (Character.getType(this)) {
+        Character.CONNECTOR_PUNCTUATION.toInt(), Character.DASH_PUNCTUATION.toInt(),
+        Character.START_PUNCTUATION.toInt(), Character.END_PUNCTUATION.toInt(),
+        Character.INITIAL_QUOTE_PUNCTUATION.toInt(), Character.FINAL_QUOTE_PUNCTUATION.toInt(),
+        Character.OTHER_PUNCTUATION.toInt(), Character.MATH_SYMBOL.toInt(),
+        Character.CURRENCY_SYMBOL.toInt(), Character.MODIFIER_SYMBOL.toInt(), Character.OTHER_SYMBOL.toInt() -> true
+        else -> false
+    }
+
+    private fun imagePrefix(source: String, bracket: Int): Boolean {
+        if (source.getOrNull(bracket - 1) != '!') return false
+        var cursor = bracket - 2
+        while (cursor >= 0 && source[cursor] == '\\') cursor--
+        return (bracket - 2 - cursor) % 2 == 0
+    }
 
     private class DelimiterBudget(var remaining: Int)
 
@@ -569,6 +614,8 @@ internal object MarkdownParser {
             val key = t.delimiter to t.count
             var closing = -1
             var inside = 0
+            var opening = t.count
+            var split = 0
             if (t.open && depth < MAX_DEPTH && key !in failed) {
                 var pending = 0
                 var sawCloser = false
@@ -582,7 +629,12 @@ internal object MarkdownParser {
                         sawCloser = true
                         val innerClose = minOf(pending, available)
                         pending -= innerClose; available -= innerClose
-                        if (available >= t.count) { closing = j; inside = innerClose; break }
+                        if (available >= opening) { closing = j; inside = innerClose; break }
+                        if (opening == 3 && split == 0 && available > 0) {
+                            split = available
+                            opening -= split
+                            available = 0
+                        }
                     }
                     if (next.open) pending += available
                 }
@@ -591,21 +643,22 @@ internal object MarkdownParser {
             val virtualClose = closing < 0 && pendingTail && t.open && depth < MAX_DEPTH && budget.remaining > 0
             if (virtualClose) closing = input.size
             if (closing >= 0) {
-                val close = if (virtualClose) t.copy(open = false, close = true) else input[closing]
+                val close = if (virtualClose) t.copy(count = opening, open = false, close = true) else input[closing]
                 val inner = input.subList(i + 1, closing).toMutableList()
+                if (split > 0) inner.add(0, t.copy(count = split))
                 // A shared *** run can finish inner emphasis or start an adjacent one:
                 // **bold *italic*** versus **bold***italic*.
                 if (inside > 0) inner += close.copy(count = inside, open = false)
-                val remaining = close.count - t.count - inside
+                val remaining = close.count - opening - inside
                 if (remaining > 0) input[closing] = close.copy(count = remaining)
                 // Inherit the old renderer's virtual EOF: only the display AST receives closure.
-                if (virtualClose && inner.lastOrNull()?.let { it.node == null && it.delimiter == t.delimiter && it.close && it.count < t.count } == true) {
+                if (virtualClose && inner.lastOrNull()?.let { it.node == null && it.delimiter == t.delimiter && it.close && it.count < opening } == true) {
                     inner.removeAt(inner.lastIndex)
                 }
                 var content = delimiters(inner, depth + 1, cancel, budget, pendingTail && virtualClose)
                 if (t.delimiter == '~') content = listOf(MarkdownInline.Strike(content))
                 else {
-                    var count = t.count
+                    var count = opening
                     while (count > 0) {
                         cancel.step()
                         val use = if (count >= 2) 2 else 1
@@ -615,6 +668,11 @@ internal object MarkdownParser {
                 }
                 result += content; i = if (remaining > 0) closing else closing + 1
             } else {
+                if (split > 0) {
+                    result += MarkdownInline.Text(t.delimiter.toString().repeat(opening))
+                    input[i] = t.copy(count = split)
+                    continue
+                }
                 if (!pendingTail || i != input.lastIndex || !t.pendingOpen) {
                     result += MarkdownInline.Text(t.delimiter.toString().repeat(t.count))
                 }
@@ -633,7 +691,7 @@ internal object MarkdownParser {
         var closedEnd = -1
         var noMoreAngles = false
         var i = 0
-        fun opening(at: Int) = if (at > 0 && source[at - 1] == '!') at - 1 else at
+        fun opening(at: Int) = if (imagePrefix(source, at)) at - 1 else at
         while (i < source.length) {
             cancel.step()
             val c = source[i]

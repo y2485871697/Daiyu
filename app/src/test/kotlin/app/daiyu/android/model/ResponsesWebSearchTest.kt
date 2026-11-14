@@ -94,12 +94,13 @@ class ResponsesWebSearchTest {
         assertEquals("reasoning.encrypted_content", body.getJSONArray("include").getString(0))
         assertFalse(body.has("tool_choice")); assertFalse(body.getBoolean("store")); assertTrue(body.getBoolean("stream"))
     }
-    @Test fun hostedOutputCreatesVisibleEscapedSourcesAndRawReplayButNoLocalTool() {
+    @Test fun hostedOutputPreservesMarkdownAndRawReplayButNoLocalTool() {
         val output = listOf(search(), message()); val events = mutableListOf<ModelEvent>()
         val raw = ResponsesStream.read(wire(*output.toTypedArray()).reader().buffered(), { false }, events::add)
         assertTrue(events.filterIsInstance<ModelEvent.ToolReady>().isEmpty())
         val final = events.filterIsInstance<ModelEvent.TextFinal>().single()
-        assertTrue(final.text.startsWith("\u2060😀 ")); assertTrue(final.text.contains(" [1](<https://example.org/source?q=a&b=c>)facts"))
+        assertTrue(final.text.startsWith("😀 facts\n\n来源：\n\n"))
+        assertFalse(final.text.contains("\u2060"))
         assertTrue(final.text.contains("](<https://example.org/source?q=a&b=c>)"))
         assertTrue(final.text.contains("\\[untrusted\\]"))
         assertEquals(output.map { it.toString() }, raw)
@@ -134,7 +135,8 @@ class ResponsesWebSearchTest {
             val raw = original.toString()
             val display = ResponsesSearchProtocol.displayText(original, plain)
             val sources = links(app.daiyu.android.MarkdownParser.parse(display))
-            assertEquals("plain=$plain", 2, sources.size)
+            assertEquals("plain=$plain", 1, sources.size)
+            assertTrue(display.startsWith(plain))
             assertTrue(sources.all { it.destination == "https://example.org/a%28b" })
             assertEquals(raw, original.toString())
         }
@@ -146,26 +148,46 @@ class ResponsesWebSearchTest {
         assertEquals(snapshot.customHeaders, auxiliary.customHeaders)
         assertEquals(snapshot.imageInputSupported, auxiliary.imageInputSupported)
     }
-    @Test fun citationsAreInlineAtPartLocalUnicodeBoundariesWithoutSplittingSurrogates() {
+    @Test fun citationsNeverRewriteBodyMarkdownOrUsePartOffsetsAsInsertionPoints() {
         val first = message(citation().put("end_index", 1))
         val content = first.getJSONArray("content")
         content.put(JSONObject().put("type", "output_text").put("text", "second claim")
-            .put("annotations", JSONArray().put(citation("https://example.org/second").put("start_index", 0).put("end_index", 6))))
+            .put("annotations", JSONArray().put(citation("https://example.org/second").put("end_index", 6))))
         val original = first.toString()
-        val display = ResponsesSearchProtocol.displayText(first, "😀 factssecond claim")
-        assertTrue(display.contains("😀 [1](<https://example.org/source?q=a&b=c>) facts"))
-        assertTrue(display.contains("second [2](<https://example.org/second>) claim"))
+        val plain = "😀 factssecond claim"
+        val display = ResponsesSearchProtocol.displayText(first, plain)
+        assertTrue(display.startsWith(plain + "\n\n来源："))
+        assertFalse(display.contains(" [1]("))
         assertEquals(original, first.toString())
-        val paragraph = app.daiyu.android.MarkdownParser.parse(display).first() as app.daiyu.android.MarkdownBlock.Paragraph
-        assertEquals(listOf("https://example.org/source?q=a&b=c", "https://example.org/second"),
-            paragraph.content.filterIsInstance<app.daiyu.android.MarkdownInline.Link>().map { it.destination })
-        for (text in listOf("`quoted code`", "    indented", "[label](https://example.org/x)", "```text\ncode", "| cell |")) {
-            val item = message(citation().put("end_index", 2))
+        for (text in listOf("**bold**", "# Heading", "`quoted code`", "    indented", "[label](https://example.org/x)",
+            "```text\ncode", "| a | b |\n| --- | --- |\n| c | d |", "> ```\n> code", "- ```\n  code")) {
+            val item = message()
             item.getJSONArray("content").getJSONObject(0).put("text", text)
-            val blocks = app.daiyu.android.MarkdownParser.parse(ResponsesSearchProtocol.displayText(item, text))
-            val body = blocks.first() as app.daiyu.android.MarkdownBlock.Paragraph
-            assertEquals(text, 1, body.content.filterIsInstance<app.daiyu.android.MarkdownInline.Link>().size)
+            val shown = ResponsesSearchProtocol.displayText(item, text)
+            assertTrue(text, shown.startsWith(text))
+            val blocks = app.daiyu.android.MarkdownParser.parse(shown)
+            assertTrue(text, blocks.last() is app.daiyu.android.MarkdownBlock.Items)
         }
+    }
+    @Test fun hostCaseDuplicatesAreOneSourceAndRefusalAnnotationsCannotCrashDisplay() {
+        val item = message(citation("https://EXAMPLE.org/source"))
+        item.getJSONArray("content").getJSONObject(0).getJSONArray("annotations")
+            .put(citation("https://example.org:443/source"))
+        item.getJSONArray("content").put(JSONObject().put("type", "refusal").put("refusal", " no")
+            .put("annotations", JSONArray().put(citation("https://unvalidated.example/"))))
+        val display = ResponsesSearchProtocol.displayText(item, "😀 facts no")
+        assertTrue(display.startsWith("😀 facts no"))
+        assertEquals(1, Regex("\\n1\\. ").findAll(display).count())
+        assertFalse(display.contains("\n2. "))
+        assertFalse(display.contains("unvalidated.example"))
+    }
+    @Test fun duplicateTerminalMessageIdsFailBeforePublishing() {
+        val events = mutableListOf<ModelEvent>()
+        try {
+            ResponsesStream.read(wire(message(), message()).reader().buffered(), { false }, events::add)
+            fail("duplicate message")
+        } catch (failure: ModelRequestException) { assertEquals(ModelFailure.PROTOCOL, failure.failure) }
+        assertTrue(events.isEmpty())
     }
     @Test fun failedHostedSearchIsPreservedNotTurnedIntoSuccessOrLocalDispatch() {
         val events = mutableListOf<ModelEvent>()

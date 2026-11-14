@@ -25,6 +25,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.CoroutineStart
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -75,24 +79,28 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
     var copied by remember(block.text) { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
     var unlocked by remember { mutableStateOf(false) }
-    var pendingDownload by remember { mutableStateOf<String?>(null) }
+    var pendingDownloadId by rememberSaveable { mutableStateOf<String?>(null) }
+    var preparingDownload by remember { mutableStateOf(false) }
     val downloader = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        val content = pendingDownload
-        pendingDownload = null
-        if (uri != null && content != null) scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    require(uri.scheme == "content")
-                    checkNotNull(context.contentResolver.openOutputStream(uri, "wt")).use {
-                        it.write(content.toByteArray(Charsets.UTF_8))
-                        it.flush()
+        val id = pendingDownloadId
+        pendingDownloadId = null
+        if (id != null) {
+            val snapshot = markdownCodeDownloadSnapshot(context.cacheDir, id)
+            if (uri == null) snapshot.delete() else scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    withContext(Dispatchers.IO) {
+                        require(uri.scheme == "content")
+                        snapshot.inputStream().use { input ->
+                            checkNotNull(context.contentResolver.openOutputStream(uri, "wt")).use { output ->
+                                input.copyTo(output)
+                                output.flush()
+                            }
+                        }
                     }
-                }
-                android.widget.Toast.makeText(context, "代码已保存", android.widget.Toast.LENGTH_SHORT).show()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                android.widget.Toast.makeText(context, "保存失败", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, "代码已保存", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (cancelled: CancellationException) { throw cancelled }
+                  catch (_: Exception) { android.widget.Toast.makeText(context, "保存失败", android.widget.Toast.LENGTH_SHORT).show() }
+                  finally { snapshot.delete() }
             }
         }
     }
@@ -140,12 +148,32 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                     verticalAlignment = Alignment.CenterVertically) {
                     BasicText(block.language.ifBlank { "text" }, Modifier.weight(1f).padding(end = 4.dp),
                         style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, color = colors.muted), maxLines = 1)
-                    CodeAction(CodeBlockIcons.Download, "下载代码", "markdown-code-download", enabled = pendingDownload == null) {
-                        pendingDownload = block.text
-                        try { downloader.launch(markdownCodeFileName(block.language)) }
-                        catch (_: Exception) {
-                            pendingDownload = null
-                            android.widget.Toast.makeText(context, "无法打开保存位置", android.widget.Toast.LENGTH_SHORT).show()
+                    Row(Modifier.horizontalScroll(rememberScrollState()).testTag("markdown-code-actions"),
+                        verticalAlignment = Alignment.CenterVertically) {
+                    CodeAction(CodeBlockIcons.Download, "下载代码", "markdown-code-download",
+                        enabled = pendingDownloadId == null && !preparingDownload) {
+                        val content = block.text
+                        val fileName = markdownCodeFileName(block.language)
+                        val id = UUID.randomUUID().toString()
+                        val snapshot = markdownCodeDownloadSnapshot(context.cacheDir, id)
+                        preparingDownload = true
+                        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                            var handedToPicker = false
+                            try {
+                                withContext(Dispatchers.IO) { snapshot.writeText(content, Charsets.UTF_8) }
+                                pendingDownloadId = id
+                                downloader.launch(fileName)
+                                handedToPicker = true
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                              catch (_: Exception) {
+                                android.widget.Toast.makeText(context, "无法打开保存位置", android.widget.Toast.LENGTH_SHORT).show()
+                            } finally {
+                                preparingDownload = false
+                                if (!handedToPicker) {
+                                    snapshot.delete()
+                                    if (pendingDownloadId == id) pendingDownloadId = null
+                                }
+                            }
                         }
                     }
                     CodeAction(CodeBlockIcons.Expand, "查看完整代码", "markdown-code-expand") { expanded = true }
@@ -158,6 +186,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                         runCatching { clipboard.setText(AnnotatedString(block.text)) }
                             .onSuccess { copied = true }
                             .onFailure { android.widget.Toast.makeText(context, "复制失败", android.widget.Toast.LENGTH_SHORT).show() }
+                    }
                     }
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
@@ -206,4 +235,9 @@ private object CodeBlockIcons {
     val Scroll by lazy { icon("Code.Scroll") {
         moveTo(8f, 8f); lineTo(12f, 4f); lineTo(16f, 8f); moveTo(8f, 16f); lineTo(12f, 20f); lineTo(16f, 16f)
     } }
+}
+
+private fun markdownCodeDownloadSnapshot(cacheDirectory: File, id: String): File {
+    require(UUID.fromString(id).toString() == id)
+    return File(cacheDirectory, "markdown-code-download-$id.txt")
 }

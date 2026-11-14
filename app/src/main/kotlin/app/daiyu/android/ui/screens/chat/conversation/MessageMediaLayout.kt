@@ -39,18 +39,18 @@ internal fun messageMediaGeometry(availableWidth: Float, aspectRatios: List<Floa
     // A pair of wide photos reads better as a short vertical strip than two postage stamps.
     val columns = if (single || (ratios.size == 2 && ratios.all { it > 1f })) 1 else 2
     val maxHeight = if (single) 360f else if (columns == 1) 220f else 216f
-    // Narrow portraits shrink the grid, not the message. Use the actual fitted column width
-    // so two tall photos remain 8dp apart instead of sitting in wide, empty backing cells.
-    val cellWidth = min((width - gap * (columns - 1)) / columns,
-        ratios.minOf { it * maxHeight })
+    // Fit independently, then pack actual widths so a tall image cannot shrink its neighbours.
+    val cellWidth = (width - gap * (columns - 1)) / columns
     val frames = mutableListOf<MessageMediaFrame>()
     var y = 0f
     ratios.chunked(columns).forEach { row ->
+        var x = 0f
         var rowHeight = 0f
-        row.forEachIndexed { column, ratio ->
+        row.forEach { ratio ->
             val height = min(maxHeight, cellWidth / ratio)
             val itemWidth = min(cellWidth, height * ratio)
-            frames += MessageMediaFrame(column * (cellWidth + gap), y, itemWidth, height)
+            frames += MessageMediaFrame(x, y, itemWidth, height)
+            x += itemWidth + gap
             rowHeight = max(rowHeight, height)
         }
         y += rowHeight + gap

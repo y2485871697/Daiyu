@@ -196,8 +196,11 @@ child_task_card_only = mode == "smoke" and sorted(raw_filter.split(",")) in (
 child_task_card_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                            for name in child_task_card_theme_target if name in raw_filter.split(",")}
 
+rendering_target = {'app.daiyu.android.ui.screens.chat.conversation.MarkdownTableStyleTest', 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest', 'app.daiyu.android.RestoredMarkdownActivityTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.RenderingRegressionTest'}
+rendering_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(rendering_target)
+rendering_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt') for name in rendering_target}
 classes = {}
-for path in sorted(Path("app/src/androidTest").rglob("*")):
+for path in sorted(rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
         continue
     if speech_only and path != speech_source:
@@ -291,7 +294,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only else "full",
+                discovery_scope="targeted" if speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

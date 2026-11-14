@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
@@ -13,13 +12,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.collectLatest
-import app.daiyu.android.MarkdownBlock
-import app.daiyu.android.MarkdownInline
 import app.daiyu.android.domain.ReportedReasoning
-
-private val plainWorkflowNarrationParser: (String) -> List<MarkdownBlock> = { text ->
-    if (text.isEmpty()) emptyList() else listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(text))))
-}
 
 internal class WorkflowNarration(val projection: MarkdownProjection?, val reveal: MarkdownReveal,
     val entryVisible: (String) -> Boolean = { true })
@@ -97,8 +90,7 @@ internal fun WorkflowNarrationContent(
     admission: WorkflowVisualAdmission? = null,
     content: @Composable (WorkflowNarration) -> Unit,
 ) {
-    val parser = if (plainText) plainWorkflowNarrationParser else LocalMarkdownParser.current
-    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+    run {
         val texts = remember(sources) { sources.map { it.text } }
         val projection = rememberMarkdownProjection(texts, streaming = running)
         val baselineOnly = !expanded || stopped

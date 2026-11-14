@@ -133,7 +133,8 @@ class NativeCompletionWebSearchTest {
         assertEquals("😀ab answer", row.getString("content"))
         assertEquals(1, row.getJSONArray("annotations").length())
         val displayed = events.filterIsInstance<ModelEvent.TextFinal>().single().text
-        assertTrue(displayed.contains("[1](<https://example.org/source>)"))
+        assertTrue(displayed.startsWith("😀ab answer\n\n来源："))
+        assertTrue(displayed.contains("](<https://example.org/source>)"))
         assertFalse(events.any { it is ModelEvent.ToolReady })
         val history = Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant", emptyList(),
             RunStatus.COMPLETED, protocolItems = listOf(row.toString()))

@@ -5,6 +5,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.util.JsonReader
 import android.util.JsonToken
 import app.daiyu.android.domain.*
+import app.daiyu.android.model.LegacySearchDisplay
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.StringReader
@@ -33,7 +34,7 @@ internal object MessageDisplayStore {
             fun decodePayload(payload: String): MessageDisplayRow {
                 val value = JSONObject(payload)
                 require(value.keys().asSequence().toSet() == setOf("version", "id", "conversation", "run", "blocks", "history"))
-                require(value.getInt("version") == 1 && value.getString("id") == row.id &&
+                require(value.getInt("version") == 2 && value.getString("id") == row.id &&
                     value.getString("conversation") == conversation.value && value.getString("run") == row.run)
                 val history = value.getJSONArray("history")
                 repeat(history.length()) { require(history.getJSONObject(it).getJSONArray("protocol").length() == 0) }
@@ -50,10 +51,19 @@ internal object MessageDisplayStore {
               catch (cancelled: android.os.OperationCanceledException) { throw cancelled }
               catch (_: Exception) { db.delete("message_display", "message_id=?", arrayOf(row.id)); null }
             row.seq to (hit ?: run {
-                // Legacy rows pay a one-time scan, without materializing/validating protocol items.
+                // Ordinary rows still skip protocols. Only exact legacy candidates need raw evidence.
                 val blockText = requireNotNull(SQLiteText.read(db, "messages", "blocks", "id", row.id))
                 val history = requireNotNull(SQLiteText.read(db, "messages", "history_segments", "id", row.id))
-                val payload = envelope(row.id, conversation.value, row.run, JSONArray(blockText), stripProtocols(history)).toString()
+                val blocks = JSONArray(blockText)
+                val retainCoordinates = hasReconnect(db, conversation, row.id)
+                if (!retainCoordinates && hasCandidate(row.role, blocks)) {
+                    val raw = SQLiteText.read(db, "messages", "protocol", "id", row.id)
+                    val protocol = try { raw?.let(::JSONArray) } catch (_: Exception) { null }
+                    if (protocol != null) repairBlocks(row.role, blocks, protocol)
+                }
+                val segments = stripProtocols(history)
+                if (!retainCoordinates) repairHistory(history, segments)
+                val payload = envelope(row.id, conversation.value, row.run, blocks, segments).toString()
                 val projection = decodePayload(payload)
                 check(db.insertOrThrow("message_display", null, ContentValues().apply {
                     put("message_id", row.id); put("payload", payload)
@@ -68,12 +78,60 @@ internal object MessageDisplayStore {
         }
     }
 
+    // Legacy lengths are also durable reconnect coordinates; never reinterpret them during display repair.
+    internal fun hasReconnect(db: SQLiteDatabase, conversation: ConversationId, id: String): Boolean =
+        db.rawQuery("SELECT 1 FROM chat_timeline_events WHERE conversation_id=? AND message_id=? AND kind='reconnect' LIMIT 1",
+            arrayOf(conversation.value, id)).use { it.moveToFirst() }
+
     private fun envelope(id: String, conversation: String, run: String, blocks: JSONArray, history: JSONArray) =
-        JSONObject().put("version", 1).put("id", id).put("conversation", conversation).put("run", run)
+        JSONObject().put("version", 2).put("id", id).put("conversation", conversation).put("run", run)
             .put("blocks", blocks).put("history", history)
 
     private data class Metadata(val seq: Long, val id: String, val run: String, val role: String,
         val status: String, val time: Long?)
+
+    private fun hasCandidate(role: String, blocks: JSONArray): Boolean = role == Message.ASSISTANT_ROLE &&
+        (0 until blocks.length()).any { index -> blocks.getJSONObject(index).let {
+            it.optString("type") == "text" && LegacySearchDisplay.candidate(it.optString("text"))
+        } }
+
+    private fun repairBlocks(role: String, blocks: JSONArray, protocol: JSONArray) {
+        try {
+            val original = decodeBlocks(blocks)
+            val projected = LegacySearchDisplay.project(role, original,
+                (0 until protocol.length()).map { protocol.getString(it) })
+            projected.forEachIndexed { index, block ->
+                if (block is MessageBlock.Text && block !== original[index]) blocks.getJSONObject(index).put("text", block.text)
+            }
+        } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
+          catch (_: Exception) { /* Unprovable legacy records retain their stored display. */ }
+    }
+
+    private fun repairHistory(source: String, segments: JSONArray) {
+        val candidates = (0 until segments.length()).filter { index -> segments.getJSONObject(index).let {
+            hasCandidate(it.getString("role"), it.getJSONArray("blocks"))
+        } }.toSet()
+        if (candidates.isEmpty()) return
+        JsonReader(StringReader(source)).use { reader ->
+            reader.beginArray()
+            var index = 0
+            while (reader.hasNext()) {
+                if (index !in candidates) reader.skipValue() else {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        if (reader.nextName() == "protocol") {
+                            val protocol = jsonValue(reader) as? JSONArray
+                            val segment = segments.getJSONObject(index)
+                            if (protocol != null) repairBlocks(segment.getString("role"), segment.getJSONArray("blocks"), protocol)
+                        } else reader.skipValue()
+                    }
+                    reader.endObject()
+                }
+                index++
+            }
+            reader.endArray()
+        }
+    }
 
     private fun stripProtocols(source: String): JSONArray = JsonReader(StringReader(source)).use { reader ->
         val result = JSONArray()

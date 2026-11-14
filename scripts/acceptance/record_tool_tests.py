@@ -276,7 +276,14 @@ CHILD_TASK_CARD_MODULES = (
 )
 
 
+RENDERING_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.RenderingRegressionTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.MarkdownTableStyleTest', 'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningMarkdownTest', 'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest', 'app.daiyu.android.RestoredMarkdownActivityTest')
+RENDERING_MODULES = ('test_reasoning_workflow_contract', 'test_work_timeline_connector_contract', 'test_workflow_render_isolation_contract', 'test_markdown_typing_contract', 'test_markdown_body_visibility_contract', 'test_markdown_table_style_contract', 'test_markdown_code_block_contract', 'test_markdown_entry_contract', 'test_markdown_cold_start_contract', 'test_markdown_return_contract', 'test_markdown_stream_progress_contract', 'test_markdown_stream_optimization_contract', 'test_message_display_contract', 'test_rendering_smoke_scope', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt')
+
+
 def command_for(python, env):
+    if (env.get('SMOKE_MODE') == 'smoke'
+            and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) == sorted(RENDERING_PLATFORM_CLASSES)):
+        return [python, '-B', '-m', 'unittest', *RENDERING_MODULES, '-v'], 'rendering-targeted'
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(COMPOSER_CONTEXT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *COMPOSER_CONTEXT_MODULES, "-v"], "composer-context-targeted"

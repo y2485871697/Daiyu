@@ -66,7 +66,7 @@ class AssistantWorkflowContentTest {
                 is MessageContentUi.Tool -> it.step.id; else -> "image" }
         })
         assertEquals(listOf("answer"), ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.text })
-        assertEquals(1, ordered.plainNarration.size)
+        assertTrue(ordered.plainNarration.isEmpty())
     }
     @Test fun plainAnswersAndImagesWithoutAnyStepsNeverCreateAnEmptyWorkflow() {
         val turn = map(source(listOf(MessageBlock.Text("a", "answer"))))

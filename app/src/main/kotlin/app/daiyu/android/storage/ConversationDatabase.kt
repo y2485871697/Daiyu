@@ -946,14 +946,23 @@ class ConversationDatabase internal constructor(context: Context, private val af
         require(limit in 1..200) {"分页数量须为1至200"}
         val db=readableDatabase
         db.beginTransaction()
-        try {
+        val result = try {
             val ids=db.rawQuery("SELECT seq,id FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",
                 arrayOf(id.value,before.toString(),limit.toString())).use { c ->
                 buildList { while(c.moveToNext()) add(c.getLong(0) to c.getString(1)) }.reversed()
             }
             val result=ids.map { (seq,key) -> seq to storedMessage(db,id,key, verifyVideoWitness = false) }
-            db.setTransactionSuccessful();return result
+            db.setTransactionSuccessful()
+            result
         } finally { db.endTransaction() }
+        result.forEach { (_, message) ->
+            val candidates = (message.blocks + message.historySegments.flatMap { it.blocks }).any {
+                it is MessageBlock.Text && app.daiyu.android.model.LegacySearchDisplay.candidate(it.text)
+            }
+            if (candidates && !MessageDisplayStore.hasReconnect(db, id, message.id.value))
+                app.daiyu.android.model.LegacySearchDisplay.prepare(message)
+        }
+        return result
     }
     private fun jsonStrings(array:JSONArray) = (0 until array.length()).map {array.getString(it)}
     private fun encode(blocks:List<MessageBlock>)=JSONArray().apply { blocks.forEach { b -> put(when(b) {

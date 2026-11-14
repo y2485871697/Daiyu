@@ -349,9 +349,9 @@ private fun MarkdownTableRow(row: List<List<MarkdownInline>>, rowIndex: Int, off
         row.forEachIndexed { column, cell ->
             val budget = rememberMarkdownVisibility(visibility, offsets[column], lengths[column])
             val align = when (alignment[column]) {
-                MarkdownBlock.Alignment.LEFT -> TextAlign.Start
+                MarkdownBlock.Alignment.LEFT -> TextAlign.Left
                 MarkdownBlock.Alignment.CENTER -> TextAlign.Center
-                MarkdownBlock.Alignment.RIGHT -> TextAlign.End
+                MarkdownBlock.Alignment.RIGHT -> TextAlign.Right
             }
             Box(Modifier.width(widths[column]).padding(horizontal = 10.dp, vertical = 7.dp)) {
                 MarkdownInlineText(cell, openLink, Modifier.fillMaxWidth(), style.copy(

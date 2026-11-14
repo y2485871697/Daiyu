@@ -126,7 +126,8 @@ object ChatTurnMapper {
             positions[block]?.let { local[block] = it }
             sources[block]?.let { localSources[block] = it }
         }
-        return RenderMessage(message.id, message.conversationId, message.runId, message.role, message.blocks,
+        return RenderMessage(message.id, message.conversationId, message.runId, message.role,
+            message.blocks.map(app.daiyu.android.model.LegacySearchDisplay::display),
             message.status, message.error, message.createdAt, message.reportedReasoning, message, local, localSources)
     }
 
@@ -183,9 +184,9 @@ object ChatTurnMapper {
                         reportedReasoning = prior.message.reportedReasoning + message.reportedReasoning.map {
                             it.copy(blockOffset = (it.blockOffset ?: 0) + offset)
                         }, authoritative = prior.message.authoritative?.let { original -> original.copy(
-                            blocks = prior.message.blocks + message.blocks,
-                            reportedReasoning = prior.message.reportedReasoning + message.reportedReasoning.map {
-                                it.copy(blockOffset = (it.blockOffset ?: 0) + offset)
+                            blocks = original.blocks + message.authoritative?.blocks.orEmpty(),
+                            reportedReasoning = original.reportedReasoning + message.authoritative?.reportedReasoning.orEmpty().map {
+                                it.copy(blockOffset = (it.blockOffset ?: 0) + original.blocks.size)
                             }) }),
                     segments = prior.segments + segment, keys = prior.keys + owner.listKey(segment))
             } else display += DisplayMessage(message, owner, listOf(segment), listOf(owner.listKey(segment)), start)

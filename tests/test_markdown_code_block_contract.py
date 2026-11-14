@@ -121,12 +121,13 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn("clipboard.setText(AnnotatedString(document.text))", dialog)
 
     def test_download_freezes_code_and_writes_only_utf8_to_selected_document(self):
-        for token in ['ActivityResultContracts.CreateDocument("text/plain")', "pendingDownload = block.text",
-                      "val content = pendingDownload", "pendingDownload = null", "uri != null && content != null",
+        for token in ['ActivityResultContracts.CreateDocument("text/plain")', "val content = block.text",
+                      "pendingDownloadId by rememberSaveable", "pendingDownloadId = id", "pendingDownloadId = null",
+                      "snapshot.writeText(content, Charsets.UTF_8)", "snapshot.inputStream()", "input.copyTo(output)",
                       'require(uri.scheme == "content")', "Dispatchers.IO", 'openOutputStream(uri, "wt")',
-                      "content.toByteArray(Charsets.UTF_8)", "it.flush()", "throw cancelled"]:
+                      "output.flush()", "throw cancelled", "snapshot.delete()"]:
             self.assertIn(token, self.code)
-        self.assertNotIn("rememberSaveable", self.code)
+        self.assertNotIn("rememberSaveable { mutableStateOf(block.text)", self.code)
         self.assertNotIn("Environment.getExternalStorage", self.code)
 
 

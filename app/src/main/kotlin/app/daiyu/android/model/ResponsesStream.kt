@@ -292,7 +292,13 @@ internal object ResponsesStream {
                     checkProtocol(response.getString("status")=="completed")
                     val out=response.getJSONArray("output")
                     try {
+                        val messageIds = mutableSetOf<String>()
                         for (i in 0 until out.length()) {
+                            val item = out.getJSONObject(i)
+                            if (item.optString("type") == "message") {
+                                val id = item.optString("id")
+                                checkProtocol(id.isNotBlank() && messageIds.add(id))
+                            }
                             checkProtocol(out.getJSONObject(i).optString("type") != "function_call_output")
                             ResponsesSearchProtocol.validateItem(out.getJSONObject(i))
                         }

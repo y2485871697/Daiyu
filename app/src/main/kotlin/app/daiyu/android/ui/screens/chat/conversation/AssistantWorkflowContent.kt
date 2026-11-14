@@ -40,7 +40,7 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     val steps = work?.segments.orEmpty().flatMapIndexed { index, segment -> buildList {
         if (!segment.narration.isNullOrBlank()) {
             val id = segment.narrationId ?: "workflow-narration:$index"
-            narration += id
+            // Narration uses the same Markdown projection as mixed-content replies.
             add(MessageContentUi.Text(id, segment.narration))
         }
         segment.reasoning?.let { add(MessageContentUi.Reasoning(it)) }

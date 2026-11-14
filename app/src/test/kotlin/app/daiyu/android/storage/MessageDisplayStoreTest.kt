@@ -205,4 +205,38 @@ class MessageDisplayStoreTest {
         assertTrue(database.displayMessages(empty.id, latestRunOnly = true).rows.isEmpty())
     }
 
+    @Test fun exactLegacySearchDisplayRebuildsOldPayloadAndPreservesAuthoritativeBytes() {
+        val (user, answer) = seed()
+        val plain = "## Heading\n\n**bold** [link](https://example.org)"
+        val item = org.json.JSONObject().put("type", "message").put("id", "body").put("role", "assistant")
+            .put("status", "completed").put("content", org.json.JSONArray().put(org.json.JSONObject()
+                .put("type", "output_text").put("text", plain).put("annotations", org.json.JSONArray().put(
+                    org.json.JSONObject().put("type", "url_citation").put("start_index", 0).put("end_index", 2)
+                        .put("url", "https://source.test").put("title", "Source")))))
+        val protocol = listOf(item.toString())
+        val old = app.daiyu.android.model.ResponsesSearchProtocol.legacyDisplayText(item, plain)
+        val saved = answer.copy(status = RunStatus.COMPLETED, blocks = listOf(MessageBlock.Text("body", old)),
+            protocolItems = protocol,
+            historySegments = listOf(MessageHistorySegment(answer.id, "assistant", listOf(MessageBlock.Text("body", old)), protocol)))
+        database.save(saved)
+        val db = database.writableDatabase
+        fun bytes() = listOf("blocks", "protocol", "history_segments").map { SQLiteText.read(db, "messages", it, "id", answer.id.value) }
+        val original = bytes()
+        val first = database.displayMessages(user.conversationId)
+        val shown = first.rows.last().second
+        val expected = app.daiyu.android.model.ResponsesSearchProtocol.displayText(item, plain)
+        assertEquals(expected, (shown.blocks.single() as MessageBlock.Text).text)
+        assertEquals(expected, (shown.segments.single().blocks.single() as MessageBlock.Text).text)
+        val payload = org.json.JSONObject(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", answer.id.value)))
+        payload.put("version", 1)
+        payload.getJSONArray("blocks").getJSONObject(0).put("text", old)
+        db.execSQL("UPDATE message_display SET payload=? WHERE message_id=?", arrayOf(payload.toString(), answer.id.value))
+        assertEquals(first, database.displayMessages(user.conversationId))
+        assertEquals(original, bytes())
+        val authority = database.messages(user.conversationId).map { it.second }
+        assertEquals(saved, authority.last())
+        assertEquals(ChatTurnMapper.mapDisplay(first), ChatTurnMapper.map(authority))
+        assertEquals(original, bytes())
+    }
+
 }

@@ -38,21 +38,43 @@ class ChatStatusBarInsetsTest : WiredActivityTestCase() {
         return view to { Geometry(bounds(list), bounds(header), bounds(composer)) }
     }
 
+    private fun assertNativeGeometry(view: View, geometry: () -> Geometry, baseline: Geometry, label: String) {
+        val insets = checkNotNull(ViewCompat.getRootWindowInsets(view))
+        val position = IntArray(2)
+        view.getLocationInWindow(position)
+        val windowBottom = position[1] + view.height
+        val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+        val navigation = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+        val bottom = (windowBottom - maxOf(ime.bottom, navigation.bottom)).toFloat()
+        val gap = baseline.list.bottom - baseline.composer.bottom
+        val expected = baseline.copy(
+            list = Rect(baseline.list.left, baseline.list.top, baseline.list.right, bottom),
+            composer = Rect(baseline.composer.left, bottom - gap - baseline.composer.height,
+                baseline.composer.right, bottom - gap),
+        )
+        assertEquals("$label window=(${position[0]},${position[1]},${view.width},${view.height}) " +
+            "status=${insets.getInsets(WindowInsetsCompat.Type.statusBars())} " +
+            "statusStable=${insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())} " +
+            "ime=$ime imeVisible=${insets.isVisible(WindowInsetsCompat.Type.ime())} nav=$navigation",
+            expected, geometry())
+    }
+
     private fun assertNativeDraws(view: View, geometry: () -> Geometry, expected: Geometry,
-        change: () -> Unit, ready: () -> Boolean) {
+        label: String, change: () -> Unit, ready: () -> Boolean) {
         var draws = 0
         var failure: Throwable? = null
         val observer = view.viewTreeObserver
         val listener = ViewTreeObserver.OnDrawListener {
             draws++
-            try { assertEquals("Status-bar visibility changed native chat geometry", expected, geometry()) }
+            try { assertNativeGeometry(view, geometry, expected, "$label draw=$draws") }
             catch (caught: Throwable) { if (failure == null) failure = caught }
         }
-        val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
         try {
-            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
-            instrumentation.runOnMainSync { observer.addOnDrawListener(listener) }
-            mainThread(change)
+            mainThread {
+                assertNativeGeometry(view, geometry, expected, "$label baseline")
+                observer.addOnDrawListener(listener)
+                change()
+            }
             awaitStableWindowFrame(view) {
                 failure?.let { throw it }
                 geometry().takeIf { ready() }
@@ -67,7 +89,6 @@ class ChatStatusBarInsetsTest : WiredActivityTestCase() {
                 if (observer.isAlive) observer.removeOnDrawListener(listener)
                 else view.viewTreeObserver.removeOnDrawListener(listener)
             }
-            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
         }
     }
 
@@ -79,7 +100,9 @@ class ChatStatusBarInsetsTest : WiredActivityTestCase() {
         val originallyVisible = ui.runOnIdle {
             checkNotNull(ViewCompat.getRootWindowInsets(view)).isVisible(status)
         }
+        val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
         try {
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
             mainThread { controller.show(status) }
             val physicalTop = awaitStableWindowFrame(view) {
                 ViewCompat.getRootWindowInsets(view)?.takeIf {
@@ -100,9 +123,10 @@ class ChatStatusBarInsetsTest : WiredActivityTestCase() {
                     assertTrue("IME still raises composer", expected.composer.bottom < withoutIme.composer.bottom - 48f)
                     assertEquals("IME must not pan chat header", withoutIme.header.bottom, expected.header.bottom, 1f)
                 }
-                repeat(2) {
+                repeat(2) { round ->
                     for (visible in listOf(false, true)) {
                         assertNativeDraws(view, geometry, expected,
+                            label = "IME=$withIme round=$round statusVisible=$visible",
                             change = { if (visible) controller.show(status) else controller.hide(status) },
                             ready = {
                                 val insets = ViewCompat.getRootWindowInsets(view)
@@ -121,6 +145,7 @@ class ChatStatusBarInsetsTest : WiredActivityTestCase() {
         } finally {
             mainThread { if (originallyVisible) controller.show(status) else controller.hide(status) }
             dismissIme()
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
         }
     }
 

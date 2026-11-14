@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import android.view.View
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +38,18 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.Modifier
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+private class NativeChatStatusBarInsets(
+    private val view: View,
+    private val source: WindowInsets,
+) : WindowInsets by source {
+    override fun getTop(density: Density): Int {
+        // Keep layout invalidation, but bypass Compat's animated synthetic inset objects.
+        val composeTop = source.getTop(density)
+        return ViewCompat.getRootWindowInsets(view)
+            ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: composeTop
+    }
+}
 
 /** Host owns every business operation; this screen never accesses a controller or repository. */
 data class ChatScreenActions(
@@ -104,6 +120,8 @@ internal fun DaiyuChatScreen(
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
+    val statusBars = WindowInsets.statusBarsIgnoringVisibility
+    val stableStatusBars = remember(view, statusBars) { NativeChatStatusBarInsets(view, statusBars) }
     var draftFocused by remember { mutableStateOf(false) }
     var inputDismissInProgress by remember { mutableStateOf(false) }
     val dismissInputOnTap = chatInputDismissTapModifier {
@@ -120,7 +138,7 @@ internal fun DaiyuChatScreen(
     Box(Modifier.fillMaxSize().onGloballyPositioned { overlayOrigin = it.positionInRoot() }) {
     Column(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
-            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility),
+            .windowInsetsPadding(stableStatusBars),
     ) {
         ChatTopBar(state.title, actions, modifier = dismissInputOnTap, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,

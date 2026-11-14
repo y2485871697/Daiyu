@@ -179,13 +179,20 @@ class ContentRecoveryWitnessContract(unittest.TestCase):
     def test_chat_status_bar_space_ignores_visibility_but_keeps_live_bottom_insets(self):
         root = Path(__file__).resolve().parents[1]
         chat = (root / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatScreen.kt").read_text()
-        self.assertIn(".windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)", chat)
+        self.assertIn("val statusBars = WindowInsets.statusBarsIgnoringVisibility", chat)
+        self.assertIn("remember(view, statusBars) { NativeChatStatusBarInsets(view, statusBars) }", chat)
+        self.assertIn(".windowInsetsPadding(stableStatusBars)", chat)
+        native = body(chat, "override fun getTop(density: Density)")
+        self.assertIn("val composeTop = source.getTop(density)", native)
+        self.assertIn("ViewCompat.getRootWindowInsets(view)", native)
+        self.assertIn("getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: composeTop", native)
+        self.assertLess(native.index("source.getTop(density)"), native.index("ViewCompat.getRootWindowInsets(view)"))
+        self.assertNotIn("coerceAtLeast", native)
         self.assertIn("@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)", chat)
         self.assertNotIn("statusBarsPadding", chat)
         self.assertIn(".windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))", chat)
         self.assertNotIn("systemBarsIgnoringVisibility", chat)
         self.assertNotIn("navigationBarsIgnoringVisibility", chat)
-        self.assertNotIn("getInsetsIgnoringVisibility", chat)
 
     def test_status_bar_regression_observes_native_draws_before_visibility_and_home_resume(self):
         root = Path(__file__).resolve().parents[1]
@@ -198,7 +205,16 @@ class ContentRecoveryWitnessContract(unittest.TestCase):
             self.assertIn(source, android)
         for forbidden in ("setContent", "captureScreenNode", "takeScreenshot", "SDK_INT", "Thread.sleep"):
             self.assertNotIn(forbidden, android)
-        self.assertLess(android.index("observer.addOnDrawListener(listener)"), android.index("mainThread(change)"))
+        native = body(android, "private fun assertNativeDraws(")
+        self.assertLess(native.index("observer.addOnDrawListener(listener)"), native.index("change()"))
+        self.assertIn("assertNativeGeometry(view, geometry, expected", native)
+        oracle = body(android, "private fun assertNativeGeometry(")
+        for source in ("view.getLocationInWindow(position)", "position[1] + view.height",
+                       "maxOf(ime.bottom, navigation.bottom)", "baseline.list.top",
+                       "baseline.composer.height", "expected, geometry()"):
+            self.assertIn(source, oracle)
+        self.assertNotIn("delta", oracle)
+        self.assertNotIn("coerce", oracle)
         flow = (root / "scripts/smoke_boot.sh").read_text()
         self.assertIn("app.daiyu.android.ChatStatusBarInsetsTest", flow)
         self.assertIn("chat_status_bar_only", flow)

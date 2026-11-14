@@ -104,7 +104,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn("turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady", chat)
         self.assertIn("val currentComplete = rememberUpdatedState(generationComplete)", chat)
         self.assertIn("generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,", chat)
-        self.assertEqual(2, chat.count("textBody = textBody"))
+        self.assertEqual(3, chat.count("textBody = textBody"))
         self.assertIn("generationComplete && body.text == text", self.markdown)
         self.assertIn("MarkdownBlocks(block.blocks, openLink, visibility, generationComplete)", self.markdown)
         self.assertIn("MarkdownBlocks(item.blocks, openLink, visibility, generationComplete)", self.markdown)

@@ -105,7 +105,7 @@ class SourceTests(unittest.TestCase):
                      '          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}'):
             self.assertIn(name + suffix, workflow)
         smoke = workflow.split('  smoke:\n', 1)[1]
-        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}", smoke)
+        self.assertIn("SMOKE_SHARD_COUNT: ${{ (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalCommandPagerTest') && '1' || (inputs.mode == 'daily' || (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalScreenTest')) && '1' || '4' }}", smoke)
         matrix = re.search(r"\|\| '(\[[^']*\])'\) }}", smoke).group(1)
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
                          {(api, index) for api in ('26', '37.2') for index in range(4)})
@@ -113,7 +113,10 @@ class SourceTests(unittest.TestCase):
     def test_api26_has_pinned_emulator_without_changing_image_or_formal_matrix(self):
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]
-        self.assertEqual(len(matrices), 4)
+        self.assertEqual(len(matrices), 6)
+        dual_api_single_shard = {(api, 0) for api in ('26', '37.2')}
+        for matrix in matrices[:3]:
+            self.assertEqual({(item['api'], item['shard']) for item in matrix}, dual_api_single_shard)
         for matrix in matrices:
             for item in matrix:
                 self.assertEqual(item['target'], 'google_apis' if item['api'] == '26' else 'google_apis_ps16k')

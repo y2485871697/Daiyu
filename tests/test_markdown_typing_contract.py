@@ -60,7 +60,9 @@ class MarkdownTypingContract(unittest.TestCase):
                       'RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),',
                       'generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,'):
             self.assertIn(token, text_body)
-        self.assertEqual(1, assistant.count('textBody = textBody'))
+        self.assertEqual(1, assistant.count('val textBody = rememberAssistantTextBody('))
+        self.assertEqual(2, assistant.count('textBody = textBody'))
+        self.assertIn('MessageContent(ordered.leading, actions, imageLoader, markdown = true, textBody = textBody)', assistant)
         self.assertIn('WorkflowNarrationContent(steps, plainText, textSources,', self.chat)
         self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", self.ui)
         content = (BASE / "MessageContent.kt").read_text()

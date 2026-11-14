@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 存储、菜单、诊断采集或返回专项增量检查
         type: choice
-        options: [storage, menu-scroll, ui-jank, ui-jank-recorder, page-back]
+        options: [storage, menu-scroll, ui-jank, ui-jank-recorder, page-back, interaction-readiness]
         default: storage
 permissions:
   contents: read
@@ -83,6 +83,11 @@ jobs:
                           'test_diagnostic_smoke_source.py', 'test_page_back_smoke_scope.py',
                           'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py',
                           'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'interaction-readiness':
+              patterns = ('test_bottom_sheet_dismiss_motion_contract.py', 'test_sheet_selection_exit_contract.py',
+                          'test_dialog_motion_contract.py', 'test_page_enter_contract.py',
+                          'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py',
+                          'test_context_route_lifecycle_contract.py')
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] in ('menu-scroll', 'ui-jank'):
               patterns += ('test_diagnostic_smoke_source.py', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
           for pattern in patterns:
@@ -138,6 +143,9 @@ jobs:
           if [[ $SCREEN_JANK_CHECK_SCOPE == page-back ]]; then
             classes=(app.daiyu.android.diagnostics.RuntimeDiagnosticsTest app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.BackPerformanceRecorderTest app.daiyu.android.diagnostics.BackPerformanceRuntimeTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest app.daiyu.android.ChatGptSpeedSelectionTest app.daiyu.android.MessageActionRenderedRevisionTest)
           fi
+          if [[ $SCREEN_JANK_CHECK_SCOPE == interaction-readiness ]]; then
+            classes=(app.daiyu.android.ui.components.DialogMotionSpecTest app.daiyu.android.ui.components.BottomSheetActionTest app.daiyu.android.ui.navigation.PageBackMotionTest)
+          fi
           filters=()
           for class in "${classes[@]}"; do
             filters+=(--tests "$class")
@@ -168,6 +176,8 @@ jobs:
               expected = {'RuntimeDiagnosticsTest', 'JankIncidentBufferTest', 'BackPerformanceRecorderTest', 'BackPerformanceRuntimeTest', 'DiagnosticLogStoreTest',
                           'FramePerformanceLogTest', 'ReconnectPartsTest', 'ReconnectIndexTest',
                           'RootExitConfirmationTest', 'PageBackMotionTest', 'ChatGptSpeedSelectionTest', 'MessageActionRenderedRevisionTest'}
+          if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'interaction-readiness':
+              expected = {'DialogMotionSpecTest', 'BottomSheetActionTest', 'PageBackMotionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

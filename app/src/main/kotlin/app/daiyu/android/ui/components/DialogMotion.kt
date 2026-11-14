@@ -116,9 +116,11 @@ internal fun DialogMotionProvider(
         LaunchedEffect(motion.dismissSource) {
             val source = motion.dismissSource
             val target = if (source == null) 1f else 0f
+            val dismissSpec = dialogExitSpec()
             coroutineScope {
-                launch { motion.scrimProgress.animateTo(target, tween(300, easing = DecelerateEasing(1.5f))) }
-                motion.progress.animateTo(target, dialogEnterSpec(largeScreen))
+                launch { motion.scrimProgress.animateTo(target,
+                    if (source == null) tween(300, easing = DecelerateEasing(1.5f)) else dismissSpec) }
+                motion.progress.animateTo(target, if (source == null) dialogEnterSpec(largeScreen) else dismissSpec)
             }
             if (source != null) {
                 when (source) {
@@ -156,6 +158,10 @@ internal fun Modifier.dialogDismissInputGuard(): Modifier {
 internal fun dialogEnterSpec(largeScreen: Boolean): FiniteAnimationSpec<Float> =
     if (largeScreen) folmeSpring(damping = 0.9f, response = 0.3f)
     else spring(dampingRatio = 0.88f, stiffness = 450f, visibilityThreshold = 0.0001f)
+
+// Exit must finish with its scrim, rather than retaining a transparent modal through a spring tail.
+internal fun dialogExitSpec(): FiniteAnimationSpec<Float> =
+    tween(durationMillis = 220, easing = DecelerateEasing(1.5f))
 
 @Composable
 internal fun rememberDialogEnterProgress(largeScreen: Boolean): Animatable<Float, androidx.compose.animation.core.AnimationVector1D> {

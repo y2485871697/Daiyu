@@ -9,6 +9,17 @@ import org.junit.Test
 import top.yukonga.miuix.kmp.anim.folmeSpring
 
 class DialogMotionSpecTest {
+    @Test fun exitFinishesExactlyWithTheScrimWithoutASettlingTail() {
+        for (start in listOf(1f, 0.4f)) {
+            val exit = TargetBasedAnimation(dialogExitSpec(), Float.VectorConverter, start, 0f)
+            assertEquals(220_000_000L, exit.durationNanos)
+            assertTrue(exit.getValueFromNanos(80_000_000L) in 0f..start)
+            assertTrue(exit.getValueFromNanos(80_000_000L) > 0f)
+            assertEquals(0f, exit.getValueFromNanos(220_000_000L), 0f)
+            assertTrue(exit.isFinishedFromNanos(220_000_000L))
+        }
+    }
+
     @Test fun compactEntryMatchesAssistantSpringAtEverySample() {
         val actual = TargetBasedAnimation(dialogEnterSpec(false), Float.VectorConverter, 0f, 1f)
         val expected = TargetBasedAnimation(

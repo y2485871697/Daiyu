@@ -64,9 +64,16 @@ class PageEnterContractTest(unittest.TestCase):
         self.assertIn('LaunchedEffect(departure, departure?.forwardSkipped, resumed, pauseEpoch)', self.host)
         self.assertIn('var forwardSkipped by mutableStateOf(false)', self.layers)
         self.assertIn('if (frame.holdingForChild) frame.childChangeCaptured = false', self.host)
-        self.assertIn('if (activeDeparture && departure?.forward == true) Box(', self.host)
-        self.assertIn('testTag("page-enter-blocker").pointerInput(departure)', self.host)
-        self.assertIn('state.transitionBlocked = activeDeparture ||', self.host)
+        self.assertNotIn('testTag("page-enter-blocker")', self.host)
+        self.assertIn('state.transitionBlocked = (activeDeparture && departure?.forward != true) ||', self.host)
+        self.assertIn('testTag("page-back-departure").pointerInput(departure)', self.host)
+
+    def test_predictive_back_takes_over_the_forward_clock_before_updating_progress(self):
+        handler = self.host.split('override fun handleOnBackStarted(', 1)[1].split('override fun handleOnBackProgressed(', 1)[0]
+        self.assertLess(handler.index('activeState.interruptEnterMotion()'), handler.index('activeState.update(owner'))
+        takeover = self.host.split('state.interruptEnterMotion = {', 1)[1].split('val diagnosticSettling', 1)[0]
+        for token in ('departure?.forward == true', 'departure.forwardSkipped = true', 'departing = false'):
+            self.assertIn(token, takeover)
 
     def test_frame_fixture_keeps_cold_clock_paused_and_samples_pixels_before_geometry(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageEnterActivityTest.kt').read_text()
@@ -85,16 +92,17 @@ class PageEnterContractTest(unittest.TestCase):
                        'testEnteringPageMirrorsTheOriginalMotionInRtl',
                        'testInitiallyMountedNestedPageHasNoInventedParentEntry',
                        'testNestedEntriesKeepOneLiveControllerAndDoNotReplayOnLoadingChanges',
-                       'testSidebarContentAliasEntersARealPageAndEntryBlocksTouchThrough',
+                       'testSidebarContentAliasEntersARealPageAndEntryAcceptsDestinationTouch',
                        'testColdStartReplacementAndScopeChangeDoNotInventAnEntry',
                        'testDialogRoutesAndPreviewSuppressionDoNotMoveUnderlyingContent'):
             self.assertIn('fun ' + method + '(', test)
-        for token in ('swipeDismissEnabled = false, predictiveBackEnabled = false',
+        for token in ('swipeDismissEnabled = false, predictiveBackEnabled = prediction',
                       'progress > 0f && progress < 1f', 'initial.width * .25f * progress',
                       'val alpha = 1f - .1f * progress', 'val light = 1f - .5f * progress',
                       'assertEquals(1, controllers)', 'assertEquals(0, disposed)',
                       'scopeId++; screen = "settings"', '.performTouchInput { click(',
-                      'assertEquals(0, fixture.opens.get())'):
+                      'assertEquals(0, fixture.opens.get())', 'assertEquals("settings", clickedScreen)',
+                      'testBackInterruptsForwardEntryWithoutWaitingForItsAnimation'):
             self.assertIn(token, test)
 
 

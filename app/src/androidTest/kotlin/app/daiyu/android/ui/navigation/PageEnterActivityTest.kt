@@ -3,6 +3,7 @@ package app.daiyu.android.ui.navigation
 import android.os.Build
 
 import androidx.activity.compose.setContent
+import androidx.activity.BackEventCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -35,6 +36,7 @@ class PageEnterActivityTest : WiredActivityTestCase() {
     private var disposed = 0
     private var backs = 0
     private var clicks = 0
+    private var clickedScreen: String? = null
     private var background = Color.Black
     private var drawingWasEnabled = false
 
@@ -50,7 +52,7 @@ class PageEnterActivityTest : WiredActivityTestCase() {
     }
 
     private fun mount(local: Boolean = false, rtl: Boolean = false,
-        transitions: Boolean = true, preview: Boolean = true) {
+        transitions: Boolean = true, preview: Boolean = true, prediction: Boolean = false) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -60,7 +62,7 @@ class PageEnterActivityTest : WiredActivityTestCase() {
                         PageBackGestureHost(routeKey = rendered,
                             contentKey = if (rendered == "chat-sidebar" || rendered == "dialog") "chat" else rendered,
                             backTargetKey = if (rendered == "chat" || rendered == "chat-sidebar") null else "chat",
-                            canNavigateBack = rendered != "chat", swipeDismissEnabled = false, predictiveBackEnabled = false,
+                            canNavigateBack = rendered != "chat", swipeDismissEnabled = false, predictiveBackEnabled = prediction,
                             animateBackEnabled = transitions && rendered != "dialog", previewScopeKey = scopeId,
                             dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() }) {
                             PageBackHandler(enabled = rendered != "chat", previewEnabled = preview) { backs++; screen = "chat" }
@@ -76,7 +78,7 @@ class PageEnterActivityTest : WiredActivityTestCase() {
                                     rendered == "settings" || rendered == "sibling" -> Color.Blue
                                     else -> Color.Red
                                 }
-                                Box(Modifier.fillMaxSize().background(color).testTag("entry-content").clickable { clicks++ })
+                                Box(Modifier.fillMaxSize().background(color).testTag("entry-content").clickable { clicks++; clickedScreen = rendered })
                             }
                         }
                     }
@@ -89,10 +91,11 @@ class PageEnterActivityTest : WiredActivityTestCase() {
     }
 
     private fun awaitEntryCapture(): Boolean {
+        var frames = 0
         ui.waitUntil(timeoutMillis = 5000) {
             ui.mainClock.advanceTimeByFrame()
-            ui.onAllNodesWithTag("page-enter-previous").fetchSemanticsNodes().isNotEmpty() ||
-                ui.onAllNodesWithTag("page-enter-blocker").fetchSemanticsNodes().isEmpty()
+            frames++
+            ui.onAllNodesWithTag("page-enter-previous").fetchSemanticsNodes().isNotEmpty() || frames >= 40
         }
         val captured = ui.onAllNodesWithTag("page-enter-previous").fetchSemanticsNodes().isNotEmpty()
         if (!captured) assertTrue("synchronous capture must animate; API26 may fall back before its ImageReader completes", Build.VERSION.SDK_INT < 28)
@@ -141,8 +144,6 @@ class PageEnterActivityTest : WiredActivityTestCase() {
             assertEquals((alpha + background.red * (1f - alpha)) * light, actual.red, .035f)
             assertEquals(background.green * (1f - alpha) * light, actual.green, .035f)
             assertEquals(background.blue * (1f - alpha) * light, actual.blue, .035f)
-            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            assertEquals("entry does not dispatch an extra return", 0, backs)
             ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-enter-previous").assertDoesNotExist()
             ui.onNodeWithTag("page-enter-scrim").assertDoesNotExist()
@@ -156,6 +157,57 @@ class PageEnterActivityTest : WiredActivityTestCase() {
     fun testEnteringPageUsesOriginalMotionWithBothGesturesDisabled() = assertEntryMotion(rtl = false)
 
     fun testEnteringPageMirrorsTheOriginalMotionInRtl() = assertEntryMotion(rtl = true)
+
+    fun testBackInterruptsForwardEntryWithoutWaitingForItsAnimation() {
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { screen = "settings" }
+            if (!awaitEntryCapture()) return
+            ui.mainClock.advanceTimeBy(64)
+            ui.onNodeWithTag("page-enter-previous").assertExists()
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            assertEquals(1, backs)
+            assertEquals("chat", screen)
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-enter-previous").assertDoesNotExist()
+            assertEquals(1, backs)
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testPredictiveBackTakesOverForwardMotionBeforeItsFirstProgressFrame() {
+        if (Build.VERSION.SDK_INT < 34) return
+        mount(prediction = true)
+        val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { screen = "settings" }
+            if (!awaitEntryCapture()) return
+            ui.mainClock.advanceTimeBy(64)
+            mainThread {
+                activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT))
+            }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("page-enter-previous").assertDoesNotExist()
+            mainThread {
+                activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .6f, BackEventCompat.EDGE_LEFT))
+            }
+            repeat(3) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onNodeWithTag("page-back-target").assertExists()
+                val surface = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+                assertEquals(initial.left + initial.width * .6f, surface.left, 1.1f)
+            }
+            assertEquals("settings", screen)
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals(0, backs)
+            assertEquals("settings", screen)
+            ui.onNodeWithTag("page-enter-previous").assertDoesNotExist()
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
 
     fun testNestedEntriesKeepOneLiveControllerAndDoNotReplayOnLoadingChanges() {
         screen = "settings"
@@ -199,7 +251,7 @@ class PageEnterActivityTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testSidebarContentAliasEntersARealPageAndEntryBlocksTouchThrough() {
+    fun testSidebarContentAliasEntersARealPageAndEntryAcceptsDestinationTouch() {
         mount()
         mainThread { screen = "chat-sidebar" }
         ui.waitForIdle()
@@ -219,12 +271,14 @@ class PageEnterActivityTest : WiredActivityTestCase() {
             assertTrue("the entering settings page covers clean red chat, not the green sidebar", source.red > .3f && source.green < .05f)
             ui.mainClock.advanceTimeBy(96)
             ui.onNodeWithTag("page-back-host").performTouchInput { click(Offset(width * .95f, height * .5f)) }
-            assertEquals(0, clicks)
+            assertEquals(1, clicks)
+            assertEquals("settings", clickedScreen)
             ui.onNodeWithTag("page-enter-previous").assertExists()
             ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-enter-blocker").assertDoesNotExist()
             ui.onNodeWithTag("page-back-host").performTouchInput { click(Offset(width * .95f, height * .5f)) }
-            assertEquals(1, clicks)
+            assertEquals(2, clicks)
+            assertEquals("settings", clickedScreen)
         } finally { ui.mainClock.autoAdvance = true }
     }
 

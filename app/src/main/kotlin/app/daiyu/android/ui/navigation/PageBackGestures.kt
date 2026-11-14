@@ -83,6 +83,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     var predictiveGeneration = 0L
     var alive = true
     var transitionBlocked = false
+    var interruptEnterMotion: () -> Unit = {}
     class PreviewOwner(enabled: Boolean, previewEnabled: Boolean) {
         var enabled by mutableStateOf(enabled)
         var previewEnabled by mutableStateOf(previewEnabled)
@@ -300,6 +301,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                     session.rejected = true
                     return
                 }
+                activeState.interruptEnterMotion()
                 val owner = Any()
                 session.gesture = activeState to owner
                 activeState.startDiagnostic(BackPerformanceRecorder.Kind.PREDICTIVE)
@@ -530,11 +532,19 @@ internal fun PageBackGestureHost(
         (!state.previewAllowed || departure.forwardSkipped))
     // Do not read visualProgress here. It is intentionally consumed only by layer/draw lambdas so
     // pointer updates invalidate the motion layer rather than the whole page composition.
-    state.transitionBlocked = activeDeparture || (state.previewAllowed && !state.active && state.gestureVisualActive)
+    // The entering surface is live and hit-tested at its animated position; only return overlays own input.
+    state.transitionBlocked = (activeDeparture && departure?.forward != true) ||
+        (state.previewAllowed && !state.active && state.gestureVisualActive)
     SideEffect {
         if (!state.active && !activeDeparture && !state.gestureVisualActive) {
             layers.resume(frame)
             state.restorePreview()
+        }
+    }
+    state.interruptEnterMotion = {
+        if (departure?.forward == true) {
+            departure.forwardSkipped = true
+            departing = false
         }
     }
     val diagnosticSettling = state.transitionBlocked
@@ -718,15 +728,6 @@ internal fun PageBackGestureHost(
                 else Modifier.absoluteSquircleClip(topLeft = 0.dp, topRight = cornerRadius, bottomRight = cornerRadius, bottomLeft = 0.dp)).drawBehind {
                 drawPreview(departure.frame)
             }.testTag("page-back-departure").pointerInput(departure) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false).consume()
-                    do {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        event.changes.forEach { it.consume() }
-                    } while (event.changes.any { it.pressed })
-                }
-            })
-            if (activeDeparture && departure?.forward == true) Box(Modifier.fillMaxSize().testTag("page-enter-blocker").pointerInput(departure) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false).consume()
                     do {

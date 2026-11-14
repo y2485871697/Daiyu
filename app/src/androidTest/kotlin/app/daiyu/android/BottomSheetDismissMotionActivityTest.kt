@@ -13,6 +13,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
@@ -31,6 +33,7 @@ class BottomSheetDismissMotionActivityTest : WiredActivityTestCase() {
     private var disposals = 0
     private var confirmationClicks = 0
     private var deliveredRevision = -1
+    private var underlyingClicks = 0
 
     private fun show(kind: Int = 0) {
         mainThread {
@@ -42,9 +45,13 @@ class BottomSheetDismissMotionActivityTest : WiredActivityTestCase() {
             disposals = 0
             confirmationClicks = 0
             deliveredRevision = -1
+            underlyingClicks = 0
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                     Box(Modifier.fillMaxSize()) {
+                        TextButton(onClick = { underlyingClicks++ }, modifier = Modifier.testTag("underlying-action")) {
+                            Text("底层按钮")
+                        }
                         if (open.value) {
                             DisposableEffect(Unit) { onDispose { disposals++ } }
                             val revision = callbackRevision.value
@@ -83,6 +90,33 @@ class BottomSheetDismissMotionActivityTest : WiredActivityTestCase() {
     private fun exitingProgress(): Float = ui.onNode(
         SemanticsMatcher.expectValue(DialogDismissing, true), useUnmergedTree = true,
     ).fetchSemanticsNode().config[DialogMotionProgress]
+
+    fun testCompletedExitReleasesTheUnderlyingButtonByNextFrame() {
+        for (kind in 0..2) {
+            show(kind)
+            val previousAutoAdvance = ui.mainClock.autoAdvance
+            try {
+                ui.mainClock.autoAdvance = false
+                if (kind == 2) {
+                    node("choice-sheet-cancel").performTouchInput { click() }
+                    ui.mainClock.advanceTimeByFrame()
+                } else sendBack()
+                ui.mainClock.advanceTimeBy(176)
+                assertTrue(exitingProgress() > 0f)
+                assertEquals(0, dismissals)
+                ui.mainClock.advanceTimeBy(80)
+                ui.waitForIdle()
+                assertEquals(1, dismissals)
+                assertEquals(1, disposals)
+                val underlying = node("underlying-action").assertIsDisplayed()
+                awaitNodeWindowFocus(underlying)
+                underlying.performTouchInput { click() }
+                assertEquals(1, underlyingClicks)
+                assertEquals(0, confirmationClicks)
+                assertEquals(0, fixture.opens.get())
+            } finally { ui.mainClock.autoAdvance = previousAutoAdvance }
+        }
+    }
 
     fun testOrdinaryPauseDoesNotDismissAnySharedSheet() {
         for (kind in 0..2) {

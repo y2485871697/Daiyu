@@ -11,11 +11,21 @@ class BottomSheetDismissMotionContractTest(unittest.TestCase):
         text = (COMPONENTS / 'DialogMotion.kt').read_text()
         scope = text.partition('internal fun DialogMotionProvider(')[2].split('\n@Composable', 1)[0]
         self.assertIn('LaunchedEffect(motion.dismissSource)', scope)
-        self.assertIn('motion.progress.animateTo(target, dialogEnterSpec(largeScreen))', scope)
-        self.assertIn('motion.scrimProgress.animateTo(target, tween(300, easing = DecelerateEasing(1.5f)))', scope)
+        self.assertIn('val dismissSpec = dialogExitSpec()', scope)
+        self.assertIn('motion.progress.animateTo(target, if (source == null) dialogEnterSpec(largeScreen) else dismissSpec)', scope)
+        self.assertIn('if (source == null) tween(300, easing = DecelerateEasing(1.5f)) else dismissSpec', scope)
+        self.assertIn('tween(durationMillis = 220, easing = DecelerateEasing(1.5f))', text)
         self.assertLess(scope.index('coroutineScope {'), scope.index('latestDismiss()'))
         self.assertNotIn('snapTo(', scope)
         self.assertNotIn('delay(', scope)
+
+    def test_bounded_exit_releases_real_underlying_button_without_a_three_second_wait(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/BottomSheetDismissMotionActivityTest.kt').read_text()
+        case = test.split('fun testCompletedExitReleasesTheUnderlyingButtonByNextFrame()', 1)[1].split('fun testOrdinaryPause', 1)[0]
+        for token in ('for (kind in 0..2)', 'advanceTimeBy(176)', 'advanceTimeBy(80)',
+                      'assertEquals(1, dismissals)', 'performTouchInput { click() }', 'assertEquals(1, underlyingClicks)'):
+            self.assertIn(token, case)
+        self.assertNotIn('3_000', case)
 
     def test_requests_keep_first_source_and_recover_if_owner_vetoes(self):
         text = (COMPONENTS / 'DialogMotion.kt').read_text()

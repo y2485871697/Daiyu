@@ -1,0 +1,126 @@
+name: 代鱼弹窗布局检查
+run-name: 代鱼弹窗布局检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 已构建应用和测试包的冻结完整SHA
+        type: string
+        required: true
+      source_run_id:
+        description: 成功compile来源run（attempt1），只复用、不打包
+        type: string
+        required: true
+      check_id:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: daiyu-popup-layout-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  EXPECTED_SHA: ${{ inputs.expected_sha }}
+  SOURCE_SHA: ${{ inputs.expected_sha }}
+  SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+  SOURCE_VARIANT: compile
+  SMOKE_MODE: smoke
+  SMOKE_TEST_CLASSES: app.daiyu.android.PopupTitleGeometryTest,app.daiyu.android.AssistantPickerVisualTest,app.daiyu.android.SharedSheetSpacingActivityTest,app.daiyu.android.CollaborationEmptyStateTest
+  SMOKE_API: '37.2'
+  DAILY_API: '37.2'
+  SMOKE_SHARD_COUNT: '1'
+  SMOKE_SHARD_INDEX: '0'
+  EMULATOR_RAM_MB: '6144'
+jobs:
+  layout:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 绑定冻结源码及真实执行身份
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          mkdir -p smoke
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          assert re.fullmatch(r'[0-9a-f]{40}', os.environ['EXPECTED_SHA'])
+          assert os.environ['SOURCE_RUN_ID'].isdecimal()
+          Path('smoke/execution-source.json').write_text(json.dumps(dict(
+              workflow_sha=os.environ['GITHUB_SHA'], checked_sha=os.environ['EXPECTED_SHA'],
+              source_sha=os.environ['SOURCE_SHA'], source_run_id=int(os.environ['SOURCE_RUN_ID']),
+              execution_run_id=int(os.environ['GITHUB_RUN_ID']), attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+              workflow_ref=os.environ['GITHUB_WORKFLOW_REF'], apk_built=False,
+              selected_classes=os.environ['SMOKE_TEST_CLASSES'].split(',')), ensure_ascii=False) + '\n')
+          PY
+      - name: 仅执行冻结源码的定向契约
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼增量Release包
+          path: delivery
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: 核对原始compile来源和同run应用测试包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_smoke_source.py
+      - name: 校验原始APK摘要
+        run: cd delivery && sha256sum -c SHA256SUMS
+      - name: 启用模拟器加速
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 统一模拟器命令行工具
+        run: |
+          tools="$ANDROID_HOME/cmdline-tools"
+          test -x "$tools/16111833/bin/avdmanager"
+          rm -rf "$tools/latest"
+          ln -s "$tools/16111833" "$tools/latest"
+          rm -f smoke/prelaunch-ready.txt
+          free -m | tee smoke/host-memory.txt
+          cat "$tools/latest/source.properties" | tee smoke/commandline-tools.txt
+          "$tools/latest/bin/sdkmanager" --version
+      - name: 安装模拟器宿主依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libpulse0
+      - name: 预启动ADB
+        run: adb start-server
+      - name: 单API定向布局回归（复用既有包）
+        timeout-minutes: 25
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: '37.2'
+          arch: x86_64
+          target: google_apis_ps16k
+          disk-size: 8192M
+          ram-size: 6144M
+          cores: 4
+          emulator-options: -memory 6144 -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel -feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb
+          emulator-boot-timeout: 180
+          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "37.2"
+          disable-animations: true
+          script: bash -c 'export GITHUB_SHA="$EXPECTED_SHA"; set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+      - name: 上传定向契约及布局证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼弹窗布局定向证据
+          path: |
+            smoke/
+            tool-evidence/
+          if-no-files-found: error

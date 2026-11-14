@@ -550,8 +550,11 @@ internal object MarkdownParser {
                     val afterSpace = after == null || Character.isWhitespace(after)
                     val beforePunctuation = before?.isMarkdownPunctuation() == true
                     val afterPunctuation = after?.isMarkdownPunctuation() == true
-                    val left = !afterSpace && (!afterPunctuation || beforeSpace || beforePunctuation)
-                    val right = !beforeSpace && (!beforePunctuation || afterSpace || afterPunctuation)
+                    // CJK prose does not require spaces around quoted or punctuated emphasis.
+                    val cjkOpening = c == '*' && before?.isCjkLetter() == true && afterPunctuation
+                    val cjkClosing = c == '*' && after?.isCjkLetter() == true && beforePunctuation
+                    val left = !afterSpace && (!afterPunctuation || beforeSpace || beforePunctuation || cjkOpening)
+                    val right = !beforeSpace && (!beforePunctuation || afterSpace || afterPunctuation || cjkClosing)
                     flush(); tokens += Token(delimiter = c, count = count,
                         open = left && (c != '_' || !right || beforePunctuation),
                         close = right && (c != '_' || !left || afterPunctuation),
@@ -580,6 +583,12 @@ internal object MarkdownParser {
         Character.INITIAL_QUOTE_PUNCTUATION.toInt(), Character.FINAL_QUOTE_PUNCTUATION.toInt(),
         Character.OTHER_PUNCTUATION.toInt(), Character.MATH_SYMBOL.toInt(),
         Character.CURRENCY_SYMBOL.toInt(), Character.MODIFIER_SYMBOL.toInt(), Character.OTHER_SYMBOL.toInt() -> true
+        else -> false
+    }
+
+    private fun Int.isCjkLetter(): Boolean = Character.isLetter(this) && when (Character.UnicodeScript.of(this)) {
+        Character.UnicodeScript.HAN, Character.UnicodeScript.HIRAGANA,
+        Character.UnicodeScript.KATAKANA, Character.UnicodeScript.HANGUL -> true
         else -> false
     }
 

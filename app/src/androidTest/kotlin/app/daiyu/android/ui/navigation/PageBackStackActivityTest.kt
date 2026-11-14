@@ -796,6 +796,133 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     fun testReturnAdvancesWhileCaptureIsPending() = assertReturnDoesNotWaitForCopy(true)
     fun testColdReturnDoesNotWaitOrEnableLatePreview() = assertReturnDoesNotWaitForCopy(false)
 
+    @OptIn(ExperimentalActivityApi::class)
+    private fun assertNestedInsetsRecovery(kind: Int, stableChange: Boolean = false) {
+        val probe = PageBackInsetsProbe()
+        val frames = mutableMapOf<Any, PageBackPreviewLayers.Frame>()
+        var gesture: PageBackGestureState? = null
+        val firstInsets = IntSize(12, 12)
+        val recoveredInsets = if (stableChange) IntSize(20, 20) else firstInsets
+        fun color(page: String) = when (page) { "chat" -> Color.Red; "settings" -> Color.Blue; else -> Color.Green }
+        fun parent(page: String) = when (page) { "chat" -> null; "settings" -> "chat"; else -> "settings" }
+        fun awaitFrame(page: String) {
+            captureScreenNode(ui.onNodeWithTag("page-back-host"))
+            ui.waitUntil(5_000) {
+                if (!ui.mainClock.autoAdvance) ui.mainClock.advanceTimeByFrame()
+                frames[page]?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true
+            }
+        }
+        fun applyInsets(value: IntSize) {
+            mainThread { probe.apply(value) }
+            ui.waitForIdle()
+            ui.waitUntil(5_000) { probe.observed == value }
+        }
+        try {
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        probe.Observe()
+                        background = MiuixTheme.colorScheme.background
+                        val rendered = screen
+                        val target = parent(rendered)
+                        val back = { backCount++; screen = checkNotNull(target) }
+                        PageBackGestureHost(rendered, canNavigateBack = target != null,
+                            swipeDismissEnabled = true, predictiveBackEnabled = true,
+                            dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
+                            backTargetKey = target,
+                            previewCapture = { frame -> frames[frame.key] = frame; frame.layer.toImageBitmap() }) {
+                            val currentGesture = LocalPageBackGesture.current
+                            androidx.compose.runtime.SideEffect { gesture = currentGesture }
+                            PageBackHandler(enabled = target != null, onBack = back)
+                            Box(Modifier.fillMaxSize().background(color(rendered))) {
+                                Box(Modifier.size(48.dp).testTag("nested-return-button").clickable(onClick = back))
+                            }
+                        }
+                    }
+                }
+            }
+            dismissIme()
+            applyInsets(firstInsets)
+            awaitFrame("chat")
+            changeScreen("settings"); awaitFrame("settings")
+            changeScreen("linux-settings"); awaitFrame("linux-settings")
+            val chat = checkNotNull(frames["chat"])
+            val settings = checkNotNull(frames["settings"])
+            val child = checkNotNull(frames["linux-settings"])
+            realPauseResumeWithPausedFrames(activity, whilePaused = {
+                applyInsets(if (stableChange) recoveredInsets else IntSize.Zero)
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("only environment changes while the deepest child is paused", "linux-settings", screen)
+            })
+            applyInsets(recoveredInsets)
+            assertTrue(probe.observations.contains(firstInsets))
+            assertTrue(probe.observations.contains(if (stableChange) recoveredInsets else IntSize.Zero))
+            assertSame("resuming the child must not replace its frame", child, frames["linux-settings"])
+            for (ancestor in listOf(chat, settings)) {
+                assertFalse("system bars must not release any ancestor", ancestor.releaseRequested)
+                assertTrue("both historical targets remain drawable", ancestor.canDrawPreview)
+            }
+            awaitFrame("linux-settings")
+            ui.mainClock.autoAdvance = false
+            for ((index, target) in listOf("settings", "chat").withIndex()) {
+                val source = screen
+                assertEquals(recoveredInsets, probe.observed)
+                if (kind == 1) ui.onNodeWithTag("nested-return-button").performClick()
+                else {
+                    if (kind == 2) mainThread {
+                        activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 1f, 0f, BackEventCompat.EDGE_LEFT))
+                        activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(100f, 1f, .6f, BackEventCompat.EDGE_LEFT))
+                    } else ui.onNodeWithTag("page-back-host").performTouchInput {
+                        down(Offset(width * .02f, height * .6f))
+                        moveTo(Offset(width * .12f, height * .6f), 32)
+                        moveTo(Offset(width * .70f, height * .6f), 160)
+                    }
+                    ui.mainClock.advanceTimeByFrame()
+                    assertEquals("preview must not invoke the business return", index, backCount)
+                    assertEquals(source, screen)
+                    ui.onNodeWithTag("page-back-target").assertExists()
+                    val progress = checkNotNull(gesture).visualProgress
+                    assertTrue("each level owns an intermediate preview", progress > 0f && progress < 1f)
+                    assertTarget(color(target), progress)
+                    if (kind == 2) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                    else ui.onNodeWithTag("page-back-host").performTouchInput { up() }
+                }
+                assertEquals("each commit returns exactly one level", target, screen)
+                assertEquals(index + 1, backCount)
+                awaitDepartureCapture()
+                val start = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                ui.mainClock.advanceTimeBy(64)
+                val moved = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
+                val host = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
+                val progress = (moved.left - host.left) / host.width
+                assertTrue("both committed levels have moving departure pixels", moved.left > start.left && progress > 0f && progress < 1f)
+                val pixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+                val outgoing = pixels[pixels.width - 2, pixels.height / 2]
+                val expected = color(source)
+                assertEquals("outgoing red identifies the correct level", expected.red, outgoing.red, .03f)
+                assertEquals("outgoing green identifies the correct level", expected.green, outgoing.green, .03f)
+                assertEquals("outgoing blue identifies the correct level", expected.blue, outgoing.blue, .03f)
+                ui.mainClock.advanceTimeBy(1000)
+                ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                awaitFrame(target)
+                assertEquals(index + 1, backCount)
+            }
+            assertEquals("chat", screen)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+            mainThread { probe.restore() }
+        }
+    }
+
+    fun testNestedSwipeReturnsAfterTransientZeroInsetsKeepSettingsAndChatAnimations() = assertNestedInsetsRecovery(0)
+    fun testNestedToolbarReturnsAfterTransientZeroInsetsKeepSettingsAndChatAnimations() = assertNestedInsetsRecovery(1)
+    fun testNestedPredictiveReturnsAfterTransientZeroInsetsKeepSettingsAndChatAnimations() {
+        if (Build.VERSION.SDK_INT >= 34) assertNestedInsetsRecovery(2)
+    }
+    fun testNestedSwipeReturnsAfterStableInsetsChangeKeepSettingsAndChatAnimations() = assertNestedInsetsRecovery(0, stableChange = true)
+    fun testNestedToolbarReturnsAfterStableInsetsChangeKeepSettingsAndChatAnimations() = assertNestedInsetsRecovery(1, stableChange = true)
+
     private fun changeScreen(value: String) {
         mainThread { screen = value }
         ui.waitForIdle()

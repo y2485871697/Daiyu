@@ -453,7 +453,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)
 
-    private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false, resumePixels: Boolean = false, hiddenPauseResume: Boolean = false, backgroundToHome: Boolean = false) {
+    private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false, resumePixels: Boolean = false, hiddenPauseResume: Boolean = false, backgroundToHome: Boolean = false, insetsRecovery: Boolean = false) {
         val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
         if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
         var marker by mutableStateOf(Color.Green)
@@ -474,6 +474,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         var settingsDetail by mutableStateOf(false)
         var observedStack: PageBackStackRegistry? = null
         val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, androidx.compose.ui.graphics.ImageBitmap>()
+        val insetsProbe = PageBackInsetsProbe()
+        val initialInsets = IntSize(12, 12)
         var immediateCaptureRequests = 0
         val draft = ComposerUi("retained draft", selectionStart = 2, selectionEnd = 5)
         val actions = ChatScreenActions()
@@ -486,6 +488,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                         CompositionLocalProvider(LocalLifecycleOwner provides if (resumePixels || hiddenPauseResume) activity else parent,
                             LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                            if (insetsRecovery) insetsProbe.Observe()
                             val rendered = route
                             PageBackGestureHost(rendered, contentKey = rendered,
                                 canNavigateBack = rendered != "chat",
@@ -553,6 +556,10 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 }
             }
             dismissIme()
+            if (insetsRecovery) {
+                mainThread { insetsProbe.apply(initialInsets) }
+                ui.waitUntil(5_000) { insetsProbe.observed == initialInsets }
+            }
             val answer = ui.onNodeWithText("Retained formatted answer")
             ui.waitUntil(5_000) { ui.onAllNodesWithText("Retained formatted answer").fetchSemanticsNodes().isNotEmpty() }
             answer.assertIsDisplayed()
@@ -579,6 +586,12 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(1000)
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
             ui.waitUntil(5_000) { settingsFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
+            if (nested) {
+                mainThread { if (topLevel) route = "appearance" else settingsDetail = true }
+                ui.mainClock.advanceTimeBy(1000)
+                captureScreenNode(ui.onNodeWithTag("page-back-host"))
+                ui.waitUntil(5_000) { detailFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
+            }
             if (hiddenPauseResume) {
                 if (backgroundToHome) {
                     val stopped = java.util.concurrent.CountDownLatch(1)
@@ -603,21 +616,26 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     }
                 } else realPauseResume(activity)
                 ui.waitForIdle()
-                assertEquals("settings", route)
+                assertEquals("background begins at the deepest child", if (nested && topLevel) "appearance" else "settings", route)
                 assertEquals(1, mounts)
                 assertEquals(0, disposals)
                 assertSame(originalMessagesIdentity, messagesIdentity)
                 assertSame(originalComposerIdentity, composerIdentity)
                 ui.onNodeWithTag("chat-draft").assertDoesNotExist()
                 ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                if (insetsRecovery) {
+                    mainThread { insetsProbe.apply(IntSize.Zero) }
+                    ui.waitUntil(5_000) { insetsProbe.observed == IntSize.Zero }
+                    ui.mainClock.advanceTimeByFrame()
+                    mainThread { insetsProbe.apply(initialInsets) }
+                    ui.waitUntil(5_000) { insetsProbe.observed == initialInsets }
+                    assertTrue("the real Compose system bars observed the zero recovery edge", IntSize.Zero in insetsProbe.observations)
+                }
                 captureScreenNode(ui.onNodeWithTag("page-back-host"))
-                ui.waitUntil(5_000) { settingsFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
-            }
-            if (nested) {
-                mainThread { if (topLevel) route = "appearance" else settingsDetail = true }
-                ui.mainClock.advanceTimeBy(1000)
-                captureScreenNode(ui.onNodeWithTag("page-back-host"))
-                ui.waitUntil(5_000) { detailFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
+                ui.waitUntil(5_000) {
+                    val live = if (nested) detailFrame else settingsFrame
+                    live?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true
+                }
             }
             mainThread { recordReturnFrames = true; marker = Color.Magenta }
             val beforeReturnDraws = liveDraws
@@ -789,6 +807,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         } finally {
             recordReturnFrames = false
             ui.mainClock.autoAdvance = true
+            if (insetsRecovery) mainThread { insetsProbe.restore() }
             if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
         }
     }
@@ -806,6 +825,99 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
     fun testRealChatRapidNestedSwipeReturnsKeepBothAnimationsInRtl() = assertRealChatReturn(swipe = true, nested = true, rtl = true)
 
     fun testRealChatRapidTopLevelSwipeReturnsKeepBothAnimations() = assertRealChatReturn(swipe = true, nested = true, topLevel = true)
+
+    fun testRealChatTopLevelChildHomeInsetsRecoveryKeepsEveryReturnAnimation() =
+        assertRealChatReturn(swipe = true, nested = true, topLevel = true, hiddenPauseResume = true,
+            backgroundToHome = true, insetsRecovery = true)
+
+    fun testRealChatNestedChildPauseInsetsRecoveryKeepsEveryReturnAnimation() =
+        assertRealChatReturn(swipe = true, nested = true, hiddenPauseResume = true, insetsRecovery = true)
+
+    private fun assertProductionChildHomeReturns(child: String, swipe: Boolean) {
+        val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
+        if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
+        try {
+            setDraft("production nested return draft")
+            openSettings()
+            captureScreenNode(ui.onNodeWithTag("page-back-host"))
+            mainThread {
+                if (child == "linux-settings") invokeHost(activity, "openLinuxSettings")
+                else invokeHost(activity, "setRetainedPage", child)
+            }
+            ui.waitForIdle()
+            ui.onNode(hasContentDescription(instrumentation.targetContext.getString(app.daiyu.android.R.string.action_back)) and hasClickAction())
+                .assertIsDisplayed().assertIsEnabled()
+            captureScreenNode(ui.onNodeWithTag("page-back-host"))
+            mainThread { assertEquals(child, invokeHost(activity, "getRetainedPage")) }
+            val stopped = java.util.concurrent.CountDownLatch(1)
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP) stopped.countDown()
+            }
+            mainThread { activity.lifecycle.addObserver(observer) }
+            try {
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+                assertTrue("production child really stopped", stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            } finally {
+                try { mainThread { activity.lifecycle.removeObserver(observer) } }
+                finally {
+                    restoreOriginalHost(activity)
+                    awaitHostWindowFocus(activity)
+                }
+            }
+            mainThread { assertEquals("HOME resumes at the deepest production page", child,
+                invokeHost(activity, "getRetainedPage")) }
+            ui.mainClock.autoAdvance = false
+            for ((index, target) in listOf("settings", "chat").withIndex()) {
+                captureScreenNode(ui.onNodeWithTag("page-back-host"))
+                ui.waitForIdle()
+                val host = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
+                if (swipe) {
+                    ui.onNodeWithTag("page-back-host").performTouchInput {
+                        down(Offset(width * .03f, height * .6f))
+                        moveTo(Offset(width * .13f, height * .6f), 32)
+                        moveTo(Offset(width * .65f, height * .6f), 160)
+                    }
+                    ui.mainClock.advanceTimeByFrame()
+                    val moving = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+                    assertTrue("production level $index has interactive motion", moving.left > host.left + host.width * .2f)
+                    ui.onNodeWithTag("page-back-target").assertExists()
+                    ui.onNodeWithTag("page-back-host").performTouchInput { up() }
+                } else {
+                    ui.onNode(hasContentDescription(instrumentation.targetContext.getString(app.daiyu.android.R.string.action_back)) and hasClickAction())
+                        .assertIsDisplayed().assertIsEnabled().performClick()
+                }
+                mainThread { assertEquals("production return pops exactly one level", target,
+                    invokeHost(activity, "getRetainedPage")) }
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty()
+                }
+                val before = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                ui.mainClock.advanceTimeBy(32)
+                val after = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                assertTrue("production level $index departure advances", after.left > before.left)
+                assertTrue("production level $index retains an intermediate frame", after.left > host.left && after.left < host.right)
+                ui.onNodeWithTag("page-back-departure-scrim").assertExists()
+                ui.mainClock.advanceTimeBy(1000)
+                ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                mainThread { assertEquals(target, invokeHost(activity, "getRetainedPage")) }
+                if (target == "settings") ui.onNodeWithTag("page:设置").assertIsDisplayed()
+            }
+            awaitUniqueTag("chat-draft")
+            assertDraft("production nested return draft")
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+        }
+    }
+
+    fun testProductionAppearanceHomeResumeKeepsSettingsAndChatSwipeAnimations() =
+        assertProductionChildHomeReturns("appearance", swipe = true)
+
+    fun testProductionLinuxHomeResumeKeepsSettingsAndChatToolbarAnimations() =
+        assertProductionChildHomeReturns("linux-settings", swipe = false)
 
     fun testHiddenRootRetainsItsStoppedInstanceAcrossPauseAndResume() {
         mount()

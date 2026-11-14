@@ -498,7 +498,13 @@ class PageBackGestureContractTest(unittest.TestCase):
                        '"generation-settings" -> "settings"',
                        '"legacy-library" -> "backup"'):
             self.assertIn(wiring, target)
-        self.assertIn('themeKey, configuration, insetsKey, density, layoutDirection, previewScopeKey', self.host)
+        self.assertIn('remember(graphics, themeKey, configuration, density, layoutDirection, previewScopeKey)', self.host)
+        self.assertIn('Unit, density, layoutDirection, previewScopeKey)', self.host)
+        self.assertNotIn('insetsKey', self.host)
+        self.assertNotIn('WindowInsets.systemBars', self.host)
+        self.assertIn('onSizeChanged { viewport = it }', self.host)
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        self.assertIn('it.size == size && it.canDrawPreview', layers)
         self.assertIn('initialVelocity = pageBackInitialVelocity(departure.progress, departure.velocity)', self.host)
         self.assertIn('if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)', self.host)
 

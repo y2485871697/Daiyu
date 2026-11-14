@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.systemBars
 import top.yukonga.miuix.kmp.squircle.absoluteSquircleClip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -399,14 +398,13 @@ internal fun PageBackGestureHost(
     val configuration = LocalConfiguration.current
     val colors = MiuixTheme.colorScheme
     val themeKey = listOf(background, colors.primary, colors.onBackground, colors.surface, colors.onSurface)
-    val bars = WindowInsets.systemBars
-    val insetsKey = IntSize(bars.getTop(density), bars.getBottom(density))
     val scope = rememberCoroutineScope()
     val previousPreviewContext = remember { arrayOfNulls<List<Any?>>(1) }
-    val layers = remember(graphics, themeKey, configuration, insetsKey, density, layoutDirection, previewScopeKey) {
-        // Only the changed-input bitmask is logged, never the configuration or scope values.
+    // System-bar visibility is not frame identity; measured viewport checks guard the historical pixels.
+    val layers = remember(graphics, themeKey, configuration, density, layoutDirection, previewScopeKey) {
+        // Keep bit 8 reserved for the removed raw-insets key so existing diagnostic bits stay stable.
         val inputs = listOf(graphics, themeKey, android.content.res.Configuration(configuration),
-            insetsKey, density, layoutDirection, previewScopeKey)
+            Unit, density, layoutDirection, previewScopeKey)
         val changed = previousPreviewContext[0]?.let { previous ->
             inputs.indices.fold(0) { mask, index ->
                 if (previous[index] != inputs[index]) mask or (1 shl index) else mask

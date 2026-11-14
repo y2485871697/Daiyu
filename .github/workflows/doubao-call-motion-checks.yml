@@ -1,0 +1,178 @@
+name: 代鱼通话动画检查
+run-name: 代鱼通话动画检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 冻结被检源码完整SHA（必须等于source_sha）
+        type: string
+        required: true
+      source_sha:
+        description: 既有compile应用和测试包的冻结完整SHA
+        type: string
+        required: true
+      source_run_id:
+        description: 成功compile来源run（attempt1），只复用、不打包
+        type: string
+        required: false
+        default: ''
+      check_id:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: daiyu-doubao-motion-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  EXPECTED_SHA: ${{ inputs.expected_sha }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+  SOURCE_VARIANT: compile
+  SMOKE_MODE: smoke
+  SMOKE_TEST_CLASSES: app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest
+  SMOKE_API: all
+  SMOKE_SHARD_COUNT: '1'
+  SMOKE_SHARD_INDEX: '0'
+jobs:
+  motion-unit:
+    if: github.ref == 'refs/heads/main' && inputs.source_run_id == ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: 核对源码并运行精确契约
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$SOURCE_SHA" = "$EXPECTED_SHA"
+          GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
+      - uses: ./.github/actions/setup-temurin
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 仅准备固定语音依赖并运行三类单测（不打包）
+        run: |
+          ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+          ./gradlew --no-daemon :app:testDebugUnitTest --tests 'app.daiyu.android.ui.screens.chat.conversation.DoubaoGenieGeometryTest' --tests 'app.daiyu.android.DoubaoCallPresentationOwnerTest' --tests 'app.daiyu.android.CallEntryPolicyTest'
+      - name: 上传通话增量检查证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼通话动画单测证据
+          path: |
+            tool-evidence/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: error
+  layout:
+    env:
+      DAILY_API: ${{ matrix.api }}
+      EMULATOR_RAM_MB: ${{ matrix.ram }}
+    if: github.ref == 'refs/heads/main' && inputs.source_run_id != ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {api: '26', target: google_apis, ram: 4096}
+          - {api: '37.2', target: google_apis_ps16k, ram: 6144}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 绑定冻结源码及真实执行身份
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$SOURCE_SHA" = "$EXPECTED_SHA"
+          mkdir -p smoke
+          python3 - <<'PYIDENTITY'
+          import json, os
+          from pathlib import Path
+          Path('smoke/execution-source.json').write_text(json.dumps(dict(
+              workflow_sha=os.environ['GITHUB_SHA'], checked_sha=os.environ['EXPECTED_SHA'],
+              source_sha=os.environ['SOURCE_SHA'], source_run_id=int(os.environ['SOURCE_RUN_ID']),
+              execution_run_id=int(os.environ['GITHUB_RUN_ID']), attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+              workflow_ref=os.environ['GITHUB_WORKFLOW_REF'], apk_built=False,
+              selected_classes=os.environ['SMOKE_TEST_CLASSES'].split(',')), ensure_ascii=False) + '\n')
+          PYIDENTITY
+      - name: 仅执行冻结源码的定向契约
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
+      - name: 核对compile来源门禁的增量单测
+        shell: bash
+        env:
+          PYTHONPATH: tests
+        run: |
+          set -o pipefail
+          python3 -B -m unittest test_smoke_boot.SourceTests.test_identity_and_unchanged_application test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_only_unchanged_application_explicit_diagnostic_smoke_is_accepted test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_compile_and_diagnostic_allow_only_the_reviewed_check_only_workflow -v 2>&1 | tee tool-evidence/source-validator-tests.txt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼增量Release包
+          path: delivery
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: 核对原始compile来源和同run应用测试包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_smoke_source.py
+      - name: 校验原始APK摘要
+        run: cd delivery && sha256sum -c SHA256SUMS
+      - name: 启用模拟器加速
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 统一模拟器命令行工具
+        run: |
+          tools="$ANDROID_HOME/cmdline-tools"
+          test -x "$tools/16111833/bin/avdmanager"
+          rm -rf "$tools/latest"
+          ln -s "$tools/16111833" "$tools/latest"
+          rm -f smoke/prelaunch-ready.txt
+          free -m | tee smoke/host-memory.txt
+          cat "$tools/latest/source.properties" | tee smoke/commandline-tools.txt
+          "$tools/latest/bin/sdkmanager" --version
+      - name: 安装模拟器宿主依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libpulse0
+      - name: 预启动ADB
+        run: adb start-server
+      - name: 双API通话动画回归（复用既有包）
+        timeout-minutes: 25
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: ${{ matrix.target }}
+          disk-size: 8192M
+          ram-size: ${{ matrix.ram }}M
+          cores: 4
+          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel -feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb
+          emulator-boot-timeout: 180
+          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
+          disable-animations: true
+          script: bash -c 'export GITHUB_SHA="$EXPECTED_SHA"; set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+      - name: 上传通话动画证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼通话动画证据-API${{ matrix.api }}
+          path: |
+            smoke/
+            tool-evidence/
+          if-no-files-found: error

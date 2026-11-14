@@ -151,9 +151,25 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertLess(close.index('layer.toImageBitmap()'), close.index('progress.animateTo(0f'))
         self.assertIn('DoubaoGenieGeometry.DURATION_MILLIS * progress.value', close)
         self.assertNotIn('progress.snapTo(', close)
-        self.assertIn('if (!closing || !snapshotReady)', overlay)
-        self.assertIn('if (bitmap != null) drawImage(bitmap) else drawLayer(layer)', overlay)
-        self.assertIn('running = !closing', overlay)
+        self.assertIn('if (!morphing || !snapshotReady)', overlay)
+        self.assertIn('val bitmap = frozenBitmap ?: return@drawWithContent', overlay)
+        self.assertNotIn('else drawLayer(layer)', overlay)
+        self.assertIn('running = !closing && !morphing', overlay)
+
+    def test_motion_captures_one_padded_raster_and_reads_progress_only_in_draw(self):
+        overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
+        entrance = overlay.split('if (firstPresentation) {', 1)[1].split('} else {', 1)[0]
+        self.assertLess(entrance.index('layer.toImageBitmap()'), entrance.index('progress.animateTo(1f'))
+        self.assertIn('CallShadowOutset = 28.dp', overlay)
+        self.assertIn('translate(padding, padding) { this@drawWithContent.drawContent() }', overlay)
+        self.assertIn('translate(-padding, -padding) { drawLayer(layer) }', overlay)
+        self.assertIn('.outset(padding * endpointSize / size.width, padding * endpointSize / size.height)', overlay)
+        self.assertIn('size.height).outset(padding)', overlay)
+        composition = overlay.split('val morphing =', 1)[1].split('.drawWithContent {', 1)[0]
+        self.assertNotIn('progress.value', composition)
+        morph = overlay.split('// Never replay the full live display list once per strip.', 1)[1].split('.shadow(14.dp', 1)[0]
+        self.assertIn('drawImage(bitmap)', morph)
+        self.assertNotIn('drawLayer(', morph)
 
     def test_real_audio_starts_private_and_snapshot_tracks_only_live_routes(self):
         audio = (SRC / 'voice/duplex/AndroidDuplexAudio.kt').read_text()

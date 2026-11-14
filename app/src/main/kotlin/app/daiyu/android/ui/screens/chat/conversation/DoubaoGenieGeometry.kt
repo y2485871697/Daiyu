@@ -85,7 +85,10 @@ internal object DoubaoGenieGeometry {
             ((elapsedMillis % 1500f) / 1500f) * 360f)
     }
 
-    data class Bounds(val left: Float, val top: Float, val width: Float, val height: Float)
+    data class Bounds(val left: Float, val top: Float, val width: Float, val height: Float) {
+        fun outset(horizontal: Float, vertical: Float = horizontal) =
+            Bounds(left - horizontal, top - vertical, width + horizontal * 2f, height + vertical * 2f)
+    }
     data class Point(val x: Float, val y: Float)
     data class Edge(val left: Float, val y: Float, val width: Float)
 

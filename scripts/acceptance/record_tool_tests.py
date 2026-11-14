@@ -373,7 +373,17 @@ WORKFLOW_BODY_MODULES = (
 )
 
 
+DOUBAO_MOTION_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.conversation." + name for name in (
+    "DoubaoCallOverlayTest", "DoubaoCallOrbPixelsTest", "DoubaoCallOverlayZeroDurationTest"))
+DOUBAO_MOTION_MODULES = ("test_doubao_call_sheet_contract", "test_doubao_motion_scope",
+    "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope")
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(DOUBAO_MOTION_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *DOUBAO_MOTION_MODULES, "-v"], "doubao-motion-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_BODY_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *WORKFLOW_BODY_MODULES, "-v"], "workflow-body-targeted"

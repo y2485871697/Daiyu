@@ -156,6 +156,30 @@ class DoubaoGenieGeometryTest {
         near(moved.top + moved.height, end.y)
     }
 
+    @Test fun paddedSurfacePreservesBothContentEndpointsAndIncludesTheShadow() {
+        val padding = 28f
+        val surface = panel.outset(padding)
+        val endpoint = anchor.outset(padding * anchor.width / panel.width,
+            padding * anchor.height / panel.height)
+        val sw = surface.width
+        val sh = surface.height
+        for ((progress, expected) in listOf(0f to anchor, 1f to panel)) {
+            val strips = DoubaoGenieGeometry.strips(progress, endpoint, surface, sw, sh)
+            fun point(x: Float, y: Float): DoubaoGenieGeometry.Point {
+                val index = (y / sh * strips.size).toInt().coerceIn(0, strips.lastIndex)
+                return strips[index].map(x, y - strips[index].sourceY)
+            }
+            val topLeft = point(padding, padding)
+            val bottomRight = point(sw - padding, sh - padding)
+            near(expected.left, topLeft.x); near(expected.top, topLeft.y)
+            near(expected.left + expected.width, bottomRight.x)
+            near(expected.top + expected.height, bottomRight.y)
+            assertTrue(strips.first().top.left < expected.left)
+            assertTrue(strips.first().top.y < expected.top)
+            assertTrue(strips.last().bottom.y > expected.top + expected.height)
+        }
+    }
+
     @Test fun clampAndTinyHostSizesDoNotProduceNaN() {
         near(0f, DoubaoGenieGeometry.smooth(-1f))
         near(1f, DoubaoGenieGeometry.smooth(2f))

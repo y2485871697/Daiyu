@@ -3,6 +3,8 @@ package app.daiyu.android
 import android.view.KeyEvent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
+import app.daiyu.android.model.catalog.CatalogLocalEditResult
+import app.daiyu.android.model.catalog.selectionFor
 import app.daiyu.android.ui.components.DialogActionLease
 import app.daiyu.android.ui.components.RetainedWorkspaceAction
 import java.util.concurrent.CountDownLatch
@@ -166,8 +168,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
         assertTrue(tail > 0f)
         node("chat-messages").performTouchInput { click(center) }
         node("chat-messages").performScrollToIndex(8)
-        ui.waitForIdle()
-        val reading = scrollValue()
+        val reading = frame()
         assertTrue("History fixture must enter an interior reading position: reading=$reading tail=$tail", reading > 0f && reading < tail)
         val oldAutoAdvance = ui.mainClock.autoAdvance
         ui.mainClock.autoAdvance = false
@@ -213,9 +214,13 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
         ui.waitUntil(5_000) { ui.runOnIdle { confirmedGptSpeed() != null } }
         val revision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
-        val before = fixture.settings.load()
+        val before = fixture.controller.conversationModelEditing(null).second.settings
+        val catalog = checkNotNull(fixture.settings.localModelCatalogSnapshot())
+        val ticket = checkNotNull(catalog.selectionFor(before.model))
         val capacity = if (before.contextWindowOverride == 32768) 65536 else 32768
-        fixture.settings.save(before.copy(contextWindowOverride = capacity))
+        assertEquals(CatalogLocalEditResult.APPLIED, fixture.settings.modelCatalog.replaceSelection(
+            ticket, ticket.record.copy(settings = ticket.record.settings.copy(contextWindowOverride = capacity)),
+            { false }))
         mainThread { invokeHost(activity, "refreshConfirmedModelLabel") }
         ui.waitUntil(5_000) { ui.runOnIdle {
             val confirmed = confirmedGptSpeed() as? ChatGptSpeedSelection
@@ -229,7 +234,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
             chatModelPicker()?.loading == false
         } }
         mainThread { assertEquals(confirmedRevision, invokeHost(activity, "getContextModelRevision")) }
-        assertEquals(capacity, fixture.settings.load().contextWindowOverride)
+        assertEquals(capacity, fixture.controller.conversationModelEditing(null).second.settings.contextWindowOverride)
         assertEquals(0, fixture.opens.get())
     }
 

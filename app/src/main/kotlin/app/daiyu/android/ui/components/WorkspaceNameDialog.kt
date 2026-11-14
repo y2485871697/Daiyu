@@ -28,18 +28,35 @@ internal fun WorkspaceNameDialog(
     enabled: () -> Boolean = { true },
 ) {
     var value by remember(initial) { mutableStateOf(initial) }
+    NameInputSheet(title, value, hint, confirmText,
+        onValueChange = { value = it }, onConfirm = { onConfirm(value) },
+        onDismiss = onDismiss, enabled = enabled)
+}
+
+@Composable
+internal fun NameInputSheet(
+    title: String,
+    value: String,
+    hint: String,
+    confirmText: String,
+    onValueChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    enabled: () -> Boolean = { true },
+    confirmEnabled: Boolean = true,
+) {
     ChatSelectionSheet(title, onDismiss = { if (enabled()) onDismiss() }, showCloseButton = false, dismissEnabled = enabled(), footer = {
         AssistantPreviewButton("取消", { if (enabled()) onDismiss() },
             Modifier.weight(1f).heightIn(min = 48.dp).testTag("dialog-cancel"),
             secondary = true, enabled = enabled())
-        AssistantPreviewButton(confirmText, { if (enabled()) onConfirm(value) },
+        AssistantPreviewButton(confirmText, { if (enabled() && confirmEnabled) onConfirm() },
             Modifier.weight(1f).heightIn(min = 48.dp).testTag("dialog-confirm"),
-            primary = true, enabled = enabled())
+            primary = true, enabled = enabled() && confirmEnabled)
     }) {
         Box(Modifier.fillMaxWidth().padding(bottom = 13.dp).testTag("workspace-name-field")) {
             TextField(
                 value = value,
-                onValueChange = { if (enabled()) value = it },
+                onValueChange = { if (enabled()) onValueChange(it) },
                 label = hint,
                 useLabelAsPlaceholder = true,
                 singleLine = true,

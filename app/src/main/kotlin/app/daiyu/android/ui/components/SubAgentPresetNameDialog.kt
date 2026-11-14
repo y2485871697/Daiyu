@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.window.WindowDialog
 
-/** Same window-level form and Material text actions as the original preset editor. */
 @Composable
 internal fun SubAgentPresetNameDialog(
     title: String,
@@ -23,7 +22,14 @@ internal fun SubAgentPresetNameDialog(
     onDismiss: () -> Unit,
     onSave: () -> Unit,
     fieldHint: String = "组名称",
+    renameStyle: Boolean = false,
 ) {
+    if (renameStyle) {
+        NameInputSheet(title, name, fieldHint, "保存",
+            onValueChange = { onNameChange(it.take(80)) },
+            onConfirm = onSave, onDismiss = onDismiss, confirmEnabled = saveEnabled)
+        return
+    }
     WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
         app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
         Column(Modifier.fillMaxWidth()) {

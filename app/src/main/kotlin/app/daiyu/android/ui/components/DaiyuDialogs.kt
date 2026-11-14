@@ -56,7 +56,12 @@ internal fun DaiyuTextInputDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
     preview: Boolean = false,
+    nameStyle: Boolean = false,
 ) {
+    if (nameStyle) {
+        WorkspaceNameDialog(title, initial, hint, confirmText, onConfirm, onDismiss)
+        return
+    }
     // Do not trim or reject empty text: moving out of a folder and clearing search need it.
     var value by remember(title, initial) { mutableStateOf(initial) }
     if (preview) {

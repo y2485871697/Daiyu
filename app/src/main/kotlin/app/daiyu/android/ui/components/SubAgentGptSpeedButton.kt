@@ -105,7 +105,7 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
             modifier = Modifier.size(SubAgentGptSpeedIconSize).graphicsLayer {
                 rotationZ = subAgentGptSpeedRotationDegrees(progress.value)
                 val scale = subAgentGptSpeedScale(progress.value); scaleX = scale; scaleY = scale
-            }, tint = displayedColor)
+            }, tint = chatColors.accent.copy(alpha = if (usable) 1f else .38f))
         Text(text = (if (chatStyle) "GPT 速度 · " else "") + subAgentGptSpeedDisplayName(mode),
             modifier = if (chatStyle) Modifier.width(IntrinsicSize.Max) else Modifier,
             style = MaterialTheme.typography.labelMedium,

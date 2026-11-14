@@ -290,7 +290,17 @@ CHAT_STATUS_BAR_INSETS_MODULES = (
 )
 
 
+RENAME_PRESENTATION_PLATFORM_CLASS = "app.daiyu.android.RenamePresentationActivityTest"
+RENAME_PRESENTATION_MODULES = (
+    "test_rename_presentation_contract", "test_workspace_create_folder_contract",
+    "test_workspace_entry_mutations_contract", "test_subagent_collaboration_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+)
+
+
 def command_for(python, env):
+    if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == RENAME_PRESENTATION_PLATFORM_CLASS:
+        return [python, "-B", "-m", "unittest", *RENAME_PRESENTATION_MODULES, "-v"], "rename-presentation-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == CHAT_STATUS_BAR_INSETS_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *CHAT_STATUS_BAR_INSETS_MODULES, "-v"], "chat-status-bar-insets-targeted"

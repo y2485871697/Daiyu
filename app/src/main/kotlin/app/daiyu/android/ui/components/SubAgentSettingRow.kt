@@ -23,13 +23,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ui.icons.daiyuIconColor
+import app.daiyu.android.ui.components.subagent.conversationAgentColors
+import androidx.compose.ui.platform.testTag
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector, description: String,
     enabled: Boolean = true, dropdown: Boolean = false, badge: String? = null, onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier, divider: Boolean = false) {
+    onLongClick: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier, divider: Boolean = false, stackedValue: Boolean = false) {
     if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
         val colors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
         Column(modifier.fillMaxWidth()) {
@@ -58,23 +59,41 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
         return
     }
     val colors = MaterialTheme.colorScheme
+    val accent = conversationAgentColors().accent
     val alpha = if (enabled) 1f else 0.38f
     Row(modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = description }
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
             enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick)
         .padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(22.dp), tint = daiyuIconColor(icon).copy(alpha = alpha))
-        Text(label, Modifier.widthIn(min = 72.dp, max = 100.dp), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface.copy(alpha = alpha))
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (!badge.isNullOrBlank()) Surface(shape = RoundedCornerShape(6.dp), color = colors.surfaceVariant) {
-                Text(badge, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.onSurface.copy(alpha = alpha))
+        Icon(icon, null, Modifier.size(22.dp), tint = accent.copy(alpha = alpha))
+        Text(label, if (stackedValue) Modifier else Modifier.widthIn(min = 72.dp, max = 100.dp),
+            style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            color = colors.onSurface.copy(alpha = alpha))
+        if (stackedValue) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(value, Modifier.fillMaxWidth().testTag("subagent-setting-model-name"),
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, color = colors.onSurface.copy(alpha = alpha))
+                if (!badge.isNullOrBlank()) Text(badge,
+                    Modifier.fillMaxWidth().testTag("subagent-setting-model-provider"),
+                    style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, color = accent.copy(alpha = alpha))
+                trailing?.let { content ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) { content() }
+                }
             }
-            Text(value, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium, maxLines = 3,
-                overflow = TextOverflow.Ellipsis, color = colors.onSurface.copy(alpha = alpha))
+        } else {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!badge.isNullOrBlank()) Surface(shape = RoundedCornerShape(6.dp), color = colors.surfaceVariant) {
+                    Text(badge, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.onSurface.copy(alpha = alpha))
+                }
+                Text(value, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium, maxLines = 3,
+                    overflow = TextOverflow.Ellipsis, color = colors.onSurface.copy(alpha = alpha))
+            }
+            trailing?.invoke()
         }
-        trailing?.invoke()
         Icon(if (dropdown) Icons.Rounded.ExpandMore else Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
-            Modifier.size(18.dp), tint = colors.onSurface.copy(alpha = alpha))
+            Modifier.size(18.dp), tint = accent.copy(alpha = alpha))
     }
 }

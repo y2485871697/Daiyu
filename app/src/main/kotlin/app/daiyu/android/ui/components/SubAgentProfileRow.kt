@@ -68,7 +68,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
         if (settings) {
             SubAgentSettingRow("模型", config?.let { it.modelDisplayName.ifBlank { it.model } }
                 ?: if (profile.modelId.isBlank()) "选择模型" else "模型不可用",
-                Icons.Rounded.ViewInAr, "${profile.name}模型", enabled = usable, badge = config?.providerName,
+                Icons.Rounded.ViewInAr, "${profile.name}模型", enabled = usable, badge = config?.providerName, stackedValue = true,
                 onClick = { if (currentUsable) { modelPicker = true } },
                 onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } },
                 trailing = { SubAgentGptSpeedButton(profile, presentationProviders, usable) })

@@ -228,7 +228,9 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('if (divider) HorizontalDivider', chat)
         for removed in ('background(', '.border(', 'daiyuIconColor(', 'val thinking', 'if (!speed)'):
             self.assertNotIn(removed, chat)
-        self.assertIn('daiyuIconColor(icon)', legacy)
+        self.assertIn('val accent = conversationAgentColors().accent', legacy)
+        self.assertIn('tint = accent.copy(alpha = alpha)', legacy)
+        self.assertNotIn('daiyuIconColor(icon)', legacy)
 
     def test_new_form_keeps_sheet_centered_title_and_transparent_floating_labels(self):
         form = (UI / 'subagent/ConversationAgentForm.kt').read_text()
@@ -310,7 +312,8 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
 
     def test_passive_role_uses_a_small_glyph_not_a_button_sized_slot(self):
         role = (UI / 'SubAgentRoleIcon.kt').read_text()
-        self.assertIn('Box(Modifier.size(24.dp)', role)
+        self.assertIn('slotSize: Dp = 24.dp', role)
+        self.assertIn('Box(Modifier.size(slotSize)', role)
         self.assertIn('Modifier.size(16.dp).testTag("subagent-role-glyph-${profile.id}")', role)
         self.assertNotIn('size(40.dp)', role)
         self.assertNotIn('size(22.dp)', role)

@@ -38,8 +38,8 @@ class WorkspaceCreateFolderContract(unittest.TestCase):
                       'remember(initial)', 'label = hint', 'useLabelAsPlaceholder = true', 'singleLine = true',
                       'Modifier.managedInput().testTag("prompt-input").fillMaxWidth()',
                       'imeCursorBrush(MiuixTheme.colorScheme.primary)', 'testTag("workspace-name-field")',
-                      'if (enabled()) onConfirm(value)', 'onDismiss = { if (enabled()) onDismiss() }',
-                      'onValueChange = { if (enabled()) value = it }', 'dismissEnabled = enabled()']:
+                      'if (enabled() && confirmEnabled) onConfirm()', 'onDismiss = { if (enabled()) onDismiss() }',
+                      'onValueChange = { if (enabled()) onValueChange(it) }', 'dismissEnabled = enabled()']:
             self.assertIn(token, dialog)
         self.assertEqual(2, dialog.count('enabled = enabled()'))
         self.assertEqual(2, dialog.count('Modifier.weight(1f).heightIn(min = 48.dp)'))

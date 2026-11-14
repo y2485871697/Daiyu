@@ -1719,7 +1719,8 @@ class MainActivity : ComponentActivity() {
     // Prompts are one-shot capabilities, not saved state. A replaced/dismissed prompt cannot commit.
     private sealed interface Prompt { val backup: Boolean }
     private class InputPrompt(val title: String, val initial: String, val hint: String,
-        val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false) : Prompt
+        val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false,
+        val nameStyle: Boolean = false) : Prompt
     private class FolderPrompt(val folders: List<app.daiyu.android.ui.model.ConversationFolderUi>,
         val initialFolderId: String?, val action: (String?) -> Unit, override val backup: Boolean = false) : Prompt
     private class ChoicePrompt(val title: String, val options: List<String>, val action: (Int) -> Unit,
@@ -5571,7 +5572,7 @@ class MainActivity : ComponentActivity() {
         fun valid() = activityUsable() && prompt === current
         when (current) {
             is InputPrompt -> DaiyuTextInputDialog(current.title, current.initial, current.hint, current.confirm,
-                preview = retainedPage == "chat",
+                preview = retainedPage == "chat", nameStyle = current.nameStyle,
                 onConfirm = { value -> confirmInputPrompt(current, value) },
                 onDismiss = { if (valid()) { if (current === mcpInput) cancelMcpEditor() else prompt = null } })
             is FolderPrompt -> ConversationFolderPicker(current.folders, current.initialFolderId,
@@ -6431,7 +6432,7 @@ class MainActivity : ComponentActivity() {
                 controller.database.rename(latest.id, value)
                 if (selected?.id == latest.id) selected = retainedConversation(id)
                 updatePane(); refresh()
-            } })
+            } }, nameStyle = true)
         }
     }
     private fun searchConversations() = openSearch("conversation-search")

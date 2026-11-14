@@ -118,7 +118,7 @@ internal fun SubAgentSettingsScreen(
                         onDelete = { if (editable) delete = preset; actionsPreset = null })
                 }
                 if (add || rename != null) SubAgentPresetNameDialog(
-                    title = if (add) "添加子代理组" else "重命名子代理组", name = name,
+                    title = if (add) "添加子代理组" else "重命名", name = name, renameStyle = !add,
                     onNameChange = { name = it }, saveEnabled = editable && name.trim().isNotBlank(),
                     onDismiss = { add = false; rename = null }, onSave = {
                         if (directory.change {
@@ -145,6 +145,7 @@ internal fun SubAgentSettingsScreen(
 @Composable
 private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: String, onBack: () -> Unit,
     isCurrentRoute: Boolean, modelSource: SubAgentModelSource) {
+    val accent = app.daiyu.android.ui.components.subagent.conversationAgentColors().accent
     val state = editor.observe()
     val lastLoadedConfig = remember(editor) { arrayOfNulls<ConversationSubAgentConfig>(1) }
     val loadedConfig = (state as? SubAgentEditorState.Loaded)?.config
@@ -163,7 +164,7 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
     WithoutPressRipple {
         Scaffold(containerColor = settingsPageBackground(),
             topBar = { TopAppBar(title = { Text(groupName) }, navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = accent) }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())) },
             floatingActionButtonPosition = FabPosition.Center,
             floatingActionButton = {
@@ -198,30 +199,25 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Icon(when (profile.role) {
-                                            "review" -> Icons.Rounded.FactCheck
-                                            "image_generation" -> Icons.Rounded.Image
-                                            "video_generation" -> Icons.Rounded.Videocam
-                                            else -> Icons.Rounded.AccountTree
-                                        }, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        SubAgentRoleIcon(profile, slotSize = 22.dp)
                                         Text(profile.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                                         var expanded by remember(editor, profile.id) { mutableStateOf(false) }
                                         LaunchedEffect(editable) { if (!editable) expanded = false }
                                         Box {
                                             IconButton(enabled = editable, onClick = { if (editor.enabled) { expanded = true } }) {
-                                                Icon(Icons.Rounded.MoreVert, "${profile.name}更多操作")
+                                                Icon(Icons.Rounded.MoreVert, "${profile.name}更多操作", tint = accent)
                                             }
                                             if (editable) SubAgentDropdownMenu(expanded, { expanded = false }) {
-                                                DropdownMenuItem(text = { Text("配置") }, leadingIcon = { Icon(Icons.Rounded.Tune, null) },
+                                                DropdownMenuItem(text = { Text("配置") }, leadingIcon = { Icon(Icons.Rounded.Tune, null, tint = accent) },
                                                     onClick = {
                                                         if (editor.enabled) SubAgentProfileDraftSession.open(editor, profile)?.let { addedDraft = it }
                                                         expanded = false
                                                     })
-                                                DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Rounded.Edit, null) },
+                                                DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Rounded.Edit, null, tint = accent) },
                                                     onClick = { if (editor.enabled) { name = profile.name; rename = profile }; expanded = false })
                                                 DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) },
-                                                    leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                                                    leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = accent) },
                                                     onClick = { if (editor.enabled) delete = profile; expanded = false })
                                             }
                                         }
@@ -240,7 +236,7 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
             })
         }
         rename?.let { profile ->
-            if (editable) SubAgentPresetNameDialog(title = "重命名代理", fieldHint = "名称", name = name,
+            if (editable) SubAgentPresetNameDialog(title = "重命名", fieldHint = "名称", name = name, renameStyle = true,
                 onNameChange = { if (editor.enabled) name = it }, saveEnabled = name.trim().isNotBlank(),
                 onDismiss = { rename = null }, onSave = {
                     if (editor.enabled && editor.updateProfile(profile.id) { it.copy(name = name.trim()) } is ConversationSubAgentPreferences.WriteResult.Saved) rename = null

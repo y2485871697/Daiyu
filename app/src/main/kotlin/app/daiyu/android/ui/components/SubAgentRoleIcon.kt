@@ -12,12 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.SubAgentProfile
 import app.daiyu.android.ui.components.subagent.conversationAgentColors
 
 @Composable
-internal fun SubAgentRoleIcon(profile: SubAgentProfile) {
+internal fun SubAgentRoleIcon(profile: SubAgentProfile, slotSize: Dp = 24.dp) {
     val icon = when (profile.role) {
         "implementation" -> Icons.Rounded.Build
         "review" -> Icons.Rounded.FactCheck
@@ -25,7 +26,7 @@ internal fun SubAgentRoleIcon(profile: SubAgentProfile) {
         "video_generation" -> Icons.Rounded.Videocam
         else -> return
     }
-    Box(Modifier.size(24.dp).testTag("subagent-role-${profile.id}"), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(slotSize).testTag("subagent-role-${profile.id}"), contentAlignment = Alignment.Center) {
         Icon(icon, "${profile.name}职责：${profile.roleLabel}", Modifier.size(16.dp).testTag("subagent-role-glyph-${profile.id}"), tint = conversationAgentColors().accent)
     }
 }

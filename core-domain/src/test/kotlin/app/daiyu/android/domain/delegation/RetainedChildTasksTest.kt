@@ -114,6 +114,8 @@ class RetainedChildTasksTest {
             val view = supervisor.snapshots(binding).single()
             assertEquals(ChildTaskStatus.COMPLETED, view.record.status); assertEquals("answer", view.record.text)
             assertFalse(view.journalUnconfirmed); assertFalse(view.stopRequested)
+            assertEquals(ChildTaskPauseState.FINISHED, view.pauseState)
+            assertEquals(ChildTaskQueueState.FINISHED, view.queueState)
         } finally { model.release.countDown(); drained(supervisor) }
     }
 

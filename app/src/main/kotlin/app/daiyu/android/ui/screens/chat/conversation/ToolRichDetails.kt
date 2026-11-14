@@ -350,6 +350,15 @@ internal object ToolRichDetails {
         val failureReason = receiptStates.asSequence().flatMap { sequenceOf(it.opt("error"), it.opt("code")) }
             .mapNotNull { code -> when (code) {
                 "invalid_arguments" -> "调用参数不符合工具要求"
+                "child_source_stale" -> "子任务引用已过期，本次未执行控制"
+                "child_control_unavailable" -> "子任务当前无法控制，本次未执行"
+                "child_task_not_found" -> "未找到目标子任务，本次未执行控制"
+                "child_not_live", "child_task_already_settled" -> "目标任务已结束，本次未执行" + when (args?.optString("action")) {
+                    "stop" -> "停止"
+                    "pause" -> "暂停"
+                    "continue" -> "继续"
+                    else -> "控制"
+                }
                 "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED" -> "未能确认活跃或获得焦点的前台窗口，不代表屏幕已锁定"
                 "APPLICATION_WINDOW_METADATA_UNAVAILABLE_NOT_EXECUTED" -> "当前窗口信息不可用，未执行操作"
                 "APPLICATION_WINDOW_DISPLAY_MISMATCH_NOT_EXECUTED" -> "当前窗口不在本次允许的显示器上"
@@ -384,6 +393,7 @@ internal object ToolRichDetails {
             val longitude = (output?.opt("longitude") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() in -180.0..180.0 }?.let { clean(it) }
             fun readable(field: ToolFieldUi): String = "${field.label}：" + when (field.value) { "true" -> "是"; "false" -> "否"; else -> field.value }
             val body = when {
+                launchingDelegation && result.isNullOrBlank() -> ""
                 result.isNullOrBlank() -> "等待执行回执"
                 failed -> failure
                 launchingDelegation -> when {

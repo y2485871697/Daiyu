@@ -16,10 +16,10 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
     private val profiles = profiles.toSet()
     init { require(this.profiles.isNotEmpty() || currentProfiles != null) }
 
-    fun tool(): RegisteredTool = object : RegisteredTool {
-        override val definition = ToolDefinition(TOOL_NAME, 1,
-            "提交后台子任务，可能产生模型费用。回执仅确认排队持久化，主回复结束后继续。执行角色使用父任务允许的可委派工具；tool_names可收窄，空数组禁用；browser_access为full/read_only/disabled，默认full但不超过父权限。审查角色仅文本审查，不递归委派或自动重试；继续和追加保留原工具范围。" + SubAgentDescriptor.initialDescription(initialProfiles),
-            CAPABILITY, ToolEffect.READ_ONLY,
+    fun tool(name: String = TOOL_NAME, capability: String = CAPABILITY): RegisteredTool = object : RegisteredTool {
+        override val definition = ToolDefinition(name, if (name == TOOL_NAME) 1 else 2,
+            "提交后台子任务，可能产生模型费用。仅等待准入持久化，不等待子任务结果；返回后主代理继续独立工作，主回复结束后子任务继续。需要结果时再调用inspect_child_tasks或get_child_task，不连续空轮询。执行角色使用父任务允许的可委派工具；tool_names可收窄，空数组禁用；browser_access为full/read_only/disabled，默认full但不超过父权限。审查角色仅文本审查，不递归委派或自动重试；继续和追加保留原工具范围。" + SubAgentDescriptor.initialDescription(initialProfiles),
+            capability, ToolEffect.READ_ONLY,
             ToolSchema(listOf(ArgumentField("tasks", ArgumentType.ArrayValue(
                 ArgumentType.ObjectValue(ToolSchema(listOf(
                     ArgumentField("profile_id", ArgumentType.Text(200, minimumLength = 1)),

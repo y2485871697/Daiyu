@@ -1,9 +1,9 @@
 package app.daiyu.android.domain.delegation
 
 /** Live process state, deliberately not a durable ChildTaskStatus or replay permission. */
-enum class ChildTaskPauseState { ACTIVE, PENDING, PAUSED }
+enum class ChildTaskPauseState { ACTIVE, PENDING, PAUSED, FINISHED }
 
-enum class ChildTaskQueueState { ACTIVE, PENDING }
+enum class ChildTaskQueueState { ACTIVE, PENDING, FINISHED }
 
 /** PENDING is only intent; PAUSED acknowledges a resumable boundary, never an in-flight read. */
 enum class ChildTaskControlReceipt { PENDING, PAUSED, RESUMED, STALE }

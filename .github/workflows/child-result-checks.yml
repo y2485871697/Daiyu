@@ -56,7 +56,8 @@ jobs:
           for pattern in ('test_delegation_batch_and_send_contract.py', 'test_child_stop_hot_configuration_contract.py',
                           'test_subagent_resume_display_contract.py', 'test_subagent_collaboration_contract.py',
                           'test_sidebar_task_entry_contract.py', 'test_child_task_card_contract.py',
-                          'test_chat_return_refresh_contract.py'):
+                          'test_chat_return_refresh_contract.py', 'test_record_tool_tests_scope.py',
+                          'test_acceptance_tool_receipt.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -114,7 +115,7 @@ jobs:
           domain = [ET.parse(p).getroot() for p in Path('core-domain/build/test-results/test').glob('TEST-*.xml')]
           app = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {s.attrib['name'].rsplit('.', 1)[-1] for s in domain}
-          assert {'ChildModelBatchTest', 'ChildModelExecutionToolsTest', 'ChildTaskCommandTest',
+          assert {'ChildModelBatchTest', 'ChildFailureDiagnosticsTest', 'ChildModelExecutionToolsTest', 'ChildTaskCommandTest',
                   'RunnerReceiptBatchTest', 'RunnerToolBoundaryTest', 'ChildUsagePipelineTest'} <= names, names
           assert {s.attrib['name'].rsplit('.', 1)[-1] for s in app} == {'SubAgentStatusRowsTest', 'LargeChildTaskBackupTest', 'SubAgentDescriptorTest',
               'SavedSubAgentRuntimeBindingsTest', 'ConversationSubAgentPreferencesTest', 'RunChildModelsTest', 'RunChildTasksTest',

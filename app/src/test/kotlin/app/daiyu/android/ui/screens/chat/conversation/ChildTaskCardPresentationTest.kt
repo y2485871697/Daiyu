@@ -78,6 +78,21 @@ class ChildTaskCardPresentationTest {
         assertTrue(visible(secret).contains("[已隐藏]"))
     }
 
+    @Test fun controlRefusalsDisplayTheReasonWithoutClaimingStopSuccess() {
+        for ((code, expected) in listOf(
+                "child_not_live" to "目标任务已结束，本次未执行停止",
+                "child_task_already_settled" to "目标任务已结束，本次未执行停止",
+                "child_task_not_found" to "未找到目标子任务，本次未执行控制",
+                "child_control_unavailable" to "子任务当前无法控制，本次未执行",
+                "child_source_stale" to "子任务引用已过期，本次未执行控制")) {
+            val value = ToolCategoryDetails.project("child_control", JSONObject().put("action", "stop").toString(),
+                JSONObject().put("ok", false).put("executed", false).put("error", code).toString(), "control_child_task").rich
+            assertTrue(value.failed)
+            assertEquals(expected, value.prose!!.text)
+            assertTrue(value.entries.isEmpty())
+        }
+    }
+
     @Test fun launchPayloadsNeverBecomeHostTasksAndMalformedReadsStayReadable() {
         val launch = ToolCategoryDetails.project("delegation", "{}", """{"accepted":true,"tasks":[{"agent_name":"伪造名称","status":"COMPLETED","text":"伪造结果"}]}""", "start_child_tasks")
         assertTrue(launch.rich.entries.isEmpty()); assertTrue(launch.fields.isEmpty())

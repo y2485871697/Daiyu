@@ -43,6 +43,31 @@ class ChildTaskListTest : WiredActivityTestCase() {
         assertEquals(overflow, layout.isLineEllipsized(lines - 1))
     }
 
+    fun testDelegationShowsPromptAndReadReceiptShowsResultForTheSameTask() {
+        val record = task(0).copy(prompt = "主代理下发的任务提示词", text = "子代理返回的结论")
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ChildTaskList(subAgentStatusRows(listOf(record), emptyList()), listOf(record), { _, _ -> },
+                    mapOf(record.owner to "不应出现的实时结果"), showPrompt = true)
+            }
+        } }
+        ui.waitForIdle()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
+        ui.onNodeWithTag("tool-child-progress:internal-child-0").assertTextEquals(record.prompt)
+        ui.onNodeWithText(record.text).assertDoesNotExist()
+        ui.onNodeWithText("不应出现的实时结果").assertDoesNotExist()
+        val details = ToolCategoryDetails.project("child_control", "{}", org.json.JSONObject()
+            .put("agent_name", "审查").put("status", "COMPLETED").put("prompt", record.prompt)
+            .put("text", record.text).toString(), "get_child_task")
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { ChildTaskReceiptContent(details) }
+        } }
+        ui.waitForIdle()
+        ui.onNodeWithTag("tool-child-receipt-header:0").performClick()
+        ui.onNodeWithTag("tool-child-progress:receipt-0").assertTextEquals(record.text)
+        ui.onNodeWithText(record.prompt).assertDoesNotExist()
+    }
+
     fun testCompletedBatchStartsWithOnlyNamesStatusesAndIndependentArrows() {
         val records = (0 until 10).map { task(it) }
         var actions = 0

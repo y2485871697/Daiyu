@@ -718,7 +718,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             tasks.remove(task.initial.owner.childRunId)
             val binding = task.binding
             binding.recent[task.initial.owner.childRunId] =
-                RetainedChildTask(task.record, task.stopRequested, true, task.journalUnconfirmed)
+                RetainedChildTask(task.record, task.stopRequested, true, task.journalUnconfirmed,
+                    ChildTaskPauseState.FINISHED, ChildTaskQueueState.FINISHED)
             while (binding.recent.size > maxRetainedTasks) binding.recent.remove(binding.recent.keys.first())
             task.request.remaining--
             if (task.request.remaining == 0 && task.request.admission is ChildTaskAdmission.Accepted)

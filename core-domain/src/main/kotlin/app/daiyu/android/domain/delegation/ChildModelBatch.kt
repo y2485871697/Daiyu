@@ -200,6 +200,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         var record = records[index]
                         var requestStarted = false
                         var requestFailure: ModelRequestException? = null
+                        var failureStage = ChildFailureStage.PREPARE
+                        var executionFailure: Exception? = null
+                        val diagnostics = ChildFailureDiagnostics()
                         val definition = models.getValue(task.profileId)
                         var permit: Semaphore? = null
                         var acquired = false
@@ -333,8 +336,13 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             requestStarted = true
                                             started.set(true)
                                         }
+                                        failureStage = ChildFailureStage.OPEN
                                         val transport = try { port.open(history, definitions) }
-                                        catch (failure: ModelRequestException) { requestFailure = failure; throw failure }
+                                        catch (failure: Exception) {
+                                            executionFailure = failure
+                                            requestFailure = failure as? ModelRequestException
+                                            throw failure
+                                        }
                                         val cancelStarted = AtomicBoolean(false)
                                         synchronized(gate) { cleanupFinished = false; cleanupPins++ }
                                         return object : ModelSession {
@@ -386,7 +394,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                                 delivery.deliver { checkedSink(event) }
                                                             }
                                                             if (continuing) (transport as ResumableModelSession).resume(attemptSink)
-                                                            else transport.next(outputs, attemptSink)
+                                                            else { failureStage = ChildFailureStage.RESPONSE; transport.next(outputs, attemptSink) }
                                                         } finally {
                                                             // Fence late callbacks and drain acknowledged delivery
                                                             // before publishing a resumable pause boundary.
@@ -396,6 +404,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                     } catch (failure: Exception) {
                                                         // A blocked read is never interrupted for pause. Only a
                                                         // transport-reported safe continuation may park here.
+                                                        executionFailure = failure
                                                         val resumable = transport as? ResumableModelSession
                                                         val kind = (failure as? ModelRequestException)?.failure
                                                         if (rejected == null && failure is ModelRequestException) requestFailure = failure
@@ -440,7 +449,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     }
                                 } }
                                 val runner = ChatRunner(selected, memory, tools, RunnerOptions(
-                                    receiptBatchExecutor = receipts,
+                                    receiptBatchExecutor = receipts, diagnostics = diagnostics,
                                     runtimeStore = usageRecorder?.let { recorder -> object : RuntimeStore {
                                         override fun save(checkpoint: RunCheckpoint) = recorder.record(record, checkpoint)
                                     } },
@@ -455,6 +464,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                 Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("source-result", source.text)), RunStatus.COMPLETED)
                                         ) } ?: emptyList()
                                         val result = runner.run(initial, previous + user)
+                                        if (executionFailure == null && result.status == RunStatus.COMPLETED) failureStage = ChildFailureStage.VALIDATE
                                         scope.requireOwner(result)
                                         check(!cancelled())
                                         val failure = requestFailure
@@ -472,7 +482,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     } else runner.stop()
                                 } finally { synchronized(gate) { runners.remove(runner); runnerDefinitions.remove(runner) } }
                             }
-                        } catch (_: Exception) { /* A sent request is uncertain; never reopen it. */ }
+                        } catch (failure: Exception) {
+                            if (executionFailure == null) executionFailure = failure
+                        }
                         finally {
                             assembly?.let { resource ->
                                 try { resource.close() }
@@ -497,7 +509,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 if (result != null) store?.finished(record, result.status, result.text, result.detail)
                                 else store?.finished(record,
                                     if (requestStarted) ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
-                                    detail = if (requestStarted) requestFailure?.userMessage?.take(200) ?: "child_result_unconfirmed" else "child_not_sent")
+                                    detail = diagnostics.detail(if (requestStarted) requestFailure?.userMessage ?: "child_result_unconfirmed" else "child_not_sent",
+                                        failureStage, executionFailure))
                             } catch (_: Exception) {
                                 completion = null
                             } finally {

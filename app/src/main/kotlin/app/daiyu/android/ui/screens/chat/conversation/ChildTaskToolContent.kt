@@ -63,10 +63,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
                         val live = controller.liveChildTasks(ConversationId(owner.conversationId)).filter { it.record.owner in owners }
                         val merged = stored.associateByTo(linkedMapOf()) { it.owner }
                         live.forEach { merged[it.record.owner] = it.record }
-                        val rows = subAgentStatusRows(merged.values.toList(), live).map { row ->
-                            if (row.status == "执行中" && live.none { it.record.owner == row.owner })
-                                row.copy(status = "状态未确认") else row
-                        }
+                        val rows = subAgentStatusRows(merged.values.toList(), live)
                         Triple(merged.values.toList(), rows, owners.associateWith(controller::childTaskProgress))
                     } }
                     result.onSuccess { records = it.first; rows = it.second; progress = it.third }
@@ -84,7 +81,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
             rows.isEmpty() -> ChildTaskFrame { Text("暂无任务记录", style = MiuixTheme.textStyles.footnote1) }
             else -> ChildTaskList(rows, records, { row, action ->
                 onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner)))
-            }, progress)
+            }, progress, showPrompt = true)
         }
     }
 }
@@ -95,13 +92,15 @@ internal fun ChildTaskList(
     records: List<ChildTaskRecord>,
     onAction: (SubAgentStatusRow, ToolCardAction) -> Unit,
     progress: Map<ChildRunOwner, String> = emptyMap(),
+    showPrompt: Boolean = false,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         rows.forEach { row -> key(row.owner) {
             val record = records.firstOrNull { it.owner == row.owner }
             val agentName = record?.display?.agentName?.takeIf { it.isNotBlank() }
                 ?.let { ToolRichDetails.scrub(it, limit = 80) } ?: "子代理"
-            val text = childTaskProgressText(record?.text, progress[row.owner])?.let { ToolRichDetails.scrub(it) }
+            val text = (if (showPrompt) record?.prompt else childTaskProgressText(record?.text, progress[row.owner]))
+                ?.takeIf { it.isNotBlank() }?.let { ToolRichDetails.scrub(it) }
             ChildTaskDisclosure(row, taskTitle = agentName, details = {
                 ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName)
             }, controls = {

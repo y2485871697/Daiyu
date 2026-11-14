@@ -269,6 +269,9 @@ COMPOSER_CONTEXT_MODULES = (
 CHILD_TASK_CARD_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.conversation." + name for name in (
     "ChildTaskListTest", "ToolOperationCardTest", "ToolCardReadabilityTest", "SubAgentStatusDialogTest",
 ))
+CHILD_DELEGATION_PLATFORM_CLASSES = CHILD_TASK_CARD_PLATFORM_CLASSES + (
+    "app.daiyu.android.ControllerChildModelsTest",
+)
 CHILD_TASK_CARD_INHERITANCE_CLASSES = CHILD_TASK_CARD_PLATFORM_CLASSES + (
     "app.daiyu.android.ConversationSelectionInheritanceActivityTest",
 )
@@ -474,7 +477,7 @@ def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
                 sorted(CHILD_TASK_CARD_PLATFORM_CLASSES), sorted(CHILD_TASK_CARD_INHERITANCE_CLASSES),
-                sorted(CHILD_TASK_CARD_THEME_CLASSES))):
+                sorted(CHILD_TASK_CARD_THEME_CLASSES), sorted(CHILD_DELEGATION_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *CHILD_TASK_CARD_MODULES, "-v"], "child-task-cards-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 

@@ -51,7 +51,7 @@ class BatchDelegationPresentationTest {
     }
 
     @Test fun waitingAndUnreadableReceiptsDoNotExposeTransportText() {
-        assertEquals("等待执行回执", details(result = null).rich.prose!!.text)
+        assertNull(details(result = null).rich.prose)
         for (raw in listOf("{INTERNAL_BROKEN", "[\"INTERNAL_ARRAY\"]", "INTERNAL_PLAIN", "{" + "x".repeat(131_072))) {
             val details = details(result = raw)
             assertEquals("委派回执无法读取", details.rich.prose!!.text)

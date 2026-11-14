@@ -252,7 +252,7 @@ class ChildModelBatchTest {
         try {
             assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.NotExecuted)
             assertEquals(ChildTaskStatus.NOT_EXECUTED, records.rows.values.single().status)
-            assertEquals("child_not_sent", records.rows.values.single().detail)
+            assertEquals("child_not_sent;phase=MODEL_OPEN;type=invalid_state", records.rows.values.single().detail)
         } finally { batch.close() }
     }
 
@@ -342,6 +342,22 @@ class ChildModelBatchTest {
         } finally { batch.close() }
     }
 
+    @Test fun swallowedRunnerFailureStillRecordsSafePhaseAndCategoryWithoutReopening() {
+        val records = Records(); val calls = AtomicInteger()
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) {
+            port { _, _ -> calls.incrementAndGet(); throw IllegalStateException("token=PRIVATE_REQUEST") }
+        }), store = records))
+        val idle = CountDownLatch(1)
+        try {
+            assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Unknown)
+            batch.closeWhenIdle { idle.countDown() }; assertTrue(idle.await(5, TimeUnit.SECONDS))
+            val record = records.rows.values.single()
+            assertEquals(ChildTaskStatus.UNKNOWN, record.status)
+            assertEquals("child_result_unconfirmed;phase=MODEL_REQUEST;type=invalid_state", record.detail)
+            assertFalse(record.detail!!.contains("PRIVATE_REQUEST")); assertEquals(1, calls.get())
+        } finally { batch.close() }
+    }
+
     @Test fun transportUncertaintyKeepsUnknownAndPreservesSafeFailureReason() {
         for (kind in listOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT, ModelFailure.INCOMPLETE, ModelFailure.PROTOCOL)) {
             val records = Records(); val calls = AtomicInteger()
@@ -353,7 +369,9 @@ class ChildModelBatchTest {
                 assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Unknown)
                 batch.closeWhenIdle { idle.countDown() }; assertTrue(idle.await(5, TimeUnit.SECONDS))
                 assertEquals(ChildTaskStatus.UNKNOWN, records.rows.values.single().status)
-                assertEquals(kind.userMessage, records.rows.values.single().detail); assertEquals(1, calls.get())
+                val detail = requireNotNull(records.rows.values.single().detail)
+                assertTrue(detail.startsWith(kind.userMessage + ";phase=MODEL_REQUEST;type="))
+                assertTrue(detail.endsWith(kind.name)); assertTrue(detail.length <= 200); assertEquals(1, calls.get())
             } finally { batch.close() }
         }
     }

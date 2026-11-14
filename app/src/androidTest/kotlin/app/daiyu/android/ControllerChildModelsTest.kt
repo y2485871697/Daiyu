@@ -66,7 +66,10 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                                     """{"tasks":[{"profile_id":"review","prompt":"review task"}]}""")))
                                 else {
                                     check(outputs.single().callId == ToolCallId("child-call"))
-                                    check(outputs.single().output.contains(if (background) "accepted" else "independent answer")); sink(ModelEvent.TextFinal("parent", "combined answer"))
+                                    val receipt = org.json.JSONObject(outputs.single().output)
+                                    check(receipt.getBoolean("accepted") && !receipt.getBoolean("completed"))
+                                    check(!receipt.has("results") && !outputs.single().output.contains("independent answer"))
+                                    sink(ModelEvent.TextFinal("parent", "combined answer"))
                                 }
                             }
                             override fun cancel() { if (isChild) cancelled.countDown() }
@@ -119,6 +122,9 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         assertNull(parent.error)
         assertEquals(if (f.expectedDelegation) "combined answer" else "delegation disabled",
             parent.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        if (!f.held && f.expectedDelegation) awaitControl("accepted child drained after independent parent completion") {
+            !f.controller.hasLiveChildTasks(f.conversation.id)
+        }
     }
     private fun resend(f: Fixture, editing: Boolean) {
         val snapshotReady = CountDownLatch(1)
@@ -183,7 +189,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
     fun testSessionAwareChildAndParentToolContinuationUseTheDurableParentConversation() {
         val f = fresh(sessionAware = true)
         assertNotNull(f.controller.sendWithChildren(f.conversation, "session parent"))
-        awaitControl("parent tool continuation completed") { f.controller.active == null }
+        awaitControl("parent and session child completed") { f.controller.active == null && !f.controller.hasLiveChildTasks(f.conversation.id) }
         assertNull(f.controller.problem)
         assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         assertEquals(setOf("parent-api", "child-api"), f.sessionOwners.map { it.first }.toSet())
@@ -192,7 +198,8 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         assertEquals(f.conversation.id.value, task.owner.conversationId)
         assertFalse(task.owner.childRunId == f.conversation.id.value)
         val assistant = f.database.messages(f.conversation.id).map { it.second }.single { it.role == Message.ASSISTANT_ROLE }
-        assertTrue(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("independent answer"))
+        assertTrue(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("accepted"))
+        assertFalse(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("independent answer"))
         val command = app.daiyu.android.domain.delegation.ChildTaskCommand("gateway-append-${f.id}", task,
             app.daiyu.android.domain.delegation.ChildTaskCommandKind.APPEND, f.profile.id, "additional constraint")
         val accepted = f.controller.directChildTask(command)
@@ -217,13 +224,14 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
     fun testSavedConfigurationRunsWithoutShieldAndPersistsParentReceiptAndTaskRecord() {
         val f = fresh()
         assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
-        awaitControl("completed with child receipt") { f.controller.active == null }
+        awaitControl("completed with durable admission and child record") { f.controller.active == null && !f.controller.hasLiveChildTasks(f.conversation.id) }
         assertNull(f.controller.problem); assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         val rows = f.database.messages(f.conversation.id).map { it.second }
         assertEquals(2, rows.size)
         val assistant = rows.single { it.role == Message.ASSISTANT_ROLE }
         assertEquals(RunStatus.COMPLETED, assistant.status)
-        assertTrue(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("independent answer"))
+        assertTrue(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("accepted"))
+        assertFalse(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("independent answer"))
         val task = f.controller.childTasks(f.conversation.id).single()
         assertEquals(ChildTaskStatus.COMPLETED, task.status); assertEquals("independent answer", task.text)
         assertEquals(assistant.id.value, task.parentMessageId)
@@ -254,7 +262,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
         f.preferences.update(key) { it.copy(profiles = listOf(f.profile.copy(reasoning = ReasoningEffort.OFF))) }
         assertNotNull(f.controller.sendWithChildren(f.conversation, "retain child choice"))
-        awaitControl("child off complete") { f.controller.active == null }
+        awaitControl("child off complete") { f.controller.active == null && !f.controller.hasLiveChildTasks(f.conversation.id) }
         assertEquals(ReasoningEffort.OFF, f.preferences.snapshot(key).profiles.single().reasoning)
         assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         assertEquals("none", org.json.JSONObject(f.childSettings.single().requestOptions.customBody)
@@ -262,19 +270,22 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         assertTrue(f.database.messages(f.conversation.id).isNotEmpty())
     }
 
-    fun testStopCancelsChildAndRetainsResourcesUntilActualExit() {
-        val f = fresh(true)
-        assertNotNull(f.controller.sendWithChildren(f.conversation, "held parent"))
+    fun testOrdinaryBatchChildOutlivesParentWithoutBlockingTheNextParentReply() {
+        val f = fresh(held = true)
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "held ordinary batch"))
         assertTrue(f.entered.await(5, TimeUnit.SECONDS))
-        val owner = checkNotNull(f.controller.active)
-        controlMain { assertTrue(f.controller.stop(owner)) }
-        assertTrue(f.cancelled.await(5, TimeUnit.SECONDS))
-        controlMain { assertNotNull(f.controller.active) }
-        assertNull(f.controller.sendWithChildren(f.conversation, "blocked next"))
-        f.release.countDown(); awaitControl("child drained and parent released") { f.controller.active == null }
-        assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
-        assertEquals(RunStatus.STOPPED, f.database.messages(f.conversation.id).single { it.second.id == owner.id }.second.status)
-        assertEquals(ChildTaskStatus.UNKNOWN, f.controller.childTasks(f.conversation.id).single().status)
+        finishParent(f)
+        assertTrue(f.controller.hasLiveChildTasks(f.conversation.id))
+        assertEquals(1L, f.cancelled.count)
+        assertNotNull(f.controller.send(f.conversation, "independent next parent task"))
+        finishParent(f)
+        assertEquals(2, f.parentOpened.get())
+        assertEquals(1L, f.release.count)
+        assertEquals(1L, f.cancelled.count)
+        f.release.countDown()
+        awaitControl("both accepted batches finish without parent blocking") { !f.controller.hasLiveChildTasks() }
+        assertEquals(2, f.childOpened.get())
+        assertTrue(f.controller.childTasks(f.conversation.id).all { it.status == ChildTaskStatus.COMPLETED })
     }
     fun testBackgroundChildOutlivesParentAndPersistsAttributedUsage() {
         val f = fresh(held = true, background = true)

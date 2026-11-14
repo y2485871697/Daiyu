@@ -32,7 +32,8 @@ internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<Retai
             task != null && !task.settled && task.pauseState == ChildTaskPauseState.PENDING -> "暂停中"
             task != null && !task.settled && task.queueState == app.daiyu.android.domain.delegation.ChildTaskQueueState.PENDING -> "排队中"
             record.status == ChildTaskStatus.QUEUED -> "排队中"
-            else -> "执行中"
+            task != null && !task.settled -> "执行中"
+            else -> "状态未确认"
         }
         SubAgentStatusRow(record.owner, record.display?.agentName ?: record.profileId, status,
             record.status == ChildTaskStatus.COMPLETED && task?.journalUnconfirmed != true,

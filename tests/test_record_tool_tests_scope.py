@@ -289,6 +289,22 @@ class ChildTaskCardScopeTest(unittest.TestCase):
                 self.assertEqual("child-task-cards-targeted", scope)
                 self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
 
+    def test_exact_cards_plus_controller_keep_targeted_checks_and_reject_bad_filters(self):
+        classes = (*self.CLASSES, "app.daiyu.android.ControllerChildModelsTest")
+        self.assertEqual(classes, recorder.CHILD_DELEGATION_PLATFORM_CLASSES)
+        for ordered in itertools.permutations(classes):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(ordered)))
+            self.assertEqual("child-task-cards-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+        raw = ",".join(classes)
+        invalid = [raw + ",unknown", raw + ",", " " + raw, raw + " ", raw.replace(",", ", ", 1)]
+        invalid += [raw + "," + name for name in classes]
+        invalid += [raw.replace(name, "app.daiyu.android.OtherTest") for name in classes]
+        for value in invalid:
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value))[1])
+        for mode in ("", "build", "compile", "candidate", "daily", "release", "checks"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
     def test_exact_cards_plus_inheritance_and_theme_stay_targeted(self):
         from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
         helper = SpeechPlatformDiscoveryTest()

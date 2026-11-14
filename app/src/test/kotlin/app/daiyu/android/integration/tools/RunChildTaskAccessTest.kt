@@ -118,8 +118,23 @@ class RunChildTaskAccessTest {
         val inspected = invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed
         val task = JSONObject(inspected.payload).getJSONArray("tasks").getJSONObject(0)
         assertEquals("retained partial", task.getString("progress")); assertTrue(task.getBoolean("stop_requested"))
-        assertTrue(task.getBoolean("settled")); assertTrue(task.getBoolean("live_state_available"))
+        assertTrue(task.getBoolean("settled")); assertFalse(task.getBoolean("live_state_available"))
+        assertTrue(task.getBoolean("snapshot_available"))
+        assertEquals("FINISHED", task.getString("pause_state")); assertEquals("FINISHED", task.getString("queue_state"))
         assertTrue(invoke(access, owner, "control_child_task", arguments().toString()) is DispatchOutcome.NotExecuted)
+    }
+
+    @Test fun controlRefusalsKeepTheirDistinctReasonsAndNeverClaimExecution() {
+        val owner = caller("conversation")
+        for ((outcome, expected) in listOf(ChildTaskStop.ALREADY_SETTLED to "child_task_already_settled",
+                ChildTaskStop.NOT_FOUND to "child_task_not_found")) {
+            val access = RunChildTaskAccess("conversation", { listOf(old) }, { old }, { emptyList() }, { "" },
+                { ChildTaskControlReceipt.STALE }, { ChildTaskControlReceipt.STALE }, { outcome }, { emptySet() })
+            val stopped = invoke(access, owner, "control_child_task", arguments("stop").toString()) as DispatchOutcome.NotExecuted
+            assertEquals(expected, stopped.code)
+            val paused = invoke(access, owner, "control_child_task", arguments("pause").toString()) as DispatchOutcome.NotExecuted
+            assertEquals("child_control_unavailable", paused.code)
+        }
     }
 
     @Test fun absentLiveObservationDoesNotClaimTransportDrainOrConfirmedJournal() {

@@ -124,6 +124,55 @@ class RunChildTasksTest {
         assertEquals("retained result", journal.list("conversation").single().text)
     }
 
+    @Test fun ordinaryBatchDelegationReturnsAdmissionAndRunsOtherToolsBeforeChildFinishes() {
+        val journal = Journal(); val child = Held(); val supervisor = RetainedChildTasks(journal)
+        val models = mapOf("review" to ChildModelDefinition("pool", 1) { child })
+        val legacy = RunChildModels(ChildModelBatch(mapOf("review" to ChildModelDefinition("legacy", 1) {
+            error("ordinary delegation must not use the synchronous batch")
+        })), setOf("review"))
+        val fastCalls = AtomicInteger()
+        val fast = object : RegisteredTool {
+            override val definition = app.daiyu.android.domain.tools.ToolDefinition("fast_read", 1, "Read fixture",
+                "fixture.read", ToolEffect.READ_ONLY, ToolSchema(emptyList()))
+            override fun prepare(arguments: ToolArguments) = PreparedTool {
+                fastCalls.incrementAndGet(); ExecutionReceipt.Confirmed("fast result")
+            }
+        }
+        val caps = SessionCapabilities("session", setOf(RunChildModels.CAPABILITY, RunChildTasks.CAPABILITY, "fixture.read"))
+        val catalog = RunCatalogTools(ToolRegistry().register(fast), caps, ToolLedger(InMemoryToolLedgerStore()),
+            message.conversationId, message.runId, children = legacy,
+            backgroundFactory = { owner, grants, auth ->
+                RunChildTasks(supervisor, supervisor.bind(owner, grants, auth, models), models.keys)
+            }) { grants, auth -> app.daiyu.android.skills.SkillRunSession.create(auth, grants.enabled, emptyList()) }
+        var rounds = 0
+        val parentPort = app.daiyu.android.CatalogFixturePort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                if (rounds++ == 0) {
+                    sink(ModelEvent.ToolReady(call().copy(name = RunChildModels.TOOL_NAME)))
+                    sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("fast"), "fast_read", "{}")))
+                } else {
+                    assertEquals(2, outputs.size)
+                    val receipt = JSONObject(outputs.first().output)
+                    assertTrue(receipt.getBoolean("accepted")); assertFalse(receipt.getBoolean("completed"))
+                    assertFalse(receipt.has("results")); assertFalse(outputs.first().output.contains("retained result"))
+                    assertTrue(child.entered.await(3, TimeUnit.SECONDS))
+                    assertEquals(1L, child.release.count); assertEquals(1, fastCalls.get())
+                    sink(ModelEvent.TextFinal("parent", "continued while child is working"))
+                }
+            }
+            override fun cancel() {}
+        } }
+        try {
+            val result = ChatRunner(parentPort, object : ConversationStore { override fun save(message: Message) {} },
+                catalog, RunnerOptions(receiptBatchExecutor = catalog)) {}.run(message, emptyList())
+            assertEquals(RunStatus.COMPLETED, result.status); assertEquals(2, rounds)
+            catalog.close()
+            assertEquals(1L, child.cancelled.count)
+            assertEquals(1, journal.enqueues.get()); assertEquals(1, child.opened.get())
+        } finally { catalog.close(); close(supervisor, child) }
+        assertEquals("retained result", journal.list("conversation").single().text)
+    }
+
     @Test fun wholeBatchValidationAndExplicitCapabilityPrecedeJournalAndNetwork() {
         val journal = Journal(); val model = Held(); val owner = owner()
         val caps = SessionCapabilities("session", setOf(RunChildTasks.CAPABILITY)); val auth = TaskAuthorization("session", "run")

@@ -55,7 +55,8 @@ class ToolEnabledChildRun(
         private set
     val snapshot: RetainedChildTask get() = synchronized(gate) {
         RetainedChildTask(observed, cancelled && observed.status != ChildTaskStatus.COMPLETED,
-            released, unknown, pauseState, contextLimited = contextLimited)
+            released, unknown, if (released) ChildTaskPauseState.FINISHED else pauseState,
+            if (released) ChildTaskQueueState.FINISHED else ChildTaskQueueState.ACTIVE, contextLimited = contextLimited)
     }
     private val pauseControl = ChildTaskPauseControl(::changed)
     val contextLimited: Boolean get() = synchronized(gate) { runner?.state()?.contextLimited == true }
@@ -103,6 +104,9 @@ class ToolEnabledChildRun(
     private fun runOnWorker() {
         var sent = false
         var completed: Message? = null
+        var failureStage = ChildFailureStage.PREPARE
+        var executionFailure: Exception? = null
+        val diagnostics = ChildFailureDiagnostics()
         try {
             while (!stopped()) {
                 if (capacity.tryAcquire(25, TimeUnit.MILLISECONDS)) {
@@ -128,7 +132,9 @@ class ToolEnabledChildRun(
                     val port = model()
                     check(!stopped() && pauseControl.awaitBoundary())
                     sent = true
-                    val transport = port.open(history, definitions)
+                    failureStage = ChildFailureStage.OPEN
+                    val transport = try { port.open(history, definitions) }
+                    catch (failure: Exception) { executionFailure = failure; throw failure }
                     synchronized(gate) { transportDrained = false }
                     val once = AtomicBoolean(false)
                     return object : ModelSession {
@@ -138,7 +144,9 @@ class ToolEnabledChildRun(
                         }
                         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                             check(pauseControl.awaitBoundary() && !stopped())
-                            transport.next(outputs, sink)
+                            failureStage = ChildFailureStage.RESPONSE
+                            try { transport.next(outputs, sink) }
+                            catch (failure: Exception) { executionFailure = failure; throw failure }
                         }
                         override fun cancel() {
                             if (!once.compareAndSet(false, true)) return
@@ -163,7 +171,7 @@ class ToolEnabledChildRun(
                 }
             }
             val childRunner = ChatRunner(selected, memory, assembly.tools,
-                RunnerOptions(receiptBatchExecutor = receipts, runtimeStore = runtimeStore, contextRuntime = contextRuntime)) { message ->
+                RunnerOptions(receiptBatchExecutor = receipts, runtimeStore = runtimeStore, contextRuntime = contextRuntime, diagnostics = diagnostics)) { message ->
                     scope.requireOwner(message)
                     progress = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }.take(16 * 1024)
                     changed()
@@ -173,23 +181,28 @@ class ToolEnabledChildRun(
                 store.started(record)
                 observed = record.copy(status = ChildTaskStatus.RUNNING)
                 val result = childRunner.run(initial, listOf(user))
+                if (executionFailure == null && result.status == RunStatus.COMPLETED) failureStage = ChildFailureStage.VALIDATE
                 scope.requireOwner(result)
                 val text = result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
                 if (result.status == RunStatus.COMPLETED && !stopped() && text.isNotBlank() &&
                     text.toByteArray(Charsets.UTF_8).size <= 64 * 1024) completed = result
             }
-        } catch (_: Exception) { /* Never reopen a sent or uncertain operation. */ }
+        } catch (failure: Exception) {
+            if (executionFailure == null) executionFailure = failure
+        }
         finally {
             try {
                 val result = completed
                 store.finished(record, if (result != null) ChildTaskStatus.COMPLETED else if (sent)
                     ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
                     text = result?.blocks?.filterIsInstance<MessageBlock.Text>()?.joinToString("\n") { it.text }.orEmpty(),
-                    detail = if (result != null) null else if (sent) "child_result_unconfirmed" else "child_not_sent")
+                    detail = if (result != null) null else diagnostics.detail(if (sent) "child_result_unconfirmed" else "child_not_sent",
+                        failureStage, executionFailure))
                 observed = record.copy(status = if (result != null) ChildTaskStatus.COMPLETED else if (sent)
                     ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
                     text = result?.blocks?.filterIsInstance<MessageBlock.Text>()?.joinToString("\n") { it.text }.orEmpty(),
-                    detail = if (result != null) null else if (sent) "child_result_unconfirmed" else "child_not_sent")
+                    detail = if (result != null) null else diagnostics.detail(if (sent) "child_result_unconfirmed" else "child_not_sent",
+                        failureStage, executionFailure))
             } catch (_: Exception) { synchronized(gate) { unknown = true } }
             close()
             synchronized(gate) { workerExited = true }

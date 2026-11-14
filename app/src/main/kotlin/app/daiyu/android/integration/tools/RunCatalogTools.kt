@@ -279,8 +279,14 @@ internal class RunCatalogTools(
                     }.forEach { registry.register(it) }
                 }
                 childTaskAccess?.tools()?.forEach { registry.register(it) }
-                children?.let { registry.register(it.tool()) }
-                background?.let { registry.register(it.tool()); registry.register(it.commandTool()) }
+                val retained = background
+                if (retained == null) {
+                    children?.let { registry.register(it.tool()) }
+                } else {
+                    registry.register(retained.tool(RunChildModels.TOOL_NAME, RunChildModels.CAPABILITY))
+                    registry.register(retained.tool())
+                    registry.register(retained.commandTool())
+                }
                 shizuku?.let { registry.register(it.commands.tool()) }
                 platformAction?.tools()?.forEach { registry.register(it) }
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }

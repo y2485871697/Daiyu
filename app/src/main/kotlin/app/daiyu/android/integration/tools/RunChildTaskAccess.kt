@@ -41,7 +41,7 @@ internal class RunChildTaskAccess(
                     .put("child_run_id", row.owner.childRunId).put("assistant_message_id", row.owner.assistantMessageId)
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
                     .put("expected_revision", row.revision).put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("profile_id", row.profileId).put("status", row.status.name)
-                    .put("queue_state", state?.queueState?.name).put("pause_state", state?.pauseState?.name).put("live_state_available", state != null)
+                    .put("queue_state", state?.let { if (it.settled) ChildTaskQueueState.FINISHED.name else it.queueState.name }).put("pause_state", state?.let { if (it.settled) ChildTaskPauseState.FINISHED.name else it.pauseState.name }).put("snapshot_available", state != null).put("live_state_available", state != null && !state.settled)
                     .put("stop_requested", state?.stopRequested ?: JSONObject.NULL)
                     .put("journal_unconfirmed", state?.journalUnconfirmed ?: JSONObject.NULL)
                     .put("settled", state?.settled ?: JSONObject.NULL).put("offset", offset)
@@ -91,7 +91,11 @@ internal class RunChildTaskAccess(
                     "pause" -> pause(row).name
                     else -> stop(row).name
                 }
-                if (outcome in setOf("STALE", "NOT_FOUND", "ALREADY_SETTLED")) ExecutionReceipt.NotExecuted("child_not_live")
+                if (outcome in setOf("STALE", "NOT_FOUND", "ALREADY_SETTLED")) ExecutionReceipt.NotExecuted(when (outcome) {
+                    "STALE" -> "child_control_unavailable"
+                    "NOT_FOUND" -> "child_task_not_found"
+                    else -> "child_task_already_settled"
+                })
                 else ExecutionReceipt.Confirmed(JSONObject().put("child_run_id", owner.childRunId)
                     .put("profile_id", row.profileId).put("agent_name", row.display?.agentName ?: JSONObject.NULL)
                     .put("outcome", outcome).put("new_request", false).toString())
@@ -123,8 +127,8 @@ internal class RunChildTaskAccess(
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
                     .put("expected_revision", row.revision).put("profile_id", row.profileId)
                     .put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("status", row.status.name)
-                    .put("queue_state", state?.queueState?.name).put("pause_state", state?.pauseState?.name).put("settled", state?.settled ?: JSONObject.NULL)
-                    .put("live_state_available", state != null)
+                    .put("queue_state", state?.let { if (it.settled) ChildTaskQueueState.FINISHED.name else it.queueState.name }).put("pause_state", state?.let { if (it.settled) ChildTaskPauseState.FINISHED.name else it.pauseState.name }).put("settled", state?.settled ?: JSONObject.NULL)
+                    .put("snapshot_available", state != null).put("live_state_available", state != null && !state.settled)
                     .put("stop_requested", state?.stopRequested ?: JSONObject.NULL)
                     .put("journal_unconfirmed", state?.journalUnconfirmed ?: JSONObject.NULL)
                     .put("prompt", row.prompt).put("offset", offset).put("text", row.text.drop(offset).take(maxChars))

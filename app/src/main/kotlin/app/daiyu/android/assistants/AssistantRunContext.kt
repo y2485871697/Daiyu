@@ -27,6 +27,11 @@ class AssistantRunContext private constructor(
         "$withMemoryPolicy\n\n$EXECUTION_POLICY"
     }
 
+    internal fun forVoiceConversation(): AssistantRunContext = AssistantRunContext(
+        assistantId, name, prompt + "\n\n本轮为实时语音对话。只输出适合朗读的自然语言正文，不输出音频、图片、代码块或其它模态。" +
+            "只可使用提供的搜索能力，搜索在后台进行，不播报工具调用、日志和原始结果，不请求设备操作。回答简洁自然，像正在通电话。",
+        avatarFileName, memoryEnabled, resolvedMemory, emptyList(), memoryRevision, memoryReadPort)
+
     companion object {
         const val EXECUTION_POLICY = "仅使用本轮提供的工具、选定执行身份和前后台位置；工具未执行、权限不足或后端不可用不授权换通道。" +
             "屏幕点击前先观察当前窗口，不沿用前一任务的应用包名；本轮提供launch_app时，打开应用应先用search_apps确认包名并直接launch_app，再观察目标界面，不必先观察助手或返回桌面。" +

@@ -110,14 +110,19 @@ class ContextPreparationCoordinator(
         cancellation: ContextPreparationCancellation = ContextPreparationCancellation(),
         summaryUsage: BoundSummaryUsagePort? = null, contextWindowOverride: Int? = null,
         chatProvider: ProviderSnapshot? = null,
-        nextSummaryUsage: (() -> BoundSummaryUsagePort)? = null): FrozenContextPreparation {
+        nextSummaryUsage: (() -> BoundSummaryUsagePort)? = null,
+        followChatModelWindow: Boolean = false): FrozenContextPreparation {
         cancellation.check()
         val pending = freezeContextMessages(pendingMessages)
         require(pending.all { it.conversationId == conversationId }) { "待发送消息不属于当前会话" }
         require(pending.map { it.id }.distinct().size == pending.size) { "待发送消息重复" }
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
         val savedSettings = settingsSnapshot()
-        val settings = if (contextWindowOverride == null) savedSettings else
+        val settings = if (followChatModelWindow) savedSettings.copy(
+            contextWindowTokens = contextWindowOverride?.toLong(),
+            reserveTokens = contextWindowOverride?.toLong()?.let { minOf(savedSettings.reserveTokens, it / 8) }
+                ?: savedSettings.reserveTokens)
+        else if (contextWindowOverride == null) savedSettings else
             savedSettings.copy(contextWindowTokens = contextWindowOverride.toLong())
         val policy = policies.resolve(settings)
         // A resolver cannot enable unknown capacity or substitute the main model's window.

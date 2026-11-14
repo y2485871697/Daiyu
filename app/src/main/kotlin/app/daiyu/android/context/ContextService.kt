@@ -54,7 +54,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         val legacy = db.rawQuery("SELECT id,summary,blob_hash,created FROM context_archives WHERE conversation_id=? ORDER BY created,id", arrayOf(id.value)).use { c ->
             buildList { while (c.moveToNext()) {
                 if (c.getString(0) in known) continue
-                val document = ArchiveCodec.decodeDocument(blobs.read(c.getString(2)))
+                val document = ArchiveCodec.decodeDocument(blobs.forConversation(id.value).read(c.getString(2)))
                 val logical = MessageHistory.expand(document.messages)
                 val cut = document.logicalPrefixCount ?: logical.size
                 if (cut > 0 && c.getString(1).isNotBlank()) add(app.daiyu.android.timeline.ChatTimelineEntry.Compression(
@@ -159,7 +159,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         db.rawQuery("SELECT id,prefix_count,revision,summary,blob_hash FROM context_archives WHERE conversation_id=?" +
             (if (supplied == null) " AND active=1" else "") + " ORDER BY created DESC,id DESC", arrayOf(id.value)).use { c ->
             while (c.moveToNext()) {
-                val document = ArchiveCodec.decodeDocument(blobs.read(c.getString(4)))
+                val document = ArchiveCodec.decodeDocument(blobs.forConversation(id.value).read(c.getString(4)))
                 val fit = fitArchive(id, original, c.getInt(1), c.getString(2), document) ?: continue
                 if (original.take(fit.physicalCount).any {
                     app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty()
@@ -241,7 +241,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             val hash = RuntimeDiagnostics.measure(
                 Stage.SUMMARY_ARCHIVE,
                 revision = count.toLong(), size = summaryInput.size.toLong()) {
-                blobs.put(if (logicalCut == null) ArchiveCodec.encode(prefix)
+                blobs.forConversation(id.value).put(if (logicalCut == null) ArchiveCodec.encode(prefix)
                     else ArchiveCodec.encodeDocument(prefix, logicalCut))
             }
             RuntimeDiagnostics.measure(Stage.SUMMARY_COMMIT) {
@@ -266,6 +266,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 checkCancellation(cancelled) // Throwing here rolls back both insert and deactivation.
             }
             }
+            terminal = terminal.copy(succeeded = true)
             return archive
         } catch (failure: Exception) {
             if (!cancelled() && failure !is java.util.concurrent.CancellationException && failure !is InterruptedException)
@@ -332,7 +333,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         if (prefix.any { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() }) return
         val archive = summary.id.value.removePrefix("summary-")
         val revision = ContextRevision.digest(prefix)
-        val hash = blobs.put(ArchiveCodec.encodeDocument(prefix, cut))
+        val hash = blobs.forConversation(summary.conversationId.value).put(ArchiveCodec.encodeDocument(prefix, cut))
         db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(summary.conversationId.value))
         check(db.insertOrThrow("context_archives", null, ContentValues().apply {
             put("id", archive); put("conversation_id", summary.conversationId.value); put("prefix_count", count)
@@ -366,8 +367,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         expectedOwner: ConversationId? = null): ArchivePage {
         require(offset >= 0 && limit in 1..200)
         val messages = transactions.run { db ->
-            db.rawQuery("SELECT blob_hash,revision FROM context_archives WHERE id=?", arrayOf(archiveId)).use { c ->
-                require(c.moveToFirst()) { "档案不存在" }; val m = ArchiveCodec.decode(blobs.read(c.getString(0))).also { MessageHistory.expand(it) }
+            db.rawQuery("SELECT blob_hash,revision,conversation_id FROM context_archives WHERE id=?", arrayOf(archiveId)).use { c ->
+                require(c.moveToFirst()) { "档案不存在" }; val m = ArchiveCodec.decode(blobs.forConversation(c.getString(2)).read(c.getString(0))).also { MessageHistory.expand(it) }
                 require(ContextRevision.digest(m) == c.getString(1))
                 if (expectedOwner != null) require(m.all { it.conversationId == expectedOwner }) { "档案消息归属不一致" }
                 m
@@ -565,7 +566,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             val cut: Int?, val fit: ArchiveFit?)
         val plans = db.rawQuery("SELECT id,prefix_count,revision,blob_hash FROM context_archives WHERE conversation_id=?",
             arrayOf(id.value)).use { c -> buildList { while (c.moveToNext()) {
-                val document = ArchiveCodec.decodeDocument(blobs.read(c.getString(3)))
+                val document = ArchiveCodec.decodeDocument(blobs.forConversation(id.value).read(c.getString(3)))
                 add(Retention(c.getString(0), c.getInt(1), c.getString(2), document.logicalPrefixCount,
                     fitArchive(id, retained, c.getInt(1), c.getString(2), document)))
             } } }
@@ -579,7 +580,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 val prefix = retained.take(fit.physicalCount)
                 val revision = ContextRevision.digest(prefix)
                 if (fit.physicalCount != plan.oldCount || revision != plan.oldRevision) {
-                    val hash = blobs.put(ArchiveCodec.encodeDocument(prefix, plan.cut))
+                    val hash = blobs.forConversation(id.value).put(ArchiveCodec.encodeDocument(prefix, plan.cut))
                     check(db.update("context_archives", ContentValues().apply {
                         put("prefix_count", fit.physicalCount); put("revision", revision); put("blob_hash", hash)
                     }, "id=? AND conversation_id=?", arrayOf(plan.archive, id.value)) == 1)
@@ -602,7 +603,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
 
     private fun verifyArchives(db: SQLiteDatabase, id: ConversationId) {
         db.rawQuery("SELECT blob_hash,revision,prefix_count FROM context_archives WHERE conversation_id=?", arrayOf(id.value)).use { c -> while (c.moveToNext()) {
-            val archived = ArchiveCodec.decode(blobs.read(c.getString(0))).also { MessageHistory.expand(it) }
+            val archived = ArchiveCodec.decode(blobs.forConversation(id.value).read(c.getString(0))).also { MessageHistory.expand(it) }
             require(archived.all { it.conversationId == id } && archived.size == c.getInt(2) &&
                 ContextRevision.digest(archived) == c.getString(1)) { "缺档或原文身份不符；拒绝修订" }
         } }

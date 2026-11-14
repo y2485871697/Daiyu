@@ -235,6 +235,9 @@ class ChatController internal constructor(private val application:Application,
     }
 
     private val contextService by lazy { ContextService(application, database).also { it.onCompression = ::postCompressionActivity } }
+    private val completedMainCompression = linkedMapOf<String, String>()
+    @Synchronized internal fun completedMainCompression(conversationId: ConversationId?): String? =
+        conversationId?.value?.let(completedMainCompression::get)
     private val compressionWaitSpans = linkedMapOf<String, RuntimeDiagnostics.Span>()
     private val compressionActivitiesById = linkedMapOf<String, app.daiyu.android.timeline.CompressionActivity>()
     internal val compressionActivities: List<app.daiyu.android.timeline.CompressionActivity>
@@ -265,6 +268,10 @@ class ChatController internal constructor(private val application:Application,
                 if (value.id !in compressionWaitSpans)
                     compressionWaitSpans[value.id] = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.SUMMARY_WAIT)
             } else compressionWaitSpans.remove(value.id)?.end()
+            if (!value.running && value.succeeded && value.failure == null && value.taskId == null) {
+                completedMainCompression[value.conversationId] = value.id
+                while (completedMainCompression.size > 32) completedMainCompression.remove(completedMainCompression.keys.first())
+            }
             if (value.running) compressionActivitiesById[value.id] = value
             else compressionActivitiesById.remove(value.id)
             value.failure?.let { failure ->
@@ -2261,6 +2268,12 @@ class ChatController internal constructor(private val application:Application,
             val questions=PrivateQuestionStore(application)
             questionStore=questions
             runtime.recoverPending {questions.interruptPending(it.ownerPrefix)}
+            while (true) {
+                val abandoned = database.temporaryVoiceConversations()
+                if (abandoned.isEmpty()) break
+                abandoned.forEach { database.delete(it) }
+            }
+            app.daiyu.android.voice.control.VoiceCallTempFiles.recover(application.cacheDir)
             childSupervisor=app.daiyu.android.domain.delegation.RetainedChildTasks(runtime.childTasks, usageRecorder=runtime.childUsage)
             val history=questions.records()
             synchronized(this) {rememberQuestions(history)}
@@ -2453,11 +2466,43 @@ class ChatController internal constructor(private val application:Application,
         notifyChanged()
         return true
     }
+    internal fun createVoiceCall(source: ConversationId?, complete: (Conversation?) -> Unit) {
+        val admitted = synchronized(this) { idleAvailable() }
+        if (!admitted) { complete(null); return }
+        executor.execute {
+            val value = runCatching {
+                database.create(source?.let(database::assistantId) ?: assistantStore.selectedId.value,
+                    modelSource = source, temporaryVoice = true)
+            }.getOrNull()
+            handler.post { complete(value) }
+        }
+    }
+    internal fun discardVoiceCall(owner: ConversationId) {
+        require(ConversationDatabase.isTemporaryVoice(owner.value))
+        val attempt = object : Runnable {
+            override fun run() {
+                if (synchronized(this@ChatController) { !idleAvailable() }) {
+                    if (!closed) handler.postDelayed(this, 100)
+                    return
+                }
+                executor.execute {
+                    try {
+                        database.delete(owner)
+                        app.daiyu.android.voice.control.VoiceCallTempFiles.clear(application.cacheDir, owner.value)
+                    } catch (_: Exception) {
+                        synchronized(this@ChatController) { problem = "临时语音清理未完成" }
+                    }
+                    notifyChanged()
+                }
+            }
+        }
+        handler.post(attempt)
+    }
     /** Queue admission only. Completion is delivered on main, even if close wins after commit.
      * Compare ALL owner fields before touching the editor. No callback clears a draft itself.
      * The host must persist text before admission and freeze that revision until completion. */
     internal fun sendText(conversation: Conversation?, editorGeneration: Long, draftRevision: Long,
-        text: String, ticket: TextSendTicket = TextSendTicket(), complete: (TextSendResult) -> Unit): Boolean {
+        text: String, ticket: TextSendTicket = TextSendTicket(), voiceConversation: Boolean = false, complete: (TextSendResult) -> Unit): Boolean {
         val owner = TextSendOwner(conversation?.id, editorGeneration, draftRevision)
         val token = synchronized(this) {
             if(isMainContextCompressing(conversation?.id) || pendingTextState != null || !idleAvailable() || text.isBlank() || editorGeneration < 0 || draftRevision < 0) return false
@@ -2468,8 +2513,14 @@ class ChatController internal constructor(private val application:Application,
         }
         try { executor.execute {
             val saved = try {
-                val withChildren = conversationChildrenEnabled(conversation)
-                sendPrepared(token,conversation,text,withChildren=withChildren,expectedDraftText=text)
+                if (voiceConversation) {
+                    val target = checkNotNull(conversation)
+                    check(ConversationDatabase.isTemporaryVoice(target.id.value))
+                    check(!preparationCancelled(token))
+                    database.draft(target.id, text)
+                }
+                val withChildren = !voiceConversation && conversationChildrenEnabled(conversation)
+                sendPrepared(token,conversation,text,withChildren=withChildren,expectedDraftText=text,voiceConversation=voiceConversation)
             }
                 catch (_: Exception) { null }
             val result = when {
@@ -3786,7 +3837,8 @@ class ChatController internal constructor(private val application:Application,
         gui:ControllerGuiEntry?=null,
         videoAttempt:ControllerVideoAttempt?=null,
         platformAction:ControllerPlatformActionPreparation?=null,
-        actionRevision: app.daiyu.android.storage.MessageRevision? = null):Conversation? {
+        actionRevision: app.daiyu.android.storage.MessageRevision? = null,
+        voiceConversation: Boolean = false):Conversation? {
         if (isMainContextCompressing(conversation?.id)) return null
         require(platformAction == null || (platformAction.submitted && !platformAction.cancelled &&
             platformAction.scope != null && imageAttempt == null && shizukuPreparation == null &&
@@ -3842,7 +3894,7 @@ class ChatController internal constructor(private val application:Application,
             problem = "会话工作区不可用（${failure.message}）"
             notifyChanged(); return null
         }
-        val assistantContext = token.browserContext ?: try {
+        val savedAssistantContext = token.browserContext ?: try {
             val binding=if(conversation==null) token.assistantId
                 else database.assistantId(conversation.id)
             if(binding==null) throw MissingAssistantBindingException()
@@ -3854,6 +3906,7 @@ class ChatController internal constructor(private val application:Application,
         } catch (_:Exception) {
             problem="助手配置或记忆读取失败";notifyChanged();return null
         }
+        val assistantContext = if (voiceConversation) savedAssistantContext.forVoiceConversation() else savedAssistantContext
         val replyIdentity = try { AssistantReplyIdentity.capture(assistantContext, assistantAssets) } catch (_: Exception) {
             problem="助手头像读取失败";notifyChanged();return null
         }
@@ -3895,7 +3948,11 @@ class ChatController internal constructor(private val application:Application,
         // the UI/store during streaming, pause/continue or tool rounds affects only the next run.
         val reasoningIntent = try { reasoningPreference.snapshot(conversation?.id?.value) }
         catch (_: Exception) { problem="思考偏好无效或读取失败，请重新保存";notifyChanged();return null }
-        val requestProvider = try { app.daiyu.android.model.ReasoningRequestPolicy.freeze(provider, reasoningIntent) }
+        val requestProvider = try {
+            val frozen = app.daiyu.android.model.ReasoningRequestPolicy.freeze(provider, reasoningIntent)
+            if (!voiceConversation) frozen else ProviderSnapshot.capture(frozen.asModelSettings().copy(
+                requestOptions = frozen.requestOptions.copy(voiceTextOnly = true)), frozen.protocol, frozen.imageInputSupported)
+        }
         catch (failure: Exception) {
             problem=if (failure is app.daiyu.android.domain.ModelRequestException) failure.userMessage
                 else if (failure is IllegalArgumentException) failure.message ?: "当前模型协议不支持此思考配置"
@@ -4003,7 +4060,7 @@ class ChatController internal constructor(private val application:Application,
                 user, checkNotNull(gui.delivery))
             val frozen = coordinator.freeze(conversationId,listOf(modelUser),token.cancellation, summaryUsage = summary.usagePort,
                 contextWindowOverride = requestProvider.contextWindowOverride, chatProvider = requestProvider,
-                nextSummaryUsage = summary.nextUsagePort)
+                nextSummaryUsage = summary.nextUsagePort, followChatModelWindow = voiceConversation)
             if (actionRevision != null) {
                 check(video == null)
                 val history = contextService.prepareActionSend(conversationId, actionRevision.prefix, frozen.policy, listOf(modelUser))
@@ -4122,7 +4179,7 @@ class ChatController internal constructor(private val application:Application,
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
         var preparingLiveMcp: app.daiyu.android.mcp.McpLiveScope? = null
-        val ordinaryRun = platformAction == null && mcpPreparation == null && browserBinding == null &&
+        val ordinaryRun = !voiceConversation && platformAction == null && mcpPreparation == null && browserBinding == null &&
             browserPreparation == null && terminalRun == null && terminalJobRun == null && generation == null &&
             shizukuPreparation == null && shizukuAuthorization == null && virtualDisplay == null && gui == null && video == null
         val prepared = try {
@@ -4136,7 +4193,7 @@ class ChatController internal constructor(private val application:Application,
                 catch (_: GenerationSettingsException) { null } else null
             val ordinaryShizuku = if (ordinaryRun && androidCommands.backend == "shizuku" && application is ChatApplication) shizukuAccess.refresh() else null
             var ordinaryShizukuScope: RunOrdinaryShizukuTools? = null
-            val liveMcp = if (mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
+            val liveMcp = if (!voiceConversation && mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
                 browserBinding == null && terminalRun == null && terminalJobRun == null && generation == null &&
                 shizukuPreparation == null && shizukuAuthorization == null && platformAction == null) {
                 val store = app.daiyu.android.mcp.McpSettingsStore(application)
@@ -4176,14 +4233,14 @@ class ChatController internal constructor(private val application:Application,
             preparingChildren = children
             val devices = RunDeviceResources(application, resultPolicy = platformSnapshot.resultPolicy)
             preparingDevices = devices
-            val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled && gui == null)
+            val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=!voiceConversation && interactiveSnapshot.enabled && gui == null)
             val capabilities = SessionCapabilities(gui?.sessionId ?: terminalJobPreparation?.identity?.sessionId ?: terminalRun?.preview?.identity?.sessionId ?: run.value,
                 (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(if (platformSnapshot.allDeviceTools) ReadOnlyTool.entries.toSet() else config.enabledTools(),
                     platformAllowed = platformSnapshot.platformAllowed) else emptySet()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE,
                         app.daiyu.android.integration.tools.RunChildTaskAccess.CAPABILITY) +
                     (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
-                    (if (interactiveSnapshot.enabled && gui == null) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
+                    (if (!voiceConversation && interactiveSnapshot.enabled && gui == null) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (platformAction == null) emptySet() else setOf(platformAction.action.kind.capability)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
@@ -4193,7 +4250,7 @@ class ChatController internal constructor(private val application:Application,
                     (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
                     (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)) +
                     (if (terminalJobRun == null) emptySet() else setOf(TerminalJobSession.CAPABILITY)) +
-                    (if (terminalRun == null && terminalJobRun == null && gui == null && virtualDisplay == null &&
+                    (if (!voiceConversation && terminalRun == null && terminalJobRun == null && gui == null && virtualDisplay == null &&
                         video == null && generation == null) setOf(RunCommandTools.CAPABILITY) else emptySet()) +
                     (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)) +
                     (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)) +
@@ -4230,6 +4287,7 @@ class ChatController internal constructor(private val application:Application,
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope, liveMcp=liveMcp,
                 workspacePin = workspace, referenceReader = referenceReader, screenImages = screenToolImages,
+                allowedToolNames = if (voiceConversation) emptySet() else null,
                 ordinaryFactory = if (!ordinaryRun) null else { realOwner, grants, task ->
                     val location = RunScreenLocation(realOwner, taskSurfaceStore, application.packageName,
                         current = { isRunUnfenced(assistant) }, present = ::presentToolLocation)
@@ -4593,7 +4651,7 @@ class ChatController internal constructor(private val application:Application,
         // Explicit New chat already has a durable row. Admit only its first accepted turn,
         // never restoration, regeneration, or a subsequent send as title catch-up.
         // Title preparation failure cannot turn the accepted chat receipt into rejection.
-        if (physicalVideoHistory.rows.isEmpty() && actionRevision == null) {
+        if (!voiceConversation && physicalVideoHistory.rows.isEmpty() && actionRevision == null) {
             try {
                 val coordinator = titleCoordinator
                 if (synchronized(this) { closed }) coordinator.close()
@@ -4907,7 +4965,18 @@ class ChatController internal constructor(private val application:Application,
         if(backgroundRuns.isNotEmpty()) return
         closingStorage=true
         executor.execute {
-            try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
+            try {
+                closeGenerationOutputReaders(); generationCleanup.close()
+                try {
+                    while (true) {
+                        val temporary = database.temporaryVoiceConversations()
+                        if (temporary.isEmpty()) break
+                        temporary.forEach { database.delete(it) }
+                    }
+                    app.daiyu.android.voice.control.VoiceCallTempFiles.recover(application.cacheDir)
+                } catch (_: Exception) { problem = "临时语音清理未完成" }
+                questionStore?.close(); database.close(); runtimeStore?.close(); runtimeStore=null
+            }
             finally {conversationConfigurationExecutor.shutdown();modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();screenshotExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }

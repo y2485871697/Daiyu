@@ -267,7 +267,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
     }
     fun conversations(query:String="",folder:String?=null): List<Conversation> {
         require(query.length<=1000 && (folder==null || folder.length<=200))
-        val conditions=mutableListOf<String>();val args=mutableListOf<String>()
+        val conditions=mutableListOf<String>("id NOT GLOB 'voice-call-*'");val args=mutableListOf<String>()
         if(folder!=null) {conditions.add("folder=?");args.add(folder)}
         val where=if(conditions.isEmpty()) "" else " WHERE "+conditions.joinToString(" AND ")
         val list=readableDatabase.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id,workspace_binding FROM conversations$where ORDER BY pinned DESC,updated DESC,id ASC",args.toTypedArray()).use {c->
@@ -332,9 +332,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
         }
         return changed
     }
-    fun create(assistantId: String? = null, workspaceBinding: String? = null, modelSource: ConversationId? = null):Conversation {
+    fun create(assistantId: String? = null, workspaceBinding: String? = null, modelSource: ConversationId? = null, temporaryVoice: Boolean = false):Conversation {
         validateWorkspaceBinding(workspaceBinding)
-        val value=Conversation(ConversationId(UUID.randomUUID().toString()),"新会话","",System.currentTimeMillis(),assistantId=assistantId,workspaceBinding=workspaceBinding)
+        val value=Conversation(ConversationId((if (temporaryVoice) "voice-call-" else "") + UUID.randomUUID().toString()),if (temporaryVoice) "语音对话" else "新会话","",System.currentTimeMillis(),assistantId=assistantId,workspaceBinding=workspaceBinding)
         transaction { db ->
             // NULL is reserved for explicit legacy/import fixtures, never a global fallback.
             if (assistantId != null) requireAssistant(db, assistantId)
@@ -344,6 +344,21 @@ class ConversationDatabase internal constructor(context: Context, private val af
             check(workspaceBinding(db, value.id) == workspaceBinding) { "创建工作区绑定回执不匹配" }
         }
         return value
+    }
+    internal fun temporaryVoiceConversations(limit: Int = 100): List<ConversationId> {
+        require(limit in 1..100)
+        return readableDatabase.rawQuery("SELECT id FROM conversations WHERE id GLOB 'voice-call-*' LIMIT ?",
+            arrayOf(limit.toString())).use { c -> buildList {
+            while (c.moveToNext()) {
+                val id = c.getString(0)
+                check(isTemporaryVoice(id)) { "invalid_voice_call_owner" }
+                add(ConversationId(id))
+            }
+        } }
+    }
+    internal companion object {
+        fun isTemporaryVoice(id: String): Boolean = id.startsWith("voice-call-") &&
+            runCatching { UUID.fromString(id.removePrefix("voice-call-")).toString() == id.removePrefix("voice-call-") }.getOrDefault(false)
     }
     fun draft(id: ConversationId, text: String) {check(writableDatabase.update("conversations",ContentValues().apply {put("draft",text)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun rename(id: ConversationId, title: String) { require(title.isNotBlank());check(writableDatabase.update("conversations",ContentValues().apply {put("title",title)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
@@ -599,8 +614,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
     private fun exportBackup(conversationId:ConversationId?,
         videoAssets: app.daiyu.android.backup.BackupVideoAssets? = null):String {
         var result=""
-        val conversationWhere=if(conversationId==null) "" else " WHERE id=?"
-        val messageWhere=if(conversationId==null) "" else " WHERE conversation_id=?"
+        val conversationWhere=if(conversationId==null) " WHERE id NOT GLOB 'voice-call-*'" else " WHERE id=? AND id NOT GLOB 'voice-call-*'"
+        val messageWhere=if(conversationId==null) " WHERE conversation_id NOT GLOB 'voice-call-*'" else " WHERE conversation_id=? AND conversation_id NOT GLOB 'voice-call-*'"
         val args=conversationId?.let {arrayOf(it.value)}
         transaction {db->
             SQLiteMessageVideoStore.assertNoOrphans(db)
@@ -677,7 +692,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 2L -> fields+"assistant_id"
                 else -> fields+setOf("assistant_id", "workspace_binding")
             })
-            val id=identity(string(c,"id"));require(ids.add(id));val folder=string(c,"folder");require(folder.length<=200)
+            val id=identity(string(c,"id"));require(!id.startsWith("voice-call-"));require(ids.add(id));val folder=string(c,"folder");require(folder.length<=200)
             // v1 has no binding: keep NULL. v2 retains the exact ID, including a deleted ID;
             // importing never selects the global assistant or creates replacement profiles.
             val assistantId=if(version==1L || c.isNull("assistant_id")) null else app.daiyu.android.assistants.AssistantStorage.id(string(c,"assistant_id"))

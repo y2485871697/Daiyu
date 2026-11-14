@@ -15,6 +15,8 @@ data class ProviderRequestOptions(
     val anthropicVersion: String? = null,
     val openAiWebSearchEnabled: Boolean = false,
     val promptCacheRetention: DaiyuPromptCacheRetention = DaiyuPromptCacheRetention.ONE_HOUR,
+    /** Run-only policy; never persisted into the model configuration. */
+    internal val voiceTextOnly: Boolean = false,
 ) {
     override fun toString(): String =
         "ProviderRequestOptions(customBody=<redacted>, speedMode=$speedMode, codex=$codex)"
@@ -42,10 +44,20 @@ data class ProviderRequestOptions(
     }
 
     internal fun apply(base: JSONObject, protocol: ProviderProtocol): JSONObject {
-        if (customBody.isEmpty() && speedMode == null && !codex && anthropicVersion == null && !openAiWebSearchEnabled) return base
+        if (customBody.isEmpty() && speedMode == null && !codex && anthropicVersion == null && !openAiWebSearchEnabled && !voiceTextOnly) return base
         validate(protocol)
         val merged = if (customBody.isEmpty()) base else RequestBodyMerge.merge(base, parseBody())
         if (protocol == ProviderProtocol.RESPONSES) GptServiceTier.apply(merged, speedMode, codex)
+        if (voiceTextOnly) {
+            merged.remove("audio")
+            if (protocol == ProviderProtocol.CHAT_COMPLETIONS) merged.put("modalities", JSONArray().put("text"))
+            else merged.remove("modalities")
+            if (protocol == ProviderProtocol.GEMINI) {
+                val config = merged.optJSONObject("generationConfig") ?: JSONObject().also { merged.put("generationConfig", it) }
+                config.put("responseModalities", JSONArray().put("TEXT"))
+                config.remove("speechConfig")
+            }
+        }
         validateBodyOptions(merged, protocol)
         if (protocol != ProviderProtocol.GEMINI) {
             require(merged.has("model")) { "请求模型无效" }

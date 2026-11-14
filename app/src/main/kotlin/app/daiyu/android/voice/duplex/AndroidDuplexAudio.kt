@@ -351,7 +351,7 @@ internal fun legacyPrivateRouteTarget(deviceTypes: List<Int>): Int? {
 }
 
 @Suppress("DEPRECATION")
-private class AndroidCommunicationRoute(private val manager: AudioManager) : DuplexRoutePort {
+internal class AndroidCommunicationRoute(private val manager: AudioManager) : DuplexRoutePort {
     override var mode: Int
         get() = manager.mode
         set(value) { manager.mode = value }

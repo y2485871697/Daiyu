@@ -29,6 +29,7 @@ internal class RemoteVoiceHostPlayer(
     transport: VoiceHttpTransport? = null,
     private val diagnostics: DiagnosticLogStore? = null,
     private val pcmFactory: (AudioAttributes, () -> Unit) -> StreamingPcmPlayer = ::androidStreamingPcmPlayer,
+    private val temporaryVoiceOwner: String? = null,
 ) : VoiceHostPlayer {
     private val transport = transport ?: VoiceNetworkAdapters.speechHttp(frozen.configuration.speech().engine, diagnostics)
     private val mutable = MutableStateFlow(SpeechPlaybackState())
@@ -117,7 +118,8 @@ internal class RemoteVoiceHostPlayer(
                 }
                 deadline?.cancel(); deadline = null
                 // The original player starts manual read-aloud after native preparation.
-                file = File.createTempFile("voice-", ".audio", context.cacheDir)
+                file = temporaryVoiceOwner?.let { app.daiyu.android.voice.control.VoiceCallTempFiles.audio(context.cacheDir, it) }
+                    ?: File.createTempFile("voice-", ".audio", context.cacheDir)
                 checkNotNull(file).writeBytes(SpeechAudioFile.normalize(bytes))
                 diagnostics?.recordAsync(DiagnosticEvent.SPEECH_AUDIO_STORED)
                 val next = MediaPlayer()

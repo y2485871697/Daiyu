@@ -350,7 +350,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             listening = state.listening,
                             // Closing remains gesture-enabled so a long press can say "请先挂断".
                             enabled = pageActive && (callUi != null || voiceMenuEnabled),
-                            description = if (callUi != null) "挂断豆包实时通话"
+                            description = if (callUi != null) "挂断${callUi.title}"
                                 else if (state.voiceMode == ChatMenuAction.VOICE_DOUBAO) "开始豆包实时通话" else null,
                             callMotion = callMotion,
                             modifier = Modifier.onGloballyPositioned { onVoiceAnchorBounds(it.boundsInRoot()) },

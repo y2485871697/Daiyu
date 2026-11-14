@@ -523,6 +523,52 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         assertTrue(moved.top >= 0f)
         assertTrue(moved.bottom <= composerTopPx - gutter + 2f)
     }
+    fun testCompressionCompletionDoesNotReplayAfterMinimizeAndRestore() {
+        mount(initialState = session().copy(title = "GPT", modelSelectable = true, compressing = true))
+        finishOpening()
+        ui.onNodeWithTag("voice-call-compressing").assertExists()
+        mainThread { call = call!!.copy(compressing = false, compressionCompletion = "one") }
+        ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-compressed").assertExists()
+        ui.mainClock.advanceTimeBy(2_700); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
+        ui.onNodeWithTag("doubao-call-minimize").performClick()
+        ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+        ui.onNodeWithTag("doubao-call-expand").performClick()
+        ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
+        mainThread { call = call!!.copy(compressing = true) }
+        ui.mainClock.advanceTimeByFrame()
+        mainThread { call = call!!.copy(compressing = false, compressionCompletion = "two") }
+        ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+        ui.onNodeWithTag("voice-call-compressed").assertExists()
+    }
+
+    fun testBothCallKindsFollowCaptionTailWithoutOverridingManualScroll() {
+        for (ordinary in listOf(false, true)) {
+            if (ordinary) mainThread { call = session().copy(modelSelectable = true) }
+            else mount()
+            finishOpening()
+            mainThread { call = call!!.copy(reply = (1..40).joinToString("\n") { "第${it}行回答" }) }
+            ui.mainClock.advanceTimeBy(1_000); ui.waitForIdle()
+            val caption = ui.onNodeWithTag("doubao-call-caption-area")
+            fun position() = caption.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+            ui.runOnIdle { assertTrue(position().value() >= position().maxValue() - 1f) }
+            caption.performTouchInput { swipeDown() }
+            ui.mainClock.advanceTimeBy(1_000); ui.waitForIdle()
+            val held = position().value()
+            ui.runOnIdle { assertTrue(held < position().maxValue() - 1f) }
+            mainThread { call = call!!.copy(reply = call!!.reply + "\n新增回答") }
+            ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+            ui.runOnIdle { assertEquals(held, position().value(), 2f) }
+            ui.onNodeWithTag("doubao-call-minimize").performClick()
+            ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+            ui.onNodeWithTag("doubao-call-expand").performClick()
+            ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+            ui.runOnIdle { assertEquals(held, position().value(), 2f) }
+        }
+    }
+
 }
 
 /** Deterministic native pixels: exact radii/colours, CSS phases, and a live mini clock. */

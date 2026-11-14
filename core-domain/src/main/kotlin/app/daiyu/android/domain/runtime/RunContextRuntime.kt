@@ -47,6 +47,7 @@ interface RunContextRuntime {
             { requests.admit(request) }, cancelled)
     }
     fun beginCompaction(boundary: Message) {}
+    fun compactionApplied() {}
     fun finishedCompaction() {}
     fun failed(reason: String) {}
     fun cancel() {}

@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
@@ -246,6 +247,55 @@ class MainActivity : ComponentActivity() {
         refreshUniversalAdmission()
         if (original != null && universalVoiceDelegate.isInitialized()) universalVoice.permissionResult(original, granted)
     }
+    private val voiceCallPresentation = VoiceCallPresentationOwner()
+    private var voiceCallModelPicker = false
+    private var voiceCallConversation: Conversation? = null
+    private var voiceCallStarting: Any? = null
+    private var voiceCallAnchor: String? = null
+    private var voiceCallHasDialogue = false
+    private var voiceCallModelName = "模型"
+    private fun voiceCallModelOwner(): ConversationId? = if (voiceCallModelPicker) voiceCallConversation?.id else selected?.id
+    private fun clearVoiceCallConversation() {
+        voiceCallStarting = null
+        val temporary = voiceCallConversation
+        voiceCallConversation = null
+        if (temporary != null) controller.discardVoiceCall(temporary.id)
+    }
+    @Volatile private var voiceCallServiceReady = false
+    private var voiceCallPermissionContinuation: ((Boolean) -> Unit)? = null
+    private val callMicrophonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val continuation = voiceCallPermissionContinuation
+        voiceCallPermissionContinuation = null
+        if (granted && activityUsable() && voiceForeground) ensureVoiceCallService(continuation ?: {})
+        else continuation?.invoke(false)
+    }
+    private fun ensureVoiceCallService(started: (Boolean) -> Unit) {
+        if (!microphoneGranted()) {
+            if (voiceCallPermissionContinuation != null) { started(false); return }
+            voiceCallPermissionContinuation = started
+            callMicrophonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        app.daiyu.android.voice.control.VoiceCallService.start(applicationContext, stop = {
+            voiceCallServiceReady = false
+            invalidateConfiguredVoice()
+        }, started = { ready ->
+            voiceCallServiceReady = ready
+            if (ready && activityUsable() && voiceForeground) started(true)
+            else { started(false); refreshVoiceCallService() }
+        })
+    }
+    private fun refreshVoiceCallService() {
+        if (voiceCallConversation != null || voiceCallStarting != null || remoteVoice.duplexActive) return
+        voiceCallServiceReady = false
+        app.daiyu.android.voice.control.VoiceCallService.release(applicationContext)
+    }
+    private fun pauseNonCallVoice() {
+        accountPreviewRevoke?.invoke()
+        invalidatePreparedSpeech()
+        if (!voiceCallServiceReady) invalidateConfiguredVoice()
+        else if (!remoteVoice.duplexActive) remoteVoice.invalidate()
+    }
     private val universalVoiceDelegate: Lazy<ActivityUniversalVoiceHost> = lazy {
         universalUnobserve = voiceRuntime.observeInvalidation { profile ->
             if (profile == null || profile == VoiceProfile.CONVERSATION) {
@@ -260,9 +310,9 @@ class MainActivity : ComponentActivity() {
                 universalOffline = profile.id.endsWith(":offline")
                 universalEditor = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
                 refreshUniversalAdmission()
-                VoiceEntrySnapshot(selected?.id?.value, universalLifecycleKey, setOf(VoiceEntryMode.UNIVERSAL),
+                VoiceEntrySnapshot(voiceCallConversation?.id?.value, universalLifecycleKey, setOf(VoiceEntryMode.UNIVERSAL),
                     profileReady = config != null && profile.id == "${config.revision}:${if (universalOffline) "offline" else "configured"}" &&
-                        draft.isEmpty() && controller.active == null && universalPermissionPermit == null &&
+                        voiceCallConversation != null && controller.active == null && universalPermissionPermit == null &&
                         universalAdmissionSnapshot in setOf(VoiceAdmission.READY, VoiceAdmission.PERMISSION_REQUIRED),
                     foreground = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible,
                     questionWaiting = controller.active?.let(::universalQuestionWaiting) == true,
@@ -293,21 +343,25 @@ class MainActivity : ComponentActivity() {
             },
             submit = { turn, text, result ->
                 refreshUniversalAdmission()
-                if (universalAdmissionSnapshot != VoiceAdmission.READY || selected?.id?.value != turn.permit.conversationId || draft.isNotEmpty()) {
+                val target = voiceCallConversation
+                if (universalAdmissionSnapshot != VoiceAdmission.READY || target?.id?.value != turn.permit.conversationId) {
                     result(VoiceControlReceipt.Rejected(turn.requestId))
                 } else {
-                    val before = checkNotNull(universalEditor)
-                    universalOwnMutation = true
-                    try { updateDraft(text) } finally { universalOwnMutation = false }
-                    if (draft != text || selected?.id?.value != turn.permit.conversationId) {
-                        revokeUniversalVoice(); result(VoiceControlReceipt.Rejected(turn.requestId))
-                    } else {
-                        val expected = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
-                        migrateUniversalEditor(before, expected)
+                    voiceCallHasDialogue = true
+                    val ticket = ChatController.TextSendTicket()
+                    val expected = ChatController.TextSendOwner(target.id, 0, turn.number.toLong())
+                    val sending = UniversalSend(turn, expected, result)
+                    universalTickets[ticket] = sending
+                    val queued = controller.sendText(target, 0, turn.number.toLong(), text, ticket, voiceConversation = true) { receipt ->
+                        controller.acknowledgeTextSend(ticket)
+                        val mapped = productionUniversalReceipt(turn, expected, receipt) { owner, exact ->
+                            if (sending.retained.add(owner)) universalAssistants[owner] = exact
+                        }
+                        if (receipt !is ChatController.TextSendResult.Unknown) universalTickets.remove(ticket)
+                        result(mapped)
                         refreshUniversalAdmission()
-                        try { sendDraft(text, UniversalSend(turn, expected, result)) }
-                        catch (_: Exception) { revokeUniversalVoice(); result(VoiceControlReceipt.Unknown(turn.requestId)) }
                     }
+                    if (!queued) { universalTickets.remove(ticket); result(VoiceControlReceipt.Rejected(turn.requestId)) }
                 }
             },
             observe = { owner, body ->
@@ -323,11 +377,25 @@ class MainActivity : ComponentActivity() {
                 VoiceControlCancellation { source.cancel(); if (complete) universalAssistants.remove(owner); Unit }
             },
             stopAcceptedRun = { owner -> universalAssistants.remove(owner)?.let { controller.stop(it) }; Unit },
+            submissionReady = { controller.active == null && controller.textSendState() == null && pendingTextSend == null &&
+                controller.ready && !controller.dataBusy && !controller.isMainContextCompressing(voiceCallConversation?.id) },
             revokePendingTicket = { permit ->
                 universalTickets.entries.filter { it.value.turn.permit.id == permit.id }.map { it.key }
                     .forEach { controller.cancelTextSend(it) }
                 // Keep the original callback association: Unknown is not proof that nothing was saved.
-            })
+            }).also { host ->
+                lifecycleScope.launch {
+                    host.state.collect { value ->
+                        voiceCallPresentation.update(value, host.speaker, controller.isMainContextCompressing(voiceCallConversation?.id),
+                            controller.completedMainCompression(voiceCallConversation?.id), SystemClock.elapsedRealtime())
+                        if (value.phase == VoiceControlPhase.STOPPED) {
+                            clearVoiceCallConversation()
+                            refreshVoiceCallService()
+                        }
+                        publishChat()
+                    }
+                }
+            }
     }
     private val universalVoice: ActivityUniversalVoiceHost get() = universalVoiceDelegate.value
     private fun migrateUniversalEditor(before: ChatController.TextSendOwner, after: ChatController.TextSendOwner) {
@@ -337,8 +405,12 @@ class MainActivity : ComponentActivity() {
     private fun microphoneGranted() = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
     private fun universalQuestionWaiting(message: Message): Boolean = controller.questionWaiting(message)
     private fun revokeUniversalVoice() {
+        if (voiceCallPresentation.state?.presentation != DoubaoCallPresentation.CLOSING) voiceCallPresentation.clear()
+        voiceCallModelPicker = false
         universalAdmissionSnapshot = VoiceAdmission.REVOKED // Fence BEFORE drain/old callbacks.
         if (universalVoiceDelegate.isInitialized()) universalVoice.state.value.permitId?.let { universalVoice.revoke(it) }
+        clearVoiceCallConversation()
+        refreshVoiceCallService()
     }
     private fun refreshUniversalAdmission() {
         if (universalOwnMutation) return // Only the exact original send may migrate its own editor.
@@ -346,14 +418,14 @@ class MainActivity : ComponentActivity() {
         val active = controller.active
         val exactActive = active == null || universalAssistants.keys.any {
             it.messageId == active.id.value && it.runId == active.runId.value && it.conversationId == active.conversationId.value
-        } || (pendingTextSend?.let { universalTickets.containsKey(it.ticket) } == true &&
+        } || (active?.conversationId == voiceCallConversation?.id && universalTickets.isNotEmpty() &&
             universalVoiceDelegate.isInitialized() && universalVoice.state.value.phase == VoiceControlPhase.SUBMITTING)
         // While SUBMITTING there is no input/output. Only this original ticket can bridge controller
         // publication to its durable receipt; no arbitrary active/latest message is ever bound.
         val pending = pendingTextSend
         val controllerTicket = controller.textSendState()?.ticket
-        val excluded = !activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
-            !selectionReady || !controller.ready || controller.dataBusy || !exactActive ||
+        val excluded = !activityUsable() || (!voiceForeground && !voiceCallServiceReady) || retainedPage != "chat" || sidebarVisible ||
+            !selectionReady || !controller.ready || (controller.dataBusy && !voiceCallModelPicker) || !exactActive ||
             expected != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
             imageHost.hasAttachments || imageHost.sending || videoSending || videoHost.state.items.isNotEmpty() ||
             shizukuWritesBlocked || terminalEditor != null || (virtualDisplayEditor != null || virtualDisplayPlanVisit != null) ||
@@ -365,6 +437,12 @@ class MainActivity : ComponentActivity() {
             active?.let(::universalQuestionWaiting) == true -> VoiceAdmission.QUESTION_WAITING
             !microphoneGranted() -> VoiceAdmission.PERMISSION_REQUIRED
             else -> VoiceAdmission.READY
+        }
+        if (universalVoiceDelegate.isInitialized()) {
+            val compressing = controller.isMainContextCompressing(voiceCallConversation?.id)
+            universalVoice.setCompressing(compressing)
+            voiceCallPresentation.update(universalVoice.state.value, universalVoice.speaker, compressing,
+                controller.completedMainCompression(voiceCallConversation?.id), SystemClock.elapsedRealtime())
         }
         if (universalAdmissionSnapshot == VoiceAdmission.REVOKED || universalAdmissionSnapshot == VoiceAdmission.QUESTION_WAITING) {
             if (universalVoiceDelegate.isInitialized() && universalVoice.state.value.active) revokeUniversalVoice()
@@ -395,12 +473,42 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun startUniversalVoice(profile: VoiceControlProfile, limits: VoiceControlLimits) {
-        if (!VoiceSettingsPreferences(applicationContext).enabled("conversation")) { toast("请先在语音设置中启用语音会话"); return }
-        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible) return
+        if (!VoiceSettingsPreferences(applicationContext).enabled("conversation")) { toast("请先在语音设置中启用语音对话"); return }
+        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible || voiceCallStarting != null) return
         stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
         speechHost.stop(speechHost.owner)
-        try { universalVoice.start(profile, limits) }
-        catch (_: Exception) { revokeUniversalVoice(); toast("持续语音未启动：检查会话独立配置、离线包或音频释放状态") }
+        val visit = Any()
+        voiceCallStarting = visit
+        voiceCallAnchor = selected?.id?.value
+        val generation = editorGeneration
+        controller.createVoiceCall(selected?.id) { temporary ->
+            if (voiceCallStarting !== visit || !activityUsable() || !voiceForeground || retainedPage != "chat" ||
+                sidebarVisible || editorGeneration != generation) {
+                temporary?.let { controller.discardVoiceCall(it.id) }
+                return@createVoiceCall
+            }
+            voiceCallStarting = null
+            if (temporary == null) { toast("当前任务尚未结束"); return@createVoiceCall }
+            voiceCallConversation = temporary
+            voiceCallHasDialogue = false
+            voiceCallModelName = confirmedModelLabel
+            ensureVoiceCallService {
+                if (voiceCallConversation?.id != temporary.id || !activityUsable() || !voiceForeground ||
+                    retainedPage != "chat" || sidebarVisible || editorGeneration != generation) {
+                    refreshVoiceCallService()
+                    return@ensureVoiceCallService
+                }
+                if (!it) { clearVoiceCallConversation(); refreshVoiceCallService(); toast("后台通话服务未启动"); return@ensureVoiceCallService }
+                try {
+                    val permit = universalVoice.start(profile, limits)
+                    if (permit != null && universalVoice.state.value.active) {
+                        voiceCallPresentation.begin(voiceCallAnchor, permit, SystemClock.elapsedRealtime(), null, voiceCallModelName)
+                        refreshUniversalAdmission()
+                        publishChat()
+                    } else { clearVoiceCallConversation(); refreshVoiceCallService(); voiceConfigurationToast("请检查语音对话配置") }
+                } catch (_: Exception) { revokeUniversalVoice(); toast("语音对话未启动，请检查配置或音频占用") }
+            }
+        }
     }
     private var preparedSpeech: FrozenVoiceSpeech? = null
     private var messageSpeechAttempt by mutableStateOf(0L)
@@ -493,7 +601,10 @@ class MainActivity : ComponentActivity() {
             applyDraft = ::applyRecognizedDraft, applyPartialDraft = ::applyRecognizedPartial,
             requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) }).also { host ->
                 lifecycleScope.launch {
-                    host.duplexSnapshot.collect { snapshot -> doubaoCallPresentation.update(snapshot) }
+                    host.duplexSnapshot.collect { snapshot ->
+                        doubaoCallPresentation.update(snapshot)
+                        if (snapshot?.endedAtMillis != null) refreshVoiceCallService()
+                    }
                 }
             }
     }
@@ -518,6 +629,7 @@ class MainActivity : ComponentActivity() {
         if (!universalOwnMutation) revokeUniversalVoice()
         invalidatePreparedSpeech()
         try { remoteVoice.invalidate() } catch (_: Exception) { toast("语音资源释放未确认") }
+        refreshVoiceCallService()
     }
     private fun requestConfiguredSpeech(expectedOwner: String?, id: String, text: String) {
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
@@ -2333,8 +2445,8 @@ class MainActivity : ComponentActivity() {
                                             app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
                                                 automaticCompression, automaticCompressionPending)
                                         },
-                                        callUi = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value },
-                                        callActions = doubaoCallActions(), dedicatedTool = { step -> routeActive && DedicatedQuestion(step) },
+                                        callUi = shownVoiceCall(),
+                                        callActions = if (voiceCallPresentation.state != null) voiceCallActions() else doubaoCallActions(), dedicatedTool = { step -> routeActive && DedicatedQuestion(step) },
                                         toolContent = { step -> if (routeActive) ToolTrustedContent(step) },
                                         imageLoader = imageHost.historyLoader.takeIf { displayWindow == null },
                                         assistant = projectedAssistants.firstOrNull { it.id == (if (selected == null) activeAssistant else selected?.assistantId) },
@@ -3279,6 +3391,11 @@ class MainActivity : ComponentActivity() {
             // A retained call picture wins over mode/settings/preflight, even after remote termination.
             if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
                 selected?.id?.value != renderedConversation) return@voice
+            val ordinaryCall = voiceCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value }
+            if (ordinaryCall != null) {
+                if (ordinaryCall.presentation != DoubaoCallPresentation.CLOSING) closeVoiceCall(ordinaryCall.sessionKey)
+                return@voice
+            }
             val shownCall = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value }
             when (callEntryAction(shownCall != null, shownCall?.presentation == DoubaoCallPresentation.CLOSING)) {
                 CallEntryAction.HANG_UP -> { closeDoubaoCall(shownCall!!.sessionKey); return@voice }
@@ -3298,12 +3415,21 @@ class MainActivity : ComponentActivity() {
                 ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) {
                     stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
                     speechHost.stop(speechHost.owner)
-                    remoteVoice.startDuplex(conversationId = selected?.id?.value) {
-                        activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-                            selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
+                    ensureVoiceCallService { ready ->
+                        if (ready && selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration) {
+                            remoteVoice.startDuplex(conversationId = renderedConversation) {
+                                activityUsable() && (voiceForeground || voiceCallServiceReady) && retainedPage == "chat" && !sidebarVisible &&
+                                    selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
+                            }
+                            refreshVoiceCallService()
+                        } else { refreshVoiceCallService(); voiceConfigurationToast("后台通话服务未启动") }
                     }
                 }
-                else -> if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+                else -> if (currentChat()) {
+                    val config = voiceRuntime.conversationConfiguration.value
+                    if (config != null) startUniversalVoice(
+                        VoiceControlProfile("${config.revision}:configured", 0, "语音对话"), VoiceControlLimits())
+                }
             }
         },
         onRegenerate = { id ->
@@ -3530,9 +3656,55 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun admitVoiceModePicker(): Boolean {
-        val admitted = voiceModePickerAdmitted(doubaoCallPresentation.state != null, remoteVoice.duplexActive)
+        val admitted = voiceModePickerAdmitted(doubaoCallPresentation.state != null || voiceCallPresentation.state != null,
+            remoteVoice.duplexActive || (universalVoiceDelegate.isInitialized() && universalVoice.state.value.active))
         if (!admitted) voiceConfigurationToast("请先挂断")
         return admitted
+    }
+
+    private fun shownVoiceCall(): DoubaoCallUi? = (voiceCallPresentation.state ?: doubaoCallPresentation.state)
+        ?.takeIf { it.conversationKey == selected?.id?.value }
+
+    private fun closeVoiceCall(key: Long) {
+        if (voiceCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
+            voiceCallModelPicker = false
+            if (universalVoiceDelegate.isInitialized()) universalVoice.state.value.permitId?.let(universalVoice::stop)
+            clearVoiceCallConversation()
+            refreshVoiceCallService()
+            publishChat()
+        }
+    }
+
+    private fun voiceCallActions(): DoubaoCallActions {
+        val shown = voiceCallPresentation.state ?: return DoubaoCallActions()
+        val key = shown.sessionKey
+        fun current() = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+            selected?.id?.value == shown.conversationKey && voiceCallPresentation.state?.let {
+                it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
+            } == true
+        return DoubaoCallActions(
+            onExpand = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.EXPANDED) },
+            onMinimize = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.MINI) },
+            onHangUp = { if (current()) closeVoiceCall(key) },
+            onSelectModel = {
+                if (current() && voiceCallHasDialogue) voiceConfigurationToast("仅对话前可更改")
+                else if (current() && universalVoice.state.value.active &&
+                    universalVoice.state.value.phase != VoiceControlPhase.SUBMITTING &&
+                    !controller.isMainContextCompressing(voiceCallConversation?.id)) {
+                    universalVoice.setModelPicker(true)
+                    openChatModels(forVoiceCall = true)
+                }
+            },
+            onToggleMute = { if (current()) universalVoice.setMuted(!universalVoice.state.value.muted) },
+            onToggleSpeaker = {
+                if (current()) {
+                    if (!universalVoice.setSpeaker(!universalVoice.speaker)) voiceConfigurationToast("当前音频输出不可切换")
+                    refreshUniversalAdmission()
+                }
+            },
+            onToggleCaptions = { if (current()) voiceCallPresentation.toggleCaptions(key) },
+            onCloseAnimationFinished = { voiceCallPresentation.finishClose(it) },
+        )
     }
 
     private fun closeDoubaoCall(key: Long) {
@@ -3681,13 +3853,13 @@ class MainActivity : ComponentActivity() {
         val dialogOwner = voiceConversationDialogOwner
         val showConversationDialog = currentEditor() && dialogOwner != null &&
             dialogOwner == ChatController.TextSendOwner(selected?.id, capturedGeneration, capturedRevision)
-        ProductionUniversalVoicePanel(universalVoice, conversationVoiceConfig,
+        if (engineeringUi) ProductionUniversalVoicePanel(universalVoice, conversationVoiceConfig,
             configure = { if (currentEditor()) retainedPage = "voice-settings" },
             start = { profile, limits ->
                 if (currentEditor() && voiceRequestEpoch == capturedVoiceEpoch && controller.ready && !controller.dataBusy)
                     startUniversalVoice(profile, limits)
             },
-            openRequested = showConversationDialog,
+            openRequested = false,
             onCloseRequest = { if (voiceConversationDialogOwner == dialogOwner) voiceConversationDialogOwner = null },
             showEntry = engineeringUi,
             cascadeEntry = {
@@ -5895,7 +6067,7 @@ class MainActivity : ComponentActivity() {
         voiceConversationDialogOwner = null
         unknownBranchOutcome = null // unmount only; the controller receipt is not consumed
         stopCascadeVoice()
-        invalidateConfiguredVoice()
+        pauseNonCallVoice()
         dictationHost.invalidate()
         offlineHost.invalidate()
         cancelShizukuEditor()
@@ -5945,7 +6117,7 @@ class MainActivity : ComponentActivity() {
         voiceForeground = false
         voiceConversationDialogOwner = null
         stopCascadeVoice()
-        invalidateConfiguredVoice()
+        pauseNonCallVoice()
         dictationHost.invalidate()
         offlineHost.invalidate()
         speechHost.setForeground(false)
@@ -6687,7 +6859,7 @@ class MainActivity : ComponentActivity() {
         pendingTextSend = pending
         var unknown = false
         val queued = try {
-            controller.sendText(selected, owner.editorGeneration, owner.draftRevision, text, pending.ticket) { result ->
+            controller.sendText(selected, owner.editorGeneration, owner.draftRevision, text, pending.ticket, voiceConversation = universal != null) { result ->
                 // The original voice association survives editor loss, Unknown and Activity teardown.
                 completeTextSend(pending, result, universal)
             }
@@ -7461,16 +7633,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openChatModels() {
+    private fun openChatModels(forVoiceCall: Boolean = false) {
         requireActivityUsable()
         app.daiyu.android.diagnostics.WindowFramePerformance.forContext(this)?.requestPopup(
             app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.MODEL_PICKER)
         dismissChatModels()
+        voiceCallModelPicker = forVoiceCall
         controller.providerBalances.requestRefresh(lifecycleScope)
         val owner = Any(); chatModelOwner = owner
         reloadChatModels(owner)
     }
     private fun dismissChatModels() {
+        if (voiceCallModelPicker) {
+            voiceCallModelPicker = false
+            if (universalVoiceDelegate.isInitialized()) universalVoice.setModelPicker(false)
+        }
         chatModelCancelled.set(true)
         chatModelProviderEditor = null; chatModelPicker = null; chatModelSettings = null; chatModelSession = null; chatModelOwner = null
         chatModelSelectionFailed = false; chatModelProviderChoices = emptyMap()
@@ -7478,7 +7655,7 @@ class MainActivity : ComponentActivity() {
     private fun reloadChatModels(owner: Any, retainPresentation: Boolean = false) {
         if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner) return
         chatModelCancelled.set(true)
-        val conversation = selected?.id
+        val conversation = voiceCallModelOwner()
         val generation = editorGeneration
         val cancelled = AtomicBoolean(false); chatModelCancelled = cancelled
         if (!retainPresentation) {
@@ -7512,7 +7689,7 @@ class MainActivity : ComponentActivity() {
                 ChatModelCatalogLoad(binding?.providerSlotId?.let { id -> choices[id]?.editor }, choices, groups)
             } }
             if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner ||
-                cancelled.get() || chatModelCancelled !== cancelled || selected?.id != conversation || editorGeneration != generation) return@launch
+                cancelled.get() || chatModelCancelled !== cancelled || voiceCallModelOwner() != conversation || editorGeneration != generation) return@launch
             val result = loaded.getOrNull()
             chatModelProviderChoices = result?.choices.orEmpty()
             chatModelProviderEditor = result?.activeEditor
@@ -7547,7 +7724,19 @@ class MainActivity : ComponentActivity() {
         if (owner == null || chatModelOwner !== owner || chatModelSession !== session) return
         val picker = chatModelPicker ?: return
         if (picker.switching) return
-        val conversation = selected?.id
+        val conversation = voiceCallModelOwner()
+        if (voiceCallModelPicker && voiceCallHasDialogue) { voiceConfigurationToast("仅对话前可更改"); return }
+        if (voiceCallModelPicker && controller.taskConfigurationBusy(conversation)) {
+            lifecycleScope.launch {
+                val until = SystemClock.elapsedRealtime() + 10_000
+                while (chatModelOwner === owner && chatModelSession === session && voiceCallModelPicker &&
+                    controller.taskConfigurationBusy(conversation) && SystemClock.elapsedRealtime() < until) delay(50)
+                if (chatModelOwner === owner && chatModelSession === session && voiceCallModelPicker &&
+                    !controller.taskConfigurationBusy(conversation)) selectChatModel(ticket, owner, session, providerId)
+                else if (chatModelOwner === owner) voiceConfigurationToast("上一轮仍在收尾，请稍后选择模型")
+            }
+            return
+        }
         if (!allowTaskConfigurationChange(conversation)) return
         val saved = chatModelSettings
         val target = chatModelProviderChoices[providerId] ?: return
@@ -7563,10 +7752,16 @@ class MainActivity : ComponentActivity() {
                 if (activityUsable()) {
                     if (success) {
                         controller.revokeImageProvider()
-                        refreshConfirmedModelLabel()
+                        if (!voiceCallModelPicker) refreshConfirmedModelLabel()
                     }
                     if (dialogActionsCurrent(lease) && chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
-                        if (success) { reloadChatModels(owner, retainPresentation = true); refresh() }
+                        if (success) {
+                            if (voiceCallModelPicker) {
+                                voiceCallModelName = ticket.record.id
+                                voiceCallPresentation.setModelName(voiceCallModelName)
+                            }
+                            reloadChatModels(owner, retainPresentation = true); refresh()
+                        }
                         else {
                             chatModelSelectionFailed = true
                             chatModelPicker = chatModelPicker?.copy(enabled = false, switching = false,

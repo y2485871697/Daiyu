@@ -16,6 +16,7 @@ data class DuplexState(
     val transcript: String = "",
     val reply: String = "",
     val reason: String? = null,
+    val captionEpoch: Long = 0,
 )
 
 /**
@@ -167,7 +168,7 @@ class DoubaoDuplexSession(
                             suppressOutput = true; playbackGeneration++; tailRequested = false
                             epoch++; audio.flush(epoch); turnBytes = 0
                             text.reset()
-                            mutableState.value = mutableState.value.copy(transcript = "", reply = "")
+                            mutableState.value = mutableState.value.copy(transcript = "", reply = "", captionEpoch = state.value.captionEpoch + 1)
                         }?.let { recognized ->
                             check(recognized.length <= 100_000)
                             mutableState.value = mutableState.value.copy(

@@ -30,6 +30,9 @@ internal class ProductionRunContext(
         val logical = MessageHistory.expand(listOf(boundary))
         this.boundary = app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex)
     }
+    override fun compactionApplied() {
+        lastActivity = lastActivity?.copy(succeeded = true)
+    }
     override fun finishedCompaction() {
         lastActivity?.takeIf { it.failure == null }?.let { progress(it.copy(running = false)) }
         lastActivity = null
@@ -54,7 +57,7 @@ internal class ProductionRunContext(
     }
 
     override fun failed(reason: String) {
-        val failed = lastActivity?.copy(running = false, failure = reason) ?: app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
+        val failed = lastActivity?.copy(running = false, failure = reason, succeeded = false) ?: app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
             parent.conversationId.value, 0, null, running = false, agentLabel = agentLabel,
             runId = parent.runId.value, taskId = taskId, failure = reason, anchor = boundary)
         lastActivity = failed
@@ -88,6 +91,7 @@ internal class ProductionRunContext(
             }).summarize(
                 CompressionInput(prefix, ContextRevision.digest(prefix))).trim()
             if (cancelled()) return null
+            require(text.isNotEmpty()) { "摘要为空；保留原文" }
             val id = "summary-${activity.id}"
             val summary = Message(MessageId(id), parent.conversationId, RunId(id), Message.USER_ROLE,
                 listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n$text\n[摘要结束]")), RunStatus.COMPLETED)

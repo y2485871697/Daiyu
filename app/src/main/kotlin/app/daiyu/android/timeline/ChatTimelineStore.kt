@@ -12,7 +12,8 @@ data class SummaryModelIdentity(val providerId: String, val model: String, val p
 data class CompressionActivity(val id: String, val conversationId: String,
     val messages: Int, val model: SummaryModelIdentity?, val running: Boolean = true,
     val agentLabel: String = "主代理", val runId: String? = null, val taskId: String? = null,
-    val waiting: Boolean = false, val failure: String? = null, val anchor: TimelineAnchor? = null)
+    val waiting: Boolean = false, val failure: String? = null, val anchor: TimelineAnchor? = null,
+    val succeeded: Boolean = false)
 
 data class TimelineAnchor(val conversationId: String, val runId: String,
     val messageId: String, val segment: Int) {

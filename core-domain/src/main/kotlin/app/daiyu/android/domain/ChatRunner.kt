@@ -556,6 +556,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
                 reopenAfterCompaction = true
                 applied = true
+                runtime?.compactionApplied()
                 return true
             } catch (failure: Exception) {
                 persistenceFailure?.let { throw it }

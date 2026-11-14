@@ -38,7 +38,7 @@ class ChatVoiceFeedbackContractTest(unittest.TestCase):
         owner = action.index('if (!currentChat()) return@voice')
         preflight = action.index('chatVoiceConfigurationProblem(voiceEntryMode)?.let { voiceConfigurationToast(it); return@voice }')
         self.assertLess(owner, preflight)
-        for downstream in ('requestDictation()', 'stopCascadeVoice()', 'remoteVoice.startDuplex', 'voiceConversationDialogOwner ='):
+        for downstream in ('requestDictation()', 'stopCascadeVoice()', 'remoteVoice.startDuplex', 'startUniversalVoice('):
             self.assertLess(preflight, action.index(downstream))
         close = action.index('CallEntryAction.HANG_UP -> { closeDoubaoCall(shownCall!!.sessionKey); return@voice }')
         self.assertLess(close, action.index('VoiceSettingsPreferences(applicationContext).enabled(feature)'))

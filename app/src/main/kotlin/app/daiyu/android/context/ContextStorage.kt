@@ -34,9 +34,14 @@ object ContextStorage {
 }
 
 /** Content addressed immutable private files. Files precede DB references: crash leaves only harmless orphans. */
-class PrivateBlobs(context: Context) {
+class PrivateBlobs(context: Context, private val voiceOwner: String? = null) {
+    private val context = context.applicationContext
+    internal fun forConversation(owner: String): PrivateBlobs =
+        if (app.daiyu.android.storage.ConversationDatabase.isTemporaryVoice(owner)) PrivateBlobs(context, owner) else this
     internal val backupStagingParent: File = context.cacheDir
-    private val root = File(context.filesDir, "neutral-context-blobs").apply { check(mkdirs() || isDirectory) }
+    private val root = (if (voiceOwner == null) File(context.filesDir, "neutral-context-blobs")
+        else File(app.daiyu.android.voice.control.VoiceCallTempFiles.directory(context.cacheDir, voiceOwner), "context"))
+        .apply { check(mkdirs() || isDirectory) }
     fun put(bytes: ByteArray): String {
         require(bytes.size.toLong() <= MAX_BLOB)
         val hash = digest(bytes); val target = file(hash)

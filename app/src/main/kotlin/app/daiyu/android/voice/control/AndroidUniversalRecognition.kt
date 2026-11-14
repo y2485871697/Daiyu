@@ -32,7 +32,9 @@ internal sealed class UniversalRecognitionConfiguration {
 
 internal class AndroidUniversalRecognition(
     private val context: Context,
-    private val systemDictation: () -> AndroidDictation = { AndroidDictation(context.applicationContext, ActivityVoiceAudio.gate) },
+    private val gate: AudioOwnerGate = ActivityVoiceAudio.gate,
+    private val communication: Boolean = false,
+    private val systemDictation: () -> AndroidDictation = { AndroidDictation(context.applicationContext, gate) },
 ) {
     fun available(config: UniversalRecognitionConfiguration): Boolean = when (config) {
         is UniversalRecognitionConfiguration.System -> config.language.isNotBlank()
@@ -51,7 +53,7 @@ internal class AndroidUniversalRecognition(
         val admitted = { allowed() && permitted() && available(config) }
         return when (config) {
             is UniversalRecognitionConfiguration.System -> system(owner, config, admitted, events)
-            is UniversalRecognitionConfiguration.Doubao -> DoubaoInput(owner, turn, config, admitted, events).also { it.start() }
+            is UniversalRecognitionConfiguration.Doubao -> DoubaoInput(owner, turn, config, admitted, events, gate).also { it.start() }
             UniversalRecognitionConfiguration.Offline -> offline(owner, admitted, events)
         }
     }
@@ -109,10 +111,11 @@ internal class AndroidUniversalRecognition(
     private fun offline(owner: VoiceOwner, allowed: () -> Boolean,
         events: VoiceControlPorts.RecognitionEvents): VoiceControlRecognition {
         val closed = AtomicBoolean(false)
-        val session = OfflineSpeechSession(ActivityVoiceAudio.gate, owner,
-            { !closed.get() && allowed() && offlineReady() }, AndroidOfflineSpeechDevice(context.applicationContext),
+        val session = OfflineSpeechSession(gate, owner,
+            { !closed.get() && allowed() && offlineReady() }, AndroidOfflineSpeechDevice(context.applicationContext, communication),
             object : OfflineSpeechSession.Events {
                 override fun listening() { if (!closed.get() && allowed()) events.listening() }
+                override fun speechStarted() { if (!closed.get() && allowed()) events.speechStarted() }
                 override fun captureStopped() { if (!closed.get() && allowed()) events.captureStopped() }
                 override fun partial(text: String) { if (!closed.get() && allowed()) events.partial(text) }
                 override fun complete(text: String) {
@@ -141,10 +144,11 @@ internal class AndroidUniversalRecognition(
         private val config: UniversalRecognitionConfiguration.Doubao,
         private val allowed: () -> Boolean,
         private val events: VoiceControlPorts.RecognitionEvents,
+        private val gate: AudioOwnerGate,
     ) : VoiceControlRecognition {
         private val main = Handler(Looper.getMainLooper())
-        private val gate = ActivityVoiceAudio.gate
-        private val audio = AndroidDuplexAudio()
+                private val audio = AndroidDuplexAudio()
+        private val activity = SpeechActivityDetector()
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private val frames = Channel<ByteArray>(64)
         private val ended = AtomicBoolean(false)
@@ -171,6 +175,8 @@ internal class AndroidUniversalRecognition(
                                 check(live())
                                 audio.open { main.post { fail() } }
                                 audio.startCapture { pcm ->
+                                    if (!ended.get() && !finishing.get() && activity.acceptPcm(pcm))
+                                        main.post { if (live()) events.speechStarted() }
                                     if (!ended.get() && !finishing.get() && !frames.trySend(pcm).isSuccess)
                                         main.post { fail() }
                                 }
@@ -231,9 +237,14 @@ internal class AndroidUniversalRecognition(
             ended.set(true)
             main.removeCallbacks(ceiling)
             frames.cancel()
-            connection.getAndSet(null)?.close()
-            scope.cancel()
-            try { audio.closeAndDrain() } catch (failure: Throwable) { releaseFailure = failure; throw failure }
+            fun release(action: () -> Unit) {
+                try { action() } catch (failure: Throwable) {
+                    if (releaseFailure == null) releaseFailure = failure
+                }
+            }
+            release { connection.getAndSet(null)?.close() }
+            release { scope.cancel() }
+            release { audio.closeAndDrain() }
             releaseFailure?.let { throw it }
         }
         override fun closeAndDrain() {

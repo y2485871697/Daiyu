@@ -13,8 +13,8 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertIn('voiceAnchor.translate(-overlayOrigin)', screen)
         self.assertIn('composerTop = composerBounds', screen)
         main = (SRC / 'MainActivity.kt').read_text()
-        self.assertIn('callUi = doubaoCallPresentation.state?.takeIf', main)
-        self.assertIn('callActions = doubaoCallActions()', main)
+        self.assertIn('callUi = shownVoiceCall()', main)
+        self.assertIn('else doubaoCallActions()', main)
         self.assertNotIn('engineeringUi || remoteVoice.duplexActive', main)
 
     def test_actual_entry_bounds_and_original_indicator_are_retained(self):
@@ -67,7 +67,7 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertIn('.padding(top = 8.dp, bottom = 6.dp)', overlay)
         self.assertIn('Spacer(Modifier.height(13.dp))', overlay)
         self.assertNotIn('Spacer(Modifier.height(19.dp))', overlay)
-        self.assertIn('padding(top = 7.dp, bottom = 5.dp).verticalScroll(', overlay)
+        self.assertIn('padding(top = 7.dp, bottom = 5.dp).nestedScroll(containment).verticalScroll(', overlay)
         self.assertIn('val iconColor = Color(style.icon)', overlay)
         self.assertIn('CallGlyph(CallControl.MIC, iconColor', overlay)
         self.assertIn('CallGlyph(CallControl.HANG_UP, iconColor', overlay)

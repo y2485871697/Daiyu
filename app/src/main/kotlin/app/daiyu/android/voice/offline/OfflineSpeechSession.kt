@@ -55,6 +55,7 @@ internal class OfflineSpeechSession(
 ) : OfflineSpeechAttempt {
     interface Events {
         fun listening()
+        fun speechStarted() {}
         /** Capture has released the microphone; decoder tail/final may still be running. */
         fun captureStopped()
         fun partial(text: String)
@@ -113,6 +114,7 @@ internal class OfflineSpeechSession(
             val samples = ShortArray(1600)
             val start = device.now()
             var lastText = ""
+            val activity = app.daiyu.android.voice.control.SpeechActivityDetector()
             while (active() && gate.current(lease)) {
                 if (SpeechInputPolicy.timedOut(device.now() - start, lastText.isNotEmpty())) break
                 val count = synchronized(audioLock) {
@@ -121,6 +123,7 @@ internal class OfflineSpeechSession(
                 }
                 check(count in 0..samples.size) { "Microphone read failed" }
                 if (count == 0) { device.idle(); continue }
+                if (activity.accept(samples, count)) post { if (active() && gate.current(lease)) events.speechStarted() }
                 engine.accept(FloatArray(count) { samples[it] / 32768f })
                 while (engine.ready()) {
                     if (!active()) return
@@ -213,7 +216,7 @@ internal class OfflineSpeechSession(
 }
 
 /** The CPU configuration and seven model paths are from the frozen P32 implementation. */
-internal class AndroidOfflineSpeechDevice(private val context: Context) : OfflineSpeechDevice {
+internal class AndroidOfflineSpeechDevice(private val context: Context, private val communication: Boolean = false) : OfflineSpeechDevice {
     override fun load(): OfflineSpeechDevice.Decoder {
         val dir = OfflineSpeechPack.directory(context)
         check(OfflineSpeechPack.state.value.ready)
@@ -251,8 +254,14 @@ internal class AndroidOfflineSpeechDevice(private val context: Context) : Offlin
     override fun microphone(): OfflineSpeechDevice.Microphone {
         val min = AudioRecord.getMinBufferSize(16_000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(min > 0)
-        val audio = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16_000,
+        val audio = AudioRecord(if (communication) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION, 16_000,
             AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min * 2, 64_000))
+        val echo = if (communication) runCatching {
+            android.media.audiofx.AcousticEchoCanceler.create(audio.audioSessionId)?.also { it.enabled = true }
+        }.getOrNull() else null
+        val noise = if (communication) runCatching {
+            android.media.audiofx.NoiseSuppressor.create(audio.audioSessionId)?.also { it.enabled = true }
+        }.getOrNull() else null
         return object : OfflineSpeechDevice.Microphone {
             override fun start() {
                 check(audio.state == AudioRecord.STATE_INITIALIZED)
@@ -263,7 +272,7 @@ internal class AndroidOfflineSpeechDevice(private val context: Context) : Offlin
             override fun release() {
                 try {
                     if (audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) audio.stop()
-                } finally { audio.release() }
+                } finally { try { echo?.release(); noise?.release() } finally { audio.release() } }
             }
         }
     }

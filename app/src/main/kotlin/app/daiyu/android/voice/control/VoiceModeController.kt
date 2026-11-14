@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class VoiceControlPhase {
     OFF, PERMISSION_REQUIRED, CONNECTING, LISTENING, WAITING_FOR_FINAL, SUBMITTING, WAITING_FOR_BODY,
-    SPEAKING, DRAINING, STOPPED
+    SPEAKING, DRAINING, COMPRESSING, MUTED, STOPPED
 }
 enum class VoiceControlStopReason {
     USER, REVOKED, DISABLED, CONFIGURATION_CHANGED, PERMISSION_DENIED, QUESTION_WAITING,
@@ -17,7 +17,7 @@ enum class VoiceControlStopReason {
 data class VoiceControlState(val phase: VoiceControlPhase = VoiceControlPhase.OFF,
     val permitId: String? = null, val profile: VoiceControlProfile? = null,
     val turn: Int = 0, val maxTurns: Int = 0, val transcript: String = "",
-    val reason: VoiceControlStopReason? = null) {
+    val reason: VoiceControlStopReason? = null, val reply: String = "", val muted: Boolean = false, val captionEpoch: Long = 0) {
     val active: Boolean get() = phase != VoiceControlPhase.OFF && phase != VoiceControlPhase.STOPPED
 }
 

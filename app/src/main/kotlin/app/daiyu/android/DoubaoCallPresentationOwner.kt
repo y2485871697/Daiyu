@@ -34,6 +34,7 @@ internal class DoubaoCallPresentationOwner {
             endedAtMillis = snapshot.endedAtMillis,
             transcript = snapshot.state.transcript,
             reply = snapshot.state.reply,
+            captionEpoch = snapshot.state.captionEpoch,
             reason = snapshot.state.reason,
             muted = snapshot.muted,
             speaker = snapshot.speaker,

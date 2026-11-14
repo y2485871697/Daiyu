@@ -75,8 +75,9 @@ class ProductionCompactionPlacementTest {
         assertTrue(started.running)
         assertEquals(TimelineAnchor("c", "r", "assistant", 1), started.anchor)
         assertEquals("summary-${started.id}", result.first().id.value)
+        runtime.compactionApplied()
         runtime.finishedCompaction()
-        assertEquals(listOf(started, started.copy(running = false)), events)
+        assertEquals(listOf(started, started.copy(running = false, succeeded = true)), events)
         runtime.finishedCompaction()
         assertEquals(2, events.size)
     }

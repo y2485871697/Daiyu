@@ -67,6 +67,7 @@ interface VoiceControlPlayback {
  */
 interface VoiceControlPorts {
     fun dispatch(action: () -> Unit)
+    fun submissionReady(): Boolean = true
     /** Monotonic, same origin as schedule; Android SystemClock.elapsedRealtime is suitable. */
     fun nowMillis(): Long
     fun schedule(delayMillis: Long, action: () -> Unit): VoiceControlCancellation
@@ -78,6 +79,7 @@ interface VoiceControlPorts {
     interface RecognitionEvents {
         /** Authoritative capture start, never inferred from a hypothesis. */
         fun listening()
+        fun speechStarted() {}
         /** This turn stopped capturing, but still owns its pending final (not a final result). */
         fun captureStopped()
         fun partial(text: String)

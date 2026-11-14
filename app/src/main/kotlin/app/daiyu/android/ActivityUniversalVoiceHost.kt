@@ -6,12 +6,14 @@ import android.os.Looper
 import android.os.SystemClock
 import app.daiyu.android.voice.*
 import app.daiyu.android.voice.control.*
+import app.daiyu.android.voice.duplex.DuplexRouteLease
+import app.daiyu.android.voice.duplex.AndroidCommunicationRoute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
 /**
- * 将有限轮 UNIVERSAL 控制器接入 Activity，管理一次显式启动、参数冻结且有限额的音频许可。
+ * 将连续语音通话接入 Activity；一次显式启动冻结识别与朗读配置，阶段等待有独立时限。
  * 构造、渲染和恢复时保持待命；编辑器、发送回执与原始 Message 仍由 Main 持有。
  *
  * 命令和父级回调在主线程运行；`current` 和准入检查还会在音频提交边界调用，需使用短小、线程安全的非阻塞快照读取。
@@ -30,11 +32,51 @@ internal class ActivityUniversalVoiceHost(
     private val submit: (VoiceControlTurn, String, (VoiceControlReceipt) -> Unit) -> Unit,
     private val observe: (VoiceAssistantOwner, (VoiceAssistantBody) -> Unit) -> VoiceControlCancellation,
     private val stopAcceptedRun: (VoiceAssistantOwner) -> Unit,
+    private val submissionReady: () -> Boolean = { true },
     private val revokePendingTicket: (VoiceControlPermit) -> Unit,
 ) : AutoCloseable {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
-    private val recognition = AndroidUniversalRecognition(app)
+    private val inputAudio = AudioOwnerGate()
+    private val outputAudio = AudioOwnerGate()
+    private val recognition = AndroidUniversalRecognition(app, gate = inputAudio, communication = true)
+    private var callLease: AudioOwnerGate.Lease? = null
+    private var route: DuplexRouteLease? = null
+    private fun acquireCallAudio(permit: VoiceControlPermit) {
+        if (callLease != null) { check(ActivityVoiceAudio.gate.current(checkNotNull(callLease))); return }
+        val binding = checkNotNull(frozen)
+        val owner = VoiceOwner(permit.conversationId, permit.id)
+        val lease = ActivityVoiceAudio.gate.acquire(owner, { admitted(permit) }) {
+            binding.revoked = true
+            releaseOnMain(main) {
+                callLease = null
+                controller.revoke(permit.id)
+                drainLanes()
+            }
+        }
+        callLease = lease
+        try {
+            route = DuplexRouteLease(
+                AndroidCommunicationRoute(app.getSystemService(android.media.AudioManager::class.java)))
+            check(route!!.startPrivate()) { "voice_call_route_unavailable" }
+        } catch (failure: Throwable) {
+            releaseCallAudio(); throw failure
+        }
+    }
+    private fun releaseCallAudio() {
+        val lease = callLease; callLease = null
+        val close = { drainLanes() }
+        if (lease == null || !ActivityVoiceAudio.gate.releaseAfter(lease, close)) close()
+    }
+    private fun drainLanes() {
+        var failure: Throwable? = null
+        fun attempt(action: () -> Unit) { try { action() } catch (problem: Throwable) { if (failure == null) failure = problem } }
+        attempt { inputAudio.cancelAll(); check(inputAudio.releaseHealthy()) { "call_input_release_pending" } }
+        attempt { outputAudio.cancelAll(); check(outputAudio.releaseHealthy()) { "call_output_release_pending" } }
+        val previousRoute = route; route = null
+        attempt { previousRoute?.close() }
+        failure?.let { throw it }
+    }
     private class Frozen(
         val profile: VoiceControlProfile,
         val entry: VoiceEntrySnapshot,
@@ -58,6 +100,7 @@ internal class ActivityUniversalVoiceHost(
         if (binding.profile != permit.profile || !current() || !recognition.available(binding.recognition))
             return VoiceAdmission.CONFIGURATION_CHANGED
         if (SystemClock.elapsedRealtime() >= permit.expiresAtMillis) return VoiceAdmission.REVOKED
+        if (callLease?.let { !ActivityVoiceAudio.gate.current(it) } == true) return VoiceAdmission.REVOKED
         return admission(permit) // Original editor/foreground/question/exclusion/permission snapshot.
     }
     private fun admitted(permit: VoiceControlPermit): Boolean = try {
@@ -66,6 +109,7 @@ internal class ActivityUniversalVoiceHost(
 
     private val ports: VoiceControlPorts = object : VoiceControlPorts {
         override fun dispatch(action: () -> Unit) = post(action)
+        override fun submissionReady() = this@ActivityUniversalVoiceHost.submissionReady()
         override fun nowMillis() = SystemClock.elapsedRealtime()
         override fun schedule(delayMillis: Long, action: () -> Unit): VoiceControlCancellation {
             val task = Runnable { action() }
@@ -108,6 +152,7 @@ internal class ActivityUniversalVoiceHost(
         override fun recognize(turn: VoiceControlTurn, events: VoiceControlPorts.RecognitionEvents): VoiceControlRecognition {
             onMain()
             check(admitted(turn.permit))
+            acquireCallAudio(turn.permit)
             val binding = checkNotNull(frozen)
             return recognition.start(turn, binding.recognition, { admitted(turn.permit) }, events)
         }
@@ -159,7 +204,7 @@ internal class ActivityUniversalVoiceHost(
                     })
                 }
             }
-            return AndroidUniversalPlayback(identity, guarded, allowed, ::post, drained, failed).also { it.start() }
+            return AndroidUniversalPlayback(identity, guarded, allowed, ::post, drained, failed, outputAudio).also { it.start() }
         }
         override fun stopAcceptedRun(owner: VoiceAssistantOwner) {
             onMain()
@@ -169,10 +214,15 @@ internal class ActivityUniversalVoiceHost(
             onMain()
             frozen?.takeIf { it.permitId == permit.id }?.revoked = true // Synchronous fence first.
             // Parent cancels ONLY original pending ticket; it must retain late result correlation.
-            revokePendingTicket(permit)
+            var failure: Throwable? = null
+            try { revokePendingTicket(permit) } catch (problem: Throwable) { failure = problem }
+            try { releaseCallAudio() } catch (problem: Throwable) {
+                if (failure == null) failure = problem else failure.addSuppressed(problem)
+            }
+            failure?.let { bridgeReleaseFailed = true; throw it }
         }
     }
-    private val controller: VoiceModeController = VoiceModeController(ports)
+    private val controller = VoiceCallController(ports)
     val state get() = controller.state
 
     fun start(profile: VoiceControlProfile, limits: VoiceControlLimits = VoiceControlLimits()): String? {
@@ -183,6 +233,11 @@ internal class ActivityUniversalVoiceHost(
     fun permissionResult(permitId: String, granted: Boolean) {
         onMain(); controller.permissionResult(permitId, granted)
     }
+    fun setCompressing(value: Boolean) { onMain(); controller.setCompressing(value) }
+    fun setMuted(value: Boolean) { onMain(); controller.setMuted(value) }
+    fun setModelPicker(value: Boolean) { onMain(); controller.setModelPicker(value) }
+    val speaker: Boolean get() = route?.speaker ?: false
+    fun setSpeaker(value: Boolean): Boolean { onMain(); return route?.setSpeaker(value) == true }
     fun stop(permitId: String) = revoke(permitId, VoiceControlStopReason.USER)
     fun revoke(permitId: String, reason: VoiceControlStopReason = VoiceControlStopReason.REVOKED) {
         onMain()
@@ -200,7 +255,7 @@ internal class ActivityUniversalVoiceHost(
         if (speech.configuration.engine == "SYSTEM") return ProductionSpeechOutput(app, owner)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val delegate = ProductionSpeechOutput(owner, {
-            val player = RemoteVoiceHostPlayer(app, scope, runtime, speech)
+            val player = RemoteVoiceHostPlayer(app, scope, runtime, speech, temporaryVoiceOwner = owner.conversationId)
             object : ProductionSpeechPlayer {
                 override val state get() = player.state
                 override fun bindOwner(owner: String) = player.bindOwner(owner)

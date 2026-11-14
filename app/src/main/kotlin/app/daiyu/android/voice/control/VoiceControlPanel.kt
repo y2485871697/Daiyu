@@ -69,6 +69,8 @@ private fun phaseLabel(phase: VoiceControlPhase): String = when (phase) {
     VoiceControlPhase.WAITING_FOR_BODY -> "已绑定本次 assistant，等待正文"
     VoiceControlPhase.SPEAKING -> "正文播放中（可能等待完整句子/音频）"
     VoiceControlPhase.DRAINING -> "正文已结束，等待音频播放完成并释放"
+    VoiceControlPhase.COMPRESSING -> "正在压缩上下文"
+    VoiceControlPhase.MUTED -> "麦克风已暂停"
     VoiceControlPhase.STOPPED -> "许可已结束"
 }
 private fun reasonLabel(reason: VoiceControlStopReason): String = when (reason) {

@@ -480,3 +480,44 @@ class PopupScrollScopeTest(unittest.TestCase):
                     self.assertTrue(call.call_args.kwargs["env"]["PYTHONPATH"].startswith(str(Path("tests").resolve())))
             finally:
                 os.chdir(old)
+
+
+class ChatStatusBarInsetsScopeTest(unittest.TestCase):
+    def test_exact_singleton_runs_only_recovery_contract_and_source_selector(self):
+        expected = ("test_chat_return_refresh_contract",
+                    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope")
+        self.assertEqual(expected, recorder.CHAT_STATUS_BAR_INSETS_MODULES)
+        for python in ("python", "python3"):
+            command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke",
+                SMOKE_TEST_CLASSES="app.daiyu.android.ChatStatusBarInsetsTest"))
+            self.assertEqual([python, "-B", "-m", "unittest", *expected, "-v"], command)
+            self.assertEqual("chat-status-bar-insets-targeted", scope)
+            self.assertNotIn("discover", command)
+
+    def test_non_exact_singletons_and_other_modes_keep_full_scope(self):
+        target = "app.daiyu.android.ChatStatusBarInsetsTest"
+        for value in (target + "," + target, target + ",app.daiyu.android.OtherTest", target + ",",
+                      " " + target, target + " "):
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value))[1])
+        for mode in ("", "compile", "candidate", "daily", "release"):
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=target))[1])
+
+    def test_receipt_keeps_targeted_command_real_failure_and_source_identity(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA="c" * 40, GITHUB_RUN_ID="14", GITHUB_RUN_ATTEMPT="1",
+                           SMOKE_MODE="smoke", SMOKE_TEST_CLASSES="app.daiyu.android.ChatStatusBarInsetsTest")
+                with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess, "call", return_value=11) as call, patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(11, recorder.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual("chat-status-bar-insets-targeted", receipt["scope"])
+                    self.assertEqual(11, receipt["exit_code"])
+                    self.assertEqual(dict(sha="c" * 40, run_id=14, attempt=1), receipt["identity"])
+                    self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.CHAT_STATUS_BAR_INSETS_MODULES, "-v"], receipt["command"])
+                    self.assertEqual(receipt["command"], call.call_args.args[0])
+                    self.assertTrue(call.call_args.kwargs["env"]["PYTHONPATH"].startswith(str(Path("tests").resolve())))
+                    call.assert_called_once()
+            finally:
+                os.chdir(old)

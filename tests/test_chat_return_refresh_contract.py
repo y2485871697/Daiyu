@@ -180,6 +180,7 @@ class ContentRecoveryWitnessContract(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         chat = (root / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatScreen.kt").read_text()
         self.assertIn(".windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)", chat)
+        self.assertIn("@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)", chat)
         self.assertNotIn("statusBarsPadding", chat)
         self.assertIn(".windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))", chat)
         self.assertNotIn("systemBarsIgnoringVisibility", chat)

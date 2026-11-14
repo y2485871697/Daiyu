@@ -283,7 +283,17 @@ RENDERING_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.Re
 RENDERING_MODULES = ('test_reasoning_workflow_contract', 'test_work_timeline_connector_contract', 'test_workflow_render_isolation_contract', 'test_markdown_typing_contract', 'test_markdown_body_visibility_contract', 'test_markdown_table_style_contract', 'test_markdown_code_block_contract', 'test_markdown_entry_contract', 'test_markdown_cold_start_contract', 'test_markdown_return_contract', 'test_markdown_stream_progress_contract', 'test_markdown_stream_optimization_contract', 'test_message_display_contract', 'test_rendering_smoke_scope', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt')
 
 
+CHAT_STATUS_BAR_INSETS_PLATFORM_CLASS = "app.daiyu.android.ChatStatusBarInsetsTest"
+CHAT_STATUS_BAR_INSETS_MODULES = (
+    "test_chat_return_refresh_contract",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == CHAT_STATUS_BAR_INSETS_PLATFORM_CLASS):
+        return [python, "-B", "-m", "unittest", *CHAT_STATUS_BAR_INSETS_MODULES, "-v"], "chat-status-bar-insets-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(POPUP_SCROLL_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *POPUP_SCROLL_MODULES, "-v"], "popup-scroll-targeted"

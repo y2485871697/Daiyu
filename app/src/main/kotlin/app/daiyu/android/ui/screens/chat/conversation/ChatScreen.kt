@@ -78,6 +78,7 @@ data class ChatScreenActions(
     val onVisibleTextAdvance: (String) -> Unit = {},
 )
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun DaiyuChatScreen(
     state: ChatScreenState,

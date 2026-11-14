@@ -698,7 +698,8 @@ internal object MarkdownParser {
                         val innerClose = minOf(pending, available)
                         pending -= innerClose; available -= innerClose
                         if (available >= opening) { closing = j; inside = innerClose; break }
-                        if (t.delimiter != '~' && available > 0 && opening > available) {
+                        if (t.delimiter != '~' && available > 0 && opening > available &&
+                            !(pendingTail && j == input.lastIndex)) {
                             split += available
                             opening -= available
                             available = 0

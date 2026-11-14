@@ -109,6 +109,11 @@ class RenderingParserRegressionTest {
                 plain((MarkdownParser.parseStreaming(source).single() as MarkdownBlock.Paragraph).content))
         }
         assertEquals("**a b c", plain(MarkdownParser.inline("****a* b* c")))
+        for (count in 2..5) for (closing in 0 until count) {
+            val source = "*".repeat(count) + "a" + "*".repeat(closing)
+            val full = MarkdownParser.inline("*".repeat(count) + "a" + "*".repeat(count))
+            assertEquals(source, full, (MarkdownParser.parseStreaming(source).single() as MarkdownBlock.Paragraph).content)
+        }
         val atBudget = "*".repeat(48) + "a" + "*".repeat(48)
         assertEquals("a", plain(MarkdownParser.inline(atBudget)))
         for (count in listOf(49, 65)) {

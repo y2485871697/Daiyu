@@ -796,7 +796,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     fun testReturnAdvancesWhileCaptureIsPending() = assertReturnDoesNotWaitForCopy(true)
     fun testColdReturnDoesNotWaitOrEnableLatePreview() = assertReturnDoesNotWaitForCopy(false)
 
-    private fun assertToolbarFinalCopy(cancelOnPause: Boolean = false, veto: Boolean = false, failCopy: Boolean = false, nested: Boolean = false) {
+    @OptIn(ExperimentalActivityApi::class)
+    private fun assertToolbarFinalCopy(cancelOnPause: Boolean = false, veto: Boolean = false, failCopy: Boolean = false, nested: Boolean = false, contention: Int = 0) {
         val gate = CompletableDeferred<Unit>()
         var waiting = 0
         var blockCopy = false
@@ -808,7 +809,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                         val rendered = screen
                         PageBackGestureHost(rendered, canNavigateBack = rendered == "settings",
-                            swipeDismissEnabled = true, predictiveBackEnabled = false,
+                            swipeDismissEnabled = true, predictiveBackEnabled = contention == 2,
                             dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                             backTargetKey = if (rendered == "settings") "chat" else null,
                             captureFromContent = true, previewCapture = { source ->
@@ -848,6 +849,9 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             val source = checkNotNull(frame)
             mainThread { blockCopy = true }
             ui.mainClock.autoAdvance = false
+            if (contention == 1) ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .02f, height * .6f))
+            }
             ui.onNodeWithTag("toolbar-final-copy").performClick()
             ui.mainClock.advanceTimeByFrame()
             ui.waitUntil(5_000) { waiting == 1 }
@@ -857,6 +861,23 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             assertNull("warm pixels never stand in for the final child", source.image)
             ui.onNodeWithTag("toolbar-final-copy").performClick()
             assertEquals("repeated toolbar taps share one request", 1, waiting)
+            if (contention == 1) ui.onNodeWithTag("page-back-host").performTouchInput {
+                moveTo(Offset(width * .70f, height * .6f), 160)
+                up()
+            }
+            if (contention == 2) mainThread {
+                activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 1f, 0f, BackEventCompat.EDGE_LEFT))
+                activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(100f, 1f, .6f, BackEventCompat.EDGE_LEFT))
+            }
+            if (contention != 0) {
+                ui.mainClock.advanceTimeByFrame()
+                assertFalse("the toolbar final-copy ticket exclusively owns visual motion", checkNotNull(state).active)
+                assertEquals(0f, checkNotNull(state).visualProgress, 0f)
+                assertTrue(checkNotNull(state).toolbarPending)
+                assertEquals(0, backCount)
+                if (contention == 2) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                assertEquals("a competing gesture cannot submit another return", 0, backCount)
+            }
             if (cancelOnPause) {
                 realPauseResume(activity)
                 mainThread { gate.complete(Unit) }
@@ -898,6 +919,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     fun testToolbarPauseDiscardsPrecommitAndNewTapCanReturn() = assertToolbarFinalCopy(cancelOnPause = true)
     fun testToolbarVetoReleasesPrecommitPixels() = assertToolbarFinalCopy(veto = true)
     fun testToolbarFailedFinalCopyReturnsOnceWithoutLatePreview() = assertToolbarFinalCopy(failCopy = true)
+    fun testToolbarFinalCopyRejectsSwipeThatWasDownBeforeToolbar() = assertToolbarFinalCopy(contention = 1)
+    fun testToolbarFinalCopyRejectsPredictiveStartAndProgress() = assertToolbarFinalCopy(contention = 2)
 
     @OptIn(ExperimentalActivityApi::class)
     private fun assertNestedInsetsRecovery(kind: Int, stableChange: Boolean = false) {

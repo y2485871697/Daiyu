@@ -143,7 +143,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
         private set
 
     fun dispatchBack(velocity: Float = 0f, back: () -> Unit) {
-        if (!alive || transitionBlocked || committing || dispatching) return
+        if (!alive || toolbarPending || transitionBlocked || committing || dispatching) return
         swipeCommit = SwipeCommit(progress, predictive, direction, velocity)
         dispatching = true
         try { synchronousTrace("daiyu.back.custom-up-dispatch") { back() } }
@@ -302,7 +302,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                 val activeState = currentState
                 if (!activeState.predictiveEnabled) return
                 activeState.predictiveGeneration++
-                if (!activeState.alive || !currentEnabled || activeState.transitionBlocked || activeState.committing) {
+                if (!activeState.alive || !currentEnabled || activeState.toolbarPending || activeState.transitionBlocked || activeState.committing) {
                     session.rejected = true
                     return
                 }
@@ -317,7 +317,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
             override fun handleOnBackProgressed(backEvent: BackEventCompat) {
                 val (activeState, owner) = session.gesture ?: return
                 if (activeState !== currentState || !activeState.alive || !currentEnabled ||
-                    activeState.transitionBlocked || activeState.committing) {
+                    activeState.toolbarPending || activeState.transitionBlocked || activeState.committing) {
                     activeState.reset(owner)
                     session.gesture = null
                     session.rejected = true
@@ -638,7 +638,7 @@ internal fun PageBackGestureHost(
                         while (true) {
                             // The return overlay blocks children; observe ahead of it until the next swipe claims.
                             val event = awaitPointerEvent(if (claimed || interruptingReturn) PointerEventPass.Initial else PointerEventPass.Final)
-                            if (event.changes.size != 1 || !state.alive || state.predictiveGeneration != predictiveGeneration || (state.active && state.predictive)) break
+                            if (event.changes.size != 1 || !state.alive || state.toolbarPending || state.predictiveGeneration != predictiveGeneration || (state.active && state.predictive)) break
                             val change = event.changes.single()
                             if (change.id != down.id) break
                             velocity.addPointerInputChange(change)

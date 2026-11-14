@@ -164,6 +164,18 @@ class PageBackGestureContractTest(unittest.TestCase):
                        'testPredictiveCompletionAfterUncomposedPauseIsRejected'):
             self.assertIn('fun ' + method + '()', regressions)
 
+    def test_toolbar_final_copy_excludes_predictive_and_preexisting_pointer_claims(self):
+        started = self.host.split('override fun handleOnBackStarted', 1)[1].split('override fun handleOnBackProgressed', 1)[0]
+        progressed = self.host.split('override fun handleOnBackProgressed', 1)[1].split('override fun handleOnBackCancelled', 1)[0]
+        self.assertIn('activeState.toolbarPending', started)
+        self.assertIn('activeState.toolbarPending', progressed)
+        self.assertIn('if (!alive || toolbarPending || transitionBlocked || committing || dispatching) return', self.host)
+        self.assertIn('!state.alive || state.toolbarPending || state.predictiveGeneration', self.host)
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        for method in ('testToolbarFinalCopyRejectsSwipeThatWasDownBeforeToolbar',
+                       'testToolbarFinalCopyRejectsPredictiveStartAndProgress'):
+            self.assertIn('fun ' + method + '()', source)
+
     def test_swipe_is_full_page_and_lets_children_arbitrate_before_claiming(self):
         for guard in ('canNavigateBack && swipeDismissEnabled && resumed && !imeVisible',
                       'if (state.active || entering || state.committing || state.dispatching || state.toolbarPending) return@awaitEachGesture', 'event.changes.size != 1',

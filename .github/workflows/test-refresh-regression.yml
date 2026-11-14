@@ -26,6 +26,18 @@ on:
         description: 仅补工具契约，不构建或运行APK
         type: boolean
         default: false
+      test_source_run_id:
+        description: 复用既有测试刷新执行包的run；留空才构建测试APK
+        type: string
+        default: ''
+      smoke_api:
+        type: choice
+        options: ['all', '26', '37.2']
+        default: 'all'
+      smoke_shard:
+        type: choice
+        options: ['all', '0', '1', '2', '3']
+        default: 'all'
 permissions:
   contents: read
   actions: read
@@ -41,7 +53,7 @@ env:
   SKIP_JDK_VERSION_CHECK: 'true'
 jobs:
   tool-contracts:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.test_source_run_id == ''
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
@@ -76,7 +88,7 @@ jobs:
           path: tool-evidence/
           if-no-files-found: warn
   test-package:
-    if: ${{ github.ref == 'refs/heads/main' && !inputs.contracts_only }}
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.contracts_only && inputs.test_source_run_id == '' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
@@ -146,35 +158,83 @@ jobs:
           if-no-files-found: warn
   smoke:
     needs: test-package
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && !inputs.contracts_only && (needs.test-package.result == 'success' || (inputs.test_source_run_id != '' && needs.test-package.result == 'skipped')) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 215
     strategy:
       fail-fast: false
       matrix:
-        api: ['26', '37.2']
-        shard: [0, 1, 2, 3]
-        include:
-          - api: '26'
-            target: google_apis
-            ram: 4096
-          - api: '37.2'
-            target: google_apis_ps16k
-            ram: 6144
+        api: ${{ fromJSON(inputs.smoke_api == '26' && '["26"]' || inputs.smoke_api == '37.2' && '["37.2"]' || '["26","37.2"]') }}
+        shard: ${{ fromJSON(inputs.smoke_shard != 'all' && format('[{0}]', inputs.smoke_shard) || '[0,1,2,3]') }}
+        include: ${{ fromJSON(inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096}]' || inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144}]' || '[{"api":"26","target":"google_apis","ram":4096},{"api":"37.2","target":"google_apis_ps16k","ram":6144}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.expected_sha }}
           persist-credentials: false
           fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: 代鱼测试刷新执行包
           path: delivery
+          run-id: ${{ inputs.test_source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: 校验双来源执行包
         env:
           GH_TOKEN: ${{ github.token }}
+          TEST_SOURCE_RUN_ID: ${{ inputs.test_source_run_id }}
+          SELECTED_SMOKE_API: ${{ matrix.api }}
+          SELECTED_SMOKE_SHARD: ${{ matrix.shard }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          python3 scripts/verify_test_refresh.py check
+          python3 - <<'PYVERIFY'
+          import hashlib, io, json, os, re, subprocess, zipfile
+          from pathlib import Path
+          env = os.environ.copy()
+          source_run = env['TEST_SOURCE_RUN_ID']
+          owner = dict(workflow_sha=env['GITHUB_SHA'], checked_sha=env['EXPECTED_SHA'],
+                       run_id=env['GITHUB_RUN_ID'], attempt=env['GITHUB_RUN_ATTEMPT'],
+                       api=env['SELECTED_SMOKE_API'], shard=env['SELECTED_SMOKE_SHARD'],
+                       classes=env['SMOKE_TEST_CLASSES'])
+          Path('smoke').mkdir(exist_ok=True)
+          Path('smoke/execution-source.json').write_text(json.dumps(owner) + '\n')
+          if source_run:
+              assert re.fullmatch('[1-9][0-9]*', source_run)
+              def api(path):
+                  return json.loads(subprocess.check_output(['gh', 'api', 'repos/y2485871697/Daiyu/' + path]))
+              pair = json.loads(Path('delivery/test-refresh.json').read_text())
+              attempt = pair['test_attempt']
+              assert re.fullmatch('[1-9][0-9]*', attempt)
+              assert pair['test_run'] == source_run and pair['test_sha'] == env['EXPECTED_SHA']
+              run = api('actions/runs/' + source_run)
+              assert run['workflow_id'] == 417476517 and run['head_branch'] == 'main'
+              assert run['head_sha'] == pair['test_sha'] and run['run_attempt'] >= int(attempt)
+              jobs = api('actions/runs/' + source_run + '/attempts/' + attempt + '/jobs?per_page=100')['jobs']
+              assert any(j['name'] == 'test-package' and j['conclusion'] == 'success' for j in jobs)
+              artifacts = api('actions/runs/' + source_run + '/artifacts?per_page=100')['artifacts']
+              artifacts = [a for a in artifacts if a['name'] == '代鱼测试刷新执行包' and not a['expired']]
+              assert len(artifacts) == 1
+              artifact = artifacts[0]
+              assert str(artifact['workflow_run']['id']) == source_run
+              assert artifact['workflow_run']['head_sha'] == pair['test_sha']
+              archive = subprocess.check_output(['gh', 'api', 'repos/y2485871697/Daiyu/actions/artifacts/' + str(artifact['id']) + '/zip'])
+              assert artifact['digest'] == 'sha256:' + hashlib.sha256(archive).hexdigest()
+              with zipfile.ZipFile(io.BytesIO(archive)) as package:
+                  names = [entry.filename for entry in package.infolist() if not entry.is_dir()]
+                  assert len(names) == len(set(names))
+                  downloaded = {str(p.relative_to('delivery')) for p in Path('delivery').rglob('*') if p.is_file()}
+                  assert set(names) == downloaded
+                  for name in names:
+                      path = Path(name)
+                      assert not path.is_absolute() and '..' not in path.parts
+                      local = Path('delivery') / path
+                      assert not local.is_symlink() and package.read(name) == local.read_bytes()
+              owner.update(test_source_run=source_run, test_source_attempt=attempt,
+                           artifact_id=artifact['id'], artifact_digest=artifact['digest'])
+              env.update(GITHUB_SHA=pair['test_sha'], GITHUB_RUN_ID=source_run, GITHUB_RUN_ATTEMPT=attempt)
+          subprocess.check_call(['python3', 'scripts/verify_test_refresh.py', 'check'], env=env)
+          Path('smoke/execution-source.json').write_text(json.dumps(owner) + '\n')
+          PYVERIFY
       - name: 启用模拟器加速
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

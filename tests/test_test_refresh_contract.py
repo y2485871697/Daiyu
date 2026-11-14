@@ -36,7 +36,8 @@ class TestRefreshContract(unittest.TestCase):
             validate_changes(['.github/workflows/chat-workflow-checks.yml', '.github/workflows/build.yml'])
 
     def test_workspace_check_metadata_is_exactly_allowlisted(self):
-        allowed = ('.github/workflows/workspace-delete-checks.yml',
+        allowed = ('.github/workflows/child-task-card-platform.yml',
+                   '.github/workflows/workspace-delete-checks.yml',
                    '.github/workflows/workspace-recovery-platform.yml')
         for path in allowed:
             with self.subTest(allowed=path):
@@ -81,6 +82,24 @@ class TestRefreshContract(unittest.TestCase):
         guard = (ROOT / 'scripts/cooperation/test_refresh_only.init.gradle').read_text()
         self.assertIn("!t.name.toLowerCase().contains('androidtest')", guard)
         self.assertIn('install|uninstall|connected|managedDevice', guard)
+
+    def test_workspace_delete_refreshes_only_test_apk_with_exact_sources(self):
+        workflow = (ROOT / '.github/workflows/workspace-delete-checks.yml').read_text()
+        self.assertIn('needs: test-package', workflow)
+        self.assertIn('ref: ${{ inputs.expected_sha }}', workflow)
+        self.assertIn('run-id: ${{ inputs.source_run_id }}', workflow)
+        self.assertIn('run-id: ${{ github.run_id }}', workflow)
+        self.assertIn('name: 代鱼测试刷新执行包', workflow)
+        for action in ('source', 'bind', 'check'):
+            self.assertIn('scripts/verify_test_refresh.py ' + action, workflow)
+        self.assertIn('-I scripts/cooperation/test_refresh_only.init.gradle', workflow)
+        self.assertIn(':app:assembleReleaseAndroidTest', workflow)
+        self.assertNotIn(':app:assembleRelease ', workflow)
+        self.assertNotIn('test "$SOURCE_SHA" = "$EXPECTED_SHA"', workflow)
+        self.assertIn('SMOKE_SHARD_COUNT: \'1\'', workflow)
+        self.assertIn('app.daiyu.android.WorkspaceEntryActionsActivityTest,app.daiyu.android.PrivateWorkspacePanelTest', workflow)
+        self.assertIn("api: '26'", workflow)
+        self.assertIn("api: '37.2'", workflow)
 
     def test_only_androidtest_packaging_is_allowed(self):
         validate_graph([':app:compileReleaseKotlin', ':app:packageReleaseResources',

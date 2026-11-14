@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       expected_sha:
-        description: 冻结被检源码完整SHA（必须等于source_sha）
+        description: 测试及验证源码完整SHA（生产源码必须未变化）
         type: string
         required: true
       source_sha:
-        description: 既有compile应用和测试包的冻结完整SHA
+        description: 既有compile应用的冻结完整SHA
         type: string
         required: true
       source_run_id:
-        description: 成功compile来源run（attempt1），只复用、不打包
+        description: 成功compile来源run（attempt1），应用只复用、仅重建测试APK
         type: string
         required: true
       check_id:
@@ -35,7 +35,78 @@ env:
   SMOKE_SHARD_COUNT: '1'
   SMOKE_SHARD_INDEX: '0'
 jobs:
+  test-package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 核对精确验证身份
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -n "$SMOKE_TEST_CLASSES"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼增量Release包
+          path: source-delivery
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: 校验旧应用及双来源边界
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_test_refresh.py source
+      - name: 测试包来源契约
+        run: python3 -B -m unittest discover -s tests -p test_test_refresh_contract.py -v
+      - uses: ./.github/actions/setup-temurin
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 准备固定离线语音 JNI（不打包）
+        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+      - name: 准备固定签名
+        env:
+          DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: python3 scripts/prepare_signing.py
+      - name: 仅构建测试APK，禁止应用打包
+        env:
+          DAIYU_REQUIRE_SIGNING: 'true'
+          DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: ./gradlew --no-daemon -I scripts/cooperation/test_refresh_only.init.gradle -PdaiyuProductionRelease=true :app:assembleReleaseAndroidTest
+      - name: 清理临时签名
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/daiyu-release.p12"
+      - name: 绑定原应用和新测试，独立记录SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_test_refresh.py bind --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼测试刷新执行包
+          path: delivery/
+          if-no-files-found: error
+      - name: 上传测试包构建证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼测试刷新构建证据
+          path: test-refresh/
+          if-no-files-found: warn
   layout:
+    needs: test-package
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 40
@@ -64,7 +135,6 @@ jobs:
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$SOURCE_SHA" = "$EXPECTED_SHA"
           mkdir -p smoke
           python3 - <<'PYBIND'
           import json, os, re
@@ -75,23 +145,21 @@ jobs:
               workflow_sha=os.environ['GITHUB_SHA'], checked_sha=os.environ['EXPECTED_SHA'],
               source_sha=os.environ['SOURCE_SHA'], source_run_id=int(os.environ['SOURCE_RUN_ID']),
               execution_run_id=int(os.environ['GITHUB_RUN_ID']), attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
-              workflow_ref=os.environ['GITHUB_WORKFLOW_REF'], apk_built=False,
+              workflow_ref=os.environ['GITHUB_WORKFLOW_REF'], application_rebuilt=False, test_apk_rebuilt=True,
               selected_classes=os.environ['SMOKE_TEST_CLASSES'].split(',')), ensure_ascii=False) + '\n')
           PYBIND
       - name: 仅执行冻结源码的定向契约
         run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: 代鱼增量Release包
+          name: 代鱼测试刷新执行包
           path: delivery
-          run-id: ${{ inputs.source_run_id }}
+          run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
-      - name: 核对原始compile来源和同run应用测试包
+      - name: 核对原应用和本次新测试包的双来源绑定
         env:
           GH_TOKEN: ${{ github.token }}
-        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_smoke_source.py
-      - name: 校验原始APK摘要
-        run: cd delivery && sha256sum -c SHA256SUMS
+        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_test_refresh.py check
       - name: 启用模拟器加速
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

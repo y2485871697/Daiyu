@@ -142,6 +142,9 @@ class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
             assertDeleteConfirmation("删除文件夹")
             node("dialog-confirm").performClick()
             ui.waitUntil(5_000) { !folder.exists() }
+            ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("workspace-save") and isEnabled()).fetchSemanticsNodes().size == 1
+            }
             node("workspace-save").assertIsEnabled()
             assertEquals(before, fixture.database.workspaceBinding(null))
             node("workspace-file:${renamed.name}").performTouchInput { longClick() }

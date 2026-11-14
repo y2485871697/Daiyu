@@ -16,6 +16,8 @@ import androidx.core.view.WindowInsetsCompat
 internal class PageBackInsetsProbe {
     private var view: View? = null
     private var original: WindowInsetsCompat? = null
+    private var legacyListener: View.OnApplyWindowInsetsListener? = null
+    private var retainedInsets: android.view.WindowInsets? = null
     var observed = IntSize.Zero
         private set
     val observations = mutableSetOf<IntSize>()
@@ -38,15 +40,31 @@ internal class PageBackInsetsProbe {
         val host = checkNotNull(view)
         val initial = original ?: WindowInsetsCompat.Builder().build()
         val insets = Insets.of(0, value.width, 0, value.height)
-        ViewCompat.dispatchApplyWindowInsets(host, WindowInsetsCompat.Builder(initial)
+        val delivered = WindowInsetsCompat.Builder(initial)
             .setInsets(WindowInsetsCompat.Type.systemBars(), insets)
             .setInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars(), insets)
             .setVisible(WindowInsetsCompat.Type.systemBars(), true)
-            .build())
+            .build()
+        if (android.os.Build.VERSION.SDK_INT < 30) {
+            if (legacyListener == null) {
+                val listener = checkNotNull(host.getTag(androidx.core.R.id.tag_on_apply_window_listener)
+                    as? View.OnApplyWindowInsetsListener) { "Compose Insets listener is not installed" }
+                legacyListener = listener
+                // Core re-requests platform insets on old APIs; keep the injected input for that pass.
+                host.setOnApplyWindowInsetsListener { target, incoming ->
+                    listener.onApplyWindowInsets(target, retainedInsets ?: incoming)
+                }
+            }
+            retainedInsets = checkNotNull(delivered.toWindowInsets())
+        }
+        ViewCompat.dispatchApplyWindowInsets(host, delivered)
     }
 
     fun restore() {
         val host = view ?: return
+        retainedInsets = null
+        legacyListener?.let { host.setOnApplyWindowInsetsListener(it) }
+        legacyListener = null
         original?.let { ViewCompat.dispatchApplyWindowInsets(host, it) }
             ?: ViewCompat.requestApplyInsets(host)
     }

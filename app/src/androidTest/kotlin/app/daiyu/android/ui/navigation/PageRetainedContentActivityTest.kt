@@ -841,7 +841,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             openSettings()
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
             mainThread {
-                if (child == "linux-settings") invokeHost(activity, "openLinuxSettings")
+                if (child == "linux-settings") invokeHost(activity, "openLinuxSettings", false)
                 else invokeHost(activity, "setRetainedPage", child)
             }
             ui.waitForIdle()

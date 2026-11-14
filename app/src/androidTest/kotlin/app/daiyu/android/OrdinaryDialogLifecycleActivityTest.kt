@@ -202,6 +202,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
         } finally { ui.mainClock.autoAdvance = oldAutoAdvance }
         ui.waitForIdle()
         awaitNodeWindowFocus(node("chat-model-search"))
+        dismissIme()
         val beforeClose = scrollValue()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitHostWindowFocus(activity)

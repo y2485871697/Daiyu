@@ -22,6 +22,12 @@ CLASSES = (
 
 
 class PageBackSmokeScopeTests(unittest.TestCase):
+    def test_exact_return_test_refresh_has_its_own_non_cancelling_queue(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/test-refresh-regression.yml').read_text()
+        group = next(line for line in workflow.splitlines() if line.startswith('  group: daiyu-test-refresh-'))
+        self.assertIn("inputs.smoke_classes == '" + ','.join(CLASSES) + "' && '-page-back' || ''", group)
+        self.assertIn('  cancel-in-progress: false', workflow)
+
     def test_exact_return_scope_runs_explicit_contracts_and_tool_guards(self):
         self.assertEqual(CLASSES, recorder.PAGE_BACK_PLATFORM_CLASSES)
         for classes in (CLASSES, tuple(reversed(CLASSES))):

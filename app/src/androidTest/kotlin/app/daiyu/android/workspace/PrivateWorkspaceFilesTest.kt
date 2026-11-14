@@ -301,13 +301,14 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         val moved = File(root.parentFile, "opened-rootfs")
         var checks = 0
         val listing = access.list(cancelled = {
-            if (++checks == 2) {
+            // Two cancellation checks precede the walk; the third observes the pinned FD.
+            if (++checks == 3) {
                 assertTrue(root.renameTo(moved)); assertTrue(root.mkdir())
                 File(root, "replacement").writeText("not-the-open-directory")
             }
             false
         })
-        assertTrue(checks >= 2)
+        assertTrue(checks >= 3)
         assertEquals(listOf("original"), listing.entries.map { it.name })
         assertEquals("keep", File(moved, "original").readText())
         try { access.list(listing.directory); fail("stale root accepted") }

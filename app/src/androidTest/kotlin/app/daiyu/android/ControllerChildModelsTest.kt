@@ -1,6 +1,6 @@
 package app.daiyu.android
 
-import android.app.Application
+import android.app.Instrumentation
 import android.content.Context
 import android.test.InstrumentationTestCase
 import app.daiyu.android.delegation.*
@@ -17,13 +17,13 @@ import java.util.concurrent.atomic.AtomicInteger
 
 @Suppress("DEPRECATION")
 class ControllerChildModelsTest : InstrumentationTestCase() {
-    private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
     private class Fixture(base: Context, val held: Boolean = false, val background: Boolean = false,
         val sessionAware: Boolean = false, val childModel: String = "child-api") {
         private val balances = fixtureProviderBalances()
         val sessionOwners = java.util.Collections.synchronizedList(mutableListOf<Pair<String, ConversationId>>())
         val id = UUID.randomUUID().toString()
-        val app = FixtureApplication(testContext(base, "controller-child-$id-"))
+        val app = Instrumentation.newApplication(ChatApplication::class.java,
+            testContext(base, "controller-child-$id-")) as ChatApplication
         val database = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.child.$id"
         val settings = ModelSettingsStore(app, alias)
@@ -83,6 +83,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                     sessionOwners.add(p.model to session.conversationId)
                     factory(p.asModelSettings())
                 }, providerBalanceHost = { balances })
+            app.controller = controller
         }
         fun prepare() {
             conversation = database.create("default"); database.draft(conversation.id, "preserve draft")
@@ -92,6 +93,8 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         }
         fun close() {
             release.countDown(); controller.stop(); controller.close(); balances.close()
+            app.shizuku.close(); app.terminalProvider.close()
+            app.balanceHost.close(); app.providerBalanceHost.close()
             app.getSharedPreferences("model-settings", 0).edit().clear().commit()
             app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             app.getSharedPreferences("subagent_configuration", 0).edit().clear().commit()

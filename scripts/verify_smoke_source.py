@@ -63,7 +63,8 @@ def verify(env, record, source_run, jobs, changed):
     }
     if variant in ('compile', 'diagnostic'):
         validation_files.update({'docs/重构清单.md', '更新说明.md',
-                                 '.github/workflows/reconnect-checks.yml'})
+                                 '.github/workflows/reconnect-checks.yml',
+                                 '.github/workflows/popup-layout-checks.yml'})
     validation_dirs = ('scripts/acceptance/', 'tests/', 'docs/acceptance/')
     if variant in ('compile', 'diagnostic'):
         validation_dirs += ('app/src/test/',)

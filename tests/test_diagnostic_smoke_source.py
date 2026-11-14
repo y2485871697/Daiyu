@@ -43,24 +43,25 @@ class DiagnosticSmokeSourceTests(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 source.verify(dict(self.env, GITHUB_SHA='b' * 40), self.record, self.run, self.jobs, changed)
 
-    def test_compile_and_diagnostic_allow_only_the_reviewed_check_only_workflow(self):
-        path = '.github/workflows/reconnect-checks.yml'
-        for variant in ('compile', 'diagnostic'):
-            env = dict(self.env, SOURCE_VARIANT=variant, GITHUB_SHA='b' * 40)
-            record = dict(self.record)
-            if variant == 'compile':
-                record.update(variant='release', production_delivery=True, profileable=False)
-            source.verify(env, record, self.run, self.jobs, [path])
-            for changed in ('.github/workflows/build.yml', '.github/workflows/other.yml',
-                            '.github/workflows/reconnect-checks.yml/extra',
-                            '.github/workflows/../workflows/reconnect-checks.yml',
-                            'app/build.gradle.kts', 'app/src/androidTest/kotlin/Changed.kt'):
-                with self.subTest(variant=variant, changed=changed), self.assertRaises(ValueError):
-                    source.verify(env, record, self.run, self.jobs, [changed])
-        release = dict(self.record, variant='release', production_delivery=True, profileable=False)
-        with self.assertRaises(ValueError):
-            source.verify(dict(self.env, SOURCE_VARIANT='release', GITHUB_SHA='b' * 40),
-                          release, self.run, [dict(name='单测、检查与生产Release', conclusion='success')], [path])
+    def test_compile_and_diagnostic_allow_only_the_reviewed_check_only_workflows(self):
+        for path in ('.github/workflows/reconnect-checks.yml',
+                     '.github/workflows/popup-layout-checks.yml'):
+            for variant in ('compile', 'diagnostic'):
+                env = dict(self.env, SOURCE_VARIANT=variant, GITHUB_SHA='b' * 40)
+                record = dict(self.record)
+                if variant == 'compile':
+                    record.update(variant='release', production_delivery=True, profileable=False)
+                source.verify(env, record, self.run, self.jobs, [path])
+                for changed in ('.github/workflows/build.yml', '.github/workflows/other.yml',
+                                path + '/extra',
+                                path.replace('/workflows/', '/workflows/../workflows/', 1),
+                                'app/build.gradle.kts', 'app/src/androidTest/kotlin/Changed.kt'):
+                    with self.subTest(variant=variant, changed=changed), self.assertRaises(ValueError):
+                        source.verify(env, record, self.run, self.jobs, [changed])
+            release = dict(self.record, variant='release', production_delivery=True, profileable=False)
+            with self.assertRaises(ValueError):
+                source.verify(dict(self.env, SOURCE_VARIANT='release', GITHUB_SHA='b' * 40),
+                              release, self.run, [dict(name='单测、检查与生产Release', conclusion='success')], [path])
 
     def test_diagnostic_flags_cannot_be_relabelled_or_omitted(self):
         for key, value in (('variant', 'release'), ('debuggable', True), ('profileable', False),

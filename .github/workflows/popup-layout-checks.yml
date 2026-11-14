@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       expected_sha:
-        description: 已构建应用和测试包的冻结完整SHA
+        description: 冻结检查源码完整SHA（应用源码须与source_sha一致）
+        type: string
+        required: true
+      source_sha:
+        description: 既有compile应用和测试包的冻结完整SHA
         type: string
         required: true
       source_run_id:
@@ -22,7 +26,7 @@ concurrency:
   cancel-in-progress: false
 env:
   EXPECTED_SHA: ${{ inputs.expected_sha }}
-  SOURCE_SHA: ${{ inputs.expected_sha }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
   SOURCE_RUN_ID: ${{ inputs.source_run_id }}
   SOURCE_VARIANT: compile
   SMOKE_MODE: smoke
@@ -47,6 +51,7 @@ jobs:
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
           mkdir -p smoke
           python3 - <<'PY'
           import json, os, re
@@ -61,7 +66,14 @@ jobs:
               selected_classes=os.environ['SMOKE_TEST_CLASSES'].split(',')), ensure_ascii=False) + '\n')
           PY
       - name: 仅执行冻结源码的定向契约
-        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
+        run: python3 scripts/acceptance/record_tool_tests.py --python python3
+      - name: 核对compile来源门禁的增量单测
+        shell: bash
+        env:
+          PYTHONPATH: tests
+        run: |
+          set -o pipefail
+          python3 -B -m unittest test_smoke_boot.SourceTests.test_identity_and_unchanged_application test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_only_unchanged_application_explicit_diagnostic_smoke_is_accepted test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_compile_and_diagnostic_allow_only_the_reviewed_check_only_workflows -v 2>&1 | tee tool-evidence/source-validator-tests.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: 代鱼增量Release包
@@ -71,7 +83,7 @@ jobs:
       - name: 核对原始compile来源和同run应用测试包
         env:
           GH_TOKEN: ${{ github.token }}
-        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/verify_smoke_source.py
+        run: python3 scripts/verify_smoke_source.py
       - name: 校验原始APK摘要
         run: cd delivery && sha256sum -c SHA256SUMS
       - name: 启用模拟器加速
@@ -114,7 +126,7 @@ jobs:
           emulator-boot-timeout: 180
           pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "37.2"
           disable-animations: true
-          script: bash -c 'export GITHUB_SHA="$EXPECTED_SHA"; set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+          script: bash -c 'set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
       - name: 上传定向契约及布局证据
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

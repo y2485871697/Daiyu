@@ -112,7 +112,10 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
             assertNull(actions.selection)
         }
         awaitNodeWindowFocus(node("chat-selection-sheet"))
+        dismissIme()
+        awaitDialogImeFrame(node("chat-selection-sheet"), false)
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(timeoutMillis = 5000) { !presentation.choosingModel }
         awaitUniqueTag("context-management")
         assertFalse(presentation.choosingModel)
         assertEquals(before, fixture.settings.load())

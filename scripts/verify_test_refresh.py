@@ -19,6 +19,8 @@ VALIDATION_FILES = {
     'docs/重构清单.md', '更新说明.md',
     '.github/workflows/test-refresh-regression.yml',
     '.github/workflows/chat-workflow-checks.yml',
+    '.github/workflows/workspace-delete-checks.yml',
+    '.github/workflows/workspace-recovery-platform.yml',
     'scripts/verify_test_refresh.py', 'scripts/cooperation/test_refresh_only.init.gradle',
     '.github/workflows/popup-layout-checks.yml',
     '.github/workflows/reconnect-details-checks.yml', 'scripts/smoke_boot.sh',

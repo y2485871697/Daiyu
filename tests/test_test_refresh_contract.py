@@ -35,6 +35,23 @@ class TestRefreshContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_changes(['.github/workflows/chat-workflow-checks.yml', '.github/workflows/build.yml'])
 
+    def test_workspace_check_metadata_is_exactly_allowlisted(self):
+        allowed = ('.github/workflows/workspace-delete-checks.yml',
+                   '.github/workflows/workspace-recovery-platform.yml')
+        for path in allowed:
+            with self.subTest(allowed=path):
+                validate_changes([path])
+            for invalid in (path + '.bak', path + '/extra',
+                            path.replace('/workflows/', '/workflows/../workflows/')):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    validate_changes([invalid])
+            for forbidden in ('.github/workflows/build.yml', '.github/workflows/unknown-checks.yml',
+                              'app/src/main/Example.kt', 'app/build.gradle.kts', 'settings.gradle.kts'):
+                for changes in ([path, forbidden], [forbidden, path]):
+                    with self.subTest(changes=changes), self.assertRaises(ValueError):
+                        validate_changes(changes)
+        validate_changes([*allowed, 'tests/example.py'])
+
     def test_application_build_and_ambiguous_paths_fail_closed(self):
         for name in ('app/src/main/Example.kt', 'app/build.gradle.kts', 'settings.gradle.kts',
                      'scripts/prepare-speech-runtime.py', '.github/workflows/build.yml',

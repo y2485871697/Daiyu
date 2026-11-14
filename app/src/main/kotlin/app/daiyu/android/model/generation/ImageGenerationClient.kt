@@ -3,7 +3,7 @@ package app.daiyu.android.model.generation
 import org.json.JSONObject
 import java.util.Base64
 
-/** Explicit Images API only. No chat, provider guessing, prompt-option parsing or fallback POST. */
+/** 使用显式配置的 Images API，选项来自固定配置，发送失败直接返回错误。 */
 class ImageGenerationClient(private val io: GenerationIo) {
     fun prepare(request: GenerationRequest): GenerationRequestPlan {
         if (!accepts(request.protocol)) throw GenerationPreflightException(GenerationFailure.INVALID_REQUEST)

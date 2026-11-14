@@ -60,11 +60,7 @@ data class Message(
     val error: String? = null,
     val protocolItems: List<String> = emptyList(),
     val historySegments: List<MessageHistorySegment> = emptyList(),
-    /**
-     * Stable accepted-message time in epoch milliseconds, not last update/completion time.
-     * Callers creating a new accepted message record the clock once. Decoders and historical
-     * messages must use null when the original time is unknown; never invent a read-time value.
-     */
+    /** 消息接收时记录一次的 epoch 毫秒时间；旧数据时间未知时填 null，保留原始时间。 */
     val createdAt: Long? = null,
     /** Expanded-history display projection only. Durable owners keep this in historySegments;
      * model request encoders must never turn this into user/assistant body text. */

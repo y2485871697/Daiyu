@@ -5,7 +5,7 @@ import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
 
-/** One request-local, raw-free observation. It cannot retry, cancel or accept model output. */
+/** 记录单次请求的耗时、阶段和传输状态，排除原始内容。 */
 internal class ProviderRequestTrace(
     private val kind: ModelRequestKind = ModelRequestKind.POST,
     private val now: () -> Long = System::nanoTime,

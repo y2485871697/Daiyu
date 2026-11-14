@@ -23,10 +23,9 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 
 /**
- * Files-only install transaction. Caller explicitly confirms a PreparedLinuxInstall and wires
- * operation cancellation. The app factory supplies the real bounded Android PTY probe runner
- * and bounded tar extraction; injected runners remain a host-test/audited integration seam.
- * No catalog writes, selection, profiles, shell fallback or implicit network requests.
+ * 安装已确认的 PreparedLinuxInstall，调用方负责连接操作取消信号。
+ * 应用工厂提供有界的 Android PTY 探测器和 tar 解压器；宿主可注入探测器。
+ * 此事务只安装文件，信任目录、环境选择和 profile 配置由调用方处理；安装过程不隐式联网。
  */
 class RootlessLinuxInstaller internal constructor(
     private val privateRoot: File,
@@ -682,7 +681,7 @@ class RootlessLinuxInstaller internal constructor(
         fun forApp(context: Context, runner: LinuxInstallProbeRunner): RootlessLinuxInstaller =
             forApp(context, TarLinuxRootfsExtraction(), runner)
 
-        /** Explicit extraction seam for audited integrations; never a SAF/shared-storage path. */
+        /** 允许宿主注入解压器；安装根目录固定为应用私有 filesDir 下的 linux-installations。 */
         fun forApp(context: Context, extraction: LinuxRootfsExtraction,
                    runner: LinuxInstallProbeRunner): RootlessLinuxInstaller = RootlessLinuxInstaller(
             File(context.filesDir.canonicalFile, "linux-installations"), extraction, runner)

@@ -1,4 +1,4 @@
-"""Offline routing tests; synthetic not-run plans are not application evidence."""
+"""检查离线验收分工及未运行计划的生成。"""
 import contextlib
 import hashlib
 import importlib.util

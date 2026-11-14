@@ -1,4 +1,4 @@
-"""Source guards for the frame-driven chat follow wiring, not runtime UI results."""
+"""检查按帧驱动的聊天跟随源码连接。"""
 from pathlib import Path
 import unittest
 

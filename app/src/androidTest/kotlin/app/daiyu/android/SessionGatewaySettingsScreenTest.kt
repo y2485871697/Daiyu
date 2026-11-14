@@ -9,7 +9,7 @@ import app.daiyu.android.model.sessiongateway.SessionGatewayRule
 import app.daiyu.android.ui.screens.settings.SessionGatewaySettingsScreen
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Controlled editor only; route/store/controller integration is owned by the parent change. */
+/** 检查受控会话网关编辑器的界面行为。 */
 @Suppress("DEPRECATION")
 class SessionGatewaySettingsScreenTest : WiredActivityTestCase() {
     private var draft by mutableStateOf(SessionGatewayRule())

@@ -13,10 +13,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Real ConversationDatabase/SQLite, real PNG inspector and actual leaf filesystem operations.
- * Source fixture is an offline committed asset, NOT a production live registration. No generation
- * attempt is manufactured for a completed tool; this does not prove Controller/T1/T2 integration.
- */
+/** 用离线已提交资产检查 ConversationDatabase、PNG 检查器和叶层文件操作。 */
 @Suppress("DEPRECATION")
 class StaticGenerationLeafDeviceTest : InstrumentationTestCase() {
     private lateinit var appContext: Context

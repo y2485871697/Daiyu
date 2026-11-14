@@ -69,7 +69,7 @@ import java.util.concurrent.Executors
 class ChatApplication:Application() {
     internal var engineeringUiForTests: Boolean = false
     companion object { internal const val OPEN_PET_SETTINGS = "app.daiyu.android.OPEN_PET_SETTINGS" }
-    // P05 process singleton. Deferred factory runs on IO; no credentials borrowed from controller.
+    // 进程级余额运行时；工厂在 IO 线程延迟创建，凭据独立于聊天控制器。
     internal var balanceHost = app.daiyu.android.balance.BalanceRuntimeHost(factory = {
         app.daiyu.android.balance.BalanceRuntime(app.daiyu.android.balance.ProviderBalanceStore(
             app.daiyu.android.balance.EncryptedBalancePersistence(applicationContext)))
@@ -776,7 +776,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private var pendingImage:ImageSendHandle?=null
-    // AC037 dedicated platform approval lane. Ordinary send paths never populate it.
+    // 系统动作的独立审批槽，普通消息发送不使用。
     private var pendingPlatformAction: ControllerPlatformActionPreparation? = null
     private var pendingPlatformToken: Preparation? = null
     @Synchronized internal fun platformActionPreparation() = pendingPlatformAction

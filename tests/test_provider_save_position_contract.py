@@ -1,4 +1,4 @@
-"""Save-position wiring guards. Android regressions own composition/scroll behavior, not these guards."""
+"""检查供应商保存后滚动位置的源码连接。"""
 from pathlib import Path
 import unittest
 

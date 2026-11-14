@@ -26,10 +26,10 @@ internal fun browserFailureKind(failure: Throwable): String = when (failure) {
     else -> "other"
 }
 
-/** Internal seam for deterministic host tests; production always uses the fixed BrowserUseManager. */
+/** 封装固定版本的 BrowserUseManager 及宿主测试使用的替身资源。 */
 internal interface BlankBrowserResource {
-    /** Thread-safe, bounded snapshot. False while any native callback/operation can still target
-     * upstream's untagged deferreds. The Android implementation must track those callbacks. */
+    /** 在限定时间内读取线程安全快照；原生回调或操作仍可能访问上游未标记的 deferred 时返回 false。
+     * Android 实现负责记录尚未结束的回调。 */
     val isIdle: Boolean get() = true
     /** Runs after allocation has an owner, so partial initialization remains destroyable. */
     fun initialize() {}
@@ -136,7 +136,7 @@ internal class LeaseBrowserHost(
         try {
             check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
             sessions.publish(slot.lease) { checkLive(slot) }
-            // Only a blank WebView. Manager init (including its cookie changes) is NOT lifecycle.
+            // 先创建空白 WebView，管理器初始化和 Cookie 变更推迟到实际使用。
             unattached = createBlank(slot.lease, { reason -> retire(slot, reason) }, {
                 isLive(slot)
             })

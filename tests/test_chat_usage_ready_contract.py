@@ -1,4 +1,4 @@
-"""Source-only guardrails; held-read Android regressions need an approved build."""
+"""检查聊天用量就绪状态的源码连接。"""
 from pathlib import Path
 import unittest
 

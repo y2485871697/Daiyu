@@ -3,7 +3,7 @@ package app.daiyu.android.storage
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.domain.ConversationId
 
-/** Local unread events, not a projection of the latest historical terminal status. */
+/** 记录本地产生的未读完成事件，与历史终态分开。 */
 internal object ConversationCompletionMarkers {
     data class Receipt(val conversationId: String, val messageId: String, val runId: String, val token: String)
 

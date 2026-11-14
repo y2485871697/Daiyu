@@ -8,7 +8,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
-/** Coordinator tests do not access a filesystem, execute a helper, or claim file validation. */
+/** 检查 Linux 设置协调器的状态转换。 */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LinuxSettingsControllerTest : TestCase() {
     private fun draft(mounts: List<LinuxSettingsMount> = emptyList()) = LinuxSettingsDraft(

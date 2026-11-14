@@ -1,4 +1,4 @@
-"""Source wiring only; Kotlin cache and first-frame rendering regressions are deferred."""
+"""检查返回聊天时 Markdown 缓存和渲染的源码连接。"""
 from pathlib import Path
 import unittest
 

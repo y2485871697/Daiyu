@@ -2,7 +2,7 @@ package app.daiyu.android.integration.tools
 
 import app.daiyu.android.domain.tools.RegisteredTool
 
-/** Lifecycle adapter only. The parent owns the sole registry, dispatcher and ledger. */
+/** 将生成工具的注册和异步清理结果接入父目录；注册表、调度器和账本由父目录统一管理。 */
 internal class GenerationCatalogLeaf(private val tools: RunGenerationTools) : AutoCloseable {
     val registeredTools: List<RegisteredTool> get() = tools.registeredTools
     private val lock = Any()

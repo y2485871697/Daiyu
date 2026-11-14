@@ -1,4 +1,4 @@
-"""Message read-aloud source wiring; Android execution belongs to the approved batch."""
+"""检查消息朗读按钮的源码连接。"""
 from pathlib import Path
 import unittest
 import re

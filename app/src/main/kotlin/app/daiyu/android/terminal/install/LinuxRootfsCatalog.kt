@@ -4,9 +4,9 @@ import java.net.URI
 import java.util.Collections
 
 /**
- * Fixed transport metadata, not an installed-environment registry or download approval.
+ * 发行版、ABI、镜像地址、大小和哈希等固定下载元数据，读取时不联网。
  * Maintainer-owned rootfs catalog; historical input baseline 2a7e7ab92b98da5a3711611017021441e7a8053c
- * (AlpineEnvironmentInstaller / DebianEnvironmentInstaller). No network verification implied.
+ * (AlpineEnvironmentInstaller / DebianEnvironmentInstaller).
  * Debian payloads are Termux proot-distro releases, NOT official Debian rootfs artifacts.
  */
 object LinuxRootfsCatalog {

@@ -1,4 +1,4 @@
-"""Source-wiring guards; device behavior is covered by the deferred Android tests."""
+"""检查页面返回手势的源码连接。"""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import unittest

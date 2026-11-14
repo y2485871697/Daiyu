@@ -10,18 +10,10 @@ import java.util.concurrent.CancellationException
 import javax.net.ssl.HttpsURLConnection
 
 /**
- * Run-local, blocking adapter from the bridge's authorized request to the real ModelPort transports.
- * Pass this instance as AuxiliaryVisionBridge's describe function. The host MUST call cancel/close
- * on parent cancellation (including while next is blocked), and close when the parent run ends.
- * A cancellation predicate or a thread interrupt alone cannot disconnect a blocked HTTP read.
- *
- * No registry/settings are read here, no tools are advertised or executed, and no request is retried.
- * Custom request bodies are rejected rather than silently stripped: they can override the frozen
- * API model or system policy. The native instructions/system field is reserved for the bridge.
- *
- * ModelSession has no close method. Closing this adapter cancels its actual active ModelSession;
- * each call also cancels in finally. The real transports own and close their streams/connections
- * in next's finally. This is a component, not a production host integration or a drain guarantee.
+ * 将已授权的图片描述请求交给 ModelPort，作为 AuxiliaryVisionBridge 的 describe 函数使用。
+ * 父运行取消或结束时调用 cancel/close，主动断开阻塞读取；调用返回后仍需等待工作线程退出。
+ * 请求禁用工具和重试，拒绝可覆盖固定模型或桥接指令的自定义请求体。
+ * close 取消当前 ModelSession，每次调用也在 finally 中取消；传输层负责关闭流和连接。
  */
 internal class AuxiliaryVisionModelAdapter(
     private val binding: AuxiliaryModelBinding,
@@ -143,10 +135,8 @@ internal class AuxiliaryVisionModelAdapter(
         }
     }
 
-    /**
-     * Read only the transport's confirmed output, not provisional TextFinal snapshots. Responses
-     * emits TextFinal even for deltas, including IDs absent from response.completed.output.
-     * These envelopes come from our fresh session's first/only next, never stored replay history.
+    /** 从新会话唯一一次 next 的确认输出中取文本。
+     * Responses 的 TextFinal 也可能是临时快照，须与最终 output 核对后再采用。
      */
     private fun completedText(items: List<String>): String {
         val parts = mutableListOf<String>()

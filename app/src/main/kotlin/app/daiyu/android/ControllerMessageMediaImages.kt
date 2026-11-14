@@ -9,7 +9,7 @@ import app.daiyu.android.media.MessageImageOwner
 import app.daiyu.android.media.MessageImageReference
 import app.daiyu.android.media.MessageImageResolver
 
-/** Viewer-only read decoder. The existing <=2048 thumbnail API and its callers stay unchanged. */
+/** 查看器使用的图片读取与解码。 */
 internal fun decodeMessageMediaDisplay(resolver: MessageImageResolver, owner: MessageImageOwner,
     reference: MessageImageReference, edge: Int): Bitmap {
     require(edge in 1..4096)

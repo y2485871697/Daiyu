@@ -11,12 +11,9 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Runs one child process from an explicit argv array.
- *
- * <p>There is no shell: the first element is the executable and the rest are literal arguments.
- * Callers must pass already-validated tokens, so no user text can become a shell or {@code am}
- * option. Output is bounded and the pipe keeps draining after the cap so a chatty child cannot
- * block. Only this child is ever terminated; no other process is signalled.
+ * 按 argv 启动一个子进程，不经过 shell；首项是可执行文件，其余项原样作为参数。
+ * 调用方需先校验参数，尤其是 {@code am} 选项。
+ * 输出达到上限后继续排空管道，防止子进程阻塞；终止操作只作用于本次启动的子进程。
  */
 final class OwnerShell {
     public static final long DEFAULT_TIMEOUT_MS = 15_000L;

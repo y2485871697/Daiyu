@@ -1,4 +1,4 @@
-"""Source-only checks; Android resume geometry remains in the approved device batch."""
+"""检查子代理界面恢复展示的源码连接。"""
 from pathlib import Path
 import unittest
 

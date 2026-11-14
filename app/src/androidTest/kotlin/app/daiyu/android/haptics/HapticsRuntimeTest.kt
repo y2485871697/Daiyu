@@ -9,7 +9,7 @@ import app.daiyu.android.domain.haptics.HapticPort
 import app.daiyu.android.domain.haptics.HapticRequest
 import app.daiyu.android.domain.haptics.HapticSettings
 
-/** Runtime regression source only; no instrumentation execution is claimed. */
+/** 检查振动运行时的生命周期和所有权，振动端口只记录调用。 */
 @Suppress("DEPRECATION")
 class HapticsRuntimeTest : InstrumentationTestCase() {
     private class Port(var delivery: HapticDelivery = HapticDelivery.PLAYED) : HapticPort {

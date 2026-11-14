@@ -1,4 +1,4 @@
-"""Sidebar capability wiring; Android interaction regressions are compiled, not run here."""
+"""检查侧栏图片能力与可见性的源码连接。"""
 from pathlib import Path
 import unittest
 

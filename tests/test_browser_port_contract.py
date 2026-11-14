@@ -1,4 +1,4 @@
-"""Source wiring contracts; real WebView/Compose checks await the approved build batch."""
+"""检查浏览器端口与宿主的源码连接。"""
 from pathlib import Path
 import re
 import unittest

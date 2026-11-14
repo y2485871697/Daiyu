@@ -31,10 +31,8 @@ import app.daiyu.android.voice.VoiceOwner
 import app.daiyu.android.voice.duplex.DuplexPhase
 import app.daiyu.android.voice.duplex.DuplexState
 
-/**
- * Component/owner-contract tests, not a fake voice backend. The fixture owner stops business in
- * onHangUp and removes only the matching session after the animation's completion callback.
- * Production backend/central-entry integration is deliberately the caller's responsibility.
+/** 检查通话浮层与测试会话所有者的回调协作：
+ * onHangUp 记录挂断并切换到关闭状态，退出动画结束后按会话标识移除匹配的测试会话。
  */
 @Suppress("DEPRECATION")
 class DoubaoCallOverlayTest : ComposeActivityTestCase() {

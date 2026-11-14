@@ -18,7 +18,7 @@ internal enum class MessageVideoCodecFailure {
 internal class MessageVideoCodecException(val failure: MessageVideoCodecFailure) :
     IllegalArgumentException("Message video sidecar: ${failure.name}")
 
-/** Metadata only. This is not an asset resolver, authorization grant or provider input codec. */
+/** 编解码视频输入元数据，读取原件和上传前另行校验授权。 */
 internal object MessageVideoInputCodec {
     internal const val MAX_UTF8_BYTES = 1024 * 1024
     internal const val MAX_INPUTS = 256

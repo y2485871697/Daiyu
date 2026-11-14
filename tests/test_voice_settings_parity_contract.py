@@ -1,4 +1,4 @@
-"""Source wiring only; Android/JVM behavior is verified in the later unified batch."""
+"""检查语音设置各入口一致性的源码连接。"""
 from pathlib import Path
 import unittest
 

@@ -1,4 +1,4 @@
-"""Source-only regression gates; geometry and lifecycle tests run in the approved Android batch."""
+"""检查页面恢复时布局和生命周期的源码连接。"""
 from pathlib import Path
 import unittest
 

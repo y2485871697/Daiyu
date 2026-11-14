@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate an offline evidence-routing plan, never application acceptance results."""
+"""离线生成验证证据的分工计划。"""
 from __future__ import annotations
 
 import json

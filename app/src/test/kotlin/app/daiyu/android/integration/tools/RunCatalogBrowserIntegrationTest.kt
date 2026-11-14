@@ -24,10 +24,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Exercises the parent RunCatalogTools, not a hand-built browser dispatcher. Confirmation,
- * binding, registry snapshot, bridge, ledger and browser facade are real. Only native lifetime
- * and close observation are controlled: the latter deliberately avoids Android Handler on JVM.
+/** 检查 RunCatalogTools 的浏览器确认、绑定、派发和账本流程。
+ * 原生生命周期和关闭观察由测试控制。
  */
 class RunCatalogBrowserIntegrationTest {
     private val message = Message(MessageId("assistant-message"), ConversationId("conversation"),

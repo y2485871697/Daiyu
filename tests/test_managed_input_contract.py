@@ -1,4 +1,4 @@
-"""Source wiring coverage only. The real-window instrumentation tests are not run here."""
+"""检查受管输入控件及窗口焦点的源码连接。"""
 from pathlib import Path
 import json
 import unittest

@@ -25,9 +25,9 @@ data class BackupInventory(val conversations: Int, val messages: Int, val branch
 data class ImportResult(val packageId: String, val inventory: BackupInventory, val alreadyImported: Boolean,
     val cleanupProblem: String? = null)
 
-/** Extends, never reimplements, schema3 text backup. Blobs are immutable and all visible references/config
- * commit in the same SQLite transaction as the existing text importer. Source is always read-only.
- * A crash before commit leaves old state plus unreferenced immutable files, never half-visible new state.
+/** 在 schema3 文本备份上增加原件和配置的导入导出，文本部分复用原导入器。
+ * 原件不可变；所有可见引用和配置随文本导入在同一 SQLite 事务中提交，源数据始终只读。
+ * 提交前崩溃会保留旧状态，并可能留下未引用的原件文件。
  */
 class NeutralBackupService(private val store: ConversationDatabase, private val blobs: PrivateBlobs,
     private val transactions: DatabaseTransactions = DatabaseTransactions { store.writableDatabase },

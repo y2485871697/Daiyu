@@ -1,6 +1,6 @@
 package app.daiyu.android.model.generation
 
-/** Explicit wire contracts, not provider/model auto-detection or a claim of model capability. */
+/** 显式选择的生成协议，模型支持情况由宿主确认。 */
 enum class GenerationProtocol { OPENAI_IMAGES_JSON, OPENAI_IMAGE_EDIT_MULTIPART, OPENAI_VIDEO_MULTIPART }
 
 enum class GenerationKind {
@@ -125,13 +125,9 @@ sealed class GenerationReservation {
 }
 
 /**
- * Required PERSISTENT parent implementation, shared by all clients/processes. reserve must atomically
- * durably insert a tombstone before returning Started; existing identity must NEVER return Started,
- * including after crashes. finish updates that row without deleting/reopening it; it must merge
- * monotonically (never replace Completed with a late Pending/Unknown, or erase known outputs).
- * On ambiguous store failure the caller sends nothing. Persisted outcomes may contain signed
- * URLs/media: protect them. Identities must be unique in the parent's ownership/account scope.
- * Intentionally no in-memory/default implementation and no reset/retry API.
+ * 所有客户端和进程共用的持久账本，reserve 原子落盘占位后才能返回 Started。
+ * 已有身份在崩溃后也保持占用，finish 只更新原行；迟到结果不能降级 Completed 或抹掉已知输出。
+ * 存储结果不明时停止发送；身份在账户内唯一，结果中的签名 URL 和媒体须受保护。
  */
 interface GenerationAttemptStore {
     fun reserve(attempt: GenerationAttempt): GenerationReservation

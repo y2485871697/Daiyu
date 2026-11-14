@@ -1,4 +1,4 @@
-"""Wiring checks for child compression; these do not replace Android execution."""
+"""检查子任务自动压缩的源码连接。"""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

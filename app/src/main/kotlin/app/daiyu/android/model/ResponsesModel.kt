@@ -63,10 +63,8 @@ class ResponsesModel internal constructor(
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions,
             sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh, summaryRequest = summaryRequest, beforeConnect = beforeConnect))
 
-    /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
-     * Pass the same run-local capability used to freeze videos to this model's constructor.
-     * A videoPostApprovalProvider must also supply fresh approval for EVERY HTTP POST. This
-     * blocking ModelSession must be driven off the UI thread; its provider may suspend for UI.
+    /** OpenRouter 视频入口，构造时传入冻结视频所用的同一运行期授权。
+     * 每次 HTTP POST 重新审批；会话是阻塞调用，须在工作线程驱动，审批可等待 UI。
      */
     fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
              images: ModelImagePlan? = null): ModelSession =

@@ -79,8 +79,8 @@ internal interface ContextManagementBackend {
         throw UnsupportedOperationException("运行中压缩不可用")
 }
 
-/** Worker-only implementation. UI receives neither this object nor a ContextService.
- * No sends, branches, revisions, tools, retries, capacity guesses or new boundary algorithm. */
+/** 在工作线程读取上下文快照、分页档案并准备或执行压缩，复用已有压缩策略和模型解析器。
+ * 界面通过控制器适配器访问；发送、分支和修订走各自入口，失败不自动重试。 */
 internal class ContextManagementWorker(
     private val service: ContextService,
     private val settings: () -> CompressionSettings,

@@ -20,24 +20,11 @@ internal interface CatalogRecordCodec<T> {
 }
 
 /**
- * Durable catalog portion of a host provider store. The file belongs to a host-owned provider
- * SLOT (for example the existing settings store's primary slot), never an endpoint-derived path.
- * The host must own this instance and route ALL provider edits through [configurationChange].
- * This class does not read/save active ModelSettings, store credentials, or select a model.
- *
- * UUID allocation happens at explicit registration/migration [register] or account replacement
- * [replaceRegisteredProvider]. A plain [configurationChange] only invalidates the revision.
- * Deletion is durable; re-registration gets a new UUID.
- * Files for other host slots are not touched. A process monitor AND an OS lock serialize different
- * instances; atomic replacement is mandatory, with no non-atomic fallback. Old encoded records
- * are retained verbatim, so importing never re-encodes/customizes an existing model.
- *
- * Durability boundary: this backend guarantees atomic replacement across PROCESS crashes, not
- * persistence across OS crash/power loss. The temporary file is fsynced, but the containing
- * directory is NOT fsynced. COMMITTED means rename succeeded and is visible to subsequent reads;
- * it does not certify power-loss durability (including initial registration/directory creation).
- * After rename we must report success, never FAILED/CANCELLED inviting an automatic retry.
- * A host requiring power-loss durability needs a stronger backend/result contract.
+ * 按宿主供应商槽位保存模型目录，文件路径由槽位确定，所有编辑经过 [configurationChange]。
+ * [register] 和 [replaceRegisteredProvider] 分配 UUID；普通编辑更新修订号，重新注册使用新 UUID。
+ * 进程内锁与 OS 锁共同串行化实例，必须原子替换文件；导入时原样保留已有记录。
+ * 临时文件会 fsync，目录不会；进程崩溃时保持原子替换，断电持久性取决于文件系统。
+ * rename 成功即报告 COMMITTED，避免提交后又返回失败或取消而诱发重试。
  */
 internal class FileSavedModelCatalogPersistence<T>(
     file: File,
@@ -258,12 +245,8 @@ internal class FileSavedModelCatalogPersistence<T>(
         if (Thread.currentThread().isInterrupted) CatalogCommitResult.CANCELLED else CatalogCommitResult.FAILED
     }
 
-    /**
-     * The host wraps save/select/restore (and local model edits) in this same boundary. Invalidate
-     * BEFORE invoking the host mutation, so a crash or failed host save cannot revive an old fetch.
-     * This boundary only advances revision; any explicit host record synchronization is separate.
-     * A failed host save can conservatively advance revision without making old tickets valid.
-     * No lock inversion: acquire this boundary BEFORE the host's existing configuration lock.
+    /** 保存、选择、恢复和本地模型编辑共用此入口，先获取目录锁，再获取宿主配置锁。
+     * 修改前先推进修订号，使旧请求在崩溃或保存失败后仍失效；记录同步另行处理。
      */
     fun <R> configurationChange(change: () -> R): R = exclusive {
         val old = readDocument()

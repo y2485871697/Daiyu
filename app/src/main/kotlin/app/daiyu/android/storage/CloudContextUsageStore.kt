@@ -10,8 +10,7 @@ import app.daiyu.android.ui.model.ContextUsageModel
 import app.daiyu.android.ui.model.acceptedContextInput
 import org.json.JSONObject
 
-/** Scoped UI receipts, not a reconstruction from billed totals or local compression estimates.
- * Kept separately from imported billing history: a backup cannot manufacture an actual-input receipt. */
+/** 实际输入量的界面记录，与导入的计费历史和本地压缩估算分开保存。 */
 internal object CloudContextUsageStore {
     fun installSchema(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS context_ui_state(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,payload TEXT NOT NULL)")

@@ -15,7 +15,7 @@ import java.security.KeyStore
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Test source for the parent batch. Fake transport only; no provider/network/microphone calls. */
+/** 用传输替身检查个人语音级联流程。 */
 @Suppress("DEPRECATION")
 class PersonalCascadeProductionDeviceTest : InstrumentationTestCase() {
     private lateinit var context: Context

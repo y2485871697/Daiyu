@@ -1,4 +1,4 @@
-"""Source guards for composer-aware follow; not Android runtime evidence."""
+"""检查聊天跟随对输入区遮挡的源码处理。"""
 from pathlib import Path
 import unittest
 

@@ -1,4 +1,4 @@
-"""Source/SQLite contracts only; the corresponding Kotlin/Android tests are batch-gated."""
+"""检查上下文用量的源码连接和 SQLite 查询。"""
 import re
 import sqlite3
 import unittest

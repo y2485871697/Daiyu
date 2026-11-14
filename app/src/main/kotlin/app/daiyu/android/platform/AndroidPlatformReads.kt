@@ -19,8 +19,8 @@ import java.nio.charset.CodingErrorAction
 import java.util.Locale
 import java.util.TimeZone
 
-/** Catalog adapter around preserved device reads/queries plus app search and granted-document reads.
- * App SDK identity only: no shell, root, Shizuku, permission acquisition, network probes or logging.
+/** 将 DeviceReads、DeviceQueries、应用搜索和已授权文档读取接入工具目录。
+ * 使用应用自身的 SDK 权限，权限申请由宿主处理；读取过程不探测网络或记录读取内容。
  */
 internal class AndroidPlatformReads(context: Context, private val resultPolicy: DeviceResultPolicy = DeviceResultPolicy(),
     lastKnownLocationSource: LastKnownLocationSource? = null) : PlatformReadBackend {

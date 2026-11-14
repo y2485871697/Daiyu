@@ -23,11 +23,8 @@ import app.daiyu.android.storage.SQLiteRuntimeStore
 import java.io.File
 import java.util.UUID
 
-/** Real SQLiteOpenHelper upgrades and transactions, not direct calls to onUpgrade.
- * Uses the existing testContext isolation and the metadata/asset-capability fixture patterns in
- * MessageVideoDatabaseTest, SQLiteSupplementAdmissionDatabaseTest and NeutralVideoBackupTest.
- * Video bytes below are deliberately fake: these tests prove DB/backup evidence, not decoding,
- * provider capability, model transport, or acceptance of a playable video.
+/** 在隔离数据库中通过 SQLiteOpenHelper 打开旧库，检查升级、事务和备份元数据。
+ * 视频字节使用合成数据。
  */
 @Suppress("DEPRECATION")
 class ControllerVideoWitnessDatabaseTest : InstrumentationTestCase() {

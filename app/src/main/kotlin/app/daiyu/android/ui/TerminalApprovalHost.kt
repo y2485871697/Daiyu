@@ -100,9 +100,8 @@ internal fun TerminalApprovalHost(
 
 internal data class TerminalApprovalSection(val id: String, val text: String)
 
-/** Complete, reversible presentation. No take(), ellipsis, redacted launch values, or digest-only approval.
- * Slices bound Compose paragraph size, not approval size. Joining slices recovers every character.
- * Provider credentials are intentionally NOT launch parameters and are never displayed.
+/** 完整展示启动计划；长文本分段以限制 Compose 段落大小，拼接后保留全部字符。
+ * 供应商凭据不属于启动参数，展示时排除。
  */
 internal fun terminalApprovalSections(preparation: ControllerTerminalPreparation): List<TerminalApprovalSection> = buildList {
     fun addText(id: String, text: String) {

@@ -1,4 +1,4 @@
-"""Source guards; Android frame/input tests remain for the approved build batch."""
+"""检查底部弹层退出动画及输入处理的源码连接。"""
 from pathlib import Path
 import unittest
 

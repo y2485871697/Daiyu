@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Offline comparison of declared physical-device samples to an externally pinned baseline.
-
-This does not collect samples, authenticate collection, or grant business acceptance.
-"""
+"""离线比较传入的设备样本与独立固定的基线，样本采集及来源核验由调用方负责。"""
 from __future__ import annotations
 
 import hashlib

@@ -8,7 +8,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import app.daiyu.android.domain.haptics.HapticSettings
 
-/** Platform test source only; no instrumentation execution is claimed. */
+/** 检查振动宿主绑定的生命周期。 */
 @Suppress("DEPRECATION")
 class HapticsHostBindingTest : InstrumentationTestCase() {
     private class Owner : LifecycleOwner {

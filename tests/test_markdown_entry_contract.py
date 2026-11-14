@@ -1,4 +1,4 @@
-"""Source wiring for history AST preparation; device execution stays in the approved batch."""
+"""检查进入历史会话时 AST 准备流程的源码连接。"""
 from pathlib import Path
 import unittest
 

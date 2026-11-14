@@ -40,7 +40,7 @@ internal class ControllerVirtualDisplayEntry(
     }
 }
 
-/** Narrow test seam. Production always uses the durable runtime, not Session.production. */
+/** 虚拟显示会话工厂；正式运行使用持久化运行时。 */
 internal fun interface ControllerVirtualDisplayFactory {
     fun create(context: Context, owner: RunExecutionOwner, capabilities: SessionCapabilities,
                writes: List<R08VirtualDisplayWrite>, reads: List<R08VirtualDisplayRead>,

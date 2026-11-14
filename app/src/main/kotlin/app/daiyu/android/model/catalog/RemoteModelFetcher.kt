@@ -65,11 +65,7 @@ enum class RemoteModelFailure {
     CANCELLED
 }
 
-/**
- * A deliberately non-sensitive error. Response bodies and URLs containing credentials are not
- * copied into its message or external cause chain. The HTTP status is retained only when the
- * server supplied one. Fetch failures never retain external JSON or transport exceptions.
- */
+/** 获取失败只保留已收到的 HTTP 状态，排除响应正文、URL、外部 JSON 及传输异常链。 */
 class RemoteModelException(
     val failure: RemoteModelFailure,
     val statusCode: Int? = null,
@@ -81,11 +77,7 @@ class RemoteModelException(
 
 typealias RemoteModelError = RemoteModelFailure
 
-/**
- * Fetches a real remote model catalogue. This class intentionally has no fallback or bundled
- * models: an empty response is a valid empty catalogue, and transport/protocol failures fail.
- * The connection factory exists so tests can use a deterministic HttpURLConnection.
- */
+/** 获取远程模型目录：空响应返回空目录，传输或协议错误直接失败。 */
 class RemoteModelFetcher(
     private val connect: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }
 ) {
@@ -230,13 +222,8 @@ class RemoteModelFetcher(
         }
     }
 
-    /**
-     * Convenience overload for callers that use a cancellation flag. The flag is checked between
-     * blocking operations and when I/O fails; it cannot unblock an active read. Cancellation still
-     * waits for that I/O to return (or reach the configured timeout), then closes and disconnects.
-     * Cancellation takes precedence over transport, HTTP-status and protocol failures, but not
-     * validation or runtime request-configuration rejections. Unexpected programming errors
-     * are propagated unchanged.
+    /** 通过标志检查取消，等待阻塞 IO 返回或超时后断开连接。
+     * 取消优先于传输、HTTP 和协议错误；校验、请求配置及程序错误仍原样抛出。
      */
     fun fetch(
         request: RemoteModelRequest,

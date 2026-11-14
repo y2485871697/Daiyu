@@ -8,9 +8,8 @@ import java.util.Base64
 
 /**
  * Pure counterpart of the frozen fork's voice/tts/SpeechPlaybackSettings.kt.
- * Resource catalogs may be shared; selection and per-model history namespaces MUST NOT be.
- * The key names are logical Prefs.Keys identifiers, not a claim about their old persisted values.
- * The parent maps these identifiers to its own storage; this class never reads global settings.
+ * 资源目录可共用，选择记录与各模型历史须使用独立命名空间。
+ * 键名是逻辑 Prefs.Keys，宿主提供实际存储映射，读取通过传入的 readString 完成。
  */
 enum class VoicePlaybackProfile(
     val modeKey: String,

@@ -1,4 +1,4 @@
-"""Source wiring guards; Android touch regressions require the approved build batch."""
+"""检查助手创建入口和回调的源码连接。"""
 from pathlib import Path
 import unittest
 

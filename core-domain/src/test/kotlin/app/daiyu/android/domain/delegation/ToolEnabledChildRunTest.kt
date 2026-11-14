@@ -13,9 +13,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Resource-owner tests, not an Android/native-host substitute. Production Runner dispatch is
- * exercised separately by BrowserChildProductionTest and the Controller instrumentation source.
- */
+/** 资源所有者测试；Runner 分发另见 BrowserChildProductionTest 和 Controller 仪器测试。 */
 class ToolEnabledChildRunTest {
     private fun await(latch: CountDownLatch) = assertTrue(latch.await(3, TimeUnit.SECONDS))
     private class Assembly : ChildToolAssembly {

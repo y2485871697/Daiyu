@@ -1,4 +1,4 @@
-"""Chat voice feedback source contracts; Android execution awaits the approved batch."""
+"""检查聊天语音反馈的源码连接。"""
 from pathlib import Path
 import unittest
 

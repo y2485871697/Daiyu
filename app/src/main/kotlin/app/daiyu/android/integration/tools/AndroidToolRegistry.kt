@@ -7,7 +7,7 @@ import app.daiyu.android.platform.AndroidPlatformReads
 import app.daiyu.android.platform.PlatformReadTool
 import app.daiyu.android.platform.DeviceResultPolicy
 
-/** Central registration only, not replacements for existing domain backends or ModelPort. */
+/** 将 Android 设备读取工具和附加工具注册到统一目录，实际读取交给当前运行的设备资源对象。 */
 object AndroidToolRegistry {
     const val ASK_USER_CAPABILITY = AskUserPlanTool.CAPABILITY
     const val BATTERY_CAPABILITY = "device.battery.read"

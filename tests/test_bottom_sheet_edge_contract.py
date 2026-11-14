@@ -1,4 +1,4 @@
-"""Source contracts only; floating geometry and IME tests await the approved Android batch."""
+"""检查底部弹层边缘和输入法适配的源码配置。"""
 from pathlib import Path
 import unittest
 

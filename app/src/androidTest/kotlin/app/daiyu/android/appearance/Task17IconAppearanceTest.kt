@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Source only: execution belongs to integrator. No launcher state is mutated by these tests. */
+/** 检查图标外观和协调器行为，启动器使用测试适配器。 */
 @Suppress("DEPRECATION")
 class Task17IconAppearanceTest : InstrumentationTestCase() {
     fun testAll64OriginalResourcesLoadAndHavePixels() {

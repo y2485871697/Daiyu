@@ -28,7 +28,7 @@ import app.daiyu.android.ui.components.UsageAction
 import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.model.ConversationTokenUsageUi
 
-/** Real presentation assertions; fixture counts are never installed in production. */
+/** 用测试计数检查紧凑用量展示。 */
 class UsageCompactPresentationTest : WiredActivityTestCase() {
     fun testCacheRowsAreInitiallyCollapsedAndRevealActualCounts() {
         mainThread {

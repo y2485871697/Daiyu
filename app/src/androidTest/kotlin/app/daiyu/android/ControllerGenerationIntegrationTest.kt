@@ -232,9 +232,8 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         assertEquals(editor.text, fixture.database.draft())
     }
 
-    /** Real production constructor -> Runner catalog -> Session -> token -> RunGenerationTools.
-     * The model is held without tool events: inspect the real pair, never execute a network call.
-     * This fails both if production forgets injection and if it still passes DENY_DOWNLOADS.
+    /** 检查构造器经 Runner、Session 和令牌传递到 RunGenerationTools 的下载配置。
+     * 模型停在工具事件之前，以便读取配置。
      */
     fun testProductionRetainedResourcePairsSamePublicTransportAndKeepsReviewedHostOwnerGate() {
         saveSettings(downloadsEnabled = true)
@@ -389,10 +388,8 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         val attempt: GenerationAttempt, val resources: ControllerGenerationResources,
         val assets: MessageGenerationAssets, val png: ByteArray)
 
-    /** Offline fixture only: persist a real two-row owner with its original tool invocation, then
-     * publish a static PNG and register it using the production filesystem/SQLite stores. No fake
-     * Tool.result URL or fake output reader can make these tests pass. The central attempt is
-     * durably UNKNOWN, not Confirmed; readback must not reserve a new paid attempt.
+    /** 离线保存消息对及原始工具调用，再通过文件存储和 SQLite 注册静态 PNG。
+     * 中央尝试记录保持 UNKNOWN，回读时保留原付费请求身份。
      */
     private fun existingOutput(kind: GenerationKind = GenerationKind.IMAGE): ExistingOutput {
         val settings = saveSettings()

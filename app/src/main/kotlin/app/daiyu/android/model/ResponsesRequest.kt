@@ -5,7 +5,7 @@ import app.daiyu.android.model.images.FrozenMessageImagePlan
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Shared by the actual transport and JVM request-builder tests. */
+
 internal object ResponsesRequest {
     fun history(history: List<Message>, images: FrozenMessageImagePlan? = null,
                 videos: app.daiyu.android.model.videos.FrozenMessageVideoPlan? = null): JSONArray {

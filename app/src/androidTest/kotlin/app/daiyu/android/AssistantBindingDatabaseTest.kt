@@ -27,7 +27,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         super.tearDown()
     }
     private fun seedV9() {
-        // Produce the complete predecessor schema, not a mock helper or onUpgrade invocation.
+        // 创建完整旧版表结构，让数据库打开过程触发升级。
         val helper = database()
         val db = helper.writableDatabase
         removePostV9ConversationSchemaForFixture(db)

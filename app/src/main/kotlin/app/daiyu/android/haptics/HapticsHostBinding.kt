@@ -9,11 +9,10 @@ import androidx.lifecycle.LifecycleOwner
 import app.daiyu.android.domain.haptics.HapticAgentAction
 
 /**
- * Real host boundary, not an event producer. Own one binding per screen/lifecycle instance.
- * The controller owns acceptance of a run; only beginRun after that acceptance. Every asynchronous
- * callback captures the returned Run, never looks up a mutable "current run" at delivery time.
- * Conversation/run/message identity is frozen, haptic settings are deliberately LIVE kill switches.
- * onStop retains background output; onDestroy/close revokes every capability and cancels its motor.
+ * 将触感会话绑定到一个页面生命周期，并转发运行事件。
+ * 控制器受理运行后才能 beginRun；异步回调捕获返回的 Run，避免投递时误用已切换的当前运行。
+ * 会话、运行和消息身份固定，当前触感设置可立即关闭输出。
+ * onStop 保留后台输出，onDestroy/close 撤销所有授权并取消振动。
  */
 class HapticsHostBinding(
     private val runtime: HapticsRuntime,

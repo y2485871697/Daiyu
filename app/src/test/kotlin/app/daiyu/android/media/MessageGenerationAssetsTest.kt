@@ -15,7 +15,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** Offline storage tests. Injected inspectors accept NON-media bytes; these do not prove codecs. */
+/** 用非媒体字节和检查器替身测试离线资产存储。 */
 class MessageGenerationAssetsTest {
     private lateinit var root: File
     private lateinit var owner: GenerationAssetOwner

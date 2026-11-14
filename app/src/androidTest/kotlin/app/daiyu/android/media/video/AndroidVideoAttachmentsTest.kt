@@ -6,9 +6,7 @@ import android.test.AndroidTestCase
 import java.io.File
 import java.util.UUID
 
-/** Uses only static malformed bytes; no media is generated and no network/provider is accessed.
- * Positive device-codec fixtures are intentionally not claimed by these rejection tests.
- */
+/** 用静态损坏字节检查视频导入拒绝路径。 */
 @Suppress("DEPRECATION")
 class AndroidVideoAttachmentsTest : AndroidTestCase() {
     private lateinit var root: File

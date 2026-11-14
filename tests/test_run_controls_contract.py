@@ -1,4 +1,4 @@
-"""Source-only integration guards for the composer controls; not runtime acceptance."""
+"""检查输入区运行控制按钮的源码连接。"""
 from pathlib import Path
 import math
 import unittest

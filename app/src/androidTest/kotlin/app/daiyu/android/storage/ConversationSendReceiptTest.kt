@@ -12,7 +12,7 @@ import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.testContext
 import java.util.UUID
 
-/** Real SQLite triggers, not mocked insert return values. */
+/** 用 SQLite 触发器模拟插入失败，检查发送回执和事务回滚。 */
 @Suppress("DEPRECATION")
 class ConversationSendReceiptTest : android.test.AndroidTestCase() {
     private lateinit var scoped: Context

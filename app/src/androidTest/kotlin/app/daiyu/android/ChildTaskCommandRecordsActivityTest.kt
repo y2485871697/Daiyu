@@ -13,7 +13,7 @@ import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** UI consent tests; durable dispatch and real cleanup are separately covered by Controller/SQLite tests. */
+/** 检查命令记录界面的用户确认。 */
 class ChildTaskCommandRecordsActivityTest : WiredActivityTestCase() {
     private val source = ChildTaskRecord(ChildRunOwner("A", "parent", "group", 1, "child", "message"),
         "parent-message", "owner", 0, "review", "original prompt", ChildTaskStatus.UNKNOWN,

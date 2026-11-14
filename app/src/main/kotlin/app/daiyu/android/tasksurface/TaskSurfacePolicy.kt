@@ -16,9 +16,10 @@ internal sealed interface TaskSurfaceDecision {
     data class NotExecuted(val code: String, val message: String) : TaskSurfaceDecision
 }
 
-/** Only a current foreground route can mint this narrow target parameter. Not an authorization.
- * A future self-tree adapter must still check the original GUI lease/owner/authorization/fence.
- * Do not remove externalRoot's own-package rejection or make this a process-wide switch. */
+/** 当前前台路由创建的自应用目标参数。
+ * 使用时仍须校验原 GUI 租约、owner、授权和撤销状态。
+ * externalRoot 继续拒绝自应用包名；此参数仅对当前路由生效。
+ */
 internal class TaskSurfaceSelfTarget private constructor(
     val packageName: String,
     private val owner: Any,

@@ -6,17 +6,11 @@ import java.net.HttpURLConnection
 import java.util.concurrent.TimeUnit
 
 /**
- * One handle per parent-owned run; never reset or share it with a subsequent session.
- * Cancellation is sticky, including connections/streams acquired after cancel(). Cleanup runs
- * outside the state lock, aborting every connection in a claimed batch before closing any stream.
- * A cancel request is NOT an acknowledgement that HTTP has exited.
- * Legacy cancellation predicates/interrupts remain checks only; use this handle to abort live I/O.
- *
- * Platform I/O cancellation is best-effort: a getter can start after throwIfCancelled() returns
- * and after cancel() has already disconnected its connection. Late registration retries disconnect
- * and closes a returned stream, but cannot guarantee abort of a getter still in flight in that gap.
- * Extra checks cannot remove that race, and holding the state lock across a getter would block
- * cancellation itself. Transport timeouts and observation of actual execution exit remain required.
+ * 每个父运行使用一个不可重置的取消句柄，取消后取得的连接和流也会清理。
+ * 在状态锁外先中止整批连接，再关闭流，避免阻塞的 close 拖住其他连接。
+ * 主动断开 IO 后仍须等待 HTTP 执行退出；标志检查和线程中断仅作附加检查。
+ * getter 可能在取消检查后才开始，晚注册需补做断开和关闭；保留超时并观测执行退出。
+ * getter 必须在状态锁外调用，否则会阻塞取消操作。
  */
 class GenerationCancellation {
     data class Snapshot(
@@ -25,9 +19,7 @@ class GenerationCancellation {
         val pendingCleanup: Int,
         val cleanupFailures: Int,
     ) {
-        /** HTTP executions have returned through finally and all attempted cleanup has returned.
-         * This does not assert parent-worker exit, successful cleanup, or asset publication safety.
-         */
+        /** HTTP 执行及清理调用均已返回；继续检查清理结果、父线程和资产发布状态。 */
         val isDrained: Boolean get() = activeExecutions == 0 && pendingCleanup == 0
     }
 
@@ -41,7 +33,7 @@ class GenerationCancellation {
 
     fun snapshot(): Snapshot = synchronized(lock) { snapshotLocked() }
 
-    /** Returns observed state after attempting aborts, not a synthetic "cancelled = drained". */
+    /** 尝试中止后返回当前状态，排空状态按实际执行退出更新。 */
     fun cancel(): Snapshot {
         val actions = synchronized(lock) {
             requested = true

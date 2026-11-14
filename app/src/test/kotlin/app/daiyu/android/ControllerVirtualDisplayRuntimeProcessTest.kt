@@ -25,8 +25,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
-/** Host filesystem evidence, not an Android filesystem/power-loss test. Each contender is a JVM
- * with its own semaphore and OS lock table. No copied directories stand in for process death. */
+/** 用独立 JVM 检查进程退出、文件锁和恢复，各进程持有独立信号量。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26], manifest = Config.NONE)
 class ControllerVirtualDisplayRuntimeProcessTest {

@@ -250,10 +250,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
     private fun field(target: Any, name: String): Any? =
         target.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(target)
 
-    /** Test-only injection at the trusted UI handoff, not a replacement send or acceptance path.
-     * Like GuiCatalogProductionTest's detached session, this needs no accessibility service.
-     * Install the exact frozen write snapshot an overlay would deliver; do not loosen any
-     * production send/commit/cleanup predicate or inject persistenceUnknown/cleanup results. */
+    /** 在可信 UI 交接处注入浮层应提交的冻结写入快照。
+     * 发送、提交和清理仍走正常流程，由流程产生持久化及清理结果。 */
     private fun installConfirmedInput(f: Fixture, entry: ControllerGuiEntry): GuiConfirmedDelivery {
         check(Looper.myLooper() === Looper.getMainLooper())
         val controller = f.controller

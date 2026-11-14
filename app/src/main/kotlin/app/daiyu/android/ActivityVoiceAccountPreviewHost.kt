@@ -325,9 +325,7 @@ internal class AccountPreviewSpeechPlayer(
     companion object { internal const val STRICT_DRAIN_MS = 2_000L }
 }
 
-/** Tracks completion of the EXISTING bounded/cancellable HTTP transport, not a new network stack.
- * Cancel of a suspended continuation alone does not prove the OkHttp response callback has drained.
- */
+/** 跟踪 HTTP 请求回调完成情况；取消协程后仍需等待 OkHttp 回调退出。 */
 internal class AccountPreviewCalls(private val delegate: Call.Factory = OkHttpVoiceTransport.client) : Call.Factory {
     private val lock = Any()
     private var closed = false

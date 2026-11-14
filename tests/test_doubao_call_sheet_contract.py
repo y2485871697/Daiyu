@@ -1,4 +1,4 @@
-"""Formal call overlay wiring; visual execution is a separate approved device batch."""
+"""检查通话浮层的源码连接。"""
 from pathlib import Path
 import unittest
 

@@ -30,7 +30,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-/** Run only on a fresh disposable synthetic installation. This tests collection, not AC acceptance. */
+/** 在全新的一次性合成数据安装中采集性能数据。 */
 @Suppress("DEPRECATION")
 class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
     private val ui = createEmptyComposeRule()

@@ -65,7 +65,7 @@ interface PetStore { fun load(): PetState; fun save(state: PetState) }
 fun interface PetClock { fun nowMillis(): Long }
 fun interface PetCancel { fun cancel() }
 fun interface PetScheduler { fun after(delayMillis: Long, task: () -> Unit): PetCancel }
-/** No chat history, credentials, tools, main-agent controller or fallback selection crosses this port. */
+/** 宠物模型接口，与主聊天历史、凭据和工具隔离。 */
 data class PetModelRequest(val requestId: String, val selection: PetModelSelection,
     val event: PetEvent, val prompt: String, val sessionId: String,
     val usageOwner: String = "pet", val maxOutputTokens: Int = 120, val timeoutMillis: Long = 45_000) {

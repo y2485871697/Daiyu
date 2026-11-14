@@ -1,4 +1,4 @@
-"""Timestamp source-style guards, not a substitute for device layout regression."""
+"""检查消息时间戳样式的源码配置。"""
 from pathlib import Path
 import unittest
 

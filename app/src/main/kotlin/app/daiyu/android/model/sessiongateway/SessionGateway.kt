@@ -14,7 +14,7 @@ data class SessionGatewayContext(val conversationId: ConversationId,
     override fun toString(): String = "SessionGatewayContext(conversationId=<redacted>, project=null)"
 }
 
-/** Request-local adaptation. Does not select providers, own storage, or grant network permission. */
+/** 为当前请求应用会话网关规则。 */
 object SessionGateway {
     fun applyResponses(request: JSONObject, finalUrl: String, rule: SessionGatewayRule,
                        context: SessionGatewayContext?) {

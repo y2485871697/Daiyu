@@ -1,4 +1,4 @@
-"""Isolated stdlib tests: no Android build, network, secrets, or acceptance claims."""
+"""用隔离数据测试验收证据校验器。"""
 import contextlib
 import copy
 import hashlib

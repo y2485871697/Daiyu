@@ -5,7 +5,7 @@ import app.daiyu.android.domain.haptics.HapticKind
 import app.daiyu.android.haptics.HapticsRuntime
 import java.lang.ref.WeakReference
 
-/** Existing click sites delegate to P31; no second system-click fallback or shadow preferences. */
+/** 将界面触感统一交给应用持有的 HapticsRuntime 处理。 */
 internal object TouchHaptics {
     private var actionDepth = 0
     private var runtime = WeakReference<HapticsRuntime>(null)

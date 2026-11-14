@@ -2,7 +2,7 @@ package app.daiyu.android.ui
 
 import app.daiyu.android.domain.MessageBlock
 
-/** Search text only: image identity/metadata are neither searchable content nor display labels. */
+/** 搜索正文和工具调用文本；图片块不参与文本匹配。 */
 internal fun retainedSearchText(blocks: List<MessageBlock>): String = blocks.mapNotNull { block ->
     when (block) {
         is MessageBlock.Text -> block.text

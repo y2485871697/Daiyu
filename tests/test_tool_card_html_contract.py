@@ -1,4 +1,4 @@
-"""Source wiring contracts; Compose/pixel and Kotlin runtime checks await an approved build."""
+"""检查工具卡片 HTML 展示的源码连接。"""
 from pathlib import Path
 import re
 import unittest

@@ -1,4 +1,4 @@
-"""Hot-path wiring guards; not a substitute for a physical frame measurement."""
+"""检查思考展示热点路径的源码连接。"""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
 
-/** Real SQLite/wrap freezes with synthetic originals and fake HTTPS, not provider capability proof. */
+/** 用合成原件和离线 HTTPS 检查 SQLite 与 wrap 冻结流程。 */
 @Suppress("DEPRECATION")
 class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
     private var db: ConversationDatabase? = null

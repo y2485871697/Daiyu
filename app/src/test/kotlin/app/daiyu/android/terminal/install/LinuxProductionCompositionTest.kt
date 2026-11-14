@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
-/** Composition-only tests: no Android binary, network or real PRoot execution is claimed. */
+/** 检查 Linux 安装组件组装。 */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LinuxProductionCompositionTest : TestCase() {
     private class Transactions : LinuxInstallTransactions {

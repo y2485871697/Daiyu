@@ -18,9 +18,7 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.nio.file.Files
 
-/** Injected inspectors accept NON-media fixtures. These tests prove lifecycle/file contracts,
- * not real image/video decoding. Real PNG decoder coverage is separate device test source.
- */
+/** 用非媒体字节和检查器替身测试资产生命周期与文件操作。 */
 class StaticGenerationAssetsTest {
     private lateinit var root: File
     private val bytes = byteArrayOf(1, 2, 3, 4)

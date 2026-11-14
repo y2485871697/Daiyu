@@ -1,4 +1,4 @@
-"""R47 failure repairs; these source checks do not replace Android execution."""
+"""检查 R47 失败项修复的源码连接。"""
 from pathlib import Path
 import unittest
 

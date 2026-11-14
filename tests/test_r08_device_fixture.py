@@ -1,4 +1,4 @@
-"""Source/packaging contracts only; these do not execute or certify root task delivery."""
+"""检查 R08 设备测试的源码和打包配置。"""
 from pathlib import Path
 import unittest
 import xml.etree.ElementTree as ET

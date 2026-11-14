@@ -14,7 +14,7 @@ import org.json.JSONArray
 import java.io.File
 import java.util.UUID
 
-/** Real Android SQLite/JSON/blob fixture. Added for platform execution, not a host JSON mock. */
+/** 在 Android 上检查上下文历史的 SQLite、JSON 和二进制数据读写。 */
 @Suppress("DEPRECATION")
 class ContextHistoryServiceTest : InstrumentationTestCase() {
     private lateinit var context: Context

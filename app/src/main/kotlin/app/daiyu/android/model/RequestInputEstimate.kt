@@ -5,7 +5,7 @@ import app.daiyu.android.model.images.FrozenMessageImagePlan
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Prices prompt fields in the final body, not JSON framing, settings or opaque bytes. */
+/** 估算最终请求体中提示内容的 token 数，排除 JSON 包装、设置及不透明数据。 */
 internal object RequestInputEstimate {
     internal fun payload(value: JSONObject): String? = when (value.optString("type")) {
         "input_image" -> value.opt("image_url") as? String

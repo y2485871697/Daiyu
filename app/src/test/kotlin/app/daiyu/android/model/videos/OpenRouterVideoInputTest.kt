@@ -18,7 +18,7 @@ import java.security.cert.Certificate
 import java.util.Base64
 import javax.net.ssl.HttpsURLConnection
 
-/** Synthetic bytes + fake inspector test protocol/storage contracts, not real Android decoding. */
+/** 用合成字节和检查器替身测试视频输入协议与存储。 */
 class OpenRouterVideoInputTest {
     private lateinit var root: File
     private lateinit var store: VideoAssetStore

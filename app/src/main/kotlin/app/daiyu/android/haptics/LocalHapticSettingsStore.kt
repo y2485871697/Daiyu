@@ -4,9 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import app.daiyu.android.domain.haptics.*
 
-/**
- * Device-local private preferences. One store per runtime; no remote config, backup API or network.
- * commit() is intentional: apply() cannot report a failed durable write.
+/** 每个 runtime 共用一个本地触感偏好存储，写入确认后通知观察者。
+ * 使用 commit 获取写入失败结果，apply 无法报告该结果。
  */
 class LocalHapticSettingsStore(private val preferences: SharedPreferences) : HapticSettingsStore {
     constructor(context: Context) : this(context.applicationContext.getSharedPreferences(

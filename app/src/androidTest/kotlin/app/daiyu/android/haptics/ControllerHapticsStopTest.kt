@@ -20,8 +20,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real Controller + production Activity host wiring, with a provider that ignores cancellation.
- * No manual Run.stop, synthetic renderer progress, reflection or terminal-status substitution. */
+/** 用忽略取消的服务替身，检查 Controller 和 Activity 停止后是否及时撤销振动。 */
 @Suppress("DEPRECATION")
 class ControllerHapticsStopTest : InstrumentationTestCase() {
     private class Owner : LifecycleOwner {

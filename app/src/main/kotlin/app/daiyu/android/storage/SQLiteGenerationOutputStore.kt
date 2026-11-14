@@ -47,16 +47,11 @@ sealed interface GenerationOutputRecovery {
 }
 
 /**
- * The supplied DB MUST be the account's application DB containing the real messages and
- * generation_attempts; accountScope must be stable across restarts.
- * No helper/version ownership, network, attempt mutation, asset deletion or Tool.result writes.
- *
- * Asset verification releases ALL file/fence locks before final registration admission.
- * Registration reacquires ONLY the asset fence, then opens the single top-level SQL transaction.
- * The gate stays held through COMMIT, ordering registration against same-fence revoke; file IO
- * stays outside SQLite. Authorization is rechecked in SQL, including on an idempotent retry.
- * Calls from an outer transaction are rejected BEFORE touching assets (lock ordering matters).
- * find authorizes metadata only; open also verifies the private original through the asset fence.
+ * 使用包含真实消息和 generation_attempts 的账户数据库，accountScope 在重启后保持稳定。
+ * 资产校验后释放全部文件锁和闸门；登记时仅重取资产闸门，再开启顶层 SQL 事务。
+ * 闸门持有至 COMMIT 完成，以协调登记与撤销；文件 IO 放在 SQL 事务外，事务内重查授权。
+ * 外层事务中的调用在接触资产前拒绝，避免锁顺序倒置，幂等重试也遵循相同规则。
+ * find 校验元数据授权，open 另通过资产闸门核验原件。
  */
 class SQLiteGenerationOutputStore(
     private val database: () -> SQLiteDatabase,

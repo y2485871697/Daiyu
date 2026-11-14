@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
 
-/** Real production transport with offline HTTPS doubles, never catalogue-only inference evidence. */
+/** 用离线 HTTPS 替身检查原生补全传输的请求和响应处理。 */
 @Suppress("DEPRECATION")
 class NativeCompletionTest : InstrumentationTestCase() {
     private val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)

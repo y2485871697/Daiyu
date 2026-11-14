@@ -49,7 +49,7 @@ fun interface BrowserVisibleDownload {
     fun request(url: String, userAgent: String, disposition: String?, mime: String?)
 }
 
-/** One exact UI attachment, never a tab-number or model capability. */
+/** 绑定到单个界面挂载实例的句柄，与面向模型的标签 ID 分开。 */
 class BrowserVisibleAttachment internal constructor(
     private val ui: UiDispatcher,
     private val navigateAction: (String) -> Unit,
@@ -87,10 +87,8 @@ class BrowserVisibleAttachment internal constructor(
     }
 }
 
-/**
- * Android-only composition boundary, not a tool registration or grant factory. Construct on the
- * trusted host side and pass the SAME registry to this adapter, queue port, and BrowserToolSession.
- * Lifecycle creates no manager, performs no navigation and does not touch CookieManager.
+/** Android 浏览器宿主适配器，与队列端口和 BrowserToolSession 共用一个注册表。
+ * 管理器创建、导航和 Cookie 配置推迟到实际使用时执行。
  */
 class AndroidOpenMinisBrowserHost(
     context: Context,
@@ -403,8 +401,8 @@ private class AndroidBlankResource(
 
     private fun ensureManager(): BrowserUseManager = manager ?: BrowserUseManager(view).also { created ->
         manager = created
-        // The fixed constructor configures cookies/JS. This happens only AFTER posted fence.
-        // Enforce file/content restrictions after configureWebView, before any navigation.
+        // 构造器在投递后的执行区间内配置 Cookie 和 JS。
+        // 配置完成后、导航开始前，重新设置文件和 content URI 的访问限制。
         view.settings.apply {
             allowFileAccess = false
             allowContentAccess = false
@@ -527,7 +525,7 @@ private class AndroidBlankResource(
             val active = ensureManager()
             check(live()) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
             if (input.action == BrowserAction.SCREENSHOT) awaitVisualState()
-            // Actual pinned upstream implementation, not an emulated action engine.
+            // 通过固定版本的上游 BrowserUseManager 执行。
             val answer = active.execute(input)
             // Manual browsing bypasses upstream's untokened finish callback. Screenshot labels
             // must describe the actual WebView, not the manager's last model-navigation state.
@@ -631,7 +629,7 @@ private class AndroidBlankResource(
     }
 }
 
-/** Defence in depth for direct manager loads as well as callback-mediated navigations. */
+/** 在直接加载请求到达 WebView 前，检查 URL 策略和导航授权。 */
 private class GuardedWebView(
     context: Context,
     private val live: () -> Boolean,

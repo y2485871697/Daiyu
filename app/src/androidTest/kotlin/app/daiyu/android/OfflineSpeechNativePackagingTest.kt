@@ -4,7 +4,7 @@ import android.test.InstrumentationTestCase
 import java.io.File
 import java.util.zip.ZipFile
 
-/** Packaging/linker proof only. Does not claim microphone/model recognition or download a pack. */
+/** 检查离线语音库是否完整打包、能否在设备上加载，以及许可证是否齐全。 */
 @Suppress("DEPRECATION")
 class OfflineSpeechNativePackagingTest : InstrumentationTestCase() {
     fun testFinalApkContainsAllPinnedRuntimeAbisAndJniCanLoadOnThisDevice() {

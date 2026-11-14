@@ -1,4 +1,4 @@
-"""Source-only contracts; Android geometry regressions run with the approved build batch."""
+"""检查子代理状态区域高度的源码配置。"""
 from pathlib import Path
 import unittest
 

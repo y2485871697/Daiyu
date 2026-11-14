@@ -10,7 +10,7 @@ enum class ChildTaskControlReceipt { PENDING, PAUSED, RESUMED, STALE }
 
 enum class ChildTaskStopDisposition { CONTINUE, PAUSE, STOP }
 
-/** One admitted child only. Does not own workers, transports, permits or cleanup. */
+/** 管理单个已接收子任务的暂停状态。 */
 internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
     private val gate = Object()
     private var state = ChildTaskPauseState.ACTIVE

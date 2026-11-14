@@ -19,9 +19,9 @@ internal class GuiCaptureRequest<T>(private val released: () -> Unit) {
         future.complete(GuiResult.Rejected(code))
         resourcesDisposed()
     }
-    /** The onSuccess receipt covers all three platform resources, not just callback arrival.
-     * Keep the original Exception-only handling and disposal order; never short-circuit or
-     * manufacture a terminal receipt if even one disposal is unconfirmed. */
+    /** 成功回调后依次释放 software、hardware 和 buffer；某一步抛出 Exception 后仍继续后续释放。
+     * 三步全部确认释放后才归还截图名额，任一步失败都保留资源占用。
+     */
     fun disposeSuccessResources(software: () -> Unit, hardware: () -> Unit, buffer: () -> Unit) {
         var disposed = true
         try { software() } catch (_: Exception) { disposed = false }

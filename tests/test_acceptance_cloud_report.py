@@ -1,4 +1,4 @@
-"""Synthetic offline fixtures only: these tests are not cloud/business evidence."""
+"""用离线合成快照测试云回归报告校验器。"""
 import contextlib
 import copy
 import hashlib

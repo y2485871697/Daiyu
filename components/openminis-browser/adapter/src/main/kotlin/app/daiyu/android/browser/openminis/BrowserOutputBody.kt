@@ -2,7 +2,7 @@ package app.daiyu.android.browser.openminis
 
 import app.daiyu.android.browser.bridge.BrowserCommand
 
-/** Private length-framed string, so manager.executeJS does NOT pretty-print/truncate JSON text. */
+/** 为正文附加长度帧，绕过 manager.executeJS 的 JSON 排版和截断。 */
 internal object BrowserOutputBody {
     const val PREFIX = "__DAIYU_BROWSER_BODY_V1__\n"
     const val DEFAULT_MAX_CHARS = 12_000
@@ -31,7 +31,7 @@ internal object BrowserOutputBody {
 
     fun script(command: BrowserCommand): String {
         val select = if (command.action == "get_readable") {
-            // Mirrors the pinned getReadable selection/whitespace rules, WITHOUT its pre-truncation.
+            // 沿用固定上游的正文选择和空白处理规则，在截断前分页。
             """
                 let el = null;
                 const candidates = ['article', '[role="main"]', 'main', '.post-content',

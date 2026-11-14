@@ -19,7 +19,7 @@ internal data class ContextManagementState(
     val notice: String? = null,
 )
 
-/** Controlled UI contract. No fake/default callbacks and no Service access in a composable. */
+/** 向界面提供上下文管理状态和操作入口，Composable 通过适配器访问 ContextService。 */
 internal interface ContextManagementControllerAdapter : AutoCloseable {
     val state: StateFlow<ContextManagementState>
     fun refresh()

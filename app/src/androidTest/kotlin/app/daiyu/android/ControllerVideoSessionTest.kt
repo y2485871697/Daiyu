@@ -18,9 +18,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real SQLite, parent session/main dispatcher and receiving journal. No paid network or decoder.
- * Evidence is constructed by reflection ONLY in this test: this is deliberately not a production
- * proof, catalogue fetch or assertion of remote support. Production has no evidence injection API.
+/** 检查 SQLite、父会话、主线程派发和接收日志。
+ * 测试通过反射构造视频能力材料，正式运行从能力请求获取。
  */
 @Suppress("DEPRECATION")
 class ControllerVideoSessionTest : InstrumentationTestCase() {

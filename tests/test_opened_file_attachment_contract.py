@@ -1,4 +1,4 @@
-"""Resolver and production wiring contracts; not a substitute for Android execution."""
+"""检查已打开文件的附件解析及生产入口连接。"""
 from pathlib import Path
 import unittest
 import xml.etree.ElementTree as ET

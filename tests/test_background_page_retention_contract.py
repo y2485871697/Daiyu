@@ -1,4 +1,4 @@
-"""Source regression gates for normal pause/resume, not process-death or Android execution."""
+"""检查普通暂停和恢复时的页面保留源码。"""
 from pathlib import Path
 import unittest
 

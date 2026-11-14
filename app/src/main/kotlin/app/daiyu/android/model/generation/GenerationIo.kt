@@ -5,10 +5,9 @@ import java.net.CookieHandler
 import java.net.HttpURLConnection
 import java.net.URL
 
-/**
- * Blocking I/O intended for a parent-owned worker. There is no retry scheduler or hidden polling.
- * The parent supplies durable attempt accounting, media validation/publication and download URL
- * authorization (including SSRF/DNS policy). Credentials are never sent to output/CDN URLs.
+/** 在父运行的工作线程执行阻塞 IO，不自动重试或轮询。
+ * 宿主负责持久记账、媒体校验与发布、下载 URL 授权及 SSRF/DNS 策略。
+ * 输出和 CDN 请求排除凭据。
  */
 class GenerationIo(
     internal val assets: GenerationAssets,
@@ -179,11 +178,8 @@ class GenerationIo(
     }
 }
 
-/**
- * Uses the project's existing java.net stack; no new HTTP dependency. Fixed-length streaming is
- * essential: HttpURLConnection cannot replay a streamed POST for redirects/authentication. No
- * redirects, cookies, caches, endpoint fallback, or application retries. The parent must not install
- * a process-wide CookieHandler during this adapter's lifetime. Inject GenerationHttp for tests.
+/** 使用固定长度流发送，防止 HttpURLConnection 因重定向或认证重放 POST。
+ * 禁用重定向、Cookie、缓存、端点回退和重试；使用期间宿主不得安装进程级 CookieHandler。
  */
 class UrlConnectionGenerationHttp(
     private val connect: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection },

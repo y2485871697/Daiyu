@@ -5,15 +5,10 @@ import android.os.Looper
 import android.os.Message
 import java.util.IdentityHashMap
 
-/**
- * Test-only delivery seam, not a send/result fake. The controller's real posted Messages
- * are held before enqueueing, then dispatched unchanged by the real main Looper. Only
- * this controller is gated: framework lifecycle and Compose queues continue normally.
- *
- * A global MessageQueue sync barrier also blocks ActivityThread lifecycle messages; a
- * blocking main Runnable cannot exercise framework destruction. Keep this reflective
- * seam local to instrumentation rather than adding a production scheduling API.
- * Install/hold/release/close on main, before releasing the worker's preparation latch.
+/** 在入队前暂存 Controller 消息，释放后由主 Looper 原样派发。
+ * 只阻塞当前 Controller，框架生命周期和 Compose 队列照常运行。
+ * 须在主线程创建并调用 hold、release、close；
+ * 先安装并调用 hold，再解除工作线程的 preparation 等待。
  */
 internal class TextSendDeliveryGate(private val controller: ChatController) : AutoCloseable {
     private val field = ChatController::class.java.getDeclaredField("handler").apply { isAccessible = true }

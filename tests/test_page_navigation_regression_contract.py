@@ -1,4 +1,4 @@
-"""Production navigation wiring; Android frames are deferred to the approved build batch."""
+"""检查生产页面导航的源码连接。"""
 from pathlib import Path
 import unittest
 

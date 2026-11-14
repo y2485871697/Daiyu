@@ -8,13 +8,8 @@ data class MessageImageOwner(val conversationId: String, val messageId: String) 
     }
 }
 
-/**
- * Immutable reference to original bytes in the app's message asset store.
- *
- * This is the platform-independent counterpart of media.MessageImageReference. The v1
- * fields and hard ceilings are identical; a particular asset store may impose lower limits.
- * Metadata is not proof that bytes exist or are valid: only the asset resolver can verify
- * the manifest, ownership and digest. No image bytes or provider credentials belong here.
+/** 消息原图的固定引用，与 media.MessageImageReference 共用 v1 字段和硬上限，资产库可采用更低限制。
+ * 这里只存元数据，原件、清单、所有者和摘要由资产解析器核验。
  */
 data class MessageImageReference(
     val owner: MessageImageOwner,

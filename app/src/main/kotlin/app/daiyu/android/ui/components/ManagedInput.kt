@@ -101,7 +101,7 @@ private class InputEntry(
     val clear: () -> Unit,
 )
 
-/** Registration changes no drawing, sizing or pointer consumption, including in Dialog windows. */
+/** 将 Compose 输入框的焦点和屏幕边界登记到所在窗口，供点击外部时收起输入使用。 */
 internal fun Modifier.managedInput(): Modifier = composed {
     val view = LocalView.current
     val focus = LocalFocusManager.current
@@ -121,7 +121,7 @@ internal fun Modifier.managedInput(): Modifier = composed {
     }
 }
 
-/** True means one hide request was dispatched; a blur transfer vetoes it, not IME completion. */
+/** 清除焦点并请求隐藏键盘；失焦回调若将焦点转给另一个输入框，则跳过隐藏并返回 false。返回 true 表示已发出隐藏请求。 */
 internal fun clearManagedInputFocus(
     view: View,
     hideIme: () -> Unit = { hideManagedInputIme(view) },

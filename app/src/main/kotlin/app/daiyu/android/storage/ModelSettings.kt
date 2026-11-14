@@ -120,7 +120,7 @@ class ModelSettingsStore internal constructor(
             if (current.model.isBlank()) emptyList() else listOf(CatalogModelParameters.fromCurrent(current))
         }
         }
-    /** Read-only, network/credential-free. Does not resurrect a deleted provider or migrate defaults. */
+    /** 读取本地目录元数据，排除凭据；已删除供应商保持删除状态。 */
     internal fun localModelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters>? = modelCatalog.readConfiguration {
         checkCatalogConfiguration()
         modelCatalog.current()

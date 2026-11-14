@@ -5,12 +5,11 @@ import org.json.JSONObject
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
-/** Restricted, independent request policy for a summary, not the main chat factory.
- * No provider-wide settings are mutated. Unknown custom keys fail closed: in particular model,
- * output/reasoning budgets, instructions, tools and provider-specific tool aliases cannot slip
- * through the general-purpose custom-body merge. */
+/** 摘要使用独立请求策略，保持供应商设置不变。
+ * 自定义请求只接受已知字段，防止覆盖模型、输出与推理预算、指令或工具配置。
+ */
 internal object SummaryProviderFactory {
-    /** Pure validation shared by profile save/load/freeze and transport creation. No model or I/O. */
+    /** 配置保存、加载、冻结和创建传输时共用的纯校验。 */
     fun validate(snapshot: ProviderSnapshot) {
         validatedCustomBody(snapshot)
     }

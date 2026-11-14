@@ -26,9 +26,7 @@ import okio.Buffer
 import okio.Timeout
 import org.json.JSONObject
 
-/** Real Android MediaPlayer + existing synthesis decoder; fake Call.Factory, no external HTTP/key.
- * Uses the production singleton gate, does not reset it or use a second audio owner barrier.
- */
+/** 使用合成 HTTP 响应检查 Android MediaPlayer、合成解码器和共用音频门控。 */
 @Suppress("DEPRECATION")
 class ActivityVoiceAccountPreviewHostAndroidTest : InstrumentationTestCase() {
     private val config get() = SpeechProviderConfig(SpeechEngine.DOUBAO,
@@ -132,7 +130,7 @@ class ActivityVoiceAccountPreviewHostAndroidTest : InstrumentationTestCase() {
             assertTrue(calls.cancelled.await(5, TimeUnit.SECONDS))
             assertTrue(events.done.await(5, TimeUnit.SECONDS))
             assertEquals(0, events.starts.get()); assertEquals(0, events.failures.get())
-            // After confirmed drain the SAME singleton admits a fresh preview, no reset/second gate.
+            // 旧播放完全退出后，同一个门控应允许新的试听。
             instrumentation.runOnMainSync { host.play(request(), Events()); host.stop() }
         } finally { instrumentation.runOnMainSync { host.close(); scope.cancel() } }
     }

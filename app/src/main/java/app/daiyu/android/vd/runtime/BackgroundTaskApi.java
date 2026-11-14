@@ -17,7 +17,7 @@ final class BackgroundTaskApi {
                 Class.forName("android.os.IBinder"));
     }
 
-    /** Class seam exercises the actual reflection/transaction recipe without Android or a device. */
+    /** 根据传入的类解析反射方法，便于替换平台类。 */
     BackgroundTaskApi(Class<?> organizerClass, Class<?> transactionClass,
             Class<?> tokenClass, Class<?> binderClass) throws Exception {
         Constructor<?> organizerConstructor = organizerClass.getConstructor();

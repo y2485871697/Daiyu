@@ -4,10 +4,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Settings import lifecycle. Call on the host UI thread except performCommit/cancellation
- * predicates. begin/fetched suspend for IO reads, then resume on that same UI context and recheck
- * the request token. Tokens, not URLs or result ordering, identify requests. No credential is retained.
+/** 设置页的目录导入流程。除 performCommit 和取消检查外，在宿主 UI 线程调用。
+ * IO 读取后回到原 UI 上下文并重查请求令牌，避免旧结果覆盖新请求；实例不保留凭据。
  */
 internal class CatalogImportSession<T>(
     private val persistence: SavedModelCatalogPersistence<T>,

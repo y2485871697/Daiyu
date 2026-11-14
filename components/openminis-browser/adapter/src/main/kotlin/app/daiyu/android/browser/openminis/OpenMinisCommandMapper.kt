@@ -7,7 +7,7 @@ import com.openminis.app.browser.BrowserActionInput
 import com.openminis.app.browser.BrowserActionResult
 import com.openminis.app.browser.ScrollDirection
 
-/** Translation to the fixed manager, not to its global tab pool. No authority arguments. */
+/** 将命令转换为固定管理器的调用；标签归属和授权由宿主维护。 */
 internal object OpenMinisCommandMapper {
     val hostActions = setOf("set_user_agent", "set_viewport", "reload", "go_back", "go_forward")
     private val fields = mapOf(
@@ -31,7 +31,7 @@ internal object OpenMinisCommandMapper {
         "reload" to emptySet(), "go_back" to emptySet(), "go_forward" to emptySet(),
     )
 
-    /** Also usable before dedicated host-method dispatch (viewport/history). Never echoes inputs. */
+    /** 校验管理器与宿主专用操作；错误使用固定代码，避免泄露输入值。 */
     fun validate(command: BrowserCommand) {
         require(command.tabId == null || command.tabId in 0..2) { "BROWSER_TAB_ID" }
         require(command.action !in setOf("fetch", "get_cookies", "set_cookies")) {
@@ -178,7 +178,7 @@ internal object OpenMinisCommandMapper {
         }
     }
 
-    /** Command-aware publication seam. A failure MUST throw, never return a Confirmed-shaped value. */
+    /** 校验并转换执行结果；操作失败时抛出异常。 */
     fun result(command: BrowserCommand, answer: BrowserActionResult): BrowserExecutionResult {
         validate(command)
         if (command.action !in hostActions) map(command)

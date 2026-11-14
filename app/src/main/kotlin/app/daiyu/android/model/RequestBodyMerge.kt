@@ -3,20 +3,9 @@ package app.daiyu.android.model
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Merges a user supplied request body into the body assembled by the model.
- *
- * User values win. Objects are the one recursive case; arrays are
- * deliberately replaced as a whole, so a user supplied array can never be
- * accidentally combined with provider defaults.  Neither input object is
- * modified, and the returned tree does not share mutable JSON containers with
- * either input.
- */
+/** 用户值优先，对象递归合并，数组整组替换；输入保持不变，结果使用独立的 JSON 容器。 */
 object RequestBodyMerge {
-    /**
-     * Example: `merge(providerBody, userBody)` keeps provider-only fields while
-     * applying every field from [userBody] according to the rules above.
-     */
+    
     @JvmStatic
     fun merge(providerBody: JSONObject, userBody: JSONObject): JSONObject {
         val result = copyObject(providerBody)
@@ -39,14 +28,8 @@ object RequestBodyMerge {
         return result
     }
 
-    /**
-     * Applies [userBodies] in list order. Later values override earlier values,
-     * except that two objects merge recursively. Each entry is applied before
-     * reading the next, so repeated keys retain intermediate type changes;
-     * flattening the list into one object would lose that behavior.
-     *
-     * The provider and every list entry remain unchanged. The returned tree
-     * shares no mutable JSON containers with any input, even for an empty list.
+    /** 按列表顺序合并 [userBodies]，后值覆盖前值，对象递归合并。
+     * 逐项应用以保留同名字段的中间类型变化；结果使用独立容器，空列表也返回副本。
      */
     @JvmStatic
     fun merge(providerBody: JSONObject, userBodies: List<JSONObject>): JSONObject {

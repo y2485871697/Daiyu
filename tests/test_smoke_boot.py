@@ -1,4 +1,4 @@
-"""Synthetic process tests; these do not claim Android instrumentation coverage."""
+"""用进程替身检查模拟器冒烟脚本的阶段和失败处理。"""
 import importlib.util
 import hashlib
 import json

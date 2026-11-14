@@ -13,7 +13,7 @@ internal class McpSelection(val serverId: String, val tool: String, arguments: S
     override fun toString() = "McpSelection(redacted)"
 }
 
-/** Frozen one-turn scope. No owner fabrication, child runner, leaf dispatcher, or leaf ledger. */
+/** 固定本轮 MCP 选择和会话，使用宿主分配的执行归属及统一调度器、账本。 */
 internal class McpRunScope(
     val settings: McpSettings,
     selections: List<McpSelection>,

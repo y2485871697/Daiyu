@@ -8,7 +8,7 @@ import app.daiyu.android.storage.ConversationDatabase
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real Controller/SQLite/Runner lane; synthetic local model only, not a UI acceptance test. */
+/** 用本地模型替身检查 Controller、SQLite 和 Runner 的消息时间处理。 */
 @Suppress("DEPRECATION")
 class ControllerMessageTimeProductionTest : InstrumentationTestCase() {
     private val fixtures = mutableListOf<RunControlFixture>()

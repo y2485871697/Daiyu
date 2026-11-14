@@ -5,7 +5,7 @@ import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import java.io.Closeable
 import java.util.Collections
 
-/** Exact values read from SQL, not a prospective write or a metadata/version stamp. */
+/** 从 SQL 读出的完整原值，用于精确匹配缓存。 */
 internal data class StoredMessageColumns(
     val messageId: String,
     val conversationId: String,
@@ -24,12 +24,9 @@ internal data class StoredMessageColumns(
         blocks, error, protocol, history).sumOf { it?.length?.toLong() ?: 0L }
 }
 
-/**
- * Bounded parsing reuse, confined to one runtime store lease. Cleared on failed
- * writes, terminal commits and lease release; never shares mutable caller graphs.
- * Every lookup receives complete, freshly SQL-proven columns. Only parsing/graph
- * construction is reused: validation (including external video witnesses) runs again.
- * Linear exact comparisons deliberately avoid hashes and content/version surrogates.
+/** 当前存储租约内的有界解析缓存，写入失败、终态提交或租约释放时清空。
+ * 查找使用刚从 SQL 确认的完整列值，逐项精确比较；解析图与调用方隔离。
+ * 仅复用解析结果，每次仍执行完整校验，包括外部视频校验。
  */
 internal class CommitMessageDecodeReuse(
     private val maxCharacters: Long = 20L * 1024 * 1024,

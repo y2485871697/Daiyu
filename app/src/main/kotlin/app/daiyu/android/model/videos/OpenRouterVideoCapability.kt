@@ -3,10 +3,8 @@ package app.daiyu.android.model.videos
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.storage.ModelSettings
 
-/** Explicit host authority, never derived from a model name, image support or Responses alone.
- * The host must verify ORIGINAL inline MP4 support for this exact model and endpoint, and obtain
- * configuration permission to upload it. Neither a catalog label nor a restored boolean is proof.
- * No gateway aliases, HTTP endpoints, alternate paths, queries or redirects are accepted here.
+/** 宿主确认当前模型和端点支持内联原始 MP4，并取得上传授权。
+ * 仅接受指定 HTTPS 端点，排除网关别名、替代路径、查询参数和重定向。
  */
 class OpenRouterVideoCapability private constructor(
     private val model: String,

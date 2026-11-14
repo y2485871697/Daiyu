@@ -1,4 +1,4 @@
-"""Offline synthetic captures only; no device collection or AC acceptance."""
+"""用离线合成采集记录测试冷启动汇总。"""
 import contextlib
 import importlib.util
 import io

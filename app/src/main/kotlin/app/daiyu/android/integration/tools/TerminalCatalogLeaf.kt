@@ -7,9 +7,9 @@ import app.daiyu.android.domain.tools.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Lifecycle glue only. RunCatalogTools owns admission, the single central dispatcher/ledger,
- * and the parent dispatch/creation barrier. The reviewed adapter owns the finite PTY plan.
- * Never call the adapter's standalone execute/start route from this leaf.
+ * 将有限 PTY 计划的工具和关闭结果接入 RunCatalogTools，计划由 CatalogTerminalBinding 持有。
+ * 准入、统一调度、账本及派发和创建中的资源计数由 RunCatalogTools 管理。
+ * 此处通过父目录派发工具，不调用适配器的独立 execute/start 入口。
  */
 internal class TerminalCatalogLeaf(
     binding: CatalogTerminalBinding,
@@ -33,11 +33,9 @@ internal class TerminalCatalogLeaf(
     override fun close() = tools.close()
 
     /**
-     * Called once by the parent's existing close observation protocol, AFTER parent dispatches
-     * (including final receipt persistence/UNKNOWN observation) and creations have drained.
-     * close() only seals. Like the existing Shizuku cleanup worker, a one-shot daemon performs
-     * the bounded join off the caller thread. No polling, sleeping, or automatic retry.
-     * A timeout retains the binding/resources and is cached as UNKNOWN by the parent.
+     * 父目录等派发、最终回执持久化或 UNKNOWN 记录，以及资源创建全部结束后调用一次。
+     * close() 只封闭准入；此处用一次性守护线程等待资源退出，避免阻塞调用线程。
+     * 等待有时限，超时后保留绑定和资源，由父目录缓存为 UNKNOWN；不轮询或自动重试。
      */
     fun observeClose(done: (RunCatalogCloseResult) -> Unit) {
         check(observingClose.compareAndSet(false, true)) { "terminal_close_already_observed" }

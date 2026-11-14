@@ -10,9 +10,8 @@ import app.daiyu.android.domain.appearance.IconSyncResult
 import app.daiyu.android.domain.appearance.LauncherComponentPort
 import app.daiyu.android.domain.appearance.LauncherIconSwitcher
 
-/**
- * Main-thread-only mutation boundary; workers fail before storage, PM or notification access.
- * No service/activity/global application wiring is installed here.
+/** 在主线程保存图标偏好，并更新启动器和通知图标。
+ * 工作线程调用会在访问存储、PackageManager 或通知前失败。
  */
 class IconAppearanceCoordinator internal constructor(
     context: Context,

@@ -11,9 +11,7 @@ import app.daiyu.android.ui.screens.chat.conversation.MessageContentUi
 import java.io.File
 import java.util.UUID
 
-/** Real SQLite/witness + asset-fd integration. Deliberately fake video bytes/inspector: this is
- * evidence of authorization and exact download bytes, not Android playback/codec coverage.
- */
+/** 使用视频和检查器替身，检查 SQLite 视频见证、文件描述符授权及下载字节。 */
 @Suppress("DEPRECATION")
 class MessageMediaOriginalProjectionTest : InstrumentationTestCase() {
     private lateinit var context: android.content.Context

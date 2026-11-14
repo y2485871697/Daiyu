@@ -3,9 +3,8 @@ package app.daiyu.android.model.generation
 import java.security.MessageDigest
 import java.util.Collections
 
-/** Parent-owned generation configuration. This is NOT inherited from chat/model settings.
- * The model can select only a frozen batch ID, never an endpoint, credential or new prompt.
- * Construct before approval and retain the same instance throughout the run and recovery.
+/** 宿主在审批前冻结生成配置，运行和恢复期间保留同一实例。
+ * 生成设置独立于聊天设置；模型只选择已冻结批次，端点、凭据和提示词由宿主固定。
  */
 class GenerationRunConfig(batches: List<Batch>, val maxPolls: Int = 4) {
     class Item(

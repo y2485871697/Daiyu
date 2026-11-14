@@ -1,4 +1,4 @@
-"""Synthetic offline fixtures only: no device, network, build, or business AC claim."""
+"""用离线合成样本测试性能基线比较。"""
 import contextlib
 import copy
 import hashlib

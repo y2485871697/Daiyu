@@ -10,7 +10,7 @@ import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
-/** Network only: no credentials, provider choice, permission, playback, or shared audio gate. */
+/** 创建 HTTP、ASR 和双向通话传输；调用方提供配置并管理音频归属。 */
 object VoiceNetworkAdapters {
     fun http(): VoiceHttpTransport = OkHttpVoiceTransport()
     fun speechHttp(engine: SpeechEngine): VoiceHttpTransport = speechHttp(engine, null)

@@ -1,4 +1,4 @@
-"""Source-wiring contracts for draft routing, input, lifecycle and settings UI; not device acceptance."""
+"""检查草稿路由、输入、生命周期和设置界面的源码连接。"""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

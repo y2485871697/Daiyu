@@ -1,4 +1,4 @@
-"""Source wiring guards for the R66 failures; not device execution evidence."""
+"""检查 R66 失败项相关测试源码的连接。"""
 from pathlib import Path
 import unittest
 

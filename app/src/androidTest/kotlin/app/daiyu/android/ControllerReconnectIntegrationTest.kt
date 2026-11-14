@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real preparation/SQLite/Runner with synthetic transports only. Source added, not executed. */
+/** 用合成传输检查准备流程、SQLite 和 Runner 的重连协作。 */
 @Suppress("DEPRECATION")
 class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {
@@ -172,7 +172,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         }
     }
 
-    /** Concrete HTTPS facade only: even official-looking URLs never open a socket. */
+    /** 所有 URL 都通过离线 HTTPS 连接替身处理。 */
     private class LocalHttps(url: URL, events: String) : HttpsURLConnection(url) {
         val sent = ByteArrayOutputStream()
         private val incoming = events.byteInputStream()

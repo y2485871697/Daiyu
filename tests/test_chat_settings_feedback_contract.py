@@ -1,4 +1,4 @@
-"""Source guards; Android regressions are executed in the authorized test batch."""
+"""检查聊天设置反馈的源码连接。"""
 from pathlib import Path
 import unittest
 

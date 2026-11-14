@@ -9,11 +9,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Explicit single-action approval only; no exact-alarm, DND or media-control privilege. -->
+    <!-- 用于用户批准的单次闹钟或计时器操作。 -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" android:maxSdkVersion="28" />
-    <!-- R06 app-identity reads only; dangerous grants are requested individually in settings. -->
+    <!-- 用于读取网络状态；危险权限在设置页分别申请。 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Existing cache only; foreground grants requested explicitly in platform settings. No background location. -->
@@ -28,14 +28,13 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <!-- Permission-check capabilities; usage and posting still need the user's system grant. -->
-    <!-- App discovery searches arbitrary package names/labels, including non-launcher apps.
-         Fixed package/intent queries would narrow it; results remain system-scoped and bounded. -->
+    <!-- 使用情况读取和通知发送仍需用户授予系统权限。 -->
+    <!-- 应用搜索支持任意包名或名称，也包含无启动入口的应用，因此不能只声明固定查询。 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Notification-listener access remains separate from posting; no all-files permission. -->
+    <!-- 通知读取与通知发送使用不同的系统授权。 -->
     <!-- Android 11+ visibility for installed TTS and speech recognition services. -->
     <queries>
         <intent><action android:name="android.intent.action.SET_ALARM" /></intent>
@@ -59,8 +58,8 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-initiated AI chat and device-tool execution, including waiting for user input and resource cleanup" />
         </service>
-        <!-- Cross-app notification read special access only. Not posting, not a run/model grant.
-             No separate process: uses the application-owned capture store and listener gate. -->
+        <!-- 通知读取使用独立的系统特殊授权，与任务和模型授权分开。
+             服务与应用同进程，共用通知采集存储和监听器授权检查。 -->
         <service android:name=".platform.CrossAppNotificationListener"
             android:label="跨应用通知读取（独立授权）"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
@@ -117,8 +116,7 @@
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
             android:enableOnBackInvokedCallback="true" android:windowSoftInputMode="adjustResize">
         </activity>
-        <!-- Task17IconManifest.fragment("app.daiyu.android"): 8 x 8 original cat icons.
-             Keep MainActivity enabled as the target; only aliases own launcher filters. -->
+        <!-- 8 × 8 组猫图标。MainActivity 保持启用，启动器入口只配置在别名上。 -->
         <activity-alias android:name="app.daiyu.android.icon.L_F27A1A_F27A1A" android:targetActivity="app.daiyu.android.MainActivity" android:enabled="false" android:exported="true" android:icon="@drawable/task17_launcher_f27a1a_f27a1a" android:roundIcon="@drawable/task17_launcher_f27a1a_f27a1a">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>

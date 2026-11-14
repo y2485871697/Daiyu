@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive full-scale synthetic raw observations; never grants AC acceptance."""
+"""汇总全规模合成数据集的原始观测。"""
 from __future__ import annotations
 
 import argparse

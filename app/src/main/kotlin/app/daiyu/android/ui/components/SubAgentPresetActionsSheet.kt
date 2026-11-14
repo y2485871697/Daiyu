@@ -32,8 +32,8 @@ import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
     val density = LocalDensity.current
     val palette = assistantPreviewPalette()
-    // Start at the settled anchor so Material does not add a second entry translation.
-    // Its gesture, hide and predictive-back state machine remains unchanged.
+    // 从展开锚点开始，由 dialogEnterMotion 负责入场，避免叠加 Material 的位移动画。
+    
     val sheetState = remember(preset.id, density) {
         SheetState(
             skipPartiallyExpanded = true,

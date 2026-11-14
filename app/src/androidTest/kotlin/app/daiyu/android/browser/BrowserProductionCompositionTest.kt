@@ -18,7 +18,7 @@ import java.util.UUID
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
-/** Real Android/WebView checks; host JVM typechecking is not execution of these tests. */
+/** 在 Android 上检查浏览器与 WebView 的组装和生命周期。 */
 @Suppress("DEPRECATION")
 class BrowserProductionCompositionTest : InstrumentationTestCase() {
     private val roots = mutableListOf<Path>()

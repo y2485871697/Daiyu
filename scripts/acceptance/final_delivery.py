@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only final evidence entry: source/tool, cloud, and 81-item business.
-
-Never builds, installs, dispatches, downloads, runs tests or grants trusted
-business acceptance. Exit 0 means ready for independent evidence review only.
-"""
+"""只读汇总源码、工具、云端及 81 项业务证据，退出码 0 表示材料已备齐，可交给独立审查。"""
 from __future__ import annotations
 
 import hashlib

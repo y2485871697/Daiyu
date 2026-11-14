@@ -1,9 +1,8 @@
-"""Offline specification-validator tests, NOT product/business acceptance.
+"""离线测试任务 15 规格校验器。
 
-Parent runs:
+运行方式：
   python3 -m unittest discover -s tests -p 'test_task15_contract.py' -v
   python3 scripts/acceptance/verify_task15_contract.py
-No product module, network, user data, shell, or execution evidence is used.
 """
 import contextlib
 import copy

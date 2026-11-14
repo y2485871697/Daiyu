@@ -24,7 +24,7 @@ internal class AccountResponse(val status: Int, val bytes: ByteArray) {
     override fun toString() = "AccountResponse(status=$status, redacted)"
 }
 
-/** Management only. Not a synthesis client; no gate, player, retries, redirects or logging. */
+/** 发送音色账户管理请求，限制响应大小并支持取消；禁用重试、重定向和日志。 */
 internal fun interface AccountHttpTransport {
     suspend fun execute(request: Request, limit: Int): AccountResponse
 }

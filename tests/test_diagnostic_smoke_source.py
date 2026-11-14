@@ -1,4 +1,4 @@
-"""Diagnostic-source fixtures, not a device or APK validation result."""
+"""用合成记录测试诊断包的源码复用校验。"""
 import copy
 import hashlib
 from pathlib import Path

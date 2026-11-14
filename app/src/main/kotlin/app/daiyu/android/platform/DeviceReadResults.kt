@@ -5,7 +5,7 @@ import android.content.pm.PackageManager
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Read-only helpers extracted from the preserved new-project DeviceToolRegistry candidate. */
+/** 设备读取的结果封装、权限检查和字段截断辅助函数，提取自 DeviceToolRegistry。 */
 internal fun success(data: JSONObject): JSONObject = JSONObject().put("ok", true).put("status", "ok").put("data", data)
 internal fun failure(status: String, reason: String = status, permissions: List<String> = emptyList()): JSONObject =
     JSONObject().put("ok", false).put("status", status).put("error", reason).apply {

@@ -1,4 +1,4 @@
-"""Source contracts; Kotlin and device behavior are verified by the cloud gate."""
+"""检查候选窗口发布的源码连接。"""
 from pathlib import Path
 import unittest
 

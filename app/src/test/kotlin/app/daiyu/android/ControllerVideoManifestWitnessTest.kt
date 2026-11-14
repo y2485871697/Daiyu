@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Small real-SQLite tests, independent of the parent's still-required DB migration hooks. */
+/** 用 SQLite 检查视频清单见证。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [26])
 class ControllerVideoManifestWitnessTest {

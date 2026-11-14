@@ -1,4 +1,4 @@
-"""Source contracts only; Kotlin and Compose execution await the approved batch."""
+"""检查聊天速度设置的源码连接。"""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

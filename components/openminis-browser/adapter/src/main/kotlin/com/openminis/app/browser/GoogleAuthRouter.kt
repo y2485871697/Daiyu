@@ -4,8 +4,8 @@ import android.content.Context
 import app.daiyu.android.browser.openminis.OpenMinisNavigationPolicy
 
 /**
- * Manager-only deny implementation. Select this file instead of upstream GoogleAuthRouter.kt;
- * there is deliberately no Custom Tab, Intent, fallback, AppLogger, or UI interaction.
+ * Manager-only deny implementation. Select this file instead of upstream GoogleAuthRouter.kt.
+ * 拒绝管理器的外部登录请求。
  */
 object GoogleAuthRouter {
     fun shouldRouteExternally(url: String?): Boolean = OpenMinisNavigationPolicy.isGoogleAuth(url)

@@ -29,9 +29,7 @@ import java.io.File
 import java.nio.file.Files
 import java.util.UUID
 
-/** Real PNG decoding, real private filesystem, real production adapter, and (below) real SQLite.
- * No fake store or injected inspector stands in for the production restore validation.
- */
+/** 用 PNG 解码器、私有文件存储、备份适配器和 SQLite 检查图片恢复。 */
 @Suppress("DEPRECATION")
 class MessageImageBackupAssetsTest : InstrumentationTestCase() {
     private val roots = mutableListOf<File>()

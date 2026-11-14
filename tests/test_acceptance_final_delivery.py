@@ -1,4 +1,4 @@
-"""Synthetic, offline fixtures only; never product/cloud/business evidence."""
+"""用离线合成材料测试最终交付证据的汇总和校验。"""
 import contextlib
 import copy
 import hashlib

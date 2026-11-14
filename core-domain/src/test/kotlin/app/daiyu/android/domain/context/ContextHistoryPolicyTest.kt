@@ -6,7 +6,7 @@ import org.junit.Test
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 
-/** 05 tests against the real 03 domain types, without Android/JSON substitutes. */
+
 class ContextHistoryPolicyTest {
     private val conversation = ConversationId("history-context")
     private fun text(value: String) = listOf(MessageBlock.Text("item", value))

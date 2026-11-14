@@ -19,7 +19,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-/** Read-only projection of this application's records; never reads the old application's data. */
+/** 从当前应用数据库读取会话列表、搜索结果和用量统计。 */
 internal class RetainedConversationData(private val database: ConversationDatabase, private val context: ContextService) {
     data class PaneSnapshot(
         val conversations: List<ConversationSummaryUi>,
@@ -80,9 +80,8 @@ internal class RetainedConversationData(private val database: ConversationDataba
     }
 
     /**
-     * Result paging AFTER complete MessageHistory expansion (never LIMIT 200 physical owners).
-     * Each page verifies every scoped conversation revision in the same SQLite snapshot. This
-     * intentionally still reads whole conversations; it is not bounded database-history paging.
+     * 先完整读取并展开搜索范围内的会话历史，再对命中结果分页。
+     * 每页在同一个 SQLite 快照内核对所有相关会话的版本，因此每次仍需读取完整会话历史。
      */
     fun searchPage(
         query: String,

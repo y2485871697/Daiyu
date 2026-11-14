@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.w3c.dom.Element
 
-/** Production-file contracts, not a second manifest/catalog. No PM writes or build inputs needed. */
+/** 只读检查清单和图标目录的配置。 */
 class IconAppearanceWiringTest {
     private val root: File = generateSequence(File(System.getProperty("user.dir")).canonicalFile) { it.parentFile }
         .first { File(it, "app/src/main/AndroidManifest.xml").isFile }

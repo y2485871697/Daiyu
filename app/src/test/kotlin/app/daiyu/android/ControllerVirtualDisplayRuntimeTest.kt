@@ -25,9 +25,7 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real private filesystem + real v2 client with scripted transport. No su, shell, socket, display,
- * network, production controller, or fake durable journal. Tests are sources, not a pass claim.
- */
+/** 用私有文件系统、v2 客户端和脚本化传输检查虚拟显示运行时。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26, 36], manifest = Config.NONE)
 class ControllerVirtualDisplayRuntimeTest {
@@ -175,7 +173,7 @@ class ControllerVirtualDisplayRuntimeTest {
             rejected { f.store().reserve(f::plan) }
             assertEquals(before, files(f.root))
             assertEquals(0, f.gate.availablePermits())
-            // No copied-directory "restart" claim: real process-exit histories have separate tests.
+            // 进程退出后的恢复由多 JVM 测试覆盖。
         }
     }
 

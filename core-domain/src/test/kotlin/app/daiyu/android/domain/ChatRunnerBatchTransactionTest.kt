@@ -9,7 +9,7 @@ import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Deterministic boundaries: no sleeps and no real provider transport. */
+
 class ChatRunnerBatchTransactionTest {
     private fun initial() = Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant", emptyList(), RunStatus.RUNNING)
     private fun batch(sequence: Long, vararg events: ModelEvent) =

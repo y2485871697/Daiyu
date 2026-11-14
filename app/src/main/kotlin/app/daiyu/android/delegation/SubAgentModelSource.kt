@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Read-only UI snapshot. The caller projects its model registry; no credentials or old repository. */
+/** 为子代理设置界面提供调用方模型目录的只读快照，排除凭据。 */
 internal interface SubAgentModelSource {
     val providers: StateFlow<List<SubAgentProvider>>
     /** Retained labels for presentation only; confirmation still resolves against providers. */
@@ -131,7 +131,7 @@ internal fun supportsGptSpeedBinding(provider: SubAgentProvider?, model: SubAgen
 
 internal fun GptSpeedMode.next(): GptSpeedMode = GptSpeedMode.entries[(ordinal + 1) % GptSpeedMode.entries.size]
 
-/** Only the profile UI's feature projection is kept, not any old request/runtime implementation. */
+/** 保存子代理配置的偏好键，并将配置中的推理强度应用到界面模型设置。 */
 internal object SubAgentPreferences {
     const val PROFILES_KEY = "agent_child_profiles_v1"
     fun applyReasoning(profile: SubAgentProfile, config: SubAgentModelConfig): SubAgentModelConfig {

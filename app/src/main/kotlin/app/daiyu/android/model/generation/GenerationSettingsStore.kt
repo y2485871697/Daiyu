@@ -81,13 +81,11 @@ class GenerationSettingsException(val reason: GenerationSettingsFailure) : Illeg
     }
 )
 
-/** Independent manifest + per-profile encrypted credentials. Never opens the chat namespace.
- *
- * ModelSettingsStore is used ONLY as a credential vault, through fixed inert adapter fields, not
- * as a provider/default resolver. The generation endpoint/model/protocol live in this manifest.
- * A length-delimited binding digest detects missing, stale or copied credentials. No plaintext
- * key is written to preferences. A durable 'saving' manifest precedes every credential write;
- * ready is published only after credential and manifest readback. All I/O belongs off the UI thread.
+/**
+ * 生成配置使用独立清单，各配置凭据分别加密，与聊天命名空间隔离。
+ * ModelSettingsStore 存凭据，端点、模型和协议来自清单；绑定摘要识别缺失、过期或复制的凭据。
+ * 写凭据前持久保存 saving 清单，读回凭据和清单后发布 ready，偏好设置排除明文密钥。
+ * 所有 IO 在工作线程执行。
  */
 class GenerationSettingsStore internal constructor(
     private val preferences: SharedPreferences,
@@ -104,10 +102,9 @@ class GenerationSettingsStore internal constructor(
         { id, key -> credentialStore(context, id).save(credentialEnvelope(key)) },
     )
 
-    /** Manifest-only local identity for read-only history/backup. Never opens a credential vault,
-     * mints a scope, repairs metadata or grants execution/download authority. A validated saving
-     * manifest (including a process-fenced save) retains its original identity; unavailable keys
-     * must not prevent reading already-published originals. Missing returns null; corrupt fails.
+    /** 从清单读取历史和备份的本地身份，排除凭据。
+     * 合法 saving 清单仍保留原身份，密钥不可用时仍可读取已发布原件。
+     * 缺失返回 null，损坏则失败；执行和下载仍需另行授权。
      */
     fun readAccountScope(): String? = synchronized(lock) { readRecord()?.scope }
 

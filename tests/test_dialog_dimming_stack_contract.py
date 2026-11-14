@@ -1,4 +1,4 @@
-"""Wiring guards; composited-screen tests run in the approved Android batch."""
+"""检查对话框叠加时背景变暗的源码配置。"""
 from pathlib import Path
 import unittest
 

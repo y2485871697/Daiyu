@@ -11,15 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
 /**
- * Activity production composition for the existing finite UNIVERSAL controller. Nothing starts on
- * construction/render/resume. Main retains its original editor/send receipt and exact Message;
- * this host owns only one explicitly started, frozen, bounded audio permission. No assistant
- * service, chat client, replacement gate, retry, latest-message inference or draft fallback.
+ * 将有限轮 UNIVERSAL 控制器接入 Activity，管理一次显式启动、参数冻结且有限额的音频许可。
+ * 构造、渲染和恢复时保持待命；编辑器、发送回执与原始 Message 仍由 Main 持有。
  *
- * Public commands/parent hooks are control-thread (main) calls, except `current` and admission:
- * those MUST also be safe, short, nonblocking snapshot reads at the audio gate commit boundary.
- * Parent must invalidate its admission snapshot BEFORE revoke on lifecycle/editor/config/question
- * changes. It must allow its OWN accepted editor revision to migrate, not authorize another editor.
+ * 命令和父级回调在主线程运行；`current` 和准入检查还会在音频提交边界调用，需使用短小、线程安全的非阻塞快照读取。
+ * 生命周期、编辑器、配置或提问变化时，父级需先使准入快照失效，再撤销许可。
+ * 编辑器版本迁移只接受本次发送已受理的原始编辑器。
  */
 internal class ActivityUniversalVoiceHost(
     context: Context,

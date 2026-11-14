@@ -12,12 +12,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real MainActivity routing/callbacks + Controller + SQLite + Runner + durable lease store.
- * Only the non-launching process host is substituted. In particular, stale actions below invoke
- * Main's SAME callback factory used by Dialog.onDismissRequest and vd-cancel, not
- * controller.cancelVirtualDisplay(oldEntry). Like retainedControls in ComposeActivityTestCase,
- * retain the host capability rather than a detached Compose ClickableNode wrapper.
- * Source coverage only: this is not evidence of execution on an emulator or privileged device. */
+/** 检查 MainActivity 回调经 Controller、SQLite、Runner 到持久化租约的处理。
+ * 进程宿主使用替身，过期操作保留 Main 的原始回调能力，
+ * 与 Dialog.onDismissRequest 和 vd-cancel 共用回调工厂。 */
 @Suppress("DEPRECATION")
 class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     override val engineeringUi = true

@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Adapter/gate/real VoiceChain tests, NOT device playback or physical-audibility evidence. */
+/** 检查播放适配器、门控和 VoiceChain 的协作。 */
 class AndroidUniversalPlaybackTest {
     private class Output : SpeechOutput {
         val requests = mutableListOf<Pair<String, SpeechOutput.Events>>()

@@ -207,7 +207,7 @@ private fun GenerationInputPreview(label: String, input: GenerationInput) {
     val bytes = remember(input) { input.bytes }
     val digest = remember(input) { MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) } }
     Text("$label：${input.mimeType}，${bytes.size} bytes，SHA-256=$digest")
-    // Display-only bounded thumbnail, not authoritative media preflight or a rewritten input.
+    // 采样解码缩略图供预览，原始输入保持不变；完整媒体验证由执行流程负责。
     val bitmap = remember(input) {
         runCatching {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

@@ -18,7 +18,7 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
     private lateinit var service: ContextService
     private val binding = SummaryModelBinding("summary-provider", "summary-only")
     // Test-only explicit mapping of a fixture's message preference to its turn policy.
-    // Not a production claim that legacy messages and turns are interchangeable.
+    // 此映射用于测试数据，正式流程分别处理消息数和轮次。
     private val policies = CompressionPolicyResolver { settings ->
         require(settings.keepRecentMessages >= 1)
         CompressionPolicy(settings.automaticWithKnownWindow, settings.contextWindowTokens,

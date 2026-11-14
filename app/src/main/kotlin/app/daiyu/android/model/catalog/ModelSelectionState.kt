@@ -5,11 +5,8 @@ import java.util.Locale
 
 internal fun remoteModelKey(id: String): String = id.trim().lowercase(Locale.ROOT)
 
-/**
- * One successful fetch, bound to the host's existing provider identity and catalog revision.
- * No identity is derived from a URL, credential, display name or list position here. Discard this
- * state when the host changes provider/draft or starts another fetch; never save credentials in it.
- * Comparison keys ignore case as in the original remote catalog; wire IDs keep their spelling.
+/** 一次成功获取的目录，绑定宿主供应商身份和修订号，排除凭据。
+ * 切换供应商、修改草稿或重新获取时丢弃；比较 ID 忽略大小写，发送时保留原拼写。
  */
 internal class ModelSelectionState private constructor(
     val providerIdentity: String,

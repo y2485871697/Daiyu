@@ -1,4 +1,4 @@
-"""Source wiring contracts only; Android persistence/rendering tests require approved batch."""
+"""检查 Linux 安装选项的源码连接。"""
 from pathlib import Path
 import unittest
 

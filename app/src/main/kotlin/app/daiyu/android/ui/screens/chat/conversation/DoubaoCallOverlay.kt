@@ -148,8 +148,8 @@ private fun DoubaoCallSession(
     val latestActions by rememberUpdatedState(actions)
     val latestState by rememberUpdatedState(state)
     val closing = state.presentation == DoubaoCallPresentation.CLOSING
-    // Keep the last LIVE inputs too: an owner may publish ENDED and new captions with CLOSING.
-    // Actual visual freezing is the raster below, never a claim that immutable state freezes layers.
+    // 保留关闭前的状态和字幕，避免 CLOSING 同时带来的 ENDED 或新字幕改变退场内容。
+    // 子图层仍可变化，退场画面由下方栅格快照固定。
     var lastLivePicture by remember { mutableStateOf(state) }
     var closingPicture by remember { mutableStateOf<DoubaoCallUi?>(null) }
     if (closing && closingPicture == null) {
@@ -201,7 +201,7 @@ private fun DoubaoCallSession(
                 // Give the p=0 surface a draw opportunity before the owner unmounts it. A zero
                 // duration scale has no extra wait; both directions already honor the system scale.
                 if ((coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f) > 0f) withFrameNanos { }
-                // No custom wall-clock animator and no delayed business hang-up live here.
+                
                 coroutineContext.ensureActive()
                 if (!completionReported && latestState.sessionKey == state.sessionKey &&
                     latestState.presentation == DoubaoCallPresentation.CLOSING) {
@@ -391,9 +391,9 @@ private fun ExpandedCallContent(
             ) { CallGlyph(CallControl.MINIMIZE, Color(0xFFA59AB4), Modifier.size(20.dp)) }
         }
         }
-        // At 374dp the body is 304dp: focus 146, captions 80, controls 78.
-        // The old 19dp notice space now belongs to captions and lowers the controls.
-        // Only this body scrolls on short screens; controls never share the drag recognizer.
+        // 面板高 374dp 时，主体占 304dp：焦点区 146、字幕 80、控制区 78。
+        
+        // 短屏下只滚动主体，控制区与拖拽手势分开。
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val focusHeight = (maxHeight - 158.dp).coerceAtLeast(142.dp)
             Column(Modifier.fillMaxSize().testTag("doubao-call-body").verticalScroll(rememberScrollState(), enabled = enabled)) {
@@ -517,7 +517,7 @@ private fun DoubaoCallUi.orbState(): DoubaoCallVisualState =
     if (muted && visualState == DoubaoCallVisualState.LISTENING)
         DoubaoCallVisualState.MUTED else visualState
 
-/** Preview .voice-orb/.mini-orb, including the two hairlines and inset light, not a flat disc. */
+/** 按预览的 .voice-orb/.mini-orb 绘制语音球，包含两道细边和内侧高光。 */
 @Composable
 internal fun CallWave(
     state: DoubaoCallVisualState,
@@ -591,7 +591,7 @@ internal fun CallWave(
     }
 }
 
-/** Tiny native line icons keep the panel self-contained; no web content or extra icon dependency. */
+/** 通话面板使用的小型原生线条图标。 */
 @Composable
 private fun CallGlyph(control: CallControl, color: Color, modifier: Modifier, active: Boolean = false) {
     Canvas(modifier) {

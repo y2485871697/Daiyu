@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 
-/** Original in-app outlines, not launcher artwork. Color is supplied by the caller's tint. */
+/** 应用内使用的原创线条图标，颜色由调用方的 tint 指定。 */
 object DaiyuIcons {
     val Menu: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Menu", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {

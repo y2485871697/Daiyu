@@ -11,7 +11,7 @@ data class VoiceOwner(val conversationId: String, val runId: String, val session
 enum class VoicePhase { IDLE, PREPARING, LISTENING, SPEAKING, COMPLETE, CANCELLED, FAILED }
 data class VoiceState(val owner: VoiceOwner?, val phase: VoicePhase, val firstSentenceStarted: Boolean = false,
     val detail: String = "", val playbackEvidence: String = "none")
-/** Software evidence only; none of these proves physical audibility or offline operation. */
+/** 记录已观察到的播放回调或启动调用，供软件侧跟踪播放进度。 */
 enum class PlaybackEvidence(val wireValue: String) {
     UNSPECIFIED_CALLBACK("output_started_callback_unspecified_not_physical_audibility"),
     TTS_ON_START("tts_on_start_not_physical_audibility"),

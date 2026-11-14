@@ -9,7 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/** Small, process-local assistant owner; no AppState, runtime or remote-service dependency. */
+/** 在当前进程读写助手档案、当前选择，并通过 CAS 提交编辑。 */
 interface AssistantStore {
     val assistants: StateFlow<List<AssistantProfile>>
     val selectedId: StateFlow<String>

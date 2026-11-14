@@ -1,4 +1,4 @@
-"""Source guards, not device animation or frame-rate evidence."""
+"""检查聊天输入法动画的源码配置。"""
 from pathlib import Path
 import unittest
 

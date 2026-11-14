@@ -56,7 +56,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Adapted from the user's original media preview; byte access remains with its authorized owner. */
+/** 承载聊天媒体预览，原始数据通过媒体所属对象提供的授权接口读取。 */
 @Composable
 internal fun ChatMediaPreviewHost(
     gallery: List<ChatMediaPreviewItem>,

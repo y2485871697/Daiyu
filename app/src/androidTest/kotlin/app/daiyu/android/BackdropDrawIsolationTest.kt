@@ -42,7 +42,7 @@ import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.textureBlur
 
-/** Real renderer draw counts, not composition counts or an emulator frame-time benchmark. */
+/** 统计渲染器的绘制次数。 */
 class BackdropDrawIsolationTest : WiredActivityTestCase() {
     fun testOrdinaryReleaseRecordsChatRecoveryDrawsWithoutBroadLogging() {
         val original = activity

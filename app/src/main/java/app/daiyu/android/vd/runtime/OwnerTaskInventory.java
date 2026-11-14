@@ -10,13 +10,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Read-only task inventory for the owner process.
- *
- * <p>Only {@code getAllRootTaskInfos} is called. There is no migrate, restore, kill or focus
- * mutation here, so probing the source display cannot disturb the user's foreground task. Any
- * reflection failure is reported as {@link OwnerProtocol#ERROR_SOURCE_STATE_UNKNOWN}; a failed
- * read is never reported as an empty source.
+/** 通过 {@code getAllRootTaskInfos} 读取任务清单。
+ * 反射失败时报告 {@link OwnerProtocol#ERROR_SOURCE_STATE_UNKNOWN}，与空清单区分。
  */
 final class OwnerTaskInventory {
     private static final String TOKEN_CLASS = "android.window.WindowContainerToken";

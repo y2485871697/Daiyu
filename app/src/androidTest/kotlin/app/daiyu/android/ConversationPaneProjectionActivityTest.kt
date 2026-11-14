@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Delay real database reads, not a fake projection, at the Activity publication boundary. */
+/** 在 Activity 发布结果前阻塞数据库读取，检查过期结果的处理。 */
 @Suppress("DEPRECATION")
 class ConversationPaneProjectionActivityTest : WiredActivityTestCase() {
     private fun updatePane() = MainActivity::class.java.getDeclaredMethod("updatePane")

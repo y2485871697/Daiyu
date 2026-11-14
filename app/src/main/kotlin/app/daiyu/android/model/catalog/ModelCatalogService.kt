@@ -17,11 +17,8 @@ class ModelCatalogService(
     constructor(store: ModelSettingsStore, fetcher: RemoteModelFetcher = RemoteModelFetcher()) :
         this(store::load, fetcher, loadSavedForRun = { store.loadForRun() })
 
-    /**
-     * Worker-only, uncached production proof for one pending approval. The revision belongs to
-     * the host's saved-config epoch (increment even for edit-away/edit-back and credential reset).
-     * The supplied snapshot must be the exact object the eventual frozen run will retain.
-     * Unlike selector fetches, this intentionally does NOT use an injected/test fetcher.
+    /** 在工作线程为本次审批实时请求能力信息。
+     * 每次编辑、改回原值或重置凭据都推进配置修订号，snapshot 与后续运行保留的对象须一致。
      */
     fun fetchSavedVideoEvidence(
         snapshot: ProviderSnapshot,

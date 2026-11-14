@@ -23,8 +23,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Backup orchestration tests. Source originals use the real media resolver; RecordingAssets is
- * explicitly a publication test double, NOT evidence of a production media restore implementation. */
+/** 检查备份编排，源原件由媒体解析器读取，目标发布由 RecordingAssets 记录替身处理。 */
 @Suppress("DEPRECATION")
 class NeutralImageBackupTest : InstrumentationTestCase() {
     private data class Fixture(val context: Context, val db: ConversationDatabase)

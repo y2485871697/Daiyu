@@ -1,7 +1,6 @@
 package app.daiyu.android.model.reconnect
 
-/** Retained five TOTAL windows, not retry counts or per-attempt delays.
- * Evidence: f001fb82 ErrorReconnectPolicyTest.policiesUseStableValuesAndTotalRetryWindows. */
+/** 五档总重连时限；重试次数和单次等待时间另行计算。 */
 enum class ReconnectDurationPreset(val wireId: String, val windowMillis: Long?, val label: String) {
     NONE("none", 0L, "不重连"),
     WINDOW_30S("window_30s", 30_000L, "30 秒"),

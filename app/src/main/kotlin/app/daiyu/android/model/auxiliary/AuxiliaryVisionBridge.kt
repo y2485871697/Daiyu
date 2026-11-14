@@ -35,12 +35,9 @@ internal data class AuxiliaryVisionRequest(
 internal class AuxiliaryVisionPreparedRequest internal constructor(val history: List<Message>)
 
 /**
- * One instance per parent run, with an independently resolved, immutable auxiliary binding.
- * All identities are authorized before IO. Successful descriptions are memoized by the FULL
- * authorization identity (including owner, run, digest and dimensions), never a path or image id.
- * A later failure publishes nothing; the source images/order remain intact. Previously completed
- * observations remain cached, so retrying preparation does not describe those observations twice.
- * Auxiliary calls are not retried or replaced by the main model.
+ * 每个父运行使用独立、固定的辅助模型绑定，读取图片前校验全部授权。
+ * 成功描述按完整授权身份缓存，包括所有者、运行、摘要和尺寸。
+ * 准备失败时保留原图与顺序；重做准备复用已完成描述，辅助请求不自动重试或回退到主模型。
  */
 internal class AuxiliaryVisionBridge(
     private val binding: AuxiliaryModelBinding,

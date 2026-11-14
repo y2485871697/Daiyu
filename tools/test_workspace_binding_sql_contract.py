@@ -1,5 +1,5 @@
-"""Minimal executable SQLite contract, not a substitute for Android regression tests.
-Run locally with: python3 tools/test_workspace_binding_sql_contract.py
+"""工作区绑定的最小 SQLite 契约测试。
+运行方式：python3 tools/test_workspace_binding_sql_contract.py
 """
 import sqlite3
 import unittest

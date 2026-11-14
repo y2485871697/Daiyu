@@ -1,4 +1,4 @@
-"""Pause/resume wiring; Android frame and callback assertions run in the approved batch."""
+"""检查暂停和恢复时界面展示的源码连接。"""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

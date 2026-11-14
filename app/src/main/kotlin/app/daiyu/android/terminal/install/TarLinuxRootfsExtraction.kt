@@ -17,10 +17,8 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.util.zip.GZIPInputStream
 
 /**
- * Streaming, files-only extractor for a verified archive in an empty app-private staging root.
- * This independently implemented adapter follows the authorized backend's extraction contract;
- * it does not download, run a shell, publish files, or trust archive-supplied ownership.
- * On failure the caller owns removal of staging, without following links.
+ * 将已校验的归档流式解压到空的应用私有暂存目录，限制展开大小和条目数，忽略归档提供的所有者信息。
+ * 下载和最终目录发布由调用方处理；失败后清理暂存目录时不能跟随符号链接。
  */
 class TarLinuxRootfsExtraction internal constructor(
     private val maxExpandedBytes: Long = MAX_EXPANDED_BYTES,

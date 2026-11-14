@@ -22,17 +22,12 @@ import java.util.concurrent.TimeUnit
  * Independent adapter implementation of the fixed OpenMinis BrowserHistoryStore API, NOT an
  * upstream source copy. Select this file instead of upstream BrowserHistory.kt when compiling.
  *
- * getInstance/record only register bounded in-memory state and enqueue work; even filesDir lookup
- * and the initial load run on our own serial worker. No worker calls host/registry/UI code.
- * Reads are snapshots of admitted events, PARTIAL until loadState leaves LOADING. FAILED means
- * old disk history could not be read, not that it was synchronously loaded. Accepted mutations
- * are merged over startup data in order, so loading cannot resurrect cleared entries.
- *
- * Mutations throw RejectedExecutionException BEFORE changing memory if closed or queue-full.
- * Admission is not a durability acknowledgement: persistenceFailed reports the last write result.
- * No automatic retry of failed/unknown writes occurs; later events write the current snapshot.
- * close() does not wait; previously admitted work drains
- * and may reach disk after close returns. There is deliberately no model-facing history export.
+ * getInstance/record 更新有界内存并排队；目录查询和首次加载交给串行工作线程。
+ * 工作线程不调用宿主、注册表或界面代码。读取返回已接纳事件的快照；LOADING 期间数据尚未齐全。
+ * FAILED 表示磁盘加载失败；启动期间的变更按顺序合并，包含清空操作。
+ * 队列关闭或已满时，在改变内存前抛出 RejectedExecutionException。
+ * persistenceFailed 记录上次写入结果；写入失败或结果未知时保留状态，后续变更写入当前快照。
+ * close 立即返回，已接纳的工作继续执行并可能在返回后落盘。历史记录仅供应用内部使用。
  */
 class BrowserHistoryStore internal constructor(
     private val backend: Backend,
@@ -257,7 +252,7 @@ class BrowserHistoryStore internal constructor(
             backend.write(array.toString())
             persistenceFailed = false
         } catch (_: Exception) {
-            // No URLs, titles, paths or exception messages are logged or sent to a model.
+            // 仅报告持久化状态；异常消息可能包含浏览数据。
             persistenceFailed = true
         }
     }
@@ -287,7 +282,7 @@ class BrowserHistoryStore internal constructor(
 
     override fun close() = synchronized(lock) {
         closed = true
-        worker.shutdown() // no join, await, callback, disk access, or cancellation of accepted work
+        worker.shutdown() // 已接纳的工作继续执行，当前调用立即返回。
     }
 
     /** Test-only waiting seam, never used by production navigation or close. */

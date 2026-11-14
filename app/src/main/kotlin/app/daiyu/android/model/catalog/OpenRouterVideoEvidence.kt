@@ -11,12 +11,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val OPENROUTER_MODELS_ENDPOINT = "https://openrouter.ai/api/v1/models"
 
-/** Parser/transport test result, deliberately NOT accepted by approval or capability APIs. */
+/** 测试用解析结果，与审批和运行期能力依据使用不同类型。 */
 internal class OpenRouterVideoModelFacts(val model: String, modalities: Set<String>) {
     val inputModalities: Set<String> = Collections.unmodifiableSet(modalities.toSet())
 }
 
-/** Strict, pure test seam. No parsing call can create runtime evidence. */
+/** 测试用严格解析器；运行期能力依据由实时请求生成。 */
 internal fun parseOpenRouterVideoFacts(body: String, source: String, exactModel: String): OpenRouterVideoModelFacts {
     fun invalid(): Nothing = throw RemoteModelException(RemoteModelFailure.PROTOCOL)
     if (source != OPENROUTER_MODELS_ENDPOINT) invalid()
@@ -68,12 +68,8 @@ internal fun parseOpenRouterVideoFacts(body: String, source: String, exactModel:
     }
 }
 
-/**
- * In-memory, one-approval evidence. No boolean, JSON, cached catalogue or injected transport can
- * construct this type. Only a fresh production HTTPS GET to the exact official models endpoint
- * can mint it. The saved-settings facade checks the host's monotonic revision before/after I/O.
- * Architecture.video plus the documented OpenRouter video contract is required; a model name,
- * image support or Responses protocol by itself is never sufficient.
+/** 单次审批的能力依据，由官方 models 端点的实时 HTTPS GET 生成，请求前后检查配置修订号。
+ * 同时核对 architecture.video 和 OpenRouter 视频协议，缓存目录和测试传输仅用于展示或测试。
  */
 internal fun sameVideoRunConfiguration(saved: ModelSettings, provider: ProviderSnapshot): Boolean =
     saved.copy(usageIdentity = null) == provider.asModelSettings().copy(usageIdentity = null)

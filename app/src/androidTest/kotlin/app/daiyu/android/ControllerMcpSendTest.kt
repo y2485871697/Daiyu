@@ -18,9 +18,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Actual Controller admission, SQLite CAS, Runner, pause/resume/stop and startup recovery.
- * HTTP wire only is synthetic; no alternate runner, owner, authorization or dispatcher is used.
- */
+/** 用合成 HTTP 响应检查 Controller 准入、SQLite CAS、Runner、运行控制和启动恢复。 */
 @Suppress("DEPRECATION")
 class ControllerMcpSendTest : InstrumentationTestCase() {
     private lateinit var fixture: RunControlFixture

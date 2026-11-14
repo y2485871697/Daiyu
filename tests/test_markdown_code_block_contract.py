@@ -1,4 +1,4 @@
-"""Narrow source wiring guards, not a replacement for Android gesture/visual tests."""
+"""检查 Markdown 代码块渲染和手势的源码连接。"""
 from pathlib import Path
 import unittest
 

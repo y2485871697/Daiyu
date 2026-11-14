@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
-/** Shared 24-unit outlines from the non-settings HTML; icons never grant tool access. */
+/** 取自非设置页 HTML 的工具操作图标，共用 24 单位线条轮廓。 */
 internal object ToolOperationIcons {
     private val paths = mapOf(
         "brain" to listOf("M9 4a3 3 0 0 0-5 3 4 4 0 0 0-1 7 4 4 0 0 0 6 5m6-15a3 3 0 0 1 5 3 4 4 0 0 1 1 7 4 4 0 0 1-6 5M9 3v18m6-18v18M5 9h4m6 4h5M5 15h4m6-8h3"),

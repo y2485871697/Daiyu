@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline business-scenario planner. No execution and no acceptance ledger."""
+"""离线生成业务场景验证计划。"""
 from __future__ import annotations
 
 import json
@@ -105,10 +105,9 @@ def _validate_catalog(ids, requirements):
 
 
 def make_plan(spec, spec_digest, build_sha, spec_pin, case_ids=None):
-    """Use load_json's digest and an independently reviewed byte-level pin.
+    """使用 load_json 摘要和独立审查的字节摘要生成计划。
 
-    A SHA labels a future target only. This function cannot prove HEAD, a clean
-    tree, artifact provenance, baseline availability, or physical execution.
+    SHA 标记计划目标，工作区、工件来源及执行结果在运行时核验。
     """
     full_sha(build_sha)
     require(isinstance(spec_pin, str) and DIGEST.fullmatch(spec_pin), "invalid_spec_pin")

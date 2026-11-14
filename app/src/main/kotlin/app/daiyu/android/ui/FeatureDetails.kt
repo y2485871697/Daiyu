@@ -7,7 +7,7 @@ internal data class FeatureControl(val id: String, val title: String, val kind: 
     val route: FeatureRoute? = null)
 internal data class FeatureSection(val id: String, val title: String, val controls: List<FeatureControl>)
 
-/** UI schema only: no fabricated values, preference writes or business command callbacks. */
+/** 定义功能详情页的分区、控件类型和跳转目标。 */
 internal object FeatureDetails {
     val pages: Map<String, List<FeatureSection>> = mapOf(
         "P01" to listOf(

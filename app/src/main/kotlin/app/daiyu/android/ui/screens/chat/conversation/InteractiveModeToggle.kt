@@ -18,10 +18,7 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * Controlled top-bar action. The owner reads/saves preferences outside composition; neither rendering
- * nor tapping mutates local state here. This is not a run control or a replacement question surface.
- */
+/** 顶栏交互模式开关。宿主提供当前值并负责读写偏好，点击时通过 onCheckedChange 回传选择。 */
 @Composable
 internal fun InteractiveModeToggle(
     enabled: Boolean,

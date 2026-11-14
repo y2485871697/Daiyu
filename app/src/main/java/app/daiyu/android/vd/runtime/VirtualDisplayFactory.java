@@ -14,22 +14,11 @@ import android.view.Display;
 import android.view.Surface;
 
 /**
- * Creates one virtual display through the public {@link DisplayManager} API.
- *
- * <p>The owner runs as root, but {@code DisplayManager.createVirtualDisplay} only accepts a package
- * name that belongs to the calling uid. Reaching the framework's system {@link Context} through
- * {@code ActivityThread.systemMain()} / {@code getSystemContext()} yields a {@code DisplayManager}
- * whose op package is {@code android}, which is what uid 0 owns. That is the same route the
- * platform's own display clients use; no hidden {@code DisplayManagerGlobal.createVirtualDisplay}
- * signature is guessed and no {@code IVirtualDisplayCallback} is fabricated.
- *
- * <p>The retained owner is an {@link ImageReader}: its {@link Surface} is the display's output
- * surface and it stays alive for the whole owner session, so the display is never released while
- * frames can still arrive. The framework owns the virtual-display callback.
- *
- * <p>The public API does not let a caller choose the display's unique id, so the value reported by
- * the created display's {@code DisplayInfo} is read back instead of echoing the requested string. A
- * display whose unique id cannot be read is never reported as created.
+ * 通过公开的 {@link DisplayManager} API 创建虚拟显示器。
+ * createVirtualDisplay 会校验包名与调用 UID，因此 root 进程通过
+ * {@code ActivityThread.systemMain()} / {@code getSystemContext()} 获取 op package 为 {@code android} 的服务。
+ * {@link ImageReader} 及其输出 {@link Surface} 保留到会话结束，显示器回调由框架管理。
+ * 公开 API 不能指定 unique id，创建后需从 {@code DisplayInfo} 读回；读不到时报告创建失败。
  */
 final class VirtualDisplayFactory {
     /** uid 0 owns this package, which satisfies the display service's package-vs-uid check. */

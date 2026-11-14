@@ -1,4 +1,4 @@
-"""Narrow source contracts for the conversation-only provider chip; no Android runtime."""
+"""检查子代理会话供应商标签的局部源码配置。"""
 from pathlib import Path
 import unittest
 

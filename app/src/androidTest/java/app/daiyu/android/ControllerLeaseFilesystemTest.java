@@ -16,8 +16,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-/** Device-only filesystem capability checks. Not executed as part of the host suite, and not a
- * power-loss durability claim. Uses only a disposable noBackup child, no owner/display or shell. */
+/** 在设备的临时 noBackup 子目录中检查文件系统操作。 */
 public class ControllerLeaseFilesystemTest extends InstrumentationTestCase {
     public void testNoBackupModesDirectoryForceAtomicMoveAndProcessLock() throws Exception {
         Path noBackup = getInstrumentation().getTargetContext().getNoBackupFilesDir()

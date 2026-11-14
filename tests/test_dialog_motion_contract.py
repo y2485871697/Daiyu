@@ -1,4 +1,4 @@
-"""Source contracts only; pixel/Compose animation regressions run with the next approved build."""
+"""检查对话框动画和布局的源码配置。"""
 from pathlib import Path
 import re
 import unittest

@@ -4,7 +4,7 @@ import app.daiyu.android.domain.*
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Pure projection tests. Subscription/DB timing still requires parent integration/device tests. */
+/** 检查语音所有者状态投影。 */
 class AndroidUniversalOwnerObserverTest {
     private val owner = VoiceAssistantOwner("chat", "run", "message")
     private fun message(status: RunStatus = RunStatus.RUNNING) = Message(

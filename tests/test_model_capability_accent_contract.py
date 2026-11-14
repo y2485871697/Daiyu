@@ -1,4 +1,4 @@
-"""Source guards for model capability tags; rendered colors await Android validation."""
+"""检查模型能力标签强调色的源码配置。"""
 from pathlib import Path
 import unittest
 import re

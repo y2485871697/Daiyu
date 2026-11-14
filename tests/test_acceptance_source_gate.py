@@ -1,4 +1,4 @@
-"""Synthetic local repositories only; no application acceptance or network."""
+"""用临时本地仓库测试源码绑定校验。"""
 import contextlib
 import importlib.util
 import io

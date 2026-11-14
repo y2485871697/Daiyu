@@ -1,4 +1,4 @@
-"""Source contracts only; window delivery and dismissal require Android regression."""
+"""检查协作完成状态与窗口关闭的源码连接。"""
 from pathlib import Path
 import unittest
 

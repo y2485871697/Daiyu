@@ -23,7 +23,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 
-/** Dedicated review48cbba32 regression tests. No microphone, network, reference upload or paid calls. */
+/** 检查语音样本选择请求的生命周期。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, manifest = Config.NONE, sdk = [34])
 class VoiceSamplePickerRequestTest {

@@ -25,9 +25,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real Main picker launch/callback -> controller dataTask -> coordinator trusted ref ->
- * content provider stream. The fixture creates real private completed bytes, NOT a fake
- * exporter, model path, parsed receipt, or FileProvider. No manifest/permissions added.
+/** 检查 Main 文件选择回调经 dataTask、下载引用到内容提供器的保存流程。
+ * 数据来自测试私有目录中的已完成文件。
  */
 @Suppress("DEPRECATION")
 class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {

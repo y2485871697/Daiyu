@@ -3,7 +3,7 @@ package app.daiyu.android.gui
 import org.junit.Assert.*
 import org.junit.Test
 
-/** JVM evidence only: not a claim that an OEM delivers overlay/window events correctly. */
+/** 检查 GUI 操作的 JVM 确认状态机。 */
 class GuiProductionConfirmationTest {
     private val node = GuiNode(4, 1, GuiBounds(10, 20, 90, 60), "Real target", "description",
         "android.widget.Button", "external:id/send", true, false, false, false, true, false)

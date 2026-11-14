@@ -1,4 +1,4 @@
-"""Synthetic manifest/tool fixtures; never a real Release build or device result."""
+"""用合成清单和工具输出测试 Release 包校验器。"""
 import hashlib
 import json
 import re

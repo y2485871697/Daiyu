@@ -12,8 +12,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.ZonedDateTime
 
-/** Read-only extraction of preserved DeviceReads (provenance in docs/R06-platform-production.md).
- * Existing battery/status remain in AndroidReadOnlyTools; no DeviceActions/write path is included.
+/** 适配 DeviceReads 的时间、网络和音频状态读取，来源见 docs/R06-platform-production.md。
+ * 电池与设备状态由 AndroidReadOnlyTools 提供，DeviceActions 写操作另行处理。
  */
 internal object DeviceReads {
     fun time(): JSONObject {
@@ -58,7 +58,7 @@ internal object DeviceReads {
     fun audio(context: Context): JSONObject {
         val manager = context.getSystemService(AudioManager::class.java) ?: return failure("unsupported")
         val streams = JSONObject()
-        // Preserve the candidate's read stream set, without depending on its write adapter.
+        // 分别读取媒体、铃声、闹钟和通知音量，以及各音量流的上下限。
         mapOf("music" to AudioManager.STREAM_MUSIC, "ring" to AudioManager.STREAM_RING,
             "alarm" to AudioManager.STREAM_ALARM, "notification" to AudioManager.STREAM_NOTIFICATION).forEach { (name, id) ->
             streams.put(name, JSONObject().put("level", manager.getStreamVolume(id))

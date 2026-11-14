@@ -4,17 +4,13 @@ import java.net.URI
 import java.util.Locale
 
 /**
- * Production gate for the pinned manager's tokenless navigationDeferred and history-writing finish
- * callback. Used by GuardedClient, not an alternative browser implementation. All lifecycle calls
- * are on UI; synchronized also fences retirement from the request thread.
+ * GuardedClient 统一处理固定管理器的 navigationDeferred 和历史写入回调。
+ * 生命周期调用在主线程执行；同步锁同时协调请求线程发起的资源退役。
  *
- * A URL already issued/observed in another epoch cannot be used again on this resource: no WebView
- * callback can distinguish its late finish from the new load's finish. Such reuse is quarantined,
- * rather than guessed from timing, WebView.url, or a fabricated callback token. Distinct fresh URLs
- * can be navigated repeatedly, and reads remain available after a completed navigation.
+ * WebView 无法区分同一 URL 的迟到完成回调和新加载的完成回调，因此隔离先前轮次出现过的 URL。
+ * 新 URL 可继续导航；导航完成后仍可读取页面。
  *
- * Finished means only that a correlated main-frame finish was forwarded. It is NOT a DOM-stable
- * or visually-ready assertion; WebView's finish callback promises neither.
+ * FINISHED 表示已转发匹配的主框架完成回调；DOM 和渲染稳定性另行等待。
  */
 internal class NavigationCallbacks(
     private val live: () -> Boolean,
@@ -173,9 +169,8 @@ internal class NavigationCallbacks(
     }
 
     /**
-     * The ONLY route to upstream.onPageFinished (which both completes its deferred and writes
-     * global history). Old, duplicate, unstarted and superseded finishes get no history hook/write.
-     * visibleUrl is an additional consistency check, never the sole callback identity.
+     * 统一转发 upstream.onPageFinished，完成 deferred 并写入全局历史。
+     * 过滤过期、重复、尚未开始或已被替换的完成回调；visibleUrl 用作附加一致性检查。
      */
     @Synchronized
     fun onFinished(url: String?, title: String, visibleUrl: String?, forward: () -> Unit): Boolean {
@@ -216,7 +211,7 @@ internal class NavigationCallbacks(
         }
     }
 
-    /** Even an upstream 'success' from its timeout must not be published as confirmed. */
+    /** 收到匹配完成回调且未超时才确认成功；否则拒绝并隔离，即使上游返回成功。 */
     @Synchronized
     fun returned(success: Boolean): Boolean {
         if (isManual) return false

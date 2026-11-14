@@ -1,4 +1,4 @@
-"""Source contracts only; native-window input requires Android regression."""
+"""检查聊天选择器返回后的焦点处理源码。"""
 from pathlib import Path
 import unittest
 

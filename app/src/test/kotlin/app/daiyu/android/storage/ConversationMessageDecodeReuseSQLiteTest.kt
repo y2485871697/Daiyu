@@ -14,7 +14,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.SQLiteMode
 
-/** Real native SQLite: these are transaction/trigger tests, not mocked cursor tests. */
+/** 用原生 SQLite 事务和触发器检查消息解码复用。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [30])
 @SQLiteMode(SQLiteMode.Mode.NATIVE)

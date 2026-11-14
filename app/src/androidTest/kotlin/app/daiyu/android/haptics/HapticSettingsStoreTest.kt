@@ -6,7 +6,7 @@ import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.haptics.*
 import java.lang.reflect.Proxy
 
-/** Platform test SOURCE. Must not be reported as executed without an instrumentation run. */
+/** 检查 Android 振动设置持久化及写入失败处理。 */
 @Suppress("DEPRECATION")
 class HapticSettingsStoreTest : InstrumentationTestCase() {
     fun testLocalDefaultsRoundTripAndReopen() {

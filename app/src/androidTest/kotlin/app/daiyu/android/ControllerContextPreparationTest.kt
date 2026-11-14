@@ -366,7 +366,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         owner=seed(f);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
         assertEquals(1,requests.get());assertEquals(0,opens.get())
-        // This assertion includes the companion production wording fix integrated by the parent.
+        
         assertEquals("会话或编辑内容已变化",f.controller.problem)
         assertEquals("newer draft",f.db.conversations().single().draft)
         assertEquals(12,ContextService(f.app,f.db).displayHistory(owner.id).size)

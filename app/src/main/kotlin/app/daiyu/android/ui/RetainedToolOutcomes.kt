@@ -19,7 +19,7 @@ import app.daiyu.android.ui.screens.chat.conversation.toolReceiptPresentation
 import app.daiyu.android.domain.runtime.ExecutionState
 import java.util.IdentityHashMap
 
-/** Read-only projection of the Runner's durable receipt disposition, never tool/model JSON text. */
+/** 从 Runner 持久化回执读取工具结果状态。 */
 internal object RetainedToolOutcomes {
     private data class Owner(val conversation: String, val run: String, val message: String)
     private data class Result(val invocation: ToolInvocation, val text: String?, val position: Int)
@@ -175,7 +175,7 @@ internal object RetainedToolOutcomes {
         }
     }
 
-    /** Only while the host's exact-source receipt read is pending; returned text proves no outcome. */
+    /** 等待同一来源的持久化回执时，已有返回文本的工具先显示“读取结果”。 */
     fun pendingProjection(message: Message, block: MessageBlock.Tool): ToolReceiptUi? =
         if (message.role == Message.ASSISTANT_ROLE && block.result != null)
             ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING) else null

@@ -125,7 +125,7 @@ class OpenRouterVideoEvidenceTest {
         assertEquals(RemoteModelFetcher.DEFAULT_TIMEOUT_MILLIS, connection.readTimeout)
         assertFalse(connection.instanceFollowRedirects)
         assertTrue(connection.closed)
-        // Facts have no conversion API to OpenRouterVideoEvidence; no production proof is faked.
+        // Facts 与运行期授权使用的 OpenRouterVideoEvidence 保持类型隔离。
         rejected { RemoteModelFetcher { Connection(302, valid) }.fetchOpenRouterVideoFacts(request, model) }
         rejected { RemoteModelFetcher { Connection(200, " ".repeat(2 * 1024 * 1024 + 1)) }
             .fetchOpenRouterVideoFacts(request, model) }

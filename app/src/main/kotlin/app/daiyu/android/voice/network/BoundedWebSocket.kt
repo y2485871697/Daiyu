@@ -85,8 +85,8 @@ internal class BoundedDraft(
         messageFragments = 0
     }
 
-    // Upstream otherwise accumulates an unfinished HTTP upgrade without a byte cap.
-    // This wraps the existing parser; it does not parse HTTP/WebSocket/TLS itself.
+    // 将未完成的 HTTP 升级请求限制在 32 KiB 内，再交给上游解析器。
+    
     override fun translateHandshake(buffer: ByteBuffer): Handshakedata {
         if (buffer.remaining() > 32 * 1024) throw InvalidHandshakeException("voice_handshake_limit")
         return super.translateHandshake(buffer)
@@ -101,7 +101,7 @@ internal fun outboundQueueHasRoom(frames: Collection<ByteBuffer>, payloadBytes: 
     return frames.sumOf { it.remaining().toLong() } + nextWireBytes <= NetworkLimits.OUTBOUND_BYTES
 }
 
-/** No TLS implementation or RFC6455 codec here: both belong to the platform / mature client. */
+/** 为 Java-WebSocket 和平台 TLS 增加消息、队列限额及可取消的 socket 管理。 */
 internal class BoundedWebSocket(
     uri: URI,
     headers: Map<String, String>,

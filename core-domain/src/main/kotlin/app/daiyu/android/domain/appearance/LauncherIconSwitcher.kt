@@ -14,10 +14,8 @@ interface LauncherComponentPort {
 
 /** Refresh active notifications, not just future builders. No service restart is implied. */
 fun interface IconNotificationPort {
-    /**
-     * Refresh inline or throw; implementation owns IDs/channels and may require a calling thread.
-     * Android's MainThreadIconNotifications requires main-thread calls and rejects workers;
-     * this port does not promise to marshal or synchronously wait for another thread.
+    /** 在调用线程同步刷新，失败抛错，通知 ID 和渠道由实现管理。
+     * MainThreadIconNotifications 须在主线程调用，线程切换由调用方负责。
      */
     fun refresh(entry: Task17IconCatalog.Entry)
 }

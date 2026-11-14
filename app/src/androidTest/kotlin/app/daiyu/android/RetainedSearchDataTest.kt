@@ -6,7 +6,7 @@ import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.ui.RetainedConversationData
 import app.daiyu.android.ui.screens.search.conversationSearchResults
 
-/** Real SQLite reader contract; no synthetic empty reader or capped-global scope filtering. */
+/** 检查 SQLite 搜索读取及作用域过滤，覆盖超出全局结果上限的数据。 */
 @Suppress("DEPRECATION")
 class RetainedSearchDataTest : android.test.AndroidTestCase() {
     private lateinit var scoped: android.content.Context

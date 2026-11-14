@@ -1,4 +1,4 @@
-"""Source contracts only; modal UI, audio and physical haptics await the approved Android batch."""
+"""检查语音长按菜单的源码连接。"""
 from pathlib import Path
 import unittest
 

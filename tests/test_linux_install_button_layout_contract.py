@@ -1,4 +1,4 @@
-"""Source-only regression for moving the initial install button; no device execution."""
+"""检查 Linux 初始安装按钮位置的源码配置。"""
 from pathlib import Path
 import unittest
 

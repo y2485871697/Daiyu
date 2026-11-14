@@ -1147,7 +1147,7 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
     }
 }
 
-/** Shared real-controller fixture; tests still assert database bytes and model-call counts. */
+/** 共享 Controller 测试环境，用于检查数据库内容和模型调用次数。 */
 @Suppress("DEPRECATION")
 abstract class WiredActivityTestCase(motionDurationScale: MotionDurationScale? = null) : ComposeActivityTestCase(motionDurationScale) {
     private var fixtureRef: RunControlFixture? = null

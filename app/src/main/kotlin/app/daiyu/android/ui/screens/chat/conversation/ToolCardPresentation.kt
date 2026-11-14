@@ -2,7 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import org.json.JSONObject
 
-/** Display taxonomy, not a registry or an execution permission. */
+/** 按工具名和操作类型生成卡片分类、标题及摘要。 */
 internal object ToolCardPresentations {
     val categories = setOf("memory", "skills", "delegation", "child_control", "workspace", "terminal", "background_job", "files", "image_read", "browser", "gui", "apps", "device_read", "personal_search", "system_action", "generation", "speech", "mcp", "context", "user_question", "generic")
     data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null, val hasScreenScreenshot: Boolean = false)

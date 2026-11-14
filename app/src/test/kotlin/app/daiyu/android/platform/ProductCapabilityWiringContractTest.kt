@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 
-/** Source contracts complement (not replace) runtime tests and do not read device/user state. */
+/** 只读检查功能能力的源码连接，不读取设备或用户状态。 */
 class ProductCapabilityWiringContractTest {
     private fun source(path: String): String = generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
         .map { File(it, "app/src/main/kotlin/app/daiyu/android/$path") }.first { it.isFile }.readText()

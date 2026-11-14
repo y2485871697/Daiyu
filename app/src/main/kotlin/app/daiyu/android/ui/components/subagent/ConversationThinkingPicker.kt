@@ -121,7 +121,7 @@ import kotlin.math.roundToInt
         val active = Color(if (colors.dark) 0xffb2a0c9 else 0xffa38db9)
         drawRoundRect(Color(if (colors.dark) 0xff332f3d else 0xffeee9f3), cornerRadius = CornerRadius(radius))
         if (selected >= 0) drawRoundRect(active, size = Size((thumbX + radius).coerceAtMost(size.width), size.height), cornerRadius = CornerRadius(radius))
-        // CSS stardust is decorative and deterministic, never a task or capability signal.
+        // 按固定坐标绘制滑轨上的装饰星点。
         listOf(.08f to .22f,.18f to .78f,.28f to .19f,.40f to .76f,.56f to .25f,.68f to .72f,.81f to .21f,.93f to .69f).forEach { (x,y) ->
             drawCircle(Color.White.copy(alpha = .6f), .7.dp.toPx(), Offset(size.width*x,size.height*y))
         }

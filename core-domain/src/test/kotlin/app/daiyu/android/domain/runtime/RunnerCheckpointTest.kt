@@ -164,7 +164,7 @@ class RunnerCheckpointTest {
         assertEquals("done", persisted!!.blocks.filterIsInstance<MessageBlock.Text>().single().text)
     }
 
-    /** Contract fake; Android transactions and live-owner takeover are verified by storage owners. */
+    /** 检查点接口的内存测试实现。 */
     private class StatefulAtomicStore(private var loseCompletedReceipt: Boolean = false) : AtomicRuntimeStore {
         val commitAttempts = mutableListOf<RunCheckpoint>()
         val commits = mutableListOf<RunCheckpoint>()

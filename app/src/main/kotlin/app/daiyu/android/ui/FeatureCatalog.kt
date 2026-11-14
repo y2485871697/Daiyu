@@ -7,7 +7,7 @@ internal enum class FeatureRoute {
 internal data class FeatureEntry(val id: String, val title: String, val route: FeatureRoute? = null)
 internal data class FeatureGroup(val id: String, val title: String, val entries: List<FeatureEntry>)
 
-/** Stable UI slots, not a capability registry or a business-completion ledger. */
+/** 功能导航的固定分组、条目和页面路由。 */
 internal object FeatureCatalog {
     val groups: List<FeatureGroup> = listOf(
         FeatureGroup("conversation", "会话与助手", listOf(

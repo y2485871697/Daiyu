@@ -41,7 +41,7 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
                     enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick)
                 .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Match the new model-name icon tint, not the legacy per-glyph palette.
+                // 与模型名称图标共用强调色。
                 Icon(icon, null, Modifier.size(20.dp), tint = colors.accent)
                 Text(label, Modifier.widthIn(min = 72.dp, max = 100.dp),
                     fontSize = 14.sp, lineHeight = 22.sp, color = colors.text)

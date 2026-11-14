@@ -8,7 +8,7 @@ import java.util.ArrayDeque
 import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
 
-/** Deterministic admission/worker fixtures, not a claim that ChatController is wired. */
+/** 控制准入和工作线程时序，检查上下文管理适配器。 */
 class ContextManagementControllerAdapterTest {
     private class Queue : Executor {
         private val tasks = ArrayDeque<Runnable>()

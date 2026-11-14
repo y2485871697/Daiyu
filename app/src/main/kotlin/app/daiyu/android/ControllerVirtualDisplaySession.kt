@@ -64,7 +64,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
         fun releaseAfterDrain()
     }
 
-    /** Existing host/client only. This seam also permits tests without su, sockets or Android I/O. */
+    /** 持有已有宿主的端点、物理退出观测函数和可选的未初始化关闭接口。 */
     internal class OwnerHandle(
         val endpoint: R08VirtualDisplayEndpoint,
         val observePhysical: () -> AndroidVirtualDisplayOwnerHost.Observation,
@@ -73,10 +73,9 @@ internal class ControllerVirtualDisplaySession internal constructor(
         val retainedHost: AndroidVirtualDisplayOwnerHost? = null
     )
 
-    /** Optional trusted host adapter for versions that implement uninitialized shutdown. Base
-     * 1d923481 has no such wire operation: leave absent, retain UNKNOWN, never invent a release.
-     * lookupOnly must authenticate THIS generation+binding and send receipt queries only.
-     * shutdownOnce must use the existing trusted owner API, never initialize, shell/kill or replay.
+    /** 关闭未初始化进程的可选宿主接口；不支持时留空并保留 UNKNOWN。
+     * lookupOnly 需校验本次 generation 和 binding，且只查询回执。
+     * shutdownOnce 只调用已有 owner 关闭 API，保持进程未初始化并避免重放操作。
      */
     interface UninitializedShutdown {
         fun lookupOnly(generation: String, binding: OwnerRunBinding): UninitializedEvidence

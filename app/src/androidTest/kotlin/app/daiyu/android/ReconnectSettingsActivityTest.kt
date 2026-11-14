@@ -3,7 +3,7 @@ package app.daiyu.android
 import androidx.compose.ui.test.*
 import app.daiyu.android.model.reconnect.*
 
-/** Real catalog -> Activity route -> editor, using the Controller's exact store. Not run yet. */
+/** 检查目录入口到 Activity 编辑器的路由，使用 Controller 持有的设置存储。 */
 class ReconnectSettingsActivityTest : WiredActivityTestCase() {
     private lateinit var store: ReconnectSettingsStore
     private lateinit var original: ReconnectSettings

@@ -1,4 +1,4 @@
-"""Synthetic offline wiring tests; not project business acceptance evidence."""
+"""用离线合成材料检查恢复证据的关联和校验。"""
 import contextlib
 import copy
 import importlib.util

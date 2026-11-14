@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Backup-owned history only. Does not own the application helper/version or runtime schema. */
+/** 校验、读写备份中的历史记录；数据库版本和运行时表结构由应用的共享数据库管理。 */
 internal object BackupHistoryRows {
     const val MAX_ROWS = 50_000
     const val MAX_METADATA_BYTES = 8 * 1024 * 1024

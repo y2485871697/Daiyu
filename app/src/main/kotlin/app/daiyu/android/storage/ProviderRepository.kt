@@ -178,7 +178,7 @@ internal class ProviderRepository(
             block(store, revision, requireProvider(state, target.editor.slotId))
         }
     }
-    /** UI metadata only; never decrypts keys/headers, validates credentials or creates a request. */
+    /** 读取界面所需元数据，密钥和连接头保持加密。 */
     internal fun contextUsageModel(): app.daiyu.android.ui.model.ContextUsageModel = registry.access { state ->
         val id = checkNotNull(state.activeSlotId)
         check(requireProvider(state, id).enabled)

@@ -8,11 +8,7 @@ import app.daiyu.android.model.catalog.OpenRouterVideoEvidence
 import app.daiyu.android.model.images.FrozenMessageImagePlan
 import java.util.Collections
 
-/**
- * Frozen approval input, NOT proof that the supplied history is complete. The host must load the
- * full authorized expanded history/sidecars (including retained segments) before constructing it.
- * No file reads, DB acceptance or network dispatch happen here.
- */
+/** 宿主先加载完整且已授权的展开历史及附加数据，包含保留分段，再冻结审批输入。 */
 internal class FrozenVideoApprovalRequest private constructor(
     val runId: String,
     val executionOwner: String,
@@ -83,10 +79,7 @@ internal class FrozenVideoApprovalRequest private constructor(
     }
 }
 
-/**
- * Pure lifecycle seam. It cannot produce capability/evidence, even with a synthetic fixture.
- * Prompt/ticket authenticity is object identity registered in this gate, never a public boolean.
- */
+/** 按本闸门登记的对象身份校验提示和票据；能力依据通过实时请求另行获取。 */
 internal class VideoApprovalGate {
     class Prompt internal constructor(internal val request: FrozenVideoApprovalRequest) {
         val videoCount: Int get() = request.inventory.size
@@ -123,11 +116,8 @@ internal class VideoApprovalGate {
     fun revoke() { prompt = null; ticket = null; consumption = null }
 }
 
-/**
- * Host-thread confined independent leaf. Not wired into ChatController/MainActivity. Call revoke
- * synchronously on edit, owner/route/lifecycle/config change and cancel the corresponding run.
- * Re-read authoritative state to build `current` at confirm, activation, and each continuation.
- * Never retain a returned raw capability outside this run or use it without these checks.
+/** 在宿主线程使用；编辑、归属、页面、生命周期或配置变化时，同步 revoke 并取消运行。
+ * 确认、激活和续接前重读当前状态，返回能力仅限本轮使用，并保留使用前校验。
  */
 internal class VideoUploadApprovalController {
     class Run internal constructor()

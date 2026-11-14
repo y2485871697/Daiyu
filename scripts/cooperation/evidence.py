@@ -1,4 +1,4 @@
-"""Offline-safe evidence verification. Never imports SSH or calls the network."""
+"""离线校验检查回执、报告及其文件摘要。"""
 import hashlib
 import json
 from pathlib import Path, PurePosixPath

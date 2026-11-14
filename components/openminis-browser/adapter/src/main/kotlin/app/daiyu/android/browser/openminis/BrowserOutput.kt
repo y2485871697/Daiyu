@@ -7,7 +7,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
-/** One budget for ALL returned string fields, including diagnostics and a real screenshot path. */
+/** 返回文本、诊断信息和截图路径共用一个字符预算。 */
 internal object BrowserOutput {
     const val MAX_OUTPUT_CHARS = 16_000
     private const val TRUNCATED = "\n[BROWSER_OUTPUT_TRUNCATED]"
@@ -23,7 +23,7 @@ internal object BrowserOutput {
         check(command.action !in setOf("fetch", "get_cookies", "set_cookies")) {
             "BROWSER_OPENMINIS_DEDICATED_CAPABILITY_REQUIRED"
         }
-        // base64Image is intentionally NOT transferred. Defend against it being echoed in text too.
+        // 排除 base64Image，并拒绝正文中夹带的副本。
         val encodedImage = answer.base64Image
         check(encodedImage.isNullOrEmpty() || !answer.text.contains(encodedImage)) {
             "BROWSER_OPENMINIS_ENCODED_IMAGE_IN_TEXT"
@@ -53,13 +53,13 @@ internal object BrowserOutput {
     private fun imagePath(path: String): String {
         check(path.length in 1..4096 && !path.any { it.code < 32 }) { "BROWSER_OPENMINIS_IMAGE_PATH_INVALID" }
         val file = File(path)
-        // Exact pinned upstream directory/name, not a file URI, base64 blob or invented attachment.
+        // 仅接受符合固定上游截图目录和文件名规则的绝对路径。
         check(file.isAbsolute && file.parentFile?.name == "browser_screenshots" && imageName.matches(file.name)) {
             "BROWSER_OPENMINIS_IMAGE_PATH_INVALID"
         }
         check(file.canonicalPath == file.absolutePath && Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)
             && file.canRead() && file.length() >= 4 && file.toPath().toRealPath().toString() == file.absolutePath) { "BROWSER_OPENMINIS_IMAGE_FILE_MISSING" }
-        // A path alone is not evidence that capture wrote a JPEG. Never return arbitrary local text.
+        // 检查 JPEG 文件头后再返回本地路径。
         file.inputStream().use { stream ->
             check(stream.read() == 0xff && stream.read() == 0xd8 && stream.read() == 0xff) {
                 "BROWSER_OPENMINIS_IMAGE_FILE_INVALID"

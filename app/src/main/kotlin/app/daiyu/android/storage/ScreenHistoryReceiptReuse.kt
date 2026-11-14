@@ -3,7 +3,7 @@ package app.daiyu.android.storage
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.diagnostics.RuntimeDiagnostics
 
-/** Lease-local reuse of one pure predicate, never SQL, owner or external video evidence. */
+/** 当前租约内缓存屏幕历史回执的纯校验结果，SQL、所有者和外部视频校验每次重做。 */
 internal class ScreenHistoryReceiptReuse(
     private val maxCharacters: Long = 16L * 1024 * 1024,
     private val maxEntries: Int = 8,

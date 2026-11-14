@@ -14,7 +14,7 @@ import app.daiyu.android.tasksurface.TaskSurfaceStore
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.settings.TaskSurfaceSettingsPanel
 
-/** Inject only persistence failure; exercise the actual settings page, not a fake page/model. */
+/** 向设置页注入持久化失败，检查保存失败后的界面处理。 */
 class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
     fun testSaveFailureIsVisibleAndSuccessfulRetryPersistsOnlyTheSelectedBasePreference() {
         var record: String? = "task-surface-v1\nASK\n"

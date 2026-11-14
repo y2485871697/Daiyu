@@ -14,9 +14,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real MainActivity -> sendText -> preparation -> SQLite receipt -> Activity callback.
- * Model initialization and (where stated) real main-message delivery are gated;
- * neither sendText nor its result/callback is replaced by a fake.
+/** 检查 MainActivity 发送经准备、SQLite 回执到 Activity 回调的流程。
+ * 通过阻塞模型初始化及指定的主线程消息投递控制测试时序。
  */
 class TextSendActivityTest : WiredActivityTestCase() {
     private val preparing = CountDownLatch(1)

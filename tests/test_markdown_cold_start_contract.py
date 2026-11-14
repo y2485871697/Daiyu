@@ -1,4 +1,4 @@
-"""Cold-start source wiring; Android regressions are present but run in the approved batch."""
+"""检查冷启动时 Markdown 准备流程的源码连接。"""
 from pathlib import Path
 import unittest
 

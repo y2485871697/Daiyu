@@ -4,9 +4,7 @@ import java.net.URI
 import java.util.Collections
 import java.util.Locale
 
-/** Explicit generation-only profile, supplied by trusted settings, never by model arguments.
- * No chat profile/default resolver and no serialisation of credentials are provided here.
- */
+/** 由可信设置提供的生成专用配置，与聊天默认设置及模型参数分开。 */
 class GenerationModelProfile(
     val id: String,
     val label: String,
@@ -36,10 +34,8 @@ class GenerationModelProfile(
     override fun toString() = "GenerationModelProfile(<redacted>)"
 }
 
-/** Exact, separately reviewed download authorities, not suffixes, wildcards or paid permission.
- * Empty means deny all downloads (inline outputs still work). No DNS/network occurs here.
- * The parent must additionally supply its network/DNS policy at leaf construction. This value
- * is not a DNS-pinning implementation. Redirects must be denied by the GenerationHttp transport.
+/** 精确下载站点列表，空列表只允许内联输出。
+ * 宿主另行提供网络、DNS 和付费授权检查，传输层禁止重定向。
  */
 class GenerationDownloadHosts(hosts: Set<String>) {
     val hosts: Set<String> = Collections.unmodifiableSet(hosts.toSet())

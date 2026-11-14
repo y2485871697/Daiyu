@@ -5,12 +5,10 @@ package app.daiyu.android.domain
 object ModelHistory {
     const val UNKNOWN_TOOL_RESULT = "{\"ok\":false,\"outcome\":\"UNKNOWN\",\"replay_allowed\":false,\"message\":\"工具结果未知；禁止重放，请仅使用只读方式核实\"}"
 
-    /** Read-only compatibility projection, never a migration or a recovery entry point.
-     * A terminal legacy null cannot prove either execution or non-execution. Active calls
-     * remain pending. Keep physical owners/segments intact for authorization and raw CAS.
-     * Only affected segments lose their opaque provider snapshot: rebuilding those from
-     * blocks gives each call exactly one explicit result without editing native JSON.
-     * COMPLETED below means usable *history*, not a change to the durable run outcome. */
+    /** 旧终态的 null 结果按未知处理，活动调用保持待定。
+     * 保留物理所有者和分段供授权及 CAS 使用，仅丢弃受影响分段的协议快照，再从块重建单一结果。
+     * 原生 JSON 和持久运行结果保持不变，此处 COMPLETED 表示历史可用。
+     */
     fun project(history: List<Message>): List<Message> {
         MessageHistory.validate(history)
         return history.map { row ->

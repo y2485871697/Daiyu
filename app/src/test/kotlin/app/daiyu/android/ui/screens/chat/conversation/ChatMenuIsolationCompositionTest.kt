@@ -24,7 +24,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Host JVM + real Compose runtime, no Activity, layout, renderer or frame-time claims. */
+/** 在主机 Compose 运行时检查菜单重组隔离。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [30])
 class ChatMenuIsolationCompositionTest {

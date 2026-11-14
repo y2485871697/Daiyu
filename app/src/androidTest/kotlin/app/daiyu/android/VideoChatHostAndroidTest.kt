@@ -24,9 +24,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
-/** Real ContentResolver -> AndroidVideoAttachments -> private originals -> actual frame preview.
- * The small MP4 is encoded on-device, not a JPEG cover or a signature-only fake. No network/DB.
- * Receipt calls below simulate the parent's authoritative settlement boundary, NOT a send success.
+/** 检查 ContentResolver 视频导入、私有原件存储和帧预览，MP4 在设备本地编码。
+ * 回执调用模拟父级的附件结算步骤。
  */
 @Suppress("DEPRECATION")
 class VideoChatHostAndroidTest : InstrumentationTestCase() {

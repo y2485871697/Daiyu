@@ -7,10 +7,7 @@ import android.media.MediaMuxer
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/** Local synthetic 64px AVC original; same bounded device-codec technique as
- * VideoChatHostAndroidTest. No provider, credential, download or paid generation is involved.
- * Real encoder/decoder availability is a prerequisite, not a skipped positive assertion.
- */
+/** 使用设备编解码器生成本地 64px AVC 测试原件；缺少所需编解码器时报告失败。 */
 internal fun encodeOfflineBackupMp4(file: File) {
     val codec = MediaCodec.createEncoderByType("video/avc")
     val muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

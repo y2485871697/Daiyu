@@ -16,7 +16,7 @@ import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Testable device boundary; production below really loads JNI and captures mono 16-kHz PCM16. */
+/** 提供解码器加载、麦克风采集和计时；正式实现使用 JNI 与单声道 16-kHz PCM16。 */
 internal interface OfflineSpeechDevice {
     interface Decoder : AutoCloseable {
         fun accept(samples: FloatArray)

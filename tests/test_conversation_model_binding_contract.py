@@ -1,4 +1,4 @@
-"""Source wiring plus real SQLite schema checks; Android end-to-end runs in the approved batch."""
+"""检查会话模型绑定的源码连接和 SQLite 表结构。"""
 from pathlib import Path
 import re
 import sqlite3

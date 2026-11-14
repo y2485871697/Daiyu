@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Validate task 15's offline specification, never execute product acceptance.
+"""离线检查任务 15 规格的结构和覆盖项。
 
-CLI exit 0 means schema/coverage validity ONLY; exit 2 means invalid input.
-No commands, artifact paths or dependencies declared in the JSON are executed
-or opened. The only input read is the explicitly selected manifest.
+退出码 0 表示规格有效，2 表示输入无效。只读取选定清单，
+不执行或打开 JSON 中声明的命令、工件路径和依赖。
 """
 import argparse
 from collections import Counter

@@ -17,23 +17,11 @@ import android.content.ComponentName;
 import android.content.Intent;
 
 /**
- * Bounded, sanitized, read-only diagnostic of the platform root task inventory.
- *
- * <p>It exists to explain a read-only refusal such as {@link LaunchTargetOccupancy#UNKNOWN}: it
- * lists every root task the platform reports together with the fields that decide whether a task is
- * a real, identified task or an unreadable one. The owner attaches it to a {@code status} reply and
- * to an unknown-inventory launch failure under {@link #FIELD}.
- *
- * <p>Only {@code ActivityTaskManager.getAllRootTaskInfos()} (and, best effort,
- * {@code getTaskInfo(int, boolean)} to name children) are ever called. There is no migrate, remove,
- * focus, hide, release or any other mutation here, so collecting the diagnostic cannot disturb a
- * foreground task and cannot weaken a launch / handoff / release gate.
- *
- * <p>No user-visible text is copied out: an {@code Intent}'s data, extras, action, categories and a
- * task-description label are never read. Only package identifiers that already pass
- * {@link OwnerProtocol#isSafeIdentifier} are emitted, every list is capped, and a reflection or
- * service failure is reported as {@code known=false} with a stable code. A failed read is never
- * reported as an empty inventory.
+ * 读取根任务及子任务标识，解释 {@link LaunchTargetOccupancy#UNKNOWN} 等任务清单读取问题。
+ * 结果放在 {@code status} 和清单未知的启动失败响应的 {@link #FIELD} 字段中，供排查问题使用。
+ * 使用 {@code getAllRootTaskInfos()}，并尝试用 {@code getTaskInfo(int, boolean)} 补充子任务名称。
+ * 排除 Intent 内容和任务标签；包标识需通过 {@link OwnerProtocol#isSafeIdentifier}，各列表均限长。
+ * 反射或服务读取失败时返回 {@code known=false} 和固定错误码，与空清单区分。
  */
 final class OwnerRootTaskDiagnostic {
     /** Response field this diagnostic is nested under. */

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline, fail-closed acceptance evidence validator; never executes commands."""
+"""离线校验验收证据，遇到缺失或无效材料时拒绝通过。"""
 from __future__ import annotations
 
 import argparse

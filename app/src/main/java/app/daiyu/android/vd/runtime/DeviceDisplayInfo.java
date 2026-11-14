@@ -4,10 +4,8 @@ import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * Reads the current device geometry so the owner never hardcodes a width, height or density and
- * never invents a display id. Values come from the framework's {@code DisplayInfo} for the default
- * display; if they cannot be read, creation fails instead of falling back to a magic number.
+/** 从默认显示器的 {@code DisplayInfo} 读取当前宽、高和密度。
+ * 读取失败时终止创建，不使用固定尺寸兜底。
  */
 final class DeviceDisplayInfo {
     static final class Geometry {

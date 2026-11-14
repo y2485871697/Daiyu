@@ -4,7 +4,7 @@ import app.daiyu.android.browser.session.BrowserTabLease
 import java.net.URI
 import java.util.Locale
 
-/** Independent policy used both for entry URLs and page/subresource navigations. No local fallback. */
+/** 入口 URL、页面导航和子资源共用 HTTP(S) 策略，并排除 Google 登录。 */
 object OpenMinisNavigationPolicy {
     private val authHosts = setOf(
         "accounts.google.com", "signin.google.com", "myaccount.google.com",
@@ -34,12 +34,10 @@ internal fun pageRequestBlocked(live: Boolean, url: String?, reject: (String) ->
 }
 
 /**
- * Trusted host hook, NOT a model parameter. Returning true explicitly authorizes the FIXED
- * manager callback to accept this URL/title into the app-global compatibility history store.
- * The selected adapter history implementation queues disk I/O; events accepted before close may
- * persist afterward. This is not a promise that close waits for disk or that accounts are isolated.
- * Called on UI; must be bounded, must not reenter ownership mutation, and must not do I/O.
- * Default denies, including redirects. Consent is frozen trusted-host policy, not model input.
+ * 由宿主决定是否通过固定管理器的回调记录 URL 和标题。
+ * 历史记录由整个应用共用，已排队的写入可在 close 返回后落盘。
+ * 回调在主线程运行，需限制耗时、避免 I/O 和重入归属变更。
+ * 授权采用固定的宿主策略，默认拒绝，包括重定向；模型参数不能改变授权。
  */
 fun interface OpenMinisHistoryApproval {
     fun allowUpstreamRecord(lease: BrowserTabLease, url: String, title: String): Boolean

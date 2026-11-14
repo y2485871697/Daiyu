@@ -170,8 +170,8 @@ internal enum class R08VirtualDisplayEvidence { CONFIRMED, NOT_EXECUTED, UNKNOWN
 /** Parent implementation MUST atomically persist+fsync the entire immutable intent BEFORE returning
  * EXECUTE_ONCE, and return it at most once across all threads/processes/restarts. Any existing claim,
  * including an interrupted claim, is LOOKUP_ONLY, never another execution permit. Reject changed
- * binding/generation/operation/parameters for the same invocation/operation ID. No in-memory production
- * implementation is supplied. Failure/ambiguity is UNKNOWN. complete() never erases a claim.
+ * binding/generation/operation/parameters for the same invocation/operation ID.
+ * Failure/ambiguity is UNKNOWN. complete() never erases a claim.
  * finalOutcome() records the CENTRAL ledger result, which can downgrade an apparent local success.
  */
 internal interface R08VirtualDisplayJournal {

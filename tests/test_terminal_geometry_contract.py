@@ -1,4 +1,4 @@
-"""Test-source contracts only; Android geometry still requires emulator regression."""
+"""检查终端布局测试的源码配置。"""
 from pathlib import Path
 import unittest
 

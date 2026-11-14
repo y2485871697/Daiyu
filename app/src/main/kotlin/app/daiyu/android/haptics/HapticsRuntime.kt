@@ -13,7 +13,7 @@ import app.daiyu.android.domain.haptics.*
 import java.util.Collections
 import java.util.IdentityHashMap
 
-/** One process-local instance shared by hosts and stream producers. No service or global singleton. */
+/** 宿主和流式事件生产者共用一个进程内实例，统一管理触感会话和设置。 */
 class HapticsRuntime internal constructor(
     val store: LocalHapticSettingsStore,
     private val portFactory: (View) -> HapticPort,

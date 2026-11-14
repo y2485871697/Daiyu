@@ -17,7 +17,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/** Offline sources only. Real Runner-issued token and central dispatcher; no process/socket/display. */
+/** 用 Runner 令牌和中央派发器离线检查虚拟显示叶层。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], manifest = Config.NONE)
 class R08VirtualDisplayCatalogLeafTest {

@@ -26,7 +26,7 @@ import static app.daiyu.android.vd.runtime.OwnerReceiptStore.Error.*;
 import static app.daiyu.android.vd.runtime.OwnerReceiptStore.State.*;
 import static org.junit.Assert.*;
 
-/** Linux POSIX primitives; non-POSIX host metadata model. No display, process, network, root launcher or Android APIs. */
+/** 检查主机文件系统上的回执存储，Linux 使用 POSIX 操作，其他主机模拟权限元数据。 */
 public class OwnerReceiptStoreTest {
     private final OwnerReceiptTestPlatform platform = new OwnerReceiptTestPlatform();
     @Rule public TemporaryFolder temporary = new TemporaryFolder();

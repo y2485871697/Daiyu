@@ -26,10 +26,9 @@ import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** One trusted run/owner, one registry, one frozen grant. Construct on Android main Looper.
- * privateRoot must already be app-private; mapping and cookie-name access are explicit host grants.
- * This is the actual production composition, not a tool registry or a replacement grant factory.
- * Never create this per tool call: stop/child termination closes this same run-owned instance.
+/** 每轮任务共用一个宿主、注册表和固定授权，在 Android 主线程构造。
+ * privateRoot 使用应用私有目录；路径映射和 Cookie 名称访问由宿主显式授权。
+ * 工具调用复用此实例，停止任务或子任务时关闭。
  */
 class AndroidBrowserRunHost(
     context: Context,
@@ -117,7 +116,7 @@ class AndroidBrowserRunHost(
     val currentTab: BrowserTabLease? get() = session.currentTab
     /** Worker-only for commands; the queued port rejects synchronous main-thread waits. */
     fun execute(arguments: Map<String, Any?>): BrowserOutcome = session.execute(arguments)
-    /** Compatibility entry point: a request, never an assertion that native I/O has drained. */
+    /** 请求清理资源；原生 I/O 的结束由等待接口确认。 */
     override fun close() { closeWithResult() }
 
     /** Nonblocking. Repeated calls retry rejected queues/file deletion, never native destroy. */

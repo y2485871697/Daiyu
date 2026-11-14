@@ -18,9 +18,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real contextual adapter + both SQLite stores + Android image inspector/private file store.
- * Only HTTP is replaced. Run explicitly as targeted instrumentation; no live provider charges.
- */
+/** 用 HTTP 替身检查上下文适配器、两个 SQLite 存储、图片检查器和私有文件存储。 */
 @Suppress("DEPRECATION")
 class RunGenerationToolsDeviceTest : InstrumentationTestCase() {
     private val fixtures = mutableListOf<Fixture>()

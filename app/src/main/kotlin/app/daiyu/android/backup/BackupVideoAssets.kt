@@ -12,7 +12,7 @@ interface BackupVideoAssets {
     fun restore(owner: MessageVideoOwner, references: List<MessageVideoReference>, contents: List<ByteArray>)
 }
 
-/** Uses the host's existing app-scoped store; no second root, draft access, or independent lock. */
+/** 为备份读取、校验和恢复已归属消息的视频，复用宿主的私有存储与锁，不访问草稿。 */
 class MessageVideoBackupAssets(private val store: VideoAssetStore) : BackupVideoAssets {
     override fun read(owner: MessageVideoOwner, reference: MessageVideoReference): ByteArray {
         require(reference.owner == owner && reference.bytes in 1..NeutralBackupService.MAX_BYTES)

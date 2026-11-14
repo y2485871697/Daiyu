@@ -15,7 +15,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Transaction/manifest integration with an explicit fake asset capability, not decoder evidence. */
+/** 用资产接口替身检查事务与视频清单的集成。 */
 @Suppress("DEPRECATION")
 class NeutralVideoBackupTest : InstrumentationTestCase() {
     private val databases = mutableListOf<Pair<Context, ConversationDatabase>>()

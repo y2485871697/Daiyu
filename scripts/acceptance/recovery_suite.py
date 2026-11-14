@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline recovery evidence wiring. No execution, dispatch, build or download."""
+"""离线核对恢复测试证据的关联。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -34,9 +34,9 @@ P = "app.daiyu.android.PlatformTest#"
 C = "app.daiyu.android.ControllerRuntimeWiringTest#"
 R = "app.daiyu.android.storage.RuntimeStorageTest#"
 D = "app.daiyu.android.domain.runtime.RunnerCheckpointTest#"
-# Reviewed assertion-level support, never a class-presence wildcard. All are
-# partial: offline source digests and collector self-reports do not establish
-# trusted compiled provenance. Device/UI/performance coverage is not inferred.
+# 按已审查的具体断言匹配支持项，不按整个测试类放行。
+# 源码摘要和采集器自报只提供部分材料，
+# 二进制来源及设备、界面、性能结果需另行核验。
 SUPPORT = MappingProxyType({
     "AC-001": (("instrumentation", P+"testPersistenceRecoveryAndDraftIsolation"),),
     "AC-002": (("instrumentation", P+"testPersistenceRecoveryAndDraftIsolation"),),
@@ -61,9 +61,9 @@ SUPPORT = MappingProxyType({
     "AC-075": (("python", "test_recovery_suite.RecoverySuiteTests#test_mapping_cannot_be_rebound"),),
 })
 FULL_ASSERTIONS = frozenset()
-# Historical reviewed input identity only, NOT trusted compiled provenance.
-# Neither these bytes in an archive nor compiled_assertion_sha256 self-report
-# binds the executed binary to source. No current source can grant full credit.
+# 固定已审查的历史输入；执行二进制与源码的对应关系需独立核验。
+
+
 DRAFT_ASSERTION_SHA256 = "b099416bb1d584558c8b5754e687f1a999b8842aafa0010ec60dbb5ce58a2203"
 # User-confirmed self-developed behavior: retain and test, not a license finding
 # or proof of execution. These additive gaps do not rename the original 81 IDs.
@@ -447,8 +447,8 @@ def source_results(files, source, run, jobs, sha, attempt):
         require(kind == "instrumentation", "unexpected_assertion_source")
         assertion_raw = files.read(source["assertion_source"])
         assertion_digest = digest(assertion_raw)
-        # Legacy field name: compare local self-reported bytes only. This is
-        # not a trusted claim that any executed binary compiled this source.
+        # 保留旧字段名，仅比较本地自报字节，
+        # 执行二进制的源码来源需另行核验。
         require(receipt.get("compiled_assertion_sha256") == assertion_digest, "compiled_assertion_mismatch")
         # An approved whole test class cannot be reduced to our single selector
         # in the receipt inventory. This only enumerates required execution; it

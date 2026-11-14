@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Text
 
-/** Local usage/context presentation only. Never installs a theme above settings. */
+/** 用量和上下文组件的局部配色，跟随当前应用外观。 */
 internal data class UsagePalette(val dark: Boolean) {
     private val actions = resolveAppearanceActions(dark)
     val primary = resolveSelectionAccent(dark)

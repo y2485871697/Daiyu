@@ -30,9 +30,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
 
-/** Real SQLite/sidecar and private files; synthetic inspector/transport only. No service/network.
- * These tests do NOT claim that synthetic bytes are a decodable Android video.
- */
+/** 用 SQLite、视频附表和私有文件检查发送流程，检查器和传输使用替身。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28])
 class ControllerVideoSendingTest {

@@ -3821,7 +3821,7 @@ class MainActivity : ComponentActivity() {
                 onClick = ::openBrowserDownloadOutputs)
             BrowserDownloadOutputsSurface()
             TerminalComposerEntry()
-            // AC037 dedicated user-initiated actions; no default model WRITE advertisement.
+            // 用户主动发起的系统动作入口，不默认向模型开放写操作。
             PlatformActionComposerEntry(available && !hasImages)
             GenerationSurfaces()
             browserApproval?.let { pending ->
@@ -3878,8 +3878,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // AC037 isolated composer integration: compare the ORIGINAL owner/revision before approval
-    // and before editor clearing. The database consumes that exact draft in sendPrepared's CAS.
+    // 批准动作和清空编辑器前都要核对原始 owner/revision；
+    // sendPrepared 通过数据库 CAS 消费对应草稿。
     private var platformActionVisit by mutableStateOf(Any())
     private fun revokePlatformActionVisit() {
         platformActionVisit = Any()
@@ -8013,8 +8013,8 @@ internal class AndroidVoiceHostPlayer(private val player: AndroidSpeechPlayer) :
     override fun closeStrict() = player.closeStrict()
 }
 
-/** P32-INTEGRATION option 2: retain playback UI, but own every player through a strict gate lease.
- * Production must inject the same gate as dictation; the default exists for isolated legacy tests.
+/** 每个播放器都通过音频租约管理；正式运行需与听写共用同一个 gate。
+ * 默认 gate 仅供独立测试使用。
  */
 internal class VoiceHost(
     private val scope: CoroutineScope,

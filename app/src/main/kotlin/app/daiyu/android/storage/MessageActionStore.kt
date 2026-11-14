@@ -23,10 +23,9 @@ internal data class MessageActionSnapshot(val conversationId: ConversationId, va
     }
 }
 
-/** Local persistence only. No provider, runner recovery, tool invocation or asset deletion.
- * Caller serializes this with controller admission. SQLite owns the final history/binding CAS.
- * Asset copies may leave private unreferenced orphans after a rollback; never delete originals
- * on an unknown commit, and never share a message-owned image directory with a branch. */
+/** 消息操作的本地持久化入口，调用方须与控制器请求准入串行化，最终历史和绑定由 SQLite 做 CAS。
+ * 资产复制回滚后可能留下未引用副本；提交结果不明时保留原件，分支使用独立图片目录。
+ */
 internal class MessageActionStore(private val database: ConversationDatabase,
     private val context: ContextService, private val images: MessageImageAssetStore,
     private val videos: app.daiyu.android.backup.BackupVideoAssets? = null,

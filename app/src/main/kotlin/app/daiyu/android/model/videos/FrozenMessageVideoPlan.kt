@@ -11,10 +11,8 @@ import app.daiyu.android.model.images.FrozenMessageImagePlan
 import app.daiyu.android.storage.ModelSettings
 import org.json.JSONObject
 
-/** A deliberately small Responses-only sidecar. References must be loaded from accepted message
- * rows, not drafts, previews, raw protocol JSON or a provider URI. Existing domain image/text
- * blocks stay unchanged. Videos are appended in list order after that row's text/image blocks.
- * The parent is responsible for supplying EVERY retained video row, including history segments.
+/** 视频引用来自已接收消息行，按顺序附在该行文字和图片后，原块保持不变。
+ * 宿主提供完整保留历史中的视频，包括历史分段，排除草稿和供应商 URI。
  */
 class MessageVideoInput(val owner: MessageVideoOwner, references: List<MessageVideoReference>) {
     val references: List<MessageVideoReference> = java.util.Collections.unmodifiableList(references.toList())

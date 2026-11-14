@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Dedicated command I/O/lifecycle regressions. Source added only; not compiled or run here. */
+/** 子任务命令 IO 与生命周期回归测试。 */
 class RetainedChildTasksCommandIoTest {
     private class Journal : ChildTaskStore {
         private val rows = linkedMapOf<String, ChildTaskRecord>()

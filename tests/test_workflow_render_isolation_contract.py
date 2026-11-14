@@ -1,4 +1,4 @@
-"""Rendering propagation guards; runtime frame acceptance remains device-only."""
+"""检查工作流渲染更新传播的源码连接。"""
 from pathlib import Path
 import unittest
 

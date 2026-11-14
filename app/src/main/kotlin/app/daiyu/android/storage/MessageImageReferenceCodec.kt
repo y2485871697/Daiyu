@@ -8,12 +8,8 @@ import app.daiyu.android.media.MessageImageReference as AssetReference
 import org.json.JSONObject
 import org.json.JSONTokener
 
-/**
- * Closed v1 reference wire format, identical to the message asset store's toJson().
- * No original bytes, draft handle, URI or permission grant are serialized.
- *
- * This codec does not publish assets or prove their existence. Callers must validate the
- * reference owner against the persisted message identity and use the asset resolver to read.
+/** 与消息资产库 toJson() 一致的 v1 引用格式，仅保存元数据。
+ * 读取前按持久消息身份校验所有者，再由资产解析器核实并打开原件。
  */
 object MessageImageReferenceCodec {
     private val fields = setOf("version", "conversation", "message", "id", "mime", "bytes", "sha256", "width", "height")

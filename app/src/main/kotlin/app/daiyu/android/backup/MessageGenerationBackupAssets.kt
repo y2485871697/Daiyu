@@ -3,9 +3,8 @@ package app.daiyu.android.backup
 import app.daiyu.android.media.MessageGenerationAssets
 import app.daiyu.android.storage.GenerationOutputReference
 
-/** Resolves the host's EXISTING account/owner-fenced reader, never constructs a new gate.
- * This capability has no commit/register/reserve/restore API. No database access inside read:
- * the parent holds its backup acceptance lock and has already selected persisted rows. */
+/** 通过宿主按账号和所有者校验的读取器，为备份读取并核对生成原件。
+ * 调用方先在备份接收锁内选定持久化记录；read 内只复用读取器，不访问数据库。 */
 class MessageGenerationBackupAssets(
     private val resolve: (GenerationOutputReference) -> MessageGenerationAssets,
 ) : BackupGenerationAssets {

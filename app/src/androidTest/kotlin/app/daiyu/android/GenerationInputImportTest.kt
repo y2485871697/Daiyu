@@ -5,8 +5,7 @@ import app.daiyu.android.media.AndroidImageInspector
 import app.daiyu.android.model.generation.*
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real Android decode + unchanged client preflight. All media are static local fixtures;
- * HTTP is a tripwire, never a network connection. No paid call, URI grant, DB, or encoding. */
+/** 用静态本地媒体检查 Android 解码和客户端预检；若流程尝试调用 HTTP，则立即使测试失败。 */
 @Suppress("DEPRECATION")
 class GenerationInputImportTest : InstrumentationTestCase() {
     private val png get() = app.daiyu.android.validDeviceTestPng()

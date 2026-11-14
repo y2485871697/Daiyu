@@ -1,4 +1,4 @@
-"""Full statistics wiring guards. Android persistence regressions remain batch-gated."""
+"""检查完整用量统计的源码连接。"""
 from pathlib import Path
 import re
 import sqlite3

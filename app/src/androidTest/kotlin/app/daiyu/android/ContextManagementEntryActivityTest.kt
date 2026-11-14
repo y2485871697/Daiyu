@@ -10,8 +10,7 @@ import app.daiyu.android.context.SummaryProfileDescriptor
 import kotlinx.coroutines.flow.MutableStateFlow
 import app.daiyu.android.domain.*
 
-/** Real Main chat action/route and real read-only production worker, with isolated fixture DB.
- * No real provider, credentials, paid request, or manual-compression transport is exercised here. */
+/** 用隔离数据库检查 Main 上下文入口、路由和只读工作线程。 */
 @Suppress("DEPRECATION")
 class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     private fun seedAndSelect(): Conversation {

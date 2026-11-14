@@ -1,4 +1,4 @@
-"""Event boundaries for real Android regressions; this suite does not execute Android."""
+"""检查 Android 回归用例中事件完成条件的源码。"""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

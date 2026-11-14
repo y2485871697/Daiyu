@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""CI-only unittest transcript/receipt capture; not business acceptance.
+"""在 CI 中运行 unittest 并记录原始输出和回执。
 
-The final offline entry never invokes this producer. Missing/interrupted
-execution must stay missing, not turn into a synthetic success receipt.
+离线交付审查不调用此脚本；执行未完成时不生成成功回执。
 """
 from __future__ import annotations
 

@@ -17,7 +17,7 @@ import app.daiyu.android.domain.haptics.HapticPort
 import app.daiyu.android.domain.haptics.HapticRequest
 import app.daiyu.android.domain.haptics.HapticSettings
 
-/** Source-only instrumentation regressions. Ports record calls; no real vibrator or model is used. */
+/** 检查 Activity 振动宿主，振动和模型端口只记录调用。 */
 @Suppress("DEPRECATION")
 class HapticsActivityHostTest : InstrumentationTestCase() {
     private class Owner : LifecycleOwner {

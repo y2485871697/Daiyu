@@ -42,7 +42,7 @@ internal enum class StaticGenerationSettlement {
     UNKNOWN,
 }
 
-/** Includes a refresh locator, not an invitation to repeat a branch/tool request. */
+/** 携带发布结果未知时的刷新定位信息；保留此身份用于查询，避免重放分支或工具请求。 */
 internal class StaticGenerationPublicationUnknown(val identity: String) :
     RuntimeException("Static publication outcome UNKNOWN; retain destination and refresh")
 

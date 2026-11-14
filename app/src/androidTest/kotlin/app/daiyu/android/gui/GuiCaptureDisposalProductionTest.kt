@@ -49,8 +49,8 @@ class GuiCaptureDisposalProductionTest : InstrumentationTestCase() {
                 assertFalse(session.releaseConfirmed)
                 assertEquals(0, terminalReceipts)
             } finally {
-                // Test teardown actually disposes the remaining fake resource. This is NOT a
-                // production retry, timeout release, or a direct resourcesDisposed injection.
+                // 测试结束时释放剩余的资源替身。
+                
                 fail = false
                 cleanup()
             }

@@ -1,4 +1,4 @@
-"""Switch colour wiring only; Android pixel methods run in the approved UI batch."""
+"""检查设置开关强调色的源码配置。"""
 from pathlib import Path
 import unittest
 

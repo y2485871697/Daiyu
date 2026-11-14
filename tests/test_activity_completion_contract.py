@@ -1,4 +1,4 @@
-"""Source guards for real-Activity completion boundaries, not device execution evidence."""
+"""检查 Activity 完成状态的源码处理边界。"""
 from pathlib import Path
 import unittest
 

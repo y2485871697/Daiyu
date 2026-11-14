@@ -6,7 +6,7 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Synthetic wire fixtures, not a claim of live-provider or physical audibility testing. */
+/** 用合成协议数据检查双工通话。 */
 class DoubaoDuplexFixtureTest {
     private class Wire : DuplexTransport {
         lateinit var listener: DuplexTransport.Listener

@@ -9,8 +9,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ControllerMcpPreparation
 
-/** Submission status only. The original task submit calls the controller send gate directly;
- * composition never simulates an approval click. No secret-bearing config is interpolated.
+/** 展示本轮 MCP 调用的提交状态；提交由原任务直接调用控制器发送入口。
+ * 展示字段排除含密钥的配置。
  */
 @Composable internal fun McpApprovalHost(pending: ControllerMcpPreparation, onCancel: () -> Unit) {
     val server = pending.scope.settings.servers.single { it.id == pending.selection.serverId }

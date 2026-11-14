@@ -15,8 +15,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real parent monitor, Preparation, executor and SQLite. Injected backends below are only
- * cancellation/drain probes; they are NOT evidence of a real paid summary transport. */
+/** 检查 Controller 锁、Preparation、执行器和 SQLite 的协作。
+ * 注入后端用于控制取消和退出时序。 */
 @Suppress("DEPRECATION")
 class ControllerContextManagementEntryTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() {

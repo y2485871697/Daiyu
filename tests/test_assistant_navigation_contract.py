@@ -1,4 +1,4 @@
-"""Assistant source contracts; device regressions await the next approved build."""
+"""检查助手页面导航的源码连接。"""
 from pathlib import Path
 import unittest
 

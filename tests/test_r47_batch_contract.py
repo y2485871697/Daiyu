@@ -1,4 +1,4 @@
-"""Source wiring for R46 follow-ups; Android assertions still require real execution."""
+"""检查 R46 后续修复的源码连接。"""
 from pathlib import Path
 import unittest
 

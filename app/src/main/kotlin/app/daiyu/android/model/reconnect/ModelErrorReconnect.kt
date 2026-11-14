@@ -6,9 +6,9 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/** Port of the retained f001fb82 ModelErrorReconnect budget/segment algorithm (blob
- * 7a2460989b2081f51d750c96b95a74578857ab3d). Only host types/diagnostics are adapted.
- * This is NOT AgentModelRetry: it never opens, posts, retries or executes local tools. */
+/** 移植自 f001fb82 的 ModelErrorReconnect 预算与分段算法
+ * （blob 7a2460989b2081f51d750c96b95a74578857ab3d），管理重连等待和提示，实际请求由 Runner 驱动。
+ */
 internal interface ReconnectTiming {
     fun nowMs(): Long
     fun schedule(delayMs: Long, action: () -> Unit): AutoCloseable

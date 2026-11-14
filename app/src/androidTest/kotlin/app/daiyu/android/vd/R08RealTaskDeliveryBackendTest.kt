@@ -9,7 +9,7 @@ import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/** Opt-in backend proof, not Main/UI/parent-lease acceptance. Unknown operations are never replayed. */
+/** 显式启用的后端测试；结果未知的操作禁止重放。 */
 class R08RealTaskDeliveryBackendTest : InstrumentationTestCase() {
     fun testExplicitNonemptyTaskHandoffReleaseAndOriginalOwnerDrain() { verifyDelivery() }
 

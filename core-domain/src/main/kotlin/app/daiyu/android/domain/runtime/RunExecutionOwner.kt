@@ -3,7 +3,7 @@ package app.daiyu.android.domain.runtime
 import app.daiyu.android.domain.*
 import java.util.UUID
 
-/** One live Runner execution. This token is not a process owner or a ledger reservation owner. */
+/** 标识一次存活的 Runner 执行，与进程所有者和账本预留身份分开。 */
 class RunExecutionOwner private constructor(
     val conversationId: ConversationId,
     val runId: RunId,

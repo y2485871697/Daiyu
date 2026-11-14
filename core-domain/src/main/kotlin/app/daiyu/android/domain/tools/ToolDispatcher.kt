@@ -18,8 +18,7 @@ class ToolDispatcher(
     private val session: SessionCapabilities,
     private val ledger: ToolLedger
 ) {
-    /** Only call after the model's whole batch has been received and its protocol terminal confirmed.
-     * This class does not implement a stream runner or change existing ModelPort/BatteryTool. */
+    /** 收齐模型整批调用并确认协议成功结束后调用。 */
     fun dispatch(
         task: TaskAuthorization,
         batch: List<ToolInvocation>,

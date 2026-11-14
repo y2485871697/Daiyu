@@ -6,7 +6,7 @@ import java.util.UUID
 
 internal const val GUI_OBSERVATION_TTL_MILLIS = 120_000L
 
-/** Independent host implementation; no imported external host implementation or persistent grants. */
+/** 标识 GUI 操作所属的会话和运行；操作授权由当前租约管理。 */
 internal data class GuiOwner(val sessionId: String, val runId: String) {
     init { require(sessionId.isNotBlank() && runId.isNotBlank()) }
 }

@@ -1,4 +1,4 @@
-"""Source wiring checks only; JVM/Android execution is deliberately deferred for this batch."""
+"""检查 Markdown 逐字显示的源码连接。"""
 from pathlib import Path
 import unittest
 

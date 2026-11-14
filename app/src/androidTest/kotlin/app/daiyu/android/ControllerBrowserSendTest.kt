@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real parent controller/SQLite/tickets. No replacement browser factory or fabricated acceptance. */
+/** 检查浏览器发送流程中的 Controller、SQLite 和发送票据。 */
 @Suppress("DEPRECATION")
 class ControllerBrowserSendTest : InstrumentationTestCase() {
     private lateinit var fixture: RunControlFixture
@@ -260,7 +260,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         }
         await(done)
         await(session.entered) // The runner starts after receipt publication on the same worker.
-        // This is an ordinary text send using the existing model fixture, NOT browser acceptance.
+        // 使用已有模型替身发送普通文本。
         assertTrue(result.get() is ChatController.TextSendResult.Accepted)
         assertEquals(2, fixture.database.messages((result.get() as ChatController.TextSendResult.Accepted).conversation.id).size)
         assertEquals(1, modelFactories.get())

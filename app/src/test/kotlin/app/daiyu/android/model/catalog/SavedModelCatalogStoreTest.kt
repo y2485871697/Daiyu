@@ -16,7 +16,7 @@ class SavedModelCatalogStoreTest {
     private val remote = listOf(RemoteModel("existing", "Remote renamed"), RemoteModel("add", "New"), RemoteModel("skip"))
     private fun selection() = ModelSelectionState.capture("provider", 4, remote)
 
-    /** Test transaction adapter, not a claimed production persistence implementation. */
+    /** 供存储测试使用的事务适配器。 */
     private class MemoryPersistence(initial: SavedModelCatalogSnapshot<LocalSettings>) : SavedModelCatalogPersistence<LocalSettings> {
         var snapshot = initial
         var reads = 0

@@ -12,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/** Exercises the real MainActivity routes + SQLite adapter, not a replacement setContent host. */
+/** 检查 MainActivity 的搜索路由和 SQLite 适配器。 */
 class SearchHostActivityTest : WiredActivityTestCase() {
     private fun replaceSearchQuery(query: String) {
         node("search:query")

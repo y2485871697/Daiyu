@@ -12,9 +12,8 @@ import app.daiyu.android.storage.StaticGenerationProvenance
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Codec for a distinct read-only kind. Production branch and complete-package v5 use this
- * same codec; v4 runtime_usage_history is unchanged. Schema installation belongs to the host's
- * existing BackupHistoryRows.install, never to a copied helper or a live attempt registration.
+/** 编解码静态生成结果，供会话分支和 v5 完整备份共用；v4 runtime_usage_history 格式保持不变。
+ * 表结构由宿主通过 BackupHistoryRows.install 安装，静态结果按只读历史保存。
  */
 internal object StaticGenerationCodec {
     const val KIND = "generation_static_output"
@@ -123,9 +122,8 @@ internal object StaticGenerationCodec {
         require(names == listOf(d.toolName)) { "Static destination lacks exact historical tool source" }
     }
 
-    /** Existing neutral_backup_history schema must be provisioned by the host. No helper/version
-     * ownership here. Call INSIDE T2 after messages exist, and again verify AFTER the last write.
-     * Idempotent insertion requires complete typed equality; never replace an existing slot.
+    /** 宿主须先安装 neutral_backup_history 表，并在 T2 事务内、消息写入后调用。
+     * 最后一次写入后重新校验；重复插入仅接受字段类型和值完全一致的记录，不替换已有位置。
      */
     fun saveInTransaction(db: SQLiteDatabase, value: StaticGenerationOutput, messages: JSONArray) {
         check(db.inTransaction())

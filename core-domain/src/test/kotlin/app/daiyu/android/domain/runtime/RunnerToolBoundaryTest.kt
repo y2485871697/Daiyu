@@ -9,7 +9,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
-/** Boundary tests use only in-memory ports and bounded latches; no device or I/O side effects. */
+
 class RunnerToolBoundaryTest {
     private val initial = Message(MessageId("assistant-1"), ConversationId("conversation-1"),
         RunId("run-1"), "assistant", emptyList(), RunStatus.RUNNING)
@@ -311,7 +311,7 @@ class RunnerToolBoundaryTest {
             httpExecutions++; ExecutionReceipt.Confirmed("must not run")
         }).snapshot()
         // Test bridge only: semantic normalization/reservation is the production ledger's job.
-        // This in-memory journal is neither a production authorization adapter nor durable storage.
+        
         fun journal(): ToolExecutionJournal {
             val ledger = ToolLedger(ledgerStore)
             val pending = mutableMapOf<ToolCallId, LedgerEntry>()

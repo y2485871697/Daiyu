@@ -9,8 +9,9 @@ import java.nio.file.Files
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/** Blocking entrypoints: invoke off the main thread. Process handles survive registry close,
- * not app restart. This adapter does not replace the reviewed LongShell/Linux path mapper. */
+/** 管理终端会话、命令任务及其进程句柄；阻塞入口须在非主线程调用。
+ * registry 关闭后仍保留进程句柄，应用重启后失效；路径映射由 LongShell/Linux 映射器负责。
+ */
 class TerminalRegistry(context: Context) : AutoCloseable {
     private val context=context.applicationContext
     private var configuration=TerminalConfiguration()

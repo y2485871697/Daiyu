@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a pinned local cloud-regression snapshot; no network or execution.
-
-This proves internal consistency of supplied bytes, NOT trusted collection or
-business acceptance. The normalized snapshot format is documented separately.
-"""
+"""校验固定的本地云回归快照中各项数据是否一致；快照来源由调用方核验。"""
 from __future__ import annotations
 
 import hashlib

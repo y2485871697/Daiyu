@@ -23,11 +23,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Real parent database/complete-backup callbacks and SQLite transactions, unlike the callback
- * doubles in NeutralVideoBackupTest. Only original-asset capabilities are fakes: these byte arrays
- * are NOT playable videos/images, and this is NOT evidence of device codecs or VideoAssetStore.
- * No model, network, clock ordering or thread sleeps are involved.
- */
+/** 检查父数据库、完整备份回调和 SQLite 事务，原件存储能力使用替身。 */
 @Suppress("DEPRECATION")
 class VideoBackupDatabaseIntegrationTest : InstrumentationTestCase() {
     private data class Fixture(val context: Context, var db: ConversationDatabase)

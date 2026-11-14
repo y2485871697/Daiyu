@@ -1,4 +1,4 @@
-"""Source wiring only; Android regressions are not executed by this suite."""
+"""检查浏览器手动操作状态的源码连接。"""
 from pathlib import Path
 import unittest
 

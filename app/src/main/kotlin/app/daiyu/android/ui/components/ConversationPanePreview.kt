@@ -4,9 +4,8 @@ import app.daiyu.android.ui.app.LocalAppearanceDark
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-/** Scoped final preview tokens: .glass-drawer and .drawer-* (style-00.css 234–300).
- * CSS #RRGGBBAA is deliberately converted to Compose #AARRGGBB, not made opaque.
- * Typography and control sizes are tuned separately for device readability.
+/** 抽屉配色取自 .glass-drawer 和 .drawer-*（style-00.css 234–300）。
+ * CSS 的 #RRGGBBAA 转为 Compose 的 #AARRGGBB，保留原透明度。
  */
 internal data class ConversationPanePreviewPalette(val dark: Boolean) {
     val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)

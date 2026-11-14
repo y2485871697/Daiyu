@@ -4,8 +4,7 @@ import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.RunStatus
 import java.util.UUID
 
-/** Retained independent runtime. Serialized transitions; asynchronous paths check their generation.
- * Owns neither the main agent nor a credential/session repository. Store failure is fail-closed. */
+/** 宠物状态转换串行执行，异步结果检查代次，存储失败时停止后续操作。 */
 class PetController(
     private val store: PetStore, private val model: PetModelPort,
     private val scheduler: PetScheduler, private val clock: PetClock,

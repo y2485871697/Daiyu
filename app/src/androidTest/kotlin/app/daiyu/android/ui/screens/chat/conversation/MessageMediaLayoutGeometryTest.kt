@@ -27,7 +27,7 @@ import app.daiyu.android.ui.media.LocalOpenChatMediaPreview
 import top.yukonga.miuix.kmp.basic.Text
 import kotlin.math.abs
 
-/** Cloud/device geometry declarations; no emulator or local build is required to author these. */
+/** 检查消息媒体在设备上的布局尺寸和位置。 */
 class MessageMediaLayoutGeometryTest : WiredActivityTestCase() {
     private val owner = MessageImageOwner("layout-chat", "layout-message")
     private var density = 1f

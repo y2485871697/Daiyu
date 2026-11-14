@@ -66,7 +66,7 @@ data class CompressionPolicy(val enabled: Boolean = false, val contextTokens: Lo
     }
 }
 
-/** Deliberately an estimate, never presented as provider usage. UTF-8 bytes is conservative. */
+/** 按 UTF-8 字节数保守估算上下文大小，显示时与供应商用量区分。 */
 fun estimateTokens(messages: List<Message>): Long = MessageHistory.expand(ModelHistory.project(messages)).sumOf { m ->
     16L + m.blocks.sumOf { b -> when (b) {
         is MessageBlock.Text -> b.text.toByteArray(Charsets.UTF_8).size.toLong()

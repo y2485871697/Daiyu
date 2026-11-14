@@ -2,13 +2,7 @@ package app.daiyu.android.model
 
 import org.json.JSONObject
 
-/**
- * The service tier selected for an OpenAI GPT request.
- *
- * A null mode is deliberate: it means that this feature is not selected and the
- * request must retain the caller's existing service_tier policy (including no
- * service_tier at all).
- */
+/** OpenAI GPT 请求的服务档位；null 表示保留请求原有的 service_tier，包括未设置。 */
 enum class GptSpeedMode {
     NORMAL,
     FAST,
@@ -22,15 +16,7 @@ enum class GptSpeedMode {
         }
 }
 
-/**
- * Applies the opt-in GPT service tier to a fully merged request body.
- *
- * This helper intentionally receives the final JSON model rather than a model
- * setting. Consequently custom-body/model merging is complete before the
- * decision is made, and a non-GPT provider cannot acquire an OpenAI-only field.
- * It does not alter model/reasoning fields and never performs fallback or
- * retry behaviour on a service error.
- */
+/** 按合并后 JSON 中的最终模型应用 GPT 服务档位，避免给非 GPT 模型添加此字段。 */
 internal object GptServiceTier {
     /**
      * Add or replace `service_tier` only for an explicit mode and a GPT model.

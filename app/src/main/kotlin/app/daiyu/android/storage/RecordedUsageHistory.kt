@@ -7,7 +7,7 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.usage.AttributedRequestUsage
 import app.daiyu.android.domain.usage.UsageOrigin
 
-/** Inert observations only. No runtime state, lease, continuation, revision or recovery entry point. */
+/** 已记录的历史用量，与可恢复执行状态分开保存。 */
 internal object RecordedUsageHistory {
     const val PARENTS = "recorded_usage_checkpoints"
     const val REQUESTS = "recorded_usage_requests"

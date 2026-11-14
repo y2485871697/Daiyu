@@ -10,7 +10,7 @@ import java.io.File
 import java.security.KeyStore
 import java.util.UUID
 
-/** Source added for the parent's unified device batch. No network, microphone or paid calls. */
+/** 通过离线数据检查语音宿主的设备端行为。 */
 @Suppress("DEPRECATION")
 class VoiceProductionHostDeviceTest : InstrumentationTestCase() {
     private lateinit var context: Context

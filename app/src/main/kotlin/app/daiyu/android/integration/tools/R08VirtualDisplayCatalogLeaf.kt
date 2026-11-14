@@ -9,7 +9,7 @@ import app.daiyu.android.vd.OwnerRunBinding
 import app.daiyu.android.vdapproval.VirtualDisplayApproval
 import org.json.JSONObject
 
-/** Small seam around the EXISTING client; no alternate dispatcher, transport or owner runtime. */
+/** 封装虚拟显示宿主的启动、客户端调用和生命周期观察，供目录工具复用同一宿主与客户端。 */
 internal interface R08VirtualDisplayEndpoint {
     fun start(generation: String, binding: OwnerRunBinding): Boolean
     fun initialize(): OwnerReply

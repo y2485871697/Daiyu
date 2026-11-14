@@ -1,4 +1,4 @@
-"""Window wiring guards; actual composited-pixel regressions await the approved batch."""
+"""检查预览对话框与状态栏的窗口源码配置。"""
 from pathlib import Path
 import unittest
 

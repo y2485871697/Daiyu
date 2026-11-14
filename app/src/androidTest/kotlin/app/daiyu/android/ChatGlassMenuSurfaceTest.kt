@@ -208,7 +208,7 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
     }
 
     private fun rendererCount(context: ShadowContext): Int {
-        // Fixed 1.9.0 implementation: inspect the actual native cache, not a draw-count proxy.
+        // 针对固定的 1.9.0 实现，直接检查原生缓存。
         val field = context.javaClass.getDeclaredField("dropShadowCache").apply { isAccessible = true }
         return (field.get(context) as? MutableScatterMap<*, *>)?.size ?: 0
     }

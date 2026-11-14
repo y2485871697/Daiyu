@@ -18,16 +18,10 @@ internal data class SavedModelCatalogSnapshot<T>(
 internal enum class CatalogCommitResult { COMMITTED, STALE, CANCELLED, FAILED }
 
 /**
- * Adapter to the host's durable registry, NOT a new provider registry or identity allocator.
- *
- * compareAndAppend is the transaction/linearization boundary. In ONE atomic operation it must:
- * - recheck that this is still the same live providerIdentity and expectedRevision;
- * - check cancellation before committing, preserve every old record byte-for-byte, append only
- *   additions, and advance the revision (all registry edits must advance that revision);
- * - leave durable AND published/in-memory state unchanged on STALE, CANCELLED, FAILED or throw.
- * It must not select a current model or save/replace ModelSettingsStore's active settings.
- * A read + unconditional save is not a valid implementation of this contract. Cancellation after
- * the transaction has committed is a success, not a failed import that supposedly wrote nothing.
+ * 宿主目录存储接口，compareAndAppend 在一个原子操作中复查供应商身份和 expectedRevision。
+ * 提交前检查取消，原样保留旧记录，仅追加新记录并推进修订号；所有目录编辑都推进该号。
+ * 失败、过期、取消或抛错时保留持久及已发布状态；提交后的取消仍报告成功。
+ * 导入保持当前模型及活动设置不变。先读取再无条件保存不满足原子提交要求。
  */
 internal interface SavedModelCatalogPersistence<T> {
     fun read(providerIdentity: String): SavedModelCatalogSnapshot<T>?
@@ -47,12 +41,8 @@ internal sealed interface CatalogImportResult {
     data object Failed : CatalogImportResult
 }
 
-/**
- * Append-only import coordinator. It has no network, default providers, current-model switching,
- * or credential storage. Construct new local settings only for selected IDs absent from the local
- * snapshot; existing settings (including name, capabilities and request overrides) are untouched.
- * The host supplies both persistence and its normal new-model defaults factory. The factory
- * must be side-effect free and return a detached record; it is not a save/registration callback.
+/** 只为选中且本地不存在的 ID 创建记录，已有名称、能力和请求配置保持不变。
+ * 宿主提供存储和无副作用的默认值工厂，工厂返回独立记录，保存与注册由提交步骤处理。
  */
 internal class SavedModelCatalogStore<T>(
     private val persistence: SavedModelCatalogPersistence<T>,

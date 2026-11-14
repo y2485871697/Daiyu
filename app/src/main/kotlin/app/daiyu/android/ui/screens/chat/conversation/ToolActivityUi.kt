@@ -4,7 +4,7 @@ import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.runtime.ExecutionPhase
 import app.daiyu.android.domain.runtime.ToolDisposition
 
-/** Display only. No transition here changes a runner, child or tool authorization. */
+/** 将工具回执和运行阶段映射为界面上的活动状态。 */
 enum class ToolActivityUi(val label: String) {
     PENDING("待派发"), QUEUED("排队中"), PREPARING("准备中"), READING("读取结果"), RUNNING("执行中"), WAITING("等待回答"),
     PAUSING("暂停中"), PAUSED("已暂停"), STOPPING("停止中"), STOPPED("已停止"), INTERRUPTED("已中断"),

@@ -1,4 +1,4 @@
-"""Source contracts only; device rendering and Kotlin checks await the approved batch."""
+"""检查终端弹层样式的源码配置。"""
 from pathlib import Path
 import unittest
 

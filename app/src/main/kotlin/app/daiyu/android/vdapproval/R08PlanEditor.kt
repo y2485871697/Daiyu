@@ -15,9 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
-/** Independent embeddable editor: neither Activity/Manifest hookup nor a parallel runtime.
- * Parameters below really become frozen host inputs. Final authorization is ONLY the existing
- * VirtualDisplayApprovalScreen after durable acceptance/reservation with the actual run owner.
+/** 编辑并冻结副屏动作计划，通过 onFrozen 将固定参数交给宿主。
+ * 宿主先按实际运行归属完成持久接收与预留，再交由 VirtualDisplayApprovalScreen 批准。
  */
 @Composable
 internal fun R08PlanEditor(

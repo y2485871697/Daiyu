@@ -1,4 +1,4 @@
-"""Source guards; actual picker geometry still requires the exact-SHA Android run."""
+"""检查助手选择器边框和布局的源码配置。"""
 from pathlib import Path
 import unittest
 

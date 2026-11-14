@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize twenty isolated cold-process captures, not pure app startup or AC acceptance."""
+"""汇总二十次独立冷进程采集记录。"""
 from __future__ import annotations
 
 import hashlib

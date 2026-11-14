@@ -7,10 +7,8 @@ import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.security.MessageDigest
 
-/** Immutable origin evidence, NOT an attempt, a live receipt, or permission to execute a tool.
- * Capture only after the host has selected an authoritative registered/readonly source. The
- * destination asset store independently verifies the original bytes; scalar validity alone is
- * never proof that the caller owns or can read a source. There is no toLiveReference method.
+/** 宿主选定已登记或只读来源后捕获的固定来源信息。
+ * 读取权限另行校验，目标资产库独立核验原件；工具执行使用独立授权。
  */
 internal data class StaticGenerationProvenance(
     val accountScope: String,

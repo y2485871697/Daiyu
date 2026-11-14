@@ -6,9 +6,7 @@ import app.daiyu.android.integration.tools.*
 import app.daiyu.android.tasksurface.*
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real Controller entry/send gates with the production decision/store and memory-only settings.
- * No accessibility grant, display process, model request or actual user preference is touched.
- * These sources must be run by the integrating agent; their presence is not execution evidence. */
+/** 用内存设置检查 Controller 入口、发送门控及任务界面决策。 */
 @Suppress("DEPRECATION")
 class ControllerTaskSurfaceHostTest : InstrumentationTestCase() {
     private fun gui(f: RunControlFixture, target: String? = null): ControllerGuiEntry {

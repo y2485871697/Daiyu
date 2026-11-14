@@ -50,7 +50,7 @@ internal class ControllerShizukuPreparation internal constructor(
         claimOpen()
         return CatalogShizukuBinding.open(session, access)
     }
-    /** Production transport seam only; tests never connect to Android or execute a command. */
+    /** 通过传入的连接工厂打开 Shizuku 后端。 */
     internal fun open(connect: (Int, String) -> ShizukuBackend): CatalogShizukuBinding {
         claimOpen()
         return CatalogShizukuBinding.open(session, connect)

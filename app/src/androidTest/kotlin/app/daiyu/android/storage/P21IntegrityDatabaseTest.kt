@@ -11,8 +11,7 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.testContext
 import java.util.UUID
 
-/** Real SQLite storage-class corruption, not a permissive codec or synthesized zero Usage.
- * Source fixtures only; execution requires the Android instrumentation runner. */
+/** 直接写入错误的 SQLite 存储类型，检查用量读取的完整性校验。 */
 @Suppress("DEPRECATION")
 class P21IntegrityDatabaseTest : InstrumentationTestCase() {
     private lateinit var context: android.content.Context

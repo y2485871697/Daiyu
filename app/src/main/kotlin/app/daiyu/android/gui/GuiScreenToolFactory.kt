@@ -6,9 +6,9 @@ import app.daiyu.android.domain.tools.*
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Catalog leaf only. Register in the EXISTING registry/dispatcher/ledger; no alternate executor.
- * screen reads are bounded by explicit UI approval; screen_action has an exact WRITE effect.
- * The fixed-effect catalog cannot safely combine reads and writes under one polymorphic definition.
+/** 为工具目录提供 screen 读取工具和 screen_action 操作工具，共用目录的派发与账本。
+ * 读取次数受界面批准的额度限制，操作需要批准精确的 WRITE effect。
+ * 目录中每个工具的读写类型固定，因此读取与操作分别注册。
  */
 internal object GuiScreenToolFactory {
     const val CAPABILITY = "gui.accessibility"

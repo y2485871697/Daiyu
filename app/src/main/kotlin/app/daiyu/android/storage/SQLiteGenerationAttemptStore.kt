@@ -42,15 +42,9 @@ class GenerationAttemptBinding(
     override fun toString() = "GenerationAttemptBinding(<redacted>)"
 }
 
-/**
- * Uses ONLY the injected application database, whose lifetime, private path, encryption/backup
- * policy and schema version belong to the host. [installSchema] must run in its migration.
- * Transaction-end failure closes the borrowed database; recovery belongs to the host supplier.
- * No lazy database, network I/O, asset publication, logging, reset or automatic retry exists here.
- *
- * Tombstones deliberately have no cascading FK: deleting/recreating a message must not reopen
- * its attempt. The host may purge private outcomes under a separate retention policy, but must
- * retain the identity/fingerprint tombstones while that account scope can reuse an identity.
+/** 使用宿主管理的应用数据库，在迁移事务中调用 [installSchema]。
+ * 结束事务失败时关闭连接，由宿主重新提供。占位记录不设级联外键，避免重建消息后重复发送。
+ * 私有结果可按策略清理，账户仍可能复用身份时保留身份和指纹占位。
  */
 class SQLiteGenerationAttemptStore(
     private val database: () -> SQLiteDatabase,

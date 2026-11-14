@@ -77,8 +77,8 @@ def verify_origin(env, record, directory, record_path, local_apks=None):
     if (str(origin['id']) != run_id or origin['head_sha'] != sha or
             origin['repository_id'] != 1434933237):
         raise ValueError('Wrong source artifact owner')
-    # Existing strict source checks apply to the original pair. Actual check revision and
-    # changes are independently verified above; no mixed-pair record is passed as an original.
+    # 原 APK 对按源构建记录校验；当前验证版本和变更已在上方单独核验。
+    
     source_env = dict(env, GITHUB_SHA=sha, SOURCE_VARIANT='compile')
     verify_source(source_env, record, source_run, jobs, [])
     source_binding = verify_archive(matches[0], directory, record_path, record, local_apks=local_apks)

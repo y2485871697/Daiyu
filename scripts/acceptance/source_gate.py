@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, fail-closed local source binding; not an APK or business verdict."""
+"""只读核验本地源码身份和工作区状态，无法确认时拒绝绑定。"""
 from __future__ import annotations
 
 import argparse

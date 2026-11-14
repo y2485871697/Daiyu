@@ -48,8 +48,7 @@ class AssistantRunContext private constructor(
                 profile.enabledSkillIds, snapshot?.revision, port)
         }
 
-        /** Legacy caller-resolved input is bounded too, but grants no read tool or revision.
-         * Parent integration must migrate to the assets overload for on-demand retrieval. */
+        /** 限制调用方提供的记忆长度；需要按版本校验并按需读取时，使用 assets 重载。 */
         fun capture(store: AssistantStore, assistantId: String?, resolvedMemory: String): AssistantRunContext {
             if (assistantId.isNullOrBlank()) throw MissingAssistantBindingException()
             val profile = store.read(assistantId) ?: throw AssistantNotFoundException(assistantId)

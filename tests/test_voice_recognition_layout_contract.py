@@ -1,4 +1,4 @@
-"""Voice settings layout wiring; device rendering waits for the approved batch."""
+"""检查语音识别设置布局的源码配置。"""
 from pathlib import Path
 import unittest
 

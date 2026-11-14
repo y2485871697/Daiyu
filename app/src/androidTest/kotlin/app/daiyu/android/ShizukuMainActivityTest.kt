@@ -5,9 +5,7 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 
-/** Real Activity + real approval host/controller. No device permission request or shell execution.
- * Accepted UI receipts below are explicit DB fixtures, not a claim of real privileged transport.
- */
+/** 检查 Activity、确认宿主和 Controller；Accepted 回执使用数据库测试数据。 */
 class ShizukuMainActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
     private val text = "完整正文\n保留末尾空格  "

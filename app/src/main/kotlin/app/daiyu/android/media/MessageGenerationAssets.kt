@@ -112,8 +112,8 @@ enum class GenerationAssetFailure { CANCELLED, OWNER_REJECTED, IDENTITY_CONFLICT
 class GenerationAssetException(val failure: GenerationAssetFailure) :
     RuntimeException("Generation asset: ${failure.name}")
 
-/** FILE publication only, always awaiting the parent's same-DB reference/receipt transaction.
- * Not a MessageBlock, not a claim that a message/asset database row exists. No provider URLs.
+/** 已发布本地文件的元数据，等待父级在同一数据库事务中提交引用和回执。
+ * 提交后才作为消息资产展示；元数据排除供应商 URL。
  */
 data class PendingGenerationAsset internal constructor(
     val receipt: GenerationAssetReceipt,

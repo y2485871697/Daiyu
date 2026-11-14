@@ -16,8 +16,7 @@ import java.security.cert.Certificate
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 
-/** Real ContextService compaction + provider parser + SQLite lease + real Runner. All HTTPS is
- * an in-memory connection. These are source fixtures, not evidence of executed device tests. */
+/** 用内存 HTTPS 连接检查 ContextService 压缩、响应解析、SQLite 租约和 Runner。 */
 @Suppress("DEPRECATION")
 class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
     private lateinit var context: Context

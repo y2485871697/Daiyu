@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CancellationException
 
-/** Actual parser contracts, not snapshots of a mock renderer. No network or new dependencies. */
+/** 检查 Markdown 解析结果及输入边界。 */
 class MarkdownParserTest {
     private fun text(nodes: List<MarkdownInline>): String = nodes.joinToString("") { node -> when (node) {
         is MarkdownInline.Text -> node.text

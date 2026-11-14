@@ -18,7 +18,7 @@ data class HapticRequest(
 )
 enum class HapticDelivery { PLAYED, SYSTEM_DISABLED, UNAVAILABLE, PERMISSION_DENIED, FAILED }
 
-/** No Android types, scheduling, preferences, or owner policy in the device boundary. */
+/** 设备振动接口，调度、设置和所有者校验由上层处理。 */
 interface HapticPort {
     fun play(request: HapticRequest): HapticDelivery
     fun cancel()

@@ -110,7 +110,7 @@ internal class ControllerVideoHistory(private val database: ConversationDatabase
     }
 }
 
-/** Keep this runtime guard testable without widening the ResponsesModel factory seam. */
+/** 运行被取消时，取消底层视频模型会话并中断当前操作。 */
 internal fun guardControllerVideoModelSession(session: ModelSession, runtimeCancelled: () -> Boolean): ModelSession =
     guardModelSession(session) {
         if (runtimeCancelled()) {

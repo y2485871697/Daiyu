@@ -1,4 +1,4 @@
-"""Plan and verify targeted production Releases without claiming full acceptance."""
+"""制定定向生产 Release 计划并核对其验证范围。"""
 import argparse
 import hashlib
 import json

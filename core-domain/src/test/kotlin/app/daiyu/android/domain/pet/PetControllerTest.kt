@@ -4,7 +4,7 @@ import app.daiyu.android.domain.*
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Cancellation, receipt and run-transition admission contracts; no Android or transport I/O. */
+/** 取消、用量回执和运行转换的准入测试。 */
 class PetControllerTest {
     private class Scheduler : PetScheduler {
         data class Entry(val delay: Long, val task: () -> Unit, var cancelled: Boolean = false)

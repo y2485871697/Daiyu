@@ -1,16 +1,8 @@
 package app.daiyu.android.domain.tools
 
-/**
- * Provider-neutral description of a registered tool.
- *
- * [parameters] is the JSON Schema produced by the very same [ToolDefinition.schema]
- * that validates an invocation.  Keeping the serialized schema here (rather than a
- * second model-specific schema) means that required fields and constraints cannot
- * drift between validation and advertising.
- *
- * This is metadata only.  In particular, advertising [ToolEffect.USER_BARRIER] does
- * not ask a question or otherwise execute a tool; the dispatcher remains responsible
- * for enforcing its single-invocation barrier.
+/** 已注册工具的供应商无关描述。
+ * [parameters] 直接由实际校验使用的 [ToolDefinition.schema] 生成，保持声明与约束一致。
+ * [ToolEffect.USER_BARRIER] 的单调用屏障由分发器执行。
  */
 data class ToolAdvertisement(
     val name: String,

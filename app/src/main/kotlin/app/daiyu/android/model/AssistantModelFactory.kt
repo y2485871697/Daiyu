@@ -4,7 +4,7 @@ import app.daiyu.android.assistants.AssistantRunContext
 import app.daiyu.android.domain.ModelPort
 import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 
-/** Uses already captured inputs only. Tool definitions/permissions remain the caller's policy. */
+/** 使用已捕获的输入；工具定义和权限由调用方提供。 */
 object AssistantModelFactory {
     fun create(snapshot: ProviderSnapshot, assistant: AssistantRunContext): ModelPort = when (snapshot.protocol) {
         ProviderProtocol.RESPONSES -> ResponsesModel(snapshot, assistant.systemPrompt)

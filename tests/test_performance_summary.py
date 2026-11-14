@@ -1,4 +1,4 @@
-"""Offline synthetic fixtures: no device measurements or acceptance claims."""
+"""用离线合成数据测试性能观测汇总。"""
 import copy
 import importlib.util
 import json

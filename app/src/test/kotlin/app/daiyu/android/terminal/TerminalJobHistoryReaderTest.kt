@@ -8,9 +8,8 @@ import java.nio.file.Files
 import java.util.Base64
 import java.util.UUID
 
-/** Format/paging fixtures only: explicitly inject JVM file I/O, never fake an Android descriptor.
- * Actual NOFOLLOW/NONBLOCK/fstat and path replacement coverage lives in the device test.
- * No Registry, Android runtime, Process, shell, journal or network.
+/** 用 JVM 文件读取测试历史记录格式和分页。
+ * Android 文件描述符的 NOFOLLOW、NONBLOCK、fstat 和路径替换由设备测试覆盖。
  */
 class TerminalJobHistoryReaderTest {
     private val owner = "conversation-1"

@@ -13,7 +13,7 @@ data class ChildRunOwner(val conversationId: String, val parentRunId: String, va
     }
 }
 
-/** Trusted host capture only; no dispatch, budget, lease, recovery or permission elevation. */
+/** 由可信宿主捕获的子运行上下文，权限由执行入口另行校验。 */
 class ChildRunScope private constructor(val owner: ChildRunOwner, val session: SessionCapabilities,
     val authorization: TaskAuthorization) {
     fun requireOwner(message: Message) {

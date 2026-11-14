@@ -1,4 +1,4 @@
-"""Source contracts; Android rendering and interaction await the approved batch."""
+"""检查外观模糊底层的源码配置。"""
 from pathlib import Path
 import unittest
 

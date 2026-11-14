@@ -51,7 +51,7 @@ private class NativeChatStatusBarInsets(
     }
 }
 
-/** Host owns every business operation; this screen never accesses a controller or repository. */
+/** 聊天界面的操作回调，由宿主执行对应业务。 */
 data class ChatScreenActions(
     val onOpenSidebar: () -> Unit = {},
     val onMore: () -> Unit = {},
@@ -146,7 +146,7 @@ internal fun DaiyuChatScreen(
             automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending,
             readAutomaticCompression = readAutomaticCompression)
         state.statusText?.let { status ->
-            // Operational errors/recovery/preparation are not money and never enter the amount slot.
+            // 错误、恢复和准备进度使用独立状态行，与金额展示分开。
             top.yukonga.miuix.kmp.basic.Text(status,
                 modifier = dismissInputOnTap.testTag("chat-status").fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                     .semantics { liveRegion = LiveRegionMode.Polite },

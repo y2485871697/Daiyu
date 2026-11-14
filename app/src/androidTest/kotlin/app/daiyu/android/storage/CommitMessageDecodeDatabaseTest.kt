@@ -6,7 +6,7 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.testContext
 import java.util.UUID
 
-/** Device counterparts of the native-SQLite JVM regressions; no APK execution is required locally. */
+/** 在 Android SQLite 上检查消息提交和解码复用，与主机端回归用例对应。 */
 @Suppress("DEPRECATION")
 class CommitMessageDecodeDatabaseTest : InstrumentationTestCase() {
     private lateinit var context: android.content.Context

@@ -7,9 +7,8 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Typed host port. Domain never knows about Android, native hosts or browser tokens.
- * The resource owner MUST retain this port before prepareOnWorker can allocate anything.
- * receipts.bindOwner is invoked by the real child Runner before tools.definitions, never by this owner.
+/** 宿主提供的子任务资源接口，先由资源所有者持有，再调用 prepareOnWorker 分配资源。
+ * 子 Runner 在读取 tools.definitions 前调用 receipts.bindOwner。
  */
 interface ChildToolAssembly : AutoCloseable {
     val scope: ChildRunScope

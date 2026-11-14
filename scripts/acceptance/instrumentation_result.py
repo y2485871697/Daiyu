@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""One strict am instrument -w summary parser for live smoke and offline review.
+"""解析 am instrument -w 汇总，供在线冒烟和离线审查共用。
 
-No normalization except CRLF; no execution, environment reads or derived flags.
+只统一 CRLF 换行，其余协议文本严格匹配。
 """
 from __future__ import annotations
 

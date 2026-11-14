@@ -4,18 +4,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Pure launch-identity policy shared by the owner and its unit tests.
- *
- * <p>Official Android behaviour: {@code FLAG_ACTIVITY_NEW_TASK} alone may reuse an existing task
- * whose affinity matches the target, which for a third-party package can be the user's own home or
- * secondary task. Pairing it with {@code FLAG_ACTIVITY_MULTIPLE_TASK} skips the existing-task search
- * and unconditionally creates an independent task
- * (developer.android.com/reference/android/content/Intent#FLAG_ACTIVITY_MULTIPLE_TASK). The owner
- * therefore always launches with exactly {@link #LAUNCH_FLAGS} = NEW_TASK | MULTIPLE_TASK.
- *
- * <p>{@code FLAG_ACTIVITY_NEW_DOCUMENT} is deliberately never set: it is document-task behaviour
- * and this session only needs an independent, provenance-marked task. A caller that supplies it (or
- * any other bit outside {@link #LAUNCH_FLAGS}) is rejected rather than silently ignored.
+ * 固定使用 NEW_TASK | MULTIPLE_TASK 创建独立任务，避免复用 affinity 匹配的用户任务。
+ * MULTIPLE_TASK 的行为见 developer.android.com/reference/android/content/Intent#FLAG_ACTIVITY_MULTIPLE_TASK。
+ * 会话不使用文档任务模式；调用方传入 NEW_DOCUMENT 或其他超出 {@link #LAUNCH_FLAGS} 的位时拒绝启动。
  */
 final class LaunchPolicy {
     static final int FLAG_ACTIVITY_NEW_TASK = 0x10000000;

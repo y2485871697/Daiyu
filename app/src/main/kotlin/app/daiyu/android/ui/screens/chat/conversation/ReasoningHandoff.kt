@@ -4,7 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateMapOf
 import app.daiyu.android.domain.ReportedReasoning
 
-/** UI ordering only; never delays a runner or replays a tool. */
+/** 记录已完成展示的思考项，供后续内容按顺序入场。 */
 @Stable
 internal class ReasoningHandoff(initial: List<ReportedReasoning>) {
     private val completed = mutableStateMapOf<String, Boolean>().apply {

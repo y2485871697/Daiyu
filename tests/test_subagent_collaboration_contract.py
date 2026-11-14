@@ -1,4 +1,4 @@
-"""Source wiring contracts; the companion Compose regression source is not executed here."""
+"""检查子代理协作界面的源码连接。"""
 from pathlib import Path
 import unittest
 

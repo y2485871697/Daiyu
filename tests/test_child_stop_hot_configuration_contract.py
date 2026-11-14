@@ -1,4 +1,4 @@
-"""Source wiring checks only; concurrency and UI methods await the approved runtime batch."""
+"""检查子任务停止与运行中配置变更的源码连接。"""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]

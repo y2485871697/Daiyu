@@ -13,9 +13,9 @@ import app.daiyu.android.domain.ToolOutput
 import app.daiyu.android.domain.runtime.ReconnectPolicy
 import app.daiyu.android.model.ProviderProtocol
 
-/** One immutable run-local preference/capability decision. Only the snapshot overload may
- * authorize official Responses background streams. No preference re-read, open/repost recovery,
- * attempt gate or tool execution lives here; Runner owns attempts and the original session. */
+/** 每轮运行冻结一次重连设置和能力，官方 Responses 后台流由供应商快照重载授权。
+ * Runner 管理请求尝试和原会话，恢复请求由 Runner 发起。
+ */
 class FrozenReconnectAdapter private constructor(
     val settings: ReconnectSettings,
     val capability: ReconnectCapability,

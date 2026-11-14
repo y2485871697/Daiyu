@@ -6,7 +6,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** Pure presentation seam: no clock reads, conversation metadata, protocol text or credentials. */
+/** 将消息创建时间按指定时区格式化为 yyyy-MM-dd HH:mm。 */
 object MessageTimestampFormatter {
     private val format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT)
 

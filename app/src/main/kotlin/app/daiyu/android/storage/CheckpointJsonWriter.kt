@@ -3,13 +3,8 @@ package app.daiyu.android.storage
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Serializes an already built (and Archive-normalized) checkpoint tree. Only immutable
- * String -> complete JSONObject.quote fragment pairs survive a write; never the tree,
- * messages, lists, tool identities, or evidence that a checkpoint passed validation.
- *
- * Confined to the runtime store's OS lease, like the store's other reuse state. The
- * owner must clear it when releasing that lease. It is deliberately not thread safe.
+/** 序列化已构建并经 Archive 规范化的检查点，仅缓存字符串及完整 JSONObject.quote 结果。
+ * 缓存限当前 OS 租约串行使用，释放时清空；每次写入仍须校验检查点。
  */
 internal class CheckpointJsonWriter(
     private val maxEntries: Int = 64,
@@ -25,7 +20,7 @@ internal class CheckpointJsonWriter(
     // UTF-16 characters in BOTH retained sources and complete quoted fragments.
     internal var retainedChars: Long = 0
         private set
-    // Deterministic diagnostics for tests; no payloads or successful-validation state.
+    // 测试用缓存计数。
     internal var quoteCalls: Long = 0
         private set
     internal var largeStringQuoteCalls: Long = 0

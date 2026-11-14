@@ -23,7 +23,7 @@ import org.java_websocket.handshake.ServerHandshake
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Exercises the real pinned codec offline, not an imitation of the production frame decoder. */
+/** 离线检查固定版本 WebSocket 编解码器的帧和缓冲区上限。 */
 class WebSocketBoundsTest {
     @Test fun outboundPcmBurstHasItsOwnBoundedBudgetAndDrainedFramesReleaseCapacity() {
         val frames = ArrayList<ByteBuffer>()

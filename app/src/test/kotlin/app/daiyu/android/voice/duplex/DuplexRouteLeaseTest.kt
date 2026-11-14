@@ -4,7 +4,7 @@ import android.media.AudioDeviceInfo
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Synthetic route fixtures; not a claim of physical Android routing verification. */
+/** 用合成路由状态检查音频租约。 */
 class DuplexRouteLeaseTest {
     private class Routes : DuplexRoutePort {
         var modeFailure: RuntimeException? = null

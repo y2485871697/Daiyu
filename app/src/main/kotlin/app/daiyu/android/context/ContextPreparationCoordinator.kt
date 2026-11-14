@@ -21,7 +21,7 @@ fun interface CompressionPolicyResolver {
  * Null means unavailable, never "use the main chat model". Resolution must not open network I/O. */
 fun interface SummaryModelResolver {
     fun resolve(binding: SummaryModelBinding): BoundSummaryModel?
-    /** Production must implement this overload; legacy fake resolvers may ignore an unused port. */
+    /** 需要绑定持久化用量或指定协议的解析器须重写此重载；默认实现只接受两者均为空的调用。 */
     fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?,
         protocol: app.daiyu.android.model.ProviderProtocol? = null): BoundSummaryModel? {
         check(protocol == null) { "summary_resolver_has_no_protocol_preference" }
@@ -88,14 +88,12 @@ class PreparedSendContext internal constructor(
 }
 
 /**
- * Production preparation seam, NOT a second queue or a send transaction.
- *
- * Caller must reserve the same parent preparation/owner lock used by sends, edits, deletion,
- * branch selection and compression BEFORE freeze; perform model I/O off the UI thread without
- * holding a JVM monitor. Keep that reservation until commit/rejection and cancel it on close,
- * stop or owner invalidation. Recheck token, owner, draft and expectedHistoryRevision atomically
- * before the existing database.send; only then start the runner with result.messages (no +user).
- * ContextService publishes archives in its own transaction: no claim of atomicity with send.
+ * 冻结待发送输入和压缩配置，准备发送给 Runner 的完整上下文。
+ * 调用方须在 freeze 前取得发送、编辑、删除、分支选择和压缩共用的准备预约，保留到提交或拒绝。
+ * 模型 I/O 在工作线程执行，期间不得持有 JVM monitor；关闭、停止或所有者失效时取消预约。
+ * database.send 前原子复查令牌、所有者、草稿和 expectedHistoryRevision；随后用 result.messages
+ * 启动 Runner，其中已包含待发送用户输入，无须再次追加。
+ * ContextService 的档案发布使用独立事务，可能先于发送提交。
  */
 class ContextPreparationCoordinator(
     private val service: ContextService,
@@ -160,7 +158,7 @@ class ContextPreparationCoordinator(
     }
 }
 
-/** Defensive collection copies only; does not expand, estimate, prune or choose archive cuts. */
+/** 复制消息及历史片段中的列表并设为不可修改，避免后续修改影响已冻结的上下文。 */
 internal fun freezeContextMessages(messages: List<Message>): List<Message> = immutable(messages.map { message ->
     message.copy(blocks = immutable(message.blocks), protocolItems = immutable(message.protocolItems),
         historySegments = immutable(message.historySegments.map { segment ->

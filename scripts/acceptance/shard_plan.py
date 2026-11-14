@@ -1,4 +1,4 @@
-"""Duration-weighted, whole-class LPT; estimates never supply acceptance evidence."""
+"""按时长估计用 LPT 算法分配完整测试类，估计值只用于分片。"""
 import hashlib
 import json
 from pathlib import Path

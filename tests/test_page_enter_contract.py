@@ -1,4 +1,4 @@
-"""Source-wiring guards; actual Compose frames remain deferred Android coverage."""
+"""检查页面进入动画的源码连接。"""
 from pathlib import Path
 import unittest
 

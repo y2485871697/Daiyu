@@ -1,4 +1,4 @@
-"""Page-local attachment sizing guards; Android geometry tests are deferred."""
+"""检查聊天页附件尺寸的局部源码配置。"""
 from pathlib import Path
 import re
 import unittest

@@ -1,4 +1,4 @@
-"""Exact local repair boundaries; these guards are not Android runtime acceptance."""
+"""检查候选版本局部修复的源码范围。"""
 from pathlib import Path
 import unittest
 

@@ -17,8 +17,8 @@ import android.provider.MediaStore
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Preserved DeviceQueries read adapters, narrowed to current Catalog ownership and consent.
- * No listener/global cache. Cursor consumption and fields remain bounded even if providers ignore hints.
+/** 为工具目录适配 DeviceQueries 查询，读取受当前调用归属与用户同意范围限制。
+ * 按需查询；即使数据提供方忽略查询提示，也限制游标读取量和字段长度。
  */
 internal object DeviceQueries {
     fun notifications(context: Context, args: JSONObject, cancelled: () -> Boolean): JSONObject {

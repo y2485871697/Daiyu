@@ -1,4 +1,4 @@
-"""Source-only wiring checks. JVM and Android behavior await the approved build batch."""
+"""检查豆包服务端口的源码连接。"""
 from pathlib import Path
 import unittest
 

@@ -1,4 +1,4 @@
-"""Source guards only; callback completion still requires Android regression."""
+"""检查助手选择点击及完成回调的源码连接。"""
 from pathlib import Path
 import unittest
 

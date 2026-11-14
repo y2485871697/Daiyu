@@ -1,4 +1,4 @@
-"""Planner contract tests only; no Android/physical/paid acceptance execution."""
+"""检查业务场景计划的生成和分类。"""
 import contextlib
 import copy
 import hashlib

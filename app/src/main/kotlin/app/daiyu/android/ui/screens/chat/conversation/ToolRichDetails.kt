@@ -26,7 +26,7 @@ data class ToolRichDetailsUi(
     val failed: Boolean = false,
 )
 
-/** A bounded, read-only projection. No URI resolving, asset loading or execution lives here. */
+/** 将已有工具参数和结果整理为详情字段及展开文本，并限制长度、隐藏敏感内容。 */
 internal object ToolRichDetails {
     private const val MAX_INPUT = 131_072
     private const val MAX_TEXT = 16_384

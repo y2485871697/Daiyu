@@ -1,4 +1,4 @@
-"""Search-history presentation wiring; Android geometry runs in the approved batch."""
+"""检查搜索历史弹层展示的源码连接。"""
 from pathlib import Path
 import unittest
 

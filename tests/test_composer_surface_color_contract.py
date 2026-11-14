@@ -1,4 +1,4 @@
-"""Source-only composer color contracts; Android pixel tests are not run here."""
+"""检查输入区表面颜色的源码配置。"""
 from pathlib import Path
 import unittest
 

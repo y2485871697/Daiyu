@@ -10,7 +10,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.file.Files
 
-/** Storage contract tests use a fake inspector and NON-media bytes, not proof of Android decoding. */
+/** 用检查器替身和非媒体字节检查视频存储。 */
 class VideoAssetStoreTest {
     private lateinit var root: File
     private lateinit var store: VideoAssetStore

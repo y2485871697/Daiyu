@@ -3,7 +3,7 @@ package app.daiyu.android
 import androidx.compose.ui.test.*
 import app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi
 
-/** Lifecycle regression only; no model request or automatic task takeover is admitted. */
+/** 检查浏览器页面的生命周期变化。 */
 @Suppress("DEPRECATION")
 class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
     private fun visit(): BrowserVisualVisit? = MainActivity::class.java.declaredMethods.single {

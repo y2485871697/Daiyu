@@ -1,4 +1,4 @@
-"""Guard exact async completion boundaries; Android execution remains a cloud gate."""
+"""检查设置操作异步完成条件的源码连接。"""
 from pathlib import Path
 import unittest
 

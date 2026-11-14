@@ -26,9 +26,9 @@ enum class UsageRequestSource { MAIN, SUMMARY, AUXILIARY_VISION, TITLE, MANUAL_S
 data class RequestUsageCheckpoint(val request: RequestCheckpoint, val snapshot: ModelEvent.Usage,
     val source: UsageRequestSource = UsageRequestSource.MAIN)
 
-/** A send-preparation reservation is not an execution owner or a fabricated checkpoint.
- * Read its sealed usage before the first real checkpoint. The same store must atomically
- * transfer it on revision 1, and reject cancelled/unsealed reservations. No network/recovery. */
+/** 首个检查点前读取准备阶段封存的用量，同一存储在修订号 1 时将其原子转入检查点。
+ * 已取消或未封存的预留记录须拒绝。
+ */
 interface PreparationRuntimeStore : AtomicRuntimeStore {
     fun preparationUsage(initial: Message): List<RequestUsageCheckpoint>
 }

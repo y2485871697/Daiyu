@@ -38,14 +38,15 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     private val formattedBody = "## 恢复前完整标题\n\n中文正文甲，包含 **粗体** 与一段已经完成的消息。\n\n- 第一项\n- 第二项"
     private var body by mutableStateOf("")
 
-    private fun mount(formatted: Boolean = false, active: Boolean = true) {
+    private fun mount(formatted: Boolean = false, active: Boolean = true,
+        parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser) {
         mainThread {
             contentActive = active
             if (formatted) body = formattedBody
             owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    CompositionLocalProvider(LocalLifecycleOwner provides owner,
+                    CompositionLocalProvider(LocalMarkdownParser provides parser, LocalLifecycleOwner provides owner,
                         app.daiyu.android.ui.navigation.LocalPageContentActive provides contentActive) {
                         Box(Modifier.size(320.dp, viewport)) {
                             ChatMessageList(
@@ -228,14 +229,33 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     }
 
     fun testBackgroundMarkdownReplacementIsCompleteBeforeResumeAlignment() {
-        mount(formatted = true)
-        mainThread { owner.registry.currentState = Lifecycle.State.CREATED }
-        val before = top("chat-turn:tail")
-        mainThread { body = formattedBody + "\n\n后台新增正文乙，这段内容在返回前已经收到。" }
-        ui.waitForIdle()
-        assertEquals(before, top("chat-turn:tail"), 1f)
-        ui.mainClock.autoAdvance = false
+        val appended = formattedBody + "\n\n后台新增正文乙，这段内容在返回前已经收到。"
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == appended) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
         try {
+            mount(formatted = true, parser = parser)
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            mainThread { owner.registry.currentState = Lifecycle.State.CREATED }
+            val before = top("chat-turn:tail")
+            mainThread { body = appended }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.waitForIdle()
+            assertEquals("Pending append must retain the occupied action slot", before, top("chat-turn:tail"), 1f)
+            release.countDown()
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithText("后台新增正文乙，这段内容在返回前已经收到。", useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty() &&
+                    ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            ui.waitForIdle()
+            assertEquals(before, top("chat-turn:tail"), 1f)
+            ui.mainClock.autoAdvance = false
             ui.runOnUiThread { owner.registry.currentState = Lifecycle.State.RESUMED }
             var previous = before
             var corrections = 0
@@ -249,6 +269,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             assertEquals("Formatted background growth must align without partial motion", 1, corrections)
             assertTrue(previous < before - 1f)
         } finally {
+            release.countDown()
             ui.mainClock.autoAdvance = true
         }
         ui.onNodeWithText("resume tail marker").assertIsDisplayed()

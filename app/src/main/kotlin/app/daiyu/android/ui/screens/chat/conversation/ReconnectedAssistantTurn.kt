@@ -49,6 +49,7 @@ internal fun ReconnectedAssistantTurn(
                 onContentDisplayed = { if (it) displayed[part.turn.listKey] = part else displayed.remove(part.turn.listKey) },
                 onContentReady = { if (it) ready[part.turn.listKey] = part else ready.remove(part.turn.listKey) },
                 showIdentity = index == identityIndex, showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn,
+                actionSlotOwner = index == parts.parts.lastIndex,
                 workflowContent = part.workflow, preparing = preparing)
             part.after.forEach { entry -> key(entry.id) { ChatTimelineDivider(entry) } }
         } }

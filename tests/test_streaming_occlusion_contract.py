@@ -8,6 +8,20 @@ DEVICE = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/co
 
 
 class StreamingOcclusionContract(unittest.TestCase):
+    def test_terminal_append_retains_only_its_measured_action_slot(self):
+        source = CHAT.read_text()
+        assistant = source.split('internal fun AssistantTurn(', 1)[1].split('private fun AssistantTextContent', 1)[0]
+        self.assertIn('remember(actionTurn.actionKey, actionTurn.status == RunStatus.RUNNING, actionSlotOwner)', assistant)
+        self.assertIn('mutableStateOf(0)', assistant)
+        self.assertIn('actionSlotOwner && actionTurn.status != RunStatus.RUNNING && actionSlotHeightPx > 0', assistant)
+        self.assertIn('(!generationComplete || !revealSettled || !showActions)', assistant)
+        self.assertIn('Modifier.onSizeChanged { actionSlotHeightPx = it.height }', assistant)
+        self.assertIn('else if (holdActionSlot)', assistant)
+        self.assertIn('actionSlotHeightPx.toDp()', assistant)
+        self.assertIn('generationComplete && revealSettled', assistant)
+        reconnect = (CHAT.parent / 'ReconnectedAssistantTurn.kt').read_text()
+        self.assertIn('actionSlotOwner = index == parts.parts.lastIndex', reconnect)
+
     def test_idle_viewport_cleanup_does_not_subscribe_to_each_scroll_layout(self):
         source = CHAT.read_text()
         cleanup = source.split('LaunchedEffect(listState, turnKeys, assistantOwnerKey)', 1)[1].split('val boundaryRequests', 1)[0]

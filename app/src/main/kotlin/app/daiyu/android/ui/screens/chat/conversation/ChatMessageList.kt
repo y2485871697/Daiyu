@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.geometry.Offset
 import kotlin.math.abs
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -850,6 +852,7 @@ internal fun AssistantTurn(
     onContentReady: (Boolean) -> Unit = {},
     workflowContent: AssistantWorkflowContent? = null,
     preparing: Boolean = false,
+    actionSlotOwner: Boolean = showActions,
 ) = key(turn.listKey) {
     val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)
     val bodySources = remember(ordered.body) {
@@ -884,7 +887,12 @@ internal fun AssistantTurn(
     val revealSettled = reveal.settled && reasoningReady && (bodyVisible || ordered.body.isEmpty())
     SideEffect { onRevealSettled(revealSettled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
-    if (turn.hasVisibleResponse() || showActions && actionTurn !== turn) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var actionSlotHeightPx by remember(actionTurn.actionKey, actionTurn.status == RunStatus.RUNNING, actionSlotOwner) {
+        mutableStateOf(0)
+    }
+    val holdActionSlot = actionSlotOwner && actionTurn.status != RunStatus.RUNNING && actionSlotHeightPx > 0 &&
+        (!generationComplete || !revealSettled || !showActions)
+    if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val identity = turn.assistantIdentity
         val avatar by produceState<android.graphics.Bitmap?>(null, identity?.avatarPng) {
             value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() }.getOrNull() }
@@ -909,7 +917,11 @@ internal fun AssistantTurn(
                 it is MessageContentUi.Text && it.text.isNotBlank()
             }
             MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,
+                modifier = Modifier.onSizeChanged { actionSlotHeightPx = it.height },
                 allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking, preparing = preparing)
+        } else if (holdActionSlot) {
+            Box(Modifier.fillMaxWidth().height(
+                with(androidx.compose.ui.platform.LocalDensity.current) { actionSlotHeightPx.toDp() }))
         }
     }
 }

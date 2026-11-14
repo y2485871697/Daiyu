@@ -45,7 +45,7 @@ class LegacyReconnectRestoreTest {
         val conversation = database.create("default").id
         val user = Message(MessageId("q"), conversation, RunId("run"), "user",
             listOf(MessageBlock.Text("q", "question")), RunStatus.COMPLETED)
-        val answer = user.copy(id = MessageId("answer"), role = "assistant", status = RunStatus.COMPLETED,
+        val answer = user.copy(id = MessageId("answer"), role = "assistant", status = RunStatus.RUNNING,
             blocks = listOf(MessageBlock.Text("body", "pending")))
         database.send(user, answer)
         database.displayMessages(conversation)
@@ -62,7 +62,7 @@ class LegacyReconnectRestoreTest {
         if (tail) history.put(JSONObject().put("message_id", "answer").put("role", "assistant")
             .put("blocks", JSONArray().put(JSONObject().put("type", "text").put("item", "tail").put("text", "**tail end**")))
             .put("protocol", JSONArray()))
-        database.writableDatabase.execSQL("UPDATE messages SET blocks=?,protocol=?,history_segments=? WHERE id='answer'",
+        database.writableDatabase.execSQL("UPDATE messages SET blocks=?,protocol=?,history_segments=?,status='COMPLETED' WHERE id='answer'",
             arrayOf(blocks.toString(), protocol.toString(), history.toString()))
         return Fixture(conversation, answer, item.toString())
     }

@@ -163,6 +163,10 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('listOf("permission-check", "skills", "providers")', regression)
         self.assertIn('recordSynchronous(startWindow = true, expectedRefresh = 0, expectedPublish = 0) { invokeHost(activity, "returnToChat") }', regression)
         self.assertIn('expectedPublish, publishCount', regression)
+        for source in ('expectedRefresh = if (full) 1 else 0', 'invokeHost(activity, "finishChatReturn", pending)',
+                       'same-owner return requests coalesce', 'settled work consumes the request exactly once',
+                       'settled pure return retains rows', 'settled publication recalculates current composer admission'):
+            self.assertIn(source, regression)
         self.assertLess(regression.index('action()'), regression.index('recorder.end('))
         self.assertLess(regression.index('recorder.end('), regression.index('runtime.export()'))
         flow = (ROOT / '.github/workflows/screen-observation-jank-checks.yml').read_text()

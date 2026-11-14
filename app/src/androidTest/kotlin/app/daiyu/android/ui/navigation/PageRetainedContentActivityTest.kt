@@ -330,6 +330,27 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             }
             recordSynchronous(startWindow = true, expectedRefresh = 0, expectedPublish = 0) { invokeHost(activity, "returnToChat") }
             awaitReturnRefresh()
+            for (full in listOf(false, true)) recordSynchronous(startWindow = true, expectedRefresh = if (full) 1 else 0) {
+                val before = invokeHost(activity, "getChatState") as ChatScreenState
+                invokeHost(activity, "returnToChat", false)
+                val field = app.daiyu.android.MainActivity::class.java.getDeclaredField("chatReturnRefresh")
+                    .apply { isAccessible = true }
+                val pending = checkNotNull(field.get(activity))
+                invokeHost(activity, "returnToChat", full)
+                assertSame("same-owner return requests coalesce", pending, field.get(activity))
+                invokeHost(activity, "returnToChat", false)
+                invokeHost(activity, "finishChatReturn", pending)
+                invokeHost(activity, "finishChatReturn", pending)
+                assertNull("settled work consumes the request exactly once", field.get(activity))
+                val after = invokeHost(activity, "getChatState") as ChatScreenState
+                assertTrue("settled publication recalculates current composer admission", after.composer.enabled)
+                assertEquals(before.composer.text, after.composer.text)
+                assertEquals(before.scrollRequest, after.scrollRequest)
+                if (!full) {
+                    assertSame("settled pure return retains rows", before.turns, after.turns)
+                    assertEquals(before.contentRevision, after.contentRevision)
+                }
+            }
             repeat(3) {
                 recordSynchronous(startWindow = true) { invokeHost(activity, "refresh") }
             }

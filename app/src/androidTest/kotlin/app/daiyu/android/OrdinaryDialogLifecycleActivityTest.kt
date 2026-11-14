@@ -172,14 +172,18 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
         node("chat-messages").performScrollToIndex(8)
         val reading = frame()
         assertTrue("History fixture must enter an interior reading position: reading=$reading tail=$tail", reading > 0f && reading < tail)
+        val listBounds = node("chat-messages").fetchSemanticsNode().boundsInRoot
+        val composerBounds = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+        val readingHeight = minOf(listBounds.bottom, composerBounds.top) - listBounds.top
+        assertTrue("Gesture must stay above composer: list=$listBounds composer=$composerBounds", readingHeight > 0f)
         val oldAutoAdvance = ui.mainClock.autoAdvance
         ui.mainClock.autoAdvance = false
         try {
             node("chat-messages").performTouchInput {
-                swipe(Offset(center.x, height * .8f), Offset(center.x, height * .2f), durationMillis = 96L)
+                swipeWithVelocity(Offset(center.x, readingHeight * .8f), Offset(center.x, readingHeight * .2f), endVelocity = 2000f, durationMillis = 96L)
             }
             val first = frame(); val second = frame()
-            assertTrue("Fixture must still move after UP", second > first)
+            assertTrue("Fixture must still move after UP: reading=$reading first=$first second=$second tail=$tail", second > first)
             assertTrue(second < tail)
             ui.runOnUiThread { invokeHost(activity, "openChatModels") }
             var afterOpen = second

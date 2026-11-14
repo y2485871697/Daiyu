@@ -150,7 +150,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         var armed = false
         var resumeEpoch = 0
         data class Frame(val kind: String, val epoch: Int, val lifecycle: Lifecycle.State,
-            val attached: Boolean, val open: Boolean, val x: Float, val width: Int,
+            val placed: Boolean, val attached: Boolean, val open: Boolean, val x: Float, val width: Int,
             val projectedWidth: Float, val rootWidth: Int)
         val frames = mutableListOf<Frame>()
         var samplingFailure: Throwable? = null
@@ -182,17 +182,18 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             mainThread { invokeHost(original, "openSidebar") }
             val drawerNode = node("conversation-drawer").assertIsDisplayed().fetchSemanticsNode()
             val originalNodeId = drawerNode.id
-            val coordinates = drawerNode.layoutInfo.coordinates
             sample = { kind ->
                 try {
-                    val attached = drawerNode.layoutInfo.isPlaced && coordinates.isAttached
-                    val position = if (attached) coordinates.positionInRoot() else Offset(Float.NaN, Float.NaN)
-                    val right = if (attached) coordinates.localToRoot(Offset(coordinates.size.width.toFloat(), 0f))
+                    val coordinates = drawerNode.layoutInfo.coordinates
+                    val placed = drawerNode.layoutInfo.isPlaced
+                    val attached = coordinates.isAttached
+                    val position = if (placed && attached) coordinates.positionInRoot() else Offset(Float.NaN, Float.NaN)
+                    val right = if (placed && attached) coordinates.localToRoot(Offset(coordinates.size.width.toFloat(), 0f))
                         else Offset(Float.NaN, Float.NaN)
-                    val root = if (attached) generateSequence(coordinates) { it.parentLayoutCoordinates }.last() else null
-                    frames += Frame(kind, resumeEpoch, original.lifecycle.currentState, attached,
+                    val root = if (placed && attached) generateSequence(coordinates) { it.parentLayoutCoordinates }.last() else null
+                    frames += Frame(kind, resumeEpoch, original.lifecycle.currentState, placed, attached,
                         invokeHost(original, "getSidebarVisible") as Boolean, position.x,
-                        if (attached) coordinates.size.width else 0, right.x - position.x, root?.size?.width ?: 0)
+                        if (placed && attached) coordinates.size.width else 0, right.x - position.x, root?.size?.width ?: 0)
                 } catch (failure: Throwable) { samplingFailure = failure }
             }
             instrumentation.runOnMainSync {
@@ -207,6 +208,13 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                 if (!open) mainThread { invokeHost(original, "dismissSidebar") }
                 repeat(3) { drawFrame() }
                 instrumentation.runOnMainSync { frames.clear(); sample!!.invoke("baseline"); armed = true }
+                val baseline = frames.first()
+                assertEquals(open, baseline.open)
+                assertTrue("home=$home open=$open baseline=$baseline must be placed and attached", baseline.placed && baseline.attached)
+                assertTrue("Baseline geometry must be finite", baseline.x.isFinite() && baseline.projectedWidth.isFinite())
+                if (open) openBaselineX = baseline.x
+                else assertTrue("Closed control must observe the drawer's actual translation",
+                    kotlin.math.abs(baseline.x - checkNotNull(openBaselineX)) > baseline.width * .5f)
                 val expectedEpoch = resumeEpoch + if (home) 2 else 1
                 if (home) {
                     // Consume the inactive composition before STOP suspends its frame clock.
@@ -227,18 +235,11 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                 mainThread {
                     armed = false
                     samplingFailure?.let { throw it }
-                    val baseline = frames.first()
-                    assertEquals(open, baseline.open)
-                    assertTrue("A baseline must be attached", baseline.attached)
-                    assertTrue("Baseline geometry must be finite", baseline.x.isFinite() && baseline.projectedWidth.isFinite())
-                    if (open) openBaselineX = baseline.x
-                    else assertTrue("Closed control must observe the drawer's actual translation",
-                        kotlin.math.abs(baseline.x - checkNotNull(openBaselineX)) > baseline.width * .5f)
                     assertTrue("Must capture resumed native draws, not only a stable end node",
                         frames.any { it.kind == "draw" && it.epoch == expectedEpoch && it.lifecycle == Lifecycle.State.RESUMED })
                     frames.forEachIndexed { index, frame ->
                         val message = "home=$home sample=$index baseline=$baseline frame=$frame"
-                        assertTrue(message, frame.attached)
+                        assertTrue(message, frame.placed && frame.attached)
                         assertTrue(message, frame.x.isFinite() && frame.projectedWidth.isFinite())
                         assertEquals(message, open, frame.open)
                         assertEquals(message, baseline.x, frame.x, .03f)

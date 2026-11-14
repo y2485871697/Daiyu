@@ -122,6 +122,10 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
                       'ViewTreeObserver.OnDrawListener', 'ViewTreeObserver.OnGlobalLayoutListener',
                       'whilePaused = {'):
             self.assertIn(token, tests)
+        sample = tests.split('sample = { kind ->', 1)[1].split('catch (failure: Throwable)', 1)[0]
+        self.assertIn('val coordinates = drawerNode.layoutInfo.coordinates', sample)
+        self.assertIn('val placed = drawerNode.layoutInfo.isPlaced', sample)
+        self.assertIn('val attached = coordinates.isAttached', sample)
 
     def test_refresh_and_toggle_keep_authoritative_io_and_pending_gates(self):
         source = (APP / 'MainActivity.kt').read_text()

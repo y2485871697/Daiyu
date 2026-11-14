@@ -69,7 +69,7 @@ class ToolReceiptTests(unittest.TestCase):
             self.assertIn("tool-evidence/", job)
             self.assertIn("if: always()", job)
         self.assertIn("if: inputs.mode == 'smoke'", smoke)
-        self.assertIn("python3 scripts/acceptance/record_tool_tests.py --python python3", smoke)
+        self.assertIn("python3 .smoke-validation-tools/scripts/acceptance/record_tool_tests.py --python python3", smoke)
         self.assertIn("代鱼工具证据-smoke-API${{ matrix.api }}", smoke)
         self.assertIn("path: tool-evidence/", smoke)
         self.assertIn('code=$?; printf "%s\\n" "$code" > smoke/exit-code.txt; exit "$code"', smoke)

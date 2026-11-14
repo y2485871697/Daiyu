@@ -155,12 +155,17 @@ class SmokeRevisionWorkflowTests(unittest.TestCase):
         self.assertTrue(steps[0].startswith('uses: actions/checkout@'))
         self.assertIn('persist-credentials: false', steps[0])
         self.assertIn('fetch-depth: 0', steps[0])
-        self.assertNotRegex(steps[0], r'(?m)^\s+ref:')
-        self.assertIn('EXPECTED_SHA: ${{ inputs.expected_sha }}', steps[1])
-        self.assertIn('run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only', steps[1])
-        self.assertNotIn('if:', steps[1])
-        self.assertNotIn('continue-on-error:', steps[1])
-        self.assertIn('run: python3 scripts/acceptance/record_tool_tests.py --python python3', steps[2])
+        self.assertIn("ref: ${{ inputs.mode == 'smoke' && inputs.expected_sha || github.sha }}", steps[0])
+        self.assertIn("ref: ${{ github.sha }}", steps[1])
+        self.assertIn("path: .smoke-validation-tools", steps[1])
+        guard = next(step for step in steps if step.startswith('name: 核对启动验证源码身份'))
+        self.assertIn('EXPECTED_SHA: ${{ inputs.expected_sha }}', guard)
+        self.assertIn('python3 .smoke-validation-tools/scripts/verify_smoke_source.py --verify-checkout-only', guard)
+        self.assertIn('python3 scripts/cooperation/cloud_checks.py --verify-revision-only', guard)
+        self.assertNotIn('if:', guard)
+        self.assertNotIn('continue-on-error:', guard)
+        tool = next(step for step in steps if step.startswith('name: 补检当前 CHECK 工具原文'))
+        self.assertIn('run: python3 .smoke-validation-tools/scripts/acceptance/record_tool_tests.py --python python3', tool)
 
     def test_guard_preserves_existing_apk_reuse_without_rebuild_or_extra_download(self):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
@@ -171,8 +176,8 @@ class SmokeRevisionWorkflowTests(unittest.TestCase):
         self.assertIn('SOURCE_SHA: ${{ inputs.source_sha }}', smoke)
         self.assertNotIn('gradlew', smoke)
         self.assertNotIn('assemble', smoke)
-        anchors = ('run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only',
-                   'uses: actions/download-artifact@', 'run: python3 scripts/verify_smoke_source.py',
+        anchors = ('python3 .smoke-validation-tools/scripts/verify_smoke_source.py --verify-checkout-only',
+                   'uses: actions/download-artifact@', 'run: python3 .smoke-validation-tools/scripts/verify_smoke_source.py',
                    'run: cd delivery && sha256sum -c SHA256SUMS', 'uses: ReactiveCircus/android-emulator-runner@')
         positions = [smoke.index(anchor) for anchor in anchors]
         self.assertEqual(positions, sorted(positions))

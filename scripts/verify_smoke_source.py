@@ -10,10 +10,11 @@ import urllib.request
 import zipfile
 
 
-def verify(env, record, source_run, jobs, changed):
+def verify(env, record, source_run, jobs, changed, *, checkout_sha=None):
     sha = env['SOURCE_SHA']
     run_id = env['SOURCE_RUN_ID']
     variant = env.get('SOURCE_VARIANT', 'debug')
+    check_sha = checkout_sha if checkout_sha is not None else env.get('GITHUB_SHA')
     if variant not in ('debug', 'release', 'daily', 'compile', 'diagnostic'):
         raise ValueError('补检应用包变体无效')
     if not re.fullmatch(r'[0-9a-f]{40}', sha) or not run_id.isdecimal():
@@ -45,7 +46,7 @@ def verify(env, record, source_run, jobs, changed):
     if variant in ('compile', 'diagnostic') and (record.get('validation_scope') != 'compile-only'
             or record.get('full_regression_passed') is not False
             or record.get('unit_tests_run') is not False or record.get('instrumentation_run') is not False
-            or (env.get('GITHUB_SHA') != sha and not changed) or not env.get('SMOKE_TEST_CLASSES')):
+            or (check_sha != sha and not changed) or not env.get('SMOKE_TEST_CLASSES')):
         raise ValueError('增量编译包补检必须绑定未变化的应用源码和明确测试范围')
     if variant == 'daily' and (record.get('validation_profile') != 'daily'
             or record.get('full_regression_passed') is not False):
@@ -184,7 +185,24 @@ def verify_diagnostic_files(root, record):
     verify_manifests(*texts, diagnostic=True)
 
 
+def verify_checkout(env):
+    expected = env.get('EXPECTED_SHA', '')
+    workflow_sha = env.get('GITHUB_SHA', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', expected) or not re.fullmatch(r'[0-9a-f]{40}', workflow_sha):
+        raise ValueError('补检必须固定完整源码与工作流SHA')
+    checkout_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    if checkout_sha != expected:
+        raise ValueError('补检实际源码与EXPECTED_SHA不符')
+    subprocess.run(['git', 'merge-base', '--is-ancestor', checkout_sha, workflow_sha], check=True)
+    tools = Path(__file__).resolve().parents[1]
+    tools_sha = subprocess.check_output(['git', '-C', str(tools), 'rev-parse', 'HEAD'], text=True).strip()
+    if tools_sha != workflow_sha:
+        raise ValueError('补检工具未固定到工作流SHA')
+    return checkout_sha
+
+
 def main():
+    checkout_sha = verify_checkout(os.environ)
     env = os.environ
     run_id = env['SOURCE_RUN_ID']
     if not run_id.isdecimal() or not re.fullmatch(r'[0-9a-f]{40}', env['SOURCE_SHA']):
@@ -196,8 +214,8 @@ def main():
             return json.load(response)
     source_run = get(base)
     jobs = get(base + '/attempts/1/jobs?per_page=100')['jobs']
-    subprocess.run(['git', 'merge-base', '--is-ancestor', env['SOURCE_SHA'], env['GITHUB_SHA']], check=True)
-    changed = subprocess.check_output(['git', 'diff', '--no-renames', '--name-only', '-z', env['SOURCE_SHA'], env['GITHUB_SHA']], text=True).split('\0')[:-1]
+    subprocess.run(['git', 'merge-base', '--is-ancestor', env['SOURCE_SHA'], checkout_sha], check=True)
+    changed = subprocess.check_output(['git', 'diff', '--no-renames', '--name-only', '-z', env['SOURCE_SHA'], checkout_sha], text=True).split('\0')[:-1]
     source_artifact = None
     if env.get('SOURCE_VARIANT') == 'candidate':
         source_workflow = subprocess.check_output(['git', 'show', env['SOURCE_SHA'] + ':.github/workflows/build.yml'], text=True)
@@ -223,16 +241,22 @@ def main():
         verify_candidate_archive(Path('delivery'), source_artifact, archive)
     else:
         record = json.loads(Path('delivery/构建记录.json').read_text())
-        verify(env, record, source_run, jobs, changed)
+        verify(env, record, source_run, jobs, changed, checkout_sha=checkout_sha)
         if env.get('SOURCE_VARIANT') == 'diagnostic':
             verify_diagnostic_files(Path('delivery'), record)
     Path('smoke').mkdir(exist_ok=True)
     Path('smoke/source.json').write_text(json.dumps(dict(build_sha=env['SOURCE_SHA'], build_run=run_id,
-        build_attempt=1, build_variant=env.get('SOURCE_VARIANT', 'debug'), check_sha=env['GITHUB_SHA'], check_run=env['GITHUB_RUN_ID'], check_attempt=env['GITHUB_RUN_ATTEMPT'],
+        build_attempt=1, build_variant=env.get('SOURCE_VARIANT', 'debug'), check_sha=checkout_sha, workflow_sha=env['GITHUB_SHA'], validation_tools_sha=env['GITHUB_SHA'], check_run=env['GITHUB_RUN_ID'], check_attempt=env['GITHUB_RUN_ATTEMPT'],
         changed_validation_files=changed, source_artifact=source_artifact,
         formal_acceptance=False if env.get('SOURCE_VARIANT') in ('candidate', 'daily', 'compile', 'diagnostic') else None), ensure_ascii=False) + '\n')
     print('既有应用包身份、变体及应用源码一致性核对通过')
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    if sys.argv[1:] == ['--verify-checkout-only']:
+        verify_checkout(os.environ)
+    elif sys.argv[1:]:
+        raise ValueError('未知补检参数')
+    else:
+        main()

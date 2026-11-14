@@ -512,6 +512,14 @@ def record(python):
     sha = os.environ["GITHUB_SHA"]
     if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha):
         raise ValueError("invalid CI SHA")
+    workflow_sha = sha
+    expected = os.environ.get("EXPECTED_SHA", "")
+    if os.environ.get("SMOKE_MODE") == "smoke" and expected:
+        if not re.fullmatch(r"[0-9a-f]{40}", expected):
+            raise ValueError("invalid smoke checkout SHA")
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        if sha != expected:
+            raise ValueError("smoke checkout SHA mismatch")
     identity = dict(sha=sha, run_id=int(os.environ["GITHUB_RUN_ID"]),
                     attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]))
     if identity["run_id"] <= 0 or identity["attempt"] <= 0:
@@ -531,6 +539,9 @@ def record(python):
     with log.open("wb") as output:
         code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT, env=child_env)
     result = dict(identity=identity, command=command, exit_code=code)
+    if sha != workflow_sha:
+        result["workflow_sha"] = workflow_sha
+        result["validation_tools_sha"] = workflow_sha
     if scope != "full":
         result["scope"] = scope
     receipt.write_text(json.dumps(result) + "\n",

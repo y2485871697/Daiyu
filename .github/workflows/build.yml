@@ -541,7 +541,12 @@ jobs:
     steps:
       - name: 限定定向过滤仅用于smoke或candidate
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
+          if test "$SMOKE_MODE" = smoke; then
+            [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          fi
           if test "$SMOKE_MODE" = daily; then
             test -n "$DAILY_BASE_SHA"
           elif test "$SMOKE_MODE" = candidate; then
@@ -553,13 +558,32 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+          ref: ${{ inputs.mode == 'smoke' && inputs.expected_sha || github.sha }}
+      - name: 固定补检工具源码
+        if: inputs.mode == 'smoke'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .smoke-validation-tools
+      - name: 验证冻结补检工具
+        if: inputs.mode == 'smoke'
+        working-directory: .smoke-validation-tools
+        run: PYTHONPATH=tests python3 -B -m unittest test_frozen_smoke_source test_diagnostic_smoke_source test_acceptance_tool_receipt test_cloud_revision test_smoke_boot.SourceTests -v
       - name: 核对启动验证源码身份
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
-        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+        run: |
+          if test "$SMOKE_MODE" = smoke; then
+            python3 .smoke-validation-tools/scripts/verify_smoke_source.py --verify-checkout-only
+          else
+            python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+          fi
       - name: 补检当前 CHECK 工具原文
         if: inputs.mode == 'smoke'
-        run: python3 scripts/acceptance/record_tool_tests.py --python python3
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 .smoke-validation-tools/scripts/acceptance/record_tool_tests.py --python python3
       - name: 上传补检工具证据
         if: always() && inputs.mode == 'smoke'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -580,7 +604,8 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_VARIANT: ${{ inputs.source_variant }}
-        run: python3 scripts/verify_smoke_source.py
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 .smoke-validation-tools/scripts/verify_smoke_source.py
       - name: 核对同run定向候选身份
         if: inputs.mode == 'candidate'
         run: python3 scripts/candidate_package.py verify --directory delivery

@@ -1,6 +1,10 @@
 package app.daiyu.android
 
+import android.view.ViewTreeObserver
 import androidx.activity.compose.setContent
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.test.platform.graphics.HardwareRendererCompat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
@@ -58,6 +62,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ConversationPaneVisualTest : WiredActivityTestCase() {
     private val density = AtomicReference<Density>()
@@ -128,6 +134,133 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+    }
+
+    fun testRealOpenedDrawerKeepsPositionAcrossPauseResume() = assertRealDrawerResume(home = false)
+
+    fun testRealOpenedDrawerKeepsPositionAcrossHomeResume() = assertRealDrawerResume(home = true)
+
+    private fun assertRealDrawerResume(home: Boolean) {
+        val original = activity
+        val task = original.taskId
+        val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
+        val oldAutoAdvance = ui.mainClock.autoAdvance
+        if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
+        val view = original.window.decorView
+        var armed = false
+        var resumeEpoch = 0
+        data class Frame(val kind: String, val epoch: Int, val lifecycle: Lifecycle.State,
+            val attached: Boolean, val open: Boolean, val x: Float, val width: Int,
+            val projectedWidth: Float, val rootWidth: Int)
+        val frames = mutableListOf<Frame>()
+        var samplingFailure: Throwable? = null
+        var sample: ((String) -> Unit)? = null
+        val draw = ViewTreeObserver.OnDrawListener { if (armed) sample?.invoke("draw") }
+        val layout = ViewTreeObserver.OnGlobalLayoutListener { if (armed) sample?.invoke("layout") }
+        val lifecycle = LifecycleEventObserver { _, event ->
+            if (armed) {
+                if (event == Lifecycle.Event.ON_RESUME) resumeEpoch++
+                sample?.invoke(event.name)
+            }
+        }
+        fun drawFrame() {
+            val latch = CountDownLatch(1)
+            val listener = ViewTreeObserver.OnDrawListener { latch.countDown() }
+            try {
+                ui.mainClock.advanceTimeByFrame()
+                instrumentation.runOnMainSync {
+                    view.viewTreeObserver.addOnDrawListener(listener)
+                    view.invalidate()
+                }
+                assertTrue("Each sampled Compose frame needs a native draw", latch.await(5, TimeUnit.SECONDS))
+            } finally {
+                instrumentation.runOnMainSync { view.viewTreeObserver.removeOnDrawListener(listener) }
+            }
+        }
+        try {
+            dismissIme()
+            mainThread { invokeHost(original, "openSidebar") }
+            val drawerNode = node("conversation-drawer").assertIsDisplayed().fetchSemanticsNode()
+            val originalNodeId = drawerNode.id
+            val coordinates = drawerNode.layoutInfo.coordinates
+            sample = { kind ->
+                try {
+                    val attached = drawerNode.layoutInfo.isPlaced && coordinates.isAttached
+                    val position = if (attached) coordinates.positionInRoot() else Offset(Float.NaN, Float.NaN)
+                    val right = if (attached) coordinates.localToRoot(Offset(coordinates.size.width.toFloat(), 0f))
+                        else Offset(Float.NaN, Float.NaN)
+                    val root = if (attached) generateSequence(coordinates) { it.parentLayoutCoordinates }.last() else null
+                    frames += Frame(kind, resumeEpoch, original.lifecycle.currentState, attached,
+                        invokeHost(original, "getSidebarVisible") as Boolean, position.x,
+                        if (attached) coordinates.size.width else 0, right.x - position.x, root?.size?.width ?: 0)
+                } catch (failure: Throwable) { samplingFailure = failure }
+            }
+            instrumentation.runOnMainSync {
+                view.viewTreeObserver.addOnDrawListener(draw)
+                view.viewTreeObserver.addOnGlobalLayoutListener(layout)
+                original.lifecycle.addObserver(lifecycle)
+            }
+            ui.mainClock.autoAdvance = false
+            var openBaselineX: Float? = null
+            // Two open returns plus an explicitly closed control; never replace Main's content.
+            for (open in listOf(true, true, false)) {
+                if (!open) mainThread { invokeHost(original, "dismissSidebar") }
+                repeat(3) { drawFrame() }
+                instrumentation.runOnMainSync { frames.clear(); sample!!.invoke("baseline"); armed = true }
+                val expectedEpoch = resumeEpoch + if (home) 2 else 1
+                if (home) {
+                    // Consume the inactive composition before STOP suspends its frame clock.
+                    realPauseResumeWithPausedFrames(original, whilePaused = { repeat(3) { drawFrame() } })
+                    assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                        android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+                    awaitControl("original drawer host stopped after HOME") {
+                        !original.isDestroyed && original.lifecycle.currentState == Lifecycle.State.CREATED
+                    }
+                    restoreOriginalHost(original)
+                    awaitHostWindowFocus(original)
+                } else realPauseResumeWithPausedFrames(original, whilePaused = {
+                    // Do not conflate PAUSE and RESUME while the Compose clock is frozen.
+                    repeat(3) { drawFrame() }
+                })
+                // The observers were armed before pause; drive every remaining animation frame.
+                repeat(32) { drawFrame() }
+                mainThread {
+                    armed = false
+                    samplingFailure?.let { throw it }
+                    val baseline = frames.first()
+                    assertEquals(open, baseline.open)
+                    assertTrue("A baseline must be attached", baseline.attached)
+                    assertTrue("Baseline geometry must be finite", baseline.x.isFinite() && baseline.projectedWidth.isFinite())
+                    if (open) openBaselineX = baseline.x
+                    else assertTrue("Closed control must observe the drawer's actual translation",
+                        kotlin.math.abs(baseline.x - checkNotNull(openBaselineX)) > baseline.width * .5f)
+                    assertTrue("Must capture resumed native draws, not only a stable end node",
+                        frames.any { it.kind == "draw" && it.epoch == expectedEpoch && it.lifecycle == Lifecycle.State.RESUMED })
+                    frames.forEachIndexed { index, frame ->
+                        val message = "home=$home sample=$index baseline=$baseline frame=$frame"
+                        assertTrue(message, frame.attached)
+                        assertTrue(message, frame.x.isFinite() && frame.projectedWidth.isFinite())
+                        assertEquals(message, open, frame.open)
+                        assertEquals(message, baseline.x, frame.x, .03f)
+                        assertEquals(message, baseline.width, frame.width)
+                        assertEquals(message, baseline.projectedWidth, frame.projectedWidth, .03f)
+                        assertEquals(message, baseline.rootWidth, frame.rootWidth)
+                    }
+                    assertEquals(task, original.taskId)
+                    assertFalse(original.isDestroyed || original.isFinishing)
+                }
+                assertEquals(originalNodeId, node("conversation-drawer").fetchSemanticsNode().id)
+            }
+        } finally {
+            instrumentation.runOnMainSync {
+                armed = false
+                original.lifecycle.removeObserver(lifecycle)
+                view.viewTreeObserver.removeOnDrawListener(draw)
+                view.viewTreeObserver.removeOnGlobalLayoutListener(layout)
+            }
+            ui.mainClock.autoAdvance = oldAutoAdvance
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+        }
     }
 
     fun testEmptyChatSwipesOpenDrawerWithoutCancellingInitialBottomPlacement() {

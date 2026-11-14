@@ -887,13 +887,17 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         node(expectedTag).assertIsDisplayed()
     }
     /** Real framework pause/resume, retaining this Activity without onStop or recreation. */
-    protected fun realPauseResume(original: MainActivity, beforePause: () -> Unit = {}, atPause: () -> Unit = {}) {
+    protected fun realPauseResume(original: MainActivity, beforePause: () -> Unit = {}, atPause: () -> Unit = {}) =
+        realPauseResumeWithPausedFrames(original, {}, beforePause, atPause)
+
+    protected fun realPauseResumeWithPausedFrames(original: MainActivity, whilePaused: () -> Unit,
+        beforePause: () -> Unit = {}, atPause: () -> Unit = {}) {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
         val debugCover = android.content.ComponentName(original.packageName, "app.daiyu.android.LifecycleCoverActivity")
         val debugCoverPresent = try { original.packageManager.getActivityInfo(debugCover, 0); true }
             catch (_: android.content.pm.PackageManager.NameNotFoundException) { false }
         if (!debugCoverPresent) {
-            releasePauseResume(original, beforePause, atPause)
+            releasePauseResume(original, beforePause, atPause, whilePaused)
             return
         }
         val app = original.application
@@ -937,6 +941,7 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
             mainThread { assertSame(cover, started); assertEquals(original.taskId, started.taskId) }
             awaitControl("original paused under transparent cover") { paused && !stopped }
             failure.get()?.let { throw it }
+            whilePaused()
         } catch (problem: Throwable) {
             primary = problem
             throw problem
@@ -960,7 +965,8 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
     }
 
     /** Release keeps its APK free of test components; this cover belongs only to the test APK. */
-    private fun releasePauseResume(original: MainActivity, beforePause: () -> Unit, atPause: () -> Unit) {
+    private fun releasePauseResume(original: MainActivity, beforePause: () -> Unit, atPause: () -> Unit,
+        whilePaused: () -> Unit) {
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
         var finishCover: android.os.ResultReceiver? = null
         var coverReady = false
@@ -1039,6 +1045,7 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
                 assertTrue("cover must use the test APK UID", coverUid != android.os.Process.myUid())
             }
             failure.get()?.let { throw it }
+            whilePaused()
         } catch (problem: Throwable) {
             primary = problem
             throw problem

@@ -2218,7 +2218,7 @@ class MainActivity : ComponentActivity() {
                     "backup", "appearance", "subagents")
                 val rootChatContent: @Composable (Boolean) -> Unit = { routeActive ->
                     ConversationSidePaneScaffold(
-                        state = paneState, visible = routeActive && sidebarVisible, backHandlerEnabled = routeActive,
+                        state = paneState, visible = retainedPage == "chat" && sidebarVisible, backHandlerEnabled = routeActive,
                         assistants = projectedAssistants, selectedAssistantId = if (selected == null) activeAssistant else selected?.assistantId.orEmpty(),
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
                         onSearchChange = { paneState = paneState.copy(searchQuery = it) },

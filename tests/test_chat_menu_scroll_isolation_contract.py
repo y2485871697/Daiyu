@@ -104,6 +104,25 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         self.assertNotIn('withFrameNanos', node)
         self.assertNotIn('key(', node)
 
+    def test_real_chat_drawer_visual_state_does_not_follow_lifecycle_activation(self):
+        activity = (APP / 'MainActivity.kt').read_text()
+        root = activity.split('val rootChatContent: @Composable (Boolean) -> Unit = { routeActive ->', 1)[1]
+        call = root.split('ConversationSidePaneScaffold(', 1)[1].split('onOpen =', 1)[0]
+        self.assertIn('visible = retainedPage == "chat" && sidebarVisible', call)
+        self.assertIn('backHandlerEnabled = routeActive', call)
+        self.assertNotIn('visible = routeActive && sidebarVisible', call)
+        # Pausing still revokes interaction; only the visual-intent wiring changes.
+        host = (APP / 'ui/navigation/PageBackGestures.kt').read_text()
+        self.assertIn('val rootActive = retainedRootActive && resumed', host)
+        self.assertIn('PageRetainedContent(retainedRootVisible, rootActive)', host)
+        self.assertIn('retainedRootContent(active)', host)
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneVisualTest.kt').read_text()
+        for token in ('testRealOpenedDrawerKeepsPositionAcrossPauseResume',
+                      'testRealOpenedDrawerKeepsPositionAcrossHomeResume',
+                      'ViewTreeObserver.OnDrawListener', 'ViewTreeObserver.OnGlobalLayoutListener',
+                      'whilePaused = {'):
+            self.assertIn(token, tests)
+
     def test_refresh_and_toggle_keep_authoritative_io_and_pending_gates(self):
         source = (APP / 'MainActivity.kt').read_text()
         self.assertIn('onMore = { if (currentChat()) refreshAutomaticCompression() }', source)

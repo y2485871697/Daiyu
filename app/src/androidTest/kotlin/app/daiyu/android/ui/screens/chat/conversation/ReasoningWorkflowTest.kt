@@ -110,13 +110,22 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testListCompletedHistoryDoesNotReplayTypewriterOrFeedback() =
         verifyAnswerAdmission(mixed = false, terminal = true, workflow = false, history = true, listEntry = true)
 
+    fun testReconnectFinalBodyTypesAfterWorkflowDisposal() =
+        verifyAnswerAdmission(mixed = true, terminal = true, streamed = false, reconnect = true)
+    fun testReconnectListFinalBodyTypesAfterWorkflowDisposal() =
+        verifyAnswerAdmission(mixed = true, terminal = true, streamed = false, listEntry = true, reconnect = true)
+    fun testReconnectCompletedHistoryDoesNotReplayTypewriterOrFeedback() =
+        verifyAnswerAdmission(mixed = true, terminal = true, workflow = false, history = true, reconnect = true)
+
     private fun verifyAnswerAdmission(mixed: Boolean, terminal: Boolean, streamed: Boolean = true,
-        workflow: Boolean = true, history: Boolean = false, listEntry: Boolean = false) {
+        workflow: Boolean = true, history: Boolean = false, listEntry: Boolean = false, reconnect: Boolean = false) {
         prepare()
         val answer = "ANSWER " + "visible text ".repeat(18)
         runBlocking {
             projectMarkdown(listOf(answer))
             projectMarkdown(listOf(answer), parser = streamingMarkdownParser)
+            if (reconnect) projectMarkdown(listOf(answer), windows = listOf(
+                app.daiyu.android.MarkdownSourceWindow(answer, 0, answer.length)))
         }
         var ready by mutableStateOf(history)
         var done by mutableStateOf(history)
@@ -127,13 +136,19 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message((if (workflow) listOf(tool("t1")) else emptyList()) + if (ready) listOf(MessageBlock.Text("body", answer)) else emptyList(), emptyList())
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
-                val turn = mapped(source).let { if (mixed) it else it.copy(content = emptyList()) }
+                val reconnects = if (reconnect) listOf(app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(
+                    "cut", app.daiyu.android.timeline.TimelineAnchor(source.conversationId.value, source.runId.value, source.id.value, 0),
+                    1L, "running", 10L, "network", 0, "model", app.daiyu.android.timeline.ReconnectPosition(0))) else emptyList()
+                val turn = (ChatTurnMapper.map(listOf(source), reconnects = reconnects).single() as ChatTurnUi.Assistant)
+                    .let { if (mixed) it else it.copy(content = emptyList()) }
                 val displayed = turn.copy(isStreaming = streamed && !done)
                 if (listEntry) Box(Modifier.size(320.dp, 480.dp)) {
                     ChatMessageList(listOf(displayed), ChatScreenActions(
                         onVisibleTextAdvance = { advances.incrementAndGet() },
-                        onVisibleCompleted = { settled.set(it.isNotEmpty()) }))
-                } else AssistantTurn(displayed, ChatScreenActions(),
+                        onVisibleCompleted = { settled.set(it.isNotEmpty()) }), timeline = reconnects)
+                } else if (reconnect) ReconnectedAssistantTurn(displayed, reconnectParts(displayed, reconnects), ChatScreenActions(),
+                    onVisibleAdvance = { advances.incrementAndGet() }, onRevealSettled = { settled.set(it) })
+                else AssistantTurn(displayed, ChatScreenActions(),
                     onVisibleAdvance = { advances.incrementAndGet() }, onRevealSettled = { settled.set(it) })
             } } }
             ui.mainClock.advanceTimeBy(if (history) 128 else 400)

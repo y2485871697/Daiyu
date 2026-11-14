@@ -79,8 +79,9 @@ class MarkdownAdmissionCompositionTest {
                 val displayed = part?.turn ?: turn.value
                 val ordered = part?.workflow ?: displayed.workflowContent()
                 mountedKey = displayed.listKey
-                val body = ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
-                val exact = parsed.value.sources == body.map { it.text }
+                val body = ordered.body.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) }
+                val windows = body.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
+                val exact = parsed.value.sources == body.map { it.text } && parsed.value.windows == windows
                 reveal = rememberMarkdownReveal(body, parsed.value, streaming = displayed.isStreaming,
                     terminal = displayed.status != RunStatus.RUNNING && ordered.pending.isEmpty() && exact,
                     onVisibleAdvance = { advances++ }, blockedSources = if (admitted.value) emptySet() else setOf("answer"),
@@ -97,7 +98,10 @@ class MarkdownAdmissionCompositionTest {
                 assertFalse(reveal!!.settled)
                 assertEquals(0, advances)
             }
-            parsed.value = MarkdownProjection(listOf(text), mapOf(text to MarkdownParser.parse(text)), defaultMarkdownParser)
+            val finalBody = (if (frozen) reconnectParts(turn.value, listOf(event)).parts.first().workflow
+                else turn.value.workflowContent()).body.filterIsInstance<MessageContentUi.Text>()
+            parsed.value = projectMarkdown(finalBody.map { it.text }, windows = finalBody.map { it.markdownWindow })
+            if (frozen) assertTrue("The fixture must retain production reconnect windows", parsed.value.windows.any { it != null })
             repeat(40) { frame() }
             assertEquals("Pending classification retains its reveal owner", key, mountedKey)
             assertEquals("Final body cannot type behind the workflow", 0, reveal!!.limit("answer"))

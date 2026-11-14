@@ -133,8 +133,10 @@ internal data class MarkdownTypingPart(val source: MarkdownTypingSource, val len
 )
 
 internal fun markdownTypingAppends(previous: List<MarkdownTypingSource>, next: List<MarkdownTypingSource>): Boolean {
-    if (!markdownWindowsAppend(previous.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty(),
-            next.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty())) return false
+    if (previous.isEmpty()) return true
+    // Parsing mode changes the AST, not the identity of the text being revealed.
+    if (!markdownWindowsAppend(previous.map { it.window?.copy(streaming = false) }.takeIf { it.any { window -> window != null } }.orEmpty(),
+            next.map { it.window?.copy(streaming = false) }.takeIf { it.any { window -> window != null } }.orEmpty())) return false
     if (previous.all { it.text.isEmpty() }) return true
     if (next.size < previous.size) return false
     return previous.indices.all { index ->

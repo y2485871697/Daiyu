@@ -111,6 +111,49 @@ class MarkdownRevealTest {
         assertNull(markdownTypingBaselineLength(projection, listOf("changed", "second new"), allowPrefix = true))
     }
 
+    @Test fun firstReconnectWindowIsNewOutputRatherThanAReplacement() {
+        val text = "字".repeat(500)
+        val window = app.daiyu.android.MarkdownSourceWindow(text, 0, text.length)
+        val source = MarkdownTypingSource("answer", text, window)
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, streaming = false, terminal = false, live = true)
+        val answer = state.update(listOf(MarkdownTypingPart(source, text.length)), 0,
+            streaming = false, terminal = true, paceTerminal = true)!!
+        assertEquals(0, answer.start)
+        state.advance(answer, 1_000_000_000L)
+        assertTrue(state.advance(answer, 1_050_000_000L) in 1..4)
+    }
+
+    @Test fun reconnectWindowCompletionKeepsThePartiallyRevealedBudget() {
+        val text = "字".repeat(500)
+        val window = app.daiyu.android.MarkdownSourceWindow(text, 20, 400, streaming = true)
+        val source = MarkdownTypingSource("answer", window.displaySource(), window)
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, streaming = true, terminal = false)
+        val running = state.update(listOf(MarkdownTypingPart(source, source.text.length)), 0,
+            streaming = true, terminal = false)!!
+        state.advance(running, 1_000_000_000L)
+        val visible = state.advance(running, 1_050_000_000L)
+        assertTrue(visible in 1 until running.total)
+        val completed = source.copy(window = window.copy(streaming = false))
+        assertFalse("The parser must still invalidate its streaming AST", markdownWindowsAppend(listOf(window), listOf(completed.window)))
+        val terminal = state.update(listOf(MarkdownTypingPart(completed, completed.text.length)), 0,
+            streaming = false, terminal = true, paceTerminal = true)!!
+        assertEquals(visible, terminal.start)
+        val next = state.advance(terminal, 1_100_000_000L)
+        assertTrue("Completion must not flush the remaining text", next in visible..visible + 4)
+        assertTrue(next < terminal.total)
+    }
+
+    @Test fun changedReconnectRangesOrContentRemainReplacements() {
+        val window = app.daiyu.android.MarkdownSourceWindow("same text", 0, 9, streaming = true)
+        val before = MarkdownTypingSource("answer", window.displaySource(), window)
+        assertFalse(markdownTypingAppends(listOf(before), listOf(before.copy(window = window.copy(start = 1)))))
+        assertFalse(markdownTypingAppends(listOf(before), listOf(before.copy(window = window.copy(end = 8)))))
+        assertFalse(markdownTypingAppends(listOf(before), listOf(before.copy(text = "replacement"))))
+        assertFalse(markdownTypingAppends(listOf(before), listOf(before.copy(window = null))))
+    }
+
     @Test fun newBodyAnimatesAndNewTargetsKeepProgress() {
         val state = MarkdownTypingState(listOf(source("")))
         state.update(listOf(part("")), 0, true, false)

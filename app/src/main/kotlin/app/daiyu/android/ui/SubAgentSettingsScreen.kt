@@ -118,7 +118,7 @@ internal fun SubAgentSettingsScreen(
                         onDelete = { if (editable) delete = preset; actionsPreset = null })
                 }
                 if (add || rename != null) SubAgentPresetNameDialog(
-                    title = if (add) "添加子代理组" else "重命名", name = name, renameStyle = !add,
+                    title = if (add) "添加子代理组" else "重命名", name = name,
                     onNameChange = { name = it }, saveEnabled = editable && name.trim().isNotBlank(),
                     onDismiss = { add = false; rename = null }, onSave = {
                         if (directory.change {
@@ -209,11 +209,6 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                                                 Icon(Icons.Rounded.MoreVert, "${profile.name}更多操作", tint = accent)
                                             }
                                             if (editable) SubAgentDropdownMenu(expanded, { expanded = false }) {
-                                                DropdownMenuItem(text = { Text("配置") }, leadingIcon = { Icon(Icons.Rounded.Tune, null, tint = accent) },
-                                                    onClick = {
-                                                        if (editor.enabled) SubAgentProfileDraftSession.open(editor, profile)?.let { addedDraft = it }
-                                                        expanded = false
-                                                    })
                                                 DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Rounded.Edit, null, tint = accent) },
                                                     onClick = { if (editor.enabled) { name = profile.name; rename = profile }; expanded = false })
                                                 DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) },
@@ -236,7 +231,7 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
             })
         }
         rename?.let { profile ->
-            if (editable) SubAgentPresetNameDialog(title = "重命名", fieldHint = "名称", name = name, renameStyle = true,
+            if (editable) SubAgentPresetNameDialog(title = "重命名", fieldHint = "名称", name = name,
                 onNameChange = { if (editor.enabled) name = it }, saveEnabled = name.trim().isNotBlank(),
                 onDismiss = { rename = null }, onSave = {
                     if (editor.enabled && editor.updateProfile(profile.id) { it.copy(name = name.trim()) } is ConversationSubAgentPreferences.WriteResult.Saved) rename = null

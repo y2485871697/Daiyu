@@ -83,7 +83,7 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
                 }
             }
         } else {
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                 if (!badge.isNullOrBlank()) Surface(shape = RoundedCornerShape(6.dp), color = colors.surfaceVariant) {
                     Text(badge, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.onSurface.copy(alpha = alpha))

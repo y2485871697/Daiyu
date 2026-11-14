@@ -1,17 +1,6 @@
 package app.daiyu.android.ui.components
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
-import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable
 internal fun SubAgentPresetNameDialog(
@@ -22,24 +11,8 @@ internal fun SubAgentPresetNameDialog(
     onDismiss: () -> Unit,
     onSave: () -> Unit,
     fieldHint: String = "组名称",
-    renameStyle: Boolean = false,
 ) {
-    if (renameStyle) {
-        NameInputSheet(title, name, fieldHint, "保存",
-            onValueChange = { onNameChange(it.take(80)) },
-            onConfirm = onSave, onDismiss = onDismiss, confirmEnabled = saveEnabled)
-        return
-    }
-    WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
-        app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
-        Column(Modifier.fillMaxWidth()) {
-            DaiyuFormTextField(value = name, onValueChange = { onNameChange(it.take(80)) },
-                hint = fieldHint, singleLine = true)
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                TextButton(onClick = onDismiss) { Text("取消") }
-                TextButton(enabled = saveEnabled, onClick = onSave) { Text("保存") }
-            }
-        }
-    }
+    NameInputSheet(title, name, fieldHint, "保存",
+        onValueChange = { onNameChange(it.take(80)) },
+        onConfirm = onSave, onDismiss = onDismiss, confirmEnabled = saveEnabled)
 }

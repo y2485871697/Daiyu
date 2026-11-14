@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -52,24 +54,48 @@ internal fun subAgentGptSpeedDescription(name: String, mode: GptSpeedMode): Stri
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun SubAgentGptSpeedButton(profile: SubAgentProfile, providers: List<SubAgentProvider>, enabled: Boolean, modifier: Modifier = Modifier) {
+internal fun SubAgentGptSpeedButton(profile: SubAgentProfile, providers: List<SubAgentProvider>, enabled: Boolean, modifier: Modifier = Modifier, settings: Boolean = false) {
     val editor = LocalConversationSubAgentEditor.current
     val usable = enabled && editor?.enabled == true
     val boundModel = remember(profile.providerId, profile.modelId, providers) {
-        val provider = providers.firstOrNull { it.id == profile.providerId && it.isEnabled }
-        val model = provider?.models?.firstOrNull { it.id == profile.modelId && it.isEnabled }
+        val provider = providers.singleOrNull { it.id == profile.providerId && it.isEnabled }
+        val model = provider?.models?.singleOrNull { it.id == profile.modelId && it.isEnabled }
         model?.takeIf { supportsGptSpeedBinding(provider, it) }
     } ?: return
     val mode = profile.gptSpeedForModel(fallback = boundModel.defaultGptSpeed)
-    key(editor, profile.id, profile.providerId, profile.modelId) { BoundSubAgentGptSpeedButton(profile, editor, usable, mode, modifier) }
+    key(editor, profile.id, profile.providerId, profile.modelId) { BoundSubAgentGptSpeedButton(profile, editor, usable, mode, modifier, settings) }
 }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: ConversationSubAgentEditor?, usable: Boolean, mode: GptSpeedMode, modifier: Modifier) {
+private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: ConversationSubAgentEditor?, usable: Boolean, mode: GptSpeedMode, modifier: Modifier, settings: Boolean) {
     val gate = remember { SubAgentGptSpeedAnimationGate() }
     val progress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val cycleSpeed: () -> Unit = {
+        val token = gate.request()
+        if (token != 0) scope.launch {
+            try {
+                val result = editor?.cycleGptSpeed(profile.id, profile.providerId, profile.modelId, expected = profile)
+                coroutineContext.ensureActive()
+                if (result !is ConversationSubAgentPreferences.WriteResult.Saved) return@launch
+                val savedProfile = result.config.profiles.singleOrNull { it.id == profile.id && it.providerId == profile.providerId && it.modelId == profile.modelId } ?: return@launch
+                val savedMode = savedProfile.gptSpeedForModel(profile.providerId, profile.modelId)
+
+                Toast.makeText(context, subAgentGptSpeedToastMessage(savedMode), Toast.LENGTH_SHORT).show()
+                if (!settings) {
+                    progress.snapTo(0f)
+                    progress.animateTo(targetValue = 1f, animationSpec = tween(durationMillis = SubAgentGptSpeedAnimationDurationMillis, easing = LinearEasing))
+                }
+            } finally { gate.finish(token) }
+        }
+    }
+    if (settings) {
+        SubAgentSettingRow("GPT 速度", subAgentGptSpeedDisplayName(mode), Icons.Rounded.Speed,
+            subAgentGptSpeedDescription(profile.name, mode), enabled = usable, onClick = cycleSpeed,
+            modifier = modifier.testTag("subagent-gpt-speed-${profile.id}"))
+        return
+    }
     val normalColor = MaterialTheme.colorScheme.onSurface
     val contentColor by animateColorAsState(targetValue = subAgentGptSpeedChipColor(mode, normalColor,
         MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimaryContainer),
@@ -82,22 +108,7 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
         else modifier.defaultMinSize(minWidth = SubAgentGptSpeedMinTouchSize, minHeight = SubAgentGptSpeedMinTouchSize))
         .semantics(mergeDescendants = true) { contentDescription = subAgentGptSpeedDescription(profile.name, mode) }
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = usable,
-            role = Role.Button, onLongClick = null, onClick = {
-                val token = gate.request()
-                if (token != 0) scope.launch {
-                    try {
-                        val result = editor?.cycleGptSpeed(profile.id, profile.providerId, profile.modelId, expected = profile)
-                        coroutineContext.ensureActive()
-                        if (result !is ConversationSubAgentPreferences.WriteResult.Saved) return@launch
-                        val savedProfile = result.config.profiles.singleOrNull { it.id == profile.id && it.providerId == profile.providerId && it.modelId == profile.modelId } ?: return@launch
-                        val savedMode = savedProfile.gptSpeedForModel(profile.providerId, profile.modelId)
-
-                        Toast.makeText(context, subAgentGptSpeedToastMessage(savedMode), Toast.LENGTH_SHORT).show()
-                        progress.snapTo(0f)
-                        progress.animateTo(targetValue = 1f, animationSpec = tween(durationMillis = SubAgentGptSpeedAnimationDurationMillis, easing = LinearEasing))
-                    } finally { gate.finish(token) }
-                }
-            })
+            role = Role.Button, onLongClick = null, onClick = cycleSpeed)
         .then(if (chatStyle) Modifier.padding(horizontal = 8.dp, vertical = 3.dp) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {

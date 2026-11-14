@@ -70,8 +70,8 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                 ?: if (profile.modelId.isBlank()) "选择模型" else "模型不可用",
                 Icons.Rounded.ViewInAr, "${profile.name}模型", enabled = usable, badge = config?.providerName, stackedValue = true,
                 onClick = { if (currentUsable) { modelPicker = true } },
-                onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } },
-                trailing = { SubAgentGptSpeedButton(profile, presentationProviders, usable) })
+                onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } })
+            SubAgentGptSpeedButton(profile, presentationProviders, usable, settings = true)
             Box(Modifier.fillMaxWidth()) {
                 SubAgentSettingRow("职责", profile.roleLabel, Icons.Rounded.Assignment,
                     "选择${profile.name}职责", enabled = usable, dropdown = true,

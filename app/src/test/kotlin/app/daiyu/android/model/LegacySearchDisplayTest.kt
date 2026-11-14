@@ -87,4 +87,41 @@ class LegacySearchDisplayTest {
         assertEquals(old.text, app.daiyu.android.copyableImageHostText(owner.copy(blocks = listOf(old.copy()))))
     }
 
+    @Test fun boundaryProjectionPreservesProviderLiteralsAndEveryHistoricalFooterBoundary() {
+        val rawPlain = "**A😀B**\r\n\u2060\\*literal"
+        val item = item()
+        item.getJSONArray("content").getJSONObject(0).put("text", rawPlain)
+        val projection = ResponsesSearchProtocol.legacyProjection(item, rawPlain)
+        assertEquals(ResponsesSearchProtocol.legacyDisplayText(item, rawPlain), projection.witness)
+        assertTrue(projection.source.startsWith(rawPlain))
+        val footer = projection.witness.lastIndexOf("\n\n来源：\n\n")
+        assertTrue(footer >= 0)
+        assertTrue(projection.source.endsWith(projection.witness.substring(footer)))
+        val offsets = projection.coordinates
+        assertEquals(projection.witness.length, offsets.rawLength)
+        assertEquals(0, offsets.at(0))
+        assertEquals(projection.source.length, offsets.at(offsets.rawLength))
+        for (cut in 0..offsets.rawLength) {
+            if (cut > 0) assertTrue(offsets.at(cut - 1) <= offsets.at(cut))
+            val before = app.daiyu.android.MarkdownSourceWindow(projection.source, 0, cut, coordinates = offsets)
+            val after = before.copy(start = cut, end = offsets.rawLength)
+            assertEquals(projection.source, before.displaySource() + after.displaySource())
+        }
+    }
+
+    @Test fun historicalFooterOrderRemainsExactWhileNewResponsesKeepCanonicalDeduplication() {
+        val item = item()
+        val annotations = item.getJSONArray("content").getJSONObject(0).getJSONArray("annotations")
+        annotations.put(JSONObject().put("type", "url_citation").put("start_index", 0).put("end_index", 3)
+            .put("url", "https://source.test:443").put("title", "Other"))
+        val projection = ResponsesSearchProtocol.legacyProjection(item, plain)
+        assertTrue(projection.source.contains("2. [Other](<https://source.test:443>)"))
+        assertFalse(ResponsesSearchProtocol.displayText(item, plain).contains("2. [Other]"))
+        val footer = projection.witness.lastIndexOf("\n\n来源：\n\n")
+        for (cut in footer + 1 until projection.witness.length) {
+            val suffix = projection.source.substring(projection.coordinates.at(cut))
+            assertEquals(projection.witness.substring(cut), suffix)
+        }
+    }
+
 }

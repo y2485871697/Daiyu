@@ -40,7 +40,11 @@ internal fun reconnectParts(turn: ChatTurnUi.Assistant, events: List<ChatTimelin
             else -> ReconnectContentRole.BODY
         }
         val windowed = when (item) {
-            is MessageContentUi.Text -> item.copy(markdownWindow = app.daiyu.android.MarkdownSourceWindow(item.text, 0, item.text.length, turn.status == app.daiyu.android.domain.RunStatus.RUNNING))
+            is MessageContentUi.Text -> {
+                val window = (item.markdownWindow ?: app.daiyu.android.MarkdownSourceWindow(item.text, 0, item.text.length))
+                    .copy(streaming = turn.status == app.daiyu.android.domain.RunStatus.RUNNING)
+                item.copy(text = window.displaySource(), markdownWindow = window)
+            }
             is MessageContentUi.Reasoning -> item.copy(markdownWindow = app.daiyu.android.MarkdownSourceWindow(item.reported.text, 0, item.reported.text.length, turn.status == app.daiyu.android.domain.RunStatus.RUNNING))
             else -> item
         }

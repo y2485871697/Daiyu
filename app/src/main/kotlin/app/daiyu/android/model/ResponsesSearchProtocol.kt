@@ -101,10 +101,34 @@ internal object ResponsesSearchProtocol {
         return app.daiyu.android.MarkdownParser.appendStandaloneSection(plain, section)
     }
 
-    // Exact compatibility witness only. Never publish this escaped representation for new output.
-    fun legacyDisplayText(item: JSONObject, plain: String): String {
+    // One emitter is shared by the compatibility witness and its raw-coordinate projection.
+    fun legacyDisplayText(item: JSONObject, plain: String): String = emitLegacy(item, plain, false).text
+
+    internal data class LegacyProjection(val witness: String, val source: String,
+        val coordinates: app.daiyu.android.MarkdownSourceCoordinates)
+
+    internal fun legacyProjection(item: JSONObject, plain: String): LegacyProjection {
+        val emitted = emitLegacy(item, plain, true)
+        val footer = emitted.footer
+        val source = if (footer == null) plain else
+            app.daiyu.android.MarkdownParser.appendStandaloneSection(plain, emitted.text.substring(footer + 2))
+        val boundaries = requireNotNull(emitted.boundaries)
+        if (footer != null) {
+            // Keep this historical source list in its original order, including duplicates.
+            // That makes every old footer boundary exact; new responses still use displayText().
+            val inserted = source.length - plain.length - (emitted.text.length - footer)
+            for (index in footer + 1 until boundaries.size) boundaries[index] = plain.length + inserted + index - footer
+        }
+        return LegacyProjection(emitted.text, source,
+            app.daiyu.android.MarkdownSourceCoordinates.from(boundaries, source.length))
+    }
+
+    private data class LegacyEmission(val text: String, val boundaries: MutableList<Int>?, val footer: Int?)
+
+    private fun emitLegacy(item: JSONObject, plain: String, mapped: Boolean): LegacyEmission {
         validateItem(item)
-        if (item.opt("type") != "message") return plain
+        if (item.opt("type") != "message") return LegacyEmission(plain,
+            if (mapped) (0..plain.length).toMutableList() else null, null)
         val sources = linkedMapOf<String, String>()
         val content = item.getJSONArray("content")
         repeat(content.length()) { index ->
@@ -116,46 +140,58 @@ internal object ResponsesSearchProtocol {
                 }
             }
         }
-        if (sources.isEmpty()) return plain
+        if (sources.isEmpty()) return LegacyEmission(plain,
+            if (mapped) (0..plain.length).toMutableList() else null, null)
         val numbers = sources.keys.withIndex().associate { it.value to it.index + 1 }
-        val displayed = buildString {
-            repeat(content.length()) { index ->
-                val part = content.getJSONObject(index)
-                val text = when (part.opt("type")) {
-                    "output_text" -> part.getString("text")
-                    "refusal" -> part.getString("refusal")
-                    else -> ""
-                }
-                val citations = sortedMapOf<Int, LinkedHashSet<String>>()
-                part.optJSONArray("annotations")?.let { annotations ->
-                    repeat(annotations.length()) { position ->
-                        val citation = annotations.getJSONObject(position)
-                        val target = url(citation.getString("url"))
-                        val end = offset(citation.opt("end_index"))
-                        val boundary = text.offsetByCodePoints(0, minOf(end, text.codePointCount(0, text.length)))
-                        citations.getOrPut(boundary) { linkedSetOf() }.add(target)
-                    }
-                }
-                fun markers(at: Int) {
-                    citations[at]?.forEach { target -> append(" [${numbers.getValue(target)}](<$target>)") }
-                }
-                markers(0)
-                var position = 0
-                while (position < text.length) {
-                    val character = text.codePointAt(position)
-                    // Cited answers render literal text so provider Markdown cannot hide inline links
-                    // inside code, link labels, tables or other nested syntax. Raw protocol is untouched.
-                    if (position == 0 || text[position - 1] == '\n' || text[position - 1] == '\r') append('\u2060')
-                    if (character < 128 && character.toChar() in "\\`*_{}[]()<>#+-.!|~&") append('\\')
-                    appendCodePoint(character)
-                    position += Character.charCount(character)
-                    markers(position)
+        val displayed = StringBuilder()
+        val boundaries = if (mapped) mutableListOf(0) else null
+        var consumed = 0
+        fun inserted(value: String) {
+            displayed.append(value)
+            repeat(value.length) { boundaries?.add(consumed) }
+        }
+        fun copied(value: String) {
+            displayed.append(value)
+            repeat(value.length) { consumed++; boundaries?.add(consumed) }
+        }
+        repeat(content.length()) { index ->
+            val part = content.getJSONObject(index)
+            val text = when (part.opt("type")) {
+                "output_text" -> part.getString("text")
+                "refusal" -> part.getString("refusal")
+                else -> ""
+            }
+            val citations = sortedMapOf<Int, LinkedHashSet<String>>()
+            part.optJSONArray("annotations")?.let { annotations ->
+                repeat(annotations.length()) { position ->
+                    val citation = annotations.getJSONObject(position)
+                    val target = url(citation.getString("url"))
+                    val end = offset(citation.opt("end_index"))
+                    val boundary = text.offsetByCodePoints(0, minOf(end, text.codePointCount(0, text.length)))
+                    citations.getOrPut(boundary) { linkedSetOf() }.add(target)
                 }
             }
+            fun markers(at: Int) {
+                citations[at]?.forEach { target -> inserted(" [${numbers.getValue(target)}](<$target>)") }
+            }
+            markers(0)
+            var position = 0
+            while (position < text.length) {
+                val character = text.codePointAt(position)
+                if (position == 0 || text[position - 1] == '\n' || text[position - 1] == '\r') inserted("\u2060")
+                if (character < 128 && character.toChar() in "\\`*_{}[]()<>#+-.!|~&") inserted("\\")
+                val next = position + Character.charCount(character)
+                copied(text.substring(position, next))
+                position = next
+                markers(position)
+            }
         }
-        return displayed + sources.entries.mapIndexed { index, (url, title) ->
+        require(!mapped || consumed == plain.length)
+        val footer = displayed.length
+        inserted(sources.entries.mapIndexed { index, (url, title) ->
             "${index + 1}. [${label(title.ifBlank { "网页来源 ${index + 1}" })}](<$url>)"
-        }.joinToString("\n", "\n\n来源：\n\n")
+        }.joinToString("\n", "\n\n来源：\n\n"))
+        return LegacyEmission(displayed.toString(), boundaries, footer)
     }
 
     private fun label(value: String): String = buildString {

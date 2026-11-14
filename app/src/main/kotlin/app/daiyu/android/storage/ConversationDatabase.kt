@@ -959,7 +959,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             val candidates = (message.blocks + message.historySegments.flatMap { it.blocks }).any {
                 it is MessageBlock.Text && app.daiyu.android.model.LegacySearchDisplay.candidate(it.text)
             }
-            if (candidates && !MessageDisplayStore.hasReconnect(db, id, message.id.value))
+            if (candidates)
                 app.daiyu.android.model.LegacySearchDisplay.prepare(message)
         }
         return result

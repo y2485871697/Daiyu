@@ -62,7 +62,7 @@ internal class MarkdownProjectionCache(
     @Synchronized
     fun put(projection: MarkdownProjection) {
         val chars = projection.sources.sumOf { it.length.toLong() } +
-            projection.windows.filterNotNull().map { it.source }.distinct().sumOf { it.length.toLong() * 4 }
+            projection.windows.filterNotNull().distinct().sumOf { it.source.length.toLong() * 4 + (it.coordinates?.rawLength?.toLong() ?: 0L) * 4 }
         if (chars > maxSourceChars) return
         val snapshot = MarkdownProjection(projection.sources.toList(), projection.blocks, projection.parser, projection.displayText, projection.windows.toList(), projection.windowBlocks, projection.windowDisplayText)
         val key = Key(snapshot.sources, MarkdownParserIdentity(snapshot.parser), snapshot.windows)

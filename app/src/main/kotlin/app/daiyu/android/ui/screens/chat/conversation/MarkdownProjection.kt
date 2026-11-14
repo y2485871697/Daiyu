@@ -52,7 +52,7 @@ internal fun markdownWindowsAppend(previous: List<MarkdownSourceWindow?>, next: 
     return previous.size <= next.size && previous.indices.all { index ->
         val before = previous[index]
         val after = next[index]
-        if (before == null || after == null) before == after else before.streaming == after.streaming && before.start == after.start &&
+        if (before == null || after == null) before == after else before.coordinates == after.coordinates && before.streaming == after.streaming && before.start == after.start &&
             before.end <= after.end && after.source.startsWith(before.source)
     }
 }

@@ -3,11 +3,30 @@ package app.daiyu.android
 import java.util.IdentityHashMap
 
 /** A display window in the original UTF-16 source, never a persisted-coordinate replacement. */
-data class MarkdownSourceWindow(val source: String, val start: Int, val end: Int, val streaming: Boolean = false) {
-    init { require(start in 0..end && end <= source.length) }
+class MarkdownSourceCoordinates private constructor(private val offsets: IntArray) {
+    val rawLength: Int get() = offsets.size - 1
+    private val hash = offsets.contentHashCode()
+    fun at(boundary: Int): Int = offsets[boundary]
+    internal fun values(): List<Int> = offsets.toList()
+    override fun hashCode(): Int = hash
+    override fun equals(other: Any?): Boolean = this === other || other is MarkdownSourceCoordinates && offsets.contentEquals(other.offsets)
+    companion object {
+        internal fun from(values: List<Int>, sourceLength: Int): MarkdownSourceCoordinates {
+            require(values.isNotEmpty() && values.first() == 0 && values.last() == sourceLength)
+            require(values.zipWithNext().all { (left, right) -> left <= right && left >= 0 })
+            return MarkdownSourceCoordinates(values.toIntArray())
+        }
+    }
+}
+
+data class MarkdownSourceWindow(val source: String, val start: Int, val end: Int, val streaming: Boolean = false,
+    val coordinates: MarkdownSourceCoordinates? = null) {
+    init { require(start in 0..end && end <= (coordinates?.rawLength ?: source.length)) }
+    val displayStart: Int get() = coordinates?.at(start) ?: start
+    val displayEnd: Int get() = coordinates?.at(end) ?: end
     fun displaySource(): String {
         fun boundary(at: Int) = if (at in 1 until source.length && source[at - 1].isHighSurrogate() && source[at].isLowSurrogate()) at - 1 else at
-        return source.substring(boundary(start), boundary(end))
+        return source.substring(boundary(displayStart), boundary(displayEnd))
     }
 }
 

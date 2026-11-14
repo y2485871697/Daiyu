@@ -37,10 +37,16 @@ class MessageDisplayContract(unittest.TestCase):
         self.assertIn('check(db.inTransaction())', store)
         self.assertIn('reader.skipValue()', store)
         miss = store.split('row.seq to (hit ?: run {', 1)[1]
-        self.assertIn('if (!retainCoordinates && hasCandidate(row.role, blocks))', miss)
+        self.assertIn('if (hasCandidate(row.role, blocks))', miss)
+        self.assertNotIn('retainCoordinates', store)
+        self.assertIn('repairHistory(history, segments, projections)', miss)
         self.assertIn('"messages", "protocol"', miss)
         self.assertNotIn('"messages", "protocol"', store.split('row.seq to (hit ?: run {', 1)[0])
-        self.assertIn('value.getInt("version") == 2', store)
+        self.assertIn('value.getInt("version") == 3', store)
+        self.assertIn('value.getJSONArray("projections")', store)
+        self.assertIn('coordinateBlocks = blocks', store)
+        self.assertIn('coordinateBlocks = it.blocks', store)
+        self.assertNotIn('block.put("text"', store)
         db = (APP / 'storage/ConversationDatabase.kt').read_text()
         self.assertIn('null, 32)', db)
         upgrade = db.split('override fun onUpgrade(', 1)[1]

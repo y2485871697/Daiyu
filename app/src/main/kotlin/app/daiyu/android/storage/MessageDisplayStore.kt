@@ -33,16 +33,36 @@ internal object MessageDisplayStore {
         val rows = ids.map { row ->
             fun decodePayload(payload: String): MessageDisplayRow {
                 val value = JSONObject(payload)
-                require(value.keys().asSequence().toSet() == setOf("version", "id", "conversation", "run", "blocks", "history"))
-                require(value.getInt("version") == 2 && value.getString("id") == row.id &&
+                require(value.keys().asSequence().toSet() == setOf("version", "id", "conversation", "run", "blocks", "history", "projections"))
+                require(value.getInt("version") == 3 && value.getString("id") == row.id &&
                     value.getString("conversation") == conversation.value && value.getString("run") == row.run)
                 val history = value.getJSONArray("history")
                 repeat(history.length()) { require(history.getJSONObject(it).getJSONArray("protocol").length() == 0) }
                 val segments = MessageHistoryCodec.decode(history)
+                val blocks = decodeBlocks(value.getJSONArray("blocks"))
+                val projections = value.getJSONArray("projections")
+                val addresses = mutableSetOf<Pair<Int, Int>>()
+                repeat(projections.length()) { index ->
+                    val projection = projections.getJSONObject(index)
+                    require(projection.keys().asSequence().toSet() == setOf("segment", "block", "text", "boundaries"))
+                    val segment = projection.getInt("segment")
+                    val ordinal = projection.getInt("block")
+                    require(addresses.add(segment to ordinal))
+                    val source = if (segment == -1) blocks else segments[segment].blocks
+                    require((if (segment == -1) row.role else segments[segment].role) == Message.ASSISTANT_ROLE)
+                    val raw = source[ordinal] as MessageBlock.Text
+                    require(LegacySearchDisplay.candidate(raw.text))
+                    val text = projection.getString("text")
+                    val offsets = projection.getJSONArray("boundaries")
+                    val coordinates = app.daiyu.android.MarkdownSourceCoordinates.from(
+                        (0 until offsets.length()).map { offsets.getInt(it) }, text.length)
+                    LegacySearchDisplay.remember(raw, text, coordinates)
+                }
                 return MessageDisplayRow(MessageId(row.id), conversation, RunId(row.run), row.role,
-                    decodeBlocks(value.getJSONArray("blocks")), RunStatus.valueOf(row.status),
+                    blocks.map(LegacySearchDisplay::display), RunStatus.valueOf(row.status),
                     SQLiteText.read(db, "messages", "error", "id", row.id), row.time,
-                    segments.map { MessageDisplaySegment(it.messageId, it.role, it.blocks, it.createdAt, it.reportedReasoning) })
+                    segments.map { MessageDisplaySegment(it.messageId, it.role, it.blocks.map(LegacySearchDisplay::display),
+                        it.createdAt, it.reportedReasoning, coordinateBlocks = it.blocks) }, coordinateBlocks = blocks)
             }
             val cached = db.rawQuery("SELECT 1 FROM message_display WHERE message_id=?", arrayOf(row.id)).use { it.moveToFirst() }
             val hit = if (!cached) null else try {
@@ -55,15 +75,15 @@ internal object MessageDisplayStore {
                 val blockText = requireNotNull(SQLiteText.read(db, "messages", "blocks", "id", row.id))
                 val history = requireNotNull(SQLiteText.read(db, "messages", "history_segments", "id", row.id))
                 val blocks = JSONArray(blockText)
-                val retainCoordinates = hasReconnect(db, conversation, row.id)
-                if (!retainCoordinates && hasCandidate(row.role, blocks)) {
+                val projections = JSONArray()
+                if (hasCandidate(row.role, blocks)) {
                     val raw = SQLiteText.read(db, "messages", "protocol", "id", row.id)
                     val protocol = try { raw?.let(::JSONArray) } catch (_: Exception) { null }
-                    if (protocol != null) repairBlocks(row.role, blocks, protocol)
+                    if (protocol != null) repairBlocks(row.role, blocks, protocol, projections, -1)
                 }
                 val segments = stripProtocols(history)
-                if (!retainCoordinates) repairHistory(history, segments)
-                val payload = envelope(row.id, conversation.value, row.run, blocks, segments).toString()
+                repairHistory(history, segments, projections)
+                val payload = envelope(row.id, conversation.value, row.run, blocks, segments, projections).toString()
                 val projection = decodePayload(payload)
                 check(db.insertOrThrow("message_display", null, ContentValues().apply {
                     put("message_id", row.id); put("payload", payload)
@@ -78,14 +98,9 @@ internal object MessageDisplayStore {
         }
     }
 
-    // Legacy lengths are also durable reconnect coordinates; never reinterpret them during display repair.
-    internal fun hasReconnect(db: SQLiteDatabase, conversation: ConversationId, id: String): Boolean =
-        db.rawQuery("SELECT 1 FROM chat_timeline_events WHERE conversation_id=? AND message_id=? AND kind='reconnect' LIMIT 1",
-            arrayOf(conversation.value, id)).use { it.moveToFirst() }
-
-    private fun envelope(id: String, conversation: String, run: String, blocks: JSONArray, history: JSONArray) =
-        JSONObject().put("version", 2).put("id", id).put("conversation", conversation).put("run", run)
-            .put("blocks", blocks).put("history", history)
+    private fun envelope(id: String, conversation: String, run: String, blocks: JSONArray, history: JSONArray,
+        projections: JSONArray) = JSONObject().put("version", 3).put("id", id).put("conversation", conversation).put("run", run)
+            .put("blocks", blocks).put("history", history).put("projections", projections)
 
     private data class Metadata(val seq: Long, val id: String, val run: String, val role: String,
         val status: String, val time: Long?)
@@ -95,19 +110,21 @@ internal object MessageDisplayStore {
             it.optString("type") == "text" && LegacySearchDisplay.candidate(it.optString("text"))
         } }
 
-    private fun repairBlocks(role: String, blocks: JSONArray, protocol: JSONArray) {
+    private fun repairBlocks(role: String, blocks: JSONArray, protocol: JSONArray, projections: JSONArray, segment: Int) {
         try {
             val original = decodeBlocks(blocks)
-            val projected = LegacySearchDisplay.project(role, original,
-                (0 until protocol.length()).map { protocol.getString(it) })
-            projected.forEachIndexed { index, block ->
-                if (block is MessageBlock.Text && block !== original[index]) blocks.getJSONObject(index).put("text", block.text)
+            LegacySearchDisplay.project(role, original, (0 until protocol.length()).map { protocol.getString(it) })
+            original.forEachIndexed { index, block ->
+                LegacySearchDisplay.projection(block)?.let { projection ->
+                    projections.put(JSONObject().put("segment", segment).put("block", index)
+                        .put("text", projection.display.text).put("boundaries", JSONArray(projection.coordinates.values())))
+                }
             }
         } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
           catch (_: Exception) { /* Unprovable legacy records retain their stored display. */ }
     }
 
-    private fun repairHistory(source: String, segments: JSONArray) {
+    private fun repairHistory(source: String, segments: JSONArray, projections: JSONArray) {
         val candidates = (0 until segments.length()).filter { index -> segments.getJSONObject(index).let {
             hasCandidate(it.getString("role"), it.getJSONArray("blocks"))
         } }.toSet()
@@ -122,7 +139,7 @@ internal object MessageDisplayStore {
                         if (reader.nextName() == "protocol") {
                             val protocol = jsonValue(reader) as? JSONArray
                             val segment = segments.getJSONObject(index)
-                            if (protocol != null) repairBlocks(segment.getString("role"), segment.getJSONArray("blocks"), protocol)
+                            if (protocol != null) repairBlocks(segment.getString("role"), segment.getJSONArray("blocks"), protocol, projections, index)
                         } else reader.skipValue()
                     }
                     reader.endObject()

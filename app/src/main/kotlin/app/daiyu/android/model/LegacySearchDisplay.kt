@@ -36,8 +36,9 @@ internal object LegacySearchDisplay {
                             })
                         }
                     }
-                    if (ResponsesSearchProtocol.legacyDisplayText(item, plain) != block.text) block
-                    else block.copy(text = ResponsesSearchProtocol.displayText(item, plain))
+                    val projection = ResponsesSearchProtocol.legacyProjection(item, plain)
+                    if (projection.witness != block.text) block
+                    else remember(block, projection.source, projection.coordinates)
                 } catch (_: Exception) { block }
             }
         }
@@ -51,7 +52,8 @@ internal object LegacySearchDisplay {
             other is Key && get()?.let { it === other.get() } == true
     }
     private val collected = ReferenceQueue<MessageBlock.Text>()
-    private val prepared = mutableMapOf<Key, MessageBlock.Text>()
+    internal data class Projection(val display: MessageBlock.Text, val coordinates: app.daiyu.android.MarkdownSourceCoordinates)
+    private val prepared = mutableMapOf<Key, Projection>()
     private fun prune() {
         while (true) {
             val key = collected.poll() as? Key ?: break
@@ -59,26 +61,32 @@ internal object LegacySearchDisplay {
         }
     }
 
+    internal fun remember(block: MessageBlock.Text, source: String,
+        coordinates: app.daiyu.android.MarkdownSourceCoordinates): MessageBlock.Text {
+        require(coordinates.rawLength == block.text.length)
+        val display = block.copy(text = source)
+        synchronized(prepared) {
+            prune()
+            prepared[Key(block, collected)] = Projection(display, coordinates)
+        }
+        return display
+    }
+
+    internal fun projection(block: MessageBlock): Projection? = if (block !is MessageBlock.Text) null else synchronized(prepared) {
+        prune()
+        prepared[Key(block)]
+    }
+
+    internal fun window(block: MessageBlock.Text): app.daiyu.android.MarkdownSourceWindow? = projection(block)?.let {
+        app.daiyu.android.MarkdownSourceWindow(it.display.text, 0, block.text.length, coordinates = it.coordinates)
+    }
+
     /** Called on the existing history loading worker, never from a mapper or a Composable. */
     fun prepare(message: Message) {
-        fun segment(role: String, blocks: List<MessageBlock>, protocol: List<String>) {
-            val projected = project(role, blocks, protocol)
-            if (projected === blocks) return
-            synchronized(prepared) {
-                prune()
-                blocks.zip(projected).forEach { (original, display) ->
-                    if (original is MessageBlock.Text && display is MessageBlock.Text && display !== original)
-                        prepared[Key(original, collected)] = display
-                }
-            }
-        }
-        segment(message.role, message.blocks, message.protocolItems)
-        message.historySegments.forEach { segment(it.role, it.blocks, it.protocolItems) }
+        project(message.role, message.blocks, message.protocolItems)
+        message.historySegments.forEach { project(it.role, it.blocks, it.protocolItems) }
     }
 
     /** Identity lookup only; no JSON, parsing, hashing of source text or SQL on the UI. */
-    fun display(block: MessageBlock): MessageBlock = if (block !is MessageBlock.Text) block else synchronized(prepared) {
-        prune()
-        prepared[Key(block)] ?: block
-    }
+    fun display(block: MessageBlock): MessageBlock = projection(block)?.display ?: block
 }

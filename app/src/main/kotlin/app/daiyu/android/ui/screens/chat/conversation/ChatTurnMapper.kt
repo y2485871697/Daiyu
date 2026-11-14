@@ -98,10 +98,10 @@ object ChatTurnMapper {
                     if (segment.role == Message.USER_ROLE) RunStatus.COMPLETED else row.status,
                     if (segment.role == Message.USER_ROLE) null else row.error,
                     segment.createdAt ?: originals[Triple(row.conversationId, row.runId, segment.messageId)]?.createdAt,
-                    segment.reportedReasoning)
+                    segment.reportedReasoning, coordinateBlocks = segment.coordinateBlocks)
             } else if (Triple(row.conversationId, row.runId, row.id) in supplements) emptyList()
             else listOf(RenderMessage(row.id, row.conversationId, row.runId, row.role, row.blocks, row.status,
-                row.error, row.createdAt, emptyList()))
+                row.error, row.createdAt, emptyList(), coordinateBlocks = row.coordinateBlocks))
         }
         presentations?.retainBlocks(history.flatMap { it.blocks })
         return mapRows(history, owners, { _, _ -> null }, { _, _ -> null }, { _, _ -> null },
@@ -116,7 +116,8 @@ object ChatTurnMapper {
         val authoritative: Message? = null,
         /** Absolute tool occurrence within this owner, retained when adjacent rows are merged. */
         val sourcePositions: Map<MessageBlock, Int> = emptyMap(),
-        val sourceMessages: Map<MessageBlock, Message> = emptyMap())
+        val sourceMessages: Map<MessageBlock, Message> = emptyMap(),
+        val coordinateBlocks: List<MessageBlock> = blocks)
 
     private fun renderMessage(message: Message, positions: Map<MessageBlock, Int> = emptyMap(),
         sources: Map<MessageBlock, Message> = emptyMap()): RenderMessage {
@@ -128,7 +129,7 @@ object ChatTurnMapper {
         }
         return RenderMessage(message.id, message.conversationId, message.runId, message.role,
             message.blocks.map(app.daiyu.android.model.LegacySearchDisplay::display),
-            message.status, message.error, message.createdAt, message.reportedReasoning, message, local, localSources)
+            message.status, message.error, message.createdAt, message.reportedReasoning, message, local, localSources, message.blocks)
     }
 
     private fun mapRows(history: List<RenderMessage>, databaseOwners: Map<TurnOwner, String>,
@@ -156,7 +157,7 @@ object ChatTurnMapper {
             val segment = nextSegment[owner] ?: 0
             nextSegment[owner] = segment + 1
             val start = nextOffset[owner] ?: 0L
-            nextOffset[owner] = start + original.blocks.sumOf { block -> when (block) {
+            nextOffset[owner] = start + original.coordinateBlocks.sumOf { block -> when (block) {
                 is MessageBlock.Text -> block.text.length.toLong()
                 is MessageBlock.Tool -> 1L
                 is MessageBlock.Image -> 1L
@@ -173,6 +174,7 @@ object ChatTurnMapper {
                 val offset = prior.message.blocks.size
                 display[display.lastIndex] = prior.copy(
                     message = prior.message.copy(blocks = prior.message.blocks + message.blocks,
+                        coordinateBlocks = prior.message.coordinateBlocks + message.coordinateBlocks,
                         sourcePositions = IdentityHashMap<MessageBlock, Int>().apply {
                             putAll(prior.message.sourcePositions)
                             putAll(message.sourcePositions)
@@ -222,7 +224,7 @@ object ChatTurnMapper {
                         it.anchor.conversationId == owner.conversationId && it.anchor.runId == owner.runId &&
                         it.anchor.messageId == owner.messageId }) ReconnectSourceUi(
                         app.daiyu.android.timeline.TimelineAnchor(owner.conversationId, owner.runId, owner.messageId, segment),
-                        source.start, mixedContent(message, errors, states, dedicated, activity,
+                        source.start, mixedContent(message.copy(blocks = message.coordinateBlocks), errors, states, dedicated, activity,
                             integrateReasoning = true, presentations = presentations, childTaskNames = childTaskNames, forceOrdered = true)) else null,
                 )
                 else -> null
@@ -318,7 +320,7 @@ object ChatTurnMapper {
                 reasoning[index].orEmpty().forEach { add(MessageContentUi.Reasoning(it)) }
                 val block = message.blocks.getOrNull(index) ?: continue
                 add(when (block) {
-                    is MessageBlock.Text -> MessageContentUi.Text(block.itemId, block.text)
+                    is MessageBlock.Text -> MessageContentUi.Text(block.itemId, block.text, app.daiyu.android.model.LegacySearchDisplay.window(block))
                     is MessageBlock.Image -> MessageContentUi.Image(MessageImageUi(owner, block.reference))
                     is MessageBlock.Tool -> MessageContentUi.Tool(
                         workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block), presentations,

@@ -48,5 +48,5 @@ internal suspend fun windowMarkdownBlocks(window: MarkdownSourceWindow,
         parsed
     }
     context.ensureActive()
-    return document.window(window.start, window.end)
+    return document.window(window.displayStart, window.displayEnd)
 }

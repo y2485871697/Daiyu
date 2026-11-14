@@ -29,6 +29,7 @@ internal data class MessageDisplaySegment(
     val blocks: List<MessageBlock>,
     val createdAt: Long?,
     val reportedReasoning: List<ReportedReasoning>,
+    val coordinateBlocks: List<MessageBlock> = blocks,
 )
 
 internal data class MessageDisplayRow(
@@ -41,6 +42,7 @@ internal data class MessageDisplayRow(
     val error: String?,
     val createdAt: Long?,
     val segments: List<MessageDisplaySegment>,
+    val coordinateBlocks: List<MessageBlock> = blocks,
 ) {
     init {
         require(listOf(id.value, conversationId.value, runId.value).all { it.isNotBlank() && it.length <= 200 })

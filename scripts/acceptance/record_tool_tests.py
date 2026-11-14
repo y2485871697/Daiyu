@@ -394,7 +394,8 @@ VOICE_REFRESH_MODULES = (
 
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VOICE_REFRESH_PLATFORM_CLASSES)):
+            and (env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.VoiceRecognitionRefreshActivityTest"
+                 or sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VOICE_REFRESH_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *VOICE_REFRESH_MODULES, "-v"], "voice-refresh-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(DOUBAO_MOTION_PLATFORM_CLASSES)):

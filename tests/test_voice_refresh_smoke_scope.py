@@ -20,6 +20,12 @@ class VoiceRefreshSmokeScopeTest(unittest.TestCase):
         self.assertIn("test_voice_refresh_smoke_scope", recorder.VOICE_REFRESH_MODULES)
         self.assertNotIn("test_option_selection_sheet_contract", recorder.VOICE_REFRESH_MODULES)
 
+    def test_focused_refresh_class_uses_the_same_required_contracts(self):
+        command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke",
+            SMOKE_TEST_CLASSES="app.daiyu.android.VoiceRecognitionRefreshActivityTest"))
+        self.assertEqual("voice-refresh-targeted", scope)
+        self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.VOICE_REFRESH_MODULES, "-v"], command)
+
     def test_partial_extended_duplicate_or_other_modes_keep_full_scope(self):
         pair = ",".join(recorder.VOICE_REFRESH_PLATFORM_CLASSES)
         for classes in (recorder.VOICE_REFRESH_PLATFORM_CLASSES[0], pair + ",app.daiyu.android.OtherTest",

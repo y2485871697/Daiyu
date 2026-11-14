@@ -22,6 +22,10 @@ on:
       check_id:
         type: string
         required: true
+      contracts_only:
+        description: 仅补工具契约，不构建或运行APK
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -36,8 +40,43 @@ env:
   SMOKE_TEST_CLASSES: ${{ inputs.smoke_classes }}
   SKIP_JDK_VERSION_CHECK: 'true'
 jobs:
-  test-package:
+  tool-contracts:
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      CONTRACTS_ONLY: ${{ inputs.contracts_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: 核对检查源码并记录真实工具结果
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          mkdir -p tool-evidence
+          python3 - <<'PYMETA'
+          import json, os, subprocess
+          from pathlib import Path
+          checked_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          Path('tool-evidence/source.json').write_text(json.dumps(dict(
+              checked_sha=checked_sha, expected_sha=os.environ['EXPECTED_SHA'],
+              workflow_sha=os.environ['GITHUB_SHA'], run_id=int(os.environ['GITHUB_RUN_ID']),
+              attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+              contracts_only=os.environ['CONTRACTS_ONLY'] == 'true',
+              smoke_classes=os.environ['SMOKE_TEST_CLASSES'])) + '\n')
+          PYMETA
+          GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
+      - name: 上传工具检查原始回执
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼测试刷新工具检查
+          path: tool-evidence/
+          if-no-files-found: warn
+  test-package:
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.contracts_only }}
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:

@@ -183,7 +183,26 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('resources.voices.create(speech!!, sample, n, slot, confirmed = true)', leaf)
         self.assertIn('resources.voices.importExisting(speech!!, id, n)', leaf)
         self.assertIn('action != "REMOVE" || !voice.uncertain', leaf)
-        self.assertIn('仅移除本机记录，不删除云端音色或任务', leaf)
+        self.assertIn(
+            '"REMOVE" -> if (!latestVoice.uncertain) ask(null) {\n'
+            '                            preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(latestVoice) }\n'
+            '                        }',
+            leaf)
+        self.assertIn(
+            'if (pending.label == null) VoiceLocalRemovalSheet(onConfirm = confirm, onDismiss = { confirmation = null })',
+            leaf)
+        removal = source('voice/account/PersonalVoices.kt').split(
+            '    @Synchronized fun removeLocal(', 1)[1].split(
+            '    @Synchronized fun accept(', 1)[0]
+        self.assertEqual(
+            'voice: Voice) {\n'
+            '        require(mutable.value.none { it.account == voice.account && it.id == voice.id && it.uncertain }) {\n'
+            '            "提交结果未知，须保留原音色身份供查询，不能先移除再重新训练"\n'
+            '        }\n'
+            '        persist(mutable.value.filterNot { it.account == voice.account && it.id == voice.id })\n'
+            '        removed.add(voice.account to voice.id)\n'
+            '    }\n',
+            removal)
 
     def test_mimo_preview_editor_has_its_own_shared_card_and_keeps_text_pipeline(self):
         panel = source('VoiceSettingsPanel.kt')
@@ -276,10 +295,10 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('.filter { it.action in available }', menus)
         self.assertNotIn('entry.action != ChatMenuAction.VOICE_DOUBAO', menus)
         composer = source('ui/screens/chat/conversation/ChatComposer.kt')
-        self.assertIn('val toolbarEnabled = state.enabled && !editing', composer)
+        self.assertIn('val toolbarEnabled = pageActive && state.enabled && !editing', composer)
         self.assertIn('val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()', composer)
         self.assertIn('onClick = { if (callUi != null || state.voiceMode in state.voiceModes) actions.onVoice() }', composer)
-        self.assertIn('enabled = callUi != null || voiceMenuEnabled', composer)
+        self.assertIn('enabled = pageActive && (callUi != null || voiceMenuEnabled)', composer)
         self.assertIn('voiceModes && voiceMenuEnabled && callUi == null', composer)
         self.assertNotIn('state.voiceModes.single()', composer)
         main = source('MainActivity.kt')

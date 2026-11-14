@@ -1425,6 +1425,71 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue(opened.isEmpty())
     }
 
+    fun testSinglePlainInlineKeepsUnicodeBudgetsAndRichTransitions() {
+        val plain = "A😀e\u0301 **literal** [x](https://literal.test)"
+        val plainBlocks = listOf(MarkdownBlock.Paragraph(listOf(app.daiyu.android.MarkdownInline.Text(plain))))
+        var blocks by mutableStateOf<List<MarkdownBlock>>(plainBlocks)
+        var budget by mutableStateOf(Int.MAX_VALUE)
+        show { Column(Modifier.width(300.dp).testTag("single-plain-inline")) {
+            ParsedMessageMarkdown(plain, blocks, visibleCharacters = budget)
+        } }
+        fun assertPlain(expected: String) {
+            val target = body("single-plain-inline", expected)
+            assertEquals(AnnotatedString(expected), annotation(target))
+            val layouts = mutableListOf<TextLayoutResult>()
+            target.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            assertEquals(expected, layouts.single().layoutInput.text.text)
+            assertEquals(16.sp, layouts.single().layoutInput.style.fontSize)
+            assertEquals(26.sp, layouts.single().layoutInput.style.lineHeight)
+        }
+        assertPlain(plain)
+        clickCharacter(body("single-plain-inline", plain), plain.indexOf("[x]") + 1)
+        assertTrue(opened.isEmpty())
+        for ((limit, expected) in listOf(1 to "A", 2 to "A😀", 3 to "A😀", 4 to "A😀e\u0301",
+                5 to "A😀e\u0301", plain.length to plain, Int.MAX_VALUE to plain)) {
+            mainThread { budget = limit }
+            assertPlain(expected)
+        }
+        for (limit in listOf(0, -1)) {
+            mainThread { budget = limit }
+            ui.onAllNodes(hasAnyAncestor(hasTestTag("single-plain-inline")) and hasText("A", substring = true),
+                useUnmergedTree = true).assertCountEquals(0)
+        }
+        mainThread { budget = Int.MAX_VALUE; blocks = MarkdownParser.parse(source) }
+        assertStyles(annotation(body("single-plain-inline")))
+        clickCharacter(body("single-plain-inline"), visible.lastIndexOf("site"))
+        assertEquals(listOf("https://example.test"), opened.toList())
+        mainThread { blocks = plainBlocks; budget = 4 }
+        assertPlain("A😀e\u0301")
+    }
+
+    fun testCodeTextFullAndPrefixBudgetsPreserveWindowEndAndUnicode() {
+        for (windowEnd in listOf(true, false)) {
+            for (payload in listOf("A\nB\n", "A😀e\u0301\nB\n", "A😀e\u0301")) {
+                val block = MarkdownBlock.Code(payload, "sh", windowEnd = windowEnd)
+                var budget by mutableStateOf(Int.MAX_VALUE)
+                show { MarkdownCodeText(block, budget, Modifier.testTag("code-budget-text"),
+                    androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp)) }
+                val full = if (windowEnd && payload.endsWith('\n')) payload.dropLast(1) else payload
+                val firstCluster = if (payload.contains("😀")) "A😀" else "A\n"
+                val middle = if (payload.startsWith("A😀")) "A😀e\u0301" else "A\nB"
+                for ((limit, expected) in listOf(Int.MAX_VALUE to full, 1 to "A", 2 to firstCluster,
+                        (if (payload.startsWith("A😀")) 4 else 3) to middle,
+                        payload.length to full, 1 to "A", Int.MAX_VALUE to full)) {
+                    mainThread { budget = limit }
+                    val target = ui.onNodeWithTag("code-budget-text", useUnmergedTree = true)
+                    target.assertTextEquals(expected)
+                    assertEquals(AnnotatedString(expected), annotation(target))
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    target.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+                    assertEquals(expected, layouts.single().layoutInput.text.text)
+                    assertFalse(layouts.single().layoutInput.softWrap)
+                }
+            }
+        }
+        assertTrue(opened.isEmpty())
+    }
+
     fun testCodeRevealSemanticsAndLayoutContainOnlyItsGraphemeSafePrefix() {
         for (full in listOf("echo first\nsecond secret line\n", "echo 😀e\u0301 first\nsecond secret line\n")) {
             val code = MarkdownBlock.Code(full, "sh", closed = true)

@@ -194,7 +194,9 @@ private fun MarkdownInlineText(
     if (limit <= 0) return
     val linkColor = conversationColors().accent
     val body = remember(content, linkColor, openLink) {
-        annotateMarkdownSpans(MarkdownText.renderInline(content), linkColor, openLink)
+        val plain = content.singleOrNull() as? MarkdownInline.Text
+        if (plain != null) AnnotatedString(plain.text)
+        else annotateMarkdownSpans(MarkdownText.renderInline(content), linkColor, openLink)
     }
     val originalConfiguration = LocalViewConfiguration.current
     val preciseLinkConfiguration = remember(originalConfiguration) {

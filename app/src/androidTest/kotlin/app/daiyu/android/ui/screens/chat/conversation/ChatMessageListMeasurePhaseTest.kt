@@ -35,6 +35,73 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
+    private fun mountStreamingViewport(
+        state: StreamingTailViewport,
+        measures: java.util.concurrent.atomic.AtomicInteger,
+        viewportHeight: () -> androidx.compose.ui.unit.Dp = { 120.dp },
+        contentHeight: () -> androidx.compose.ui.unit.Dp = { 1000.dp },
+    ) {
+        mount {
+            val viewportHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { viewportHeight().roundToPx() }
+            StreamingTailContainer(state, { null }, "measure-probe", true, { false }, { 0 }, { viewportHeightPx },
+                onViewportMeasure = { measures.incrementAndGet() }) {
+                Box(Modifier.size(100.dp, contentHeight()))
+            }
+        }
+    }
+
+    fun testStreamingViewportOffsetScrollDoesNotRemeasureViewport() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        val measures = java.util.concurrent.atomic.AtomicInteger()
+        mountStreamingViewport(state, measures)
+        val settledMeasures = measures.get()
+        assertTrue(settledMeasures > 0)
+        mainThread { assertEquals(0f, state.scrollOffset, 0.001f); assertTrue(state.maxOffset > 84) }
+        repeat(12) { step ->
+            mainThread {
+                val before = state.scrollOffset
+                assertEquals(-7f, checkNotNull(state.scroller).dispatchRawDelta(-7f), 0.001f)
+                assertEquals(before + 7f, state.scrollOffset, 0.001f)
+            }
+            ui.waitForIdle()
+            assertEquals("offset-only scroll must not remeasure viewport at step ${step + 1}", settledMeasures, measures.get())
+        }
+    }
+
+    fun testStreamingViewportGeometryChangesStillRemeasureAndClampOffset() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        val measures = java.util.concurrent.atomic.AtomicInteger()
+        var viewportHeight by mutableStateOf(120.dp)
+        var contentHeight by mutableStateOf(1000.dp)
+        mountStreamingViewport(state, measures, { viewportHeight }, { contentHeight })
+        var maximum = 0
+        var bodyHeight = 0
+        mainThread {
+            maximum = state.maxOffset; bodyHeight = state.contentHeight
+            assertTrue(maximum > 0)
+            val delta = -maximum.toFloat()
+            assertEquals(delta, checkNotNull(state.scroller).dispatchRawDelta(delta), 0.001f)
+            assertEquals(maximum.toFloat(), state.scrollOffset, 0.001f)
+        }
+        ui.waitForIdle()
+        val beforeResize = measures.get()
+        mainThread { viewportHeight = 200.dp }
+        ui.waitForIdle()
+        assertTrue(measures.get() > beforeResize)
+        ui.onNodeWithTag("chat-stream-viewport:measure-probe").assertHeightIsEqualTo(200.dp)
+        mainThread {
+            assertEquals(bodyHeight, state.contentHeight)
+            assertTrue(state.maxOffset in 1 until maximum)
+            assertEquals(state.maxOffset.toFloat(), state.scrollOffset, 0.001f)
+        }
+        val beforeShrink = measures.get()
+        mainThread { contentHeight = 80.dp }
+        ui.waitForIdle()
+        assertTrue(measures.get() > beforeShrink)
+        ui.onNodeWithTag("chat-stream-viewport:measure-probe").assertHeightIsEqualTo(80.dp)
+        mainThread { assertEquals(0, state.maxOffset); assertEquals(0f, state.scrollOffset, 0.001f) }
+    }
+
     private fun rows(): List<ChatTurnUi> = List(20) { ChatTurnUi.User("u$it", "row $it") }
 
     fun testInitialBottomRequestUnderSubcompositionMeasuresWithoutReentry() {

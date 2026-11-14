@@ -49,7 +49,7 @@ class StreamingOcclusionContract(unittest.TestCase):
 
     def test_unbounded_placement_does_not_observe_unused_item_origin(self):
         source = CHAT.read_text()
-        viewport = source.split('private fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
+        viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
         placement = viewport.split('layout(viewport.width, state.contentHeight)', 1)[1]
         guard = placement.index('val q = if (!state.bounded) 0 else {')
         origin = placement.index('val origin = state.itemOrigin')
@@ -79,7 +79,7 @@ class StreamingOcclusionContract(unittest.TestCase):
 
     def test_bounded_viewport_preserves_extent_and_aligns_real_content_same_measure(self):
         source = CHAT.read_text()
-        viewport = source.split("private fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
         for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = body.height",
                       "minOf(body.height, visibleHeight)", "body.height - height",
                       "state.bounded && follows()", "maximum.toFloat()",
@@ -105,7 +105,7 @@ class StreamingOcclusionContract(unittest.TestCase):
 
     def test_short_growth_does_not_use_partial_height_as_an_internal_follow_target(self):
         source = CHAT.read_text()
-        viewport = source.split("private fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
         self.assertIn("val followOffset = (body.height - viewportHeight().coerceAtLeast(1)).coerceAtLeast(0)", viewport)
         self.assertIn("state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()", viewport)
         self.assertNotIn("if (state.bounded && follows()) maximum.toFloat()", viewport)

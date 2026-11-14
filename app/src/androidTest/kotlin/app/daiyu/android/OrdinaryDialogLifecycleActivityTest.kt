@@ -118,6 +118,161 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase() {
         assertEquals("unchanged", marker.readText())
         assertEquals(0, fixture.opens.get())
     }
+    fun testOpeningChatModelsDuringLongHistoryFlingKeepsBackgroundScroll() {
+        val db = fixture.database
+        val conversation = db.create("default")
+        repeat(70) { i ->
+            val user = app.daiyu.android.domain.Message(
+                app.daiyu.android.domain.MessageId("dialog-fling-user-$i"), conversation.id,
+                app.daiyu.android.domain.RunId("dialog-fling-run-$i"), app.daiyu.android.domain.Message.USER_ROLE,
+                listOf(app.daiyu.android.domain.MessageBlock.Text("body", "历史问题 $i")),
+                app.daiyu.android.domain.RunStatus.COMPLETED)
+            val answer = user.copy(id = app.daiyu.android.domain.MessageId("dialog-fling-answer-$i"),
+                role = app.daiyu.android.domain.Message.ASSISTANT_ROLE,
+                blocks = listOf(app.daiyu.android.domain.MessageBlock.Text("body", "历史正文 $i\n".repeat(12))),
+                status = app.daiyu.android.domain.RunStatus.RUNNING)
+            db.send(user, answer); db.save(answer.copy(status = app.daiyu.android.domain.RunStatus.COMPLETED))
+        }
+        mainThread { activity.select(conversation) }
+        awaitControl("history readers idle") { !fixture.controller.dataBusy }
+        awaitUniqueTag("chat-turn:dialog-fling-answer-69")
+        dismissIme(); ui.waitForIdle()
+        val originalListId = node("chat-messages").fetchSemanticsNode().id
+        fun scrollValue(): Float {
+            val current = node("chat-messages").fetchSemanticsNode()
+            assertEquals("Opening a picker must not remount chat", originalListId, current.id)
+            val range = current.config[androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange]
+            var value = Float.NaN
+            ui.runOnUiThread { value = range.value() }
+            assertTrue(value.isFinite())
+            return value
+        }
+        fun frame(): Float { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle(); return scrollValue() }
+        val tail = scrollValue()
+        assertTrue(tail > 0f)
+        node("chat-messages").performTouchInput { click(center) }
+        node("chat-messages").performScrollToIndex(8)
+        ui.waitForIdle()
+        val reading = scrollValue()
+        assertTrue(reading > 0f && reading < tail)
+        val oldAutoAdvance = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            node("chat-messages").performTouchInput {
+                swipe(Offset(center.x, height * .8f), Offset(center.x, height * .2f), durationMillis = 96L)
+            }
+            val first = frame(); val second = frame()
+            assertTrue("Fixture must still move after UP", second > first)
+            assertTrue(second < tail)
+            ui.runOnUiThread { invokeHost(activity, "openChatModels") }
+            var afterOpen = second
+            repeat(4) {
+                afterOpen = frame()
+                assertTrue("Picker entry must not reset history", afterOpen >= second - .001f)
+                assertTrue("Picker entry must not jump to tail", afterOpen < tail)
+            }
+            assertTrue("Background continues moving across picker entry", afterOpen > second)
+            repeat(24) {
+                val value = frame()
+                assertTrue(value >= second - .001f); assertTrue(value < tail)
+            }
+            node("chat-model-picker").assertIsDisplayed()
+            node("chat-model-search").assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = oldAutoAdvance }
+        ui.waitForIdle()
+        awaitNodeWindowFocus(node("chat-model-search"))
+        val beforeClose = scrollValue()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitHostWindowFocus(activity)
+        node("chat-model-picker").assertDoesNotExist()
+        assertEquals(beforeClose, scrollValue(), .001f)
+        val beforeNextScroll = scrollValue()
+        node("chat-messages").performTouchInput {
+            swipe(Offset(center.x, height * .8f), Offset(center.x, height * .2f), durationMillis = 240L)
+        }
+        ui.waitForIdle()
+        assertTrue(scrollValue() > beforeNextScroll)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testConfirmedContextRevisionStillChangesForRealConfigurationChanges() {
+        awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
+        ui.waitUntil(5_000) { ui.runOnIdle { invokeHost(activity, "getConfirmedGptSpeed") != null } }
+        val revision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
+        val before = fixture.settings.load()
+        val capacity = if (before.contextWindowOverride == 32768) 65536 else 32768
+        fixture.settings.save(before.copy(contextWindowOverride = capacity))
+        mainThread { invokeHost(activity, "refreshConfirmedModelLabel") }
+        ui.waitUntil(5_000) { ui.runOnIdle {
+            val confirmed = invokeHost(activity, "getConfirmedGptSpeed") as? ChatGptSpeedSelection
+            confirmed?.editing?.settings?.contextWindowOverride == capacity &&
+                (invokeHost(activity, "getContextModelRevision") as Long) > revision
+        } }
+        val confirmedRevision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
+        mainThread { invokeHost(activity, "openChatModels") }
+        awaitUniqueTag("chat-model-search")
+        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
+        ui.waitUntil(5_000) { ui.runOnIdle {
+            (pickerField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState)?.loading == false
+        } }
+        mainThread { assertEquals(confirmedRevision, invokeHost(activity, "getContextModelRevision")) }
+        assertEquals(capacity, fixture.settings.load().contextWindowOverride)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testChatModelLoadingKeepsTheWindowSearchAndContextRevision() {
+        awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
+        ui.waitUntil(5_000) { ui.runOnIdle { invokeHost(activity, "getConfirmedGptSpeed") != null } }
+        setDraft("打开目录不改变聊天")
+        dismissIme()
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.load()
+        val revision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val holder = Thread {
+            try { fixture.settings.modelCatalog.configurationChange {
+                entered.countDown(); check(release.await(60, TimeUnit.SECONDS))
+            } } catch (problem: Throwable) { failure.set(problem) }
+        }.apply { start() }
+        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            mainThread { invokeHost(activity, "openChatModels") }
+            awaitUniqueTag("chat-model-search")
+            awaitNodeWindowFocus(node("chat-model-search"))
+            mainThread { assertTrue((pickerField.get(activity) as app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState).loading) }
+            val root = focusedWindowRoot()
+            node("chat-model-search").performTextReplacement("unfinished model search")
+            dismissIme()
+            release.countDown(); holder.join(5_000)
+            assertFalse(holder.isAlive)
+            failure.get()?.let { throw it }
+            ui.waitUntil(5_000) { ui.runOnIdle {
+                (pickerField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState)?.loading == false
+            } }
+            awaitNodeWindowFocus(node("chat-model-search"))
+            assertSame(root, focusedWindowRoot())
+            node("chat-model-search").assertEditableText("unfinished model search")
+            ui.onAllNodesWithTag("chat-model-picker").assertCountEquals(1)
+            mainThread { assertEquals(revision, invokeHost(activity, "getContextModelRevision")) }
+            assertEquals(settings, fixture.settings.load())
+            assertEquals(before, fixture.database.exportBackup())
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            awaitHostWindowFocus(activity)
+            assertDraft("打开目录不改变聊天")
+            mainThread { invokeHost(activity, "openChatModels") }
+            awaitUniqueTag("chat-model-search")
+            ui.waitUntil(5_000) { ui.runOnIdle {
+                (pickerField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerState)?.loading == false
+            } }
+            node("chat-model-search").assertEditableText("")
+            mainThread { assertEquals(revision, invokeHost(activity, "getContextModelRevision")) }
+            assertEquals(0, fixture.opens.get())
+        } finally { release.countDown(); holder.join(10_000) }
+    }
+
     fun testChatModelSearchSurvivesPauseAndStopWithoutAnySelection() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
         mainThread { invokeHost(activity, "openChatModels") }

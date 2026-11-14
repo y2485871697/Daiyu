@@ -25,8 +25,20 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
 
     def test_host_marks_pending_before_controller_and_rejects_duplicate_selection(self):
         text = (SRC / "MainActivity.kt").read_text()
-        render = text.split("else LocalCatalogChatModelPicker(session", 1)[1].split("composerShortcutPick", 1)[0]
-        self.assertIn("switching = picker.switching", render)
+        render = text.split("chatModelPicker?.let { picker ->", 1)[1].split("composerShortcutPick", 1)[0]
+        self.assertEqual(1, render.count("ChatModelPicker(picker,"))
+        self.assertNotIn("LocalCatalogChatModelPicker(", render)
+        self.assertEqual(2, render.count("picker.enabled && !picker.loading && !picker.switching"))
+        self.assertIn("session.selectionFor(id)", render)
+        self.assertIn("session.selectionFor(providerId, id)", render)
+        self.assertIn("selectChatModel(it, owner, session)", render)
+        self.assertIn("selectChatModel(it, owner, session, providerId)", render)
+        self.assertIn("chatModelOwner === owner", render)
+        reload = text.split("private fun reloadChatModels(", 1)[1].split("private fun selectChatModel(", 1)[0]
+        self.assertNotIn("contextModelRevision++", reload)
+        self.assertNotIn("confirmedModelLabel =", reload)
+        self.assertNotIn("confirmedReasoningModel =", reload)
+        self.assertNotIn("refreshConfirmedModelLabel()", reload)
         method = text.split("private fun selectChatModel(", 1)[1].split("private fun gatewayCurrent", 1)[0]
         self.assertIn("if (picker.switching) return", method)
         pending = method.index("chatModelPicker = picker.copy(switching = true)")

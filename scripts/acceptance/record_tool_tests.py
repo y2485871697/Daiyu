@@ -291,6 +291,9 @@ RENDERING_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.Re
 RENDERING_MODULES = ('test_reasoning_workflow_contract', 'test_work_timeline_connector_contract', 'test_workflow_render_isolation_contract', 'test_markdown_typing_contract', 'test_markdown_body_visibility_contract', 'test_markdown_table_style_contract', 'test_markdown_code_block_contract', 'test_markdown_entry_contract', 'test_markdown_cold_start_contract', 'test_markdown_return_contract', 'test_markdown_stream_progress_contract', 'test_markdown_stream_optimization_contract', 'test_message_display_contract', 'test_rendering_smoke_scope', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt')
 
 
+SCROLL_POPUP_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest', 'app.daiyu.android.OrdinaryDialogLifecycleActivityTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerLayoutTest')
+SCROLL_POPUP_MODULES = tuple(dict.fromkeys(POPUP_SCROLL_MODULES + RENDERING_MODULES + ('test_model_switch_feedback_contract', 'test_selection_stays_open_contract', 'test_model_picker_caption_contract', 'test_model_selection_switch_state_contract', 'test_voice_settings_parity_contract', 'test_chat_gpt_speed_contract', 'test_model_picker_balance_contract', 'test_conversation_model_binding_contract')))
+
 CHAT_STATUS_BAR_INSETS_PLATFORM_CLASS = "app.daiyu.android.ChatStatusBarInsetsTest"
 CHAT_STATUS_BAR_INSETS_MODULES = (
     "test_chat_return_refresh_contract",
@@ -333,6 +336,9 @@ COMPRESSION_DIALOG_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SCROLL_POPUP_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *SCROLL_POPUP_MODULES, "-v"], "scroll-popup-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.PlatformTest":
         return [python, "-B", "-m", "unittest", "test_platform_smoke_scope", "test_test_refresh_contract", "test_acceptance_tool_receipt", "-v"], "platform-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

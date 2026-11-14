@@ -63,6 +63,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -101,7 +102,7 @@ private class FollowClearanceLayout : RemeasurementModifier {
 // The lazy item keeps the full content extent H. Only its interactive viewport is
 // bounded (V), and placed at q inside that extent. Content has an ordinary scroll
 // offset a, so its *unclipped* origin is itemOrigin + q - a, not itemOrigin.
-private class StreamingTailViewport(initiallyBounded: Boolean) {
+internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var bounded by mutableStateOf(initiallyBounded)
     var migrating by mutableStateOf(false)
     var scrollOffset by mutableStateOf(0f)
@@ -114,7 +115,7 @@ private class StreamingTailViewport(initiallyBounded: Boolean) {
 }
 
 @Composable
-private fun StreamingTailContainer(
+internal fun StreamingTailContainer(
     state: StreamingTailViewport,
     listCoordinates: () -> LayoutCoordinates?,
     itemKey: String,
@@ -122,6 +123,7 @@ private fun StreamingTailContainer(
     follows: () -> Boolean,
     clearance: () -> Int,
     viewportHeight: () -> Int,
+    onViewportMeasure: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val innerScroll = rememberScrollableState { delta ->
@@ -153,6 +155,7 @@ private fun StreamingTailContainer(
                 verticalScrollAxisRange = ScrollAxisRange(
                     value = { state.scrollOffset }, maxValue = { state.maxOffset.toFloat() })
             }) { measurables, constraints ->
+            onViewportMeasure?.invoke()
             val body = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
             state.contentHeight = body.height
             val height = if (state.bounded) {
@@ -167,7 +170,7 @@ private fun StreamingTailContainer(
             // Keep short replies at their top while the outer follower reveals appended rows.
             val followOffset = (body.height - viewportHeight().coerceAtLeast(1)).coerceAtLeast(0)
             state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()
-                else state.scrollOffset.coerceIn(0f, maximum.toFloat())
+                else Snapshot.withoutReadObservation { state.scrollOffset.coerceIn(0f, maximum.toFloat()) }
             layout(body.width, height) {
                 body.placeRelative(0, -state.scrollOffset.roundToInt())
             }

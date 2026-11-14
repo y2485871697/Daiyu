@@ -25,6 +25,10 @@ import kotlin.math.ceil
 /** Code is already non-selectable. Keep interactive Markdown on its visible-prefix text path. */
 @Composable
 internal fun MarkdownCodeText(block: MarkdownBlock.Code, visibleCharacters: Int, modifier: Modifier, style: TextStyle) {
+    if (visibleCharacters >= block.text.length) {
+        BasicText(markdownCodeDisplayText(block, block.text), modifier, style = style, softWrap = false)
+        return
+    }
     val boundaries = remember(block.text) { MarkdownTextBoundaries(block.text) }
     val end = boundaries.end(visibleCharacters)
     val visible = remember(block.text, end) { block.text.substring(0, end) }

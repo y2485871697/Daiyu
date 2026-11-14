@@ -2939,11 +2939,17 @@ class MainActivity : ComponentActivity() {
                     val owner = chatModelOwner
                     val session = chatModelSession
                     val dismiss = { if (dialogActionsCurrent(lease) && chatModelOwner === owner) dismissChatModels() }
-                    if (session == null) ChatModelPicker(picker, onSelect = {}, onDismiss = dismiss)
-                    else LocalCatalogChatModelPicker(session, enabled = picker.enabled,
-                        loading = picker.loading, message = picker.message, switching = picker.switching,
-                        onSelect = { if (dialogActionsCurrent(lease)) selectChatModel(it, owner, session) },
-                        onSelectOtherProvider = { providerId, ticket -> if (dialogActionsCurrent(lease)) selectChatModel(ticket, owner, session, providerId) },
+                    ChatModelPicker(picker,
+                        onSelect = { id ->
+                            if (session != null && dialogActionsCurrent(lease) && picker.enabled && !picker.loading && !picker.switching) {
+                                session.selectionFor(id)?.let { selectChatModel(it, owner, session) }
+                            }
+                        },
+                        onSelectOtherProvider = { providerId, id ->
+                            if (session != null && dialogActionsCurrent(lease) && picker.enabled && !picker.loading && !picker.switching) {
+                                session.selectionFor(providerId, id)?.let { selectChatModel(it, owner, session, providerId) }
+                            }
+                        },
                         onDismiss = dismiss)
                 }
                 composerShortcutPick?.let { pick ->
@@ -7489,11 +7495,6 @@ class MainActivity : ComponentActivity() {
             val record = active?.catalog?.models?.singleOrNull { it.settings.localIdentity == binding?.localModelIdentity }
             val saved = if (record != null && active.settings != null) record.settings.applyTo(active.settings, record.id) else null
             chatModelSettings = saved
-            confirmedModelLabel = saved?.model?.ifBlank { "模型" } ?: "模型"
-            confirmedReasoningModel = saved?.let {
-                runCatching { app.daiyu.android.model.ReasoningRequestPolicy.requestModel(it.model, it.requestOptions) }.getOrNull()
-            }.orEmpty()
-            contextModelRevision++
             val session = result?.let {
                 LocalCatalogChatModelPickerSession(active?.catalog, saved?.model.orEmpty(),
                     providerId = it.activeEditor?.slotId.orEmpty(), providers = it.groups,

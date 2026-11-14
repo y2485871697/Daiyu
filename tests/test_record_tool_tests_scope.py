@@ -296,6 +296,26 @@ class ChildTaskCardScopeTest(unittest.TestCase):
             command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(ordered)))
             self.assertEqual("child-task-cards-targeted", scope)
             self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        helper = SpeechPlatformDiscoveryTest()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper.fixture(root)
+            for name in classes:
+                relative = Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text((ROOT / relative).read_text())
+            seen = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=",".join(classes))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertCountEqual(classes, inventory["all_classes"])
+                seen.extend(selection["selected_classes"])
+            self.assertCountEqual(classes, seen)
         raw = ",".join(classes)
         invalid = [raw + ",unknown", raw + ",", " " + raw, raw + " ", raw.replace(",", ", ", 1)]
         invalid += [raw + "," + name for name in classes]

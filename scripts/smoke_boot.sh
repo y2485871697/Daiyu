@@ -197,10 +197,12 @@ child_task_card_target = {"app.daiyu.android.ui.screens.chat.conversation." + na
 )}
 child_task_card_inheritance_target = child_task_card_target | {"app.daiyu.android.ConversationSelectionInheritanceActivityTest"}
 child_task_card_theme_target = child_task_card_inheritance_target | {"app.daiyu.android.ChatThemeInteractionActivityTest"}
+child_delegation_target = child_task_card_target | {"app.daiyu.android.ControllerChildModelsTest"}
 child_task_card_only = mode == "smoke" and sorted(raw_filter.split(",")) in (
-    sorted(child_task_card_target), sorted(child_task_card_inheritance_target), sorted(child_task_card_theme_target))
+    sorted(child_task_card_target), sorted(child_task_card_inheritance_target), sorted(child_task_card_theme_target),
+    sorted(child_delegation_target))
 child_task_card_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
-                           for name in child_task_card_theme_target if name in raw_filter.split(",")}
+                           for name in child_task_card_theme_target | child_delegation_target if name in raw_filter.split(",")}
 
 workflow_body_target = {"app.daiyu.android.ui.screens.chat.conversation." + name for name in (
     "ReasoningWorkflowTest", "ReconnectBoundaryPlacementTest",

@@ -205,14 +205,18 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
         val beforeClose = scrollValue()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitHostWindowFocus(activity)
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty()
+        }
         node("chat-model-picker").assertDoesNotExist()
         assertEquals(beforeClose, scrollValue(), .001f)
         val beforeNextScroll = scrollValue()
         node("chat-messages").performTouchInput {
-            swipe(Offset(center.x, height * .8f), Offset(center.x, height * .2f), durationMillis = 240L)
+            swipe(Offset(center.x, readingHeight * .8f), Offset(center.x, readingHeight * .2f), durationMillis = 240L)
         }
-        ui.waitForIdle()
-        assertTrue(scrollValue() > beforeNextScroll)
+        val afterNextScroll = frame()
+        assertTrue("Chat scrolls after picker closes: before=$beforeNextScroll after=$afterNextScroll", afterNextScroll > beforeNextScroll)
         assertEquals(0, fixture.opens.get())
     }
 

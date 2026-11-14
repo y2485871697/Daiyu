@@ -333,6 +333,8 @@ COMPRESSION_DIALOG_MODULES = (
 
 
 def command_for(python, env):
+    if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.PlatformTest":
+        return [python, "-B", "-m", "unittest", "test_platform_smoke_scope", "test_test_refresh_contract", "test_acceptance_tool_receipt", "-v"], "platform-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(COMPRESSION_DIALOG_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *COMPRESSION_DIALOG_MODULES, "-v"], "compression-dialog-targeted"

@@ -117,6 +117,8 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     var committing = false
         private set
 
+    var ordinaryReturn: ((() -> Unit) -> Unit)? = null
+
     fun commitBack(back: () -> Unit) {
         if (!alive || toolbarPending || (transitionBlocked && swipeCommit == null) || committing) return
         BackPerformance.safely {
@@ -127,6 +129,9 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
         }
         val visual = swipeCommit
         swipeCommit = null
+        if (visual == null && progress == 0f && !predictive && previewAllowed && toolbarReturnJob?.isActive != true) {
+            ordinaryReturn?.let { it(back); return }
+        }
         committing = true
         val velocity = visual?.velocity ?: if (predictive) predictiveMotion.calculateVelocity().x / 1000f else 0f
         try { synchronousTrace("daiyu.back.callback-commit") {
@@ -579,6 +584,7 @@ internal fun PageBackGestureHost(
             }
         }
     }
+    state.ordinaryReturn = toolbarBack
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val currentBack by rememberUpdatedState(dispatchBack)
     val activeDeparture = departing && !departureInterrupted && departure?.returnSkipped != true && !(departure?.forward == true &&
@@ -738,9 +744,11 @@ internal fun PageBackGestureHost(
                         // Once the destination is drawn live, never reintroduce a late outgoing bitmap.
                         departure.returnSkipped = true
                     }
+                    val pendingReturn = layers.pendingReturnImage(frame)
                     val held = when {
                         departure != null && showDeparture && !departure.forward ->
                             if (retainedRootContent != null && retainedRootVisible) null else departure.targetImage
+                        pendingReturn != null -> pendingReturn
                         state.previewAllowed && (state.active || state.gestureVisualActive) -> frame.image
                         frame.holdingForChild && frame.childChangeCaptured == true && state.previewAllowed -> frame.image
                         else -> null

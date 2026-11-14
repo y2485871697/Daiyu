@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -731,7 +732,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun assertReturnDoesNotWaitForCopy(withPreparedImage: Boolean) {
+    private fun assertUncoordinatedReturnDoesNotWaitForCopy(withPreparedImage: Boolean) {
         val gate = CompletableDeferred<Unit>()
         var blockCopies = false
         var copiesWaiting = 0
@@ -770,8 +771,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         }
         ui.waitUntil(5_000) { copiesWaiting > 0 }
         ui.mainClock.autoAdvance = false
-            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            assertEquals("business pop is synchronous while capture is pending", "chat", screen)
+            mainThread { backCount++; screen = "chat" }
+            assertEquals("uncoordinated route changes do not wait for capture", "chat", screen)
             assertEquals(1, backCount)
             assertFalse(gate.isCompleted)
             ui.mainClock.advanceTimeByFrame()
@@ -794,16 +795,18 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testReturnAdvancesWhileCaptureIsPending() = assertReturnDoesNotWaitForCopy(true)
-    fun testColdReturnDoesNotWaitOrEnableLatePreview() = assertReturnDoesNotWaitForCopy(false)
+    fun testUncoordinatedReturnAdvancesWhileCaptureIsPending() = assertUncoordinatedReturnDoesNotWaitForCopy(true)
+    fun testColdUncoordinatedReturnDoesNotEnableLatePreview() = assertUncoordinatedReturnDoesNotWaitForCopy(false)
 
     @OptIn(ExperimentalActivityApi::class)
-    private fun assertToolbarFinalCopy(cancelOnPause: Boolean = false, veto: Boolean = false, failCopy: Boolean = false, nested: Boolean = false, contention: Int = 0) {
+    private fun assertToolbarFinalCopy(cancelOnPause: Boolean = false, veto: Boolean = false, failCopy: Boolean = false, nested: Boolean = false, contention: Int = 0, ordinarySystem: Boolean = false) {
         val gate = CompletableDeferred<Unit>()
         var waiting = 0
         var blockCopy = false
         var frame: PageBackPreviewLayers.Frame? = null
         var state: PageBackGestureState? = null
+        var sourceState: PageBackGestureState? = null
+        var unshieldedParentDraws = 0
         try {
             mainThread {
                 activity.setContent {
@@ -829,8 +832,14 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                                 if (!veto) { if (nested) localPage = null else screen = "chat" }
                             }
                             PageBackStack(if (nested) localPage else null) {
+                            val localRendered = localPage
+                            val parentVisible = rendered == "chat" || (nested && localRendered == null)
                             Box(Modifier.fillMaxSize().pageBackPreviewSource()
-                                .background(if (rendered == "chat") Color.Red else Color.Green)) {
+                                .background(if (parentVisible) Color.Red else Color.Green)
+                                .drawWithContent {
+                                    if (nested && parentVisible && gesture === sourceState) unshieldedParentDraws++
+                                    drawContent()
+                                }) {
                                 if (rendered == "settings") app.daiyu.android.ui.components.MiuixBackButton(
                                     onClick = { activity.onBackPressedDispatcher.onBackPressed() },
                                     modifier = Modifier.testTag("toolbar-final-copy"))
@@ -848,9 +857,14 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
             ui.waitUntil(5_000) { frame?.ready != null }
             val source = checkNotNull(frame)
+            sourceState = state
             mainThread { blockCopy = true }
             ui.mainClock.autoAdvance = false
             fun clickToolbar() {
+                if (ordinarySystem) {
+                    mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                    return
+                }
                 val toolbar = ui.onNodeWithTag("toolbar-final-copy")
                 if (contention == 1) toolbar.performSemanticsAction(SemanticsActions.OnClick) {
                     assertTrue("toolbar OnClick must be handled", it())
@@ -895,9 +909,17 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 ui.onNodeWithTag("toolbar-final-copy").performClick()
             } else mainThread { gate.complete(Unit) }
             ui.waitUntil(5_000) {
-                if (backCount == 0) ui.mainClock.advanceTimeByFrame()
-                backCount == 1
+                ui.mainClock.advanceTimeByFrame()
+                if (!veto && !failCopy) {
+                    val pixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+                    val pixel = pixels[pixels.width - 3, pixels.height / 2]
+                    assertTrue("every handoff frame keeps the departing child visible: $pixel",
+                        pixel.green > .9f && pixel.red < .1f && pixel.blue < .1f)
+                }
+                backCount == 1 && (veto || failCopy ||
+                    ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty())
             }
+            assertEquals("the parent must not draw inside the outgoing visual route", 0, unshieldedParentDraws)
             ui.mainClock.advanceTimeByFrame()
             if (veto) {
                 ui.mainClock.advanceTimeBy(64)
@@ -913,13 +935,27 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     ui.mainClock.advanceTimeBy(32)
                     val after = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
                     assertTrue("the accepted fresh child uses the original return motion", after.left > before.left)
-                } else ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                } else {
+                    repeat(4) {
+                        ui.mainClock.advanceTimeBy(250)
+                        ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                    }
+                    val pixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
+                    val pixel = pixels[pixels.width / 2, pixels.height / 2]
+                    assertTrue("failed copy settles on the parent: $pixel", pixel.red > .9f && pixel.green < .1f)
+                }
+                assertEquals(1, backCount)
+                assertEquals(0, unshieldedParentDraws)
             }
         } finally {
             gate.complete(Unit)
             ui.mainClock.autoAdvance = true
         }
     }
+
+    fun testOrdinarySystemReturnWaitsForFinalChildCopy() = assertToolbarFinalCopy(ordinarySystem = true)
+    fun testOrdinaryNestedSystemReturnKeepsEveryHandoffFrame() = assertToolbarFinalCopy(nested = true, ordinarySystem = true)
+    fun testOrdinarySystemFailedCopyNeverReintroducesDeparture() = assertToolbarFinalCopy(failCopy = true, ordinarySystem = true)
 
     fun testToolbarWaitsForFinalChildCopyAndCoalescesRepeatedTaps() = assertToolbarFinalCopy()
     fun testToolbarNestedPopKeepsFinalCopyUntilRegistryConsumesTicket() = assertToolbarFinalCopy(nested = true)

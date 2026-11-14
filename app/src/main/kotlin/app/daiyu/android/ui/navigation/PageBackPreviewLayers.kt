@@ -377,6 +377,11 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun ownsToolbarReturn(departure: Departure): Boolean = active && !closed && pending === departure &&
         frames[currentKey] === departure.frame && !departure.frame.releaseRequested
 
+    // Nested content can pop before its visual route publishes the departure.
+    fun pendingReturnImage(frame: Frame): ImageBitmap? = frame.image?.takeIf {
+        active && !closed && pending?.frame === frame && frames[currentKey] === frame && frame.canDrawPreview
+    }
+
     suspend fun awaitToolbarReturn(departure: Departure) {
         departure.frame.capture?.join()
     }

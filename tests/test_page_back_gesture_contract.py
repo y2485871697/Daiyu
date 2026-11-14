@@ -164,6 +164,26 @@ class PageBackGestureContractTest(unittest.TestCase):
                        'testPredictiveCompletionAfterUncomposedPauseIsRejected'):
             self.assertIn('fun ' + method + '()', regressions)
 
+    def test_ordinary_system_back_prepares_pixels_and_bridges_nested_publication(self):
+        commit = self.host.split('    fun commitBack(', 1)[1].split('    private class SwipeCommit', 1)[0]
+        self.assertIn('visual == null && progress == 0f && !predictive && previewAllowed', commit)
+        self.assertLess(commit.index('ordinaryReturn?.let { it(back); return }'), commit.index('committing = true'))
+        self.assertIn('state.ordinaryReturn = toolbarBack', self.host)
+        self.assertIn('val pendingReturn = layers.pendingReturnImage(frame)', self.host)
+        self.assertIn('pendingReturn != null -> pendingReturn', self.host)
+        self.assertIn('toolbarReturnJob?.isActive != true', commit)
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        bridge = layers.split('    fun pendingReturnImage(', 1)[1].split('    suspend fun awaitToolbarReturn', 1)[0]
+        for guard in ('active && !closed', 'pending?.frame === frame', 'frames[currentKey] === frame', 'frame.canDrawPreview'):
+            self.assertIn(guard, bridge)
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        for method in ('testOrdinarySystemReturnWaitsForFinalChildCopy',
+                       'testOrdinaryNestedSystemReturnKeepsEveryHandoffFrame',
+                       'testOrdinarySystemFailedCopyNeverReintroducesDeparture'):
+            self.assertIn('fun ' + method + '()', source)
+        self.assertIn('every handoff frame keeps the departing child visible', source)
+        self.assertIn('0, unshieldedParentDraws', source)
+
     def test_toolbar_final_copy_excludes_predictive_and_preexisting_pointer_claims(self):
         started = self.host.split('override fun handleOnBackStarted', 1)[1].split('override fun handleOnBackProgressed', 1)[0]
         progressed = self.host.split('override fun handleOnBackProgressed', 1)[1].split('override fun handleOnBackCancelled', 1)[0]
@@ -822,7 +842,7 @@ class PageBackGestureContractTest(unittest.TestCase):
             self.assertIn('fun ' + name + '()', gestures)
         self.assertIn('afterFirstFrame <= beforeGesture + 1', gestures)
         self.assertIn('afterFirstFrame, pageCompositions', gestures)
-        for name in ('testReturnAdvancesWhileCaptureIsPending', 'testColdReturnDoesNotWaitOrEnableLatePreview', 'testFrozenPreviewRejectsSameGenerationLateCopy'):
+        for name in ('testUncoordinatedReturnAdvancesWhileCaptureIsPending', 'testColdUncoordinatedReturnDoesNotEnableLatePreview', 'testFrozenPreviewRejectsSameGenerationLateCopy'):
             self.assertIn('fun ' + name + '()', stack)
         self.assertIn('assertFalse(gate.isCompleted)', stack)
         self.assertIn('cancelled warm pixels never become visible', stack)

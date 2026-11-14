@@ -54,10 +54,10 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
 
     def test_menu_state_is_revoked_by_availability_disabled_or_editor_changes(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
-        self.assertIn('var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes, callUi?.sessionKey)', composer)
-        self.assertIn('val toolbarEnabled = state.enabled && !editing', composer)
+        self.assertIn('var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes, callUi?.sessionKey, pageActive)', composer)
+        self.assertIn('val toolbarEnabled = pageActive && state.enabled && !editing', composer)
         self.assertIn('val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()', composer)
-        self.assertIn('ChatVoiceModeMenu(voiceModes && voiceMenuEnabled && callUi == null,', composer)
+        self.assertIn('ChatVoiceModeMenu(pageActive && voiceModes && voiceMenuEnabled && callUi == null,', composer)
 
     def test_only_long_press_can_open_the_mode_picker(self):
         button = (CHAT / 'ChatComposer.kt').read_text().split('SpeechMorphButton(', 1)[1].split('onLongClick =', 1)[0]
@@ -69,7 +69,7 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
 
     def test_disabled_long_press_is_removed_before_feedback_and_callback(self):
         composer = (CHAT / 'ChatComposer.kt').read_text().split('SpeechMorphButton(', 1)[1]
-        self.assertIn('enabled = callUi != null || voiceMenuEnabled,', composer)
+        self.assertIn('enabled = pageActive && (callUi != null || voiceMenuEnabled),', composer)
         self.assertNotIn('enabled = voiceMenuEnabled && callUi?.presentation != DoubaoCallPresentation.CLOSING', composer)
         self.assertIn('onLongClick = if (callUi != null || voiceMenuEnabled)', composer)
         self.assertIn('val admitted = actions.onVoiceLongPress()', composer)

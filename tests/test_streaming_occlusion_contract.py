@@ -8,6 +8,24 @@ DEVICE = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/co
 
 
 class StreamingOcclusionContract(unittest.TestCase):
+    def test_idle_viewport_cleanup_does_not_subscribe_to_each_scroll_layout(self):
+        source = CHAT.read_text()
+        cleanup = source.split('LaunchedEffect(listState, turnKeys, assistantOwnerKey)', 1)[1].split('val boundaryRequests', 1)[0]
+        candidates = cleanup.index('val candidates = nestedStates.filter')
+        idle = cleanup.index('if (candidates.isEmpty()) return@snapshotFlow emptyList()')
+        layout = cleanup.index('val layout = listState.layoutInfo')
+        self.assertLess(candidates, idle)
+        self.assertLess(idle, layout)
+        self.assertNotIn('layoutInfo', cleanup[:idle])
+        for token in ('!(key == assistantOwnerKey && followBottom)', 'viewport.bounded', '!viewport.migrating'):
+            self.assertIn(token, cleanup[candidates:idle])
+        self.assertIn('candidates.mapNotNull', cleanup[layout:])
+        collect = cleanup.split('.collect { offscreen ->', 1)[1]
+        self.assertIn('(key != assistantOwnerKey || !followBottom) && viewport.bounded && !viewport.migrating', collect)
+        for token in ('viewport.bounded = false', 'viewport.scrollOffset = 0f',
+                      'viewport.viewportOffset = 0', 'viewport.boundaryDelta = 0f'):
+            self.assertIn(token, collect)
+
     def test_occlusion_clearance_uses_the_same_bounded_frame_motion(self):
         source = CHAT.read_text()
         follow = source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]

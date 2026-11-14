@@ -20,6 +20,7 @@ internal val LocalBottomSheetContent = staticCompositionLocalOf { false }
 @Composable
 internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scrimBlurRadius: Float = 0f,
     bottomSheet: Boolean = false, onOutsideDismiss: () -> Unit = onDismiss, dismissEnabled: Boolean = true,
+    automaticPopup: app.daiyu.android.diagnostics.PopupPerformanceCapture.Type? = null,
     content: @Composable BoxWithConstraintsScope.() -> Unit) {
     val density = LocalDensity.current
     val inheritedDimStack = LocalDialogDimStack.current
@@ -30,7 +31,7 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
     },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = dismissEnabled, dismissOnClickOutside = dismissEnabled)) {
-        app.daiyu.android.diagnostics.ObserveDialogFrames(if (bottomSheet) "sheet" else "dialog")
+        app.daiyu.android.diagnostics.ObserveDialogFrames(if (bottomSheet) "sheet" else "dialog", automaticPopup)
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         val dimAmount = remember(window) { window?.attributes?.dimAmount ?: 0f }
         SideEffect {

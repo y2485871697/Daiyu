@@ -8,7 +8,9 @@ internal class BackPerformanceRecorder(
     private val epoch: () -> Long,
     private val emit: (Incident) -> Unit,
 ) {
-    enum class Kind { CUSTOM_SWIPE, PREDICTIVE, BACK_PRESS }
+    enum class Kind { CUSTOM_SWIPE, PREDICTIVE, BACK_PRESS, ASSISTANT_PICKER, MODEL_PICKER }
+    enum class Source { MAIN, POPUP }
+    enum class Scroll { IDLE, DRAG, NON_DRAG_SCROLL }
     enum class End { TAIL, HARD_LIMIT, RESET, SUPERSEDED, PAUSED, DESTROYED, OWNER_REMOVED }
     enum class Phase(val trace: String) {
         CUSTOM_UP("daiyu.back.custom-up-dispatch"), CALLBACK("daiyu.back.callback-commit"),
@@ -47,7 +49,8 @@ internal class BackPerformanceRecorder(
         val pending = arrayOfNulls<Sample>(8)
     }
     data class Frame(val duration: Long, val budget: Long, val refreshHz: Float, val stages: List<Long>,
-        val overlapsStart: Boolean, val vsyncOffset: Long = 0L)
+        val overlapsStart: Boolean, val vsyncOffset: Long = 0L,
+        val source: Source? = null, val scroll: Scroll? = null)
     data class Incident(val epoch: Long, val kind: Kind, val reason: End, val commitAttempted: Boolean,
         val routeChanged: Boolean, val elapsed: Long, val frames: Int, val slow: Int, val max: Long,
         val minBudget: Long, val maxBudget: Long, val minHz: Float, val maxHz: Float,
@@ -180,9 +183,11 @@ internal class BackPerformanceRecorder(
             stats.max = maxOf(stats.max, elapsed)
         }
     }
-    @Synchronized fun frame(vsync: Long, duration: Long, budget: Long, hz: Float, stages: LongArray, host: Any? = null) {
+    @Synchronized fun frame(vsync: Long, duration: Long, budget: Long, hz: Float, stages: LongArray, host: Any? = null,
+        sourceToken: Token? = null, source: Source? = null, scroll: Scroll? = null) {
         val window = valid() ?: return
         if (host != null && (window.owner as? Owner)?.host !== host) return
+        if (sourceToken != null && sourceToken != window.token) return
         if (vsync > window.deadline || duration < 0 || budget <= 0) return
         // An input-triggering frame can start before claim. Retain overlapping evidence separately:
         // it is ambiguous across consecutive gestures and never counts as an attributed window frame.
@@ -192,7 +197,7 @@ internal class BackPerformanceRecorder(
             window.overlapFrames = (window.overlapFrames + 1).coerceAtMost(MAX_COUNT)
             if (duration <= budget) return
             window.overlapSlow = (window.overlapSlow + 1).coerceAtMost(MAX_COUNT)
-            addWorst(window, vsync, duration, budget, hz, stages, overlapsStart = true)
+            addWorst(window, vsync, duration, budget, hz, stages, overlapsStart = true, source = source, scroll = scroll)
             return
         }
         window.frames = (window.frames + 1).coerceAtMost(MAX_COUNT)
@@ -201,10 +206,11 @@ internal class BackPerformanceRecorder(
         if (hz.isFinite() && hz > 0) { window.minHz = minOf(window.minHz, hz); window.maxHz = maxOf(window.maxHz, hz) }
         if (duration <= budget) return
         window.slow = (window.slow + 1).coerceAtMost(MAX_COUNT)
-        addWorst(window, vsync, duration, budget, hz, stages, overlapsStart = false)
+        addWorst(window, vsync, duration, budget, hz, stages, overlapsStart = false, source = source, scroll = scroll)
     }
-    private fun addWorst(window: Window, vsync: Long, duration: Long, budget: Long, hz: Float, stages: LongArray, overlapsStart: Boolean) {
-        window.worst.add(Frame(duration, budget, hz.takeIf { it.isFinite() } ?: 0f, stages.take(9), overlapsStart, vsync - window.start))
+    private fun addWorst(window: Window, vsync: Long, duration: Long, budget: Long, hz: Float, stages: LongArray, overlapsStart: Boolean,
+        source: Source?, scroll: Scroll?) {
+        window.worst.add(Frame(duration, budget, hz.takeIf { it.isFinite() } ?: 0f, stages.take(9), overlapsStart, vsync - window.start, source, scroll))
         window.worst.sortByDescending { it.duration }
         if (window.worst.size > MAX_WORST) window.worst.removeAt(MAX_WORST)
     }

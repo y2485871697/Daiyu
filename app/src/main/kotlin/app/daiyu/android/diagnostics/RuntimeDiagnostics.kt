@@ -181,14 +181,20 @@ internal object RuntimeDiagnostics {
     private val backGeneration = AtomicLong()
     internal fun backEpoch(): Long = backGeneration.get()
 
-    internal fun backIncident(incident: BackPerformanceRecorder.Incident) {
+    internal fun backIncident(incident: BackPerformanceRecorder.Incident) = automaticIncident(incident)
+
+    internal fun popupIncident(incident: BackPerformanceRecorder.Incident, opened: Long,
+        scroll: BackPerformanceRecorder.Scroll) = automaticIncident(incident, opened, scroll)
+
+    private fun automaticIncident(incident: BackPerformanceRecorder.Incident, popupOpened: Long? = null,
+        scrollAtOpen: BackPerformanceRecorder.Scroll? = null) {
         if (directory == null || incident.epoch != backGeneration.get()) return
         try {
             executor.execute {
                 try {
                     if (incident.epoch != backGeneration.get()) return@execute
                     // Serialization and file locking happen ONLY on the existing bounded writer.
-                    val value = JSONObject().put("stage", "BACK_PERFORMANCE").put("code", "INCIDENT")
+                    val value = JSONObject().put("stage", if (popupOpened == null) "BACK_PERFORMANCE" else "POPUP_PERFORMANCE").put("code", "INCIDENT")
                         .put("time_ms", System.currentTimeMillis()).put("kind", incident.kind.name)
                         .put("end_reason", incident.reason.name).put("commit_attempted", incident.commitAttempted)
                         .put("route_changed", incident.routeChanged).put("elapsed_ns", incident.elapsed)
@@ -220,14 +226,40 @@ internal object RuntimeDiagnostics {
                         .put("worst_frames", JSONArray().apply { incident.worst.forEach { frame ->
                             put(JSONObject().put("total_ns", frame.duration).put("budget_ns", frame.budget)
                                 .put("refresh_hz", frame.refreshHz).put("stages_ns", JSONArray(frame.stages))
-                                .put("overlaps_start_unattributed", frame.overlapsStart).put("vsync_offset_ns", frame.vsyncOffset))
+                                .put("overlaps_start_unattributed", frame.overlapsStart).put("vsync_offset_ns", frame.vsyncOffset).apply {
+                                    if (popupOpened != null) {
+                                        put("source_window", frame.source?.name)
+                                        put("scroll", frame.scroll?.name)
+                                    }
+                                })
                         } })
+                    if (popupOpened != null) value.put("opened_ns", popupOpened)
+                        .put("sampling_start", "WINDOW_REGISTERED").put("scroll_at_open", scrollAtOpen?.name)
                     val row = value.toString()
                     lock.withLock {
                         if (incident.epoch != backGeneration.get()) return@withLock
                         val missing = dropped.getAndSet(0)
                         if (missing > 0) append(JSONObject().put("code", Code.DROPPED.name).put("count", missing).toString())
                         append(row)
+                    }
+                } catch (_: Throwable) { dropped.incrementAndGet() }
+            }
+        } catch (_: Throwable) { dropped.incrementAndGet() }
+    }
+
+    internal fun popupBoundary(boundary: PopupPerformanceCapture.Boundary) {
+        if (directory == null || boundary.epoch != backGeneration.get()) return
+        try {
+            executor.execute {
+                try {
+                    val row = JSONObject().put("stage", "POPUP_PERFORMANCE")
+                        .put("code", if (boundary.closed) "CLOSE" else "OPEN")
+                        .put("time_ms", System.currentTimeMillis()).put("kind", boundary.type.name)
+                        .put("opened_ns", boundary.opened).put("event_ns", boundary.at)
+                        .put("sampling_start", "WINDOW_REGISTERED").put("scroll_at_open", boundary.scrollAtOpen.name)
+                        .toString()
+                    lock.withLock {
+                        if (boundary.epoch == backGeneration.get()) append(row)
                     }
                 } catch (_: Throwable) { dropped.incrementAndGet() }
             }

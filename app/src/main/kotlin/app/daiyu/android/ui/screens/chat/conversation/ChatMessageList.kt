@@ -343,9 +343,12 @@ internal fun ChatMessageList(
     // its full-height row must be ordinary content before the reader re-enters it.
     LaunchedEffect(listState, turnKeys, assistantOwnerKey) {
         snapshotFlow {
+            val candidates = nestedStates.filter { (key, viewport) ->
+                !(key == assistantOwnerKey && followBottom) && viewport.bounded && !viewport.migrating
+            }
+            if (candidates.isEmpty()) return@snapshotFlow emptyList()
             val layout = listState.layoutInfo
-            if (layout.totalItemsCount == 0) emptyList() else nestedStates.mapNotNull { (key, viewport) ->
-                if (key == assistantOwnerKey && followBottom || !viewport.bounded || viewport.migrating) return@mapNotNull null
+            if (layout.totalItemsCount == 0) emptyList() else candidates.mapNotNull { (key, viewport) ->
                 val item = layout.visibleItemsInfo.firstOrNull { it.key == key }
                 if (item == null) key else {
                     val top = item.offset + viewport.viewportOffset

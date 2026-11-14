@@ -18,6 +18,12 @@ internal object ComposeSystemTrace {
         completed = BackPerformance.recorder::composition,
     )
 
+    private val popupSamples = BackCompositionSamples(
+        observed = PopupPerformance.capture.recorder::compositionObserved,
+        limited = PopupPerformance.capture.recorder::compositionLimited,
+        completed = PopupPerformance.capture.recorder::composition,
+    )
+
     fun install() {
         if (installed) return
         Composer.setTracer(SystemTracer)
@@ -29,18 +35,23 @@ internal object ComposeSystemTrace {
 
     private object SystemTracer : CompositionTracer {
         override fun isTraceInProgress(): Boolean = events.get()?.pending == true || systemEnabled() ||
-            (onMainThread() && samples.enabled(BackPerformance.recorder.compositionToken()))
+            (onMainThread() && (samples.enabled(BackPerformance.recorder.compositionToken()) ||
+                popupSamples.enabled(PopupPerformance.capture.recorder.compositionToken())))
 
         override fun traceEventStart(key: Int, dirty1: Int, dirty2: Int, info: String) {
             val stack = events.get() ?: CompositionTraceEvents().also(events::set)
             if (stack.start(systemEnabled())) Trace.beginSection(info.takeLast(BackPerformanceRecorder.MAX_COMPOSE_NAME))
             if (onMainThread()) BackPerformance.safely {
                 samples.start(BackPerformance.recorder.compositionToken(), info)
+                popupSamples.start(PopupPerformance.capture.recorder.compositionToken(), info)
             }
         }
 
         override fun traceEventEnd() {
-            if (onMainThread()) BackPerformance.safely { samples.end(BackPerformance.recorder.compositionToken()) }
+            if (onMainThread()) BackPerformance.safely {
+                samples.end(BackPerformance.recorder.compositionToken())
+                popupSamples.end(PopupPerformance.capture.recorder.compositionToken())
+            }
             if (events.get()?.end() == true) Trace.endSection()
         }
     }

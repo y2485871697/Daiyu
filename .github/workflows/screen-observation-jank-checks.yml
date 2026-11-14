@@ -74,7 +74,7 @@ jobs:
                           'test_chat_menu_scroll_isolation_contract.py', 'test_chat_menu_shadow_contract.py',
                           'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py')
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
-              patterns = ('test_automatic_back_performance_contract.py', 'test_chat_return_refresh_contract.py',
+              patterns = ('test_automatic_back_performance_contract.py', 'test_popup_performance_contract.py', 'test_chat_return_refresh_contract.py',
                           'test_jank_diagnostics_contract.py',
                           'test_page_frame_logging_contract.py',
                           'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py',
@@ -141,7 +141,7 @@ jobs:
             classes=(app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.ui.screens.chat.conversation.ChatMenuIsolationCompositionTest)
           fi
           if [[ $SCREEN_JANK_CHECK_SCOPE == page-back ]]; then
-            classes=(app.daiyu.android.diagnostics.RuntimeDiagnosticsTest app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.BackPerformanceRecorderTest app.daiyu.android.diagnostics.BackPerformanceRuntimeTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest app.daiyu.android.ChatGptSpeedSelectionTest app.daiyu.android.MessageActionRenderedRevisionTest)
+            classes=(app.daiyu.android.diagnostics.PopupPerformanceTest app.daiyu.android.diagnostics.RuntimeDiagnosticsTest app.daiyu.android.diagnostics.JankIncidentBufferTest app.daiyu.android.diagnostics.BackPerformanceRecorderTest app.daiyu.android.diagnostics.BackPerformanceRuntimeTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.diagnostics.FramePerformanceLogTest app.daiyu.android.ui.screens.chat.conversation.ReconnectPartsTest app.daiyu.android.ui.screens.chat.conversation.ReconnectIndexTest app.daiyu.android.ui.navigation.RootExitConfirmationTest app.daiyu.android.ui.navigation.PageBackMotionTest app.daiyu.android.ChatGptSpeedSelectionTest app.daiyu.android.MessageActionRenderedRevisionTest)
           fi
           if [[ $SCREEN_JANK_CHECK_SCOPE == interaction-readiness ]]; then
             classes=(app.daiyu.android.ui.components.DialogMotionSpecTest app.daiyu.android.ui.components.BottomSheetActionTest app.daiyu.android.ui.navigation.PageBackMotionTest)
@@ -173,7 +173,7 @@ jobs:
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'ui-jank':
               expected = {'JankIncidentBufferTest', 'FramePerformanceLogTest', 'DiagnosticLogStoreTest', 'ChatMenuIsolationCompositionTest'}
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
-              expected = {'RuntimeDiagnosticsTest', 'JankIncidentBufferTest', 'BackPerformanceRecorderTest', 'BackPerformanceRuntimeTest', 'DiagnosticLogStoreTest',
+              expected = {'PopupPerformanceTest', 'RuntimeDiagnosticsTest', 'JankIncidentBufferTest', 'BackPerformanceRecorderTest', 'BackPerformanceRuntimeTest', 'DiagnosticLogStoreTest',
                           'FramePerformanceLogTest', 'ReconnectPartsTest', 'ReconnectIndexTest',
                           'RootExitConfirmationTest', 'PageBackMotionTest', 'ChatGptSpeedSelectionTest', 'MessageActionRenderedRevisionTest'}
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'interaction-readiness':

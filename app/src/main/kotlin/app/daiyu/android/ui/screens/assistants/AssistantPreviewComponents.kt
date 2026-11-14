@@ -94,11 +94,12 @@ internal fun AssistantPreviewDialog(
     showCloseButton: Boolean = true,
     onOutsideDismiss: () -> Unit = onDismiss,
     footer: (@Composable RowScope.() -> Unit)? = null,
+    automaticPopup: app.daiyu.android.diagnostics.PopupPerformanceCapture.Type? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (!show) return
     val density = LocalDensity.current
-    PreviewDialog(onDismiss, bottomSheet = true, onOutsideDismiss = onOutsideDismiss) {
+    PreviewDialog(onDismiss, bottomSheet = true, onOutsideDismiss = onOutsideDismiss, automaticPopup = automaticPopup) {
         val sheetHeight = defaultBottomSheetHeight(maxHeight)
         CompositionLocalProvider(LocalDensity provides density) {
             AssistantPreviewSheet(title, onDismiss, onBack, showCloseButton, footer,

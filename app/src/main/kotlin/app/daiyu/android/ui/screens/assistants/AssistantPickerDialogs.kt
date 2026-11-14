@@ -86,6 +86,7 @@ fun AssistantPickerDialog(
     // Management is a view within the same glass sheet, not a stack of stock dialogs.
     AssistantPreviewDialog(show = actionProfile == null && deleteProfile == null,
         title = stringResource(R.string.assistant_picker_title), onDismiss = onDismiss,
+        automaticPopup = app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.ASSISTANT_PICKER,
         showCloseButton = false,
         onOutsideDismiss = onOutsideDismiss,
         footer = {

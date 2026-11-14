@@ -43,7 +43,9 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
 
     private fun show(dark: Boolean, bottomSheet: Boolean, pureBlack: Boolean = false,
         initiallyOpen: Boolean = true, backgroundOverride: Color? = null, scrim: Color? = null,
-        siblingWindows: Boolean = false, nestedInnerTheme: Boolean = false) {
+        siblingWindows: Boolean = false, nestedInnerTheme: Boolean = false,
+        automaticPopup: app.daiyu.android.diagnostics.PopupPerformanceCapture.Type? = null,
+        onSample: ((app.daiyu.android.diagnostics.BackPerformanceRecorder.Token?, Boolean) -> Unit)? = null) {
         mainThread {
             appearance.value = AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
@@ -69,7 +71,17 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
                         .testTag("modal-page")) {
                         if (outerOpen.value) PreviewDialog(
                             onDismiss = { dismissals++; outerOpen.value = false }, bottomSheet = outerBottomSheet.value, scrimColor = scrim,
+                            automaticPopup = automaticPopup,
                         ) {
+                            if (onSample != null) {
+                                val view = androidx.compose.ui.platform.LocalView.current
+                                androidx.compose.runtime.SideEffect {
+                                    val host = app.daiyu.android.diagnostics.WindowFramePerformance.forContext(activity)
+                                    val window = (view.parent as? DialogWindowProvider)?.window
+                                    val capture = app.daiyu.android.diagnostics.PopupPerformance.capture
+                                    onSample(capture.recorder.token(), host != null && window != null && capture.observing(host, window))
+                                }
+                            }
                             TextButton(onClick = { innerOpen.value = true },
                                 modifier = Modifier.align(Alignment.Center).testTag("modal-outer")) { Text("打开第二层") }
                             Box(Modifier.align(Alignment.CenterStart).size(40.dp).background(Color.White)
@@ -141,6 +153,48 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
         assertHostBars()
         assertEquals(1, dismissals)
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSelectorWindowsRegisterOrdinaryCaptureWithoutEnablingOtherDialogs() {
+        assertFalse(BuildConfig.JANK_DIAGNOSTICS)
+        val capture = app.daiyu.android.diagnostics.PopupPerformance.capture
+        for (type in app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.entries) {
+            var first: app.daiyu.android.diagnostics.BackPerformanceRecorder.Token? = null
+            var accepted = false
+            show(dark = false, bottomSheet = true, automaticPopup = type, onSample = { token, owns ->
+                if (first == null && token != null) { first = token; accepted = owns }
+            })
+            assertNotNull("The production Dialog registration must start a selector window", first)
+            assertTrue("The registration belongs to the actual Dialog, not just the main Window", accepted)
+            assertDialogWindowAndHostBars("modal-outer")
+            closeOuter()
+            assertNull("Disposing the selector closes its own capture", capture.recorder.token())
+        }
+        show(dark = false, bottomSheet = true)
+        assertNull("A default sheet must not opt into automatic selector capture", capture.recorder.token())
+        closeOuter()
+    }
+
+    fun testAnOldRegistrationCannotRemoveTheReplacementWindowListener() {
+        show(dark = false, bottomSheet = true,
+            automaticPopup = app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.MODEL_PICKER)
+        val root = node("modal-outer").fetchSemanticsNode().root as ViewRootForTest
+        mainThread {
+            val host = requireNotNull(app.daiyu.android.diagnostics.WindowFramePerformance.forContext(activity))
+            val window = (root.view.parent as DialogWindowProvider).window
+            val type = app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.MODEL_PICKER
+            val first = requireNotNull(host.registerWindow(window, "sheet", type))
+            val replacement = requireNotNull(host.registerWindow(window, "sheet", type))
+            host.unregisterWindow(window, first)
+            val sessionsField = host.javaClass.getDeclaredField("sessions").apply { isAccessible = true }
+            val sessions = sessionsField.get(host) as Map<*, *>
+            assertTrue("Old disposal must not detach the replacement Dialog listener", sessions.containsKey(window))
+            assertTrue(app.daiyu.android.diagnostics.PopupPerformance.capture.observing(host, window))
+            host.unregisterWindow(window, replacement)
+            assertFalse(sessions.containsKey(window))
+            assertFalse(app.daiyu.android.diagnostics.PopupPerformance.capture.observing(host, window))
+        }
+        closeOuter()
     }
 
     fun testCenteredAndBottomOverlaysRetainHostBarsAcrossThemesAndExactBackgrounds() {

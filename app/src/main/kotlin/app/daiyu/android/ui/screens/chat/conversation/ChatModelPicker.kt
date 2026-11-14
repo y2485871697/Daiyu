@@ -104,7 +104,8 @@ internal fun ChatModelPicker(
         !state.loading && search.isNotEmpty() -> "没有找到匹配的模型"
         else -> null
     }
-    ChatSelectionSheet(height = 500.dp, title = title, showCloseButton = false, onDismiss = onDismiss) {
+    ChatSelectionSheet(height = 500.dp, title = title, showCloseButton = false, onDismiss = onDismiss,
+        automaticPopup = app.daiyu.android.diagnostics.PopupPerformanceCapture.Type.MODEL_PICKER) {
         Box(modifier.fillMaxSize()) {
             Column(Modifier.testTag("chat-model-picker").semantics {
                 stateDescription = if (state.loading) "正在读取模型目录" else "模型目录读取完成"

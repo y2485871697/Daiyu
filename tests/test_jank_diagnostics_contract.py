@@ -35,18 +35,21 @@ class JankDiagnosticsContract(unittest.TestCase):
     def test_one_existing_window_collector_and_independent_diagnostic_gate(self):
         s=(APP/'diagnostics/WindowFramePerformance.kt').read_text()
         self.assertEqual(1,s.count('addOnFrameMetricsAvailableListener(session.listener, target)'))
-        self.assertIn('if (epoch == null && !diagnostic && !automaticBack)',s)
+        self.assertIn('if (epoch == null && !diagnostic && !automaticBack && !automaticPopup)',s)
         self.assertIn('if (diagnostic) incident.add(page, frame)',s)
         self.assertIn('if (!host.diagnostic && (!state.loaded || !state.enabled || state.unavailable))',s)
         self.assertIn('it.kind != "main"',s)
-        self.assertIn('if (kind != "main" && !diagnostic && log.captureEpoch() == null) return',s)
+        self.assertIn('if (kind != "main" && !diagnostic && log.captureEpoch() == null &&',s)
+        self.assertIn('!PopupPerformance.capture.observing(this, window)) return',s)
         self.assertIn('session.incident.flush()',s)
         self.assertIn('removeOnFrameMetricsAvailableListener',s)
 
     def test_interaction_observer_reads_only_discrete_phases(self):
         s=(APP/'diagnostics/WindowFramePerformance.kt').read_text().split('internal fun ObserveDiagnosticInteraction',1)[1]
         self.assertIn('snapshotFlow { current.value() }',s)
-        self.assertIn('BuildConfig.JANK_DIAGNOSTICS) return',s)
+        self.assertIn('val diagnostic = app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS',s)
+        self.assertIn('if (!diagnostic && kind != "chat-scroll") return',s)
+        self.assertLess(s.index('if (!diagnostic) return@collect'), s.index('JankDiagnostics.beginPhase'))
         self.assertIn('finally',s)
         self.assertIn('JankDiagnostics.endPhase',s)
         self.assertIn('JankDiagnostics.beginPhase',s)

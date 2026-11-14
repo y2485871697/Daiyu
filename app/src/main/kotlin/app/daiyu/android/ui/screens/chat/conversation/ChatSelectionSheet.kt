@@ -44,10 +44,11 @@ internal fun ChatSelectionSheet(
     footer: @Composable RowScope.() -> Unit = {},
     dismissEnabled: Boolean = true,
     titleTextAlign: TextAlign? = null,
+    automaticPopup: app.daiyu.android.diagnostics.PopupPerformanceCapture.Type? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
-    PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled) {
+    PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled, automaticPopup = automaticPopup) {
         val finishDismiss = rememberBottomSheetAction()
         val available = (maxHeight - if (height == null) 70.dp else 88.dp).coerceAtLeast(0.dp)
         val shape = RoundedCornerShape(25.dp)

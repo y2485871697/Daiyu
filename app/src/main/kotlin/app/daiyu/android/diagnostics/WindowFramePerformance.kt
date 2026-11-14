@@ -40,9 +40,12 @@ internal class WindowFramePerformance private constructor(
     private val diagnostic = app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS
     private val windows = LinkedHashMap<Window, String>()
     private val sessions = LinkedHashMap<Window, Session>() // Main thread owns listener membership.
+    private val popupLeases = LinkedHashMap<Window, PopupPerformanceCapture.Lease>()
     private var thread: HandlerThread? = null
     @Volatile private var handler: Handler? = null
     private var route = "startup"
+    @Volatile private var scrollPhase = BackPerformanceRecorder.Scroll.IDLE
+    internal fun scroll(phase: BackPerformanceRecorder.Scroll) { scrollPhase = phase }
     private val contexts = LinkedHashMap<Window, LinkedHashMap<Any, String>>()
     private fun path(window: Window) = (listOf(route) + (contexts[window]?.values?.toList() ?: emptyList())).joinToString("/")
     internal fun context(window: Window, token: Any, label: String?) {
@@ -81,7 +84,9 @@ internal class WindowFramePerformance private constructor(
         val listener = Window.OnFrameMetricsAvailableListener { _, metrics, drops ->
             val epoch = log.captureEpoch()
             val automaticBack = kind == "main" && BackPerformance.recorder.observing(this@WindowFramePerformance)
-            if (epoch == null && !diagnostic && !automaticBack) return@OnFrameMetricsAvailableListener
+            val popupWindow = if (kind == "main") null else window
+            val automaticPopup = PopupPerformance.capture.observing(this@WindowFramePerformance, popupWindow)
+            if (epoch == null && !diagnostic && !automaticBack && !automaticPopup) return@OnFrameMetricsAvailableListener
             try {
             val intended = metrics.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP)
             val vsync = intended.takeIf { it > 0 } ?: System.nanoTime()
@@ -98,6 +103,10 @@ internal class WindowFramePerformance private constructor(
                 metrics.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 1L)
             if (automaticBack) BackPerformance.safely {
                 BackPerformance.recorder.frame(vsync, frame.totalNs, budget, refreshHz.toFloat(), stages, host = this@WindowFramePerformance)
+            }
+            if (automaticPopup) BackPerformance.safely {
+                PopupPerformance.capture.frame(this@WindowFramePerformance, popupWindow, vsync,
+                    frame.totalNs, budget, refreshHz.toFloat(), stages, scrollPhase)
             }
             if (epoch != null || diagnostic) {
                 val page = timeline.pageAt(vsync)
@@ -131,7 +140,8 @@ internal class WindowFramePerformance private constructor(
 
     private fun attach(window: Window, kind: String) {
         if (sessions.containsKey(window) || !resumed || !enabled || closed) return
-        if (kind != "main" && !diagnostic && log.captureEpoch() == null) return
+        if (kind != "main" && !diagnostic && log.captureEpoch() == null &&
+            !PopupPerformance.capture.observing(this, window)) return
         val target = handler ?: HandlerThread("daiyu-frame-metrics").also { it.start(); thread = it }
             .let { Handler(it.looper).also { worker -> handler = worker } }
         val session = Session(window, kind)
@@ -173,8 +183,25 @@ internal class WindowFramePerformance private constructor(
             }
         }
     }
-    internal fun registerWindow(window: Window, kind: String) { windows[window] = kind; attach(window, kind) }
-    internal fun unregisterWindow(window: Window) { windows.remove(window); contexts.remove(window); detach(window) }
+    internal fun registerWindow(window: Window, kind: String,
+        automaticPopup: PopupPerformanceCapture.Type? = null): PopupPerformanceCapture.Lease? {
+        windows[window] = kind
+        val lease = if (automaticPopup != null && resumed && !closed) PopupPerformance.capture.start(
+            this, window, automaticPopup, scrollPhase,
+            schedule = { delay, work -> activity.window.decorView.postDelayed({ work() }, delay); Unit },
+            onEnded = { if (!diagnostic && log.captureEpoch() == null) detach(window) }) else null
+        if (lease != null) popupLeases[window] = lease
+        attach(window, kind)
+        return lease
+    }
+    internal fun unregisterWindow(window: Window, lease: PopupPerformanceCapture.Lease? = null) {
+        if (lease != null) {
+            PopupPerformance.capture.close(lease)
+            if (popupLeases[window] !== lease) return
+            popupLeases.remove(window)
+        } else if (popupLeases.containsKey(window)) return
+        windows.remove(window); contexts.remove(window); detach(window)
+    }
 
     companion object {
         private val hosts = WeakHashMap<Activity, WindowFramePerformance>()
@@ -212,10 +239,12 @@ internal class WindowFramePerformance private constructor(
                     }
                     Lifecycle.Event.ON_PAUSE -> {
                         BackPerformance.safely { BackPerformance.recorder.endHost(host, BackPerformanceRecorder.End.PAUSED) }
+                        BackPerformance.safely { PopupPerformance.capture.endHost(host, BackPerformanceRecorder.End.PAUSED) }
                         host.resumed = false; host.reconcile()
                     }
                     Lifecycle.Event.ON_DESTROY -> {
                         BackPerformance.safely { BackPerformance.recorder.endHost(host, BackPerformanceRecorder.End.DESTROYED) }
+                        BackPerformance.safely { PopupPerformance.capture.endHost(host, BackPerformanceRecorder.End.DESTROYED) }
                         host.closed = true; host.reconcile(); hosts.remove(activity)
                     }
                     else -> Unit
@@ -227,7 +256,8 @@ internal class WindowFramePerformance private constructor(
                 store.state.collect { state ->
                     host.enabled = true // Broad batches still use log.captureEpoch(), never this listener gate.
                     if (!host.diagnostic && (!state.loaded || !state.enabled || state.unavailable)) {
-                        host.sessions.filterValues { it.kind != "main" }.keys.toList().forEach(host::detach)
+                        host.sessions.filterValues { it.kind != "main" &&
+                            !PopupPerformance.capture.observing(host, it.window) }.keys.toList().forEach(host::detach)
                     }
                     host.reconcile()
                 }
@@ -265,14 +295,14 @@ internal fun ObservePageFrames(routeKey: Any) {
 }
 
 @Composable
-internal fun ObserveDialogFrames(kind: String) {
+internal fun ObserveDialogFrames(kind: String, automaticPopup: PopupPerformanceCapture.Type? = null) {
     val host = WindowFramePerformance.forContext(LocalContext.current)
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-    DisposableEffect(host, window, kind) {
+    DisposableEffect(host, window, kind, automaticPopup) {
         // Fixed call-site categories, never dialog title/text.
         val safeKind = kind.takeIf { it in setOf("dialog", "sheet", "alert", "confirmation", "text-input") } ?: "dialog"
-        if (window != null) host?.registerWindow(window, safeKind)
-        onDispose { if (window != null) host?.unregisterWindow(window) }
+        val lease = if (window != null) host?.registerWindow(window, safeKind, automaticPopup) else null
+        onDispose { if (window != null) host?.unregisterWindow(window, lease) }
     }
 }
 
@@ -309,7 +339,8 @@ private fun Context.findFrameActivity(): Activity? {
 /** Only discrete labels are observed; animated fractions/coordinates never enter composition. */
 @Composable
 internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String) {
-    if (!app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS) return
+    val diagnostic = app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS
+    if (!diagnostic && kind != "chat-scroll") return
     val context = LocalContext.current
     val host = WindowFramePerformance.forContext(context)
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: context.findFrameActivity()?.window
@@ -323,6 +354,12 @@ internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String)
             androidx.compose.runtime.snapshotFlow { current.value() }.collect { phase ->
                 val safePhase = phase.takeIf { it in setOf("idle", "entering", "open", "exiting", "retained",
                     "drag", "scroll", "predictive", "settle", "forward", "return", "closed", "moving") } ?: "idle"
+                if (safeKind == "chat-scroll") host?.scroll(when (safePhase) {
+                    "drag" -> BackPerformanceRecorder.Scroll.DRAG
+                    "scroll" -> BackPerformanceRecorder.Scroll.NON_DRAG_SCROLL
+                    else -> BackPerformanceRecorder.Scroll.IDLE
+                })
+                if (!diagnostic) return@collect
                 if (window != null) host?.context(window, token, "$safeKind=$safePhase")
                 activeSpan?.let { JankDiagnostics.endPhase(it, cookie) }
                 activeSpan = "daiyu.$safeKind=$safePhase"
@@ -333,8 +370,9 @@ internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String)
                 })
             }
         } finally {
+            if (safeKind == "chat-scroll") host?.scroll(BackPerformanceRecorder.Scroll.IDLE)
             activeSpan?.let { JankDiagnostics.endPhase(it, cookie) }
-            if (window != null) host?.context(window, token, null)
+            if (diagnostic && window != null) host?.context(window, token, null)
         }
     }
 }

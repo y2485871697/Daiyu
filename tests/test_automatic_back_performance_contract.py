@@ -32,7 +32,7 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
         self.assertIn('private var enabled = true', window)
         self.assertIn('host.enabled = true', window)
         self.assertIn('kind == "main" && BackPerformance.recorder.observing(this@WindowFramePerformance)', window)
-        self.assertIn('if (epoch == null && !diagnostic && !automaticBack) return', window)
+        self.assertIn('if (epoch == null && !diagnostic && !automaticBack && !automaticPopup) return', window)
         self.assertIn('if (epoch != null) batch.add(epoch, page, frame)', window)
         self.assertIn('if (diagnostic) incident.add(page, frame)', window)
         self.assertIn('host::detach', window)

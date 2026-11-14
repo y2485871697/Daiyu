@@ -418,12 +418,19 @@ class PageBackGestureContractTest(unittest.TestCase):
             'private object SystemTracer : CompositionTracer',
             'Build.VERSION.SDK_INT >= 29 && Trace.isEnabled()',
             'Trace.beginSection(info.takeLast(BackPerformanceRecorder.MAX_COMPOSE_NAME))',
-            'onMainThread() && samples.enabled(BackPerformance.recorder.compositionToken())',
             'samples.start(BackPerformance.recorder.compositionToken(), info)',
             'samples.end(BackPerformance.recorder.compositionToken())',
+            'popupSamples.start(PopupPerformance.capture.recorder.compositionToken(), info)',
+            'popupSamples.end(PopupPerformance.capture.recorder.compositionToken())',
             'Trace.endSection()',
         ):
             self.assertIn(expected, source)
+        progress = source.split('override fun isTraceInProgress()', 1)[1].split('override fun traceEventStart', 1)[0]
+        self.assertIn(
+            '(onMainThread()&&(samples.enabled(BackPerformance.recorder.compositionToken())||'
+            'popupSamples.enabled(PopupPerformance.capture.recorder.compositionToken())))',
+            ''.join(progress.split()),
+        )
         self.assertIn('ComposeSystemTrace.install()', application)
         self.assertNotIn('JANK_DIAGNOSTICS', source + application.split('class ChatApplication', 1)[1].split('class ChatController', 1)[0])
         self.assertNotIn('runtime-tracing', source)

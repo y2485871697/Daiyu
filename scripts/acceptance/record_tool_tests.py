@@ -382,6 +382,17 @@ CHILD_TASK_CARD_MODULES = (
 )
 
 
+CHILD_STOP_PLATFORM_CLASSES = (
+    "app.daiyu.android.ChildStopChoiceActivityTest",
+    "app.daiyu.android.ControllerChildRetentionTest",
+)
+CHILD_STOP_MODULES = (
+    "test_child_stop_hot_configuration_contract", "test_run_controls_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 POPUP_SCROLL_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest')
 POPUP_SCROLL_MODULES = ('test_streaming_occlusion_contract', 'test_streaming_follow_contract', 'test_chat_resume_scroll_contract', 'test_preview_dialog_status_bar_contract', 'test_assistant_picker_frame_contract', 'test_chat_menu_scroll_isolation_contract', 'test_popup_performance_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
 
@@ -697,6 +708,9 @@ QUESTION_CARD_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(CHILD_STOP_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *CHILD_STOP_MODULES, "-v"], "child-stop-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest"):
         return [python, "-B", "-m", "unittest", "test_chat_timeline_contract",

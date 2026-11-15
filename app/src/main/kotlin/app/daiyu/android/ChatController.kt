@@ -31,6 +31,7 @@ import app.daiyu.android.integration.tools.*
 import app.daiyu.android.tasksurface.*
 import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.delegation.ChildTaskRecord
+import app.daiyu.android.domain.delegation.ChildTaskStatus
 import app.daiyu.android.domain.delegation.ChildTaskCommand
 import app.daiyu.android.domain.delegation.ChildTaskCommandReceipt
 import app.daiyu.android.domain.delegation.ChildModelBatch
@@ -1657,7 +1658,8 @@ class ChatController internal constructor(private val application:Application,
     internal class ChildPauseCapture(val tasks: RunChildTasks,
         val group: app.daiyu.android.domain.delegation.ChildTaskPauseGroup)
     internal class ChildStopChoice internal constructor(val owner: Message, internal val capture: ChildPauseCapture?,
-        internal val browser: List<Pair<ControllerChildBrowserPlan, Long>> = emptyList())
+        internal val browser: List<Pair<ControllerChildBrowserPlan, Long>> = emptyList(),
+        val hasRunningChildren: Boolean)
     private val childStopChoices = java.util.ArrayDeque<ChildStopChoice>()
     @Synchronized internal fun childStopChoice(): ChildStopChoice? = childStopChoices.peekFirst()
     internal fun finishChildStopChoice(choice: ChildStopChoice,
@@ -6085,15 +6087,26 @@ class ChatController internal constructor(private val application:Application,
         }
         return accepted
     }
+    private fun childNeedsStopChoice(child: app.daiyu.android.domain.delegation.RetainedChildTask): Boolean =
+        !child.settled && !child.stopRequested && !child.journalUnconfirmed &&
+            child.record.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING) &&
+            child.pauseState in setOf(app.daiyu.android.domain.delegation.ChildTaskPauseState.ACTIVE,
+                app.daiyu.android.domain.delegation.ChildTaskPauseState.PENDING)
+
     internal fun stopMain(owner: Message): Boolean {
         val lifetime = synchronized(this) {
             resources?.takeIf { ownedRunner(owner) === it.runner }?.also { lifetime ->
+                val tasks = backgroundRuns[lifetime.initial.runId]
+                tasks?.close()
+                val runningChildren = tasks?.snapshots()?.any(::childNeedsStopChoice) == true
                 val capture = capturePausedChildren(lifetime)
-                capture?.tasks?.close()
-                val browser = browserChildren.filter { it.parent.identity.runId == owner.runId }
+                val browser = browserChildren.filter { it.parent.identity.runId == owner.runId &&
+                    it.snapshot?.let(::childNeedsStopChoice) == true }
                     .mapNotNull { plan -> plan.capturePause()?.let { plan to it } }
-                if ((capture != null && capture.tasks.hasCaptured(capture.group)) || browser.isNotEmpty())
-                    childStopChoices.addLast(ChildStopChoice(lifetime.initial, capture, browser))
+                val choice = ChildStopChoice(lifetime.initial, capture, browser,
+                    hasRunningChildren = (runningChildren && capture != null && capture.tasks.hasCaptured(capture.group)) || browser.isNotEmpty())
+                if (choice.hasRunningChildren) childStopChoices.addLast(choice)
+                else capture?.tasks?.finishGroup(capture.group, false)
                 fenceRun(lifetime)
             }
         } ?: return false

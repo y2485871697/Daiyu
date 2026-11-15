@@ -17,6 +17,17 @@ producer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(producer)
 
 
+class ChildStopReceiptScopeTest(unittest.TestCase):
+    def test_stop_scope_is_explicit_and_preserves_single_source_gate(self):
+        classes = "app.daiyu.android.ChildStopChoiceActivityTest,app.daiyu.android.ControllerChildRetentionTest"
+        command, scope = producer.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=classes))
+        self.assertEqual("child-stop-targeted", scope)
+        self.assertNotIn("discover", command)
+        self.assertIn("test_run_controls_contract", command)
+        self.assertIn("test_child_stop_hot_configuration_contract", command)
+        self.assertEqual(1, command.count("test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope"))
+
+
 PROVIDER_SAVE_CLASSES = (
     "app.daiyu.android.ProviderSavePositionActivityTest",
     "app.daiyu.android.ControllerProviderSaveNoticeTest",

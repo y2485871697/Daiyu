@@ -96,10 +96,11 @@ class RunControlsContractTest(unittest.TestCase):
         activity = (APP / 'MainActivity.kt').read_text()
         self.assertIn('controller.stopMain(owner)', activity)
         self.assertIn('onDismiss = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE) }', activity)
-        self.assertIn('OptionSelectionSheet(', activity)
-        self.assertIn('main-stop-continue-children', activity)
-        self.assertIn('main-stop-keep-children', activity)
-        self.assertIn('main-stop-cancel-children', activity)
+        self.assertIn('ChildStopChoiceSheet(', activity)
+        sheet = (APP / 'ui/components/ChildStopChoiceSheet.kt').read_text()
+        self.assertIn('main-stop-continue-children', sheet)
+        self.assertIn('main-stop-keep-children', sheet)
+        self.assertIn('main-stop-cancel-children', sheet)
 
     def test_child_stop_choice_has_observable_projection_before_refresh_early_returns(self):
         activity = (APP / 'MainActivity.kt').read_text()

@@ -5,13 +5,38 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app/src/main/kotlin/app/daiyu/android"
 DOMAIN = ROOT / "core-domain/src/main/kotlin/app/daiyu/android/domain/delegation"
 class ChildStopHotConfigurationContractTest(unittest.TestCase):
-    def test_three_choices_reuse_model_sheet_and_dismiss_preserves_pause(self):
+    def test_three_action_menu_matches_preset_sheet_and_dismiss_preserves_pause(self):
         text = (APP / "MainActivity.kt").read_text().split("@Composable private fun ChildStopChoiceSurface()",1)[1].split("@Composable private fun UnknownBranchSurface()",1)[0]
-        self.assertIn("OptionSelectionSheet(",text)
-        self.assertNotIn("DaiyuAlertDialog(",text)
-        self.assertLess(text.index("继续子代理"), text.index("暂停子代理"))
-        self.assertLess(text.index("暂停子代理"), text.index("停止子代理"))
-        self.assertIn("onDismiss = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE) }",text)
+        self.assertIn("ChildStopChoiceSheet(", text)
+        self.assertNotIn("OptionSelectionItem(", text)
+        self.assertNotIn("DaiyuAlertDialog(", text)
+        self.assertIn("!choice.hasRunningChildren", text)
+        self.assertIn("onDismiss = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE) }", text)
+        sheet = (APP / "ui/components/ChildStopChoiceSheet.kt").read_text()
+        for fragment in ('ModalBottomSheet(', 'RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)',
+                         'BottomSheetDefaults.DragHandle()', 'heightIn(min = 64.dp)', 'Role.Button', '"子任务处理"'):
+            self.assertIn(fragment, sheet)
+        self.assertLess(sheet.index('ChildStopActionRow("继续"'), sheet.index('ChildStopActionRow("暂停"'))
+        self.assertLess(sheet.index('ChildStopActionRow("暂停"'), sheet.index('ChildStopActionRow("停止"'))
+        self.assertNotIn('selected =', sheet)
+
+    def test_stop_menu_freezes_current_run_work_before_pause_capture(self):
+        controller = (APP / "ChatController.kt").read_text()
+        predicate = controller.split('private fun childNeedsStopChoice(', 1)[1].split('internal fun stopMain(', 1)[0]
+        for fragment in ('!child.settled', '!child.stopRequested', '!child.journalUnconfirmed',
+                         'ChildTaskStatus.QUEUED', 'ChildTaskStatus.RUNNING', 'ChildTaskPauseState.ACTIVE', 'ChildTaskPauseState.PENDING'):
+            self.assertIn(fragment, predicate)
+        self.assertNotIn('ChildTaskPauseState.PAUSED', predicate)
+        stop = controller.split('internal fun stopMain(', 1)[1].split('// True acknowledges', 1)[0]
+        self.assertLess(stop.index('snapshots()?.any(::childNeedsStopChoice)'), stop.index('capturePausedChildren(lifetime)'))
+        self.assertIn('backgroundRuns[lifetime.initial.runId]', stop)
+        self.assertLess(stop.index('tasks?.close()'), stop.index('snapshots()?.any(::childNeedsStopChoice)'))
+        self.assertIn('it.parent.identity.runId == owner.runId', stop)
+        self.assertIn('it.snapshot?.let(::childNeedsStopChoice) == true', stop)
+        self.assertIn('capture.tasks.hasCaptured(capture.group)', stop)
+        self.assertIn('if (choice.hasRunningChildren) childStopChoices.addLast(choice)', stop)
+        self.assertIn('else capture?.tasks?.finishGroup(capture.group, false)', stop)
+
     def test_stop_choice_never_relooks_up_active_group(self):
         text = (APP / "ChatController.kt").read_text().split("internal fun finishChildStopChoice(",1)[1].split("private fun capturePausedChildren",1)[0]
         self.assertIn("childStopChoices.remove(choice)",text)

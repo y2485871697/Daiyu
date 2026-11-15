@@ -332,6 +332,27 @@ class RootlessCommitScopeTest(unittest.TestCase):
                 os.chdir(old)
 
 
+class ChildStopScopeTest(unittest.TestCase):
+    def test_exact_stop_and_retention_classes_keep_targeted_contracts(self):
+        classes = ("app.daiyu.android.ChildStopChoiceActivityTest", "app.daiyu.android.ControllerChildRetentionTest")
+        self.assertEqual(classes, recorder.CHILD_STOP_PLATFORM_CLASSES)
+        modules = ("test_child_stop_hot_configuration_contract", "test_run_controls_contract",
+                   "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+                   "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope")
+        self.assertEqual(modules, recorder.CHILD_STOP_MODULES)
+        for ordered in (classes, tuple(reversed(classes))):
+            for python in ("python", "python3"):
+                command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(ordered)))
+                self.assertEqual("child-stop-targeted", scope)
+                self.assertEqual([python, "-B", "-m", "unittest", *modules, "-v"], command)
+        raw = ",".join(classes)
+        for value in (classes[0], raw + ",unknown", raw + "," + classes[0], raw + ",", " " + raw,
+                      raw.replace("ChildStopChoiceActivityTest", "OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value))[1])
+        for mode in ("compile", "candidate", "daily", "release", "checks"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+
 class ChildTaskCardScopeTest(unittest.TestCase):
     CLASSES = tuple("app.daiyu.android.ui.screens.chat.conversation." + name for name in (
         "ChildTaskListTest", "ToolOperationCardTest", "ToolCardReadabilityTest", "SubAgentStatusDialogTest",

@@ -54,6 +54,7 @@ jobs:
           from pathlib import Path
           records = []
           for pattern in ('test_delegation_batch_and_send_contract.py', 'test_child_stop_hot_configuration_contract.py',
+                          'test_run_controls_contract.py',
                           'test_subagent_resume_display_contract.py', 'test_subagent_collaboration_contract.py',
                           'test_sidebar_task_entry_contract.py', 'test_child_task_card_contract.py',
                           'test_chat_return_refresh_contract.py', 'test_record_tool_tests_scope.py',

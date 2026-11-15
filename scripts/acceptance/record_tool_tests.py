@@ -413,6 +413,22 @@ VOICE_REFRESH_MODULES = (
 )
 
 
+PROVIDER_SAVE_PLATFORM_CLASSES = (
+    "app.daiyu.android.ProviderSavePositionActivityTest",
+    "app.daiyu.android.ControllerProviderSaveNoticeTest",
+    "app.daiyu.android.ControllerModelSettingsTest",
+    "app.daiyu.android.ui.screens.settings.ProviderInlineEditorsTest",
+    "app.daiyu.android.ui.screens.settings.ProviderSaveValidationTest",
+    "app.daiyu.android.RequestBodyFieldsActivityTest",
+)
+PROVIDER_SAVE_MODULES = (
+    "test_provider_save_position_contract", "test_provider_save_validation_contract",
+    "test_provider_search_save_contract", "test_provider_directory_selection_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 PROVIDER_CATALOG_PLATFORM_CLASSES = (
     "app.daiyu.android.ui.screens.settings.ProviderCatalogSettingsScreenTest",
     "app.daiyu.android.LocalCatalogModelsActivityTest",
@@ -465,6 +481,9 @@ IME_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PROVIDER_SAVE_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *PROVIDER_SAVE_MODULES, "-v"], "provider-save-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(IME_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *IME_MODULES, "-v"], "ime-targeted"

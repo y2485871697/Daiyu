@@ -140,10 +140,23 @@ internal class PetOverlayHost(
             else {
                 val next = placement(this)
                 val changed = params.x != next.x || params.y != next.y
-                if (changed) { update(); false }
-                else { alpha = 1f; true }
+                if (changed) { alpha = 0f; update(); false }
+                else if (!windowOriginMatches(this, next)) {
+                    alpha = 0f
+                    postInvalidateOnAnimation()
+                    false
+                } else { alpha = 1f; true }
             }
         }
+    }
+    private fun windowOriginMatches(current: View, target: PetPlacement): Boolean {
+        val screen = IntArray(2)
+        val local = IntArray(2)
+        current.getLocationOnScreen(screen)
+        current.getLocationInWindow(local)
+        // LayoutParams are requested coordinates; WindowManager applies them on a later traversal.
+        // Subtract in-window translation so an active drag does not block the draw gate.
+        return screen[0] - local[0] == target.x && screen[1] - local[1] == target.y
     }
     private fun placement(current: View): PetPlacement {
         val metrics = context.resources.displayMetrics

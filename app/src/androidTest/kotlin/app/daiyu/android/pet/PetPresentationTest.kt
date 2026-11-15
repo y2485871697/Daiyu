@@ -62,26 +62,50 @@ class PetPresentationTest : WiredActivityTestCase() {
             if (frame.getChildAt(0).alpha == 0f || !sprite().isShown || sprite().isLayoutRequested || sprite().width == 0) null else bounds()
         }
         // Application overlays deliberately never take keyboard/window focus.
-        val accepted = java.util.concurrent.atomic.AtomicReference<Rect?>()
-        var previous: Rect? = null
-        val listener = android.view.ViewTreeObserver.OnDrawListener {
-            if (frame.alpha > 0f && frame.isAttachedToWindow && !frame.isLayoutRequested &&
-                frame.getChildAt(0)?.alpha == 1f && sprite().width > 0) {
-                val next = bounds()
-                if (next == previous) accepted.compareAndSet(null, next)
-                previous = next
+        data class Frame(val sprite: Rect, val rootX: Int, val rootY: Int,
+            val width: Int, val height: Int, val spriteLeft: Int, val spriteTop: Int)
+        val accepted = java.util.concurrent.atomic.AtomicReference<Frame?>()
+        var previous: Frame? = null
+        var frameNanos = Long.MIN_VALUE
+        var sampledNanos = Long.MIN_VALUE
+        var active = true
+        lateinit var choreographer: android.view.Choreographer
+        val callback = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(time: Long) {
+                if (!active) return
+                frameNanos = time
+                frame.postInvalidateOnAnimation()
+                choreographer.postFrameCallback(this)
             }
-            if (accepted.get() == null) frame.postInvalidateOnAnimation()
+        }
+        val listener = android.view.ViewTreeObserver.OnDrawListener {
+            if (frameNanos != Long.MIN_VALUE && sampledNanos != frameNanos) {
+                sampledNanos = frameNanos
+                val panel = frame.getChildAt(0)
+                val ready = frame.alpha == 1f && frame.isAttachedToWindow && !frame.isLayoutRequested &&
+                    panel?.alpha == 1f && !panel.isLayoutRequested && !sprite().isLayoutRequested && sprite().width > 0
+                if (ready) {
+                    val origin = IntArray(2); frame.getLocationOnScreen(origin)
+                    val next = Frame(bounds(), origin[0], origin[1], frame.width, frame.height, sprite().left, sprite().top)
+                    if (next == previous) accepted.compareAndSet(null, next)
+                    previous = next
+                } else previous = null
+            }
         }
         instrumentation.runOnMainSync {
+            choreographer = android.view.Choreographer.getInstance()
             frame.viewTreeObserver.addOnDrawListener(listener)
-            frame.postInvalidateOnAnimation()
+            choreographer.postFrameCallback(callback)
         }
         try {
             ui.waitUntil(5_000) { accepted.get() != null }
-            return checkNotNull(accepted.get())
+            return checkNotNull(accepted.get()).sprite
         } finally {
-            instrumentation.runOnMainSync { frame.viewTreeObserver.removeOnDrawListener(listener) }
+            instrumentation.runOnMainSync {
+                active = false
+                choreographer.removeFrameCallback(callback)
+                frame.viewTreeObserver.removeOnDrawListener(listener)
+            }
         }
     }
     override fun cleanupFixture() {
@@ -209,10 +233,12 @@ class PetPresentationTest : WiredActivityTestCase() {
             root = frame; recordFrames(frame)
         }
         val expected = stable()
-        speak("主人，米饭已经吃完啦，我会继续陪着你。")
-        assertEquals(expected, stable())
-        mainThread { checkNotNull(controller).dismissSpeech() }
-        assertEquals(expected, stable())
+        repeat(3) {
+            speak("主人，米饭已经吃完啦，我会继续陪着你。")
+            assertEquals(expected, stable())
+            mainThread { checkNotNull(controller).dismissSpeech() }
+            assertEquals(expected, stable())
+        }
         mainThread {
             assertTrue(visibleFrames.isNotEmpty())
             assertTrue("Overlay visible frames moved: $visibleFrames", visibleFrames.all { it == expected })

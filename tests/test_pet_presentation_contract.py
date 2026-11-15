@@ -29,7 +29,7 @@ class PetPresentationContractTest(unittest.TestCase):
         overlay = (PET / 'PetOverlayHost.kt').read_text()
         self.assertIn('alpha = 0f', overlay)
         self.assertIn('addOnPreDrawListener', overlay)
-        self.assertIn('if (changed) { update(); false }', overlay)
+        self.assertIn('if (changed) { alpha = 0f; update(); false }', overlay)
         self.assertIn('FLAG_LAYOUT_NO_LIMITS', overlay)
         self.assertIn('FLAG_LAYOUT_IN_SCREEN', overlay)
         self.assertNotIn('constrainPetOverlayPosition', overlay)
@@ -53,3 +53,19 @@ class PetPresentationContractTest(unittest.TestCase):
         self.assertIn('core-domain/build/test-results/test/', workflow)
         self.assertNotIn('assemble', workflow)
         self.assertNotIn('discover', workflow)
+
+    def test_overlay_waits_for_applied_window_origin_not_requested_params(self):
+        text = (PET / 'PetOverlayHost.kt').read_text()
+        gate = text.split('viewTreeObserver.addOnPreDrawListener', 1)[1].split('private fun windowOriginMatches', 1)[0]
+        self.assertIn('else if (!windowOriginMatches(this, next))', gate)
+        self.assertIn('postInvalidateOnAnimation()', gate)
+        self.assertLess(gate.index('windowOriginMatches(this, next)'), gate.index('alpha = 1f'))
+        applied = text.split('private fun windowOriginMatches', 1)[1].split('private fun placement', 1)[0]
+        self.assertIn('current.getLocationOnScreen(screen)', applied)
+        self.assertIn('current.getLocationInWindow(local)', applied)
+        self.assertIn('screen[0] - local[0] == target.x', applied)
+        self.assertIn('screen[1] - local[1] == target.y', applied)
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/pet/PetPresentationTest.kt').read_text()
+        overlay = tests.split('fun testRealOverlayFirstDrawSpeechGrowthAndDismissalPreserveAnchor', 1)[1]
+        self.assertIn('repeat(3)', overlay)
+        self.assertIn('visibleFrames.all { it == expected }', overlay)

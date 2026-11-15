@@ -19,12 +19,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.ui.haptics.clickable
+import app.daiyu.android.ui.screens.chat.conversation.ChatAnchoredMenu
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 
@@ -57,11 +59,13 @@ internal fun ConversationDrawerControls(
                 DrawerControlChoice("已完成", completed, "completed", checkbox = true) { onCompletedChange(!completed) }
                 DrawerControlDivider()
                 val colors = conversationPanePreviewPalette()
-                Text("重置", color = colors.danger, fontSize = 13.sp, lineHeight = 19.sp,
+                Text("重置", color = colors.danger, fontSize = 13.sp, lineHeight = 20.sp,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().testTag("drawer-filter-reset")
+                        .padding(horizontal = 2.dp, vertical = 2.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onReset)
-                        .padding(horizontal = 12.dp, vertical = 10.dp))
+                        .heightIn(min = 40.dp).padding(horizontal = 12.dp, vertical = 10.dp))
             }
         }
         DrawerControlButton("排序", DrawerControlIcons.Sort, "sort", sortByLastOutput || reverse,
@@ -108,9 +112,9 @@ private fun DrawerControlsMenu(
     tag: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    DaiyuDropdownMenu(expanded, onDismiss, modifier = Modifier.testTag("drawer-$tag-menu"),
-        preferAbove = true, offset = DpOffset(0.dp, 6.dp), minWidth = 168.dp, maxWidth = 220.dp) {
-        content()
+    ChatAnchoredMenu(expanded, onDismiss, preferAbove = true,
+        offset = DpOffset(0.dp, 6.dp), minWidth = 0.dp) {
+        Column(Modifier.width(IntrinsicSize.Max).testTag("drawer-$tag-menu"), content = content)
     }
 }
 
@@ -125,13 +129,15 @@ private fun DrawerControlChoice(
     val colors = usagePalette()
     Row(Modifier.fillMaxWidth().testTag("drawer-choice-$tag")
         .semantics { this.selected = selected; role = if (checkbox) Role.Checkbox else Role.RadioButton }
+        .padding(horizontal = 2.dp, vertical = 2.dp)
         .clip(RoundedCornerShape(10.dp))
         .background(if (selected) colors.selectionContainer else Color.Transparent)
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
         .heightIn(min = 40.dp).padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = if (selected) colors.selectionContent else colors.text,
-            fontSize = 13.sp, lineHeight = 20.sp)
+            fontSize = 13.sp, lineHeight = 20.sp,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().testTag("drawer-label-$tag"))
     }
 }
 

@@ -1,12 +1,40 @@
 package app.daiyu.android.storage
 
 import android.database.sqlite.SQLiteDatabase
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
 import app.daiyu.android.*
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.PrivateBlobs
 import app.daiyu.android.domain.*
 import app.daiyu.android.ui.RetainedConversationData
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.ConversationDrawerControls
+import app.daiyu.android.ui.components.usagePalette
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import app.daiyu.android.ui.components.ConversationDrawerSection
 import app.daiyu.android.ui.components.groupForDrawer
 import java.security.MessageDigest
@@ -292,6 +320,94 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         node("drawer-choice-reverse").assertIsSelected()
     }
 
+    fun testMenusFitTheirLabelsCenterTextAndSeparateHighlightsInBothThemesAndFontScales() {
+        fun distance(a: Color, b: Color) = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.4f)) {
+            var density = 1f
+            var selection = Color.Transparent
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        val base = LocalDensity.current
+                        CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale)) {
+                            key(dark, fontScale) {
+                                density = LocalDensity.current.density
+                                selection = usagePalette().selectionContainer
+                                val running = remember { mutableStateOf(false) }
+                                val completed = remember { mutableStateOf(false) }
+                                val lastOutput = remember { mutableStateOf(false) }
+                                val reverse = remember { mutableStateOf(false) }
+                                ChatMenuLayer {
+                                    Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF18151E) else Color.White)
+                                        .padding(start = 16.dp, bottom = 64.dp),
+                                        contentAlignment = Alignment.BottomStart) {
+                                        ConversationDrawerControls(running.value, completed.value, lastOutput.value, reverse.value,
+                                            { running.value = it }, { completed.value = it },
+                                            { running.value = false; completed.value = false },
+                                            { lastOutput.value = it }, { reverse.value = it }, { true })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            fun assertCompactCenteredMenu(menuTag: String, labelTags: List<String>): Float {
+                val bounds = node(menuTag).fetchSemanticsNode().boundsInRoot
+                var widestLabel = 0f
+                for (tag in labelTags) {
+                    val text = ui.onNodeWithTag(tag, useUnmergedTree = true)
+                    val results = mutableListOf<TextLayoutResult>()
+                    text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+                    val layout = results.single()
+                    val textBounds = text.fetchSemanticsNode().boundsInRoot
+                    val glyphCenter = textBounds.center.x +
+                        (layout.getLineLeft(0) + layout.getLineRight(0) - layout.size.width) / 2f
+                    assertEquals("centered $tag, dark=$dark font=$fontScale", bounds.center.x, glyphCenter, density)
+                    widestLabel = maxOf(widestLabel, layout.multiParagraph.intrinsics.maxIntrinsicWidth)
+                }
+                assertEquals("natural label width plus symmetric padding, dark=$dark font=$fontScale",
+                    widestLabel + 28f * density, bounds.width, 2f * density)
+                return bounds.width
+            }
+            node("drawer-filter-button").performClick()
+            val filterLabels = listOf("drawer-label-running", "drawer-label-completed", "drawer-filter-reset")
+            val filterWidth = assertCompactCenteredMenu("drawer-filter-menu", filterLabels)
+            node("drawer-choice-running").performClick()
+            node("drawer-choice-completed").performClick()
+            node("drawer-choice-running").assertIsSelected()
+            node("drawer-choice-completed").assertIsSelected()
+            assertEquals(filterWidth, assertCompactCenteredMenu("drawer-filter-menu", filterLabels), density)
+            val menu = node("drawer-filter-menu")
+            val menuBounds = menu.fetchSemanticsNode().boundsInRoot
+            val first = node("drawer-choice-running").fetchSemanticsNode().boundsInRoot
+            val second = node("drawer-choice-completed").fetchSemanticsNode().boundsInRoot
+            val pixels = menu.captureToImage().toPixelMap()
+            fun pixel(x: Float, y: Float) = pixels[
+                (x - menuBounds.left).roundToInt().coerceIn(0, pixels.width - 1),
+                (y - menuBounds.top).roundToInt().coerceIn(0, pixels.height - 1)]
+            val fillX = menuBounds.left + 5f * density
+            assertTrue("first independent highlight", distance(pixel(fillX, first.center.y), selection) < .012f)
+            assertTrue("second independent highlight", distance(pixel(fillX, second.center.y), selection) < .012f)
+            assertTrue("visible strip between selections",
+                distance(pixel(fillX, (first.bottom + second.top) / 2f), selection) > .018f)
+            assertTrue("horizontal inset remains menu background",
+                distance(pixel(menuBounds.left + density, first.center.y), selection) > .018f)
+            assertTrue("each highlight keeps its own round corner",
+                distance(pixel(menuBounds.left + 3f * density, first.top + 3f * density), selection) > .018f)
+            androidx.test.espresso.Espresso.pressBack()
+            node("drawer-sort-button").performClick()
+            val sortLabels = listOf("date", "last-output", "forward", "reverse").map { "drawer-label-$it" }
+            val sortWidth = assertCompactCenteredMenu("drawer-sort-menu", sortLabels)
+            assertTrue("longer labels expand the menu", sortWidth > filterWidth + 8f * density)
+            node("drawer-choice-last-output").performClick()
+            node("drawer-choice-reverse").performClick()
+            assertCompactCenteredMenu("drawer-sort-menu", sortLabels)
+            androidx.test.espresso.Espresso.pressBack()
+        }
+    }
+
     private fun awaitPaneRows(ids: List<ConversationId>) {
         awaitControl("sidebar captured seeded rows and message metadata") {
             val field = MainActivity::class.java.getDeclaredField("paneState\$delegate").apply { isAccessible = true }
@@ -358,6 +474,78 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         androidx.test.espresso.Espresso.pressBack()
         assertTrue(screenBounds("drawer-conversation:${newer.id.value}").top < screenBounds("drawer-conversation:${older.id.value}").top)
         assertEquals(oldMillis(), db.conversations().single { it.id == older.id }.sidebarDateMillis)
+    }
+
+    fun testDateHeadingsRespectStatusFiltersAndSortWhileRowsRemainVisible() {
+        val db = fixture.database
+        fun completed(pinned: Boolean = false): Conversation {
+            val owner = db.create("default")
+            val (user, reply) = pair(owner.id)
+            db.send(user, reply)
+            db.save(reply.copy(status = RunStatus.COMPLETED))
+            if (pinned) db.organize(owner.id, "", true)
+            return owner
+        }
+        val pinned = completed(pinned = true)
+        val done = completed()
+        val running = completed()
+        val groups = retained().summaries(null).groupForDrawer(zone)
+        val pinnedTag = "drawer-heading:" + groups.single { it.section == ConversationDrawerSection.Pinned }.key
+        val dateTags = groups.filter { it.section != ConversationDrawerSection.Pinned }.map { "drawer-heading:${it.key}" }
+        val dateHeading = SemanticsMatcher("non-pinned drawer heading") {
+            it.config.getOrNull(SemanticsProperties.TestTag)?.let { tag ->
+                tag.startsWith("drawer-heading:") && tag != pinnedTag
+            } == true
+        }
+        fun dateHeadings(visible: Boolean) {
+            if (visible) dateTags.forEach { node(it).assertIsDisplayed() }
+            else ui.onAllNodes(dateHeading).assertCountEquals(0)
+        }
+        fun choose(button: String, choice: String) {
+            node(button).performClick()
+            node(choice).performClick()
+            androidx.test.espresso.Espresso.pressBack()
+        }
+        fun row(id: ConversationId) = node("drawer-conversation:${id.value}")
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        awaitPaneRows(listOf(pinned.id, done.id, running.id))
+        dateHeadings(true)
+        node(pinnedTag).assertIsDisplayed()
+        val session = fixture.session("completed")
+        try {
+            val result = action(MessageAction.REGENERATE, target(running.id, Message.ASSISTANT_ROLE))
+            assertTrue(result is MessageActionResult.Regenerated)
+            assertEquals(RegenerationSendOutcome.ACCEPTED, (result as MessageActionResult.Regenerated).outcome)
+            assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+            for ((choice, survivingId) in listOf("drawer-choice-completed" to done.id,
+                "drawer-choice-running" to running.id)) {
+                choose("drawer-filter-button", choice)
+                row(survivingId).assertIsDisplayed()
+                dateHeadings(false)
+                if (survivingId == done.id) {
+                    row(pinned.id).assertIsDisplayed()
+                    node(pinnedTag).assertIsDisplayed()
+                }
+                choose("drawer-sort-button", "drawer-choice-last-output")
+                dateHeadings(false)
+                row(survivingId).assertIsDisplayed()
+                choose("drawer-sort-button", "drawer-choice-date")
+                dateHeadings(false)
+                row(survivingId).assertIsDisplayed()
+                choose("drawer-filter-button", "drawer-filter-reset")
+                dateHeadings(true)
+                node(pinnedTag).assertIsDisplayed()
+                row(done.id).assertIsDisplayed()
+                row(running.id).assertIsDisplayed()
+            }
+            choose("drawer-sort-button", "drawer-choice-last-output")
+            dateHeadings(false)
+            node(pinnedTag).assertIsDisplayed()
+            choose("drawer-sort-button", "drawer-choice-date")
+            choose("drawer-sort-button", "drawer-choice-reverse")
+            dateHeadings(true)
+        } finally { session.release.countDown() }
+        awaitControl("heading regression generation completed") { fixture.controller.active == null }
     }
 
     fun testClosingDrawerDismissesTheOpenMenuAndDoesNotReopenItOnNextVisit() {

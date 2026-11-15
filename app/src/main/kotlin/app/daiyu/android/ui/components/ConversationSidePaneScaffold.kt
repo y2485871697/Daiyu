@@ -397,6 +397,7 @@ private fun ConversationPanePanel(
     val visibleConversations = remember(state.conversations, query, filterRunning, filterCompleted) {
         state.searchResults().filterDrawerStatus(filterRunning, filterCompleted)
     }
+    val showDateHeadings = !sortByLastOutput && !filterRunning && !filterCompleted
     val groups = remember(visibleConversations, sortByLastOutput, reverse) {
         visibleConversations.groupForDrawer(sortByLastOutput = sortByLastOutput, reverse = reverse)
     }
@@ -495,8 +496,10 @@ private fun ConversationPanePanel(
                     }
                 } else {
                     groups.forEachIndexed { groupIndex, group ->
-                        item(key = group.key, contentType = "drawer-section") {
-                            ConversationSectionHeader(group = group, first = groupIndex == 0)
+                        if (group.section == ConversationDrawerSection.Pinned || showDateHeadings) {
+                            item(key = group.key, contentType = "drawer-section") {
+                                ConversationSectionHeader(group = group, first = groupIndex == 0)
+                            }
                         }
                         itemsIndexed(
                             items = group.items,

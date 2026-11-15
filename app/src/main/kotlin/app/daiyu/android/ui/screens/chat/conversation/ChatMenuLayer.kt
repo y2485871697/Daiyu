@@ -84,6 +84,8 @@ private class MenuOverlay(
     val maxHeight: Dp?,
     val offset: DpOffset,
     val screenMargin: Dp,
+    val preferAbove: Boolean,
+    val minWidth: Dp,
     val outsideClickFeedback: () -> Boolean,
     val content: @Composable () -> Unit,
 )
@@ -171,11 +173,11 @@ private fun BoxScope.ChatMenuOverlay(
                             val scale = 0.15f + 0.85f * motion.fraction.value
                             scaleX = scale
                             scaleY = scale
-                            transformOrigin = TransformOrigin(1f, 0f)
+                            transformOrigin = TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)
                         }
                         .onGloballyPositioned { if (diagnostic != null) probe.surface = it }
                         .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
-                        else Modifier.clearAndSetSemantics {}), motion = motion) {
+                        else Modifier.clearAndSetSemantics {}), motion = motion, preferAbove = menu.preferAbove) {
                         CompositionLocalProvider(LocalPopupMotion provides motion) { menu.content() }
                     }
                 },
@@ -189,7 +191,7 @@ private fun BoxScope.ChatMenuOverlay(
                 val maxHeight = menu.maxHeight?.roundToPx()?.coerceAtMost(availableHeight) ?: availableHeight
                 val dismiss = measurables[0].measure(Constraints.fixed(width, height))
                 val surface = measurables[1].measure(Constraints(
-                    minWidth = minOf(156.dp.roundToPx(), maxWidth),
+                    minWidth = menu.minWidth.roundToPx().coerceIn(0, maxWidth),
                     maxWidth = maxWidth,
                     maxHeight = maxHeight,
                 ))
@@ -201,8 +203,10 @@ private fun BoxScope.ChatMenuOverlay(
                     val rootAnchor = menu.anchor()
                     val anchor = rootAnchor.translate(-usedHost.left, -usedHost.top)
                     val fitsBelow = anchor.bottom + offsetY + surface.height + margin <= height
-                    val wantedY = if (fitsBelow) anchor.bottom.toInt() + offsetY
-                        else anchor.top.toInt() - offsetY - surface.height
+                    val fitsAbove = anchor.top - offsetY - surface.height >= margin
+                    val above = if (menu.preferAbove) fitsAbove || !fitsBelow else !fitsBelow
+                    val wantedY = if (above) anchor.top.toInt() - offsetY - surface.height
+                        else anchor.bottom.toInt() + offsetY
                     val y = wantedY.coerceIn(margin,
                         (height - surface.height - margin).coerceAtLeast(margin))
                     val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
@@ -231,6 +235,8 @@ internal fun ChatAnchoredMenu(
     screenMargin: Dp = 9.dp,
     anchorBounds: Rect? = null,
     outsideClickFeedback: Boolean = true,
+    preferAbove: Boolean = false,
+    minWidth: Dp = 156.dp,
     content: @Composable () -> Unit,
 ) {
     val layer = LocalMenuLayer.current
@@ -252,7 +258,11 @@ internal fun ChatAnchoredMenu(
         anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
     })
     if ((expanded || mounted) && layer != null) {
-        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ latestExpanded }, { latestAnchorBounds ?: anchor }, { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin, { latestOutsideClickFeedback }) { Box(modifier) { latestContent() } } }
+        val menu = remember(maxHeight, offset, screenMargin, preferAbove, minWidth) {
+            MenuOverlay({ latestExpanded }, { latestAnchorBounds ?: anchor },
+                { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin, preferAbove, minWidth,
+                { latestOutsideClickFeedback }) { Box(modifier) { latestContent() } }
+        }
         LaunchedEffect(layer, menu, expanded) {
             if (expanded) {
                 layer.active?.takeIf { it !== menu }?.onDismiss?.invoke()
@@ -275,6 +285,7 @@ internal fun ChatGlassMenuSurface(
     backdrop: LayerBackdrop?,
     modifier: Modifier,
     motion: PopupMotion? = null,
+    preferAbove: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val dark = MiuixTheme.colorScheme.background.luminance() < .3f
@@ -287,12 +298,12 @@ internal fun ChatGlassMenuSurface(
         else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
     Box(modifier.width(IntrinsicSize.Max), propagateMinConstraints = true) {
         // Keep the shadow raster independent of the animated reveal geometry.
-        ChatMenuShadows(motion, dark, Modifier.matchParentSize())
+        ChatMenuShadows(motion, dark, Modifier.matchParentSize(), preferAbove)
         Column(Modifier
             .graphicsLayer { alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f) }
             .daiyuMenuClipReveal(
                 fractionProgress = { menuRevealFraction(motion) },
-                preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
+                preferAbove = preferAbove, cornerRadius = 19.dp, squircleEnabled = false,
                 clipWhenFullyRevealed = false,
             )
             .clip(shape).then(blur)
@@ -329,13 +340,13 @@ private fun menuRevealFraction(motion: PopupMotion?): Float =
     else (motion?.fraction?.value ?: 1f).coerceIn(0f, 1f)
 
 @Composable
-private fun ChatMenuShadows(motion: PopupMotion?, dark: Boolean, modifier: Modifier) {
+private fun ChatMenuShadows(motion: PopupMotion?, dark: Boolean, modifier: Modifier, preferAbove: Boolean) {
     val shape = remember { RoundedCornerShape(19.dp) }
     val shadowContext = LocalGraphicsContext.current.shadowContext
     Box(modifier
         .graphicsLayer {
             scaleY = menuRevealFraction(motion)
-            transformOrigin = TransformOrigin(.5f, 0f)
+            transformOrigin = TransformOrigin(.5f, if (preferAbove) 1f else 0f)
         }
         .drawWithCache {
             // Keep animated opacity out of Compose 1.9's shadow-renderer cache key.

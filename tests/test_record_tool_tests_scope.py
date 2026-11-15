@@ -354,6 +354,34 @@ class ChildStopScopeTest(unittest.TestCase):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
 
 
+    def test_stop_selector_reads_only_exact_requested_files_and_keeps_empty_shards(self):
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        helper = SpeechPlatformDiscoveryTest()
+        classes = recorder.CHILD_STOP_PLATFORM_CLASSES
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper.fixture(root)
+            for name in classes:
+                relative = Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text((ROOT / relative).read_text())
+            seen = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=",".join(reversed(classes)))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertEqual({classes[0]: 8, classes[1]: 17}, inventory["all_classes"])
+                seen.extend(selection["selected_classes"])
+            self.assertCountEqual(classes, seen)
+            for invalid in (classes[0], ",".join((*classes, classes[0])), ",".join((*classes, "unknown"))):
+                self.assertNotEqual(0, helper.select(root, classes=invalid).returncode)
+            (root / "app/src/androidTest/kotlin" / (classes[0].replace(".", "/") + ".kt")).unlink()
+            self.assertNotEqual(0, helper.select(root, classes=",".join(classes)).returncode)
+
+
 class ChildTaskCardScopeTest(unittest.TestCase):
     CLASSES = tuple("app.daiyu.android.ui.screens.chat.conversation." + name for name in (
         "ChildTaskListTest", "ToolOperationCardTest", "ToolCardReadabilityTest", "SubAgentStatusDialogTest",

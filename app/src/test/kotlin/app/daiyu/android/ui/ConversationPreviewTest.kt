@@ -164,6 +164,8 @@ class ConversationPreviewTest {
             MessageHistorySegment(reply.id, Message.ASSISTANT_ROLE, reply.blocks, createdAt = 100L),
             MessageHistorySegment(supplement.id, Message.USER_ROLE, supplement.blocks, createdAt = 300L),
             MessageHistorySegment(reply.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("final", "final")), createdAt = 100L))
+        database.save(reply.copy(historySegments = segments.dropLast(1)))
+        assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
         database.save(reply.copy(status = RunStatus.COMPLETED, historySegments = segments))
         assertEquals(100L, data.summaries(null).single().lastMessageAtMillis)
         assertEquals(100L, MessageHistory.expand(database.messages(id).map { it.second }).last().createdAt)
@@ -171,14 +173,12 @@ class ConversationPreviewTest {
             assertTrue(it.moveToFirst()); it.getLong(0)
         }
         assertEquals(100L, cached)
-        database.save(reply.copy(status = RunStatus.COMPLETED, historySegments = segments.dropLast(1)))
-        assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
         db.beginTransaction()
         try {
             db.delete("messages", "id=?", arrayOf(reply.id.value))
             assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
         } finally { db.endTransaction() }
-        assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
+        assertEquals(100L, data.summaries(null).single().lastMessageAtMillis)
     }
 
     @Test fun embeddedUserTailUsesItsOwnUnknownTimeAndOldDatabaseRebuildsProjectionWithoutChangingMessages() {

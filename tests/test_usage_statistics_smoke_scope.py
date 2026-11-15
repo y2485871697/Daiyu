@@ -26,6 +26,7 @@ class UsageStatisticsSmokeScopeTest(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/build.yml").read_text()
         validation = workflow.split("      - name: 验证冻结补检工具\n", 1)[1].split("      - name:", 1)[0]
         self.assertIn("working-directory: .smoke-validation-tools", validation)
+        self.assertIn("${{ inputs.mode == 'smoke' && inputs.smoke_classes == 'app.daiyu.android.UsagePresentationActivityTest' && '-usage-statistics' || '' }}", workflow.split("concurrency:", 1)[1].split("jobs:", 1)[0])
         self.assertIn("test_smoke_boot.SourceTests test_usage_statistics_smoke_scope -v", validation)
         for python in ("python", "python3"):
             command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))

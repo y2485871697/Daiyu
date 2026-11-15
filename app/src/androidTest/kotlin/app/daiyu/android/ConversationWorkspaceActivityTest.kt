@@ -105,11 +105,11 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    private fun showComposer(selectionStart: Int = composerDraft.length) {
+    private fun showComposer(selectionStart: Int = composerDraft.length, layoutModifier: Modifier = Modifier) {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ChatMenuLayer(Modifier.fillMaxSize()) {
-                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
+                    Column(Modifier.fillMaxSize().then(layoutModifier), verticalArrangement = Arrangement.Bottom) {
                         ChatComposer(ComposerUi(text = composerDraft, selectionStart = selectionStart, selectionEnd = selectionStart, editorGeneration = editorGeneration),
                             ChatScreenActions(onTextChange = { composerDraft = it }, onOpenWorkspace = { opens++ }, onVoiceLongPress = { voiceLongPresses++; true }))
                     }
@@ -231,19 +231,48 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(1, opens) }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testLongDraftScrollsInsideEditorWithoutOpeningWorkspace() {
         composerDraft = (1..30).joinToString("\n") { index ->
             val marker = ('A'.code + (index - 1) % 26).toChar()
             "${index.toString().padStart(2, '0')}: " + marker.toString().repeat(1 + (index * 7) % 18)
         }
         val draft = composerDraft
-        showComposer(selectionStart = 0)
+        showComposer(selectionStart = 0, layoutModifier = Modifier.imePadding())
         val field = node("chat-draft")
+        val root = (field.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        val imeType = androidx.core.view.WindowInsetsCompat.Type.ime()
+        dismissIme(root)
+        val windowBottomWithoutIme = awaitStableWindowFrame(root) {
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+            if (insets == null || insets.isVisible(imeType)) null else {
+                val location = IntArray(2)
+                root.rootView.getLocationOnScreen(location)
+                location[1] + root.rootView.height
+            }
+        }
         field.performTouchInput { click() }
         awaitImeFrame(field, true)
         field.performTextInputSelection(androidx.compose.ui.text.TextRange.Zero)
         awaitVisualIdle()
         field.assertIsFocused()
+        fun editorBoundsAboveIme(): androidx.compose.ui.geometry.Rect {
+            val semantics = field.fetchSemanticsNode()
+            val (screenBounds, imeBottom) = awaitStableWindowFrame(root) {
+                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+                if (insets == null || !insets.isVisible(imeType)) null else {
+                    val position = semantics.positionOnScreen
+                    val size = semantics.size
+                    androidx.compose.ui.geometry.Rect(position.x, position.y,
+                        position.x + size.width, position.y + size.height) to insets.getInsets(imeType).bottom
+                }
+            }
+            val imeTop = windowBottomWithoutIme - imeBottom
+            assertTrue("Editor must remain above visible IME; editor=$screenBounds imeTop=$imeTop imeBottom=$imeBottom",
+                imeBottom > 0 && screenBounds.width > 0f && screenBounds.height > 0f && screenBounds.bottom <= imeTop + 1f)
+            return screenBounds
+        }
+        val beforeScreenBounds = editorBoundsAboveIme()
         val bounds = field.fetchSemanticsNode().boundsInRoot
         val before = captureScreenNode(field).toPixelMap()
         field.performTouchInput {
@@ -255,6 +284,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         field.assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange,
             androidx.compose.ui.text.TextRange.Zero))
         assertEquals(bounds, field.fetchSemanticsNode().boundsInRoot)
+        assertEquals(beforeScreenBounds, editorBoundsAboveIme())
         val after = captureScreenNode(field).toPixelMap()
         assertEquals(before.width, after.width)
         assertEquals(before.height, after.height)
@@ -279,7 +309,9 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
             node("conversation-workspace-sheet").assertDoesNotExist()
             assertDraft(draft)
         }
-        node("chat-workspace-gesture-area").performClick()
+        node("chat-workspace-gesture-area").performSemanticsAction(
+            androidx.compose.ui.semantics.SemanticsActions.OnClick,
+        ) { action -> assertTrue(action()) }
         awaitUniqueTag("conversation-workspace-sheet")
         node("workspace-path-card:0").assertExists()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

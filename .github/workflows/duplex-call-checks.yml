@@ -14,7 +14,7 @@ on:
         type: string
         required: true
       validation_sha:
-        description: 可选已审验证源，仅覆盖单个语音反馈契约，不改冻结生产/JVM/设备测试
+        description: 可选已审验证源，仅覆盖语音反馈契约及一个JVM夹具，不改冻结生产/设备测试
         type: string
         required: false
         default: ''
@@ -69,14 +69,18 @@ jobs:
           assert re.fullmatch('[0-9a-f]{40}', validation)
           subprocess.run(['git', 'merge-base', '--is-ancestor', source, validation], check=True)
           subprocess.run(['git', 'merge-base', '--is-ancestor', validation, workflow], check=True)
-          path = 'tests/test_chat_voice_feedback_contract.py'
-          data = subprocess.check_output(['git', 'show', validation + ':' + path])
-          before = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-          Path(path).write_bytes(data)
+          files = ('tests/test_chat_voice_feedback_contract.py',
+                   'app/src/test/kotlin/app/daiyu/android/VoiceCallPresentationOwnerTest.kt')
+          records = []
+          for path in files:
+              data = subprocess.check_output(['git', 'show', validation + ':' + path])
+              before = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+              Path(path).write_bytes(data)
+              records.append(dict(path=path, before_sha256=before, after_sha256=hashlib.sha256(data).hexdigest()))
           Path('duplex-call-checks').mkdir(exist_ok=True)
           Path('duplex-call-checks/validation-source.json').write_text(json.dumps(dict(
               checked_sha=source, validation_sha=validation, workflow_sha=workflow,
-              validation_files=[dict(path=path, before_sha256=before, after_sha256=hashlib.sha256(data).hexdigest())]), indent=2) + '\n')
+              validation_files=records), indent=2) + '\n')
           PYVALIDATION
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
@@ -127,7 +131,7 @@ jobs:
           if [[ "$CHECK_SCOPE" == speech ]]; then
             classes=(app.daiyu.android.voice.providers.DoubaoPcmStreamTest app.daiyu.android.voice.StreamingPcmPlayerTest app.daiyu.android.diagnostics.DiagnosticLogStoreTest app.daiyu.android.voice.SpeechAudioFileTest app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.RemoteVoicePlaybackBudgetTest app.daiyu.android.VoiceHostTest app.daiyu.android.VoiceHostGateTest app.daiyu.android.voice.network.HttpVoiceNetworkTest app.daiyu.android.ActivityVoiceAccountPreviewHostTest app.daiyu.android.AccountPreviewSpeechPlayerTailTest app.daiyu.android.voice.account.PersonalVoicePreviewTest)
           else
-            classes=(app.daiyu.android.ActivityUniversalVoiceHostPersonalTest app.daiyu.android.voice.personal.PersonalVoiceCallAuthorizationTest app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest app.daiyu.android.pet.AndroidPetModelPortTest app.daiyu.android.model.ResponsesWebSearchTest app.daiyu.android.model.NativeCompletionWebSearchTest app.daiyu.android.voice.control.VoiceNativeSearchActivityTest app.daiyu.android.VoiceCallPresentationOwnerTest app.daiyu.android.voice.control.VoiceCallControllerTest app.daiyu.android.voice.control.SpeechActivityDetectorTest app.daiyu.android.voice.control.VoiceCallTempFilesTest app.daiyu.android.context.ProductionCompactionPlacementTest app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
+            classes=(app.daiyu.android.ui.screens.chat.conversation.DoubaoGenieGeometryTest app.daiyu.android.CallEntryPolicyTest app.daiyu.android.ActivityUniversalVoiceHostPersonalTest app.daiyu.android.voice.personal.PersonalVoiceCallAuthorizationTest app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest app.daiyu.android.pet.AndroidPetModelPortTest app.daiyu.android.model.ResponsesWebSearchTest app.daiyu.android.model.NativeCompletionWebSearchTest app.daiyu.android.voice.control.VoiceNativeSearchActivityTest app.daiyu.android.VoiceCallPresentationOwnerTest app.daiyu.android.voice.control.VoiceCallControllerTest app.daiyu.android.voice.control.SpeechActivityDetectorTest app.daiyu.android.voice.control.VoiceCallTempFilesTest app.daiyu.android.context.ProductionCompactionPlacementTest app.daiyu.android.DoubaoCallPresentationOwnerTest app.daiyu.android.DuplexCallSnapshotTest app.daiyu.android.voice.duplex.DuplexRouteLeaseTest app.daiyu.android.voice.duplex.DoubaoDuplexFixtureTest app.daiyu.android.voice.network.SocketVoiceNetworkTest app.daiyu.android.voice.network.WebSocketBoundsTest)
           fi
           filters=()
           for class in "${classes[@]}"; do filters+=(--tests "$class"); done
@@ -150,7 +154,9 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          required = {'app.daiyu.android.ActivityUniversalVoiceHostPersonalTest',
+          required = {'app.daiyu.android.ui.screens.chat.conversation.DoubaoGenieGeometryTest',
+                      'app.daiyu.android.CallEntryPolicyTest',
+                      'app.daiyu.android.ActivityUniversalVoiceHostPersonalTest',
                       'app.daiyu.android.voice.personal.PersonalVoiceCallAuthorizationTest',
                       'app.daiyu.android.RemoteVoiceHostPlayerAudioFocusTest',
                       'app.daiyu.android.model.auxiliary.AuxiliaryVisionModelAdapterTest',

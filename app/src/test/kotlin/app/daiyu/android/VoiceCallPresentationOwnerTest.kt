@@ -17,7 +17,7 @@ class VoiceCallPresentationOwnerTest {
         owner.begin("anchor", "permit", 100, null, "gpt6.1sol")
         assertEquals("GPT", owner.state!!.title)
         assertEquals("助手", owner.state!!.responseLabel)
-        assertEquals("豆包", DoubaoCallUi(1, null).responseLabel)
+        assertEquals("豆包", DoubaoCallUi(1, null, startedAtMillis = 0).responseLabel)
         owner.setModelName("gemini-3-pro")
         assertEquals("Gemini", owner.state!!.title)
         assertEquals("助手", owner.state!!.responseLabel)

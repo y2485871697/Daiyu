@@ -839,7 +839,11 @@ internal fun ChatMessageList(
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> androidx.compose.runtime.CompositionLocalProvider(
                             LocalWorkflowVisualScope provides workflowAdmissions.scope(turn.listKey, initialPositionPending),
-                            LocalWorkflowDisclosureContext provides remember(turn.listKey) { WorkflowDisclosureContext(disclosureViewport, turn.listKey) }) { Column {
+                            LocalWorkflowDisclosureContext provides remember(turn.listKey, disclosureViewport) {
+                                WorkflowDisclosureContext(disclosureViewport, turn.listKey) {
+                                    !currentRetainingRows && currentAssistants[turn.listKey]?.let { it.status == RunStatus.RUNNING && it.isStreaming } == true
+                                }
+                            }) { Column {
                             ReconnectedAssistantTurn(turn, reconnectPartsByKey.getValue(turn.listKey), actions, imageLoader,
                                 dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id,

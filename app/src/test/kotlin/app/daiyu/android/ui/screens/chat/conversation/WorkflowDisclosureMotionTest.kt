@@ -7,21 +7,37 @@ import org.junit.Test
 class WorkflowDisclosureMotionTest {
     private val viewport = Rect(20f, 100f, 340f, 500f)
 
-    @Test fun followingAlwaysWinsEvenInTheUpperHalf() {
-        assertTrue(workflowDisclosureExpandsUp(true, 120f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(true, 480f, viewport))
+    @Test fun streamingFollowWinsEvenInTheUpperHalf() {
+        assertTrue(workflowDisclosureExpandsUp(true, true, 120f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(true, true, 480f, viewport))
+    }
+
+    @Test fun idleAtTheBottomUsesTheSafeViewportMidpoint() {
+        assertFalse(workflowDisclosureExpandsUp(true, false, 299f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(true, false, 300f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(true, false, 301f, viewport))
+    }
+
+    @Test fun inactiveOutputDoesNotResumeFollowEvenWhenTheListRemainsAtBottom() {
+        var resumed = false
+        val viewportState = WorkflowDisclosureViewport({ true }, { viewport }, { resumed = true }, { true }, { _, _ -> 0f })
+        viewportState.pointerDown(true)
+        val motion = WorkflowDisclosureMotion(WorkflowDisclosureContext(viewportState, "finished") { false })
+        assertFalse(motion.upwards)
+        motion.toggle(opening = true)
+        assertFalse(resumed)
     }
 
     @Test fun detachedReaderUsesTheSafeViewportMidpoint() {
-        assertFalse(workflowDisclosureExpandsUp(false, 299f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(false, 300f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(false, 301f, viewport))
+        assertFalse(workflowDisclosureExpandsUp(false, true, 299f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(false, true, 300f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(false, true, 301f, viewport))
     }
 
     @Test fun translatedViewportHasTheSameDirection() {
         val translated = Rect(20f, 1100f, 340f, 1500f)
-        assertFalse(workflowDisclosureExpandsUp(false, 1299f, translated))
-        assertTrue(workflowDisclosureExpandsUp(false, 1301f, translated))
+        assertFalse(workflowDisclosureExpandsUp(false, true, 1299f, translated))
+        assertTrue(workflowDisclosureExpandsUp(false, true, 1301f, translated))
     }
 
     @Test fun pressRemembersFollowBeforeTheListCancelsIt() {
@@ -39,7 +55,7 @@ class WorkflowDisclosureMotionTest {
     @Test fun draggingDiscardsThePressAndAnimationOwner() {
         val context = WorkflowDisclosureViewport({ true }, { viewport }, {}, { true }, { _, _ -> 0f })
         context.pointerDown(true)
-        context.active = WorkflowDisclosureMotion(WorkflowDisclosureContext(context, "turn"))
+        context.active = WorkflowDisclosureMotion(WorkflowDisclosureContext(context, "turn") { true })
         context.cancelAnchor()
         assertFalse(context.followingOnPress)
         assertNull(context.active)

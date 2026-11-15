@@ -24,8 +24,8 @@ import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.abs
 
-internal fun workflowDisclosureExpandsUp(followingBottom: Boolean, headerCenter: Float, viewport: Rect): Boolean =
-    followingBottom || headerCenter >= viewport.center.y
+internal fun workflowDisclosureExpandsUp(followingBottom: Boolean, outputActive: Boolean, headerCenter: Float, viewport: Rect): Boolean =
+    followingBottom && outputActive || headerCenter >= viewport.center.y
 
 internal val WorkflowDisclosureUp = SemanticsPropertyKey<Boolean>("WorkflowDisclosureUp")
 
@@ -52,11 +52,15 @@ internal class WorkflowDisclosureViewport(
     }
 }
 
-internal data class WorkflowDisclosureContext(val viewport: WorkflowDisclosureViewport, val itemKey: String)
+internal data class WorkflowDisclosureContext(
+    val viewport: WorkflowDisclosureViewport,
+    val itemKey: String,
+    val outputActive: () -> Boolean,
+)
 internal val LocalWorkflowDisclosureContext = staticCompositionLocalOf<WorkflowDisclosureContext?> { null }
 
 internal class WorkflowDisclosureMotion(private val context: WorkflowDisclosureContext?) {
-    var upwards by mutableStateOf(context?.viewport?.follows?.invoke() == true)
+    var upwards by mutableStateOf(context?.let { it.outputActive() && it.viewport.follows() } == true)
         private set
     val alignment: Alignment.Vertical get() = if (upwards) Alignment.Bottom else Alignment.Top
     private var header: LayoutCoordinates? = null
@@ -77,7 +81,7 @@ internal class WorkflowDisclosureMotion(private val context: WorkflowDisclosureC
     val containerModifier: Modifier get() = Modifier.pointerInput(this@WorkflowDisclosureMotion) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            followingOnPress = context?.viewport?.followingOnPress == true
+            followingOnPress = context?.let { it.outputActive() && it.viewport.followingOnPress } == true
             pressGesture = context?.viewport?.gesture ?: -1L
             do { val event = awaitPointerEvent(PointerEventPass.Final) } while (event.changes.any { it.pressed })
             followingOnPress = false
@@ -108,14 +112,15 @@ internal class WorkflowDisclosureMotion(private val context: WorkflowDisclosureC
             val origin = root.positionInWindow()
             Rect(origin.x, origin.y, origin.x + root.size.width, origin.y + root.size.height)
         }
-        upwards = workflowDisclosureExpandsUp(following,
+        upwards = workflowDisclosureExpandsUp(following, context?.outputActive?.invoke() == true,
             coordinates.positionInWindow().y + coordinates.size.height / 2f, viewport)
         return true
     }
 
     fun toggle(opening: Boolean) {
         val viewport = context?.viewport
-        val following = viewport?.let { it.follows() || followingOnPress && pressGesture == it.gesture } == true
+        val following = context?.outputActive?.invoke() == true &&
+            viewport?.let { it.follows() || followingOnPress && pressGesture == it.gesture } == true
         followingOnPress = false
         // Freeze direction through reversals and the matching collapse; a new closed cycle may choose again.
         if ((opening || expanded) && !cycleChosen) cycleChosen = chooseDirection(following)

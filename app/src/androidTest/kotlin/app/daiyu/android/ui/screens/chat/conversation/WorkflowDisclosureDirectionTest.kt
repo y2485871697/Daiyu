@@ -21,18 +21,20 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.app.AgentAppTheme
 
 class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     private var density = 1f
     private val work = WorkProcessUi(emptyList(), "已完成")
 
-    private fun mountList(following: Boolean, lower: Boolean = false, tool: Boolean = false) {
+    private fun mountList(following: Boolean, lower: Boolean = false, tool: Boolean = false,
+        status: RunStatus = RunStatus.RUNNING, streaming: Boolean = true) {
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
                 ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
-                    ChatMessageList(List(8) { ChatTurnUi.User("u$it", "history $it") } + ChatTurnUi.Assistant("tail"),
+                    ChatMessageList(List(8) { ChatTurnUi.User("u$it", "history $it") } + ChatTurnUi.Assistant("tail", status = status, isStreaming = streaming),
                         ChatScreenActions(), composerBottomInset = inset,
                         scrollRequest = if (following) ChatScrollRequest(1) else ChatScrollRequest(1, messageId = "tail", followBottom = false),
                         turnExtras = { turn -> if (turn.id == "tail") {
@@ -42,7 +44,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                             }) else WorkProcessCard(work, "direction-fixture", content = {
                                 Box(Modifier.fillMaxWidth().height(80.dp).testTag("direction-body"))
                             })
-                            if (following || !lower) Box(Modifier.height(180.dp))
+                            if (!lower) Box(Modifier.height(180.dp))
                         } })
                 }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("direction-composer")) })
             }
@@ -95,6 +97,39 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         assertEquals("Fixture header must be in the requested safe half", lower, center >= (listTop + safeBottom) / 2f)
     }
 
+    fun testCompletedReplyAtBottomUsesUpperHalfInsteadOfThePressFollowSnapshot() {
+        mountList(following = true, status = RunStatus.COMPLETED, streaming = false)
+        assertHalf(lower = false)
+        val anchor = top()
+        touchHeader(); ui.waitForIdle()
+        assertDirection(false)
+        assertEquals(anchor, top(), 2f)
+        ui.onNodeWithTag("direction-body").assertExists()
+    }
+
+    fun testCompletedReplyAtBottomStillExpandsUpInTheLowerHalf() {
+        mountList(following = true, lower = true, status = RunStatus.COMPLETED, streaming = false)
+        assertHalf(lower = true)
+        val anchor = bottom()
+        touchHeader(); ui.waitForIdle()
+        assertDirection(true)
+        assertEquals(anchor, bottom(), 2f)
+    }
+
+    fun testStoppedReplyAtBottomUsesTheUpperHalfFallback() {
+        mountList(following = true, status = RunStatus.STOPPED, streaming = false)
+        assertHalf(lower = false)
+        touchHeader(); ui.waitForIdle()
+        assertDirection(false)
+    }
+
+    fun testRunningWithoutStreamingAtBottomUsesTheUpperHalfFallback() {
+        mountList(following = true, streaming = false)
+        assertHalf(lower = false)
+        touchHeader(); ui.waitForIdle()
+        assertDirection(false)
+    }
+
     fun testDetachedUpperHeaderExpandsDownWithoutMovingItsTop() {
         mountList(following = false)
         assertHalf(lower = false)
@@ -131,7 +166,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         var following by mutableStateOf(true)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val viewport = remember { WorkflowDisclosureViewport({ following }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
-            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "stable") }) {
+            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "stable") { true } }) {
                 Column { WorkProcessCard(work, "stable", content = { Box(Modifier.height(80.dp)) }) }
             }
         } } }
@@ -156,10 +191,42 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         assertDirection(false)
     }
 
+    fun testOutputCompletionKeepsTheCurrentEdgeUntilFullyClosed() {
+        var outputActive by mutableStateOf(true)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
+            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
+                WorkflowDisclosureContext(viewport, "completing") { outputActive }
+            }) {
+                WorkProcessCard(work, "completing", content = { Box(Modifier.height(80.dp).testTag("completion-body")) })
+            }
+        } } }
+        ui.waitForIdle()
+        ui.mainClock.autoAdvance = false
+        try {
+            touchHeader()
+            ui.mainClock.advanceTimeBy(64); ui.waitForIdle()
+            assertDirection(true)
+            mainThread { outputActive = false }
+            touchHeader()
+            ui.mainClock.advanceTimeBy(48); ui.waitForIdle()
+            assertDirection(true)
+            touchHeader()
+            ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
+            assertDirection(true)
+            touchHeader()
+            ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
+            assertDirection(true)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.onNodeWithTag("completion-body").assertDoesNotExist()
+        touchHeader(); ui.waitForIdle()
+        assertDirection(false)
+    }
+
     fun testToolDetailsUseTheSameFollowingPriority() {
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
-            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "tool") }) {
+            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "tool") { true } }) {
                 WorkStepRow(WorkStepUi("tool", "fixture", "detail", WorkStepState.OK))
             }
         } } }
@@ -179,7 +246,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         kotlinx.coroutines.runBlocking { projectMarkdown(listOf("direction summary")) }
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
-            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "reasoning") }) {
+            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "reasoning") { true } }) {
                 ReportedReasoningCard("reasoning", listOf(app.daiyu.android.domain.ReportedReasoning("summary", "direction summary")))
             }
         } } }

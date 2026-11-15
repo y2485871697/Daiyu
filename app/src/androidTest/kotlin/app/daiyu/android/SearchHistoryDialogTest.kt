@@ -135,9 +135,11 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 MessageSearchPage(listOf(if (request.conversationId == null) globalHit else hit))
             })
             node("search:query").performTextReplacement("历史")
+            dismissIme()
             ui.mainClock.advanceTimeBy(200)
             ui.waitUntil(5_000) { entered.count == 0L }
             node("search:scope").performClick()
+            node("search:scope").assertTextEquals("全部")
             awaitUniqueTag("search:message:other:segment:1")
             release.countDown()
             assertTrue(finished.await(5, TimeUnit.SECONDS))

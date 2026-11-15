@@ -177,7 +177,42 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
         ui.onNodeWithText("压缩并继续").scrollToVisible().assertIsDisplayed().performClick()
         assertEquals(listOf(record.owner to ToolCardAction.RESUME_TASK), events)
-        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertIsDisplayed()
+        ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
+        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+    }
+
+    fun testRunningAndQueuedCardsNeverExposePauseOrStopWhenExpanded() {
+        val running = task(0, ChildTaskStatus.RUNNING)
+        val queued = task(1, ChildTaskStatus.QUEUED)
+        val records = listOf(running, queued)
+        val live = listOf(RetainedChildTask(running, false, false, false))
+        val rows = subAgentStatusRows(records, live)
+        assertEquals(listOf("执行中", "排队中"), rows.map { it.status })
+        var actions = 0
+        show(rows, records) { _, _ -> actions++ }
+        ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
+        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+        for (record in records) {
+            ui.onNodeWithTag("tool-child-summary:${record.owner.childRunId}").scrollToVisible().performClick()
+            ui.onNodeWithTag("tool-child-progress:${record.owner.childRunId}").assertIsDisplayed()
+            ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
+            ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+            ui.onNodeWithText(ToolCardAction.RESUME_TASK.label).assertDoesNotExist()
+        }
+        assertEquals(0, actions)
+    }
+
+    fun testPausedCardOnlyKeepsResumeWithTheExactTaskTarget() {
+        val record = task(0, ChildTaskStatus.RUNNING)
+        val live = RetainedChildTask(record, false, false, false, ChildTaskPauseState.PAUSED)
+        val events = mutableListOf<Pair<ChildRunOwner, ToolCardAction>>()
+        show(subAgentStatusRows(listOf(record), listOf(live)), listOf(record)) { row, action -> events += row.owner to action }
+        ui.onNodeWithText(ToolCardAction.RESUME_TASK.label).assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
+        ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
+        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+        ui.onNodeWithText(ToolCardAction.RESUME_TASK.label).scrollToVisible().assertIsDisplayed().performClick()
+        assertEquals(listOf(record.owner to ToolCardAction.RESUME_TASK), events)
     }
 
     fun testUnknownTaskHasOneFrameWithoutDebugDetailsOrResultPageAction() {

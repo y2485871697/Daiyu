@@ -106,8 +106,7 @@ internal fun ChildTaskList(
                 ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName)
             }, controls = {
                 val actions = when (row.status) {
-                    "已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
-                    "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
+                    "已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK)
                     else -> emptyList()
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

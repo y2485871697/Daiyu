@@ -48,16 +48,17 @@ class ChildTaskCardContractTest(unittest.TestCase):
         self.assertIn('titleOverride = agentName, plainText = true', source)
         self.assertIn('var expanded by rememberSaveable(index, entry.title)', source)
         self.assertIn('tool-child-receipt-arrow:$index', source)
-        self.assertIn('if (expanded) ChildTaskProgressContent(', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure)', source)
+        self.assertIn('ChildTaskProgressContent(entry.documents.firstOrNull()?.text', source)
         self.assertNotIn('toolOutputPreview(body)', source)
         self.assertNotIn('Int.MAX_VALUE', source)
         self.assertNotIn('ToolMiniAction', source)
 
-    def test_live_cards_use_frozen_identity_progress_and_existing_exact_controls(self):
+    def test_live_cards_keep_frozen_identity_progress_and_only_exact_resume_control(self):
         source = (CHAT / 'ChildTaskToolContent.kt').read_text()
         for fragment in ('owners.associateWith(controller::childTaskProgress)', 'live.forEach { merged[it.record.owner] = it.record }',
                          'ChildTaskFrame(Modifier.testTag("tool-child-frame:', 'ChildTaskProgressContent(',
-                         'ToolCardAction.PAUSE_TASK', 'ToolCardAction.RESUME_TASK', 'ToolCardAction.STOP_TASK'):
+                         'ToolCardAction.RESUME_TASK'):
             self.assertIn(fragment, source)
         self.assertNotIn('SettingsExpandableContent', source)
         self.assertNotIn('tool-child-batch-summary', source)
@@ -65,7 +66,13 @@ class ChildTaskCardContractTest(unittest.TestCase):
         self.assertIn('.heightIn(min = 28.dp)', source)
         self.assertIn('var expanded by rememberSaveable(row.owner)', source)
         self.assertIn('tool-child-arrow:${row.owner.childRunId}', source)
-        self.assertIn('if (expanded) {\n            details()\n            controls()\n        }', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure)', source)
+        expanded = source.split('WorkflowExpandableContent(visibility, disclosure) {', 1)[1]
+        self.assertLess(expanded.index('details()'), expanded.index('controls()'))
+        self.assertNotIn('ToolCardAction.PAUSE_TASK', source)
+        self.assertNotIn('ToolCardAction.STOP_TASK', source)
+        self.assertIn('"已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK)', source)
+        self.assertIn('row.contextLimited && action == ToolCardAction.RESUME_TASK', source)
         self.assertNotIn('else preview()', source)
         self.assertNotIn('preview: @Composable', source)
         self.assertIn('settingsDisclosureRotation(expanded, expandedDegrees = 180f)', source)

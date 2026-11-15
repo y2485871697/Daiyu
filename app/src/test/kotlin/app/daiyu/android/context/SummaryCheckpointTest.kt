@@ -5,14 +5,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SummaryCheckpointTest {
-    private fun checkpoint() = SummaryCheckpoint.marker + "\n" +
-        SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- factual evidence" }
+    private fun checkpoint() = SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- factual evidence" }
     @Test fun exactEightSectionsAndNestedOrFencedHeadings() {
         val text = checkpoint()
         assertEquals(text, SummaryCheckpoint.validate(text))
         assertNotNull(SummaryCheckpoint.validate(text.replace("- factual evidence", "- fact\n### Current Work")))
         assertNotNull(SummaryCheckpoint.validate(text.replace("- factual evidence", "- fact\n```\n## not a real section\n```")))
         assertNotNull(SummaryCheckpoint.validate("```markdown\n$text\n```"))
+    }
+    @Test fun legacyFirstLineIsOptionalAndNeverReturned() {
+        val text = checkpoint()
+        assertFalse(SummaryCheckpoint.instruction.contains(SummaryCheckpoint.marker))
+        assertEquals(text, SummaryCheckpoint.validate(SummaryCheckpoint.marker + "\n" + text))
+        assertEquals(text, SummaryCheckpoint.validate("```markdown\n" + SummaryCheckpoint.marker + "\n" + text + "\n```"))
+        assertEquals(text, SummaryCheckpoint.withoutLegacyMarker("  " + SummaryCheckpoint.marker + " \r\n\n" + text))
+        val quoted = text + "\n- 历史引用 " + SummaryCheckpoint.marker
+        assertEquals(quoted, SummaryCheckpoint.validate(quoted))
+        assertEquals(quoted, SummaryCheckpoint.withoutLegacyMarker(quoted))
+        assertEquals("旧版自由格式正文", SummaryCheckpoint.withoutLegacyMarker(SummaryCheckpoint.marker + "\n旧版自由格式正文"))
+        assertNull(SummaryCheckpoint.validate(SummaryCheckpoint.marker + "\nextra preface\n" + text))
+        assertNull(SummaryCheckpoint.validate(SummaryCheckpoint.marker))
     }
     @Test fun missingEmptyDuplicateOutOfOrderAndUnclosedFencesFail() {
         val text = checkpoint()

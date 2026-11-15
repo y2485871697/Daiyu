@@ -71,7 +71,7 @@ class ProviderSummaryUsagePortTest {
         val owner = Message(MessageId("parent"), ConversationId("conversation"), RunId("run"), "assistant", emptyList(), RunStatus.RUNNING)
         val history = (0..7).map { n -> owner.copy(id = MessageId("u$n"), role = "user", status = RunStatus.COMPLETED,
             blocks = listOf(MessageBlock.Text("source", "original evidence ".repeat(120)))) }
-        val reply = SummaryCheckpoint.marker + "\n" + SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- kept" }
+        val reply = SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- kept" }
         val wires = listOf(Connection(rejected = true), Connection(terminalText = reply))
         val admitted = mutableListOf<RequestCheckpoint>()
         val reported = mutableListOf<Pair<RequestCheckpoint, ModelEvent.Usage>>()

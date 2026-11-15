@@ -6,8 +6,7 @@ import org.junit.Test
 
 class ModelContextSummarizerContractTest {
     private val binding = SummaryModelBinding("provider", "summary")
-    private fun checkpoint() = SummaryCheckpoint.marker + "\n" +
-        SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- preserved fact" }
+    private fun checkpoint() = SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- preserved fact" }
     private fun input(text: String) = CompressionInput(listOf(Message(MessageId("m"), ConversationId("c"),
         RunId("r"), "user", listOf(MessageBlock.Text("body", text)), RunStatus.COMPLETED)), "revision")
     private class Fixture(val replies: (Int) -> String) {
@@ -61,6 +60,11 @@ class ModelContextSummarizerContractTest {
 
     @Test fun validCheckpointUsesOneRequestAndNoTools() {
         val f = Fixture { checkpoint() }
+        assertEquals(checkpoint(), ModelContextSummarizer(f.model(), ContextPreparationCancellation(), f::model).summarize(input("facts")))
+        assertEquals(1, f.prompts.size); assertEquals(1, f.bindings)
+    }
+    @Test fun legacyCheckpointIsNormalizedWithoutARepairRequest() {
+        val f = Fixture { SummaryCheckpoint.marker + "\n" + checkpoint() }
         assertEquals(checkpoint(), ModelContextSummarizer(f.model(), ContextPreparationCancellation(), f::model).summarize(input("facts")))
         assertEquals(1, f.prompts.size); assertEquals(1, f.bindings)
     }

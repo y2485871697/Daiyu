@@ -14,7 +14,7 @@ class ProductionRunContextCapacityTest {
             status = RunStatus.COMPLETED, blocks = listOf(MessageBlock.Text("body", "source evidence ".repeat(120)))) }
         val policy = CompressionPolicy(true, 4096, reserveTokens = 64, tokenTail = true)
         val binding = SummaryModelBinding("provider", "summary")
-        val reply = SummaryCheckpoint.marker + "\n" + SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- kept" }
+        val reply = SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- kept" }
         val runtime = ProductionRunContext(policy, parent, {
             BoundSummaryModel(binding, SummaryModelTransport { _, _ -> object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {

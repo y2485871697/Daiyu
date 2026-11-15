@@ -20,8 +20,7 @@ import javax.net.ssl.HttpsURLConnection
 
 /** Real model serialization/stream parsing against offline HTTPS fixtures; no provider/network. */
 class ProviderSummaryModelTest {
-    private fun checkpointText() = SummaryCheckpoint.marker + "\n" +
-        SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- fact" }
+    private fun checkpointText() = SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- fact" }
 
     private val binding = SummaryModelBinding("explicit-summary-provider", "summary-wire-model")
     private val protocols = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)

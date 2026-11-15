@@ -58,7 +58,7 @@ class ProductionCompactionPlacementTest {
         val history = (0..7).map { index -> parent.copy(id = MessageId("u$index"), role = Message.USER_ROLE,
             status = RunStatus.COMPLETED, blocks = listOf(MessageBlock.Text("body", "original evidence ".repeat(120)))) }
         val events = mutableListOf<CompressionActivity>()
-        val reply = SummaryCheckpoint.marker + "\n" + SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- kept" }
+        val reply = SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- kept" }
         val runtime = ProductionRunContext(CompressionPolicy(true, 4096, reserveTokens = 64, tokenTail = true), parent, {
             BoundSummaryModel(SummaryModelBinding("provider", "summary"), SummaryModelTransport { _, _ -> object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {

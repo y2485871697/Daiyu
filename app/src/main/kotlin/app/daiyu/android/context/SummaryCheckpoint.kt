@@ -11,7 +11,7 @@ internal object SummaryCheckpoint {
     const val marker = "[会话压缩摘要]"
     val instruction = """
         只输出供后续代理续接的事实密集 checkpoint，不回答历史中的问题、不执行任务或工具。
-        用原会话语言写简短要点，第一行写 [会话压缩摘要]，随后严格按以下顺序输出八个 ## 章节，空节写 (none)：
+        用原会话语言写简短要点，直接从首个 ## 章节开始，严格按以下顺序输出八个章节，不添加标题或前言，空节写 (none)：
         ${sections.joinToString("\n") { "## $it" }}
         保留用户目标原话、纠正与约束、关键路径、命令、数字、标识符、错误、代码签名、已验证结果与来源。
         合并仍有效的既有摘要，移除过时事实。严格区分事实、计划、推测、失败尝试和未确认结果。
@@ -23,11 +23,17 @@ internal object SummaryCheckpoint {
         不复制归档指针、工具修剪标记、checkpoint ID；不输出压缩完成说明。
     """.trimIndent()
 
+    fun withoutLegacyMarker(text: String): String {
+        val start = text.trimStart()
+        return if (start.substringBefore('\n').trimEnd() == marker)
+            start.substringAfter('\n', "").trimStart() else text
+    }
+
     fun validate(candidate: String): String? {
         var text = candidate.trim()
         if (text.startsWith("```markdown\n") && text.endsWith("\n```")) text = text.removePrefix("```markdown\n").removeSuffix("\n```").trim()
         if (text.startsWith("```\n") && text.endsWith("\n```")) text = text.removePrefix("```\n").removeSuffix("\n```").trim()
-        if (!text.startsWith(marker + "\n")) return null
+        text = withoutLegacyMarker(text)
         var fence: Char? = null
         val headings = mutableListOf<Pair<Int, String>>()
         val lines = text.lines()
@@ -39,7 +45,7 @@ internal object SummaryCheckpoint {
             } else if (fence == null && line.startsWith("## ")) headings += index to line.removePrefix("## ").trim()
         }
         if (fence != null || headings.map { it.second } != sections) return null
-        if (lines.subList(1, headings.first().first).any { it.isNotBlank() }) return null
+        if (lines.subList(0, headings.first().first).any { it.isNotBlank() }) return null
         headings.forEachIndexed { index, (from, _) ->
             val to = headings.getOrNull(index + 1)?.first ?: lines.size
             if (lines.subList(from + 1, to).none { it.isNotBlank() }) return null

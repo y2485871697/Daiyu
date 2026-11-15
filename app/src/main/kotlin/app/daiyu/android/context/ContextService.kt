@@ -62,7 +62,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                     c.getString(1), null, cut, null, null))
             } }
         }
-        (saved + legacy).filter { it.anchor.listKey in anchors }.sortedWith(compareBy({ it.created }, { it.id }))
+        (saved + legacy).filter { it.anchor.listKey in anchors }.map { entry ->
+            if (entry is app.daiyu.android.timeline.ChatTimelineEntry.Compression)
+                entry.copy(summary = SummaryCheckpoint.withoutLegacyMarker(entry.summary)) else entry
+        }.sortedWith(compareBy({ it.created }, { it.id }))
     }
 
     fun displayHistory(id: ConversationId): List<Message> = transactions.run { read(it, id) }
@@ -126,7 +129,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     }
     private fun summaryMessage(id: ConversationId, archive: String, summary: String) =
         Message(MessageId("summary-$archive"), id, RunId("summary-$archive"), "user",
-            listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n$summary\n[摘要结束]")), RunStatus.COMPLETED)
+            listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n${SummaryCheckpoint.withoutLegacyMarker(summary)}\n[摘要结束]")), RunStatus.COMPLETED)
     private data class ArchiveFit(val physicalCount: Int, val tail: List<Message>)
 
     private fun fitArchive(id: ConversationId, current: List<Message>, count: Int, revision: String,
@@ -230,7 +233,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         try {
             onCompression(activity)
             onStarted()
-            val summary = summarizer.summarize(CompressionInput(summaryInput, revision)).trim()
+            val summary = SummaryCheckpoint.withoutLegacyMarker(summarizer.summarize(CompressionInput(summaryInput, revision))).trim()
             checkCancellation(cancelled)
             val reduced = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary)) <
                 TokenTailCompression.historyTokens(summaryInput, includeLatestScreen = false) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)

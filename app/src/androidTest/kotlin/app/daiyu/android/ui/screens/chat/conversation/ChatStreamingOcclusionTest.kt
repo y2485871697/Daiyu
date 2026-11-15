@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -555,6 +556,35 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         verifyDisclosureGap(60)
     }
 
+    fun testBoundedViewportPublishesFullExtentWhenOnlyTheContentHeightChanges() {
+        var growth by mutableStateOf(0.dp)
+        val state = StreamingTailViewport(true)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            density = LocalDensity.current.density
+            val boundedHeight = with(LocalDensity.current) { 80.dp.roundToPx() }
+            Box(Modifier.size(320.dp, 420.dp)) {
+                Column(Modifier.testTag("extent-parent")) {
+                    StreamingTailContainer(state, { null }, "extent", false, { false }, { 0 }, { boundedHeight }) {
+                        Box(Modifier.fillMaxWidth().height(160.dp + growth))
+                    }
+                }
+            }
+        } } }
+        ui.waitForIdle()
+        ui.mainClock.autoAdvance = false
+        try {
+            repeat(12) { index ->
+                ui.runOnUiThread { growth = ((index + 1) * 6).dp }
+                frame()
+                val expected = (160 + (index + 1) * 6) * density
+                val parent = ui.onNodeWithTag("extent-parent").fetchSemanticsNode()
+                val viewport = ui.onNodeWithTag("chat-stream-viewport:extent").fetchSemanticsNode()
+                assertEquals("Full extent must be published in the same frame", expected, parent.size.height.toFloat(), 1f)
+                assertEquals("The interactive viewport must remain bounded", 80f * density, viewport.size.height.toFloat(), 1f)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     private fun verifyDisclosureGap(bodyHeight: Int) {
         var appended by mutableStateOf(0.dp)
         var streaming by mutableStateOf(true)
@@ -582,8 +612,10 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         // The long fixture's top header may be offscreen; use its semantic action to begin the same disclosure policy.
         ui.mainClock.autoAdvance = false
         try {
-            ui.onNodeWithTag("work-process-header").performClick()
+            ui.onNodeWithTag("work-process-header").performSemanticsAction(SemanticsActions.OnClick) { it() }
             ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription, "已展开"))
             ui.runOnUiThread { appended = 52.dp }
             var previous: Float? = null
             var sawUnbounded = false
@@ -597,7 +629,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     assertTrue("Unbounded viewport must retain its full content height",
                         viewport.layoutInfo.coordinates.size.height >= (bodyHeight + 60) * density)
                     sawUnbounded = true
-                    ui.onNodeWithTag("work-process-header").performClick()
+                    ui.onNodeWithTag("work-process-header").performSemanticsAction(SemanticsActions.OnClick) { it() }
                     ui.runOnUiThread { appended += 52.dp }
                 }
                 frame()

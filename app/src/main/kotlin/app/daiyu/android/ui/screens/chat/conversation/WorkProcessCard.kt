@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -86,6 +87,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     androidx.compose.runtime.SideEffect { if (!expanded || stopped) motions.suppress(items) }
     val colors = conversationColors()
     val title = work.title
+    val detailExtent = remember(ownerKey) { WorkflowCollapseExtent() }
     val progressSummary = work.progressSummary
     val shape = RoundedCornerShape(12.dp)
     CompositionLocalProvider(LocalWorkflowNodeMotions provides motions,
@@ -122,7 +124,11 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                     if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
             }
         }
-        AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
+        AnimatedVisibility(visibility, modifier = Modifier.layout { measurable, constraints ->
+            val detail = measurable.measure(constraints)
+            val height = detailExtent.measure(detail.height, expanded)
+            layout(detail.width, height) { detail.placeRelative(0, 0) }
+        }, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
             exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.collapseAlignment)) {
             DisposableEffect(ownerKey) {
                 contentMounted = true

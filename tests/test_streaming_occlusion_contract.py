@@ -50,7 +50,7 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_unbounded_placement_does_not_observe_unused_item_origin(self):
         source = CHAT.read_text()
         viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
-        placement = viewport.split('layout(viewport.width, state.contentHeight)', 1)[1]
+        placement = viewport.split('layout(viewport.width, contentHeight)', 1)[1]
         self.assertIn('val origin = if (state.bounded) state.itemOrigin else null', placement)
         self.assertIn('state.viewportOffset = q', placement)
         self.assertIn('viewport.placeRelative(0, q)', placement)
@@ -77,11 +77,11 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_bounded_viewport_preserves_extent_and_aligns_real_content_same_measure(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = body.height",
+        for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = contentHeight",
                       "minOf(body.height, currentViewportHeight)", "state.contentHeight - visibleHeight",
                       "state.bounded && following && !state.followCatchup", "state.maxOffset.toFloat()",
                       "body.placeRelative(0, -state.scrollOffset.roundToInt())",
-                      "layout(viewport.width, state.contentHeight)", "Modifier.onPlaced",
+                      "layout(viewport.width, contentHeight)", "Modifier.onPlaced",
                       "list.localPositionOf(coordinates, Offset.Zero).y",
                       "viewport.placeRelative(0, q)", "state.scrollOffset = (old - delta).coerceIn",
                       "ScrollAxisRange(", "state.viewportOffset.coerceIn(0, state.maxOffset)"):
@@ -109,7 +109,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("minOf(body.height, currentViewportHeight)", measure)
         self.assertNotIn("state.itemOrigin", measure)
         self.assertNotIn("val followOffset = (body.height - viewportHeight()", viewport)
-        placement = viewport.split("layout(viewport.width, state.contentHeight)", 1)[1]
+        placement = viewport.split("layout(viewport.width, contentHeight)", 1)[1]
         self.assertNotIn("state.scrollOffset =", measure)
         self.assertEqual(1, placement.count("val following = follows()"))
         self.assertIn("val followOffset = if (state.contentHeight > viewport.height) maximum else 0", placement)
@@ -187,8 +187,8 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_full_extent_invalidates_outer_measure_and_exact_ownership_survives_consumption(self):
         source = CHAT.read_text()
         self.assertIn("var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)", source)
-        self.assertIn("state.contentHeight = body.height", source)
-        self.assertIn("layout(viewport.width, state.contentHeight)", source)
+        self.assertIn("state.contentHeight = contentHeight", source)
+        self.assertIn("layout(viewport.width, contentHeight)", source)
         migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
         self.assertIn("&& !exactNavigationOwnsScroll", migration)
         self.assertIn("if (exactNavigationOwnsScroll) return@LaunchedEffect", migration)

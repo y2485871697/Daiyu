@@ -30,6 +30,16 @@ internal fun workflowDisclosureExpandsUp(followingBottom: Boolean, outputActive:
 internal val WorkflowDisclosureUp = SemanticsPropertyKey<Boolean>("WorkflowDisclosureUp")
 internal val WorkflowDisclosureGeometry = SemanticsPropertyKey<() -> String>("WorkflowDisclosureGeometry")
 
+// A reversed size spring may retain its opening velocity; closing cannot expose more detail.
+internal class WorkflowCollapseExtent {
+    private var height = 0
+
+    fun measure(measuredHeight: Int, expanded: Boolean): Int {
+        height = if (expanded) measuredHeight else minOf(height, measuredHeight)
+        return height
+    }
+}
+
 internal class WorkflowDisclosureViewport(
     val follows: () -> Boolean,
     val bounds: () -> Rect?,
@@ -119,14 +129,7 @@ internal class WorkflowDisclosureMotion(
                         lastRequested = delta
                         val consumed = viewport.correctAnchor(it.itemKey, delta)
                         lastConsumed = consumed
-                        if (abs(delta - consumed) > .5f) {
-                            // At a scroll boundary, retain only the edge that the viewport can actually hold.
-                            if (anchorAtTop) anchorTop += delta - consumed
-                            else {
-                                anchorBottom += delta - consumed
-                                viewport.bounds()?.let { safe -> anchorBottom = minOf(anchorBottom, safe.bottom) }
-                            }
-                        }
+                        // Preserve the cycle edge while an owning item measure is still pending.
                     } finally { correctingAnchor = false }
                 }
             }

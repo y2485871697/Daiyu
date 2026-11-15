@@ -60,4 +60,16 @@ class WorkflowDisclosureMotionTest {
         assertFalse(context.followingOnPress)
         assertNull(context.active)
     }
+    @Test fun reversedWorkflowCollapseNeverGrowsAndReopeningRetainsTheNewExtent() {
+        val extent = WorkflowCollapseExtent()
+        assertEquals(44, extent.measure(44, expanded = true))
+        assertEquals(44, extent.measure(56, expanded = false))
+        assertEquals(40, extent.measure(40, expanded = false))
+        assertEquals(40, extent.measure(48, expanded = false))
+        assertEquals(52, extent.measure(52, expanded = true))
+        assertEquals(52, extent.measure(60, expanded = false))
+        assertEquals(0, extent.measure(0, expanded = false))
+        assertEquals(24, extent.measure(24, expanded = true))
+    }
+
 }

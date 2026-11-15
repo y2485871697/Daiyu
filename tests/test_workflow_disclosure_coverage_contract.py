@@ -25,6 +25,19 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertNotIn('viewport.scrollOffset =', anchor)
         self.assertIn('disclosureViewport.active == null', source)
 
+    def test_full_extent_is_a_parent_measure_dependency_even_when_the_viewport_is_fixed(self):
+        source = (CHAT / 'ChatMessageList.kt').read_text()
+        self.assertIn('HorizontalAlignmentLine(::maxOf)', source)
+        self.assertIn('alignmentLines = mapOf(StreamingTailContentHeight to body.height)', source)
+        self.assertIn('val contentHeight = viewport[StreamingTailContentHeight]', source)
+        self.assertIn('layout(viewport.width, contentHeight)', source)
+        self.assertNotIn('state.contentHeight = body.height', source)
+
+    def test_transient_zero_consumption_does_not_move_the_saved_cycle_edge(self):
+        source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        self.assertNotIn('anchorTop += delta - consumed', source)
+        self.assertNotIn('anchorBottom += delta - consumed', source)
+
     def test_reentrant_anchor_layout_does_not_rebase_the_cycle_edge(self):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         self.assertIn('anchorGesture == viewport.gesture && !correctingAnchor', source)

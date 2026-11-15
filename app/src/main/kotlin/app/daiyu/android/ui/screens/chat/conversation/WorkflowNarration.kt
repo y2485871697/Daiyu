@@ -26,6 +26,10 @@ internal class WorkflowVisualAdmissions(initialOwners: Set<String>) {
 
 internal class WorkflowVisualScope(private val baseline: Boolean) {
     private val owners = mutableMapOf<String, WorkflowVisualAdmission>()
+    private val motions = mutableMapOf<String, WorkflowNodeMotions>()
+    fun motions(key: String, steps: List<MessageContentUi>, running: Boolean) = motions.getOrPut(key) {
+        WorkflowNodeMotions(if (baseline || !running) steps else emptyList())
+    }
     fun owner(key: String, steps: List<MessageContentUi>, running: Boolean) = owners.getOrPut(key) {
         WorkflowVisualAdmission(if (baseline || !running) steps.mapIndexed { index, item -> item.workflowKey(index) }
             else emptyList(), animateFirstNarration = !baseline && running)

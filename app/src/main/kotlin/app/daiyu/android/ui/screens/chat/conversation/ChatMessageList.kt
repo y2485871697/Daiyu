@@ -1055,11 +1055,12 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
     val textSources = remember(steps) { steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) } }
     val visualScope = LocalWorkflowVisualScope.current
     val visualAdmission = remember(ownerKey, visualScope) { visualScope?.owner(ownerKey, steps, work.running) }
+    val nodeMotions = remember(ownerKey, visualScope) { visualScope?.motions(ownerKey, steps, work.running) ?: WorkflowNodeMotions(steps) }
     val textPhase = textSources to work.running
     val entriesSettled = visualAdmission?.settled(steps) != false
     var settledPhase by remember(ownerKey) { mutableStateOf<Pair<List<MarkdownTypingSource>, Boolean>?>(null) }
     var disclosureExpanded by remember(ownerKey) { mutableStateOf(work.running && !stopped) }
-    WorkProcessCard(work, ownerKey,
+    WorkProcessCard(work, ownerKey, nodeMotions = nodeMotions, motionItems = steps,
         allowLiveTiming = live, generationComplete = generationComplete, stopped = stopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff,
         answerPending = answerPending, workflowTextSettled = !disclosureExpanded || ((textSources.isEmpty() || settledPhase == textPhase) && entriesSettled),

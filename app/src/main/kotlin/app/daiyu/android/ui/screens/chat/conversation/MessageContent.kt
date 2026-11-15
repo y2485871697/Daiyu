@@ -51,12 +51,25 @@ internal fun MessageContent(
     entryVisible: (String) -> Boolean = { true },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
-    val connectors = remember(content, workflowTimeline) { workflowConnectors(content, workflowTimeline) }
     val ranges = remember(content) { messageContentRanges(content.map { it.isInlineMedia() }) }
     val imageNumbers = remember(content, imageOffset) {
         var number = imageOffset
         content.map { if (it is MessageContentUi.Image) ++number else 0 }
     }
+    val visibleIndices = buildList {
+        var ready = true
+        ranges.forEach { range ->
+            val item = content[range.first]
+            val visible = ready && entryVisible(item.workflowKey(range.first))
+            if (visible && (item !is MessageContentUi.Text || item.text.isNotBlank())) add(range.first)
+            if (visible && item is MessageContentUi.Reasoning) ready = reasoningReady(item.reported)
+        }
+    }
+    val timelineIndices = visibleIndices.filter { (content[it] as? MessageContentUi.Tool)?.step?.dedicatedKey == null }
+    val visibleContent = timelineIndices.map { content[it] }
+    val visibleConnectors = remember(visibleContent, workflowTimeline) { workflowConnectors(visibleContent, workflowTimeline) }
+    val connectors = timelineIndices.zip(visibleConnectors).toMap()
+    val lineMotions = rememberWorkflowLineMotions(content, timelineIndices, workflowTimeline)
     // This column deliberately has no width derived from media. Long text measures against
     // the bubble's normal constraints, even when a narrow portrait is its only attachment.
     Column {
@@ -71,16 +84,16 @@ internal fun MessageContent(
                     key(block.step.renderKey) {
                         // Keep the dedicated interaction's callsite while a prior thought closes.
                         val dedicated = dedicatedTool(block.step)
-                        if (visible && !dedicated) SpacedMessageEntry(index, content, connectors[index], entryBody, fillWidth) {
-                            WorkStepRow(block.step, showConnector = connectors[index].after, toolContent = toolContent, flowRunning = flowRunning)
+                        if (visible && !dedicated) SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lineMotion = lineMotions[index]) {
+                            WorkStepRow(block.step, showConnector = (connectors[index] ?: WorkflowConnector(false, false, false)).after, toolContent = toolContent, flowRunning = flowRunning)
                         }
                     }
                 } else if (visible && (block !is MessageContentUi.Text || block.text.isNotBlank())) {
-                    SpacedMessageEntry(index, content, connectors[index], entryBody, fillWidth, lastIndex = range.last) {
+                    SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lastIndex = range.last, lineMotion = lineMotions[index]) {
                         when (block) {
                             is MessageContentUi.Text -> textBody(block, Modifier.testTag("message-content-text:$index")
                                 .then(if (workflowTimeline) Modifier.padding(start = 18.dp) else Modifier))
-                            is MessageContentUi.Reasoning -> reasoningBody(block.reported, connectors[index].after)
+                            is MessageContentUi.Reasoning -> reasoningBody(block.reported, (connectors[index] ?: WorkflowConnector(false, false, false)).after)
                             is MessageContentUi.Image, is MessageContentUi.Video -> MessageMediaGroup(
                                 content, range, imageNumbers, imageLoader,
                                 Modifier.then(if (workflowTimeline) Modifier.padding(start = 18.dp) else Modifier)
@@ -104,10 +117,12 @@ private fun SpacedMessageEntry(
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit,
     fillWidth: Boolean,
     lastIndex: Int = index,
+    lineMotion: WorkflowLineMotion? = null,
     body: @Composable () -> Unit,
 ) {
     val current = content[index]
     entryBody(current.workflowKey(index)) {
+        WorkflowLineScope(lineMotion, if (lastIndex < content.lastIndex) 10.dp else 0.dp) {
         WorkTimelineEntry(
             leadingConnector = connector.before,
             trailingConnector = connector.after,
@@ -116,6 +131,7 @@ private fun SpacedMessageEntry(
             fillWidth = fillWidth,
             content = body,
         )
+        }
     }
 }
 

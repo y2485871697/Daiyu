@@ -32,4 +32,41 @@ class WorkflowConnectorsTest {
         assertTrue(connectors.all { !it.before && !it.after && !it.through })
         assertTrue(workflowConnectors(listOf(text("a", "answer")), true).all { !it.through })
     }
+    @Test fun initialCompletionsAreSilentButPendingCompletionIsNew() {
+        val pending = MessageContentUi.Tool(WorkStepUi("pending", "pending", ""))
+        val motions = WorkflowNodeMotions(listOf(tool("a"), pending))
+        assertFalse(motions.complete("tool:a"))
+        assertTrue(motions.complete("tool:pending"))
+        assertFalse(motions.complete("tool:pending"))
+        val thought = WorkflowNodeMotions(listOf(MessageContentUi.Reasoning(ReportedReasoning("old", "done"))))
+        assertFalse(thought.complete("reasoning:old"))
+        assertTrue(motions.complete("reasoning:new"))
+        assertFalse(motions.complete("reasoning:new"))
+    }
+
+    @Test fun onlyNewStableNodePairsAnimateAndHiddenUpdatesAreConsumed() {
+        val motions = WorkflowNodeMotions(listOf(tool("a"), text("n", "narration"), tool("b")))
+        assertFalse(motions.connect(WorkflowEdge("tool:a", "tool:b")))
+        assertTrue(motions.connect(WorkflowEdge("tool:b", "tool:c")))
+        assertFalse(motions.connect(WorkflowEdge("tool:b", "tool:c")))
+        motions.suppress(listOf(tool("b"), tool("d")))
+        assertFalse(motions.connect(WorkflowEdge("tool:b", "tool:d")))
+        assertFalse(motions.complete("tool:d"))
+        assertFalse(motions.connect(WorkflowEdge("tool:a", "tool:d")))
+        assertTrue(motions.connect(WorkflowEdge("tool:d", "tool:new")))
+    }
+
+    @Test fun sharedEdgePhasesRevealOneSegmentAtATime() {
+        val progress = androidx.compose.runtime.mutableStateOf(.25f)
+        val tail = WorkflowLinePart(progress, 0, 2)
+        val head = WorkflowLinePart(progress, 1, 2)
+        assertEquals(.5f, tail.fraction(), 0f)
+        assertEquals(0f, head.fraction(), 0f)
+        progress.value = .75f
+        assertEquals(1f, tail.fraction(), 0f)
+        assertEquals(.5f, head.fraction(), 0f)
+        progress.value = 1f
+        assertEquals(1f, head.fraction(), 0f)
+    }
+
 }

@@ -55,7 +55,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, onExpandedChange: (Boolean) -> Unit = {}, answerPending: Boolean = false, workflowTextSettled: Boolean = true, content: (@Composable (Boolean) -> Unit)? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, onExpandedChange: (Boolean) -> Unit = {}, answerPending: Boolean = false, workflowTextSettled: Boolean = true, content: (@Composable (Boolean) -> Unit)? = null, nodeMotions: WorkflowNodeMotions? = null, motionItems: List<MessageContentUi>? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val reasoning = work.segments.mapNotNull { it.reasoning }
     val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
     val reasoningReady = stopped || sequence.ready(reasoning)
@@ -78,10 +78,16 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
         else if (manuallyClosed) reasoning.filter { it.activeSinceNanos == null }.forEach(sequence::complete)
     }
     val reasoningState = rememberSaveableStateHolder()
+    val items = motionItems ?: work.segments.flatMap { segment ->
+        listOfNotNull(segment.reasoning?.let { MessageContentUi.Reasoning(it) }) + segment.steps.map { MessageContentUi.Tool(it) }
+    }
+    val motions = nodeMotions ?: remember(ownerKey) { WorkflowNodeMotions(items) }
+    androidx.compose.runtime.SideEffect { if (!expanded || stopped) motions.suppress(items) }
     val colors = conversationColors()
     val title = work.title
     val progressSummary = work.progressSummary
     val shape = RoundedCornerShape(12.dp)
+    CompositionLocalProvider(LocalWorkflowNodeMotions provides motions) {
     Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
         drawContent()
         drawLine(if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF),
@@ -169,12 +175,14 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             }
         }
     }
+    }
 }
 
 /** A single compact timeline row shared by work summaries and ordered mixed content. */
 @Composable
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
+    val lineMotion = LocalWorkflowLineMotion.current
     var expanded by rememberSaveable(step.renderKey) { mutableStateOf(false) }
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
@@ -192,11 +200,12 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
     }
     Row(Modifier.fillMaxWidth().testTag("tool-step:${step.toolCallId}").drawBehind {
         if (showConnector) drawLine(colors.line,
-            Offset(5.dp.toPx(), 27.dp.toPx()), Offset(5.dp.toPx(), size.height), 1.dp.toPx())
+            Offset(5.dp.toPx(), 27.dp.toPx()), Offset(5.dp.toPx(), minOf(size.height,
+                27.dp.toPx() + (size.height + lineMotion.spacingAfter.toPx() - 27.dp.toPx()) * (lineMotion.outgoing?.fraction() ?: 1f))), 1.dp.toPx())
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp), contentAlignment = Alignment.TopStart) {
             val ring = running && step.state != WorkStepState.OK && step.state != WorkStepState.FAILED
-            Box(Modifier.size(10.dp).clip(CircleShape).then(
+            Box(Modifier.size(10.dp).workflowCompletion("tool:${step.renderKey}", step.state == WorkStepState.OK).clip(CircleShape).then(
                 if (ring) Modifier.border(1.5.dp, tint, CircleShape) else Modifier.background(tint)),
                 contentAlignment = Alignment.Center) {
                 if (step.state == WorkStepState.OK) Icon(DaiyuIcons.Check, null, Modifier.size(8.dp), tint = Color.White)

@@ -248,14 +248,17 @@ internal fun ReasoningStepRow(
     onHandoffReady: (Boolean) -> Unit = {},
 ) {
     val colors = conversationColors()
+    val lineMotion = LocalWorkflowLineMotion.current
     Row(Modifier.fillMaxWidth().testTag("work-reasoning:${reported.itemId}").drawBehind {
         if (showConnector) drawLine(colors.line, Offset(5.dp.toPx(), 27.dp.toPx()),
-            Offset(5.dp.toPx(), size.height), 1.dp.toPx())
+            Offset(5.dp.toPx(), minOf(size.height,
+                27.dp.toPx() + (size.height + lineMotion.spacingAfter.toPx() - 27.dp.toPx()) * (lineMotion.outgoing?.fraction() ?: 1f))), 1.dp.toPx())
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp)) {
             val complete = reported.activeSinceNanos == null
             Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
                 .semantics { stateDescription = if (complete) "已思考" else "正在思考" }
+                .workflowCompletion("reasoning:${reported.itemId}", complete)
                 .clip(CircleShape).then(if (complete) Modifier.background(colors.success)
                     else Modifier.border(1.5.dp, colors.accent, CircleShape)), contentAlignment = Alignment.Center) {
                 if (complete) Icon(DaiyuIcons.Check, "思考完成", Modifier.size(8.dp), tint = Color.White)

@@ -63,6 +63,14 @@ jobs:
               result = unittest.TextTestRunner(verbosity=2).run(suite)
               assert result.wasSuccessful() and not result.skipped, pattern
               records.append(dict(pattern=pattern, tests=result.testsRun, skipped=0))
+          import sys
+          sys.path.insert(0, 'tests')
+          gate = 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope'
+          suite = unittest.TestLoader().loadTestsFromName(gate)
+          assert suite.countTestCases() == 1, gate
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped, gate
+          records.append(dict(pattern=gate, tests=result.testsRun, skipped=0))
           Path('child-result-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
           PYTEST
           python3 scripts/verify_boundaries.py

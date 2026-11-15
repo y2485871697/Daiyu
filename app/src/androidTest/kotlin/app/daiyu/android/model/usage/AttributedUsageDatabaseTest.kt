@@ -60,6 +60,24 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         DatabaseTransactions { database.readableDatabase }.run { RecordedUsageReader.readAttributed(it, conversation, budget) }
     private fun rejects(work: () -> Unit) { try { work(); fail("must reject") } catch (_: Exception) {} }
 
+    fun testMainRequestSequenceIgnoresReportedSummaryRequests() {
+        val owner = parent(); val child = task(owner)
+        val base = checkpoint(child)
+        val first = checkNotNull(base.request)
+        val summary = RequestCheckpoint("summary", "summary-attempt", base.owner, RequestOperation.NEXT)
+        val next = RequestCheckpoint("second-main", "next-attempt", base.owner, RequestOperation.NEXT)
+        val reported = base.copy(context = RunContextCheckpoint(summaries = listOf(summary)),
+            usageRequests = listOf(first), usage = base.usage +
+                RequestUsageCheckpoint(summary, ModelEvent.Usage(1, 2), UsageRequestSource.SUMMARY))
+        runtime.childUsage.record(child, reported, ChildRequestModel("provider-a", "model-a"))
+        runtime.childUsage.record(child, reported.copy(revision = 2, request = next,
+            usageRequests = listOf(first, next)), ChildRequestModel("provider-b", "model-b"))
+        database.readableDatabase.rawQuery("SELECT request_sequence,api_model_snapshot FROM child_request_usage WHERE request_id=?",
+            arrayOf(next.requestId)).use {
+            assertTrue(it.moveToFirst()); assertEquals(2, it.getInt(0)); assertEquals("model-b", it.getString(1))
+        }
+    }
+
     fun testSummaryAdmissionOnlyIsMissingNotUnreadableAndIgnoredInsertFailsClosed() {
         val owner = parent(); val child = task(owner)
         val initial = checkpoint(child)

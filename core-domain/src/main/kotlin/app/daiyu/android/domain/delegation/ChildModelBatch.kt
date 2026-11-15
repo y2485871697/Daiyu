@@ -438,7 +438,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             if (lease?.leaveBoundary() == false) continue
                                             val assignedProfile = selectedModel.profileId ?: assignment.profileId
                                             if (record.assignedProfileId != assignedProfile) {
-                                                record = checkNotNull(store?.reassigned(record, assignedProfile, record.display)) { "child_assignment_unconfirmed" }
+                                                record = checkNotNull(store?.reassigned(record, assignedProfile, record.display)) { "child_assignment_unconfirmed" }.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null)
                                             }
                                             store?.selected(record, selectedModel.display)
                                             record = record.copy(display = selectedModel.display)
@@ -459,6 +459,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_OPEN)
                                         val transport = try { port.open(history, definitions) }
                                         catch (failure: Exception) {
+                                            trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_FAILED)
                                             executionFailure = failure
                                             requestFailure = failure as? ModelRequestException
                                             throw failure
@@ -567,7 +568,10 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                         continuing = true
                                                     }
                                                 }
-                                                rejected?.let { throw it }
+                                                rejected?.let {
+                                                    trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_FAILED)
+                                                    throw it
+                                                }
                                             }
                                         }
                                     }

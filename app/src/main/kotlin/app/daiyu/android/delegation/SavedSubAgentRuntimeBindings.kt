@@ -86,10 +86,11 @@ internal class SavedSubAgentRuntimeBindings(
             val lock = Any()
             var assigned = binding.profile
             var last = original
-            val guard = runtimeStart?.let { start -> CommittedProfileBinding(start, binding.profile) { _, candidate ->
+            val guard = runtimeStart?.let { start -> CommittedProfileBinding(start, binding.profile) { previous, candidate ->
                 runCatching {
-                    val saved = ModelFactory.snapshot(resolveSavedModel(candidate.providerId, candidate.modelId))
-                    identity(candidate.providerId, saved) == last.modelIdentity
+                    fun identityOf(profile: SubAgentProfile) = identity(profile.providerId,
+                        ModelFactory.snapshot(resolveSavedModel(profile.providerId, profile.modelId)))
+                    identityOf(previous) == identityOf(candidate)
                 }.getOrDefault(false)
             } }
             var lifetime = currentLifetime?.invoke(assigned.id)

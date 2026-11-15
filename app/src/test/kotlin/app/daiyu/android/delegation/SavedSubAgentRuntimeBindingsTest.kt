@@ -112,6 +112,43 @@ class SavedSubAgentRuntimeBindingsTest {
         }
     }
 
+    @Test fun committedPresetUsesTheEditedSelectionEvenWithoutAnIntermediateRequest() {
+        for (matchesEdited in listOf(true, false)) {
+            val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+            repository.update(owner) { config }
+            val changed = child.copy(id = "edited-record", modelId = "edited-api-model")
+            val source = listOf(provider.copy(models = listOf(child, changed)))
+            val preset = repository.addPreset("replacement")
+            repository.update(SubAgentConfigKey.Preset(preset.id)) {
+                it.copy(profiles = listOf(profile.copy(id = "replacement",
+                    modelId = if (matchesEdited) changed.id else child.id)))
+            }
+            val resolve: (String, String) -> ModelSettings = { _, id ->
+                if (id == changed.id) saved.copy(model = changed.modelId) else saved
+            }
+            val bindings = SavedSubAgentRuntimeBindings { noNetwork }
+            fun latest() = repository.snapshot(owner)
+            val definition = bindings.freeze(owner, latest(), source, resolve,
+                latestConfig = ::latest,
+                latestModel = { id -> bindings.freeze(owner, latest(), source, resolve).getValue(id) },
+                runtimeStart = repository.openRuntime(owner)).getValue(profile.id)
+            repository.update(owner) { it.copy(profiles = listOf(profile.copy(modelId = changed.id))) }
+            repository.applyPreset(owner, preset.id)
+            assertEquals(matchesEdited, definition.isValid())
+            if (matchesEdited) {
+                val selected = definition.current()
+                assertEquals("replacement", selected.profileId)
+                assertEquals(changed.modelId, selected.display?.modelId)
+            } else {
+                repository.update(SubAgentConfigKey.Preset(preset.id)) {
+                    it.copy(profiles = listOf(profile.copy(id = "replacement", modelId = changed.id)))
+                }
+                repository.applyPreset(owner, preset.id)
+                assertFalse(definition.isValid())
+            }
+        }
+    }
+
     @Test fun savedSelectionWorksWithoutShieldAndOldDefinitionsKeepTheirSnapshot() {
         var current = saved
         val captured = mutableListOf<ProviderSnapshot>()

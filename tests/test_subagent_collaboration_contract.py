@@ -364,13 +364,19 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
 
     def test_both_new_request_paths_freeze_and_check_without_mutating_old_definitions(self):
         controller = (SRC / 'ChatController.kt').read_text()
-        self.assertEqual(2, controller.count('freezeSavedChildModels(key) { provider ->'))
         self.assertIn('models.isCurrent()', controller)
         self.assertIn('childPreparation.isCurrent()', controller)
         direct = controller.split('private fun directChildTaskPinned(', 1)[1].split('private fun pruneBackgroundRuns()', 1)[0]
+        self.assertEqual(1, direct.count('freezeSavedChildModels(key, runModel = factory)'))
+        self.assertIn('directChildFactory = factory', direct)
         self.assertLess(direct.index('models.isCurrent()'), direct.index('database.send('))
         self.assertIn('Rejected("child_model_configuration_changed")', direct)
         prepared = controller.split('private fun sendPrepared(', 1)[1]
+        self.assertEqual(1, prepared.count('freezeSavedChildModels(key, runModel = childRunFactory)'))
+        for entry in (direct, prepared):
+            self.assertIn('sessionModel?.invoke(provider, assistantContext,', entry)
+            self.assertIn('assistantModel?.invoke(provider, assistantContext)', entry)
+            self.assertIn('UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)', entry)
         self.assertLess(prepared.index('childPreparation.isCurrent()'), prepared.index('val mayCommit=synchronized(this)'))
         failure = prepared.split('childPreparation.isCurrent()', 1)[1].split('\n        }', 1)[0]
         self.assertIn('closeUnacceptedTools(token, tools, conversation?.id, conversationId)', failure)
@@ -380,11 +386,20 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
             self.assertIn(check, helper)
         binding = (SRC / 'delegation/SavedSubAgentRuntimeBindings.kt').read_text()
         create = binding.split('val original = ChildModelDefinition(', 1)[1]
-        self.assertIn('runModel(binding.child)', create)
+        original = create.split('\n            val lock = Any()', 1)[0]
+        self.assertIn('runModel(binding.child)', original)
+        self.assertIn('latest = null, selection = binding.child', original)
+        self.assertNotIn('resolveSavedModel', original)
         self.assertIn('child_profile_removed_or_role_changed', create)
         self.assertNotIn('else original', create)
-        self.assertLess(create.index('val selected = latestModel(binding.profile.id)'), create.index('check(latestConfig() == next)'))
-        self.assertNotIn('resolveSavedModel', create)
+        latest = create.split('latest = { synchronized(lock) {', 1)[1].split('}, selection = binding.child', 1)[0]
+        self.assertIn('check(currentBinding()) { "child_profile_removed_or_role_changed" }', latest)
+        self.assertIn('check(profile.role == binding.profile.role)', latest)
+        self.assertLess(latest.index('val resolved = latestModel(profile.id)'), latest.index('check(latestConfig() == next'))
+        self.assertIn('guard.current()?.revision == guardBefore?.revision', latest)
+        self.assertIn('resolved.also { last = it }', latest)
+        self.assertIn('if (deletedSelection()) last else throw failure', latest)
+        self.assertNotIn('resolveSavedModel', latest)
 
 
 if __name__ == '__main__':

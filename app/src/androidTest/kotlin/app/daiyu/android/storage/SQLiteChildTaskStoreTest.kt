@@ -64,7 +64,7 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
                 parent.assistantMessageId.value, "run_child_models", call)
             val records = tasks(parent, count).map { it.copy(owner = it.owner.copy(taskGroupId = group)) }
             store.enqueue(parent, records)
-            val read = (store as SQLiteChildTaskStore).forCall(parent.conversationId.value,
+            val read = SQLiteChildTaskStore(db).forCall(parent.conversationId.value,
                 parent.runId.value, parent.assistantMessageId.value, "run_child_models", call)
             assertEquals(records, read)
             assertEquals((0 until count).toList(), read.map { it.index })
@@ -512,7 +512,9 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         assertEquals(ChildModelRole.REVIEW, next.originalRole); assertEquals(1L, next.revision)
         assertEquals(next, store.get(record.owner))
         assertNull(store.reassigned(record, "stale", record.display))
-        store.finished(next.copy(status = ChildTaskStatus.QUEUED), ChildTaskStatus.COMPLETED, "retained result")
+        val normalized = next.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null)
+        store.selected(normalized, next.display)
+        store.finished(normalized, ChildTaskStatus.COMPLETED, "retained result")
         assertEquals("replacement", store.get(record.owner)!!.assignedProfileId)
         assertEquals("retained result", store.get(record.owner)!!.text)
     }

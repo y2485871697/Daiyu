@@ -142,15 +142,22 @@ class ChildModelBatchTest {
     @Test fun transportCannotSwallowPolicyViolationAndReturnConfirmed() {
         for (bad in listOf<ModelEvent>(ModelEvent.TextDelta("t", "x".repeat(65537)),
             ModelEvent.ToolReady(ToolInvocation(ToolCallId("evil"), "write_file", "{}")))) {
+            val events = java.util.Collections.synchronizedList(mutableListOf<ChildTaskDiagnosticEvent>())
+            val opens = AtomicInteger()
             val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) {
+                opens.incrementAndGet()
                 port { _, sink ->
                     sink(ModelEvent.TextFinal("good", "initial valid text"))
                     try { sink(bad) } catch (_: Exception) {}
                     try { sink(ModelEvent.TextFinal("late", "must not become success")) } catch (_: Exception) {}
                 }
-            })))
-            try { assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Unknown) }
-            finally { batch.close() }
+            }), diagnostics = ChildTaskDiagnostics { events.add(it) }))
+            try {
+                assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Unknown)
+                assertEquals(1, opens.get())
+                assertEquals(1, events.count { it.phase == ChildTaskDiagnosticPhase.REQUEST_FAILED })
+                assertFalse(events.any { it.phase == ChildTaskDiagnosticPhase.REQUEST_COMPLETED })
+            } finally { batch.close() }
         }
     }
 
@@ -337,11 +344,17 @@ class ChildModelBatchTest {
     @Test fun confirmedRejectionFromOpenHasAConfirmedFailureReceiptWithoutRetry() {
         val opens = AtomicInteger(); val records = Records()
         val child = ModelPort { opens.incrementAndGet(); throw ModelRequestException(ModelFailure.AUTHENTICATION) }
-        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }), store = records))
+        val events = java.util.Collections.synchronizedList(mutableListOf<ChildTaskDiagnosticEvent>())
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }.routed("provider", "actual-model")),
+            store = records, diagnostics = ChildTaskDiagnostics { events.add(it) }))
         try {
             val result = batch.execute(context(), listOf(ChildModelTask("one", "task"))) as ExecutionReceipt.Confirmed
             assertTrue(result.isError); assertEquals(1, opens.get())
             assertEquals(ChildTaskStatus.FAILED, records.rows.values.single().status)
+            val requests = events.filter { it.phase in setOf(ChildTaskDiagnosticPhase.REQUEST_OPEN, ChildTaskDiagnosticPhase.REQUEST_FAILED) }
+            assertEquals(listOf(ChildTaskDiagnosticPhase.REQUEST_OPEN, ChildTaskDiagnosticPhase.REQUEST_FAILED), requests.map { it.phase })
+            assertTrue(requests.all { it.model == ChildRequestModel("provider", "actual-model") })
+            assertFalse(events.any { it.phase in setOf(ChildTaskDiagnosticPhase.FIRST_EVENT, ChildTaskDiagnosticPhase.REQUEST_COMPLETED) })
         } finally { batch.close() }
     }
 

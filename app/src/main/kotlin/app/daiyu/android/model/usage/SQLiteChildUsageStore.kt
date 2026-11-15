@@ -59,7 +59,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 }
             }
             check(records.map { it.request.requestId }.containsAll(priorIds)) { "child_usage_snapshot_lost_request" }
-            records.forEachIndexed { index, record ->
+            records.forEach { record ->
                 check(priorSources[record.request.requestId]?.let { it == record.source.name } != false) {
                     "child_usage_request_source_changed"
                 }
@@ -79,7 +79,8 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                     if (record.source == app.daiyu.android.domain.runtime.UsageRequestSource.MAIN &&
                         checkpoint.request?.requestId == record.request.requestId && model != null) {
                         values.put("provider_id_snapshot", model.providerId); values.put("api_model_snapshot", model.modelId)
-                        values.put("requested_at_ms", System.currentTimeMillis()); values.put("request_sequence", index + 1)
+                        values.put("requested_at_ms", System.currentTimeMillis())
+                        values.put("request_sequence", checkpoint.usageRequests.indexOfFirst { it.requestId == record.request.requestId } + 1)
                         values.put("assigned_profile_snapshot", task.assignedProfileId)
                         values.put("original_role_snapshot", task.originalRole?.name)
                     }

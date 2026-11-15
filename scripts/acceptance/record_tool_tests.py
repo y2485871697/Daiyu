@@ -629,7 +629,31 @@ WORKSPACE_GESTURE_MODULES = (
 )
 
 
+GENERATION_PORT_PLATFORM_CLASSES = (
+    'app.daiyu.android.GenerationInputImportTest',
+    'app.daiyu.android.storage.SQLiteGenerationAttemptStoreTest',
+    'app.daiyu.android.storage.SQLiteGenerationOutputStoreTest',
+    'app.daiyu.android.integration.tools.RunGenerationToolsDeviceTest',
+    'app.daiyu.android.ControllerGenerationResourcesTest',
+    'app.daiyu.android.ControllerGenerationIntegrationTest',
+    'app.daiyu.android.storage.GenerationProtocolMigrationTest',
+)
+GENERATION_PORT_MODULES = (
+    'test_generation_port_scope',
+    'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt',
+    'test_frozen_smoke_source',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+    'test_smoke_boot.ProcessTests.test_four_shards_are_disjoint_deterministic_and_complete',
+    'test_smoke_boot.ProcessTests.test_strict_shared_result_rejects_ambiguous_and_failed_protocol',
+    'test_smoke_boot.ProcessTests.test_targeted_count_mismatch_or_runner_failure_is_not_success',
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(GENERATION_PORT_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *GENERATION_PORT_MODULES, "-v"], "generation-port-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == WORKSPACE_GESTURE_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *WORKSPACE_GESTURE_MODULES, "-v"], "workspace-gesture-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
@@ -828,9 +852,16 @@ def record(python):
     if scope != "full":
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
+    validation_cwd = None
+    if scope == "generation-port-targeted":
+        validation_cwd = Path(__file__).resolve().parents[2]
+        child_env["PYTHONPATH"] = str(validation_cwd / "tests") + os.pathsep + os.environ.get("PYTHONPATH", "")
     log = root / "unittest.log"
     with log.open("wb") as output:
-        code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT, env=child_env)
+        if validation_cwd is None:
+            code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT, env=child_env)
+        else:
+            code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT, env=child_env, cwd=validation_cwd)
     result = dict(identity=identity, command=command, exit_code=code)
     if sha != workflow_sha:
         result["workflow_sha"] = workflow_sha

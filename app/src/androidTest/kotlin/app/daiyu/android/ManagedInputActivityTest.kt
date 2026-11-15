@@ -318,6 +318,46 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     fun testActivityFieldsSwitchAndOutsideButtonRunsOnce() = exerciseFields(false)
     fun testOffsetDialogFieldsUseTheirOwnWindowAndScreenBounds() = exerciseFields(true)
 
+    private fun awaitHomeWindowSettled() {
+        val automation = instrumentation.uiAutomation
+        val oldFlags = automation.serviceInfo.flags
+        data class HomeFrame(val windowId: Int, val bounds: android.graphics.Rect)
+        var previous: HomeFrame? = null
+        var stable = 0
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            awaitControl("external app focused with no IME window in two polls") {
+                var home: HomeFrame? = null
+                var imeShown = false
+                for (window in automation.windows) {
+                    try {
+                        val bounds = android.graphics.Rect()
+                        window.getBoundsInScreen(bounds)
+                        if (window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD && !bounds.isEmpty)
+                            imeShown = true
+                        if (window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION &&
+                            window.isFocused && !bounds.isEmpty) {
+                            val root = window.root
+                            try {
+                                val owner = root?.packageName?.toString()
+                                if (!owner.isNullOrEmpty() && owner != activity.packageName)
+                                    home = HomeFrame(window.id, bounds)
+                            } finally { root?.recycle() }
+                        }
+                    } finally { window.recycle() }
+                }
+                val next = home.takeUnless { imeShown }
+                stable = if (next != null && next == previous) stable + 1 else if (next != null) 1 else 0
+                previous = next
+                stable >= 2
+            }
+        } finally {
+            automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
+        }
+    }
+
     private fun fieldHomeRoundTrip(tag: String, hiddenBeforeHome: Boolean) {
         val original = activity
         val task = original.taskId
@@ -354,6 +394,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                 assertTrue(instrumentation.uiAutomation.performGlobalAction(
                     android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
                 assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                awaitHomeWindowSettled()
             } finally {
                 instrumentation.runOnMainSync { original.lifecycle.removeObserver(observer) }
                 restoreOriginalHost(original)
@@ -386,14 +427,28 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         for ((initial, later) in listOf(0 to null, resize to pan, resize to (pan or hidden), unchanged to null)) {
             lateinit var dialog: android.app.Dialog
             lateinit var box: android.widget.FrameLayout
+            lateinit var decor: android.view.View
             mainThread {
+                val density = activity.resources.displayMetrics.density
                 dialog = android.app.Dialog(activity)
-                box = android.widget.FrameLayout(activity)
+                box = android.widget.FrameLayout(activity).apply {
+                    addView(android.widget.TextView(activity).apply { text = "Window IME policy fixture" })
+                }
                 dialog.setContentView(box)
                 dialog.show()
+                checkNotNull(dialog.window).setLayout((280 * density).toInt(), (160 * density).toInt())
+                decor = checkNotNull(dialog.window).decorView
             }
             try {
-                awaitStableWindowFrame(box) { box.windowToken }
+                awaitControl("policy Dialog attached and window-focused") {
+                    dialog.isShowing && decor.isAttachedToWindow && decor.hasWindowFocus() &&
+                        decor.windowToken != null && decor.width > 0 && decor.height > 0 &&
+                        box.isAttachedToWindow && box.windowToken == decor.windowToken &&
+                        box.width > 0 && box.height > 0
+                }
+                awaitStableWindowFrame(decor) {
+                    decor.windowToken?.takeIf { box.windowToken == it && box.width > 0 && box.height > 0 }
+                }
                 mainThread {
                     val window = checkNotNull(dialog.window)
                     window.attributes = window.attributes.apply { softInputMode = initial }

@@ -98,9 +98,21 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertLess(home.index('assertEquals(1, selection.end)'), home.index('GLOBAL_ACTION_HOME'))
         self.assertNotIn('assertTrue(it(5, 1, true))', home)
         self.assertIn('!= wantedSelection', home)
+        self.assertLess(home.index('stopped.await('), home.index('awaitHomeWindowSettled()'))
+        self.assertLess(home.index('awaitHomeWindowSettled()'), home.index('restoreOriginalHost(original)'))
+        background = text.split('private fun awaitHomeWindowSettled()', 1)[1].split('private fun fieldHomeRoundTrip', 1)[0]
+        for token in ('window.isFocused', 'TYPE_APPLICATION', 'TYPE_INPUT_METHOD',
+                      '!owner.isNullOrEmpty() && owner != activity.packageName', 'home.takeUnless { imeShown }',
+                      'root?.recycle()', 'window.recycle()', 'FLAG_RETRIEVE_INTERACTIVE_WINDOWS',
+                      'stable >= 2', 'flags = oldFlags'):
+            self.assertIn(token, background)
+        for token in ('showSoftInput', 'hideSoftInput', 'requestFocus', 'Thread.sleep'):
+            self.assertNotIn(token, background)
         self.assertIn('testWindowImePolicyRestoresZeroAndKeepsLaterWindowModes', text)
         self.assertIn('listOf(0 to null, resize to pan, resize to (pan or hidden), unchanged to null)', text)
-        self.assertIn('awaitStableWindowFrame(box) { box.windowToken }', text)
+        self.assertIn('awaitControl("policy Dialog attached and window-focused")', text)
+        self.assertIn('awaitStableWindowFrame(decor)', text)
+        self.assertIn('box.width > 0 && box.height > 0', text)
         self.assertIn('assertTrue(field.isAttachedToWindow)', text)
 
     def test_registration_cleanup_preserves_later_window_wrappers(self):

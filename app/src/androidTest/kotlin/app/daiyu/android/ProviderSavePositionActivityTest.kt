@@ -161,7 +161,7 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
                 val draft = draftState.value
                 val latest by rememberUpdatedSettingsDraft(draft)
                 currentIdentity = { latest === draft }
-                ModelSettingsScreen(draft, { draftState.value = it }, { saves++ }, {},
+                ModelSettingsScreen(draft, { draftState.value = it }, { saves++ }, onFetchCatalog = {}, onBack = {},
                     providerName = "Equal provider", pageTitle = "Equal provider", showCatalog = false)
             }
         } }

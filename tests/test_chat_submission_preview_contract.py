@@ -101,7 +101,8 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         controller = (APP / 'ChatController.kt').read_text()
         action = controller.split('internal fun messageAction(', 1)[1].split('internal fun skillManagement()', 1)[0]
         self.assertLess(action.index('if (!idleAvailable()'), action.index('regenerationPreview = RegenerationPreview(target)'))
-        self.assertLess(action.index('regenerationPreview = RegenerationPreview(target)'), action.index('executor.execute'))
+        self.assertIn('val actionExecutor = if (stableBranch) messageBranchExecutor else executor', action)
+        self.assertLess(action.index('regenerationPreview = RegenerationPreview(target)'), action.index('actionExecutor.execute'))
         self.assertIn('acceptedAssistantId = token?.admittedVoiceOwner?.id?.value', action)
         self.assertIn('regenerationPreview?.target === target', action)
         self.assertIn('RegenerationSendOutcome.ACCEPTED && acceptedAssistantId != null', action)

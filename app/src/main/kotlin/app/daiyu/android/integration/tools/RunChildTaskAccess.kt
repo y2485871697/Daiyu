@@ -22,13 +22,13 @@ internal class RunChildTaskAccess(
 ) {
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = ToolDefinition("inspect_child_tasks", 1,
-            "读取本会话已有子任务、进度和结果（包括旧配置、暂停或停止的任务），以及新委派可用的当前配置。只读，不自动继续或重派。进度仅保留于当前进程。" + SubAgentDescriptor.initialDescription(initialProfiles),
+            "读取本会话已有子任务、进度和结果（包括旧配置、暂停或停止的任务），以及新委派可用的当前配置。只读，不自动继续或重派。进度仅保留于当前进程。max_chars为可选正整数，默认每条任务的结果和进度各1024字符；超过1024时按1024读取，使用返回的next偏移继续分页。" + SubAgentDescriptor.initialDescription(initialProfiles),
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("offset", ArgumentType.Integer(0, 65536), required = false),
-                ArgumentField("max_chars", ArgumentType.Integer(1, 1024), required = false))))
+                ArgumentField("max_chars", ArgumentType.Integer(1, Long.MAX_VALUE), required = false))))
         override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { context ->
             val offset = if (arguments.contains("offset")) arguments.integer("offset").toInt() else 0
-            val maxChars = if (arguments.contains("max_chars")) arguments.integer("max_chars").toInt() else 1024
+            val maxChars = if (arguments.contains("max_chars")) arguments.integer("max_chars").coerceAtMost(1024L).toInt() else 1024
             if (context.owner.conversationId.value != conversationId || context.cancelled())
                 return@contextual ExecutionReceipt.NotExecuted("child_conversation_mismatch")
             val active = live().associateBy { it.record.owner }
@@ -118,7 +118,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("get_child_task", 1,
-            "按完整身份精确读取本会话任意已有子任务（不限最近20条）。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。",
+            "按完整身份精确读取本会话任意已有子任务（不限最近20条）。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果和进度各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),
@@ -126,12 +126,12 @@ internal class RunChildTaskAccess(
                 ArgumentField("child_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("assistant_message_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("offset", ArgumentType.Integer(0, 65536), required = false),
-                ArgumentField("max_chars", ArgumentType.Integer(1, 4096), required = false))))
+                ArgumentField("max_chars", ArgumentType.Integer(1, Long.MAX_VALUE), required = false))))
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val owner = ChildRunOwner(conversationId, arguments.text("parent_run_id"), arguments.text("task_group_id"),
                 arguments.text("generation").toLong(), arguments.text("child_run_id"), arguments.text("assistant_message_id"))
             val offset = if (arguments.contains("offset")) arguments.integer("offset").toInt() else 0
-            val maxChars = if (arguments.contains("max_chars")) arguments.integer("max_chars").toInt() else 4096
+            val maxChars = if (arguments.contains("max_chars")) arguments.integer("max_chars").coerceAtMost(4096L).toInt() else 4096
             return PreparedTool.contextual { context ->
                 if (context.owner.conversationId.value != conversationId || context.cancelled())
                     return@contextual ExecutionReceipt.NotExecuted("child_conversation_mismatch")

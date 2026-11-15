@@ -193,4 +193,76 @@ class RunChildTaskAccessTest {
         assertTrue(invoke(access, caller("conversation"), "control_child_task", arguments().toString()) is DispatchOutcome.NotExecuted)
         assertEquals(1, resumes.get())
     }
+
+    private fun queryArguments(name: String) = if (name == "inspect_child_tasks") JSONObject() else arguments().apply {
+        remove("parent_message_id"); remove("parent_owner_id"); remove("expected_revision"); remove("action")
+    }
+
+    @Test fun readOnlyQueryLengthsClampBeforeIntConversionAndKeepDefaultsAndSmallPages() {
+        val text = "result-".repeat(1300)
+        val partial = "progress-".repeat(1100)
+        val completed = old.copy(status = ChildTaskStatus.COMPLETED, text = text)
+        val access = RunChildTaskAccess("conversation", { listOf(completed) },
+            { completed.takeIf { row -> row.owner == it } }, { emptyList() }, { partial },
+            { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { emptySet() })
+        val owner = caller("conversation")
+        for ((name, limit) in listOf("inspect_child_tasks" to 1024, "get_child_task" to 4096)) {
+            val requests = listOf(null, 1L, 3L, limit.toLong(), limit + 1L, 6000L, 12000L, Int.MAX_VALUE + 1L, Long.MAX_VALUE)
+            for (requested in requests) {
+                val args = queryArguments(name).put("offset", 2)
+                if (requested != null) args.put("max_chars", requested)
+                val payload = JSONObject((invoke(access, owner, name, args.toString()) as DispatchOutcome.Confirmed).payload)
+                val row = if (name == "inspect_child_tasks") payload.getJSONArray("tasks").getJSONObject(0) else payload
+                val effective = requested?.coerceAtMost(limit.toLong())?.toInt() ?: limit
+                assertEquals(text.substring(2, 2 + effective), row.getString("text"))
+                assertEquals(partial.substring(2, 2 + effective), row.getString("progress"))
+                assertEquals(2 + effective, row.getInt("next_text_offset"))
+                assertEquals(2 + effective, row.getInt("next_progress_offset"))
+                assertEquals("COMPLETED", row.getString("status"))
+            }
+        }
+    }
+
+    @Test fun oversizedReadOnlyQueryPagesReachTheEndWithoutSkippingText() {
+        val text = "abcdefg".repeat(1300)
+        val partial = "12345".repeat(1300)
+        val completed = old.copy(status = ChildTaskStatus.COMPLETED, text = text)
+        val access = RunChildTaskAccess("conversation", { listOf(completed) }, { completed }, { emptyList() }, { partial },
+            { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { emptySet() })
+        val owner = caller("conversation")
+        for (name in listOf("inspect_child_tasks", "get_child_task")) {
+            val result = StringBuilder(); val progress = StringBuilder()
+            var offset = 0
+            while (true) {
+                val args = queryArguments(name).put("offset", offset).put("max_chars", 12000)
+                val payload = JSONObject((invoke(access, owner, name, args.toString()) as DispatchOutcome.Confirmed).payload)
+                val row = if (name == "inspect_child_tasks") payload.getJSONArray("tasks").getJSONObject(0) else payload
+                result.append(row.getString("text")); progress.append(row.getString("progress"))
+                if (row.isNull("next_text_offset") && row.isNull("next_progress_offset")) break
+                val next = maxOf(row.optInt("next_text_offset", offset), row.optInt("next_progress_offset", offset))
+                assertTrue(next > offset); offset = next
+            }
+            assertEquals(text, result.toString()); assertEquals(partial, progress.toString())
+        }
+    }
+
+    @Test fun invalidReadOnlyQueryLengthsAndForeignCallersStillCannotReadTaskState() {
+        val access = RunChildTaskAccess("conversation", { error("must not read records") },
+            { error("must not read source") }, { error("must not read live state") }, { error("must not read progress") },
+            { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { error("must not read profiles") })
+        val owner = caller("conversation")
+        for (name in listOf("inspect_child_tasks", "get_child_task")) {
+            for (invalid in listOf("0", "-1", "1.5", "true", JSONObject.quote("12000"), "[]", "9223372036854775808")) {
+                val base = queryArguments(name).toString().dropLast(1)
+                val args = base + (if (base.length > 1) "," else "") + JSONObject.quote("max_chars") + ":" + invalid + "}"
+                val rejected = invoke(access, owner, name, args) as DispatchOutcome.NotExecuted
+                assertEquals("invalid_arguments", rejected.code)
+            }
+            val args = queryArguments(name).put("max_chars", Long.MAX_VALUE).toString()
+            val foreign = invoke(access, caller("foreign"), name, args) as DispatchOutcome.NotExecuted
+            assertEquals("child_conversation_mismatch", foreign.code)
+            assertTrue(invoke(access, owner, name, args, capability = false) is DispatchOutcome.NotExecuted)
+        }
+    }
+
 }

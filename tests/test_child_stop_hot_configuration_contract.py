@@ -5,6 +5,19 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app/src/main/kotlin/app/daiyu/android"
 DOMAIN = ROOT / "core-domain/src/main/kotlin/app/daiyu/android/domain/delegation"
 class ChildStopHotConfigurationContractTest(unittest.TestCase):
+    def test_run_preparation_rejection_logs_bounded_frames_without_exception_payload(self):
+        controller = (APP / "ChatController.kt").read_text()
+        preparation = controller.split("val prepared = try {", 1)[1].split("val (owned, tools) = prepared", 1)[0]
+        rejected = preparation.rsplit("} catch (failure: Exception) {", 1)[1]
+        diagnostic = rejected.split("auxiliaryPort?.close()", 1)[0]
+        self.assertIn('android.util.Log.e("DaiyuRunPreparation"', diagnostic)
+        self.assertIn('failure.javaClass.name', diagnostic)
+        self.assertIn('failure.stackTrace.take(12)', diagnostic)
+        self.assertIn('${it.className}.${it.methodName}:${it.lineNumber}', diagnostic)
+        for payload in ('failure.message', 'failure.toString()', 'stackTraceToString(', 'printStackTrace('):
+            self.assertNotIn(payload, diagnostic)
+        self.assertIn('problem="运行准备失败";notifyChanged();return null', rejected)
+
     def test_three_action_menu_matches_preset_sheet_and_dismiss_preserves_pause(self):
         text = (APP / "MainActivity.kt").read_text().split("@Composable private fun ChildStopChoiceSurface()",1)[1].split("@Composable private fun UnknownBranchSurface()",1)[0]
         self.assertIn("ChildStopChoiceSheet(", text)

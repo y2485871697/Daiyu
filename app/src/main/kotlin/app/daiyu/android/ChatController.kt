@@ -4721,7 +4721,9 @@ class ChatController internal constructor(private val application:Application,
                 }
             }
             owned to tools
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            android.util.Log.e("DaiyuRunPreparation", "prepare_failed type=${failure.javaClass.name} frames=" +
+                failure.stackTrace.take(12).joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" })
             auxiliaryPort?.close()
             if(preparingTools!=null) closeUnacceptedTools(token, preparingTools, conversation?.id, conversationId)
             else {

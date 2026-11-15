@@ -1,19 +1,25 @@
 package app.daiyu.android
 
+import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.domain.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.components.LocalBottomSheetContent
 import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.components.UsageAction
@@ -42,6 +48,101 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
     }
 
     private fun bounds(tag: String) = node(tag).fetchSemanticsNode().boundsInRoot
+
+    private fun assertConversationDeleteAppearance() {
+        ui.onNodeWithText("删除会话").assertIsDisplayed()
+        ui.onNodeWithText("确认删除此会话及其消息？").assertDoesNotExist()
+        ui.onNodeWithText("取消").assertIsDisplayed()
+        ui.onNodeWithText("删除").assertIsDisplayed()
+        ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
+        val cancel = bounds("dialog-cancel")
+        val confirm = bounds("dialog-confirm")
+        val sheet = bounds("chat-selection-sheet")
+        val title = ui.onNodeWithText("删除会话").fetchSemanticsNode().boundsInRoot
+        assertEquals(cancel.width, confirm.width, 1f)
+        assertEquals(cancel.top, confirm.top, 1f)
+        assertEquals(sheet.center.x, title.center.x, 1f)
+        val density = node("chat-selection-sheet").fetchSemanticsNode().layoutInfo.density.density
+        assertEquals("no description or empty-body gap", 12f * density, cancel.top - title.bottom, 2f)
+        val pixels = captureScreenNode(node("dialog-confirm")).toPixelMap()
+        val expected = Color(0xFF92454F)
+        var red = 0
+        var white = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val pixel = pixels[x, y]
+            if (kotlin.math.abs(pixel.red - expected.red) < .025f &&
+                kotlin.math.abs(pixel.green - expected.green) < .025f &&
+                kotlin.math.abs(pixel.blue - expected.blue) < .025f) red++
+            if (x in pixels.width / 4 until pixels.width * 3 / 4 &&
+                y in pixels.height / 4 until pixels.height * 3 / 4 &&
+                pixel.red > .97f && pixel.green > .97f && pixel.blue > .97f) white++
+        }
+        assertTrue("workspace deletion red fill", red > pixels.width * pixels.height * .35f)
+        assertTrue("workspace deletion white label", white > 8)
+    }
+
+    fun testConversationDeleteMatchesWorkspaceWithoutDescription() {
+        val before = fixture.database.exportBackup()
+        val dismissals = AtomicInteger()
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
+            val open = mutableStateOf(true)
+            mount(dark, fontScale) {
+                if (open.value) DaiyuConfirmDialog("删除会话", "", "删除", true,
+                    onConfirm = { fail("appearance must not confirm") },
+                    onDismiss = { dismissals.incrementAndGet(); open.value = false },
+                    preview = true, deletionAppearance = true, showCloseButton = false)
+            }
+            assertConversationDeleteAppearance()
+            assertEquals(8f * menuDensity, bounds("dialog-confirm").left - bounds("dialog-cancel").right, 2f)
+            assertGap(bounds("chat-selection-sheet").bottom - bounds("dialog-confirm").bottom, 17f)
+            node("dialog-cancel").performClick()
+            ui.waitForIdle()
+            node("chat-selection-sheet").assertDoesNotExist()
+        }
+        assertEquals(4, dismissals.get())
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRealSidebarDeleteOnlyConfirmsTargetAndDismissalKeepsHistory() {
+        val target = fixture.database.create("default")
+        val sibling = fixture.database.create("default")
+        for (conversation in listOf(target, sibling)) {
+            val key = conversation.id.value
+            val user = Message(MessageId("$key-user"), conversation.id, RunId("$key-run"), Message.USER_ROLE,
+                listOf(MessageBlock.Text("q", "keep history for $key")), RunStatus.COMPLETED)
+            val answer = user.copy(id = MessageId("$key-answer"), role = Message.ASSISTANT_ROLE, status = RunStatus.RUNNING)
+            fixture.database.send(user, answer)
+            fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+        }
+        val originalIds = fixture.database.conversations().map { it.id }.toSet()
+        val siblingHistory = fixture.database.messages(sibling.id)
+        val before = fixture.database.exportBackup()
+        dismissIme()
+        mainThread { invokeHost(activity, "openSidebar") }
+        for (action in listOf("cancel", "back", "outside", "confirm")) {
+            mainThread { invokeHost(activity, "confirmDelete", target.id.value) }
+            awaitUniqueTag("chat-selection-sheet")
+            awaitNodeWindowFocus(node("chat-selection-sheet"))
+            ui.waitForIdle()
+            assertConversationDeleteAppearance()
+            when (action) {
+                "cancel" -> node("dialog-cancel").performClick()
+                "back" -> instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                "outside" -> node("preview-dialog-viewport").performTouchInput { click(Offset(2f, 2f)) }
+                "confirm" -> node("dialog-confirm").performClick()
+            }
+            ui.waitForIdle()
+            node("chat-selection-sheet").assertDoesNotExist()
+            if (action != "confirm") assertEquals(before, fixture.database.exportBackup())
+        }
+        awaitControl("only the confirmed conversation is removed") {
+            fixture.database.conversations().none { it.id == target.id }
+        }
+        assertEquals(originalIds - target.id, fixture.database.conversations().map { it.id }.toSet())
+        assertEquals(siblingHistory, fixture.database.messages(sibling.id))
+        assertEquals(0, fixture.opens.get())
+    }
 
     private fun assertGap(gap: Float, maxDp: Float) {
         assertTrue("adjacent content must not overlap: $gap", gap >= -1f)

@@ -112,7 +112,10 @@ internal fun DaiyuConfirmDialog(
         ChatSelectionSheet(title, onDismiss, showCloseButton = showCloseButton, footer = {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("dialog-cancel"), secondary = secondaryCancel)
             AssistantPreviewButton(confirmText, onConfirm, Modifier.weight(1f).testTag("dialog-confirm"), primary = !destructive, danger = destructive, deletionAppearance = deletionAppearance)
-        }) { Text(message, fontSize = 12.sp, lineHeight = 19.2.sp, modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) }
+        }) {
+            if (message.isNotBlank()) Text(message, fontSize = 12.sp, lineHeight = 19.2.sp,
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp))
+        }
         return
     }
     WindowDialog(show = true, title = title, summary = message, onDismissRequest = onDismiss) {

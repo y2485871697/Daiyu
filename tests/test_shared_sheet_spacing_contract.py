@@ -12,6 +12,27 @@ def source(path):
 
 
 class SharedSheetSpacingContractTest(unittest.TestCase):
+    def test_sidebar_delete_uses_workspace_appearance_without_confirmation_paragraph(self):
+        host = source("MainActivity.kt")
+        prompt = host.split("private class ConfirmPrompt(", 1)[1].split(": Prompt", 1)[0]
+        self.assertIn("val deletionAppearance: Boolean = false", prompt)
+        surface = host.split("@Composable private fun PromptSurface()", 1)[1].split("private fun dismissPrompt", 1)[0]
+        self.assertIn("deletionAppearance = current.deletionAppearance", surface)
+        target = host.split("private fun confirmDelete(id: String)", 1)[1].split("private fun editRetainedConversation", 1)[0]
+        self.assertIn('ConfirmPrompt("删除会话", "", "删除", true,', target)
+        self.assertIn("showCloseButton = false, deletionAppearance = true", target)
+        self.assertIn("action = { guard { deleteRetainedConversation(id) } }", target)
+        self.assertEqual(1, host.count("deletionAppearance = true"))
+        dialog = source("ui/components/DaiyuDialogs.kt")
+        self.assertIn("danger = destructive, deletionAppearance = deletionAppearance", dialog)
+        self.assertIn("if (message.isNotBlank()) Text(message", dialog)
+        reference = source("ui/components/WorkspaceEntryDialogs.kt")
+        self.assertIn("danger = true, deletionAppearance = true", reference)
+        shared = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/SharedSheetSpacingActivityTest.kt").read_text()
+        self.assertIn("testRealSidebarDeleteOnlyConfirmsTargetAndDismissalKeepsHistory", shared)
+        self.assertIn("testConversationDeleteMatchesWorkspaceWithoutDescription", shared)
+        self.assertIn("Color(0xFF92454F)", shared)
+
     def test_short_selection_content_wraps_without_a_page_opt_in(self):
         sheet = source("ui/screens/chat/conversation/ChatSelectionSheet.kt")
         self.assertIn("if (height == null) Modifier.heightIn(max = available)", sheet)

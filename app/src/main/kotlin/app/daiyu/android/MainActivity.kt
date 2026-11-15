@@ -1848,7 +1848,8 @@ class MainActivity : ComponentActivity() {
         override val backup: Boolean = false) : Prompt
     private class ConfirmPrompt(val title: String, val message: String, val confirm: String,
         val destructive: Boolean = false, val action: () -> Unit, override val backup: Boolean = false,
-        val showCloseButton: Boolean = true, val secondaryCancel: Boolean = false) : Prompt
+        val showCloseButton: Boolean = true, val secondaryCancel: Boolean = false,
+        val deletionAppearance: Boolean = false) : Prompt
     private var prompt by mutableStateOf<Prompt?>(null)
     private var lastOpenedBackupUri: String? = null
     // One validated, bounded URI only: never an Intent/ClipData, descriptor, saved state or grant.
@@ -5775,6 +5776,7 @@ class MainActivity : ComponentActivity() {
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
             is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
                 preview = retainedPage == "chat", showCloseButton = current.showCloseButton, secondaryCancel = current.secondaryCancel,
+                deletionAppearance = current.deletionAppearance,
                 onConfirm = { confirmPrompt(current) }, onDismiss = { if (valid()) dismissPrompt(current) })
         }
     }
@@ -6639,8 +6641,8 @@ class MainActivity : ComponentActivity() {
         }, mutation = { controller.database.delete(conversation.id) })
     }
     private fun confirmDelete(id: String) {
-        prompt = ConfirmPrompt("删除会话", "确认删除此会话及其消息？", "删除", true,
-            action = { guard { deleteRetainedConversation(id) } }, showCloseButton = false)
+        prompt = ConfirmPrompt("删除会话", "", "删除", true,
+            action = { guard { deleteRetainedConversation(id) } }, showCloseButton = false, deletionAppearance = true)
     }
     private fun editRetainedConversation(item: ConversationSummaryUi, folder: Boolean) { guard { editConversation(item.id, folder) } }
     private fun editConversation(id: String, folder: Boolean) {

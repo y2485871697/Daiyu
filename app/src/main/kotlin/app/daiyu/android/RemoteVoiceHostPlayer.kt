@@ -58,8 +58,9 @@ internal class RemoteVoiceHostPlayer(
         releaseOnMain(handler) { accepted = playOnMain(owner, requestId, text) }
         return accepted
     }
+    private fun speechCurrent(): Boolean = runtime.current(frozen) && frozen.upload?.current() != false
     private fun playOnMain(owner: String, requestId: String, text: String): Boolean {
-        if (closed || !scope.isActive || releaseFailure != null || this.owner != owner || !runtime.current(frozen)) return false
+        if (closed || !scope.isActive || releaseFailure != null || this.owner != owner || !speechCurrent()) return false
         val config = frozen.configuration
         if (config.voice.startsWith("mimo-local-") && frozen.reference == null) return false
         releaseMedia()
@@ -80,9 +81,9 @@ internal class RemoteVoiceHostPlayer(
                 }
                 var cap = frozen.playbackLimitMs
                 val bytes = withContext(Dispatchers.IO) {
-                    check(runtime.current(frozen))
+                    check(speechCurrent())
                     val reference = frozen.reference?.let { value -> PersonalVoiceReference { id, provider ->
-                        check(id == config.voice && provider == config.referenceOwner() && runtime.current(frozen))
+                        check(id == config.voice && provider == config.referenceOwner() && speechCurrent())
                         value
                     } }
                     // This wrapper is the last application boundary before actual HTTP execute.
@@ -92,7 +93,7 @@ internal class RemoteVoiceHostPlayer(
                         check(!closed && runtime.referenceStillCurrent(frozen))
                         cap = frozen.upload?.consume(requestId, text) ?: frozen.playbackLimitMs
                         check(cap in 1..frozen.playbackLimitMs)
-                        check(!closed && runtime.current(frozen))
+                        check(!closed && speechCurrent())
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
                         try {
                             transport.execute(request, maxBytes).also {
@@ -112,7 +113,7 @@ internal class RemoteVoiceHostPlayer(
                 diagnostics?.recordAsync(DiagnosticEvent.SPEECH_AUDIO_DECODED)
                 ensureActive()
                 if (closed || mutable.value.requestId != requestId) return@launch
-                if (!runtime.current(frozen)) {
+                if (!speechCurrent()) {
                     finish(owner, requestId, false)
                     return@launch
                 }
@@ -130,7 +131,7 @@ internal class RemoteVoiceHostPlayer(
                 next.setVolume(1f, 1f)
                 next.isLooping = false
                 next.setOnPreparedListener { source ->
-                    if (closed || player !== source || !runtime.current(frozen)) {
+                    if (closed || player !== source || !speechCurrent()) {
                         if (player === source) finish(owner, requestId, false)
                     } else try {
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_NATIVE_PREPARED)
@@ -151,7 +152,7 @@ internal class RemoteVoiceHostPlayer(
                             return@setOnPreparedListener
                         }
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_FOCUS_GRANTED)
-                        if (closed || player !== source || !runtime.current(frozen)) {
+                        if (closed || player !== source || !speechCurrent()) {
                             if (player === source) finish(owner, requestId, false)
                             return@setOnPreparedListener
                         }
@@ -207,16 +208,16 @@ internal class RemoteVoiceHostPlayer(
                 val account = if (frozen.doubaoResolver != null) frozen.doubaoResolver.invoke() else frozen.doubaoPersonal
                 DoubaoPcmSynthesis(stream).synthesize(frozen.configuration.speech(), text, frozen.configuration.voice, account,
                     beforeSend = {
-                        check(!closed && runtime.referenceStillCurrent(frozen) && runtime.current(frozen))
+                        check(!closed && runtime.referenceStillCurrent(frozen) && speechCurrent())
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
                     }) { bytes ->
                     ensureActive()
-                    check(!closed && runtime.current(frozen))
+                    check(!closed && speechCurrent())
                     if (!receivedAudio) {
                         receivedAudio = true
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_STREAM_AUDIO_RECEIVED)
                         withContext(Dispatchers.Main.immediate) {
-                            check(!closed && mutable.value.requestId == requestId && runtime.current(frozen))
+                            check(!closed && mutable.value.requestId == requestId && speechCurrent())
                             var leasedOutput: StreamingPcmPlayer? = null
                             val lease = SpeechAudioFocus(context, attributes, handler) {
                                 if (!closed && leasedOutput != null && pcm === leasedOutput) {
@@ -233,7 +234,7 @@ internal class RemoteVoiceHostPlayer(
                             lateinit var created: StreamingPcmPlayer
                             created = pcmFactory(attributes) {
                                 handler.post {
-                                    if (!closed && pcm === created && mutable.value.requestId == requestId && runtime.current(frozen)) {
+                                    if (!closed && pcm === created && mutable.value.requestId == requestId && speechCurrent()) {
                                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_STREAM_PLAYBACK_STARTED)
                                         mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.SPEAKING)
                                         if (closed || pcm !== created) return@post
@@ -257,7 +258,7 @@ internal class RemoteVoiceHostPlayer(
                 diagnostics?.recordAsync(DiagnosticEvent.SPEECH_STREAM_DRAINED)
             }
             currentCoroutineContext().ensureActive()
-            if (!closed && pcm === output && mutable.value.requestId == requestId && runtime.current(frozen)) {
+            if (!closed && pcm === output && mutable.value.requestId == requestId && speechCurrent()) {
                 finish(owner, requestId, true)
             }
         } catch (cancelled: CancellationException) {

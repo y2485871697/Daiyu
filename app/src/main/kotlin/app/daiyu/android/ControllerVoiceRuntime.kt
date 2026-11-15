@@ -71,6 +71,7 @@ internal typealias VoiceProfile = app.daiyu.android.voice.VoicePlaybackProfile
 /** Called at the transport boundary, once per actual HTTP execute, never at queue admission. */
 internal fun interface PersonalCascadeUpload {
     fun consume(requestId: String, exactText: String): Long
+    fun current(): Boolean = true
 }
 
 internal class FrozenVoiceSpeech(

@@ -89,6 +89,53 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         assertTrue(label, before.indices.count { before[it] != after[it] } > 3)
     }
 
+    fun testBothCallEntryModesIgnoreOngoingGenerationListeningAndPressAnimation() {
+        var screen by mutableStateOf(ChatScreenState("call-entry", conversationKey = "call-entry"))
+        mountChat { screen }
+        for (mode in listOf(ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO)) {
+            mainThread { screen = screen.copy(composer = ComposerUi(voiceMode = mode)) }
+            assertIndicatorSettles("$mode initially static")
+            val resting = indicatorPixels()
+            mainThread { screen = screen.copy(composer = screen.composer.copy(listening = true,
+                phase = ComposerPhase.RUNNING, executionPhase = app.daiyu.android.domain.runtime.ExecutionPhase.STREAMING)) }
+            repeat(40) { frame ->
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("$mode does not replay for phase changes frame=$frame", resting, indicatorPixels())
+            }
+            ui.onNodeWithTag("chat-voice").performTouchInput { down(center) }
+            ui.mainClock.advanceTimeBy(96L)
+            assertEquals("$mode does not animate before a call is actually opened", resting, indicatorPixels())
+            ui.onNodeWithTag("chat-voice").performTouchInput { up() }
+            assertIndicatorSettles("$mode release remains static")
+        }
+    }
+
+    fun testModelChevronActualInkIsCenteredBesideModelTitle() {
+        mount(initialState = session().copy(title = "GPT", modelSelectable = true))
+        finishOpening()
+        fun inkCenter(tag: String): Offset {
+            val node = ui.onNodeWithTag(tag, useUnmergedTree = true)
+            val bounds = node.fetchSemanticsNode().boundsInRoot
+            val pixels = captureScreenNode(node).toPixelMap()
+            var minX = pixels.width; var minY = pixels.height; var maxX = -1; var maxY = -1
+            for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                val c = pixels[x, y]
+                if (c.alpha > .5f && c.red < .55f && c.green < .55f && c.blue < .55f) {
+                    minX = minOf(minX, x); minY = minOf(minY, y)
+                    maxX = maxOf(maxX, x); maxY = maxOf(maxY, y)
+                }
+            }
+            assertTrue("$tag has visible ink", maxX >= minX)
+            return Offset(bounds.left + (minX + maxX + 1f) / 2f, bounds.top + (minY + maxY + 1f) / 2f)
+        }
+        val arrow = inkCenter("voice-call-model-chevron")
+        val title = inkCenter("voice-call-model-title")
+        val bounds = ui.onNodeWithTag("voice-call-model-chevron", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals(bounds.center.x, arrow.x, 1f)
+        assertEquals(bounds.center.y, arrow.y, 1f)
+        assertEquals(title.y, arrow.y, instrumentation.targetContext.resources.displayMetrics.density)
+    }
+
     fun testIdleChatIndicatorIsStillBeforeAnyCallAndAfterCallRemoval() {
         var screen by mutableStateOf(ChatScreenState("idle", conversationKey = "first"))
         mountChat { screen }

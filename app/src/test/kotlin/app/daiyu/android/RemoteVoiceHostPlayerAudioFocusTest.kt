@@ -108,6 +108,46 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         return media.last()
     }
 
+    @Test fun revokedCallReservationRejectsBeforeAnySynthesisRequest() {
+        host.closeStrict()
+        host = newHost(FrozenVoiceSpeech(config).withUpload(object : PersonalCascadeUpload {
+            override fun consume(requestId: String, exactText: String) = 15_000L
+            override fun current() = false
+        }, 15_000))
+        assertFalse(host.play("owner", "revoked", "不应上传"))
+        assertEquals(0, requests)
+        assertTrue(media.isEmpty())
+    }
+    @Test fun revokedReservationAfterHttpCannotPrepareOrPlayLateAudio() {
+        var live = true
+        host.closeStrict()
+        host = newHost(FrozenVoiceSpeech(config).withUpload(object : PersonalCascadeUpload {
+            override fun consume(requestId: String, exactText: String) = 15_000L
+            override fun current() = live
+        }, 15_000), transport = VoiceHttpTransport { _, _ ->
+            requests++; live = false
+            VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio)
+        })
+        assertTrue(host.play("owner", "late-http", "已取消的回答"))
+        drainUntil { host.state.value.phase == SpeechPhase.ERROR }
+        assertEquals(1, requests)
+        assertTrue(media.isEmpty())
+        assertNull(shadowOf(audio).lastAudioFocusRequest)
+    }
+    @Test fun revokedReservationAtPreparedBoundaryNeverStartsNativePlayer() {
+        var live = true
+        host.closeStrict()
+        host = newHost(FrozenVoiceSpeech(config).withUpload(object : PersonalCascadeUpload {
+            override fun consume(requestId: String, exactText: String) = 15_000L
+            override fun current() = live
+        }, 15_000))
+        val (player, shadow) = preparing("cancel-before-start")
+        live = false
+        shadow.invokePreparedListener()
+        assertFalse(player.isPlaying)
+        assertEquals(SpeechPhase.ERROR, host.state.value.phase)
+        assertNull(shadowOf(audio).lastAudioFocusRequest)
+    }
     @Test fun grantedFocusPrecedesActualStartAndCompletionReleasesTheSameRequest() {
         val (player, shadow) = preparing()
         assertFalse(player.isPlaying)

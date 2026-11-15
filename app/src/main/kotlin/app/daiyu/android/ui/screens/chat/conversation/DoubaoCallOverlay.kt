@@ -495,8 +495,16 @@ private fun ExpandedCallContent(
                 Row(Modifier.testTag("voice-call-select-model").then(if (state.modelSelectable)
                     Modifier.clickable(enabled = enabled, role = Role.Button, onClick = actions.onSelectModel) else Modifier),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(state.title, color = CallInk, fontSize = 14.sp, fontWeight = FontWeight(650))
-                    if (state.modelSelectable) Text("⌄", Modifier.padding(start = 4.dp), color = CallInk, fontSize = 13.sp)
+                    Text(state.title, Modifier.testTag("voice-call-model-title"), color = CallInk,
+                        fontSize = 14.sp, fontWeight = FontWeight(650))
+                    if (state.modelSelectable) Canvas(Modifier.padding(start = 4.dp).size(8.dp)
+                        .testTag("voice-call-model-chevron")) {
+                        val left = Offset(size.width * .15f, size.height * .35f)
+                        val middle = Offset(size.width * .5f, size.height * .65f)
+                        val right = Offset(size.width * .85f, size.height * .35f)
+                        drawLine(CallInk, left, middle, 1.dp.toPx(), StrokeCap.Round)
+                        drawLine(CallInk, middle, right, 1.dp.toPx(), StrokeCap.Round)
+                    }
                 }
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.size(4.dp).background(Color(0xFFAC97CD), RoundedCornerShape(2.dp)))

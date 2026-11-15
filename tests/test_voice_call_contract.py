@@ -13,6 +13,34 @@ class VoiceCallContractTest(unittest.TestCase):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('permit != null && universalVoice.state.value.active', main)
 
+    def test_call_content_is_owned_by_each_call_and_cleaned_at_stop(self):
+        controller = (SRC / 'voice/control/VoiceCallController.kt').read_text()
+        self.assertIn('transcript: String = session.transcript', controller)
+        self.assertIn('session.transcript = transcript', controller)
+        stop = controller.split('private fun end(session: Call,', 1)[1]
+        self.assertIn('mutable.value = VoiceControlState(', stop)
+        self.assertNotIn('state.value.copy(', stop)
+        owner = (SRC / 'VoiceCallPresentationOwner.kt').read_text()
+        self.assertIn('responseLabel = "助手"', owner)
+        self.assertIn('val responseLabel: String = "豆包"', (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text())
+
+    def test_personal_call_freezes_reference_and_checks_a_shared_transport_budget(self):
+        host = (SRC / 'ActivityUniversalVoiceHost.kt').read_text()
+        self.assertNotIn('require(speech.reference == null && !speech.isPersonal)', host)
+        self.assertIn('PersonalVoiceCallAuthorization(identity,', host)
+        self.assertIn('personal?.reserve(turn)', host)
+        self.assertIn('personal?.accepted(turn, PersonalVoiceCascadeOwner(', host)
+        self.assertIn('binding.personal?.answer(turn,', host)
+        self.assertIn('personal.consume(requestId, exactText, 15_000)', host)
+        self.assertIn('personal?.close(); playback.closeAndDrain()', host)
+        self.assertIn('binding.personal?.revoke()', host)
+        player = (SRC / 'RemoteVoiceHostPlayer.kt').read_text()
+        self.assertIn('frozen.upload?.current() != false', player)
+        self.assertGreaterEqual(player.count('speechCurrent()'), 6)
+        main = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('voiceRuntime.authorizeReference(prepared)', main)
+        self.assertNotIn('if (mode == ChatMenuAction.VOICE_CHAT && offlineReady) return null', main)
+
     def test_voice_uses_temporary_owner_without_editor_mutation(self):
         main = (SRC / "MainActivity.kt").read_text()
         send = main.split("submit = { turn, text, result ->", 1)[1].split("observe =", 1)[0]

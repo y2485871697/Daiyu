@@ -40,6 +40,7 @@ internal fun SpeechMorphButton(
     modifier: Modifier = Modifier,
     description: String? = null,
     callMotion: DoubaoCallMotionState? = null,
+    pressAnimationEnabled: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -51,7 +52,7 @@ internal fun SpeechMorphButton(
         delay(180)
         tapFeedback = false
     }
-    val showPressFeedback = enabled && (pressed || tapFeedback)
+    val showPressFeedback = pressAnimationEnabled && enabled && (pressed || tapFeedback)
     val diameter = animateDpAsState(
         if (listening || showPressFeedback) 32.dp else 20.dp,
         spring(dampingRatio = 0.65f),
@@ -85,7 +86,7 @@ internal fun SpeechMorphButton(
                 rotationZ = callEntryRotation(progress)
             },
             indicatorSize = 20.dp,
-            // Call motion adds activity; it must never replace generation/listening's oscillator.
+            // Call entries pass only their opening motion; dictation keeps its activity feedback.
             animate = generating || listening || showPressFeedback || callMotion?.transforming == true,
         )
     }

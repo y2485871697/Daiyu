@@ -321,7 +321,7 @@ class MainActivity : ComponentActivity() {
             },
             admission = { universalAdmissionSnapshot },
             prepareConversationSpeech = {
-                voiceRuntime.prepareSpeech(VoiceProfile.CONVERSATION).also { universalFrozen = it }
+                checkNotNull(universalFrozen).also { check(voiceRuntime.current(it)) { "voice_configuration_changed" } }
             },
             current = {
                 val frozen = universalFrozen
@@ -463,7 +463,6 @@ class MainActivity : ComponentActivity() {
         if (mode == ChatMenuAction.VOICE_DOUBAO) return missing.takeIf { config.duplexKey.isBlank() }
         val offlineReady = if (mode == ChatMenuAction.VOICE_INPUT) offlineSpeechReady()
             else app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready
-        if (mode == ChatMenuAction.VOICE_CHAT && offlineReady) return null
         return when (config.dictation) {
             "DOUBAO" -> missing.takeIf {
                 config.asrKey.isBlank() || config.asrResource !in app.daiyu.android.voice.providers.DoubaoAsrProtocol.resources
@@ -482,33 +481,62 @@ class MainActivity : ComponentActivity() {
         voiceCallStarting = visit
         voiceCallAnchor = selected?.id?.value
         val generation = editorGeneration
-        controller.createVoiceCall(selected?.id) { created ->
-            val temporary = created?.conversation
-            if (voiceCallStarting !== visit || !activityUsable() || !voiceForeground || retainedPage != "chat" ||
-                sidebarVisible || editorGeneration != generation) {
-                temporary?.let { controller.discardVoiceCall(it.id) }
-                return@createVoiceCall
-            }
-            voiceCallStarting = null
-            if (temporary == null) { toast("当前任务尚未结束"); return@createVoiceCall }
-            voiceCallConversation = temporary
-            voiceCallHasDialogue = false
-            voiceCallModelName = checkNotNull(created).modelName
-            ensureVoiceCallService {
-                if (voiceCallConversation?.id != temporary.id || !activityUsable() || !voiceForeground ||
-                    retainedPage != "chat" || sidebarVisible || editorGeneration != generation) {
-                    refreshVoiceCallService()
-                    return@ensureVoiceCallService
+        lifecycleScope.launch {
+            val speech = try {
+                val prepared = voiceRuntime.prepareSpeech(VoiceProfile.CONVERSATION)
+                if (prepared.configuration.engine == "MIMO" && prepared.isPersonal) voiceRuntime.authorizeReference(prepared)
+                else prepared
+            } catch (_: Exception) {
+                if (voiceCallStarting === visit) {
+                    voiceCallStarting = null
+                    voiceConfigurationToast("请检查语音对话的朗读配置")
                 }
-                if (!it) { clearVoiceCallConversation(); refreshVoiceCallService(); toast("后台通话服务未启动"); return@ensureVoiceCallService }
-                try {
-                    val permit = universalVoice.start(profile, limits)
-                    if (permit != null && universalVoice.state.value.active) {
-                        voiceCallPresentation.begin(voiceCallAnchor, permit, SystemClock.elapsedRealtime(), null, voiceCallModelName)
-                        refreshUniversalAdmission()
-                        publishChat()
-                    } else { clearVoiceCallConversation(); refreshVoiceCallService(); voiceConfigurationToast("请检查语音对话配置") }
-                } catch (_: Exception) { revokeUniversalVoice(); toast("语音对话未启动，请检查配置或音频占用") }
+                return@launch
+            }
+            if (voiceCallStarting !== visit || !activityUsable() || !voiceForeground || retainedPage != "chat" ||
+                sidebarVisible || editorGeneration != generation || !voiceRuntime.current(speech)) {
+                if (voiceCallStarting === visit) { voiceCallStarting = null; refreshVoiceCallService() }
+                return@launch
+            }
+            universalFrozen = speech
+            controller.createVoiceCall(selected?.id) { created ->
+                val temporary = created?.conversation
+                if (voiceCallStarting !== visit || !activityUsable() || !voiceForeground || retainedPage != "chat" ||
+                    sidebarVisible || editorGeneration != generation) {
+                    temporary?.let { controller.discardVoiceCall(it.id) }
+                    return@createVoiceCall
+                }
+                voiceCallStarting = null
+                if (temporary == null) { toast("当前任务尚未结束"); return@createVoiceCall }
+                voiceCallConversation = temporary
+                voiceCallHasDialogue = false
+                voiceCallModelName = checkNotNull(created).modelName
+                ensureVoiceCallService {
+                    if (voiceCallConversation?.id != temporary.id || !activityUsable() || !voiceForeground ||
+                        retainedPage != "chat" || sidebarVisible || editorGeneration != generation) {
+                        refreshVoiceCallService()
+                        return@ensureVoiceCallService
+                    }
+                    if (!it) { clearVoiceCallConversation(); refreshVoiceCallService(); toast("后台通话服务未启动"); return@ensureVoiceCallService }
+                    try {
+                        val permit = universalVoice.start(profile, limits)
+                        if (permit != null && universalVoice.state.value.active) {
+                            voiceCallPresentation.begin(voiceCallAnchor, permit, SystemClock.elapsedRealtime(), null, voiceCallModelName)
+                            refreshUniversalAdmission()
+                            publishChat()
+                        } else {
+                            val reason = universalVoice.state.value.reason
+                            clearVoiceCallConversation(); refreshVoiceCallService()
+                            voiceConfigurationToast(when (reason) {
+                                VoiceControlStopReason.RECOGNITION_FAILED -> "语音识别未启动，请检查麦克风或识别配置"
+                                VoiceControlStopReason.RELEASE_FAILED -> "语音资源释放未确认，请稍后重拨"
+                                VoiceControlStopReason.PERMISSION_DENIED -> "请允许麦克风权限"
+                                VoiceControlStopReason.CONFIGURATION_CHANGED -> "语音对话配置不可用或已更改"
+                                else -> "语音对话未启动，请稍后重拨"
+                            })
+                        }
+                    } catch (_: Exception) { revokeUniversalVoice(); toast("语音对话未启动，请检查配置或音频占用") }
+                }
             }
         }
     }

@@ -345,14 +345,17 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         }
                     }
                     Box {
+                        val callEntryOnly = callUi != null || state.voiceMode == ChatMenuAction.VOICE_CHAT ||
+                            state.voiceMode == ChatMenuAction.VOICE_DOUBAO
                         SpeechMorphButton(
-                            generating = state.showGenerationLoading(),
-                            listening = state.listening,
+                            generating = !callEntryOnly && state.showGenerationLoading(),
+                            listening = !callEntryOnly && state.listening,
+                            pressAnimationEnabled = !callEntryOnly,
                             // Closing remains gesture-enabled so a long press can say "请先挂断".
                             enabled = pageActive && (callUi != null || voiceMenuEnabled),
                             description = if (callUi != null) "挂断${callUi.title}"
                                 else if (state.voiceMode == ChatMenuAction.VOICE_DOUBAO) "开始豆包实时通话" else null,
-                            callMotion = callMotion,
+                            callMotion = callMotion.takeIf { callUi?.presentation == DoubaoCallPresentation.EXPANDED },
                             modifier = Modifier.onGloballyPositioned { onVoiceAnchorBounds(it.boundsInRoot()) },
                             onClick = { if (callUi != null || state.voiceMode in state.voiceModes) actions.onVoice() },
                             onLongClick = if (callUi != null || voiceMenuEnabled) ({

@@ -18,7 +18,7 @@ internal class VoiceCallPresentationOwner {
         initialCompression = completedCompression
         compressionStarted = false
         state = DoubaoCallUi(--serial, conversation, startedAtMillis = now,
-            title = voiceCallModelShortName(modelName), modelSelectable = true, responseLabel = voiceCallModelShortName(modelName))
+            title = voiceCallModelShortName(modelName), modelSelectable = true, responseLabel = "助手")
     }
     fun update(value: VoiceControlState, speaker: Boolean, compressing: Boolean, completedCompression: String?, now: Long) {
         val previous = state ?: return
@@ -46,6 +46,7 @@ internal class VoiceCallPresentationOwner {
                     VoiceControlStopReason.RECOGNITION_FAILED -> "语音识别失败，请重新拨打"
                     VoiceControlStopReason.RELEASE_FAILED -> "语音资源释放未确认"
                     VoiceControlStopReason.CONFIGURATION_CHANGED -> "请检查语音配置"
+                    VoiceControlStopReason.EXPIRED -> "本次个人音色授权已到期，请重新拨打"
                     VoiceControlStopReason.RESPONSE_FAILED, VoiceControlStopReason.REJECTED -> "回答未完成，请重新拨打"
                     else -> null
                 }
@@ -53,7 +54,7 @@ internal class VoiceCallPresentationOwner {
             })
     }
     fun setModelName(name: String) {
-        state?.let { state = it.copy(title = voiceCallModelShortName(name), responseLabel = voiceCallModelShortName(name)) }
+        state?.let { state = it.copy(title = voiceCallModelShortName(name)) }
     }
     fun present(key: Long, presentation: DoubaoCallPresentation) {
         state?.takeIf { it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING }

@@ -6,6 +6,7 @@ import android.os.Looper
 import android.os.SystemClock
 import app.daiyu.android.voice.*
 import app.daiyu.android.voice.control.*
+import app.daiyu.android.voice.personal.*
 import app.daiyu.android.voice.duplex.DuplexRouteLease
 import app.daiyu.android.voice.duplex.AndroidCommunicationRoute
 import kotlinx.coroutines.CoroutineScope
@@ -85,7 +86,10 @@ internal class ActivityUniversalVoiceHost(
     ) {
         @Volatile var permitId: String? = null
         @Volatile var revoked = false
+        var personal: PersonalVoiceCallAuthorization? = null
+        var expiry: Runnable? = null
     }
+    private var startingLimits = VoiceControlLimits()
     @Volatile private var frozen: Frozen? = null
     @Volatile private var closed = false
     @Volatile private var bridgeReleaseFailed = false
@@ -122,13 +126,22 @@ internal class ActivityUniversalVoiceHost(
             if (closed) return entry.copy(profileReady = false)
             if (VoiceEntryPolicy.startProblem(entry) != null) return entry
             val speech = prepareConversationSpeech()
-            // A pre-existing one-request personal-reference grant is NOT a multi-turn/sentence grant.
-            require(speech.reference == null && !speech.isPersonal) {
-                "universal_personal_reference_requires_independent_bounded_grant"
-            }
             val input = recognitionConfiguration()
             check(current() && recognition.available(input)) { "universal_configuration_unavailable" }
-            frozen = Frozen(profile, entry, speech, input)
+            val binding = Frozen(profile, entry, speech, input)
+            frozen = binding
+            if (speech.isPersonal) {
+                check(!speech.configuration.voice.startsWith("mimo-local-") || speech.reference != null)
+                val identity = checkNotNull(runtime.personalBinding(speech)) { "personal_call_voice_unavailable" }
+                val limits = startingLimits
+                binding.personal = PersonalVoiceCallAuthorization(identity,
+                    PersonalVoiceCascadeLimits(8 * limits.maxTurns, 1600 * limits.maxTurns,
+                        limits.durationMillis, limits.durationMillis),
+                    currentBinding = { runtime.personalBinding(speech) },
+                    callIsCurrent = { !closed && frozen === binding && !binding.revoked && current() },
+                    nowMillis = SystemClock::elapsedRealtime)
+                check(binding.personal!!.current()) { "personal_call_configuration_changed" }
+            }
             return entry
         }
         override fun admission(permit: VoiceControlPermit): VoiceAdmission {
@@ -138,6 +151,13 @@ internal class ActivityUniversalVoiceHost(
             if (binding != null && binding.permitId == null && !binding.revoked) {
                 onMain()
                 binding.permitId = permit.id
+                binding.personal?.let { personal ->
+                    val expiry = Runnable {
+                        if (frozen === binding && !binding.revoked) revoke(permit.id, VoiceControlStopReason.EXPIRED)
+                    }
+                    binding.expiry = expiry
+                    check(main.postDelayed(expiry, personal.remainingMillis()))
+                }
             }
             return checkAdmission(permit)
         }
@@ -162,7 +182,15 @@ internal class ActivityUniversalVoiceHost(
             // Never discard a late result on revoke. First late Accepted goes to the leaf; an
             // Accepted discovered AFTER an Unknown/Rejected needs separate exact cleanup because
             // the unchanged leaf intentionally ignores duplicate receipts.
-            val receipts = AndroidUniversalReceiptFence(turn, result) { extra ->
+            val personal = frozen?.personal
+            personal?.reserve(turn)
+            val receipts = AndroidUniversalReceiptFence(turn, { receipt ->
+                if (receipt is VoiceControlReceipt.Accepted && admitted(turn.permit)) {
+                    personal?.accepted(turn, PersonalVoiceCascadeOwner(receipt.assistant.conversationId,
+                        receipt.assistant.runId, receipt.assistant.messageId))
+                } else personal?.rejected(turn)
+                result(receipt)
+            }) { extra ->
                 try { this@ActivityUniversalVoiceHost.stopAcceptedRun(extra) }
                 catch (_: Exception) {
                     bridgeReleaseFailed = true
@@ -191,8 +219,14 @@ internal class ActivityUniversalVoiceHost(
             check(owner.conversationId == turn.permit.conversationId && admitted(turn.permit))
             val binding = checkNotNull(frozen)
             val identity = VoiceOwner(owner.conversationId, owner.runId) // Unique per output/turn.
-            val allowed = { admitted(turn.permit) && frozen === binding }
-            val base = speechOutput(identity, binding.speech)
+            val personal = binding.personal?.answer(turn,
+                PersonalVoiceCascadeOwner(owner.conversationId, owner.runId, owner.messageId))
+            val speech = if (personal == null) binding.speech else binding.speech.withUpload(object : PersonalCascadeUpload {
+                override fun consume(requestId: String, exactText: String): Long = personal.consume(requestId, exactText, 15_000)
+                override fun current(): Boolean = personal.current()
+            }, 15_000)
+            val allowed = { admitted(turn.permit) && frozen === binding && personal?.current() != false }
+            val base = speechOutput(identity, speech)
             // Recheck every sentence and every real player event, not just first lease acquisition.
             val guarded = object : SpeechOutput by base {
                 override fun speak(text: String, events: SpeechOutput.Events) {
@@ -204,7 +238,12 @@ internal class ActivityUniversalVoiceHost(
                     })
                 }
             }
-            return AndroidUniversalPlayback(identity, guarded, allowed, ::post, drained, failed, outputAudio).also { it.start() }
+            val playback = try {
+                AndroidUniversalPlayback(identity, guarded, allowed, ::post, drained, failed, outputAudio).also { it.start() }
+            } catch (failure: Throwable) { personal?.close(); throw failure }
+            return object : VoiceControlPlayback by playback {
+                override fun closeAndDrain() { personal?.close(); playback.closeAndDrain() }
+            }
         }
         override fun stopAcceptedRun(owner: VoiceAssistantOwner) {
             onMain()
@@ -212,7 +251,12 @@ internal class ActivityUniversalVoiceHost(
         }
         override fun revoke(permit: VoiceControlPermit) {
             onMain()
-            frozen?.takeIf { it.permitId == permit.id }?.revoked = true // Synchronous fence first.
+            frozen?.takeIf { it.permitId == permit.id }?.let { binding ->
+                binding.revoked = true
+                binding.personal?.revoke()
+                binding.expiry?.let(main::removeCallbacks)
+                binding.expiry = null
+            } // Synchronous fence before draining audio.
             // Parent cancels ONLY original pending ticket; it must retain late result correlation.
             var failure: Throwable? = null
             try { revokePendingTicket(permit) } catch (problem: Throwable) { failure = problem }
@@ -228,7 +272,8 @@ internal class ActivityUniversalVoiceHost(
     fun start(profile: VoiceControlProfile, limits: VoiceControlLimits = VoiceControlLimits()): String? {
         onMain()
         if (bridgeReleaseFailed) return null
-        return controller.start(profile, limits)
+        startingLimits = limits
+        return try { controller.start(profile, limits) } finally { startingLimits = VoiceControlLimits() }
     }
     fun permissionResult(permitId: String, granted: Boolean) {
         onMain(); controller.permissionResult(permitId, granted)

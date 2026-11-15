@@ -16,9 +16,26 @@ class VoiceCallPresentationOwnerTest {
         val owner = VoiceCallPresentationOwner()
         owner.begin("anchor", "permit", 100, null, "gpt6.1sol")
         assertEquals("GPT", owner.state!!.title)
+        assertEquals("助手", owner.state!!.responseLabel)
+        assertEquals("豆包", DoubaoCallUi(1, null).responseLabel)
         owner.setModelName("gemini-3-pro")
         assertEquals("Gemini", owner.state!!.title)
-        assertEquals("Gemini", owner.state!!.responseLabel)
+        assertEquals("助手", owner.state!!.responseLabel)
+    }
+    @Test fun restartedCallRejectsOldPermitAndOldCloseAnimationWithoutChangingTheNewLabel() {
+        val owner = VoiceCallPresentationOwner()
+        owner.begin("anchor", "permit", 100, null, "gpt")
+        val oldKey = owner.state!!.sessionKey
+        owner.update(state(), false, false, null, 200)
+        assertTrue(owner.beginClose(oldKey, 300))
+        owner.begin("anchor", "next-permit", 400, null, "gemini-3-pro")
+        val fresh = owner.state
+        owner.finishClose(oldKey)
+        owner.update(state(), true, false, null, 500)
+        assertEquals(fresh, owner.state)
+        assertEquals("", owner.state!!.transcript); assertEquals("", owner.state!!.reply)
+        assertEquals("助手", owner.state!!.responseLabel)
+        assertEquals("Gemini", owner.state!!.title)
     }
     @Test fun compressionCompletionFromBeforeCallIsNotDisplayed() {
         val owner = VoiceCallPresentationOwner()

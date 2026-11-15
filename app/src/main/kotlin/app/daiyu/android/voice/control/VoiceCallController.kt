@@ -29,6 +29,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         var timer: VoiceControlCancellation? = null
         var nextTurn = 0
         var captionEpoch = 0L
+        var transcript = ""
         var reply = ""
         var searching = false
         var searchCompletion: String? = null
@@ -107,8 +108,9 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         })
         return false
     }
-    private fun publish(session: Call, phase: VoiceControlPhase? = null, transcript: String = state.value.transcript) {
+    private fun publish(session: Call, phase: VoiceControlPhase? = null, transcript: String = session.transcript) {
         if (!current(session)) return
+        session.transcript = transcript
         val shown = phase ?: when {
             session.compressing -> VoiceControlPhase.COMPRESSING
             session.muted || session.modelPicker -> VoiceControlPhase.MUTED
@@ -310,7 +312,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         releaseAnswer(session, true)
         attempt { ports.revoke(session.permit) }
         if (failed) releaseFailed = true
-        mutable.value = state.value.copy(phase = VoiceControlPhase.STOPPED, searching = false, searchCompletion = null,
+        mutable.value = VoiceControlState(phase = VoiceControlPhase.STOPPED,
+            permitId = session.permit.id, profile = session.permit.profile,
             reason = if (failed || releaseFailed) VoiceControlStopReason.RELEASE_FAILED else reason)
     }
     override fun close() { call?.let { end(it, VoiceControlStopReason.CLOSED) }; closed = true }

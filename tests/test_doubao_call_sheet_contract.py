@@ -20,8 +20,10 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
     def test_actual_entry_bounds_and_original_indicator_are_retained(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('onVoiceAnchorBounds(it.boundsInRoot())', composer)
-        self.assertIn('generating = state.showGenerationLoading()', composer)
-        self.assertIn('listening = state.listening', composer)
+        self.assertIn('generating = !callEntryOnly && state.showGenerationLoading()', composer)
+        self.assertIn('listening = !callEntryOnly && state.listening', composer)
+        self.assertIn('state.voiceMode == ChatMenuAction.VOICE_CHAT', composer)
+        self.assertIn('state.voiceMode == ChatMenuAction.VOICE_DOUBAO', composer)
         button = (CHAT / 'SpeechMorphButton.kt').read_text()
         self.assertIn('indicatorSize = 20.dp', button)
         self.assertIn('description ?: if (listening)', button)

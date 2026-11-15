@@ -294,6 +294,51 @@ class VoiceCallControllerTest {
         assertEquals(listOf(owner), f.stopped)
         assertTrue(c.state.value.active)
     }
+    @Test fun hangUpClearsAllPublicCallContentBeforeAnyNewRecognitionArrives() {
+        val f = Fake(); val c = VoiceCallController(f)
+        val oldPermit = c.start(profile)!!
+        f.finishRecognition("上一通识别"); f.accept(owner)
+        f.observations.single().body(VoiceAssistantBody(owner, "上一通回答", VoiceBodyStatus.STREAMING, true))
+        f.flush()
+        assertEquals("上一通识别", c.state.value.transcript)
+        assertEquals("上一通回答", c.state.value.reply)
+        val lateBody = f.observations.single().body
+        val lateInput = f.recognitions.first()
+        c.stop(oldPermit)
+        assertEquals(VoiceControlStopReason.USER, c.state.value.reason)
+        assertEquals(oldPermit, c.state.value.permitId)
+        assertEquals("", c.state.value.transcript); assertEquals("", c.state.value.reply)
+        assertEquals(0L, c.state.value.captionEpoch)
+        val nextPermit = c.start(profile)!!
+        assertNotEquals(oldPermit, nextPermit)
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        assertEquals("", c.state.value.transcript); assertEquals("", c.state.value.reply)
+        lateInput.partial("晚到的旧识别"); lateInput.finalResult("晚到的旧最终识别")
+        lateBody(VoiceAssistantBody(owner, "晚到回答", VoiceBodyStatus.COMPLETE, false, "old-success"))
+        f.flush()
+        assertEquals(nextPermit, c.state.value.permitId)
+        assertEquals("", c.state.value.transcript); assertEquals("", c.state.value.reply)
+        assertFalse(c.state.value.searching); assertNull(c.state.value.searchCompletion)
+        assertEquals(1, f.sends.size)
+    }
+    @Test fun sameCallKeepsItsOwnTranscriptAcrossMuteAndCompression() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.recognitions.last().partial("本通字幕"); f.flush()
+        c.setMuted(true); c.setMuted(false)
+        assertEquals("本通字幕", c.state.value.transcript)
+        c.setCompressing(true); c.setCompressing(false)
+        assertEquals("本通字幕", c.state.value.transcript)
+    }
+    @Test fun releaseFailureClearsContentButKeepsTheFailClosedLatch() {
+        val f = Fake(); val c = VoiceCallController(f)
+        val permit = c.start(profile)!!
+        f.recognitions.single().partial("应清理"); f.flush()
+        f.inputs.single().failClose = true
+        c.stop(permit)
+        assertEquals("", c.state.value.transcript); assertEquals("", c.state.value.reply)
+        assertEquals(VoiceControlStopReason.RELEASE_FAILED, c.state.value.reason)
+        assertNull(c.start(profile))
+    }
     @Test fun continuousCallsAreNotLimitedByLegacyMaximumTurns() {
         val f = Fake(); val c = VoiceCallController(f)
         val permit = c.start(profile, VoiceControlLimits(maxTurns = 1))!!

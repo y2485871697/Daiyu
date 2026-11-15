@@ -52,7 +52,9 @@ class CallEntryCorrectionsContractTest(unittest.TestCase):
 
     def test_shared_motion_is_read_in_layer_not_per_frame_composition(self):
         self.assertIn('callMotion: DoubaoCallMotionState? = null', self.composer)
-        self.assertIn('callMotion = callMotion,', self.composer)
+        self.assertIn('callMotion = callMotion.takeIf { callUi?.presentation == DoubaoCallPresentation.EXPANDED },', self.composer)
+        self.assertIn('pressAnimationEnabled = !callEntryOnly', self.composer)
+        self.assertIn('pressAnimationEnabled && enabled && (pressed || tapFeedback)', self.button)
         self.assertIn('callMotion: DoubaoCallMotionState? = null', self.button)
         before, layer = self.button.split('.graphicsLayer {', 1)
         self.assertNotIn('callMotion?.progress?.value', before)

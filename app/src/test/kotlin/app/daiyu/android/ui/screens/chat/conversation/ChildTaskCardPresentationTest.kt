@@ -58,7 +58,7 @@ class ChildTaskCardPresentationTest {
         assertEquals("排队中", status(JSONObject(running.toString()).put("queue_state", "PENDING")))
     }
 
-    @Test fun separateTasksKeepEqualProgressWithoutCurrentConfigurationBackfill() {
+    @Test fun legacyInspectionReceiptsKeepEqualProgressWithoutCurrentConfigurationBackfill() {
         val tasks = JSONArray()
         repeat(2) { tasks.put(JSONObject().put("profile_id", "historical-$it").put("status", "UNKNOWN").put("progress", "同一段进度")) }
         val value = rich(JSONObject().put("tasks", tasks).put("available_profile_metadata",
@@ -105,6 +105,25 @@ class ChildTaskCardPresentationTest {
         .put("parent_run_id", owner.parentRunId).put("task_group_id", owner.taskGroupId)
         .put("generation", owner.generation.toString()).put("child_run_id", owner.childRunId)
         .put("assistant_message_id", owner.assistantMessageId)
+
+    @Test fun summaryOnlyInspectionKeepsFrozenIdentityAndStatusWithoutTaskDocuments() {
+        val task = identity().put("conversation_id", frozenOwner.conversationId)
+            .put("status", "RUNNING").put("live_state_available", true).put("settled", false)
+            .put("pause_state", "PAUSED").put("expected_revision", 3)
+        val payload = JSONObject().put("tasks", JSONArray().put(task))
+            .put("current_configuration_available", true)
+            .put("available_profile_metadata", JSONArray().put(JSONObject().put("name", "当前改名"))).toString()
+        assertEquals(listOf(frozenOwner), childTaskReceiptOwners("conversation", "inspect_child_tasks", "{}", payload))
+        val original = ToolCardPresentations.present("inspect_child_tasks", "{}", payload)
+        val actual = childTaskNamedPresentation(original, "conversation", "inspect_child_tasks", "{}", payload,
+            mapOf(frozenOwner to "历史审查"))
+        val details = actual.details.rich
+        assertEquals("历史审查", details.entries.single().title)
+        assertEquals(listOf(ToolFieldUi("状态", "已暂停")), details.entries.single().fields)
+        assertTrue(details.entries.single().documents.isEmpty())
+        assertTrue(details.documents.isEmpty()); assertNull(details.prose)
+        assertFalse(visible(details).contains("当前改名"))
+    }
 
     @Test fun legacyReadRestoresFrozenNameAfterCacheHitWithoutChangingReceiptStateOrBody() {
         val payload = JSONObject().put("child_run_id", frozenOwner.childRunId).put("status", "COMPLETED")

@@ -35,6 +35,6 @@ internal data class SubAgentDescriptor(
                 "按profile_id与role选择，不根据名称、序号或模型猜测。implementation=执行，review=仅文本审查，" +
                 "image_generation=图片生成，video_generation=视频生成；媒体只用对应dispatch_tools，不能交给文本子任务工具。" +
                 "task_tier是用户指定的简单/常规/复杂任务分工，不是模型能力评分，null表示未设置或不适用。" +
-                "文本配置热修改后先inspect_child_tasks读取最新配置；当前配置不能回填旧任务角色或等级。"
+                "inspect_child_tasks仅查看当前可用子代理配置和任务总览；具体任务的进度、结果和诊断详情使用get_child_task。文本配置热修改后先inspect_child_tasks读取最新配置；当前配置不能回填旧任务角色或等级。"
     }
 }

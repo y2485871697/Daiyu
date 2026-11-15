@@ -22,13 +22,9 @@ internal class RunChildTaskAccess(
 ) {
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = ToolDefinition("inspect_child_tasks", 1,
-            "读取本会话已有子任务、进度和结果（包括旧配置、暂停或停止的任务），以及新委派可用的当前配置。只读，不自动继续或重派。进度仅保留于当前进程。max_chars为可选正整数，默认每条任务的结果和进度各1024字符；超过1024时按1024读取，使用返回的next偏移继续分页。" + SubAgentDescriptor.initialDescription(initialProfiles),
-            CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
-                ArgumentField("offset", ArgumentType.Integer(0, 65536), required = false),
-                ArgumentField("max_chars", ArgumentType.Integer(1, Long.MAX_VALUE), required = false))))
+            "查看新委派可用的当前子代理配置，以及本会话最多20条已有子任务的身份和状态总览（包括旧配置、暂停或停止的任务）。不读取单任务进度、结果正文或诊断详情；需要这些内容时按返回的完整身份调用get_child_task。无参数，只读，不自动继续或重派。" + SubAgentDescriptor.initialDescription(initialProfiles),
+            CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(emptyList()))
         override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { context ->
-            val offset = if (arguments.contains("offset")) arguments.integer("offset").toInt() else 0
-            val maxChars = if (arguments.contains("max_chars")) arguments.integer("max_chars").coerceAtMost(1024L).toInt() else 1024
             if (context.owner.conversationId.value != conversationId || context.cancelled())
                 return@contextual ExecutionReceipt.NotExecuted("child_conversation_mismatch")
             val active = live().associateBy { it.record.owner }
@@ -36,7 +32,6 @@ internal class RunChildTaskAccess(
             val result = JSONArray()
             rows.forEach { row ->
                 val state = active[row.owner]
-                val partial = progress(row.owner)
                 result.put(JSONObject().put("conversation_id", conversationId).put("parent_run_id", row.owner.parentRunId)
                     .put("task_group_id", row.owner.taskGroupId).put("generation", row.owner.generation)
                     .put("child_run_id", row.owner.childRunId).put("assistant_message_id", row.owner.assistantMessageId)
@@ -47,12 +42,7 @@ internal class RunChildTaskAccess(
                     .put("configuration_paused", state?.configurationPaused ?: JSONObject.NULL)
                     .put("stop_requested", state?.stopRequested ?: JSONObject.NULL)
                     .put("journal_unconfirmed", state?.journalUnconfirmed ?: JSONObject.NULL)
-                    .put("settled", state?.settled ?: JSONObject.NULL).put("offset", offset)
-                    .put("progress", partial.drop(offset).take(maxChars))
-                    .put("next_progress_offset", if (partial.length > offset + maxChars) offset + maxChars else JSONObject.NULL)
-                    .put("text", row.text.drop(offset).take(maxChars))
-                    .put("next_text_offset", if (row.text.length > offset + maxChars) offset + maxChars else JSONObject.NULL)
-                    .put("detail", row.detail))
+                    .put("settled", state?.settled ?: JSONObject.NULL))
             }
             val metadata = runCatching { currentProfileMetadata?.invoke() }.getOrNull()
             val profiles = if (currentProfileMetadata != null) metadata?.map { it.profileId }?.toSet()
@@ -118,7 +108,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("get_child_task", 1,
-            "按完整身份精确读取本会话任意已有子任务（不限最近20条）。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果和进度各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
+            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置和任务总览使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果和进度各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),

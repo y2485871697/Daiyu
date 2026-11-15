@@ -38,16 +38,16 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
     private var submissions = 0
     private var submitted: QuestionAnswer? = null
 
-    private fun show(dark: Boolean, fontScale: Float, answer: QuestionAnswer? = null, reply: Reply = Reply.SAVED) {
+    private fun show(dark: Boolean, fontScale: Float, answer: QuestionAnswer? = null, reply: Reply = Reply.SAVED, twoLineLabel: Boolean = false) {
         val question = UserQuestion("下一步操作", prompt, listOf(
-            QuestionOption("keep", label, description), QuestionOption("change", "调整配置")),
+            QuestionOption("keep", label, description), QuestionOption("change", if (twoLineLabel) "调整配置\n保留已有数据" else "调整配置")),
             recommendedOptionId = "keep")
         val record = QuestionRecord(owner.storageKey, question, answer = answer)
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                    key(dark, fontScale, answer, reply) {
+                    key(dark, fontScale, answer, reply, twoLineLabel) {
                         AgentAppTheme(AppearanceSettings(
                             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                             applyInterfaceScale = false) {
@@ -195,11 +195,16 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
 
     fun testOptionsCenterIndicatorAndTextInsideBackgroundForWrappedAndSingleLabels() {
         for (fontScale in listOf(1f, 1.3f)) {
-            show(dark = false, fontScale = fontScale)
+            show(dark = false, fontScale = fontScale, twoLineLabel = true)
+            assertEquals(1, layout("其他…", 15).lineCount)
+            assertEquals(2, layout("调整配置\n保留已有数据", 15).lineCount)
             for (index in 0..3) assertCentered(index)
             scrollTo("question-option:1").performClick()
             assertCentered(1)
-            show(dark = true, fontScale = fontScale, answer = QuestionAnswer.Selected("keep", note))
+            scrollTo("question-option:2").performClick()
+            assertCentered(2)
+            show(dark = true, fontScale = fontScale, answer = QuestionAnswer.Selected("change", note), twoLineLabel = true)
+            assertEquals(2, layout("调整配置\n保留已有数据", 15).lineCount)
             for (index in 0..3) assertCentered(index)
         }
     }

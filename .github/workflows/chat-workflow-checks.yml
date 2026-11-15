@@ -135,7 +135,7 @@ jobs:
                           'test_message_action_scroll_contract.py', 'test_message_confirmation_contract.py',
                           'test_branch_configuration_inheritance_contract.py', 'test_message_timestamp_style_contract.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'question-card':
-              patterns = ('test_question_card_readability_contract.py', 'test_stream_question_projection_contract.py')
+              patterns = ('test_question_card_readability_contract.py', 'test_stream_question_projection_contract.py', 'test_question_card_smoke_scope.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               discovered = suite.countTestCases()

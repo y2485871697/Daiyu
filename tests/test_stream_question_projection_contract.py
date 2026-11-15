@@ -24,8 +24,12 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         recovery = text.split('private fun recovery(answer:QuestionAnswer?)', 1)[1]
         self.assertLess(recovery.index('assertNotNull(projection)'), recovery.index('launch(f,'))
         disclosure = text.split('private fun openRecoveredWorkflow()', 1)[1].split('private fun recovery(', 1)[0]
-        self.assertIn('SemanticsProperties.StateDescription, "已折叠"', disclosure)
-        self.assertLess(disclosure.index('node("work-process-header").performClick()'), disclosure.index('waitForCard(readOnly=true)'))
+        self.assertIn('when (header.fetchSemanticsNode().config[SemanticsProperties.StateDescription])', disclosure)
+        self.assertIn('"已折叠" -> header.performClick()', disclosure)
+        self.assertIn('"已展开" -> Unit', disclosure)
+        self.assertIn('else -> fail("unexpected workflow disclosure state")', disclosure)
+        expanded = 'header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))'
+        self.assertLess(disclosure.index(expanded), disclosure.index('waitForCard(readOnly=true)'))
         self.assertIn('assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())', recovery)
         self.assertIn('recreate();openRecoveredWorkflow()', recovery)
     def test_long_output_paths_have_distinct_saved_disclosure_owners(self):

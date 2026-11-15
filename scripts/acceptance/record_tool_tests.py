@@ -676,7 +676,21 @@ MESSAGE_ACTION_MODULES = (
 )
 
 
+QUESTION_CARD_PLATFORM_CLASSES = (
+    "app.daiyu.android.ui.screens.chat.conversation.QuestionCardReadabilityTest",
+    "app.daiyu.android.question.QuestionCardBindingTest",
+    "app.daiyu.android.question.QuestionTest",
+)
+QUESTION_CARD_MODULES = (
+    "test_question_card_readability_contract", "test_stream_question_projection_contract",
+    "test_question_card_smoke_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(QUESTION_CARD_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *QUESTION_CARD_MODULES, "-v"], "question-card-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(RETURN_CHAT_HANDOFF_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *RETURN_CHAT_HANDOFF_MODULES, "-v"], "return-chat-handoff-targeted"

@@ -80,12 +80,13 @@ class QuestionCardReadabilityContractTest(unittest.TestCase):
     def test_exact_cloud_scope_and_real_device_assertions_cover_new_behaviors(self):
         workflow = WORKFLOW.read_text()
         self.assertIn('message-actions, question-card]', workflow)
-        self.assertIn("patterns = ('test_question_card_readability_contract.py', 'test_stream_question_projection_contract.py')", workflow)
+        self.assertIn("patterns = ('test_question_card_readability_contract.py', 'test_stream_question_projection_contract.py', 'test_question_card_smoke_scope.py')", workflow)
         self.assertIn('filters=(--tests app.daiyu.android.question.QuestionCheckpointEvidenceTest', workflow)
         self.assertIn("expected = {'QuestionCheckpointEvidenceTest', 'QuestionToolBridgeTest'}", workflow)
         device = DEVICE.read_text()
         for token in ('assertArchived(0)', 'assertArchived(1)', 'assertArchived(2)',
                       'QuestionAnswer.Delegate(longText)', 'QuestionAnswer.Other(custom)',
                       'node("question-note").assertDoesNotExist()', 'hasSetTextAction()',
-                      'isFocused()', 'Indicator centered', 'Text centered', 'SAVED_REFRESH_FAILED'):
+                      'isFocused()', 'Indicator centered', 'Text centered', 'SAVED_REFRESH_FAILED',
+                      'twoLineLabel = true', 'assertEquals(2, layout(', 'assertEquals(1, layout('):
             self.assertIn(token, device)

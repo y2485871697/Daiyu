@@ -401,7 +401,20 @@ VOICE_REFRESH_MODULES = (
 )
 
 
+PROVIDER_CATALOG_PLATFORM_CLASSES = (
+    "app.daiyu.android.ui.screens.settings.ProviderCatalogSettingsScreenTest",
+    "app.daiyu.android.LocalCatalogModelsActivityTest",
+)
+PROVIDER_CATALOG_MODULES = (
+    "test_provider_catalog_tabs_contract", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PROVIDER_CATALOG_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *PROVIDER_CATALOG_MODULES, "-v"], "provider-catalog-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and (env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.VoiceRecognitionRefreshActivityTest"
                  or sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VOICE_REFRESH_PLATFORM_CLASSES))):

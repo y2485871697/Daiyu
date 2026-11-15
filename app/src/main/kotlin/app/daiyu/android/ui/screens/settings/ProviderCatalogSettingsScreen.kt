@@ -6,10 +6,10 @@ import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.haptics.miuix.TextButton
-import androidx.compose.runtime.key
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +17,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.model.catalog.CatalogImportSession
 import app.daiyu.android.model.catalog.CatalogLocalEditResult
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -93,6 +96,31 @@ internal fun <T> ProviderCatalogSettingsScreen(
     val selectedModelIds = pageUi?.selectedModelIds ?: remember(providerIdentity, persistence) { mutableStateOf<Set<String>?>(null) }
     var modelTab by selectedTab
     var localRevision by remember { mutableStateOf(0L) }
+    val localCatalog = remember(providerIdentity, persistence) { LocalCatalogModelState(providerIdentity, persistence) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, localCatalog) {
+        var paused = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) { paused = true; localCatalog.invalidate() }
+            if (event == Lifecycle.Event.ON_RESUME && paused) {
+                paused = false
+                if (localModelActions != null) scope.launch {
+                    try { localCatalog.load() }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* The model page exposes the retry action. */ }
+                }
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(localCatalog, localRevision) {
+        if (localModelActions != null) {
+            try { localCatalog.load(force = localRevision > 0) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { /* The model page exposes the retry action. */ }
+        }
+    }
     val fetch: (ModelSettingsDraftUi) -> Unit = { value ->
             if (ownerCurrent() && enabled && !state.saving) {
                 scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -133,19 +161,19 @@ internal fun <T> ProviderCatalogSettingsScreen(
     PageBackStack(if (managingLocal && localModelActions != null) "local-models" else null) {
         if (managingLocal && localModelActions != null) {
             LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled, editingEnabled = enabled, onBack = { selectedModelIds.value = null; managingLocal = false },
-                listState = modelListState, queryState = modelQuery, selectionState = selectedModelIds, scrollBehavior = modelScrollBehavior)
+                catalog = localCatalog, listState = modelListState, queryState = modelQuery, selectionState = selectedModelIds, scrollBehavior = modelScrollBehavior)
             return@PageBackStack
         }
         if (twoTabs && modelTab && localModelActions != null) {
-            key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled && !state.saving, editingEnabled = enabled,
+            LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled && !state.saving, editingEnabled = enabled,
                 onBack = onBack, pageTitle = pageTitle, managementEndpoint = draft.endpoint,
-                listState = modelListState, queryState = modelQuery, selectionState = selectedModelIds, scrollBehavior = modelScrollBehavior,
+                catalog = localCatalog, listState = modelListState, queryState = modelQuery, selectionState = selectedModelIds, scrollBehavior = modelScrollBehavior,
                 fetchingModels = state.loading, onFetchModels = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null, headerContent = {
                     tabs()
                     item {
                         state.status?.let { SettingsNote(it) }
                     }
-                }) }
+                })
         } else configurationContent(ProviderConfigurationForm(
             pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
             listState = configurationListState, speechOnly = speechOnly,

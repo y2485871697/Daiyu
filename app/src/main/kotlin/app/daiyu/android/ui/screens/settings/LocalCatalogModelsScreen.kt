@@ -56,9 +56,7 @@ import app.daiyu.android.model.catalog.selectionIndex
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.components.DaiyuTextInputDialog
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -91,15 +89,16 @@ internal fun <T> LocalCatalogModelsScreen(
     backPreviewEnabled: Boolean = true,
     editingEnabled: Boolean = enabled,
     selectionState: MutableState<Set<String>?> = remember(providerIdentity, persistence) { mutableStateOf(null) },
+    catalog: LocalCatalogModelState<T> = remember(providerIdentity, persistence) { LocalCatalogModelState(providerIdentity, persistence) },
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
     val currentEnabled by rememberUpdatedState(enabled)
     val visit = remember(providerIdentity, persistence) { AtomicBoolean(true) }
     var selectionLease by remember(providerIdentity, persistence) { mutableStateOf(app.daiyu.android.ui.components.DialogActionLease()) }
-    var snapshot by remember(providerIdentity, persistence) { mutableStateOf<SavedModelCatalogSnapshot<T>?>(null) }
+    val snapshot = catalog.snapshot
+    val loaded = catalog.loaded
     var request by remember { mutableStateOf<AtomicBoolean?>(null) }
-    var loaded by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<CatalogModelSelection<T>?>(null, referentialEqualityPolicy()) }
     val selectionIndex = remember(snapshot) { snapshot?.selectionIndex().orEmpty() }
@@ -117,10 +116,11 @@ internal fun <T> LocalCatalogModelsScreen(
     fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun cancel() {
         selectionLease.revoke()
-        request?.set(true); request = null; snapshot = null; loaded = false; editing = null; deleting = null; adding = null
+        request?.set(true); request = null; editing = null; deleting = null; adding = null
         selectedIds = null; deletingSelected = null; savingEditor = false
     }
     fun pause() {
+        catalog.invalidate()
         selectionLease.revoke()
         request?.set(true); request = null; deleting = null; savingEditor = false
         deletingSelected = null
@@ -128,30 +128,32 @@ internal fun <T> LocalCatalogModelsScreen(
         editing = editing?.copy()
         adding = adding?.let { Any() }
     }
-    fun reload() {
+    fun reconcile(value: SavedModelCatalogSnapshot<T>?) {
+        val selection = editing
+        val addBase = addingBase.takeIf { adding != null }
+        if ((selection != null && (value == null || value.providerIdentity != selection.providerIdentity ||
+                value.revision != selection.expectedRevision ||
+                value.models.singleOrNull { it.id == selection.record.id } != selection.record)) ||
+            (addBase != null && (value == null || value.providerIdentity != addBase.providerIdentity || value.revision != addBase.revision))) {
+            editorStale = true
+            notice = "目录已变化，草稿已保留；请取消后重新打开。"
+        }
+        selectedIds = selectedIds?.intersect(value?.models.orEmpty().map { it.id }.toSet())
+    }
+    fun reload(force: Boolean = true) {
         if (!current() || request != null) return
-        deleting = null; deletingSelected = null; loaded = false
+        deleting = null; deletingSelected = null
         val token = AtomicBoolean(false); request = token
         scope.launch {
             try {
-                val value = withContext(Dispatchers.IO) { persistence.read(providerIdentity) }
+                val value = catalog.load(force)
                 if (current() && request === token && !token.get()) {
-                    val selection = editing
-                    val addBase = addingBase.takeIf { adding != null }
-                    if ((selection != null && (value == null || value.providerIdentity != selection.providerIdentity ||
-                            value.revision != selection.expectedRevision ||
-                            value.models.singleOrNull { it.id == selection.record.id } != selection.record)) ||
-                        (addBase != null && (value == null || value.providerIdentity != addBase.providerIdentity || value.revision != addBase.revision))) {
-                        editorStale = true
-                        notice = "目录已变化，草稿已保留；请取消后重新打开。"
-                    }
-                    selectedIds = selectedIds?.intersect(value?.models.orEmpty().map { it.id }.toSet())
-                    snapshot = value; loaded = true
+                    reconcile(value)
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 if (current() && request === token && !token.get()) {
-                    loaded = true; editorStale = true; notice = "本地模型读取失败，草稿已保留；请刷新"
+                    editorStale = true; notice = "模型列表读取失败，草稿已保留；请重试"
                 }
             } finally { if (request === token) request = null }
         }
@@ -216,7 +218,10 @@ internal fun <T> LocalCatalogModelsScreen(
                 request = null; savingEditor = false
                 if (result == CatalogLocalEditResult.APPLIED) {
                     editing = null; adding = null; notice = "模型已保存"; reload()
-                } else notice = "模型未保存，请刷新后重新打开。"
+                } else {
+                    notice = "模型未保存，请重试；草稿已保留。"
+                    if (result == CatalogLocalEditResult.STALE) { editorStale = true; reload() }
+                }
             }
         }
         try {
@@ -229,7 +234,7 @@ internal fun <T> LocalCatalogModelsScreen(
     DisposableEffect(lifecycle, visit) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) { resumed = false; pause() }
-            if (event == Lifecycle.Event.ON_RESUME) { selectionLease = app.daiyu.android.ui.components.DialogActionLease(); resumed = true; reload() }
+            if (event == Lifecycle.Event.ON_RESUME && !resumed) { selectionLease = app.daiyu.android.ui.components.DialogActionLease(); resumed = true; reload(force = false) }
         }
         lifecycle.addObserver(observer)
         onDispose {
@@ -237,13 +242,14 @@ internal fun <T> LocalCatalogModelsScreen(
             lifecycle.removeObserver(observer)
         }
     }
-    LaunchedEffect(visit) { reload() }
+    LaunchedEffect(visit) { reload(force = false) }
+    LaunchedEffect(snapshot) { if (current()) reconcile(snapshot) }
     val back = { if (current()) {
         if (selectedIds != null) { selectedIds = null; deletingSelected = null }
         else { visit.set(false); cancel(); onBack() }
     } }
     BackHandler(previewEnabled = backPreviewEnabled && selectedIds == null) { back() }
-    val editorEnabled = enabled && resumed && request == null
+    val editorEnabled = enabled && resumed && request == null && !catalog.refreshing && !catalog.failed
     val addVisit = adding
     if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", "自定义模型"), isNew = true,
         enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice, saving = savingEditor,
@@ -298,10 +304,10 @@ internal fun <T> LocalCatalogModelsScreen(
                         leading = { DaiyuIcon(DaiyuIcons.Add, null) }, showChevron = true, onClick = add)
                 }
                 notice?.let { SettingsNote(it) }
-                if (!loaded) SettingsNote("正在读取本地模型")
-                if (loaded && snapshot == null) TextButton("重试", enabled = request == null,
+                if (notice == null && catalog.failed) SettingsNote("模型列表读取失败，请重试")
+                if (loaded && (snapshot == null || catalog.failed)) TextButton("重试", enabled = request == null,
                     onClick = { notice = null; reload() }, modifier = Modifier.testTag("local-model-refresh"))
-                if (selection == null) SettingsSectionTitle("模型列表（共 ${snapshot?.models?.size ?: 0} 个）")
+                if (selection == null) SettingsSectionTitle(if (loaded && !catalog.failed) "模型列表（共 ${snapshot?.models?.size ?: 0} 个）" else "模型列表")
                 else {
                     val grouped = LocalSettingsPageStyle.current
                     val titleStyle = MiuixTheme.textStyles.body2.copy(
@@ -332,7 +338,7 @@ internal fun <T> LocalCatalogModelsScreen(
                     }
                 }
                 SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
-                if (loaded && snapshot?.models.isNullOrEmpty()) SettingsNote("还没有模型，请从远端拉取或添加自定义模型")
+                if (loaded && !catalog.failed && snapshot?.models.isNullOrEmpty()) SettingsNote("还没有模型，请从远端拉取或添加自定义模型")
             }
             snapshot?.models?.filter { query.isBlank() || it.id.contains(query.trim(), true) || it.displayName.contains(query.trim(), true) }?.forEach { model ->
                 item("local-model:${model.id}") {

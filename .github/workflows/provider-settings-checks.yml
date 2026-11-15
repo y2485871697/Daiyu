@@ -57,7 +57,7 @@ jobs:
           from pathlib import Path
           records = []
           for pattern in ('test_daiyu_prompt_cache_contract.py', 'test_provider_body_compact_contract.py',
-                          'test_provider_save_validation_contract.py'):
+                          'test_provider_save_validation_contract.py', 'test_provider_catalog_tabs_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -83,6 +83,7 @@ jobs:
             :app:compileDebugKotlin :app:testDebugUnitTest \
             --tests 'app.daiyu.android.model.DaiyuPromptCacheWireTest' \
             --tests 'app.daiyu.android.ui.screens.settings.ProviderRequestFieldPolicyTest' \
+            --tests 'app.daiyu.android.ui.screens.settings.LocalCatalogModelStateTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee provider-settings-checks/gradle.log
       - name: 核对编译报告及零安装包
         run: |
@@ -90,7 +91,7 @@ jobs:
           import json, os, re
           import xml.etree.ElementTree as ET
           from pathlib import Path
-          expected = {'app.daiyu.android.model.DaiyuPromptCacheWireTest', 'app.daiyu.android.ui.screens.settings.ProviderRequestFieldPolicyTest'}
+          expected = {'app.daiyu.android.model.DaiyuPromptCacheWireTest', 'app.daiyu.android.ui.screens.settings.ProviderRequestFieldPolicyTest', 'app.daiyu.android.ui.screens.settings.LocalCatalogModelStateTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           assert {s.attrib['name'] for s in suites} == expected
           for suite in suites:

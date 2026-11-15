@@ -92,7 +92,7 @@ class ProviderPagePositionActivityTest : WiredActivityTestCase() {
         selectProviderTab("模型")
         reveal("local-model-search").performTextReplacement("scroll-restore")
         dismissIme()
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("正在读取本地模型").fetchSemanticsNodes().isEmpty() }
+        ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("local-model-add") and isEnabled()).fetchSemanticsNodes().size == 1 }
         val tag = "local-model:scroll-restore-22"
         reveal(tag, lazyKey = tag)
         val before = position(tag)

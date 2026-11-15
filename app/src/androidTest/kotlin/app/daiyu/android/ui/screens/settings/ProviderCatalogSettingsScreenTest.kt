@@ -17,6 +17,8 @@ import app.daiyu.android.model.catalog.SavedModelCatalogSnapshot
 import app.daiyu.android.ui.app.AgentAppTheme
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Exercises the real wrapper and real durable backend, with only network admission faked. */
 class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
@@ -27,23 +29,31 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
     @Volatile private var cancelled: (() -> Boolean)? = null
     private var saves = 0
     private var connectionSaved by mutableStateOf(true)
+    private val reads = AtomicInteger()
+    private val completedReads = AtomicInteger()
+    private var readGate: CountDownLatch? = null
     private val old = SavedCatalogModel("existing", "Local name", "old customized parameters")
 
     override fun tearDown() {
+        readGate?.countDown()
         try { super.tearDown() } finally { if (::directory.isInitialized) directory.deleteRecursively() }
     }
 
-    private fun show(twoTabs: Boolean = true) {
+    private fun show(twoTabs: Boolean = true, blockRead: Boolean = false) {
         directory = File(instrumentation.targetContext.cacheDir, "catalog-ui-${UUID.randomUUID()}")
         catalog = FileSavedModelCatalogPersistence(File(directory, "catalog"), object : CatalogRecordCodec<String> {
             override fun encode(record: String) = record
             override fun decode(encoded: String) = encoded
         })
         val identity = catalog.register(listOf(old)).providerIdentity
+        reads.set(0); completedReads.set(0)
+        readGate = if (blockRead) CountDownLatch(1) else null
         val checkedPersistence = object : SavedModelCatalogPersistence<String> by catalog {
             override fun read(providerIdentity: String): SavedModelCatalogSnapshot<String>? {
                 check(Thread.currentThread() !== Looper.getMainLooper().thread) { "Catalog read on UI" }
-                return catalog.read(providerIdentity)
+                reads.incrementAndGet()
+                readGate?.await()
+                return catalog.read(providerIdentity).also { completedReads.incrementAndGet() }
             }
         }
         fetched = null; cancelled = null; saves = 0
@@ -218,6 +228,43 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         node("provider-model-selection").assertDoesNotExist()
         assertEquals(listOf(old), catalog.current()!!.models)
         ui.runOnIdle { assertEquals(1, saves); assertEquals("existing", draft.model) }
+    }
+
+    fun testModelTabReusesPreloadedListAcrossRepeatedSwitches() {
+        show()
+        reveal("settings-radio:配置").assertIsSelected()
+        ui.waitUntil(5_000) { completedReads.get() == 1 }
+        ui.waitForIdle()
+        selectProviderTab("模型")
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:existing").fetchSemanticsNodes().isNotEmpty() }
+        repeat(3) {
+            selectProviderTab("配置")
+            selectProviderTab("模型")
+            node("local-model:existing").assertExists()
+            ui.onNodeWithText("正在读取本地模型").assertDoesNotExist()
+            ui.onNodeWithText("模型列表（共 1 个）").assertExists()
+        }
+        assertEquals("Tab changes must not read the catalog again", 1, reads.get())
+        assertNull(fetched)
+        ui.runOnIdle { assertEquals("existing", draft.model); assertEquals(0, saves) }
+    }
+
+    fun testPendingInitialReadDoesNotClaimZeroModelsOrLoadLocalInference() {
+        show(blockRead = true)
+        reveal("settings-radio:配置").assertIsSelected()
+        try {
+            ui.waitUntil(5_000) { reads.get() == 1 }
+            selectProviderTab("模型")
+            ui.onNodeWithText("正在读取本地模型").assertDoesNotExist()
+            ui.onNodeWithText("模型列表（共 0 个）").assertDoesNotExist()
+            ui.onNodeWithText("还没有模型，请从远端拉取或添加自定义模型").assertDoesNotExist()
+            ui.onNodeWithText("模型列表").assertExists()
+            assertEquals(1, reads.get())
+        } finally { readGate?.countDown() }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:existing").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(1, reads.get())
+        assertNull(fetched)
+        ui.runOnIdle { assertEquals("existing", draft.model); assertEquals(0, saves) }
     }
 
 }

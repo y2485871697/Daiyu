@@ -27,7 +27,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
     private fun openLocalModelTab() {
         selectProviderTab("模型")
         awaitUniqueTag("local-model-add")
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("正在读取本地模型").fetchSemanticsNodes().isEmpty() }
+        ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("local-model-add") and isEnabled()).fetchSemanticsNodes().size == 1 }
         reveal("local-model:extra-local").assertExists()
     }
     private fun openLocalModels() {

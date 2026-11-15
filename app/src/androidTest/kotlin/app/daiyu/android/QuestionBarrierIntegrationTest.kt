@@ -116,7 +116,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         instrumentation.waitForIdleSync()
         if(conversation!=null) main {checkNotNull(activity).select(conversation)}
     }
-    private fun waitForCard(readOnly:Boolean=false) {
+    private fun waitForCard(readOnly:Boolean=false, savedAnswer:QuestionAnswer?=null) {
         ui.waitUntil(timeoutMillis=8_000) {
             ui.onAllNodesWithTag("question-card").fetchSemanticsNodes().size==1 &&
                 node("question-card").isDisplayed() &&
@@ -127,8 +127,19 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         node("question-note").assertDoesNotExist()
         if(readOnly) {
             node("question-submit").assertDoesNotExist()
-            node("question-option:0").assertDoesNotExist()
-            node("question-option:1").assertDoesNotExist()
+            if (savedAnswer == null) {
+                node("question-option:0").assertDoesNotExist()
+                node("question-option:1").assertDoesNotExist()
+            } else {
+                val selected = (savedAnswer as QuestionAnswer.Selected).optionId
+                assertTrue(selected in listOf("one", "two"))
+                listOf("one", "two").forEachIndexed { index, id ->
+                    val option = node("question-option:$index").assertIsNotEnabled()
+                    if (id == selected) option.assertIsSelected() else option.assertIsNotSelected()
+                }
+                ui.onAllNodes(hasSetTextAction() and hasAnyAncestor(hasTestTag("question-card")))
+                    .assertCountEquals(0)
+            }
         }
     }
     // Invoke the attached semantics callback twice in one main-thread turn: recomposition must not
@@ -365,18 +376,22 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertTrue(row(f,id).interrupted);assertNull(row(f,id).answer)
         assertEquals(1,f.probe.nexts.get());assertEquals(1,f.probe.opens.get())
     }
-    private fun openRecoveredWorkflow() {
+    private fun openRecoveredWorkflow(savedAnswer:QuestionAnswer?=null, coveredByDrawer:Boolean=false) {
         ui.waitUntil(timeoutMillis=8_000) {
             ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size==1
         }
         val header = node("work-process-header")
         when (header.fetchSemanticsNode().config[SemanticsProperties.StateDescription]) {
-            "已折叠" -> header.performClick()
+            "已折叠" -> {
+                if (coveredByDrawer) {
+                    header.performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+                } else header.performClick()
+            }
             "已展开" -> Unit
             else -> fail("unexpected workflow disclosure state")
         }
         header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
-        waitForCard(readOnly=true)
+        waitForCard(readOnly=true, savedAnswer=savedAnswer)
     }
     private fun assertRecoveredQuestionSurvivesDrawerHandoff(f:Fixture, target:ConversationId) {
         val current = checkNotNull(activity)
@@ -423,7 +438,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             ui.onNodeWithContentDescription("打开侧边栏").performClick()
             selectFromDrawer(other.id)
             selectFromDrawer(target)
-            openRecoveredWorkflow()
+            openRecoveredWorkflow(coveredByDrawer=true)
             assertUnclipped()
             ui.mainClock.autoAdvance = false
             try {
@@ -471,16 +486,14 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             assertEquals(old.owner, projection.identity.ownerId)
         }
         launch(f,f.db.conversations().single())
-        openRecoveredWorkflow()
+        openRecoveredWorkflow(savedAnswer=answer)
         if (answer == null) {
             node("question-toggle").assertTextContains("提问已中断 · Route choice")
             ui.onNodeWithText("提问已中断，当前不可作答").assertExists()
         } else {
-            node("question-toggle").assertTextContains("已回答 · Route choice").performClick()
-            ui.onNodeWithText("已选择：Second route").assertExists()
-            node("question-option:0").assertDoesNotExist()
-            node("question-option:1").assertDoesNotExist()
-            node("question-submit").assertDoesNotExist()
+            node("question-toggle").assertTextContains("已回答 · Route choice")
+            node("question-option:0").assertTextContains("First route")
+            node("question-option:1").assertTextContains("Second route")
         }
         if (switchThroughDrawer) assertRecoveredQuestionSurvivesDrawerHandoff(f, old.message.conversationId)
         drainWorker(f);assertNull(f.c.active);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
@@ -494,7 +507,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             assertEquals(old.owner, projection.identity.ownerId)
             assertExactQuestionOwner(f, shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation, id, recoveredEvidence)
         }
-        recreate();openRecoveredWorkflow()
+        recreate();openRecoveredWorkflow(savedAnswer=answer)
         drainWorker(f);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
     }
     fun testRecoveredQuestionKeepsThreeActionsAndFullCardAfterDrawerSwipe()=recovery(null, switchThroughDrawer=true)

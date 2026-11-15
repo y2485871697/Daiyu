@@ -41,6 +41,26 @@ class TestRefreshContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_changes(['.github/workflows/build.yml'])
 
+    def test_build_workflow_accepts_multiple_queue_expression_appends_only(self):
+        before, after = self.build_group_fixture()
+        tail = b"${{ inputs.mode == 'smoke' && '-timeline-divider' || '' }}"
+        group = next(line for line in after.splitlines(keepends=True) if line.startswith(b'  group: '))
+        multiple = after.replace(group, group[:-1] + tail + b'\n')
+        validate_build_group_only(before, multiple)
+        validate_changes(['.github/workflows/build.yml'], build_pair=(before, multiple))
+        validate_build_group_only(after, multiple)
+        for suffix in (b'UNREVIEWED' + tail, b' ' + tail, b'\n' + tail,
+                       b'\r' + tail, b'${{ nested { invalid } }}' + tail):
+            damaged = after.replace(group, group[:-1] + suffix + b'\n')
+            with self.subTest(suffix=suffix), self.assertRaises(ValueError):
+                validate_build_group_only(before, damaged)
+        for damaged in (multiple.replace(b'inputs.mode', b'inputs.changed', 1),
+                        multiple.replace(b'assembleRelease', b'assembleDebug'),
+                        multiple.replace(b'SIGNING: fixed', b'SIGNING: other'),
+                        multiple.replace(b'cancel-in-progress: false', b'cancel-in-progress: true')):
+            with self.subTest(damaged=damaged), self.assertRaises(ValueError):
+                validate_build_group_only(before, damaged)
+
     def test_queue_exception_cannot_change_build_commands_signing_or_other_bytes(self):
         before, after = self.build_group_fixture()
         for damaged in (after.replace(b'assembleRelease', b'assembleDebug'),

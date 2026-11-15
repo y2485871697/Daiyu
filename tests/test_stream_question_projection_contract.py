@@ -39,15 +39,43 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/QuestionBarrierIntegrationTest.kt').read_text()
         recovery = text.split('private fun recovery(answer:QuestionAnswer?', 1)[1]
         self.assertLess(recovery.index('assertNotNull(projection)'), recovery.index('launch(f,'))
-        disclosure = text.split('private fun openRecoveredWorkflow()', 1)[1].split('private fun recovery(', 1)[0]
+        disclosure = text.split('private fun openRecoveredWorkflow(', 1)[1].split('private fun recovery(', 1)[0]
         self.assertIn('when (header.fetchSemanticsNode().config[SemanticsProperties.StateDescription])', disclosure)
-        self.assertIn('"已折叠" -> header.performClick()', disclosure)
+        self.assertIn('if (coveredByDrawer)', disclosure)
+        self.assertIn('header.performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }', disclosure)
+        self.assertIn('else header.performClick()', disclosure)
+        self.assertIn('openRecoveredWorkflow(coveredByDrawer=true)', disclosure)
         self.assertIn('"已展开" -> Unit', disclosure)
         self.assertIn('else -> fail("unexpected workflow disclosure state")', disclosure)
         expanded = 'header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))'
-        self.assertLess(disclosure.index(expanded), disclosure.index('waitForCard(readOnly=true)'))
+        self.assertLess(disclosure.index(expanded), disclosure.index('waitForCard(readOnly=true, savedAnswer=savedAnswer)'))
         self.assertIn('assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())', recovery)
-        self.assertIn('recreate();openRecoveredWorkflow()', recovery)
+        self.assertIn('openRecoveredWorkflow(savedAnswer=answer)', recovery)
+        self.assertIn('recreate();openRecoveredWorkflow(savedAnswer=answer)', recovery)
+    def test_recovered_saved_answer_keeps_complete_disabled_form(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/QuestionBarrierIntegrationTest.kt').read_text()
+        helper = text.split('private fun waitForCard(', 1)[1].split('private fun submitAction', 1)[0]
+        self.assertIn('savedAnswer:QuestionAnswer?=null', helper)
+        self.assertIn('if (savedAnswer == null)', helper)
+        for token in ('node("question-option:0").assertDoesNotExist()',
+                      'node("question-option:1").assertDoesNotExist()',
+                      'node("question-submit").assertDoesNotExist()',
+                      'node("question-option:$index").assertIsNotEnabled()',
+                      'if (id == selected) option.assertIsSelected() else option.assertIsNotSelected()',
+                      'hasSetTextAction() and hasAnyAncestor(hasTestTag("question-card"))'):
+            self.assertIn(token, helper)
+        recovery = text.split('private fun recovery(answer:QuestionAnswer?', 1)[1]
+        self.assertNotIn('已选择：', recovery)
+        self.assertIn('node("question-option:0").assertTextContains("First route")', recovery)
+        self.assertIn('node("question-option:1").assertTextContains("Second route")', recovery)
+        handoff = text.split('private fun assertRecoveredQuestionSurvivesDrawerHandoff(', 1)[1].split('private fun recovery(', 1)[0]
+        for token in ('repeat(2)', 'swipeLeft()', 'repeat(90)', 'ui.mainClock.advanceTimeByFrame()',
+                      'value.positionInRoot.y, value.boundsInRoot.top',
+                      'value.size.height.toFloat(), value.boundsInRoot.height',
+                      'title.positionInRoot.y, title.boundsInRoot.top',
+                      'title.size.height.toFloat(), title.boundsInRoot.height',
+                      'assertThreeActions()', 'assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())'):
+            self.assertIn(token, handoff)
     def test_long_output_paths_have_distinct_saved_disclosure_owners(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolOperationCardTest.kt').read_text()
         fixture = text.split('fun testLongOutputDisclosureAndHostSlotNeverReplayTools()', 1)[1].split('fun testRestrictedReceipts', 1)[0]

@@ -72,7 +72,7 @@ class PetPresentationContractTest(unittest.TestCase):
 
     def test_overlay_frame_sampler_stops_at_acceptance_without_espresso_idle(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/pet/PetPresentationTest.kt').read_text()
-        sampler = text.split('private fun stable(): Rect', 1)[1].split('override fun cleanupFixture', 1)[0]
+        sampler = text.split('private fun stable(expectedSpeech: String? = null): Rect', 1)[1].split('override fun cleanupFixture', 1)[0]
         self.assertIn('java.util.concurrent.CountDownLatch(1)', sampler)
         self.assertIn('completed.await(5, java.util.concurrent.TimeUnit.SECONDS)', sampler)
         accepted = sampler.split('if (next == previous && accepted.compareAndSet(null, next))', 1)[1].split('previous = next', 1)[0]
@@ -85,3 +85,21 @@ class PetPresentationContractTest(unittest.TestCase):
         self.assertIn('failure.get()?.let { throw it }', sampler)
         self.assertIn('finally {', sampler)
         self.assertIn('removeOnDrawListener(listener)', sampler)
+
+    def test_real_overlay_uses_native_draw_and_exact_live_text_not_global_idle(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/pet/PetPresentationTest.kt').read_text()
+        overlay = text.split('fun testRealOverlayFirstDrawSpeechGrowthAndDismissalPreserveAnchor', 1)[1]
+        self.assertNotIn('mainThread {', overlay)
+        self.assertNotIn('speak(', overlay)
+        self.assertIn('instrumentation.runOnMainSync', overlay)
+        self.assertIn('stable(text)', overlay)
+        self.assertIn('repeat(3)', overlay)
+        self.assertIn('visibleFrames.all { it == expected }', overlay)
+        speech = text.split('private fun overlaySpeechReady', 1)[1].split('private fun stable', 1)[0]
+        for fragment in ('bubble.visibility == View.GONE', 'SemanticsProperties.Text', 'it.text == text',
+                         'semanticsOwner', 'unmergedRootSemanticsNode', 'node.layoutInfo.isPlaced',
+                         'node.layoutInfo.coordinates.isAttached', 'node.boundsInRoot.width > 0f'):
+            self.assertIn(fragment, speech)
+        sampler = text.split('private fun stable', 1)[1].split('override fun cleanupFixture', 1)[0]
+        self.assertIn('overlaySpeechReady(expectedSpeech)', sampler)
+        self.assertIn('ui.mainClock.advanceTimeByFrame()', sampler)

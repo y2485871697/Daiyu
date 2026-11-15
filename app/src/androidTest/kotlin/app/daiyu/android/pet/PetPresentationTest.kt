@@ -2,6 +2,12 @@ package app.daiyu.android.pet
 
 import android.graphics.Rect
 import android.view.View
+import android.view.ViewGroup
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import android.widget.FrameLayout
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,12 +62,32 @@ class PetPresentationTest : WiredActivityTestCase() {
         }
         ui.onNodeWithText(text).assertExists()
     }
-    private fun stable(): Rect {
+    @OptIn(ExperimentalComposeUiApi::class)
+    private fun overlaySpeechReady(text: String?): Boolean {
+        val panel = checkNotNull(root).getChildAt(0) as ViewGroup
+        val bubble = (0 until panel.childCount).map(panel::getChildAt).filterIsInstance<PetSpeechBubbleView>().single()
+        if (text == null) return bubble.visibility == View.GONE
+        if (!bubble.isShown || !bubble.isAttachedToWindow || bubble.isLayoutRequested ||
+            bubble.width <= 0 || bubble.height <= 0) return false
+        fun findRoot(view: View): ViewRootForTest? {
+            if (view is ViewRootForTest) return view
+            if (view is ViewGroup) for (i in 0 until view.childCount) findRoot(view.getChildAt(i))?.let { return it }
+            return null
+        }
+        fun hasText(node: SemanticsNode): Boolean {
+            val found = node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == text } == true
+            return (found && node.layoutInfo.isPlaced && node.layoutInfo.coordinates.isAttached &&
+                node.boundsInRoot.width > 0f && node.boundsInRoot.height > 0f) || node.children.any(::hasText)
+        }
+        return findRoot(bubble)?.semanticsOwner?.unmergedRootSemanticsNode?.let(::hasText) == true
+    }
+    private fun stable(expectedSpeech: String? = null): Rect {
         val frame = checkNotNull(root)
         if (overlay == null) return awaitStableWindowFrame(frame) {
             if (frame.getChildAt(0).alpha == 0f || !sprite().isShown || sprite().isLayoutRequested || sprite().width == 0) null else bounds()
         }
         // Application overlays deliberately never take keyboard/window focus.
+        ui.mainClock.advanceTimeByFrame()
         data class Frame(val sprite: Rect, val rootX: Int, val rootY: Int,
             val width: Int, val height: Int, val spriteLeft: Int, val spriteTop: Int)
         val accepted = java.util.concurrent.atomic.AtomicReference<Frame?>()
@@ -86,7 +112,7 @@ class PetPresentationTest : WiredActivityTestCase() {
                 try {
                     val panel = frame.getChildAt(0)
                     val ready = frame.alpha == 1f && frame.isAttachedToWindow && !frame.isLayoutRequested &&
-                        panel?.alpha == 1f && !panel.isLayoutRequested && !sprite().isLayoutRequested && sprite().width > 0
+                        panel?.alpha == 1f && !panel.isLayoutRequested && !sprite().isLayoutRequested && sprite().width > 0 && overlaySpeechReady(expectedSpeech)
                     if (ready) {
                         val origin = IntArray(2); frame.getLocationOnScreen(origin)
                         val next = Frame(bounds(), origin[0], origin[1], frame.width, frame.height, sprite().left, sprite().top)
@@ -124,7 +150,7 @@ class PetPresentationTest : WiredActivityTestCase() {
         }
     }
     override fun cleanupFixture() {
-        mainThread {
+        instrumentation.runOnMainSync {
             overlay?.close(); overlay = null
             root?.removeAllViews(); root = null
             controller?.close(); controller = null
@@ -236,7 +262,7 @@ class PetPresentationTest : WiredActivityTestCase() {
         android.os.ParcelFileDescriptor.AutoCloseInputStream(
             instrumentation.uiAutomation.executeShellCommand("appops set $packageName SYSTEM_ALERT_WINDOW allow")
         ).use { it.readBytes() }
-        mainThread {
+        instrumentation.runOnMainSync {
             controller = newController(70, 120, true)
             val host = PetOverlayHost(activity, checkNotNull(controller), WhaleMaidResources(activity), {}, onState = { _, error ->
                 assertNull(error)
@@ -248,13 +274,18 @@ class PetPresentationTest : WiredActivityTestCase() {
             root = frame; recordFrames(frame)
         }
         val expected = stable()
+        val text = "主人，米饭已经吃完啦，我会继续陪着你。"
         repeat(3) {
-            speak("主人，米饭已经吃完啦，我会继续陪着你。")
-            assertEquals(expected, stable())
-            mainThread { checkNotNull(controller).dismissSpeech() }
+            instrumentation.runOnMainSync {
+                completion = null
+                checkNotNull(controller).feed(PetFood.GRAIN)
+                checkNotNull(completion)(PetModelResult.Completed("{\"mood\":\"happy\",\"speech\":\"$text\"}"))
+            }
+            assertEquals(expected, stable(text))
+            instrumentation.runOnMainSync { checkNotNull(controller).dismissSpeech() }
             assertEquals(expected, stable())
         }
-        mainThread {
+        instrumentation.runOnMainSync {
             assertTrue(visibleFrames.isNotEmpty())
             assertTrue("Overlay visible frames moved: $visibleFrames", visibleFrames.all { it == expected })
         }

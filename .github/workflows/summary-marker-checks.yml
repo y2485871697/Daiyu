@@ -92,8 +92,36 @@ jobs:
               workflow_ref=os.environ['GITHUB_WORKFLOW_REF'], apk_built=False, full_regression_passed=False, validation_inputs=inputs,
               selected_classes=os.environ['SMOKE_TEST_CLASSES'].split(',')), ensure_ascii=False) + '\n')
           PY
-      - name: 仅执行冻结源码的定向契约
-        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
+      - name: 仅执行冻结源码的摘要及inventory契约
+        shell: bash
+        run: |
+          python3 - <<'PYCONTRACTS'
+          import hashlib, json, os, re, subprocess, sys
+          from pathlib import Path
+          modules = ['test_summary_compression_chain_contract', 'test_composer_context_smoke_scope']
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == os.environ['EXPECTED_SHA']
+          command = [sys.executable, '-B', '-m', 'unittest', *modules, '-v']
+          folder = Path('tool-evidence')
+          folder.mkdir(exist_ok=True)
+          log = folder / 'unittest.log'
+          env = dict(os.environ, PYTHONPATH=str(Path('tests').resolve()))
+          with log.open('wb') as output:
+              code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT, env=env)
+          raw = log.read_bytes()
+          sys.stdout.buffer.write(raw)
+          counts = re.findall(rb'Ran (\d+) tests? in ', raw)
+          count = int(counts[-1]) if counts else 0
+          skipped = sum(map(int, re.findall(rb'\bskipped=(\d+)', raw)))
+          validation_code = code or (0 if count > 0 and skipped == 0 else 1)
+          receipt = dict(identity=dict(sha=os.environ['EXPECTED_SHA'], run_id=int(os.environ['GITHUB_RUN_ID']),
+              attempt=int(os.environ['GITHUB_RUN_ATTEMPT'])), workflow_sha=os.environ['WORKFLOW_SHA'],
+              validation_tools_sha=os.environ['EXPECTED_SHA'], scope='summary-marker-targeted', command=command,
+              exit_code=code, validation_exit_code=validation_code, tests=count, skipped=skipped,
+              log_sha256=hashlib.sha256(raw).hexdigest(),
+              inputs={f'tests/{module}.py': hashlib.sha256(Path(f'tests/{module}.py').read_bytes()).hexdigest() for module in modules})
+          (folder / 'receipt.json').write_text(json.dumps(receipt) + '\n')
+          sys.exit(validation_code)
+          PYCONTRACTS
       - name: 定向inventory及冻结执行接线契约
         shell: bash
         env:

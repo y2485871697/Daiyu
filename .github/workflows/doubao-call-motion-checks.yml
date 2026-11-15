@@ -122,7 +122,7 @@ jobs:
           PYTHONPATH: .motion-validation-tools/tests
         run: |
           set -o pipefail
-          python3 -B -m unittest test_smoke_boot.SourceTests.test_identity_and_unchanged_application test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope test_smoke_boot.SourceTests.test_call_clock_fixture_keeps_strict_raster_assertions test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_only_unchanged_application_explicit_diagnostic_smoke_is_accepted test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_compile_and_diagnostic_allow_only_the_reviewed_check_only_workflow -v 2>&1 | tee tool-evidence/source-validator-tests.txt
+          python3 -B -m unittest test_smoke_boot.SourceTests.test_identity_and_unchanged_application test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope test_smoke_boot.SourceTests.test_call_clock_fixture_keeps_strict_raster_assertions test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_only_unchanged_application_explicit_diagnostic_smoke_is_accepted test_diagnostic_smoke_source.DiagnosticSmokeSourceTests.test_compile_and_diagnostic_allow_only_the_reviewed_check_only_workflows -v 2>&1 | tee tool-evidence/source-validator-tests.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: 代鱼增量Release包

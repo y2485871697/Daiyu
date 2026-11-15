@@ -93,5 +93,39 @@ class MessageGenerationActionsContract(unittest.TestCase):
         smoke = (ROOT / "scripts/smoke_boot.sh").read_text()
         self.assertIn("message_action_sources if message_action_only", smoke)
 
+    def test_frozen_message_action_tools_execute_their_own_modules_and_keep_dual_sha(self):
+        import io
+        import json
+        import os
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location("message_action_frozen_recorder", ROOT / "scripts/acceptance/record_tool_tests.py")
+        recorder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recorder)
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory) / "frozen-tools"
+            evidence = Path(directory) / "evidence"
+            source = tools / "scripts/acceptance/record_tool_tests.py"
+            env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40,
+                       GITHUB_RUN_ID="43", GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke",
+                       SMOKE_TEST_CLASSES=",".join(recorder.MESSAGE_ACTION_PLATFORM_CLASSES))
+            def child(command, stdout, stderr, env=None, cwd=None):
+                self.assertEqual(tools, cwd)
+                self.assertTrue(env["PYTHONPATH"].startswith(str(tools / "tests")))
+                stdout.write(b"fixture failed as expected\n")
+                return 7
+            with patch.dict(os.environ, env, clear=True), patch.object(recorder, "__file__", str(source)), \
+                    patch.object(recorder, "Path", side_effect=lambda value: evidence if value == "tool-evidence" else Path(value)), \
+                    patch.object(recorder.subprocess, "check_output", return_value="a" * 40 + "\n"), \
+                    patch.object(recorder.subprocess, "call", side_effect=child), \
+                    patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                self.assertEqual(7, recorder.record("python3"))
+            receipt = json.loads((evidence / "receipt.json").read_text())
+            self.assertEqual("message-actions-targeted", receipt["scope"])
+            self.assertEqual("a" * 40, receipt["identity"]["sha"])
+            self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+            self.assertEqual(7, receipt["exit_code"])
+
 if __name__ == "__main__":
     unittest.main()

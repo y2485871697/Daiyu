@@ -181,6 +181,15 @@ class MarkdownEntrySmokeScopeTests(unittest.TestCase):
         )
         self.assertIn(suffix, group)
         self.assertEqual(1, group.count(suffix))
+        refresh = (Path(__file__).resolve().parents[1] / '.github/workflows/test-refresh-regression.yml').read_text(encoding='utf-8')
+        refresh_group = next(line.strip() for line in refresh.splitlines() if line.startswith('  group:'))
+        refresh_suffix = (
+            "${{ inputs.smoke_classes == '"
+            + canonical + "' && '-session-entry' || '' }}"
+        )
+        self.assertIn(refresh_suffix, refresh_group)
+        self.assertEqual(1, refresh_group.count(refresh_suffix))
+        self.assertIn('\n  cancel-in-progress: false\n', refresh)
         self.assertIn('\n  cancel-in-progress: false\n', workflow)
         fragments = group.split('${{')
         self.assertNotIn('}}', fragments[0])

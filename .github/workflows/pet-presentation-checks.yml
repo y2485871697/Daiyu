@@ -21,13 +21,30 @@ jobs:
     timeout-minutes: 35
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
+      CHECK_ID: ${{ inputs.check_id }}
       SKIP_JDK_VERSION_CHECK: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: 核对准确源码
-        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+        shell: bash
+        run: |
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git merge-base --is-ancestor "$EXPECTED_SHA" "$GITHUB_SHA"
+          GITHUB_SHA="$EXPECTED_SHA" python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - name: 固定检查接线源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: .pet-validation-tools
+          persist-credentials: false
+      - name: 验证冻结检查接线
+        working-directory: .pet-validation-tools
+        run: PYTHONPATH=tests python3 -B -m unittest test_pet_presentation_ci_identity -v
       - uses: ./.github/actions/setup-temurin
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
@@ -54,7 +71,7 @@ jobs:
       - name: 核对单测终态和零安装包
         run: |
           python3 - <<'PYREPORT'
-          import json, os
+          import json, os, subprocess
           from pathlib import Path
           import xml.etree.ElementTree as ET
           reports = []
@@ -71,7 +88,10 @@ jobs:
                   assert all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), (name, suite.attrib)
                   reports.append(dict(checked_class=name, **suite.attrib))
           assert not list(Path('app/build').rglob('*.apk'))
-          record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+          source_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert source_sha == os.environ['EXPECTED_SHA']
+          record = dict(source_sha=source_sha, workflow_sha=os.environ['GITHUB_SHA'],
+                        check_id=os.environ['CHECK_ID'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), unit=reports,
                         apk_built=False, instrumentation_run=False)
           Path('pet-presentation-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')

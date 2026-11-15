@@ -170,9 +170,9 @@ class SQLiteGenerationOutputStore(
             row.sha256.matches(HASH) && row.receipt.assetId.endsWith("-${row.sha256}") &&
             row.bytes > 0 && row.width > 0 && row.height > 0)
         when (row.kind) {
-            GenerationKind.IMAGE -> check(row.protocol != GenerationProtocol.OPENAI_VIDEO_MULTIPART &&
+            GenerationKind.IMAGE -> check(!row.protocol.isVideo &&
                 row.mimeType in setOf("image/png", "image/jpeg", "image/webp") && row.durationMs == 0L)
-            GenerationKind.VIDEO -> check(row.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART &&
+            GenerationKind.VIDEO -> check(row.protocol.isVideo &&
                 row.mimeType in setOf("video/mp4", "video/webm") && row.durationMs > 0)
         }
     }
@@ -286,6 +286,20 @@ class SQLiteGenerationOutputStore(
         private val HASH = Regex("[0-9a-f]{64}")
         private val RECEIPT = Regex("genasset-v1-[0-9a-f]{64}-[0-9a-f]{64}")
 
+        internal fun upgradeProtocols(db: SQLiteDatabase) {
+            val schema = db.rawQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", arrayOf(TABLE))
+                .use { if (it.moveToFirst()) it.getString(0) else null }
+            if (schema == null) { installSchema(db); return }
+            if (schema.contains("NOVELAI_IMAGE_JSON")) return
+            val rows = db.rawQuery("SELECT COUNT(*) FROM generation_outputs", null).use { it.moveToFirst(); it.getLong(0) }
+            db.execSQL("ALTER TABLE generation_outputs RENAME TO generation_outputs_legacy_protocols")
+            db.execSQL("DROP INDEX IF EXISTS generation_outputs_owner")
+            installSchema(db)
+            db.execSQL("INSERT INTO generation_outputs SELECT * FROM generation_outputs_legacy_protocols")
+            check(db.rawQuery("SELECT COUNT(*) FROM generation_outputs", null).use { it.moveToFirst(); it.getLong(0) } == rows)
+            db.execSQL("DROP TABLE generation_outputs_legacy_protocols")
+        }
+
         /** Parent calls after installing its messages and attempt schemas in onCreate/onUpgrade. */
         fun installSchema(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE IF NOT EXISTS generation_outputs (
@@ -293,7 +307,7 @@ class SQLiteGenerationOutputStore(
                 item_id TEXT NOT NULL CHECK(length(item_id) BETWEEN 1 AND 128),
                 output_index INTEGER NOT NULL CHECK(typeof(output_index)='integer' AND output_index BETWEEN 0 AND 31),
                 fingerprint TEXT NOT NULL CHECK(length(CAST(fingerprint AS BLOB)) BETWEEN 1 AND 512),
-                protocol TEXT NOT NULL CHECK(protocol IN ('OPENAI_IMAGES_JSON','OPENAI_IMAGE_EDIT_MULTIPART','OPENAI_VIDEO_MULTIPART')),
+                protocol TEXT NOT NULL CHECK(protocol IN (${GenerationProtocol.entries.joinToString(",") { "'${it.name}'" }})),
                 account_scope TEXT NOT NULL CHECK(length(account_scope) BETWEEN 1 AND 200),
                 conversation_id TEXT NOT NULL, assistant_id TEXT NOT NULL, run_id TEXT NOT NULL,
                 tool_call_id TEXT NOT NULL, tool_name TEXT NOT NULL,

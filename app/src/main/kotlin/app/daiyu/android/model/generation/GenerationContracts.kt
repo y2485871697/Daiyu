@@ -1,14 +1,25 @@
 package app.daiyu.android.model.generation
 
 /** 显式选择的生成协议，模型支持情况由宿主确认。 */
-enum class GenerationProtocol { OPENAI_IMAGES_JSON, OPENAI_IMAGE_EDIT_MULTIPART, OPENAI_VIDEO_MULTIPART }
+enum class GenerationProtocol(val kind: GenerationKind, val suffix: String, val label: String) {
+    OPENAI_IMAGES_JSON(GenerationKind.IMAGE, "/images/generations", "Images JSON"),
+    OPENAI_IMAGE_EDIT_MULTIPART(GenerationKind.IMAGE, "/images/edits", "图片编辑 Multipart"),
+    OPENAI_IMAGE_EDIT_JSON(GenerationKind.IMAGE, "/images/edits", "图片编辑 JSON image_url"),
+    OPENAI_IMAGE_REFERENCE_JSON(GenerationKind.IMAGE, "/images/generations", "Images JSON 参考图"),
+    NOVELAI_IMAGE_JSON(GenerationKind.IMAGE, "/ai/generate-image", "NovelAI 原生"),
+    OPENAI_VIDEO_MULTIPART(GenerationKind.VIDEO, "/videos", "Videos Multipart"),
+    OPENAI_VIDEO_JSON(GenerationKind.VIDEO, "/videos", "Videos JSON"),
+    OPENAI_VIDEOS_GENERATIONS_JSON(GenerationKind.VIDEO, "/videos/generations", "Videos Generations JSON"),
+    OPENAI_VIDEO_GENERATIONS_JSON(GenerationKind.VIDEO, "/video/generations", "Video Generations JSON"),
+    ARK_CONTENTS_JSON(GenerationKind.VIDEO, "/contents/generations/tasks", "方舟内容生成任务"),
+    VIDEO_CHAT_JSON(GenerationKind.VIDEO, "/chat/completions", "视频 Chat Completions");
+
+    val isVideo: Boolean get() = kind == GenerationKind.VIDEO
+}
 
 enum class GenerationKind {
     IMAGE, VIDEO;
-    internal fun accepts(protocol: GenerationProtocol): Boolean = when (this) {
-        IMAGE -> protocol == GenerationProtocol.OPENAI_IMAGES_JSON || protocol == GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART
-        VIDEO -> protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART
-    }
+    internal fun accepts(protocol: GenerationProtocol): Boolean = this == protocol.kind
 }
 
 data class GenerationIdentity(val operationId: String, val itemId: String) {
@@ -36,9 +47,12 @@ class GenerationRequest(
     references: List<GenerationInput> = emptyList(),
     val mask: GenerationInput? = null,
     parameters: Map<String, String> = emptyMap(),
+    val requestBodyJson: String = "",
+    headers: Map<String, String> = emptyMap(),
 ) {
     val references: List<GenerationInput> = references.toList()
     val parameters: Map<String, String> = parameters.toMap()
+    val headers: Map<String, String> = headers.toMap()
     override fun toString(): String = "GenerationRequest(protocol=$protocol, payload=<redacted>)"
 }
 

@@ -59,7 +59,7 @@ class ImageGenerationClientTest {
     @Test fun batchPreflightsEveryChildAndDuplicateIdentitiesBeforeAnyPost() {
         val fixture = GenerationFixture()
         val invalid = fixture.images.submitBatch(listOf(generationRequest("a"),
-            generationRequest("b", parameters = mapOf("seed" to "1"))))
+            generationRequest("b", parameters = mapOf("n" to "11"))))
         assertTrue(invalid.all { it.submission is Submission.NotExecuted })
         assertTrue(fixture.http.requests.isEmpty())
         assertEquals(0, fixture.store.reserveCalls)

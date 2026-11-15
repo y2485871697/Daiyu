@@ -6,7 +6,7 @@ import java.util.Collections
 /** 宿主在审批前冻结生成配置，运行和恢复期间保留同一实例。
  * 生成设置独立于聊天设置；模型只选择已冻结批次，端点、凭据和提示词由宿主固定。
  */
-class GenerationRunConfig(batches: List<Batch>, val maxPolls: Int = 4) {
+class GenerationRunConfig(batches: List<Batch>, val maxPolls: Int = 120) {
     class Item(
         val id: String,
         val prompt: String,
@@ -27,8 +27,11 @@ class GenerationRunConfig(batches: List<Batch>, val maxPolls: Int = 4) {
         private val apiKey: String,
         val model: String,
         items: List<Item>,
+        val requestBodyJson: String = "",
+        headers: Map<String, String> = emptyMap(),
     ) {
         val items: List<Item> = Collections.unmodifiableList(items.toList())
+        val headers: Map<String, String> = Collections.unmodifiableMap(headers.toMap())
         init {
             require(id.matches(Regex("[A-Za-z0-9_-]{1,128}")))
             require(this.items.size in 1..32 && this.items.map { it.id }.distinct().size == this.items.size)
@@ -36,7 +39,7 @@ class GenerationRunConfig(batches: List<Batch>, val maxPolls: Int = 4) {
 
         fun requests(identity: (String) -> GenerationIdentity): List<GenerationRequest> = items.map {
             GenerationRequest(identity(it.id), protocol, endpoint, apiKey, model, it.prompt,
-                it.references, it.mask, it.parameters)
+                it.references, it.mask, it.parameters, requestBodyJson, headers)
         }
 
         /** Complete, length-delimited desired change, without exposing credentials/media in a ledger.
@@ -47,7 +50,8 @@ class GenerationRunConfig(batches: List<Batch>, val maxPolls: Int = 4) {
                 update(java.nio.ByteBuffer.allocate(4).putInt(bytes.size).array()); update(bytes)
             }
             fun text(value: String) = field(value.toByteArray(Charsets.UTF_8))
-            text("generation-config-v1"); text(id); text(protocol.name); text(endpoint); text(apiKey); text(model)
+            text("generation-config-v1"); text(id); text(protocol.name); text(endpoint); text(apiKey); text(model); text(requestBodyJson)
+            headers.toSortedMap().forEach { (name, value) -> text(name); text(value) }
             text(this@Batch.items.size.toString())
             this@Batch.items.forEach { item ->
                 text(item.id); text(item.prompt); text(item.references.size.toString())
@@ -64,7 +68,7 @@ class GenerationRunConfig(batches: List<Batch>, val maxPolls: Int = 4) {
 
     val batches: List<Batch> = Collections.unmodifiableList(batches.toList())
     init {
-        require(maxPolls in 0..32)
+        require(maxPolls in 0..240)
         require(this.batches.isNotEmpty() && this.batches.map { it.id }.distinct().size == this.batches.size)
     }
     /** Persistent value identity of the complete frozen config, independent of object/call IDs.

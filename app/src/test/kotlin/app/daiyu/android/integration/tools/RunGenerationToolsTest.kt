@@ -90,7 +90,7 @@ class RunGenerationToolsTest {
             GenerationProtocol.OPENAI_VIDEO_MULTIPART else GenerationProtocol.OPENAI_IMAGES_JSON,
             if (video) "https://api.example/v1/videos" else "https://api.example/v1/images/generations",
             "secret", "model", if (invalidLast) listOf(GenerationRunConfig.Item("first", "ok"),
-                GenerationRunConfig.Item("last", "bad", parameters = mapOf("n" to "2")))
+                GenerationRunConfig.Item("last", "bad", parameters = mapOf("n" to "11")))
             else listOf(GenerationRunConfig.Item("first", "draw")))), polls)
 
     @Test fun paidEffectUsesPersistentAccountOwnerAndConfigScopeNotRuntimeIdentity() {

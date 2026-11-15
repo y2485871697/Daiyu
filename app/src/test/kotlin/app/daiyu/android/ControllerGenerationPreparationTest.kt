@@ -26,11 +26,7 @@ class ControllerGenerationPreparationTest {
     private val editor = GenerationEditorSnapshot(7, " exact editor\n", listOf("immutable-attachment"))
     private val hosts = GenerationDownloadHosts(setOf("cdn.example"))
     private fun profile(protocol: GenerationProtocol = GenerationProtocol.OPENAI_IMAGES_JSON) =
-        GenerationModelProfile("generation-only", "Explicit model", protocol, "https://api.example/v1/" + when (protocol) {
-            GenerationProtocol.OPENAI_IMAGES_JSON -> "images/generations"
-            GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> "images/edits"
-            GenerationProtocol.OPENAI_VIDEO_MULTIPART -> "videos"
-        }, "never-echo-this-key", "chosen-model")
+        GenerationModelProfile("generation-only", "Explicit model", protocol, "https://api.example/v1/" + protocol.suffix.removePrefix("/"), "never-echo-this-key", "chosen-model")
     private fun prepare(parameters: Map<String, String> = emptyMap(), maxPolls: Int = 3) =
         ControllerGenerationPreparation.prepare(identity, editor, listOf(profile()), listOf(
             GenerationBatchSelection("batch", "generation-only", listOf(
@@ -123,8 +119,8 @@ class ControllerGenerationPreparationTest {
         assertEquals(" 1024x1024 ", frozen.parameters["size"])
         assertEquals("0007", frozen.parameters["seed"])
         assertEquals(0, p.preview.config.maxPolls)
-        assertTrue(p.preview.blockers.isNotEmpty())
-        rejects { p.confirm(p.preview, editor, identity) }
+        assertTrue(p.preview.blockers.isEmpty())
+        p.confirm(p.preview, editor, identity)
     }
 
     @Test fun formPreservesImageAndVideoOriginalParametersAndNeverChoosesProfile() {

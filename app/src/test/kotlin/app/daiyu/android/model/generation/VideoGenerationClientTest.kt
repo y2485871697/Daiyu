@@ -9,14 +9,14 @@ class VideoGenerationClientTest {
         val fixture = GenerationFixture()
         fixture.http.respond = { request -> when (request.method) {
             "POST" -> jsonResponse("{\"id\":\"video_123\",\"status\":\"queued\"}")
-            else -> if (request.url.endsWith("/content")) GenerationHttpResponse(200, byteArrayOf(1, 2), "video/mp4")
+            else -> if (request.url.endsWith("/content")) GenerationHttpResponse(200, byteArrayOf(0,0,0,24,102,116,121,112,105,115,111,109,0,0,0,0), "video/mp4")
                 else jsonResponse("{\"id\":\"video_123\",\"status\":\"completed\"}")
         } }
         val plan = fixture.videos.prepare(generationRequest(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART))
         val pending = fixture.videos.submit(plan) as Submission.Pending
         assertEquals(1, fixture.http.requests.size)
         val done = fixture.videos.poll(plan, pending.handle) as Submission.Completed
-        assertEquals("https://api.example/v1/videos/video_123", fixture.http.requests.last().url)
+        assertEquals("https://api.example/v1/videos/video_123/content", fixture.http.requests.last().url)
         assertTrue(fixture.assets.commits.isEmpty())
         val asset = fixture.io.downloadAndCommit(plan, done.outputs.single())
         assertTrue(asset is GenerationAssetResult.Committed)
@@ -37,25 +37,13 @@ class VideoGenerationClientTest {
         } }
         val plan = fixture.videos.prepare(generationRequest(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART))
         val pending = fixture.videos.submit(plan) as Submission.Pending
-        val done = fixture.videos.poll(plan, pending.handle) as Submission.Completed
+        val done = fixture.videos.poll(plan, pending.handle) as Submission.Unknown
         val contentUrl = plan.endpoint + "/video_123/content"
-        val source = done.outputs.single().source as GenerationSource.Remote
-        assertEquals(contentUrl, source.url)
-        assertTrue(source.authenticated)
-        assertTrue(authorizedUrls.isEmpty())
-
-        assertEquals(GenerationAssetResult.Failed(GenerationFailure.DOWNLOAD_DENIED),
-            fixture.io.downloadAndCommit(plan, done.outputs.single()))
+        assertEquals(GenerationFailure.DOWNLOAD_DENIED, done.reason)
         assertEquals(listOf(contentUrl), authorizedUrls)
         assertEquals(0, fixture.http.requests.count { it.method == "GET" && it.url == contentUrl })
-        assertEquals(0, fixture.assets.inspections)
         assertTrue(fixture.assets.commits.isEmpty())
-        assertEquals(plan.attempt, fixture.store.rows[plan.identity])
-        assertEquals(done, fixture.store.results[plan.identity])
-        assertSame(source, done.outputs.single().source)
-        assertEquals(done, fixture.videos.submit(plan))
         assertEquals(1, fixture.http.requests.count { it.method == "POST" })
-        assertEquals(listOf("POST", "GET"), fixture.http.requests.map { it.method })
     }
 
     @Test fun parentAuthorizationDoesNotReplaceAuthenticatedContentUrlChecks() {
@@ -94,7 +82,7 @@ class VideoGenerationClientTest {
         fixture.http.respond = { jsonResponse("{\"id\":\"different\",\"status\":\"completed\"}") }
         assertTrue(fixture.videos.poll(plan, initial.handle) is Submission.Unknown)
         assertEquals(1, fixture.http.requests.count { it.method == "POST" })
-        assertEquals(setOf(plan.endpoint, initial.handle.pollUrl), fixture.http.requests.map { it.url }.toSet())
+        assertEquals((listOf(plan.endpoint) + plan.pollUrls(initial.handle.taskId)).toSet(), fixture.http.requests.map { it.url }.toSet())
     }
 
     @Test fun invalidTaskIdOrUnknownStatusNeverTriggersAlternativeEndpoints() {

@@ -21,6 +21,8 @@ data class GenerationProfileSettings(
     val endpoint: String,
     val model: String,
     val apiKey: String,
+    val requestBodyJson: String = "",
+    val headers: Map<String, String> = emptyMap(),
 ) {
     override fun toString() = "GenerationProfileSettings(<redacted>)"
 }
@@ -44,7 +46,7 @@ class GenerationSettingsSnapshot internal constructor(
     val values: GenerationSettingsValues,
 ) {
     val profiles: List<GenerationModelProfile> = Collections.unmodifiableList(values.profiles.map {
-        GenerationModelProfile(requireNotNull(it.id), it.label, it.protocol, it.endpoint, it.apiKey, it.model)
+        GenerationModelProfile(requireNotNull(it.id), it.label, it.protocol, it.endpoint, it.apiKey, it.model, it.requestBodyJson, it.headers)
     })
     val downloads = GenerationDownloadHosts(if (values.downloadsEnabled) values.downloadHosts else emptySet())
     val maxPolls: Int get() = values.maxPolls
@@ -106,7 +108,21 @@ class GenerationSettingsStore internal constructor(
      * 合法 saving 清单仍保留原身份，密钥不可用时仍可读取已发布原件。
      * 缺失返回 null，损坏则失败；执行和下载仍需另行授权。
      */
-    fun readAccountScope(): String? = synchronized(lock) { readRecord()?.scope }
+    fun readAccountScope(): String? = synchronized(lock) { readRecord()?.scope ?: preferences.getString("media_scope", null) }
+
+    internal fun withMediaProfiles(profiles: List<GenerationProfileSettings>): GenerationSettingsSnapshot = synchronized(lock) {
+        val record = readRecord()
+        val base = if (record == null) null else loadSnapshot()
+        val scope = base?.accountScope ?: preferences.getString("media_scope", null) ?: run {
+            val value = "generation_${UUID.randomUUID().toString().replace("-", "")}"
+            check(preferences.edit().putString("media_scope", value).commit())
+            check(preferences.getString("media_scope", null) == value)
+            value
+        }
+        GenerationSettingsSnapshot(scope, base?.revision ?: "media", GenerationSettingsValues(
+            base?.values?.profiles.orEmpty() + profiles, base?.maxPolls ?: 120,
+            base?.values?.downloadsEnabled ?: false, base?.values?.downloadHosts.orEmpty()))
+    }
 
     fun loadSnapshot(): GenerationSettingsSnapshot = synchronized(lock) {
         if (namespace in fenced) fail(GenerationSettingsFailure.SAVE_UNCONFIRMED)
@@ -153,7 +169,7 @@ class GenerationSettingsStore internal constructor(
         val savedValues = GenerationSettingsValues(values.profiles.map {
             it.copy(id = it.id ?: "profile_${UUID.randomUUID().toString().replace("-", "")}")
         }, values.maxPolls, values.downloadsEnabled, values.downloadHosts)
-        val scope = previous?.scope ?: "generation_${UUID.randomUUID().toString().replace("-", "")}"
+        val scope = previous?.scope ?: preferences.getString("media_scope", null) ?: "generation_${UUID.randomUUID().toString().replace("-", "")}"
         val revision = UUID.randomUUID().toString()
         val bindings = savedValues.profiles.associate { requireNotNull(it.id) to binding(it) }
         val saving = encode(Record(scope, revision, "saving", savedValues, bindings))
@@ -164,8 +180,9 @@ class GenerationSettingsStore internal constructor(
             commitAndReadBack(saving)
             savedValues.profiles.forEach { profile ->
                 val id = requireNotNull(profile.id)
-                saveCredential(id, profile.apiKey)
-                check(loadCredential(id) == profile.apiKey)
+                val secret = encodeCredential(profile)
+                saveCredential(id, secret)
+                check(loadCredential(id) == secret)
             }
             commitAndReadBack(ready)
             val readBack = readRecord() ?: error("manifest_missing")
@@ -192,7 +209,15 @@ class GenerationSettingsStore internal constructor(
         val profiles = record.values.profiles.map { profile ->
             val id = requireNotNull(profile.id)
             val key = try { loadCredential(id) } catch (_: Exception) { "" }
-            val loaded = profile.copy(apiKey = key)
+            val loaded = try {
+                if (key.startsWith("{\"generation_key\":")) {
+                    val envelope = JSONObject(key)
+                    require(envelope.getInt("generation_key") == 1)
+                    val headers = envelope.getJSONObject("headers")
+                    profile.copy(apiKey = envelope.getString("apiKey"),
+                        headers = headers.keys().asSequence().associateWith { headers.get(it) as String })
+                } else profile.copy(apiKey = key)
+            } catch (_: Exception) { profile.copy(apiKey = "") }
             val valid = try {
                 validateProfile(loaded)
                 binding(loaded) == record.bindings[id]
@@ -221,11 +246,13 @@ class GenerationSettingsStore internal constructor(
             val array = root.getJSONArray("profiles")
             val profiles = (0 until array.length()).map { index ->
                 val item = array.getJSONObject(index)
-                item.fields("id", "label", "kind", "protocol", "endpoint", "model", "binding")
+                require(item.keys().asSequence().toSet() in setOf(
+                    setOf("id", "label", "kind", "protocol", "endpoint", "model", "binding"),
+                    setOf("id", "label", "kind", "protocol", "endpoint", "model", "binding", "requestBodyJson")))
                 val id = item.text("id").also { require(it.matches(Regex("profile_[a-f0-9]{32}"))) }
                 require(bindings.put(id, item.text("binding").also { require(it.matches(Regex("[a-f0-9]{64}"))) }) == null)
                 GenerationProfileSettings(id, item.text("label"), GenerationKind.valueOf(item.text("kind")),
-                    GenerationProtocol.valueOf(item.text("protocol")), item.text("endpoint"), item.text("model"), "validation-only")
+                    GenerationProtocol.valueOf(item.text("protocol")), item.text("endpoint"), item.text("model"), "validation-only", item.optString("requestBodyJson", ""))
             }
             val hostsArray = root.getJSONArray("downloadHosts")
             val hosts = (0 until hostsArray.length()).map { hostsArray.get(it) as String }
@@ -244,7 +271,7 @@ class GenerationSettingsStore internal constructor(
         .put("profiles", JSONArray(record.values.profiles.map {
             JSONObject().put("id", it.id).put("label", it.label).put("kind", it.kind.name)
                 .put("protocol", it.protocol.name).put("endpoint", it.endpoint).put("model", it.model)
-                .put("binding", record.bindings[requireNotNull(it.id)])
+                .put("binding", record.bindings[requireNotNull(it.id)]).put("requestBodyJson", it.requestBodyJson)
         })).toString()
 
     companion object {
@@ -266,7 +293,7 @@ class GenerationSettingsStore internal constructor(
 
         private fun validate(values: GenerationSettingsValues, requireIds: Boolean) {
             try {
-                require(values.profiles.size in 1..16 && values.maxPolls in 0..32 && values.downloadHosts.size <= 64)
+                require(values.profiles.size in 1..16 && values.maxPolls in 0..240 && values.downloadHosts.size <= 64)
                 val ids = values.profiles.mapNotNull { it.id }
                 require(ids.distinct().size == ids.size && (!requireIds || ids.size == values.profiles.size))
                 values.profiles.forEach(::validateProfile)
@@ -277,9 +304,9 @@ class GenerationSettingsStore internal constructor(
         private fun validateProfile(profile: GenerationProfileSettings) {
             require(profile.label.length <= 2000 && profile.endpoint.length <= 4096)
             require(profile.id == null || profile.id.matches(Regex("profile_[a-f0-9]{32}")))
-            require((profile.kind == GenerationKind.VIDEO) == (profile.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART))
+            require((profile.kind == GenerationKind.VIDEO) == profile.protocol.isVideo)
             GenerationModelProfile(profile.id ?: "validation", profile.label, profile.protocol,
-                profile.endpoint, profile.apiKey, profile.model)
+                profile.endpoint, profile.apiKey, profile.model, profile.requestBodyJson, profile.headers)
         }
 
         private fun binding(profile: GenerationProfileSettings): String = MessageDigest.getInstance("SHA-256").run {
@@ -288,8 +315,17 @@ class GenerationSettingsStore internal constructor(
                 val bytes = it.toByteArray(Charsets.UTF_8)
                 update(java.nio.ByteBuffer.allocate(4).putInt(bytes.size).array()); update(bytes)
             }
+            if (profile.requestBodyJson.isNotEmpty() || profile.headers.isNotEmpty()) {
+                listOf(profile.requestBodyJson, JSONObject(profile.headers.toSortedMap()).toString()).forEach {
+                    val bytes = it.toByteArray(Charsets.UTF_8)
+                    update(java.nio.ByteBuffer.allocate(4).putInt(bytes.size).array()); update(bytes)
+                }
+            }
             digest().joinToString("") { "%02x".format(it.toInt() and 255) }
         }
+        private fun encodeCredential(profile: GenerationProfileSettings): String = if (profile.headers.isEmpty()) profile.apiKey else
+            JSONObject().put("generation_key", 1).put("apiKey", profile.apiKey)
+                .put("headers", JSONObject(profile.headers)).toString()
         private fun JSONObject.text(key: String): String = get(key) as String
         private fun JSONObject.fields(vararg names: String) {
             require(keys().asSequence().toSet() == names.toSet())

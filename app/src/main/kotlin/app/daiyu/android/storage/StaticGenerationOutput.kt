@@ -41,10 +41,10 @@ internal data class StaticGenerationProvenance(
         require(receipt.matches(Regex("genasset-v1-[0-9a-f]{64}-[0-9a-f]{64}")) && receipt.endsWith("-$sha256"))
         require(width > 0 && height > 0 && width.toLong() * height <= 40_000_000)
         when (kind) {
-            GenerationKind.IMAGE -> require(protocol != GenerationProtocol.OPENAI_VIDEO_MULTIPART &&
+            GenerationKind.IMAGE -> require(!protocol.isVideo &&
                 mimeType in setOf("image/png", "image/jpeg", "image/webp") && durationMs == 0L &&
                 bytes in 1..GenerationRequestPlan.MAX_IMAGE_BYTES.toLong())
-            GenerationKind.VIDEO -> require(protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART &&
+            GenerationKind.VIDEO -> require(protocol.isVideo &&
                 mimeType in setOf("video/mp4", "video/webm") && durationMs in 1..3_600_000L &&
                 bytes in 1..GenerationRequestPlan.MAX_VIDEO_BYTES.toLong())
         }

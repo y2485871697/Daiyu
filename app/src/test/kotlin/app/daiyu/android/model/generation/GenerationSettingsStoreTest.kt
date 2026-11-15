@@ -31,12 +31,8 @@ class GenerationSettingsStoreTest {
     }
 
     private fun profile(protocol: GenerationProtocol = GenerationProtocol.OPENAI_IMAGES_JSON) = GenerationProfileSettings(
-        label = "  explicit label  ", kind = if (protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART) GenerationKind.VIDEO else GenerationKind.IMAGE,
-        protocol = protocol, endpoint = "https://api.example/v1/" + when (protocol) {
-            GenerationProtocol.OPENAI_IMAGES_JSON -> "images/generations"
-            GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> "images/edits"
-            GenerationProtocol.OPENAI_VIDEO_MULTIPART -> "videos"
-        }, model = "  exact-model  ", apiKey = "fixture-credential-never-a-real-key",
+        label = "  explicit label  ", kind = protocol.kind,
+        protocol = protocol, endpoint = "https://api.example/v1" + protocol.suffix, model = "  exact-model  ", apiKey = "fixture-credential-never-a-real-key",
     )
     private fun values(profiles: List<GenerationProfileSettings> = listOf(profile()), hosts: Set<String> = emptySet(),
         enabled: Boolean = false) = GenerationSettingsValues(profiles, 4, enabled, hosts)
@@ -47,6 +43,30 @@ class GenerationSettingsStoreTest {
     private fun rejects(reason: GenerationSettingsFailure, action: () -> Unit) {
         try { action(); fail("expected rejection") }
         catch (failure: GenerationSettingsException) { assertEquals(reason, failure.reason) }
+    }
+
+    @Test fun allProtocolsBodiesAndSecretHeadersRoundTripWithoutMetadataLeaks() {
+        val original = values(GenerationProtocol.entries.map { protocol ->
+            profile(protocol).copy(requestBodyJson = "{\"seed\":42}", headers = mapOf("X-Generation-Token" to "fixture-private-header"))
+        })
+        val first = store().save(original, null)
+        val manifest = prefs.getString(GenerationSettingsStore.KEY, null)!!
+        assertFalse(manifest.contains("fixture-private-header"))
+        assertFalse(manifest.contains("fixture-credential-never-a-real-key"))
+        val reopened = store().loadSnapshot()
+        assertEquals(first.accountScope, reopened.accountScope)
+        assertEquals(GenerationProtocol.entries.toSet(), reopened.values.profiles.map { it.protocol }.toSet())
+        reopened.values.profiles.forEach {
+            assertEquals("{\"seed\":42}", it.requestBodyJson)
+            assertEquals(mapOf("X-Generation-Token" to "fixture-private-header"), it.headers)
+        }
+    }
+
+    @Test fun mediaOnlyAccountScopeSurvivesFirstIndependentSave() {
+        val media = store().withMediaProfiles(listOf(profile().copy(id = "media-image")))
+        assertEquals(media.accountScope, store().readAccountScope())
+        val saved = store().save(values(), null)
+        assertEquals(media.accountScope, saved.accountScope)
     }
 
     @Test fun missingNeverReadsCredentialsOrCreatesDefault() {

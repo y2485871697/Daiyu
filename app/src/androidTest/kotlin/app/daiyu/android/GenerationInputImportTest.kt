@@ -78,18 +78,13 @@ class GenerationInputImportTest : InstrumentationTestCase() {
         val valid = import(png)
         fun request(protocol: GenerationProtocol, refs: List<GenerationInput>, mask: GenerationInput? = null) =
             GenerationRequest(GenerationIdentity("operation", "item"), protocol,
-                when (protocol) {
-                    GenerationProtocol.OPENAI_IMAGES_JSON -> "https://synthetic.invalid/images/generations"
-                    GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> "https://synthetic.invalid/images/edits"
-                    GenerationProtocol.OPENAI_VIDEO_MULTIPART -> "https://synthetic.invalid/videos"
-                }, "synthetic-key", "explicit-model", "draw", refs, mask)
+                "https://synthetic.invalid" + protocol.suffix, "synthetic-key", "explicit-model", "draw", refs, mask)
         val invalidImageRequests = listOf(
             request(edit, listOf(GenerationInput(byteArrayOf(1), "image/png"))),
             request(edit, listOf(GenerationInput(png.copyOf(24), "image/png"))),
             request(edit, listOf(GenerationInput(png, "image/jpeg"))),
             request(edit, listOf(valid), GenerationInput(byteArrayOf(1), "image/png")),
-            request(edit, listOf(valid, valid)),
-            request(GenerationProtocol.OPENAI_IMAGES_JSON, listOf(valid)))
+            request(edit, listOf(valid, valid), valid))
         for (request in invalidImageRequests) assertTrue(images.submit(request) is Submission.NotExecuted)
         assertTrue(videos.submit(request(GenerationProtocol.OPENAI_VIDEO_MULTIPART,
             listOf(valid, valid))) is Submission.NotExecuted)

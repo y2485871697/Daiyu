@@ -31,7 +31,7 @@ internal data class GenerationApprovalForm(
     val prompt: String = "",
     val size: String = "",
     val duration: String = "",
-    val maxPolls: String = "4",
+    val maxPolls: String = "120",
     val references: List<GenerationInput> = emptyList(),
     val mask: GenerationInput? = null,
     val otherParameters: Map<String, String> = emptyMap(),
@@ -117,7 +117,7 @@ internal fun GenerationApprovalHost(
             modifier = Modifier.managedInput().fillMaxWidth(),
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
         )
-        OutlinedTextField(form.maxPolls, { edit(form.copy(maxPolls = it)) }, label = { Text("maxPolls：0–32，仅轮询原任务，不重发 POST") },
+        OutlinedTextField(form.maxPolls, { edit(form.copy(maxPolls = it)) }, label = { Text("maxPolls：0–240，仅轮询原任务，不重发 POST") },
             singleLine = true,
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
             modifier = Modifier.managedInput(),
@@ -135,7 +135,7 @@ internal fun GenerationApprovalHost(
         Button(enabled = form.profileId != null && preparation == null, onClick = {
             error = null
             preparation = runCatching {
-                require(form.maxPolls.matches(Regex("[0-9]{1,2}")))
+                require(form.maxPolls.matches(Regex("[0-9]{1,3}")))
                 ControllerGenerationPreparation.prepare(identity, editor, profiles, listOf(form.selection()),
                     form.maxPolls.toInt(), downloads).also {
                     preparedForm = form.copy(references = form.references.toList(), otherParameters = form.otherParameters.toMap())
@@ -187,10 +187,12 @@ internal fun GenerationPreviewContent(preview: GenerationPreparationPreview) {
     Text("maxPolls = ${preview.config.maxPolls}；凭据已冻结但不显示。")
     preview.config.batches.forEach { batch ->
         Text("batch_id = ${batch.id}\n配置 = ${preview.profileLabels[batch.id]}\nprotocol = ${batch.protocol.name}\nendpoint = ${batch.endpoint}\nmodel = ${batch.model}")
+        if (batch.requestBodyJson.isNotBlank()) Text("附加请求体（冻结原值）：\n${batch.requestBodyJson}")
+        if (batch.headers.isNotEmpty()) Text("自定义请求头：${batch.headers.keys.sorted().joinToString()}（值已隐藏）")
         batch.items.forEach { item ->
             Text("item_id = ${item.id}\nprompt（${item.prompt.length} 字符，原值）：\n${item.prompt}")
             Text("parameters（原值，不裁剪或替换）：")
-            if (item.parameters.isEmpty()) Text("{}；size / duration 均未发送；image n = 1（协议固定）")
+            if (item.parameters.isEmpty()) Text("{}；同时读取保存的请求默认值与提示词中的图片输出设置")
             item.parameters.forEach { (key, value) -> Text("[$key]（${value.length} 字符）=\n$value") }
             item.references.forEachIndexed { index, input -> GenerationInputPreview("原图 $index", input) }
             if (item.references.isEmpty()) Text("原图：无")

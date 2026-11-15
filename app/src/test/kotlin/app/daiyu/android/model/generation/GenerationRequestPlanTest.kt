@@ -15,10 +15,14 @@ class GenerationRequestPlanTest {
         assertEquals(plan.fingerprint, GenerationRequestPlan.prepare(generationRequest(), TestGenerationAssets()).fingerprint)
     }
 
-    @Test fun missingHelperOptionsNeverDisappearSilently() {
-        for (parameter in listOf("seed", "size", "quality", "aspect_ratio", "duration", "n", "count", "concurrency", "extra_body", "internal_image_config")) {
-            assertFailure(GenerationFailure.UNSUPPORTED_PARAMETER, generationRequest(parameters = mapOf(parameter to "1")))
-        }
+    @Test fun preservesSupportedParametersAndRejectsInvalidShapeBeforePost() {
+        val plan = GenerationRequestPlan.prepare(generationRequest(parameters = mapOf("seed" to "123", "quality" to "high", "n" to "2")), TestGenerationAssets())
+        val json = JSONObject(plan.body.toString(Charsets.UTF_8))
+        assertEquals(123, json.getInt("seed"))
+        assertEquals("high", json.getString("quality"))
+        assertEquals(2, json.getInt("n"))
+        assertFailure(GenerationFailure.UNSUPPORTED_PARAMETER, generationRequest(parameters = mapOf("aspect_ratio" to "invalid")))
+        assertFailure(GenerationFailure.UNSUPPORTED_PARAMETER, generationRequest(parameters = mapOf("n" to "11")))
     }
 
     @Test fun rejectsAmbiguousEndpointsInsteadOfChangingTransport() {
@@ -37,7 +41,7 @@ class GenerationRequestPlanTest {
         val plan = GenerationRequestPlan.prepare(request, assets)
         assertEquals(2, assets.inspections)
         val body = plan.body.toString(Charsets.UTF_8)
-        assertTrue(body.contains("name=\"image\"; filename=\"reference.png\""))
+        assertTrue(body.contains("name=\"image\"; filename=\"image0.png\""))
         assertTrue(body.contains("name=\"mask\"; filename=\"mask.png\""))
         assertTrue(body.contains("name=\"n\"\r\n\r\n1\r\n"))
         assertEquals(plan.fingerprint, GenerationRequestPlan.prepare(request, assets).fingerprint)
@@ -46,11 +50,11 @@ class GenerationRequestPlanTest {
     @Test fun referenceAndMaskErrorsArePreflightFailures() {
         val png = GenerationInput(byteArrayOf(1), "image/png")
         val jpeg = GenerationInput(byteArrayOf(1), "image/jpeg")
-        assertFailure(GenerationFailure.UNSUPPORTED_REFERENCE, generationRequest(refs = listOf(png)))
-        assertFailure(GenerationFailure.UNSUPPORTED_REFERENCE, generationRequest(mask = png))
+        assertTrue(GenerationRequestPlan.prepare(generationRequest(refs = listOf(png)), TestGenerationAssets()).contentType.startsWith("multipart/"))
+        assertFailure(GenerationFailure.INVALID_MEDIA, generationRequest(mask = png))
         assertFailure(GenerationFailure.UNSUPPORTED_REFERENCE, generationRequest(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART))
-        assertFailure(GenerationFailure.UNSUPPORTED_REFERENCE, generationRequest(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, refs = listOf(png, png)))
-        assertFailure(GenerationFailure.INVALID_MEDIA, generationRequest(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, refs = listOf(jpeg)))
+        assertTrue(GenerationRequestPlan.prepare(generationRequest(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, refs = listOf(png, png)), TestGenerationAssets()).body.isNotEmpty())
+        assertTrue(GenerationRequestPlan.prepare(generationRequest(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, refs = listOf(jpeg)), TestGenerationAssets()).body.isNotEmpty())
         assertFailure(GenerationFailure.INVALID_MEDIA, generationRequest(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART,
             refs = listOf(png), mask = GenerationInput(byteArrayOf(99), "image/png")))
         assertFailure(GenerationFailure.INVALID_MEDIA, generationRequest(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART,
@@ -62,7 +66,7 @@ class GenerationRequestPlanTest {
     @Test fun videosDoNotDiscardAdditionalReferencesOrMasks() {
         val png = GenerationInput(byteArrayOf(1), "image/png")
         assertFailure(GenerationFailure.UNSUPPORTED_REFERENCE, generationRequest(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART, refs = listOf(png, png)))
-        assertFailure(GenerationFailure.UNSUPPORTED_REFERENCE, generationRequest(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART, mask = png))
+        assertFailure(GenerationFailure.INVALID_MEDIA, generationRequest(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART, mask = png))
         val plan = GenerationRequestPlan.prepare(generationRequest(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART, refs = listOf(png)), TestGenerationAssets())
         val body = plan.body.toString(Charsets.UTF_8)
         assertTrue(body.contains("name=\"input_reference\""))

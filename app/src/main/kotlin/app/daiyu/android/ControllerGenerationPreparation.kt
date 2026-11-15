@@ -113,23 +113,14 @@ internal class ControllerGenerationPreparation private constructor(val preview: 
                 profile.freeze(selected.batchId, selected.items)
             }
             val config = GenerationRunConfig(batches, maxPolls)
-            // Preserve all raw values. The current client rejects ALL optional parameters, even
-            // size. Show a blocked preview rather than silently dropping one or billing a fallback.
+            // Keep raw preview values; authoritative protocol/media preflight precedes every paid POST.
             val blockers = batches.flatMap { batch -> batch.items.flatMap { item ->
                 buildList {
                     val prefix = "${batch.id}/${item.id}: "
                     if (item.prompt.isBlank() || item.prompt.length > 100_000)
                         add(prefix + "缺少有效原始 prompt；请填写，不会猜测或使用聊天草稿替代。")
-                    if (item.parameters.isNotEmpty())
-                        add(prefix + "当前生成客户端不支持附加参数（含 size、duration、quality、seed、n）；请明确移除后重新预览。")
-                    when (batch.protocol) {
-                        GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> if (item.references.size != 1)
-                            add(prefix + "图片编辑需要一张明确选择的原图；不会猜测或补选。")
-                        GenerationProtocol.OPENAI_IMAGES_JSON -> if (item.references.isNotEmpty() || item.mask != null)
-                            add(prefix + "此生成协议不支持原图或 mask；不会静默丢弃。")
-                        GenerationProtocol.OPENAI_VIDEO_MULTIPART -> if (item.references.size > 1 || item.mask != null)
-                            add(prefix + "此视频协议只支持至多一张参考图且不支持 mask；不会静默丢弃。")
-                    }
+                    if (!GenerationFormInputs.supported(batch.protocol, item.references, item.mask))
+                        add(prefix + "所选协议需要有效原图，或不支持这些参考图 / mask 遮罩；不会丢弃输入。")
                 }
             } }
             return ControllerGenerationPreparation(GenerationPreparationPreview(identity, editor, config,
@@ -181,7 +172,7 @@ internal class ConfirmedGenerationPreparation internal constructor(val preview: 
                 val invocation = request.context.invocation
                 val binding = GenerationAttemptBinding(owner.conversationId.value, owner.assistantMessageId.value,
                     owner.runId.value, invocation.id.value, invocation.name)
-                val expectedTool = if (request.batch.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART)
+                val expectedTool = if (request.batch.protocol.isVideo)
                     RunGenerationTools.VIDEO_TOOL else RunGenerationTools.IMAGE_TOOL
                 return !revoked &&
                     request.context.owner === boundOwner && request.context.authorization === boundAuthorization &&

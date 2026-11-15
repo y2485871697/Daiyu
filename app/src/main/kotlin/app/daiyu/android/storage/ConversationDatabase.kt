@@ -15,7 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 33), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 34), ConversationStore {
     constructor(context: Context) : this(context, {})
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -85,7 +85,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..32 && newVersion == 33) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..33 && newVersion == 34) { "不支持此数据库版本，保留原数据" }
+        if (oldVersion == 33) {
+            SQLiteGenerationOutputStore.upgradeProtocols(db)
+            return
+        }
         // Preserve installed receipts, including an authoritative empty v8 import.
         val needsUsageReceiptBackfill = !db.rawQuery(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -146,6 +150,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         installWorkspaceBindings(db)
         ConversationModelSelections.install(db)
         MessageDisplayStore.install(db)
+        SQLiteGenerationOutputStore.upgradeProtocols(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)

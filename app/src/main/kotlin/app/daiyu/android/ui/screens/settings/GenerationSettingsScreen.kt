@@ -25,13 +25,15 @@ data class GenerationProfileDraftUi(
     val endpoint: String = "",
     val model: String = "",
     val apiKey: String = "",
+    val requestBodyJson: String = "",
+    val headersJson: String = "",
 ) {
     override fun toString() = "GenerationProfileDraftUi(<redacted>)"
 }
 
 data class GenerationSettingsDraftUi(
     val profiles: List<GenerationProfileDraftUi> = listOf(GenerationProfileDraftUi()),
-    val maxPolls: String = "4",
+    val maxPolls: String = "120",
     val downloadsEnabled: Boolean = false,
     val downloadHosts: String = "",
     val downloadHostsReviewed: Boolean = false,
@@ -42,23 +44,27 @@ data class GenerationSettingsDraftUi(
     /** No trim, filtering, protocol inference, endpoint rewriting or parameter dropping. The store
      * performs authoritative validation. Blank/duplicate host lines are errors, not ignored input. */
     fun toSettingsValues(): GenerationSettingsValues {
-        require(maxPolls.matches(Regex("0|[1-9][0-9]*"))) { "轮询上限须为 0–32 的整数" }
+        require(maxPolls.matches(Regex("0|[1-9][0-9]*"))) { "轮询上限须为 0–240 的整数" }
         val polls = maxPolls.toIntOrNull()
-        require(polls != null && polls in 0..32) { "轮询上限须为 0–32 的整数" }
+        require(polls != null && polls in 0..240) { "轮询上限须为 0–240 的整数" }
         val hosts = if (downloadHosts.isEmpty()) emptyList() else downloadHosts.split('\n')
         require(hosts.distinct().size == hosts.size) { "下载 host 不得重复" }
         GenerationDownloadHosts(hosts.toSet())
         require(!downloadsEnabled || downloadHostsReviewed) { "启用下载须另行明确确认精确 host 列表" }
         return GenerationSettingsValues(profiles.map {
             GenerationProfileSettings(it.id, it.label, requireNotNull(it.kind) { "请明确选择生成类型" },
-                requireNotNull(it.protocol) { "请明确选择生成协议" }, it.endpoint, it.model, it.apiKey)
+                requireNotNull(it.protocol) { "请明确选择生成协议" }, it.endpoint, it.model, it.apiKey, it.requestBodyJson,
+                    if (it.headersJson.isBlank()) emptyMap() else org.json.JSONObject(it.headersJson).let { headers ->
+                        headers.keys().asSequence().associateWith { name -> headers.get(name) as String }
+                    })
         }, polls, downloadsEnabled, hosts.toSet())
     }
 
     override fun toString() = "GenerationSettingsDraftUi(<redacted>)"
 }
 
-private fun GenerationProfileSettings.toDraft() = GenerationProfileDraftUi(id, label, kind, protocol, endpoint, model, apiKey)
+private fun GenerationProfileSettings.toDraft() = GenerationProfileDraftUi(id, label, kind, protocol, endpoint, model, apiKey, requestBodyJson,
+    if (headers.isEmpty()) "" else org.json.JSONObject(headers).toString())
 
 fun GenerationSettingsSnapshot.toGenerationSettingsDraft() = GenerationSettingsDraftUi(
     profiles = values.profiles.map { it.toDraft() }, maxPolls = values.maxPolls.toString(),
@@ -94,8 +100,8 @@ fun GenerationSettingsScreen(
     }
     SettingsScaffoldPage(title = "独立生成模型设置", onBack = onBack, modifier = modifier) {
         item(key = "generation_explanation") {
-            SettingsNote("仅保存生成配置，不使用聊天模型，不联网、不探测能力，也不授权付费运行。每次运行仍需单独预览并确认。")
-            SettingsNote("endpoint 必须是服务商完整 HTTPS 生成地址；不会补路径或自动选择协议。附加请求参数由运行编辑器保留并校验，本页不会丢弃或替换参数。")
+            SettingsNote("仅保存生成配置，不使用聊天模型，不联网、不探测能力，也不授权付费运行。生成使用当前配置；保存本身不会发起付费请求。")
+            SettingsNote("endpoint 必须是服务商完整 HTTPS 生成地址；不会补路径或自动选择协议。支持自然语言比例、尺寸与分辨率；附加请求体保留原字段，并在发送前校验。")
             draft.accountScope?.let { SettingsNote("持久账户范围：$it") }
         }
         draft.profiles.forEachIndexed { index, profile ->
@@ -112,18 +118,18 @@ fun GenerationSettingsScreen(
                     SettingsRadioRow("视频", profile.kind == GenerationKind.VIDEO, enabled = enabled) {
                         update(index, profile.copy(kind = GenerationKind.VIDEO))
                     }
-                    SettingsRadioRow("OpenAI 图片生成 JSON", profile.protocol == GenerationProtocol.OPENAI_IMAGES_JSON, enabled = enabled) {
-                        update(index, profile.copy(protocol = GenerationProtocol.OPENAI_IMAGES_JSON))
-                    }
-                    SettingsRadioRow("OpenAI 图片编辑 Multipart", profile.protocol == GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, enabled = enabled) {
-                        update(index, profile.copy(protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART))
-                    }
-                    SettingsRadioRow("OpenAI 视频 Multipart", profile.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART, enabled = enabled) {
-                        update(index, profile.copy(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART))
+                    GenerationProtocol.entries.filter { profile.kind == null || it.kind == profile.kind }.forEach { protocol ->
+                        SettingsRadioRow(protocol.label, profile.protocol == protocol, enabled = enabled) {
+                            update(index, profile.copy(protocol = protocol))
+                        }
                     }
                     SettingsTextField("完整生成 endpoint", profile.endpoint, { update(index, profile.copy(endpoint = it)) }, enabled = enabled)
                     SettingsTextField("生成模型名", profile.model, { update(index, profile.copy(model = it)) }, enabled = enabled)
                     SettingsTextField("生成 API Key", profile.apiKey, { update(index, profile.copy(apiKey = it)) }, password = true, enabled = enabled, compact = true)
+                    SettingsTextField("附加请求体 JSON", profile.requestBodyJson,
+                        { update(index, profile.copy(requestBodyJson = it)) }, multiline = true, enabled = enabled)
+                    SettingsTextField("自定义请求头 JSON", profile.headersJson,
+                        { update(index, profile.copy(headersJson = it)) }, password = true, enabled = enabled)
                     TextButton(text = "移除此配置", colors = deletionButtonColors(), enabled = enabled && draft.profiles.size > 1,
                         onClick = { onDraftChange(draft.copy(profiles = draft.profiles.filterIndexed { i, _ -> i != index })) },
                         modifier = Modifier.fillMaxWidth().padding(12.dp))
@@ -138,7 +144,7 @@ fun GenerationSettingsScreen(
         item(key = "generation_limits") {
             SettingsSectionTitle("运行配置")
             SettingsCard {
-                SettingsTextField("最多轮询次数（0–32）", draft.maxPolls,
+                SettingsTextField("最多轮询次数（0–240）", draft.maxPolls,
                     { onDraftChange(draft.copy(maxPolls = it)) }, enabled = enabled)
             }
         }

@@ -103,9 +103,9 @@ internal object BackupGenerationCodec {
                     r.width > 0 && r.height > 0 && r.sha256.matches(Regex("[0-9a-f]{64}")))
                 require(r.receipt.assetId.matches(Regex("genasset-v1-[0-9a-f]{64}-[0-9a-f]{64}")) && r.receipt.assetId.endsWith("-${r.sha256}"))
                 when (r.kind) {
-                    GenerationKind.IMAGE -> require(r.protocol != GenerationProtocol.OPENAI_VIDEO_MULTIPART &&
+                    GenerationKind.IMAGE -> require(!r.protocol.isVideo &&
                         r.mimeType in setOf("image/png", "image/jpeg", "image/webp") && r.durationMs == 0L)
-                    GenerationKind.VIDEO -> require(r.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART &&
+                    GenerationKind.VIDEO -> require(r.protocol.isVideo &&
                         r.mimeType in setOf("video/mp4", "video/webm") && r.durationMs > 0L)
                 }
                 if (contents != null) verify(r, contents[r.sha256] ?: error("缺少生成原资产"))

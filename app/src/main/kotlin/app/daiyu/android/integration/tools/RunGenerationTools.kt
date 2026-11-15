@@ -47,6 +47,7 @@ internal data class GenerationRunItemResult(
     val submission: Submission,
     val references: List<GenerationOutputReference>,
     val failures: Map<Int, GenerationFailure>,
+    val summary: String = "",
 ) {
     override fun toString() = "GenerationRunItemResult(<redacted>)"
 }
@@ -101,7 +102,7 @@ internal class RunGenerationTools(
     val registeredTools: List<RegisteredTool> = config?.let { frozen ->
         listOf(false, true).mapNotNull { video ->
             val batches = frozen.batches.filter {
-                (it.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART) == video
+                (it.protocol.isVideo) == video
             }.associateBy { it.id }
             if (batches.isEmpty()) null else object : RegisteredTool {
                 override val definition = ToolDefinition(
@@ -144,7 +145,7 @@ internal class RunGenerationTools(
         val effect = writeEffect(accountScope, owner, frozen, batch)
         if (context.owner !== owner || context.authorization !== authorization ||
             context.authorization.allowedWrites != setOf(effect) ||
-            context.invocation.name != if (batch.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART) VIDEO_TOOL else IMAGE_TOOL)
+            context.invocation.name != if (batch.protocol.isVideo) VIDEO_TOOL else IMAGE_TOOL)
             return ExecutionReceipt.NotExecuted("generation_invocation_mismatch")
         return execute(context, frozen, batch, effect)
     }
@@ -172,7 +173,7 @@ internal class RunGenerationTools(
                 { context.cancelled() || synchronized(lock) { closed } }, cancellation)
             val images = ImageGenerationClient(io)
             val videos = VideoGenerationClient(io)
-            val isVideo = batch.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART
+            val isVideo = batch.protocol.isVideo
             val requests = batch.requests(binding::identity)
             // No approval and no POST if even the last sibling fails media/protocol preflight.
             val plans = try {
@@ -187,7 +188,7 @@ internal class RunGenerationTools(
             if (context.cancelled() || cancellation.isCancellationRequested)
                 return ExecutionReceipt.NotExecuted("generation_cancelled")
             // The original client also re-preflights the COMPLETE batch before its first POST.
-            val submitted = if (isVideo) videos.submitBatch(requests) else images.submitBatch(requests)
+            val submitted = io.submitPlans(plans) { if (isVideo) videos.submit(it) else images.submit(it) }
             val outputStore = SQLiteGenerationOutputStore(database, assetOwner, assets)
             val items = submitted.mapIndexed { index, item ->
                 val plan = plans[index]
@@ -196,6 +197,7 @@ internal class RunGenerationTools(
                 while (isVideo && result is Submission.Pending && polls < frozen.maxPolls &&
                     !context.cancelled() && !cancellation.isCancellationRequested) {
                     // Only GET on the original handle. Unknown ends polling; NEVER a second POST.
+                    if (polls > 0 && !awaitPoll(context)) break
                     result = videos.poll(plan, result.handle)
                     polls++
                 }
@@ -215,7 +217,22 @@ internal class RunGenerationTools(
                         }
                     }
                 }
-                GenerationRunItemResult(item.identity, result, refs.toList(), failures.toMap())
+                val summary = if (isVideo) refs.joinToString("\n") { reference ->
+                    "视频:${reference.width}x${reference.height} 时长:${reference.durationMs / 1000.0}秒"
+                } else refs.joinToString("\n") { reference ->
+                    val options = plan.imageOptions
+                    val dimension = options?.dimensionReport(reference.width, reference.height, plan.expectedSize).orEmpty()
+                    val ratio = options?.aspectRatio?.takeUnless { it == "auto" } ?: reducedRatio(reference.width, reference.height)
+                    "分辨率:${reference.width}x${reference.height} 比例:$ratio" + when {
+                        "IMAGE_DIMENSIONS_UNVERIFIED" in dimension -> " IMAGE_DIMENSIONS_UNVERIFIED"
+                        "IMAGE_DIMENSIONS_MISMATCH" in dimension -> " IMAGE_DIMENSIONS_MISMATCH"
+                        "IMAGE_RESOLUTION_UNVERIFIED" in dimension -> " IMAGE_RESOLUTION_UNVERIFIED"
+                        else -> ""
+                    }
+                }
+                val countMismatch = if (!isVideo && result is Submission.Completed &&
+                    refs.size != (plan.imageOptions?.count ?: 1)) "\nIMAGE_COUNT_MISMATCH" else ""
+                GenerationRunItemResult(item.identity, result, refs.toList(), failures.toMap(), summary + countMismatch)
             }
             val outcome = GenerationRunOutcome(binding, items)
             synchronized(lock) { outcomes[binding.operationId] = outcome }
@@ -291,10 +308,29 @@ internal class RunGenerationTools(
         else GenerationToolsCloseResult.Unknown("generation_http_not_drained")
     }
 
+    private fun awaitPoll(context: ToolExecutionContext): Boolean {
+        val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
+        synchronized(lock) {
+            while (!closed && !context.cancelled() && !cancellation.isCancellationRequested) {
+                val left = end - System.nanoTime()
+                if (left <= 0) return true
+                TimeUnit.NANOSECONDS.timedWait(lock, minOf(left, TimeUnit.MILLISECONDS.toNanos(100)))
+            }
+        }
+        return false
+    }
+    private fun reducedRatio(width: Int, height: Int): String {
+        if (width <= 0 || height <= 0) return "未知"
+        fun gcd(a: Int, b: Int): Int = if (b == 0) a else gcd(b, a % b)
+        val divisor = gcd(width, height)
+        return "${width / divisor}:${height / divisor}"
+    }
+
     private fun payload(outcome: GenerationRunOutcome): String = JSONObject().put("items", JSONArray().also { array ->
         outcome.items.forEach { item ->
             array.put(JSONObject().put("item_id", item.identity.itemId)
                 .put("status", if (item.submission is Submission.Completed) "completed" else "not_executed")
+                .put("summary", item.summary)
                 .put("assets", JSONArray().also { assets -> item.references.forEach {
                     assets.put(JSONObject().put("asset_id", it.receipt.assetId).put("output_index", it.outputIndex)
                         .put("kind", it.kind.name.lowercase()).put("mime_type", it.mimeType))

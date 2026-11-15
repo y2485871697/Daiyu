@@ -39,11 +39,7 @@ class GenerationContractsTest {
 internal fun generationRequest(
     item: String = "item1",
     protocol: GenerationProtocol = GenerationProtocol.OPENAI_IMAGES_JSON,
-    endpoint: String = when (protocol) {
-        GenerationProtocol.OPENAI_IMAGES_JSON -> "https://api.example/v1/images/generations"
-        GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> "https://api.example/v1/images/edits"
-        GenerationProtocol.OPENAI_VIDEO_MULTIPART -> "https://api.example/v1/videos"
-    },
+    endpoint: String = "https://api.example/v1" + protocol.suffix,
     refs: List<GenerationInput> = emptyList(),
     mask: GenerationInput? = null,
     parameters: Map<String, String> = emptyMap(),

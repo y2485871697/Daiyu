@@ -1,57 +1,47 @@
 package app.daiyu.android.model.generation
 
 import org.json.JSONObject
-import java.util.Base64
 
-/** 使用显式配置的 Images API，选项来自固定配置，发送失败直接返回错误。 */
 class ImageGenerationClient(private val io: GenerationIo) {
     fun prepare(request: GenerationRequest): GenerationRequestPlan {
-        if (!accepts(request.protocol)) throw GenerationPreflightException(GenerationFailure.INVALID_REQUEST)
+        if (request.protocol.isVideo) throw GenerationPreflightException(GenerationFailure.INVALID_REQUEST)
         return GenerationRequestPlan.prepare(request, io.assets)
     }
-
-    fun submit(request: GenerationRequest): Submission = try {
-        submit(prepare(request))
-    } catch (failure: GenerationPreflightException) { Submission.NotExecuted(failure.failure) }
-
-    fun submit(plan: GenerationRequestPlan): Submission {
-        if (!accepts(plan.protocol)) return Submission.NotExecuted(GenerationFailure.INVALID_REQUEST)
-        return io.submit(plan, ::parse)
-    }
-
-    /** All children are preflighted before the first POST; execution is deliberately sequential. */
+    fun submit(request: GenerationRequest): Submission = try { submit(prepare(request)) }
+        catch (failure: GenerationPreflightException) { Submission.NotExecuted(failure.failure) }
+    fun submit(plan: GenerationRequestPlan): Submission = if (plan.kind != GenerationKind.IMAGE)
+        Submission.NotExecuted(GenerationFailure.INVALID_REQUEST) else io.submit(plan) { parse(plan, it) }
     fun submitBatch(requests: List<GenerationRequest>): List<GenerationBatchItem> =
-        io.batch(requests, ::accepts, ::submit)
+        io.batch(requests, { !it.isVideo }, ::submit)
 
-    private fun accepts(protocol: GenerationProtocol): Boolean = protocol == GenerationProtocol.OPENAI_IMAGES_JSON ||
-        protocol == GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART
-
-    private fun parse(response: GenerationHttpResponse): Submission {
-        val root = JSONObject(response.bytes.toString(Charsets.UTF_8))
-        if (root.has("error")) return Submission.Unknown(GenerationFailure.REMOTE_FAILED)
-        val data = root.getJSONArray("data")
-        if (data.length() !in 1..GenerationRequestPlan.MAX_BATCH) return Submission.Unknown(GenerationFailure.PROTOCOL)
-        val outputs = (0 until data.length()).map { index ->
+    private fun parse(plan: GenerationRequestPlan, response: GenerationHttpResponse): Submission {
+        val bytes = response.bytes
+        val parsed = when {
+            plan.protocol == GenerationProtocol.NOVELAI_IMAGE_JSON -> NovelAiImageProtocol.parse(bytes) { io.cancellation.throwIfCancelled() }
+            bytes.hasSupportedImageMagic() -> ImageGenerationParser.Parsed(listOf(ImageGenerationParser.ImageRef(bytes = bytes,
+                mimeType = bytes.sniffGenerationImageMimeType())))
+            else -> {
+                val text = bytes.toString(Charsets.UTF_8)
+                val root = runCatching { JSONObject(text) }.getOrNull()
+                if (root?.has("error") == true && !root.isNull("error")) return Submission.Unknown(GenerationFailure.REMOTE_FAILED)
+                ImageGenerationParser.parse(text)
+            }
+        }
+        if (parsed.images.isEmpty() || parsed.images.size > GenerationRequestPlan.MAX_BATCH)
+            return Submission.Unknown(GenerationFailure.PROTOCOL)
+        val outputs = parsed.images.mapIndexed { index, image ->
             try {
-                val item = data.getJSONObject(index)
-                val hasInline = item.has("b64_json") && !item.isNull("b64_json")
-                val hasUrl = item.has("url") && !item.isNull("url")
-                require(hasInline != hasUrl)
-                val source = if (hasInline) {
-                    val encoded = item.get("b64_json") as String
-                    require(encoded.isNotEmpty() && encoded.length <= GenerationRequestPlan.MAX_JSON_BYTES)
-                    val bytes = Base64.getDecoder().decode(encoded)
-                    require(bytes.isNotEmpty() && bytes.size <= GenerationRequestPlan.MAX_IMAGE_BYTES)
-                    GenerationSource.Inline(bytes, "image/png")
+                val source = if (image.bytes != null) {
+                    require(image.bytes.isNotEmpty() && image.bytes.size <= GenerationRequestPlan.MAX_IMAGE_BYTES)
+                    GenerationSource.Inline(image.bytes, image.bytes.sniffGenerationImageMimeType().ifEmpty { image.mimeType })
                 } else {
-                    val url = item.get("url") as String
+                    val url = requireNotNull(image.url)
                     GenerationRequestPlan.checkedDownload(url)
                     GenerationSource.Remote(url)
                 }
                 GenerationOutput(index, source)
             } catch (_: Exception) { GenerationOutput(index, failure = GenerationFailure.PROTOCOL) }
         }
-        return if (outputs.any { it.source != null }) Submission.Completed(outputs)
-        else Submission.Unknown(GenerationFailure.PROTOCOL)
+        return if (outputs.any { it.source != null }) Submission.Completed(outputs) else Submission.Unknown(GenerationFailure.PROTOCOL)
     }
 }

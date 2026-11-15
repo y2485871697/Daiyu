@@ -19,10 +19,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal object GenerationFormInputs {
     fun supported(protocol: GenerationProtocol, references: List<GenerationInput>, mask: GenerationInput?): Boolean =
         when (protocol) {
-            GenerationProtocol.OPENAI_IMAGES_JSON -> references.isEmpty() && mask == null
-            GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> references.size == 1 &&
-                references.single().mimeType == "image/png" && (mask == null || mask.mimeType == "image/png")
-            GenerationProtocol.OPENAI_VIDEO_MULTIPART -> references.size <= 1 && mask == null
+            GenerationProtocol.NOVELAI_IMAGE_JSON -> references.isEmpty() && mask == null
+            GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> references.isNotEmpty() && (mask == null || references.size == 1 && mask.mimeType == "image/png")
+            GenerationProtocol.OPENAI_IMAGE_EDIT_JSON -> references.size == 1 && mask == null
+            GenerationProtocol.OPENAI_IMAGE_REFERENCE_JSON -> references.size == 1 && (mask == null || mask.mimeType == "image/png")
+            GenerationProtocol.OPENAI_IMAGES_JSON ->
+                references.size <= 1 && (mask == null || references.size == 1 && mask.mimeType == "image/png")
+            GenerationProtocol.ARK_CONTENTS_JSON, GenerationProtocol.VIDEO_CHAT_JSON -> mask == null
+            else -> references.size <= 1 && mask == null
         }
 
     fun ids(references: List<GenerationInput>, mask: GenerationInput?): List<String> =
@@ -43,9 +47,9 @@ internal object GenerationInputImport {
         cancelled: () -> Boolean): GenerationInput {
         val uri = URI(source)
         require(uri.scheme == "content" && !uri.rawAuthority.isNullOrBlank())
-        require(protocol != GenerationProtocol.OPENAI_IMAGES_JSON)
+        require(protocol != GenerationProtocol.NOVELAI_IMAGE_JSON)
         require(target != GenerationInputTarget.MASK ||
-            protocol == GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART && reference != null)
+            protocol in setOf(GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, GenerationProtocol.OPENAI_IMAGE_REFERENCE_JSON, GenerationProtocol.OPENAI_IMAGES_JSON) && reference != null)
         fun checkCurrent() { check(!cancelled()) { "generation_input_cancelled" } }
         checkCurrent()
         val bytes = open().use { stream ->
@@ -68,11 +72,10 @@ internal object GenerationInputImport {
         require(bytes.isNotEmpty())
         val actual = inspector.inspect(bytes)
         validate(actual)
-        if (protocol == GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART) require(actual.mime == "image/png")
         if (target == GenerationInputTarget.MASK) {
             val original = inspector.inspect(checkNotNull(reference).bytes)
             validate(original)
-            require(original.mime == "image/png" && actual.mime == "image/png" &&
+            require(actual.mime == "image/png" &&
                 actual.width == original.width && actual.height == original.height)
         }
         checkCurrent()
@@ -223,9 +226,9 @@ internal class GenerationInputHost(
     fun begin(identity: GenerationInputIdentity, protocol: GenerationProtocol,
         target: GenerationInputTarget, reference: GenerationInput?): Request? {
         if (closed || !resumed || active != null || external != null || current() != identity ||
-            protocol == GenerationProtocol.OPENAI_IMAGES_JSON ||
+            protocol == GenerationProtocol.NOVELAI_IMAGE_JSON ||
             target == GenerationInputTarget.MASK &&
-                (protocol != GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART || reference == null)) return null
+                (protocol !in setOf(GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, GenerationProtocol.OPENAI_IMAGE_REFERENCE_JSON, GenerationProtocol.OPENAI_IMAGES_JSON) || reference == null)) return null
         return Request(identity, protocol, target, reference, workers.cancel).also {
             active = it; external = it; changed(true)
         }

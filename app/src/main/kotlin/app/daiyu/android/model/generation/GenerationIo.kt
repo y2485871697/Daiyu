@@ -22,7 +22,7 @@ class GenerationIo(
         if (cancelled()) return Submission.NotExecuted(GenerationFailure.CANCELLED)
         // Construct every request byte/header before accounting and before any network operation.
         val request = GenerationHttpRequest("POST", plan.endpoint, headers(plan) +
-            ("Content-Type" to plan.contentType), plan.body, GenerationRequestPlan.MAX_JSON_BYTES)
+            ("Content-Type" to plan.contentType), plan.body, plan.responseLimit)
         val reservation = try { attemptStore.reserve(plan.attempt) } catch (_: Exception) {
             return Submission.NotExecuted(GenerationFailure.STORE_UNAVAILABLE)
         }
@@ -65,15 +65,25 @@ class GenerationIo(
         if (!matches(plan, handle)) return Submission.NotExecuted(GenerationFailure.INVALID_REQUEST)
         if (cancelled()) return Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
         val result = try {
-            val response = http.execute(GenerationHttpRequest("GET", handle.pollUrl, headers(plan), null,
-                GenerationRequestPlan.MAX_JSON_BYTES), cancellation)
+            var response: GenerationHttpResponse? = null
+            for (url in plan.pollUrls(handle.taskId)) {
+                if (cancelled()) return Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
+                try {
+                    response = http.execute(GenerationHttpRequest("GET", url, headers(plan), null,
+                        plan.responseLimit), cancellation)
+                    if (response.statusCode in 200..299 || response.statusCode in setOf(401, 402, 403)) break
+                } catch (failure: Exception) {
+                    if (cancelled()) throw failure
+                }
+            }
+            val received = response ?: return Submission.Unknown(GenerationFailure.TRANSPORT, handle = handle)
             when {
                 cancelled() -> Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
-                response.statusCode !in 200..299 -> Submission.Unknown(GenerationFailure.HTTP, response.statusCode, handle)
-                response.bytes.isEmpty() -> Submission.Unknown(GenerationFailure.EMPTY_RESPONSE, handle = handle)
-                response.bytes.size > GenerationRequestPlan.MAX_JSON_BYTES -> Submission.Unknown(GenerationFailure.PROTOCOL, handle = handle)
+                received.statusCode !in 200..299 -> Submission.Unknown(GenerationFailure.HTTP, received.statusCode, handle)
+                received.bytes.isEmpty() -> Submission.Unknown(GenerationFailure.EMPTY_RESPONSE, handle = handle)
+                received.bytes.size > plan.responseLimit -> Submission.Unknown(GenerationFailure.PROTOCOL, handle = handle)
                 else -> try {
-                    when (val parsed = parse(response)) {
+                    when (val parsed = parse(received)) {
                         is Submission.Unknown -> parsed.copy(handle = handle)
                         else -> parsed
                     }
@@ -85,6 +95,25 @@ class GenerationIo(
             (result is Submission.Unknown && result.reason == GenerationFailure.REMOTE_FAILED)) {
             try { attemptStore.finish(plan.attempt, result) } catch (_: Exception) { /* no resubmit */ }
         }
+        return result
+    }
+
+    internal fun content(plan: GenerationRequestPlan, handle: GenerationHandle,
+        parse: (GenerationHttpResponse) -> Submission): Submission {
+        if (!matches(plan, handle) || !authorizeDownload(handle.contentUrl))
+            return Submission.Unknown(GenerationFailure.DOWNLOAD_DENIED, handle = handle)
+        if (cancelled()) return Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
+        val result = try {
+            val response = http.execute(GenerationHttpRequest("GET", handle.contentUrl, headers(plan), null,
+                plan.responseLimit), cancellation)
+            when {
+                cancelled() -> Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
+                response.statusCode !in 200..299 -> Submission.Unknown(GenerationFailure.HTTP, response.statusCode, handle)
+                response.bytes.size > plan.responseLimit -> Submission.Unknown(GenerationFailure.PROTOCOL, handle = handle)
+                else -> parse(response)
+            }
+        } catch (failure: Exception) { Submission.Unknown(transportFailure(failure), handle = handle) }
+        if (result is Submission.Completed) try { attemptStore.finish(plan.attempt, result) } catch (_: Exception) { }
         return result
     }
 
@@ -108,11 +137,9 @@ class GenerationIo(
                     GenerationRequestPlan.checkedDownload(source.url)
                     if (source.authenticated) {
                         // Only a generated /videos/{id}/content URL can receive the bearer token.
-                        val prefix = plan.endpoint + "/"
-                        require(plan.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART)
-                        require(source.url.startsWith(prefix) && source.url.endsWith("/content"))
-                        val id = source.url.removePrefix(prefix).removeSuffix("/content")
-                        require(validTaskId(id))
+                        require(plan.protocol.isVideo)
+                        val id = source.url.substringBeforeLast("/content").substringAfterLast('/')
+                        require(validTaskId(id) && source.url == plan.taskUrls(id).second)
                     }
                 } catch (_: Exception) { return GenerationAssetResult.Failed(GenerationFailure.DOWNLOAD_DENIED) }
                 val response = try {
@@ -156,7 +183,33 @@ class GenerationIo(
             // No valid sibling is sent if ANY item fails preflight.
             return snapshot.map { GenerationBatchItem(it.identity, Submission.NotExecuted(failure.failure)) }
         }
-        return plans.map { GenerationBatchItem(it.identity, submit(it)) }
+        return submitPlans(plans, submit)
+    }
+
+    internal fun submitPlans(plans: List<GenerationRequestPlan>, submit: (GenerationRequestPlan) -> Submission): List<GenerationBatchItem> {
+        val parallelism = plans.maxOfOrNull { it.concurrency } ?: 1
+        if (parallelism == 1 || plans.size <= 1) return plans.map { GenerationBatchItem(it.identity, submit(it)) }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(parallelism, plans.size))
+        var interrupted = false
+        try {
+            val results = plans.map { plan -> pool.submit(java.util.concurrent.Callable { GenerationBatchItem(plan.identity, submit(plan)) }) }
+            return results.mapIndexed { index, future ->
+                try { future.get() } catch (_: InterruptedException) {
+                    interrupted = true
+                    cancellation.cancel()
+                    GenerationBatchItem(plans[index].identity, Submission.Unknown(GenerationFailure.CANCELLED))
+                } catch (_: Exception) {
+                    GenerationBatchItem(plans[index].identity, Submission.Unknown(if (cancelled()) GenerationFailure.CANCELLED else GenerationFailure.TRANSPORT))
+                }
+            }
+        } finally {
+            pool.shutdown()
+            while (!pool.isTerminated) {
+                try { pool.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
+                catch (_: InterruptedException) { interrupted = true; cancellation.cancel() }
+            }
+            if (interrupted) Thread.currentThread().interrupt()
+        }
     }
 
     private fun cancelled(): Boolean = cancellation.isCancellationRequested ||
@@ -164,14 +217,11 @@ class GenerationIo(
     private fun transportFailure(failure: Exception): GenerationFailure =
         if (failure is GenerationCancelledException || cancelled()) GenerationFailure.CANCELLED
         else GenerationFailure.TRANSPORT
-    private fun headers(plan: GenerationRequestPlan): Map<String, String> = buildMap {
-        put("Accept", "application/json")
-        plan.authorization?.let { put("Authorization", it) }
-    }
+    private fun headers(plan: GenerationRequestPlan): Map<String, String> = plan.requestHeaders
     private fun matches(plan: GenerationRequestPlan, handle: GenerationHandle): Boolean =
-        plan.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART && plan.identity == handle.identity &&
+        plan.protocol.isVideo && plan.identity == handle.identity &&
             plan.fingerprint == handle.planFingerprint && validTaskId(handle.taskId) &&
-            handle.pollUrl == plan.endpoint + "/" + handle.taskId && handle.contentUrl == handle.pollUrl + "/content"
+            plan.taskUrls(handle.taskId) == (handle.pollUrl to handle.contentUrl)
 
     internal companion object {
         fun validTaskId(value: String): Boolean = value.matches(Regex("[A-Za-z0-9_-]{1,256}"))

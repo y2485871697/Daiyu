@@ -72,8 +72,23 @@ internal fun projectSubAgentProvider(
     require(snapshot.models.map { it.settings.localIdentity }.distinct().size == snapshot.models.size)
     return SubAgentProvider(snapshot.providerIdentity, "主模型服务商", snapshot.models.map { record ->
         val enabled = try { record.settings.requestOptions.validate(protocol); true } catch (_: Exception) { false }
+        val body = runCatching {
+            if (record.settings.requestOptions.customBody.isBlank()) org.json.JSONObject() else
+                org.json.JSONObject(record.settings.requestOptions.customBody)
+        }.getOrElse { org.json.JSONObject() }
+        val image = app.daiyu.android.model.generation.ImageGenerationModels.matches(record.id) || body.has("daiyu_image_config")
+        val video = app.daiyu.android.model.generation.VideoGenerationModels.matches(record.id) ||
+            body.optJSONObject("daiyu_media_reasoning")?.has("video_generation") == true
+        val media = app.daiyu.android.model.generation.MediaReasoningSettings.resolve(body,
+            if (video) "video_generation" else "image_generation")
         SubAgentModel(id = record.settings.localIdentity, modelId = record.id,
             displayName = record.displayName, isEnabled = enabled,
+            supportsImageGeneration = image && !video,
+            supportsVideoGeneration = video,
+            mediaReasoningSupported = media.status == app.daiyu.android.model.generation.MediaReasoningSettings.Status.SUPPORTED,
+            mediaReasoningLabel = media.label,
+            mediaReasoningEfforts = media.efforts,
+            defaultReasoning = media.defaultEffort,
             supportsGptSpeed = protocol == ProviderProtocol.RESPONSES && GptServiceTier.isGptSpeedModel(record.id),
             defaultGptSpeed = record.settings.requestOptions.speedMode ?: GptSpeedMode.NORMAL)
     })

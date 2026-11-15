@@ -11,8 +11,8 @@ import java.nio.charset.CodingErrorAction
 
 /** Private versioned binary payload. No base64 expansion, Java serialization, paths or debug dumps. */
 internal object GenerationAttemptCodec {
-    const val MAX_ENCODED_BYTES = 32 * 1024 * 1024
-    private const val MAX_INLINE_BYTES = 20 * 1024 * 1024
+    const val MAX_ENCODED_BYTES = 140 * 1024 * 1024
+    private const val MAX_INLINE_BYTES = 100 * 1024 * 1024
     private const val MAX_OUTPUTS = 32
     private const val MAX_URL_BYTES = 16 * 1024
 
@@ -106,10 +106,16 @@ internal object GenerationAttemptCodec {
 
     fun validateHandle(attempt: GenerationAttempt, value: Submission) {
         val handle = handleOf(value) ?: return
-        check(attempt.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART)
+        check(attempt.protocol.isVideo)
         check(handle.identity == attempt.identity && handle.planFingerprint == attempt.fingerprint)
         check(handle.taskId.matches(Regex("[A-Za-z0-9_-]{1,256}")))
-        check(handle.pollUrl.endsWith("/" + handle.taskId) && handle.contentUrl == handle.pollUrl + "/content")
+        val poll = java.net.URI(handle.pollUrl)
+        val content = java.net.URI(handle.contentUrl)
+        check(poll.scheme == "https" && content.scheme == "https" && poll.rawAuthority == content.rawAuthority &&
+            poll.rawUserInfo == null && poll.rawQuery == null && poll.rawFragment == null &&
+            content.rawQuery == null && content.rawFragment == null)
+        check(handle.pollUrl.endsWith("/" + handle.taskId) &&
+            handle.contentUrl.endsWith("/videos/${handle.taskId}/content"))
     }
 
     /**

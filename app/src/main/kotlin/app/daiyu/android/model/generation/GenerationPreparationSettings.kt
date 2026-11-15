@@ -12,7 +12,10 @@ class GenerationModelProfile(
     val endpoint: String,
     private val credential: String,
     val model: String,
+    val requestBodyJson: String = "",
+    headers: Map<String, String> = emptyMap(),
 ) {
+    val headers: Map<String, String> = Collections.unmodifiableMap(headers.toMap())
     init {
         require(id.matches(Regex("[A-Za-z0-9_-]{1,128}")))
         require(label.isNotBlank() && model.isNotBlank() && model.length <= 512)
@@ -20,16 +23,39 @@ class GenerationModelProfile(
         val uri = URI(endpoint)
         require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.rawUserInfo == null &&
             uri.rawQuery == null && uri.rawFragment == null && (uri.port == -1 || uri.port == 443))
-        val suffix = when (protocol) {
-            GenerationProtocol.OPENAI_IMAGES_JSON -> "/images/generations"
-            GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> "/images/edits"
-            GenerationProtocol.OPENAI_VIDEO_MULTIPART -> "/videos"
-        }
-        require(uri.rawPath.endsWith(suffix) && '%' !in uri.rawPath && "//" !in uri.rawPath && uri.normalize() == uri)
+        require(uri.rawPath.endsWith(protocol.suffix) && '%' !in uri.rawPath && "//" !in uri.rawPath && uri.normalize() == uri)
+        require(requestBodyJson.length <= 262144)
+        if (requestBodyJson.isNotBlank()) org.json.JSONObject(requestBodyJson)
+        GenerationRequestPlan.validateHeaders(this.headers)
     }
 
     fun freeze(batchId: String, items: List<GenerationRunConfig.Item>): GenerationRunConfig.Batch =
-        GenerationRunConfig.Batch(batchId, protocol, endpoint, credential, model, items)
+        GenerationRunConfig.Batch(batchId, protocol, endpoint, credential, model,
+            expandItems(items), requestBodyJson, headers)
+
+    private fun expandItems(items: List<GenerationRunConfig.Item>): List<GenerationRunConfig.Item> {
+        if (protocol.isVideo) return items
+        return items.flatMap { item ->
+            val explicitJson = org.json.JSONObject()
+            item.parameters.filterKeys { it in GenerationRequestPlan.imageParameterKeys }.forEach { (key, value) ->
+                explicitJson.put(key, GenerationRequestPlan.parameterValue(value))
+            }
+            val explicit = ImageGenerationOptions.fromJson(explicitJson)
+            val parsed = ImagePromptOptions.parse(item.prompt, explicit)
+            val body = if (requestBodyJson.isBlank()) org.json.JSONObject() else org.json.JSONObject(requestBodyJson)
+            item.parameters.filterKeys { it !in GenerationRequestPlan.imageParameterKeys }.forEach { (key, value) ->
+                body.put(key, GenerationRequestPlan.parameterValue(value))
+            }
+            val prepared = if (GrokImageProfile.applies(endpoint, model, body))
+                GrokImageProfile.prepare(body, parsed.options, explicit, item.references.size, item.mask != null)
+            else ImageRequestParameters.prepare(body, parsed.options, explicit, 1)
+            val count = prepared.options.count ?: 1
+            if (prepared.options.concurrency == null || count == 1) listOf(item) else (0 until count).map { index ->
+                GenerationRunConfig.Item("${item.id}_$index", item.prompt, item.references, item.mask,
+                    item.parameters + mapOf("n" to "1", "concurrency" to prepared.options.concurrency.toString()))
+            }
+        }.also { require(it.size <= 32) }
+    }
 
     override fun toString() = "GenerationModelProfile(<redacted>)"
 }

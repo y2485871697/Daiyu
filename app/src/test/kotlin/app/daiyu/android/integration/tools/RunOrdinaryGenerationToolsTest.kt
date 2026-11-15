@@ -18,13 +18,8 @@ class RunOrdinaryGenerationToolsTest {
     private val assets = mapOf("source" to png, "mask" to mask)
     private fun settings(vararg protocols: GenerationProtocol): GenerationSettingsSnapshot = GenerationSettingsSnapshot(
         "account", "revision", GenerationSettingsValues(protocols.mapIndexed { index, protocol ->
-            val video = protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART
-            GenerationProfileSettings("p$index", "profile $index", if (video) GenerationKind.VIDEO else GenerationKind.IMAGE,
-                protocol, "https://example.test/v1/" + when (protocol) {
-                    GenerationProtocol.OPENAI_IMAGES_JSON -> "images/generations"
-                    GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> "images/edits"
-                    GenerationProtocol.OPENAI_VIDEO_MULTIPART -> "videos"
-                }, "model", "unique-generation-fixture-secret")
+            GenerationProfileSettings("p$index", "profile $index", protocol.kind,
+                protocol, "https://example.test/v1" + protocol.suffix, "model", "unique-generation-fixture-secret")
         }, 4, false, emptySet()))
     private fun leaf(settings: GenerationSettingsSnapshot, inputs: Map<String, GenerationInput> = assets) =
         RunOrdinaryGenerationTools(owner, auth, settings,
@@ -81,7 +76,7 @@ class RunOrdinaryGenerationToolsTest {
         val settings = settings(GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART)
         assertEquals(1, leaf(settings).tools.size)
         assertTrue(leaf(settings, emptyMap()).tools.isEmpty())
-        assertTrue(leaf(settings, mapOf("jpeg" to GenerationInput(byteArrayOf(1), "image/jpeg"))).tools.isEmpty())
+        assertEquals(1, leaf(settings, mapOf("jpeg" to GenerationInput(byteArrayOf(1), "image/jpeg"))).tools.size)
         rejected { prepare(leaf(settings), """{"prompt":"edit"}""") }
         rejected { prepare(leaf(settings), """{"prompt":"edit","source_asset_id":"/private/path"}""") }
     }
@@ -102,7 +97,7 @@ class RunOrdinaryGenerationToolsTest {
         mutable["source"] = GenerationInput(byteArrayOf(9), "image/png")
         val same = prepare(frozen, """{"prompt":"edit","profile_id":"p1","source_asset_id":"source"}""")
         assertEquals(original.writeEffect, same.writeEffect)
-        rejected { prepare(frozen, """{"prompt":"edit","profile_id":"p0","source_asset_id":"source"}""") }
+        prepare(frozen, """{"prompt":"edit","profile_id":"p0","source_asset_id":"source"}""")
         prepare(frozen, """{"prompt":"generate","profile_id":"p0"}""")
     }
     @Test fun videoMayFreezeOneReferenceButNeverAMask() {

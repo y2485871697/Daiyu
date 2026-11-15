@@ -82,8 +82,8 @@ internal enum class ReasoningEffort(val wireValue: String, val displayName: Stri
 }
 
 internal object ImageResolutionTier {
-    val values = listOf("low", "medium", "high")
-    fun label(value: String): String = when (value) { "low" -> "低"; "medium" -> "中"; "high" -> "高"; else -> value }
+    val values = listOf("low", "medium", "high", "ultra")
+    fun label(value: String): String = when (value) { "low" -> "低"; "medium" -> "中"; "high" -> "高"; "ultra" -> "超高"; else -> value }
 }
 
 internal data class SubAgentModelConfig(

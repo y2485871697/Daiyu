@@ -1919,7 +1919,7 @@ class ChatController internal constructor(private val application:Application,
         val config = runtimeStart.config
         val lifetimes = config.profiles.associate { it.id to childPreferences.profileLifetime(key, it.id) }
         val registryRevision = providers.snapshot().revision
-        val availableConfig = config.copy(profiles = config.profiles.filterNot { (it.providerId to it.modelId) in deletedCatalogModels })
+        val availableConfig = config.copy(profiles = config.profiles.filterNot { it.isMedia || (it.providerId to it.modelId) in deletedCatalogModels })
         val selection = if (profileId == null) availableConfig else availableConfig.copy(enabled = true,
             profiles = availableConfig.profiles.filter { it.id == profileId })
         check(profileId == null || selection.profiles.size == 1) { "child_profile_removed_or_role_changed" }
@@ -4302,8 +4302,14 @@ class ChatController internal constructor(private val application:Application,
                 } }
                 admission
             }
-            val ordinaryGeneration = if (ordinaryRun) try { GenerationSettingsStore(application).loadSnapshot() }
-                catch (_: GenerationSettingsException) { null } else null
+            val ordinaryGeneration = if (ordinaryRun) {
+                val mediaProfiles = if (mediaStart?.config?.enabled == true) mediaStart.config.profiles.filter { it.isMedia }
+                    .map { profile -> app.daiyu.android.model.generation.SavedMediaGenerationBindings.profile(profile,
+                        readSavedChildProviderModel(profile.providerId, profile.modelId)) } else emptyList()
+                val store = GenerationSettingsStore(application)
+                if (mediaProfiles.isNotEmpty()) store.withMediaProfiles(mediaProfiles)
+                else try { store.loadSnapshot() } catch (_: GenerationSettingsException) { null }
+            } else null
             val ordinaryShizuku = if (ordinaryRun && androidCommands.backend == "shizuku" && application is ChatApplication) shizukuAccess.refresh() else null
             var ordinaryShizukuScope: RunOrdinaryShizukuTools? = null
             val liveMcp = if (!voiceConversation && mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
@@ -4422,7 +4428,7 @@ class ChatController internal constructor(private val application:Application,
                     try { jobLinux?.let { jobConfigurations["linux"] = it.commandConfiguration() } }
                     finally { jobLinux?.close() }
                     val generationInputs = if (ordinaryGeneration?.profiles?.any {
-                        it.protocol != app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGES_JSON
+                        it.protocol != app.daiyu.android.model.generation.GenerationProtocol.NOVELAI_IMAGE_JSON
                     } == true) messageImages.generationInputs(user) else emptyMap()
                     val scopes = mutableListOf<RunOwnedToolScope>()
                     try {

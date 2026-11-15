@@ -212,7 +212,8 @@ internal fun ConversationSidePaneScaffold(
     val currentVisible by rememberUpdatedState(visible)
     val currentOnOpen by rememberUpdatedState(onOpen)
     val currentOnDismiss by rememberUpdatedState(onDismiss)
-    var drawerBlocksIme by remember { mutableStateOf(visible) }
+    val drawerBlocksIme = visible || drawerState.targetValue == DrawerValue.Open ||
+        drawerState.currentValue == DrawerValue.Open || drawerState.isAnimationRunning
     var managing by remember { mutableStateOf(false) }
 
     fun launchAfterDrawerClosed(action: () -> Unit) {
@@ -258,10 +259,6 @@ internal fun ConversationSidePaneScaffold(
                     currentOnDismiss()
                 }
             }
-    }
-
-    LaunchedEffect(visible) {
-        drawerBlocksIme = visible
     }
 
     LaunchedEffect(drawerState, visible, focusManager, keyboard, view) {

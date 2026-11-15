@@ -62,6 +62,113 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun rawFrame(): Frame {
+        val surface = node("chat-composer-surface").fetchSemanticsNode()
+        val header = node("chat-top-bar").fetchSemanticsNode()
+        val view = (surface.root as ViewRootForTest).view
+        var result: Frame? = null
+        mainThread {
+            val origin = IntArray(2)
+            view.rootView.getLocationOnScreen(origin)
+            result = Frame(origin[1] + view.rootView.height,
+                ViewCompat.getRootWindowInsets(view)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0,
+                surface.positionOnScreen.y + surface.size.height,
+                header.positionOnScreen.y + header.size.height)
+        }
+        return checkNotNull(result)
+    }
+
+    fun testDrawerSearchImeDoesNotLiftBackgroundComposer() {
+        dismissIme()
+        val draft = " 侧栏不改聊天草稿 "
+        setDraft(draft)
+        val database = fixture.database.exportBackup()
+        repeat(2) {
+            ui.onNodeWithContentDescription("打开侧边栏").performClick()
+            node("conversation-drawer").assertIsDisplayed()
+            val baseline = settledFrame(visible = false)
+            node("drawer-search").performTouchInput { click() }
+            awaitImeFrame(node("drawer-search-input"), visible = true)
+            node("drawer-search-input").performTextReplacement("查询")
+            node("drawer-search-input").assertEditableText("查询")
+            val searching = rawFrame()
+            assertTrue(searching.imeBottom > 0)
+            assertEquals(baseline.composerBottom, searching.composerBottom, 2f)
+            assertEquals(baseline.headerBottom, searching.headerBottom, 2f)
+            node("chat-draft").assertIsNotFocused()
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            awaitImeFrame(node("drawer-search-input"), visible = false)
+            assertEquals(baseline.composerBottom, rawFrame().composerBottom, 2f)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            awaitControl("drawer closed") {
+                MainActivity::class.java.getDeclaredMethod("getSidebarVisible").apply { isAccessible = true }
+                    .invoke(activity) == false
+            }
+            node("chat-draft").performTouchInput {
+                advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                click()
+            }
+            awaitImeFrame(node("chat-draft"), visible = true)
+            settledFrame(visible = true, before = baseline)
+            assertDraft(draft)
+            dismissIme()
+            settledFrame(visible = false, before = baseline)
+        }
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    fun testRepeatedImeOpeningIncludesIntermediateComposerFrames() {
+        // API26 has no platform insets-animation dispatch; terminal geometry is covered separately.
+        if (Build.VERSION.SDK_INT < 30) return
+        fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
+        val scales = listOf("window_animation_scale", "transition_animation_scale", "animator_duration_scale")
+            .associateWith { shell("settings get global $it") }
+        try {
+            scales.keys.forEach { shell("settings put global $it 1") }
+            repeat(2) {
+                dismissIme()
+                val before = settledFrame(visible = false)
+                val surface = node("chat-composer-surface").fetchSemanticsNode()
+                val header = node("chat-top-bar").fetchSemanticsNode()
+                val view = (surface.root as ViewRootForTest).view
+                val samples = mutableListOf<Pair<Float, Float>>()
+                val listener = android.view.ViewTreeObserver.OnPreDrawListener {
+                    if (surface.layoutInfo.isPlaced && header.layoutInfo.isPlaced && samples.size < 240) {
+                        samples += (surface.positionOnScreen.y + surface.size.height) to
+                            (header.positionOnScreen.y + header.size.height)
+                    }
+                    true
+                }
+                mainThread { view.viewTreeObserver.addOnPreDrawListener(listener) }
+                val shown: Frame
+                try {
+                    node("chat-draft").performTouchInput {
+                        advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                        click()
+                    }
+                    awaitImeFrame(node("chat-draft"), visible = true)
+                    shown = settledFrame(visible = true, before = before)
+                } finally {
+                    mainThread { view.viewTreeObserver.removeOnPreDrawListener(listener) }
+                }
+                val frames = samples.toList()
+                assertTrue("Opening must move the composer", before.composerBottom - shown.composerBottom > 48f)
+                assertTrue("Actual intermediate composer motion missing: $frames", frames.any {
+                    it.first < before.composerBottom - 2f && it.first > shown.composerBottom + 2f
+                })
+                frames.forEach { assertEquals(before.headerBottom, it.second, 2f) }
+            }
+        } finally {
+            scales.forEach { (key, value) ->
+                shell(if (value == "null") "settings delete global $key" else "settings put global $key $value")
+            }
+        }
+    }
+
     private fun assertRealApi26ImeBinding() {
         if (Build.VERSION.SDK_INT != 26) return
         val expected = "jp.co.omronsoft.openwnn/.OpenWnnJAJP"
@@ -152,8 +259,8 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         setSelection(1, 4, relativeToOriginalText = true)
         assertHostSelection(1, 4)
         if (hideBeforeLeaving) {
-            dismissIme()
-            settledFrame(visible = false)
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            settledFrame(visible = false, before = before)
         }
         node("chat-draft").assertIsFocused()
         val database = fixture.database.exportBackup()
@@ -176,40 +283,22 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         assertSame("HOME must retain the original host", original, activity)
         assertFalse(original.isDestroyed)
         assertEquals(task, original.taskId)
-        ui.waitUntil(5_000) {
-            ui.onNodeWithTag("chat-draft").fetchSemanticsNode().config[SemanticsProperties.Focused] == false
-        }
-        node("chat-draft").assertIsNotFocused()
-        // No dismissIme here: a return-triggered keyboard would be a product failure.
-        val returned = settledFrame(visible = false, before = before)
-        node("chat-draft").assertIsNotFocused()
+        node("chat-draft").assertIsFocused()
+        val returned = settledFrame(visible = !hideBeforeLeaving, before = before)
+        node("chat-draft").assertIsFocused()
         assertEquals(before.headerBottom, returned.headerBottom, 2f)
         assertDraft(draft)
         assertSelection(1, 4)
         assertHostSelection(1, 4)
         assertEquals(database, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
-        node("chat-draft").performTouchInput {
-            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
-            click()
-        }
-        node("chat-draft").assertIsFocused()
-        awaitImeFrame(node("chat-draft"), visible = true)
-        val reopened = settledFrame(visible = true, before = returned)
-        assertTrue(reopened.composerBottom < returned.composerBottom - 48f * activity.resources.displayMetrics.density)
-        assertEquals(returned.headerBottom, reopened.headerBottom, 2f)
-        dismissIme()
-        settledFrame(visible = false, before = returned)
-        assertDraft(draft)
-        assertEquals(database, fixture.database.exportBackup())
-        assertEquals(0, fixture.opens.get())
     }
 
-    fun testReturningFromHomeDoesNotReopenVisibleKeyboardOrLoseSelection() {
+    fun testReturningFromHomePreservesVisibleKeyboardAndSelection() {
         repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = false) }
     }
 
-    fun testReturningFromHomeDoesNotReopenHiddenFocusedKeyboard() {
+    fun testReturningFromHomePreservesHiddenFocusedKeyboard() {
         repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = true) }
     }
 
@@ -293,15 +382,13 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         mainThread { owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_PAUSE) }
         node("chat-draft").assertIsFocused()
         mainThread { owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_STOP) }
-        node("chat-draft").assertIsNotFocused()
-        awaitImeFrame(node("chat-draft"), visible = false)
+        node("chat-draft").assertIsFocused()
         assertRetainedDraft()
         mainThread {
             owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_START)
             owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_RESUME)
         }
-        node("chat-draft").assertIsNotFocused()
-        awaitImeFrame(node("chat-draft"), visible = false)
+        node("chat-draft").assertIsFocused()
         assertRetainedDraft()
         assertEquals(database, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())

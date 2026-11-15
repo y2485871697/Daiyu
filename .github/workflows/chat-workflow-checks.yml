@@ -124,7 +124,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'conversation-date':
               patterns = ('test_conversation_date_contract.py', 'test_conversation_date_smoke_scope.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'ime':
-              patterns = ('test_chat_ime_hotpath_contract.py', 'test_chat_ime_lifecycle_contract.py',
+              patterns = ('test_chat_return_refresh_contract.py', 'test_managed_input_contract.py', 'test_chat_ime_hotpath_contract.py', 'test_chat_ime_lifecycle_contract.py',
                           'test_chat_ime_motion_contract.py', 'test_ime_frame_contract.py',
                           'test_chat_resume_scroll_contract.py', 'test_page_back_gesture_contract.py')
           for pattern in patterns:

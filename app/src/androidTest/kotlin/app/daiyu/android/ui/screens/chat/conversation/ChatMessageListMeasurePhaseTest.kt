@@ -43,8 +43,9 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         contentHeight: () -> androidx.compose.ui.unit.Dp = { 1000.dp },
     ) {
         mount {
-            val viewportHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { viewportHeight().roundToPx() }
-            StreamingTailContainer(state, { null }, "measure-probe", true, { false }, { 0 }, { viewportHeightPx },
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            StreamingTailContainer(state, { null }, "measure-probe", true, { false }, { 0 },
+                viewportHeight = { with(density) { viewportHeight().roundToPx() } },
                 onViewportMeasure = { measures.incrementAndGet() }) {
                 Box(Modifier.size(100.dp, contentHeight()))
             }
@@ -303,6 +304,41 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             assertTrue("viewport still remeasures at $height", measuredHeight.get() != previousHeight)
             assertEquals("viewport-only frames preserve messages slot content", initial, compositions.get())
             previousHeight = measuredHeight.get()
+        }
+    }
+
+    fun testRealStreamingListViewportResizeDoesNotRecomposeTurnContent() {
+        var viewportHeight by mutableStateOf(200.dp)
+        val compositions = java.util.concurrent.atomic.AtomicInteger()
+        val turns: List<ChatTurnUi> = rows() + ChatTurnUi.Assistant(
+            "measure-tail", status = app.daiyu.android.domain.RunStatus.RUNNING)
+        val actions = ChatScreenActions()
+        val request = ChatScrollRequest(1)
+        val extras: @Composable (ChatTurnUi.Assistant) -> Unit = { Box(Modifier.height(1000.dp)) }
+        val observe: (String) -> Unit = { if (it == "measure-tail") compositions.incrementAndGet() }
+        mount {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.ui.layout.Layout(modifier = Modifier.fillMaxSize(), content = {
+                ChatMessageList(turns, actions, scrollRequest = request, composerBottomInset = 40.dp,
+                    turnExtras = extras, onTurnComposed = observe)
+            }) { measurables, constraints ->
+                val px = with(density) { viewportHeight.roundToPx() }
+                val child = measurables.single().measure(
+                    androidx.compose.ui.unit.Constraints.fixed(constraints.maxWidth, px))
+                layout(constraints.maxWidth, constraints.maxHeight) { child.placeRelative(0, 0) }
+            }
+        }
+        ui.onNodeWithTag("chat-messages").assertHeightIsEqualTo(200.dp)
+        ui.onNodeWithTag("chat-stream-viewport:measure-tail").assertHeightIsEqualTo(125.dp)
+        val initial = compositions.get()
+        assertTrue(initial > 0)
+        for (height in listOf(200.dp, 120.dp, 200.dp, 160.dp)) {
+            mainThread { viewportHeight = height }
+            ui.waitForIdle()
+            ui.onNodeWithTag("chat-messages").assertHeightIsEqualTo(height)
+            ui.onNodeWithTag("chat-stream-viewport:measure-tail")
+                .assertHeightIsEqualTo(height - 40.dp - 11.dp - 24.dp)
+            assertEquals("unchanged turn content at $height", initial, compositions.get())
         }
     }
 

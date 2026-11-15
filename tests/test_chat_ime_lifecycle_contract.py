@@ -22,7 +22,8 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         screen = self.read(CHAT / 'ChatScreen.kt')
         self.assertEqual(2, screen.count('.windowInsetsPadding('))
         self.assertEqual(1, screen.count('.windowInsetsPadding(stableStatusBars)'))
-        self.assertEqual(1, screen.count('.windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))'))
+        self.assertEqual(1, screen.count('.windowInsetsPadding(conversationInsets)'))
+        self.assertIn('if (drawerBlocksIme) WindowInsets.navigationBars', screen)
         self.assertIn('WindowInsets.navigationBars.union(WindowInsets.ime)', screen)
         self.assertNotIn('.navigationBarsPadding()', screen)
         self.assertNotIn('.imePadding()', screen)
@@ -42,29 +43,14 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         for forbidden in ('onSizeChanged', 'mutableIntStateOf', 'mutableStateOf'):
             self.assertNotIn(forbidden, layers)
 
-    def test_stop_cleanup_is_chat_scoped_and_does_not_restore_focus(self):
-        helper = self.read(MAIN / 'ui/components/ChatInputIme.kt').split('internal fun DismissImeOnStop(', 1)[1]
-        self.assertIn('var pendingStopDismiss = false', helper)
-        stop = helper.split('Lifecycle.Event.ON_STOP -> {', 1)[1].split('Lifecycle.Event.ON_RESUME', 1)[0]
-        self.assertIn('pendingStopDismiss = true', stop)
-        self.assertIn('hide()', stop)
-        self.assertIn('if (!pendingStopDismiss || restoreDismiss != null ||', helper)
-        self.assertIn('Lifecycle.State.RESUMED', helper)
-        self.assertIn('view.hasWindowFocus()', helper)
-        self.assertLess(helper.index('pendingStopDismiss = false\n                    hide()'),
-                        helper.index('view.postOnAnimation(work)'))
-        self.assertIn('hideChatInputIme(focus, keyboard, view)', helper)
-        self.assertIn('lifecycle.addObserver(observer)', helper)
-        self.assertIn('lifecycle.removeObserver(observer)', helper)
-        self.assertIn('restoreDismiss?.let(view::removeCallbacks)', helper)
-        self.assertIn('removeOnWindowFocusChangeListener(windowFocus)', helper)
-        for forbidden in ('ON_PAUSE', 'requestFocus(', '.show()'):
-            self.assertNotIn(forbidden, helper)
+    def test_background_does_not_dismiss_or_restore_chat_input(self):
+        helper = self.read(MAIN / 'ui/components/ChatInputIme.kt')
         composer = self.read(CHAT / 'ChatComposer.kt')
-        self.assertIn('DismissImeOnStop { dismiss ->', composer)
-        self.assertIn('try { dismiss() } finally { lifecycleDismissInProgress = false }', composer)
+        for forbidden in ('DismissImeOnStop', 'pendingStopDismiss', 'postOnAnimation', 'LifecycleEventObserver'):
+            self.assertNotIn(forbidden, helper)
+        self.assertNotIn('DismissImeOnStop', composer)
         self.assertIn('!lifecycleDismissInProgress && !isInputDismissInProgress()', composer)
-        self.assertNotIn('DismissImeOnStop(', self.read(MAIN / 'MainActivity.kt'))
+        self.assertIn('hideChatInputIme(focus, keyboard, view)', composer)
 
     def test_stopped_editor_preserves_local_value_and_host_selection(self):
         composer = self.read(CHAT / 'ChatComposer.kt')
@@ -75,7 +61,7 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         self.assertNotIn('value.selection.collapsed', change)
 
     def test_programmatic_show_does_not_repeat_or_use_two_channels(self):
-        helper = self.read(MAIN / 'ui/components/ChatInputIme.kt').split('internal suspend fun showChatInputIme', 1)[1].split('/** Returning', 1)[0]
+        helper = self.read(MAIN / 'ui/components/ChatInputIme.kt').split('internal suspend fun showChatInputIme', 1)[1].split('/** Observe', 1)[0]
         self.assertEqual(1, helper.count('requestFocus()'))
         self.assertIn('if (keyboard != null) keyboard.show()', helper)
         self.assertIn('else (view.context as? Activity)', helper)
@@ -94,12 +80,13 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         self.assertIn('am start -n $component -f 0x30020000', driver)
         self.assertNotIn('FLAG_ACTIVITY_CLEAR_TASK', home)
         returned = home.split('awaitHostWindowFocus(original)', 1)[1]
-        before_reopen = returned.split('node("chat-draft").performTouchInput', 1)[0]
-        self.assertNotIn('dismissIme()', before_reopen.replace('// No dismissIme here:', ''))
-        for expected in ('assertIsNotFocused()', 'assertDraft(draft)', 'assertSelection(1, 4)', 'assertHostSelection(1, 4)',
-                         'assertEquals(database, fixture.database.exportBackup())'):
-            self.assertIn(expected, before_reopen)
-        self.assertIn('settledFrame(visible = true, before = returned)', returned)
+        for forbidden in ('dismissIme()', '.performTouchInput', '.show()', 'requestFocus('):
+            self.assertNotIn(forbidden, returned)
+        for expected in ('assertIsFocused()', 'assertDraft(draft)', 'assertSelection(1, 4)', 'assertHostSelection(1, 4)',
+                         'assertEquals(database, fixture.database.exportBackup())',
+                         'settledFrame(visible = !hideBeforeLeaving, before = before)'):
+            self.assertIn(expected, returned)
+        self.assertIn('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)', home)
         self.assertIn('repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = false) }', android)
         self.assertIn('repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = true) }', android)
         self.assertIn('realPauseResume(activity)', android)

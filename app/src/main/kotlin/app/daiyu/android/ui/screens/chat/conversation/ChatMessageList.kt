@@ -49,6 +49,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -124,6 +125,9 @@ internal fun StreamingTailContainer(
     clearance: () -> Int,
     viewportHeight: () -> Int,
     onViewportMeasure: (() -> Unit)? = null,
+    listViewportHeight: () -> Int = {
+        listCoordinates()?.size?.height ?: (viewportHeight() + clearance())
+    },
     content: @Composable () -> Unit,
 ) {
     val innerScroll = rememberScrollableState { delta ->
@@ -164,19 +168,20 @@ internal fun StreamingTailContainer(
                     value = { state.scrollOffset }, maxValue = { state.maxOffset.toFloat() })
             }) { measurables, constraints ->
             onViewportMeasure?.invoke()
+            val currentViewportHeight = viewportHeight().coerceAtLeast(1)
             val body = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
             state.contentHeight = body.height
             val height = if (state.bounded) {
-                val safeBottom = (listCoordinates()?.size?.height ?: (viewportHeight() + clearance())) - clearance()
+                val safeBottom = listViewportHeight() - clearance()
                 val availableBelowOrigin = safeBottom - (state.itemOrigin?.roundToInt() ?: 0).coerceAtLeast(0)
-                val visibleHeight = minOf(viewportHeight(), availableBelowOrigin).coerceAtLeast(1)
+                val visibleHeight = minOf(currentViewportHeight, availableBelowOrigin).coerceAtLeast(1)
                 minOf(body.height, visibleHeight)
             } else body.height
             val maximum = (body.height - height).coerceAtLeast(0)
             state.maxOffset = maximum
             // Keep short replies at their top while the outer follower reveals appended rows.
             // Once the body fills a reading viewport, pin its tail to the actual visible slice.
-            val followOffset = if (body.height > viewportHeight().coerceAtLeast(1)) maximum else 0
+            val followOffset = if (body.height > currentViewportHeight) maximum else 0
             state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()
                 else Snapshot.withoutReadObservation { state.scrollOffset.coerceIn(0f, maximum.toFloat()) }
             layout(body.width, height) {
@@ -184,6 +189,7 @@ internal fun StreamingTailContainer(
             }
         }
     }) { measurables, constraints ->
+        val currentListHeight = listViewportHeight()
         val viewport = measurables.single().measure(constraints.copy(minHeight = 0))
         layout(viewport.width, state.contentHeight) {
             // onPlaced runs after this item's parent placement, before its child
@@ -191,7 +197,7 @@ internal fun StreamingTailContainer(
             val q = if (!state.bounded) 0 else {
                 val origin = state.itemOrigin
                 if (follows() && origin != null)
-                    ((listCoordinates()?.size?.height ?: 0) - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
+                    (currentListHeight - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
                 else state.viewportOffset.coerceIn(0, state.maxOffset)
             }
             state.viewportOffset = q
@@ -218,6 +224,7 @@ internal fun ChatMessageList(
     speechPreparingMessageId: String? = null,
     onViewportReady: (Boolean) -> Unit = {},
     retainUnconfirmedRows: Boolean = false,
+    onTurnComposed: ((String) -> Unit)? = null,
 ) {
     val incomingTurns = turns
     var retainedTurns by remember { mutableStateOf(turns, androidx.compose.runtime.referentialEqualityPolicy()) }
@@ -738,9 +745,9 @@ internal fun ChatMessageList(
         }
     }
     SideEffect { onViewportReady(!initialPositionPending && incomingTurns.isNotEmpty()) }
+    val viewportHeightPx = remember { mutableIntStateOf(0) }
     Box(modifier.fillMaxSize()) {
-      BoxWithConstraints(Modifier.fillMaxSize()) {
-        val viewportHeightPx = constraints.maxHeight
+      Layout(modifier = Modifier.fillMaxSize(), content = {
         LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending && !retainingRows,
             modifier = Modifier.testTag("chat-messages").fillMaxSize()
                 .then(clearanceLayout)
@@ -770,6 +777,7 @@ internal fun ChatMessageList(
             verticalArrangement = Arrangement.spacedBy(26.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 val turnContent: @Composable () -> Unit = {
+                    if (onTurnComposed != null) SideEffect { onTurnComposed(turn.listKey) }
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> androidx.compose.runtime.CompositionLocalProvider(
@@ -817,7 +825,8 @@ internal fun ChatMessageList(
                             userScrollEnabled = pageActive && !initialPositionPending && !retainingRows,
                             follows = { turn.listKey == assistantOwnerKey && followBottom && (initialPositionPending || canFollowBottom()) },
                             clearance = { currentOcclusionPx + with(density) { 24.dp.roundToPx() } },
-                            viewportHeight = { viewportHeightPx - currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() } },
+                            viewportHeight = { viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() } },
+                            listViewportHeight = { viewportHeightPx.intValue },
                             content = turnContent)
                     } else turnContent()
                 }
@@ -832,6 +841,10 @@ internal fun ChatMessageList(
                 }
             }
         }
+      }) { measurables, constraints ->
+          viewportHeightPx.intValue = constraints.maxHeight
+          val list = measurables.single().measure(constraints)
+          layout(list.width, list.height) { list.placeRelative(0, 0) }
       }
     }
 }

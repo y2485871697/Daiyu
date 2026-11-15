@@ -252,7 +252,8 @@ class ContentRecoveryWitnessContract(unittest.TestCase):
         self.assertNotIn("coerceAtLeast", native)
         self.assertIn("@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)", chat)
         self.assertNotIn("statusBarsPadding", chat)
-        self.assertIn(".windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))", chat)
+        self.assertIn(".windowInsetsPadding(conversationInsets)", chat)
+        self.assertIn("else WindowInsets.navigationBars.union(WindowInsets.ime)", chat)
         self.assertNotIn("systemBarsIgnoringVisibility", chat)
         self.assertNotIn("navigationBarsIgnoringVisibility", chat)
 

@@ -113,6 +113,9 @@ internal fun DaiyuChatScreen(
     speechPreparingMessageId: String? = null,
     menuAvailable: Boolean = true,
 ) {
+    val drawerBlocksIme = app.daiyu.android.ui.components.LocalConversationDrawerBlocksIme.current
+    val conversationInsets = if (drawerBlocksIme) WindowInsets.navigationBars
+        else WindowInsets.navigationBars.union(WindowInsets.ime)
     val motionState = remember(callUi?.sessionKey) { DoubaoCallMotionState() }
     var voiceAnchor by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
     var composerBounds by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
@@ -155,7 +158,7 @@ internal fun DaiyuChatScreen(
                 style = MiuixTheme.textStyles.footnote1)
         }
         ChatConversationLayers(Modifier.weight(1f)
-            .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)), messages = { bottomInset ->
+            .windowInsetsPadding(conversationInsets), messages = { bottomInset ->
             ChatViewportFrame(state.conversationKey, state.historyReady && displayedTurns.isEmpty(), Modifier.fillMaxSize()) { onViewportReady ->
               androidx.compose.runtime.key(state.conversationKey) {
                 ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),

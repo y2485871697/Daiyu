@@ -32,8 +32,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import kotlin.math.hypot
@@ -287,17 +285,14 @@ private object InputWindows {
     val windows = mutableMapOf<Window, InputWindow>()
     fun acquire(window: Window, entry: InputEntry): InputWindow {
         val host = windows.getOrPut(window) {
-            val lifecycle = entry.view.findViewTreeLifecycleOwner()?.lifecycle
-                ?: (window.context.inputActivity() as? LifecycleOwner)?.lifecycle
-            inputTrace("new window lifecycle=${lifecycle?.currentState}")
-            InputWindow(window, lifecycle)
+            InputWindow(window)
         }
         host.entries.add(entry)
         return host
     }
 }
 
-private class InputWindow(private val window: Window, private val lifecycle: Lifecycle?) {
+private class InputWindow(private val window: Window) {
     val entries = mutableSetOf<InputEntry>()
     private val decor = window.decorView as? ViewGroup
     private var clearing = 0
@@ -325,12 +320,6 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         }
     }
     private val original = window.callback
-    private val observer = LifecycleEventObserver { _, event ->
-        if (event == Lifecycle.Event.ON_STOP) {
-            inputTrace("stop entries=${entries.size} focused=${entries.count { it.focused() }}")
-            entries.firstOrNull { it.focused() }?.let { dismiss(it) }
-        }
-    }
     private var candidate: InputEntry? = null
     private var nativeFocus: View? = null
     private var x = 0f
@@ -374,7 +363,6 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
     }
     init {
         window.callback = callback
-        lifecycle?.addObserver(observer)
     }
     private fun dismiss(entry: InputEntry) {
         if (!entry.focused() || entry !in entries) return
@@ -418,7 +406,6 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         if (candidate === entry) candidate = null
         if (entries.isEmpty()) {
             releaseRestingFocus()
-            lifecycle?.removeObserver(observer)
             if (window.callback === callback) window.callback = original
             InputWindows.windows.remove(window, this)
             nativeFocus = null; tap = false

@@ -340,6 +340,7 @@ ime_target = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+    'app.daiyu.android.ManagedInputActivityTest',
 )
 ime_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(ime_target)
 ime_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt") for name in ime_target}

@@ -553,8 +553,11 @@ IME_PLATFORM_CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+    'app.daiyu.android.ManagedInputActivityTest',
 )
 IME_MODULES = (
+    'test_chat_return_refresh_contract.ContentRecoveryWitnessContract.test_chat_status_bar_space_ignores_visibility_but_keeps_live_bottom_insets',
+    'test_managed_input_contract',
     'test_chat_ime_hotpath_contract',
     'test_chat_ime_lifecycle_contract',
     'test_chat_ime_motion_contract',

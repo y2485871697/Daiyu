@@ -1,4 +1,4 @@
-"""Bounded seven-class IME regression with no full discovery fallback."""
+"""Bounded eight-class IME regression with no full discovery fallback."""
 import json
 from pathlib import Path
 import tempfile
@@ -15,13 +15,16 @@ CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+    'app.daiyu.android.ManagedInputActivityTest',
 )
 
 
 class ChatImeSmokeScopeTest(unittest.TestCase):
-    def test_only_exact_seven_class_scope_selects_bounded_contracts(self):
+    def test_only_exact_eight_class_scope_selects_bounded_contracts(self):
         self.assertEqual(CLASSES, recorder.IME_PLATFORM_CLASSES)
         self.assertTrue(recorder.IME_MODULES)
+        self.assertEqual(8, len(CLASSES))
+        self.assertIn('test_managed_input_contract', recorder.IME_MODULES)
         self.assertEqual(len(recorder.IME_MODULES), len(set(recorder.IME_MODULES)))
         for names in (CLASSES, tuple(reversed(CLASSES))):
             command, scope = recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(names)))
@@ -49,7 +52,7 @@ class ChatImeSmokeScopeTest(unittest.TestCase):
                         after.replace(b'\n', b'\r\n')):
             self.assertFalse(source.concurrency_group_only_change(before, invalid))
 
-    def test_four_shards_discover_only_the_seven_sources_and_cover_every_method(self):
+    def test_four_shards_discover_only_the_eight_sources_and_cover_every_method(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             helper = discovery.SpeechPlatformDiscoveryTest()

@@ -185,7 +185,9 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun screenBounds(tag: String,
         touchBounds: (androidx.compose.ui.geometry.Rect) -> androidx.compose.ui.geometry.Rect = { it }): androidx.compose.ui.geometry.Rect {
-        val interaction = node(tag).scrollToVisible()
+        val interaction = node(tag)
+        if (generateSequence(interaction.fetchSemanticsNode().parent) { it.parent }
+            .any { hasScrollAction().matches(it) }) interaction.scrollToVisible()
         awaitVisualIdle()
         awaitNodeWindowFocus(interaction)
         val target = interaction.fetchSemanticsNode()
@@ -314,15 +316,28 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     fun testActivityFieldsSwitchAndOutsideButtonRunsOnce() = exerciseFields(false)
     fun testOffsetDialogFieldsUseTheirOwnWindowAndScreenBounds() = exerciseFields(true)
 
-    fun testHomeReturnDoesNotRestoreOrdinaryFieldKeyboard() {
-        showFields()
+    private fun fieldHomeRoundTrip(tag: String, hiddenBeforeHome: Boolean) {
         val original = activity
-        val root = original.window.decorView as android.view.ViewGroup
-        var focusOrder = 0
-        mainThread { focusOrder = root.descendantFocusability }
+        val task = original.taskId
+        val database = fixture.database.exportBackup()
         repeat(2) {
-            tapField("managed-first")
-            mainThread { assertEquals(focusOrder, root.descendantFocusability) }
+            tapField(tag)
+            node(tag).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetSelection) {
+                assertTrue(it(5, 1, true))
+            }
+            if (hiddenBeforeHome) {
+                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                awaitFieldIme(tag, visible = false)
+            }
+            node(tag).assertIsFocused()
+            val before = node(tag).fetchSemanticsNode()
+            val text = before.config[androidx.compose.ui.semantics.SemanticsProperties.EditableText]
+            val selection = before.config[androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
+            assertEquals(5, selection.start)
+            assertEquals(1, selection.end)
+            @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+            val view = (before.root as androidx.compose.ui.platform.ViewRootForTest).view
+            val token = view.windowToken
             val stopped = java.util.concurrent.CountDownLatch(1)
             val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                 if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
@@ -337,21 +352,67 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                 restoreOriginalHost(original)
             }
             awaitHostWindowFocus(original)
-            awaitFieldFocus("managed-first", false)
-            node("managed-first").assertIsNotFocused()
-            awaitFieldIme("managed-first", visible = false)
+            assertSame(original, activity)
+            assertEquals(task, original.taskId)
+            assertFalse(original.isDestroyed)
+            node(tag).assertIsFocused()
+            awaitFieldIme(tag, visible = !hiddenBeforeHome)
+            val returned = node(tag).fetchSemanticsNode()
+            assertEquals(text, returned.config[androidx.compose.ui.semantics.SemanticsProperties.EditableText])
+            assertEquals(selection, returned.config[androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange])
             mainThread {
-                assertTrue(root.isFocused)
-                assertEquals(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS, root.descendantFocusability)
+                assertTrue(view.isAttachedToWindow)
+                assertTrue(view.hasWindowFocus())
+                assertEquals(token, view.windowToken)
             }
-            node("managed-first").assertTextEquals(" 保留草稿😀 ")
+            assertEquals(database, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
         }
+    }
+
+    fun testHomeReturnPreservesVisibleOrdinaryFieldKeyboard() {
+        showFields()
+        fieldHomeRoundTrip("managed-first", hiddenBeforeHome = false)
+    }
+
+    fun testHomeReturnPreservesHiddenOrdinaryFieldKeyboard() {
+        showFields()
+        fieldHomeRoundTrip("managed-first", hiddenBeforeHome = true)
+    }
+
+    private fun renameHomeRoundTrip(hiddenBeforeHome: Boolean) {
+        fieldsInDialog = true
+        var confirms = 0
+        var dismissals = 0
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    var shown by remember { mutableStateOf(true) }
+                    if (shown) DaiyuTextInputDialog(
+                        title = "重命名回归", initial = " 保留名称😀 ", hint = "名称", confirmText = "保存",
+                        onConfirm = { confirms++ }, onDismiss = { dismissals++; shown = false })
+                }
+            }
+        }
+        fieldHomeRoundTrip("prompt-input", hiddenBeforeHome)
+        node("prompt-input").assertIsDisplayed()
+        assertEquals(0, confirms)
+        assertEquals(0, dismissals)
+    }
+
+    fun testHomeReturnPreservesVisibleRenameKeyboard() = renameHomeRoundTrip(false)
+    fun testHomeReturnPreservesHiddenRenameKeyboard() = renameHomeRoundTrip(true)
+
+    fun testExplicitDismissAndDetachRestoreRootFocusOrder() {
+        showFields()
+        val root = activity.window.decorView as android.view.ViewGroup
+        var focusOrder = 0
+        mainThread { focusOrder = root.descendantFocusability }
         tapField("managed-first")
-        mainThread { assertEquals(focusOrder, root.descendantFocusability) }
         realTap("managed-outside")
         awaitFieldFocus("managed-first", false)
         mainThread { assertEquals(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS, root.descendantFocusability) }
-        mainThread { original.setContent {} }
+        mainThread { activity.setContent {} }
         mainThread { assertEquals(focusOrder, root.descendantFocusability) }
         assertEquals(0, fixture.opens.get())
     }

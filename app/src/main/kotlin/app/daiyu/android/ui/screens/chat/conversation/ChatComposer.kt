@@ -102,10 +102,6 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     callMotion: DoubaoCallMotionState? = null,
     attachmentContent: @Composable () -> Unit = {}) {
     var lifecycleDismissInProgress by remember { mutableStateOf(false) }
-    app.daiyu.android.ui.components.DismissImeOnStop { dismiss ->
-        lifecycleDismissInProgress = true
-        try { dismiss() } finally { lifecycleDismissInProgress = false }
-    }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current

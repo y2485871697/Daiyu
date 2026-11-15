@@ -20,6 +20,20 @@ class ChatImeHotpathContractTest(unittest.TestCase):
         self.assertEqual(1, screen.count('WindowInsets.navigationBars.union(WindowInsets.ime)'))
         self.assertIn('ChatConversationLayers(Modifier.weight(1f)', screen)
 
+    def test_list_height_is_read_by_measure_not_item_composition(self):
+        source = (MAIN / 'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
+        body = source.split('internal fun ChatMessageList(', 1)[1].split('internal fun UserTurn(', 1)[0]
+        self.assertNotIn('BoxWithConstraints(', body)
+        self.assertIn('remember { mutableIntStateOf(0) }', body)
+        self.assertIn('viewportHeightPx.intValue = constraints.maxHeight', body)
+        self.assertIn('listViewportHeight = { viewportHeightPx.intValue }', body)
+        viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
+        self.assertIn('val safeBottom = listViewportHeight() - clearance()', viewport)
+        self.assertIn('val currentListHeight = listViewportHeight()', viewport)
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageListMeasurePhaseTest.kt').read_text()
+        self.assertIn('testRealStreamingListViewportResizeDoesNotRecomposeTurnContent', tests)
+        self.assertIn('onTurnComposed = observe', tests)
+
     def test_navigation_observes_ime_visibility_not_every_pixel(self):
         source = (MAIN / 'ui/navigation/PageBackGestures.kt').read_text()
         helper = source.split('internal fun rememberPageImeVisible(', 1)[1].split('internal class PageBackGestureState', 1)[0]

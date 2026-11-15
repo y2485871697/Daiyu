@@ -67,9 +67,10 @@ class ManagedInputContractTest(unittest.TestCase):
                       'field.visibleInputBounds()', 'window.decorView.visibleInputBounds()'):
             self.assertIn(token, text)
 
-    def test_stop_not_pause_and_no_automatic_show_or_business_edits(self):
+    def test_background_keeps_system_ime_state_and_explicit_dismiss_still_hides(self):
         text = SOURCE.read_text()
-        self.assertIn('Lifecycle.Event.ON_STOP', text)
+        self.assertNotIn('LifecycleEventObserver', text)
+        self.assertNotIn('Lifecycle.Event.ON_STOP', text)
         self.assertNotIn('Lifecycle.Event.ON_PAUSE', text)
         self.assertNotIn('Lifecycle.Event.ON_RESUME', text)
         self.assertNotIn('.show(', text)
@@ -80,7 +81,7 @@ class ManagedInputContractTest(unittest.TestCase):
     def test_registration_cleanup_preserves_later_window_wrappers(self):
         text = SOURCE.read_text()
         for token in ('onDispose { detach() }', 'removeOnAttachStateChangeListener(listener)',
-                      'lifecycle?.removeObserver(observer)', 'if (window.callback === callback)',
+                      'if (window.callback === callback)',
                       'InputWindows.windows.remove(window, this)'):
             self.assertIn(token, text)
 
@@ -122,6 +123,15 @@ class ManagedInputContractTest(unittest.TestCase):
                       'awaitFieldIme("managed-first", visible = false)', '动作次数 1',
                       'realLongPress("managed-first")', 'realDrag("managed-first")', 'fixture.database.exportBackup()', 'fixture.opens.get()'):
             self.assertIn(token, text)
+        home = text.split('private fun fieldHomeRoundTrip', 1)[1].split('fun testHomeReturnPreservesVisibleOrdinary', 1)[0]
+        returned = home.split('awaitHostWindowFocus(original)', 1)[1]
+        self.assertIn('awaitFieldIme(tag, visible = !hiddenBeforeHome)', returned)
+        self.assertIn('node(tag).assertIsFocused()', returned)
+        self.assertIn('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)', home)
+        for forbidden in ('dismissIme()', 'tapField(', '.show(', 'requestFocus('):
+            self.assertNotIn(forbidden, returned)
+        self.assertIn('DaiyuTextInputDialog(', text)
+        self.assertIn('fieldHomeRoundTrip("prompt-input", hiddenBeforeHome)', text)
         self.assertNotIn('Thread.sleep', text)
         taps = text.split('private fun exerciseFields', 1)[1].split('fun testHiddenIme', 1)[0]
         self.assertNotIn('dismissIme()', taps)

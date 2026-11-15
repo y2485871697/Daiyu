@@ -470,7 +470,7 @@ VOICE_REFRESH_MODULES = (
 
 SUBAGENT_PRESET_PLATFORM_CLASSES = (
     "app.daiyu.android.SubAgentPresetActionsSheetTest",
-    "app.daiyu.android.SubAgentSettingsProfileSheetTest",
+    "app.daiyu.android.SubAgentPresetDetailPresentationTest",
 )
 SUBAGENT_PRESET_MODULES = (
     "test_subagent_preset_actions_theme_contract", "test_subagent_profile_delete_contract",

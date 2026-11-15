@@ -44,7 +44,7 @@ if requested is not None and any(not re.fullmatch(
     raise ValueError("Expected comma-separated complete instrumentation class names")
 subagent_preset_target = {
     "app.daiyu.android.SubAgentPresetActionsSheetTest",
-    "app.daiyu.android.SubAgentSettingsProfileSheetTest",
+    "app.daiyu.android.SubAgentPresetDetailPresentationTest",
 }
 subagent_preset_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(subagent_preset_target)
 subagent_preset_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")

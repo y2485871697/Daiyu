@@ -14,7 +14,7 @@ SPEC.loader.exec_module(recorder)
 
 CLASSES = (
     "app.daiyu.android.SubAgentPresetActionsSheetTest",
-    "app.daiyu.android.SubAgentSettingsProfileSheetTest",
+    "app.daiyu.android.SubAgentPresetDetailPresentationTest",
 )
 MODULES = (
     "test_subagent_preset_actions_theme_contract", "test_subagent_profile_delete_contract",

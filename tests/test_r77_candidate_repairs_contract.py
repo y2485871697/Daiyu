@@ -48,6 +48,9 @@ class R77CandidateRepairsContract(unittest.TestCase):
         source = (TEST / 'ui/screens/chat/conversation/ChatMessageSpacingTest.kt').read_text()
         self.assertIn('ui.waitUntil(5_000)', source)
         self.assertIn('displayed && gap in 30f..40f', source)
+        self.assertEqual(2, source.count('val composerOuterTop = surface.top - 10f * density'))
+        self.assertEqual(2, source.count('val gap = (composerOuterTop - fullTailBottom) / density'))
+        self.assertIn('outerGapDp=$gap surfaceGapDp=', source)
         self.assertIn('tail.size.height > viewport.height', source)
         self.assertIn('Compact tail after composer growth: $lastGeometry', source)
         settled = source.split('private fun assertCompactTail(', 1)[1].split('fun testCompleted', 1)[0]

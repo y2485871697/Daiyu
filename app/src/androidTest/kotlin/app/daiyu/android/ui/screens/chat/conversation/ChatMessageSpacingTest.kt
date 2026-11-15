@@ -61,6 +61,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
 
     private fun assertCompactTail(marker: String) {
         awaitImeFrame(ui.onNodeWithTag("spacing-host"), visible = false)
+        // The reserved composer includes its 10dp outer top padding; the surface does not.
         var lastGeometry = "marker not sampled"
         try {
             ui.waitUntil(5_000) {
@@ -72,10 +73,11 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     val surface = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
                     val viewport = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot
                     val fullTailBottom = tail.positionInRoot().y + tail.size.height
-                    val gap = (surface.top - fullTailBottom) / density
+                    val composerOuterTop = surface.top - 10f * density
+                    val gap = (composerOuterTop - fullTailBottom) / density
                     val displayed = ui.onNodeWithText(marker, substring = true).isDisplayed()
                     lastGeometry = "tailTop=${tail.positionInRoot().y} tailHeight=${tail.size.height} " +
-                        "surface=$surface viewport=$viewport density=$density gapDp=$gap markerDisplayed=$displayed"
+                        "surface=$surface viewport=$viewport density=$density outerGapDp=$gap surfaceGapDp=${(surface.top - fullTailBottom) / density} markerDisplayed=$displayed"
                     displayed && gap in 30f..40f
                 }
             }
@@ -90,8 +92,9 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         val surface = ui.onNodeWithTag("chat-composer-surface").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue("Fixture must overflow the actual viewport", tail.size.height > viewport.height)
         val fullTailBottom = tail.positionInRoot().y + tail.size.height
-        val gap = (surface.top - fullTailBottom) / density
-        assertTrue("Tail must clear the composer without the old empty strip: gap=${gap}dp", gap in 30f..40f)
+        val composerOuterTop = surface.top - 10f * density
+        val gap = (composerOuterTop - fullTailBottom) / density
+        assertTrue("Tail must retain compact clearance above the outer composer: gap=${gap}dp", gap in 30f..40f)
         ui.onNodeWithContentDescription("上一条用户消息").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }

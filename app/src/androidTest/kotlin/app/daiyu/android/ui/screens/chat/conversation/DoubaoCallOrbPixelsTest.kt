@@ -4,6 +4,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,9 +27,12 @@ class DoubaoCallOrbPixelsTest : ComposeActivityTestCase() {
             mainThread {
                 activity.setContent {
                     CompositionLocalProvider(LocalDensity provides Density(1f)) {
-                        Box(Modifier.size(100.dp).background(Color.White), contentAlignment = Alignment.Center) {
-                            CallWave(DoubaoCallVisualState.LISTENING,
-                                Modifier.size(if (compact) 37.dp else 80.dp), compact = compact, phaseMillis = phase)
+                        Box(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding(),
+                            contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(100.dp), contentAlignment = Alignment.Center) {
+                                CallWave(DoubaoCallVisualState.LISTENING,
+                                    Modifier.size(if (compact) 37.dp else 80.dp), compact = compact, phaseMillis = phase)
+                            }
                         }
                     }
                 }

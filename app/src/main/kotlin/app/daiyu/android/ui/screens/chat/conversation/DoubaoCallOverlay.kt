@@ -29,13 +29,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Path
@@ -58,7 +58,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -118,6 +118,35 @@ internal class DoubaoCallMotionState {
 
 private val CallShadowOutset = 28.dp
 private val CallMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+// Cache software-blurred pixels so live and captured layers use the same shadow on API 26 too.
+private fun Modifier.callPanelShadow(cornerRadius: Dp): Modifier = drawWithCache {
+    val padding = CallShadowOutset.roundToPx()
+    val inset = padding.toFloat()
+    val shadow = if (size.width > 0f && size.height > 0f) {
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            size.width.roundToInt() + padding * 2,
+            size.height.roundToInt() + padding * 2,
+            android.graphics.Bitmap.Config.ARGB_8888,
+        ).apply { density = android.graphics.Bitmap.DENSITY_NONE }
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        val radius = minOf(cornerRadius.toPx(), size.width / 2f, size.height / 2f)
+        fun layer(blur: Dp, offset: Dp, alpha: Float) {
+            paint.color = android.graphics.Color.argb((alpha * 255).roundToInt(), 183, 166, 206)
+            paint.maskFilter = android.graphics.BlurMaskFilter(blur.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+            val y = inset + offset.toPx()
+            canvas.drawRoundRect(inset, y, inset + size.width, y + size.height, radius, radius, paint)
+        }
+        layer(14.dp, 4.dp, .24f)
+        layer(7.dp, 0.dp, .12f)
+        bitmap.asImageBitmap()
+    } else null
+    onDrawBehind {
+        shadow?.let { drawImage(it, topLeft = Offset(-inset, -inset)) }
+    }
+}
+
 
 private val CallInk = Color(0xFF34313F)
 private val CallLavender = Color(0xFFF3EFF8)
@@ -346,9 +375,7 @@ private fun DoubaoCallSession(
                         }
                     }
                 }
-                .dropShadow(shape, Shadow(radius = 14.dp, color = Color(0xFFB7A6CE),
-                    offset = DpOffset(0.dp, 4.dp), alpha = .24f))
-                .dropShadow(shape, Shadow(radius = 7.dp, color = Color(0xFFB7A6CE), alpha = .12f))
+                .callPanelShadow(if (mini) 23.dp else 29.dp)
                 .clip(shape)
                 .background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
                 .border(1.dp, Color.White, shape),

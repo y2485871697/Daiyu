@@ -233,14 +233,9 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
     fun testShortPanelKeepsControlsReachableByBodyScrollWithoutDraggingThePanel() {
         mount(430.dp); finishOpening()
         val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
-        ui.mainClock.autoAdvance = true
-        try {
-            ui.onNodeWithTag("doubao-call-hang-up").performScrollTo().assertIsDisplayed()
-            ui.onNodeWithTag("doubao-call-speaker").performScrollTo().assertIsDisplayed().performClick()
-            awaitVisualIdle()
-        } finally {
-            ui.mainClock.autoAdvance = false
-        }
+        ui.onNodeWithTag("doubao-call-hang-up").scrollToVisible().assertIsDisplayed()
+        ui.onNodeWithTag("doubao-call-speaker").scrollToVisible().assertIsDisplayed().performClick()
+        awaitVisualIdle()
         assertEquals(1, speakerToggles)
         assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
     }
@@ -670,20 +665,25 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             mainThread { call = call!!.copy(reply = (1..40).joinToString("\n") { "第${it}行回答" }) }
             ui.mainClock.advanceTimeBy(1_000); ui.waitForIdle()
             val caption = ui.onNodeWithTag("doubao-call-caption-area")
-            fun position() = caption.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
-            ui.runOnIdle { assertTrue(position().value() >= position().maxValue() - 1f) }
+            fun position(): Pair<Float, Float> {
+                val range = caption.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+                return ui.runOnIdle { range.value() to range.maxValue() }
+            }
+            val tail = position()
+            assertTrue(tail.first >= tail.second - 1f)
             caption.performTouchInput { swipeDown() }
             ui.mainClock.advanceTimeBy(1_000); ui.waitForIdle()
-            val held = position().value()
-            ui.runOnIdle { assertTrue(held < position().maxValue() - 1f) }
+            val manual = position()
+            val held = manual.first
+            assertTrue(held < manual.second - 1f)
             mainThread { call = call!!.copy(reply = call!!.reply + "\n新增回答") }
             ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
-            ui.runOnIdle { assertEquals(held, position().value(), 2f) }
+            assertEquals(held, position().first, 2f)
             ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
             ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
             ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
             ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
-            ui.runOnIdle { assertEquals(held, position().value(), 2f) }
+            assertEquals(held, position().first, 2f)
         }
     }
 

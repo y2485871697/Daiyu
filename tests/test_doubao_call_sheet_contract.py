@@ -162,18 +162,21 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         entrance = overlay.split('if (firstPresentation) {', 1)[1].split('} else {', 1)[0]
         self.assertLess(entrance.index('layer.toImageBitmap()'), entrance.index('progress.animateTo(1f'))
         self.assertIn('CallShadowOutset = 28.dp', overlay)
-        self.assertIn('.dropShadow(shape, Shadow(radius = 14.dp', overlay)
+        self.assertNotIn('.dropShadow(', overlay)
         self.assertNotIn('.shadow(14.dp', overlay)
-        self.assertEqual(2, overlay.count('.dropShadow(shape, Shadow('))
-        self.assertIn('offset = DpOffset(0.dp, 4.dp), alpha = .24f)', overlay)
-        self.assertIn('Shadow(radius = 7.dp, color = Color(0xFFB7A6CE), alpha = .12f)', overlay)
+        self.assertIn('private fun Modifier.callPanelShadow(cornerRadius: Dp): Modifier = drawWithCache', overlay)
+        self.assertIn('android.graphics.Canvas(bitmap)', overlay)
+        self.assertIn('android.graphics.BlurMaskFilter(blur.toPx()', overlay)
+        self.assertIn('layer(14.dp, 4.dp, .24f)', overlay)
+        self.assertIn('layer(7.dp, 0.dp, .12f)', overlay)
+        self.assertIn('.callPanelShadow(if (mini) 23.dp else 29.dp)', overlay)
         self.assertIn('translate(padding, padding) { this@drawWithContent.drawContent() }', overlay)
         self.assertIn('translate(-padding, -padding) { drawLayer(layer) }', overlay)
         self.assertIn('.outset(padding * endpointSize / size.width, padding * endpointSize / size.height)', overlay)
         self.assertIn('size.height).outset(padding)', overlay)
         composition = overlay.split('val morphing =', 1)[1].split('.drawWithContent {', 1)[0]
         self.assertNotIn('progress.value', composition)
-        morph = overlay.split('// Never replay the full live display list once per strip.', 1)[1].split('.dropShadow(', 1)[0]
+        morph = overlay.split('// Never replay the full live display list once per strip.', 1)[1].split('.callPanelShadow(', 1)[0]
         self.assertIn('drawImage(bitmap)', morph)
         self.assertNotIn('drawLayer(', morph)
 

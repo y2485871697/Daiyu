@@ -43,9 +43,13 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         node(list).scrollToDescendant(hasTestTag(tag))
         return node(tag).assertIsDisplayed()
     }
-    private fun beginField(name: String, type: String, value: String) {
-        reveal("model-body-fields").assertExists()
+    private fun openBodyFields() {
+        awaitUniqueTag("model-body-fields")
+        node("model-body-fields").assertIsDisplayed()
             .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+    }
+    private fun beginField(name: String, type: String, value: String) {
+        openBodyFields()
         awaitUniqueTag("model-body-fields-list")
         fieldControl("model-body-field-add", "model-body-fields-list").performClick()
         fieldControl("settings-field:字段名").performTextReplacement(name)
@@ -55,8 +59,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     }
     fun testDismissImeUsesTheOpenFieldDialogWindow() {
         showComponent()
-        reveal("model-body-fields").assertExists()
-            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        openBodyFields()
         awaitUniqueTag("model-body-fields-list")
         fieldControl("model-body-field-add", "model-body-fields-list").performClick()
         val field = node("settings-field:字段名")
@@ -145,7 +148,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         mainThread { apply() }
         assertEquals(initial, draft)
         assertNull(saved); assertEquals(0, saveCount)
-        reveal("model-body-fields").performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        openBodyFields()
         awaitUniqueTag("model-body-fields-list")
         node("model-body-field:0").assertDoesNotExist()
         ui.onNodeWithText("关闭").performClick()

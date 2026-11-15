@@ -135,5 +135,24 @@ class ProviderSavePositionContractTest(unittest.TestCase):
             self.assertIn(required, android)
 
 
+    def test_cloud_regression_fixtures_use_their_actual_host_and_initialized_catalog(self):
+        android = ROOT / "app/src/androidTest/kotlin/app/daiyu/android"
+        position = (android / "ProviderSavePositionActivityTest.kt").read_text()
+        self.assertIn("val catalog = fixture.controller.providers.withEditor(editor) { it.modelCatalogSnapshot() }", position)
+        self.assertIn("assertEquals(catalog?.providerIdentity, currentCatalog?.providerIdentity)", position)
+        self.assertIn("assertEquals(previous.activeSlotId, registered.activeSlotId)", position)
+        body = (android / "RequestBodyFieldsActivityTest.kt").read_text()
+        self.assertIn('private fun openBodyFields()', body)
+        self.assertIn('awaitUniqueTag("model-body-fields")', body)
+        self.assertNotIn('reveal("model-body-fields")', body)
+        self.assertIn('realPauseResume(activity, atPause =', body)
+        inline = (android / "ui/screens/settings/ProviderInlineEditorsTest.kt").read_text()
+        self.assertIn('node("provider-cache-retention:5m").assertIsSelected()', inline)
+        self.assertIn('node("provider-cache-retention-menu").assertDoesNotExist()', inline)
+        self.assertIn('control("provider-cache-retention").assertTextContains("5分钟")', inline)
+        self.assertIn('pageTitle = "语音字段夹具"', inline)
+        self.assertIn('awaitUniqueTag("page:语音字段夹具")', inline)
+
+
 if __name__ == "__main__":
     unittest.main()

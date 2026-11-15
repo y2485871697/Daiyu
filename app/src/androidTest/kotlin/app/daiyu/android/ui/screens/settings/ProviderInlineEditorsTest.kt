@@ -31,10 +31,17 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
             node("provider-cache-retention-menu").assertExists()
         }
         node("provider-cache-retention:5m").performClick()
+        node("provider-cache-retention:5m").assertIsSelected()
+        node("provider-cache-retention-menu").assertExists()
+        androidx.test.espresso.Espresso.pressBack()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("provider-cache-retention-menu").fetchSemanticsNodes().isEmpty()
+        }
+        node("provider-cache-retention-menu").assertDoesNotExist()
         render()
         control("provider-cache-retention").assertExists()
         ui.onNodeWithText("自定义请求体").assertIsDisplayed()
-        ui.onNodeWithText("5分钟").assertExists()
+        control("provider-cache-retention").assertTextContains("5分钟")
         control("model-save").performClick()
         assertEquals(app.daiyu.android.model.DaiyuPromptCacheRetention.FIVE_MINUTES, saved?.promptCacheRetention)
         assertEquals(0, fixture.opens.get())
@@ -69,9 +76,10 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         control("provider-cache-retention").assertExists()
         ui.onNodeWithText("自定义请求体").assertIsDisplayed()
         mainThread { activity.setContent { MiuixTheme {
-            ModelSettingsScreen(draft, { draft = it }, { saved = it }, {}, {}, showCatalog = false, speechOnly = true)
+            ModelSettingsScreen(draft, { draft = it }, { saved = it }, {}, {},
+                pageTitle = "语音字段夹具", showCatalog = false, speechOnly = true)
         } } }
-        awaitModelEditor()
+        awaitUniqueTag("page:语音字段夹具")
         node("model-custom-headers").assertDoesNotExist()
         node("provider-cache-retention").assertDoesNotExist()
         ui.onNodeWithText("自定义请求体").assertDoesNotExist()

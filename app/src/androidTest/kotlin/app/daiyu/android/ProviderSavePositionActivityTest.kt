@@ -87,7 +87,7 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         val saved = fixture.controller.providers.editing(editor).settings
         assertEquals("https://position.invalid", saved.endpoint)
         assertEquals("position-test-key", saved.apiKey)
-        val catalog = fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() }
+        val catalog = fixture.controller.providers.withEditor(editor) { it.modelCatalogSnapshot() }
 
         reveal("provider-name", "Position provider").performTextReplacement("Renamed position provider")
         saveAtBottom("Position provider", "Renamed position provider")

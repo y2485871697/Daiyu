@@ -443,6 +443,11 @@ def command_for(python, env):
             and env.get("SMOKE_TEST_CLASSES") == LINUX_SETTINGS_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *LINUX_SETTINGS_MODULES, "-v"], "linux-settings-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.AssistantPickerVisualTest"):
+        return [python, "-B", "-m", "unittest", "test_assistant_picker_frame_contract",
+                "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+                "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", "-v"], "assistant-picker-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(POPUP_TITLE_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *POPUP_TITLE_MODULES, "-v"], "popup-title-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == RENAME_PRESENTATION_PLATFORM_CLASS:

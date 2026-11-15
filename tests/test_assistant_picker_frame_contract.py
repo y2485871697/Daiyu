@@ -7,6 +7,39 @@ SOURCE = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/AssistantPickerVis
 
 
 class AssistantPickerFrameContractTest(unittest.TestCase):
+    def test_delete_sheet_omits_prompt_and_close_without_changing_other_actions(self):
+        picker = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
+        body = picker.split('internal fun AssistantDeleteDialog(', 1)[1].split('\n@Composable', 1)[0]
+        self.assertNotIn('assistant_delete_body', body)
+        self.assertIn('showCloseButton = false', body)
+        for token in ('assistant_delete_title', 'AssistantDialogIdentity(profile, assets)',
+                      'onDismiss = onDismiss', 'onBack = onDismiss', 'onOutsideDismiss = onOutsideDismiss',
+                      'R.string.action_cancel', 'R.string.action_delete', 'onConfirm', 'enabled = canDelete'):
+            self.assertIn(token, body)
+        visual = SOURCE.read_text().split('fun testDeleteSheetOmitsPromptAndCloseButKeepsCancelBackAndConfirm()', 1)[1].split('fun testSearchStillFilters', 1)[0]
+        for token in ('assistant_delete_body', 'assertDoesNotExist()', 'onNodeWithContentDescription("关闭")',
+                      'R.string.action_cancel', 'onNodeWithContentDescription("返回").performClick()',
+                      'R.string.action_delete', 'assertNull(deleted)', 'assertEquals("visual-a", deleted)'):
+            self.assertIn(token, visual)
+
+    def test_assistant_picker_singleton_uses_targeted_contracts_and_inventory(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('assistant_picker_recorder', ROOT / 'scripts/acceptance/record_tool_tests.py')
+        recorder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recorder)
+        target = 'app.daiyu.android.AssistantPickerVisualTest'
+        command, scope = recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=target))
+        self.assertEqual('assistant-picker-targeted', scope)
+        self.assertIn('test_assistant_picker_frame_contract', command)
+        self.assertNotIn('discover', command)
+        for invalid in (target + ',unknown', target + ',' + target, ' ' + target):
+            self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=invalid))[1])
+        self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE='compile', SMOKE_TEST_CLASSES=target))[1])
+        smoke = (ROOT / 'scripts/smoke_boot.sh').read_text()
+        self.assertIn('assistant_picker_only = mode == "smoke" and raw_filter == assistant_picker_target', smoke)
+        self.assertIn('[assistant_picker_source] if assistant_picker_only else', smoke)
+        self.assertIn('or assistant_picker_only or popup_title_only', smoke)
+
     def test_all_geometry_and_text_are_sampled_in_one_stable_native_frame(self):
         text = SOURCE.read_text()
         helper = text.split('private fun pickerFrame(): PickerFrame {', 1)[1].split('fun testPickerKeeps', 1)[0]

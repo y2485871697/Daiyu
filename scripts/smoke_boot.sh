@@ -230,6 +230,9 @@ chat_status_bar_source = Path("app/src/androidTest/kotlin/app/daiyu/android/Chat
 rename_presentation_target = "app.daiyu.android.RenamePresentationActivityTest"
 rename_presentation_only = mode == "smoke" and raw_filter == rename_presentation_target
 rename_presentation_source = Path("app/src/androidTest/kotlin/app/daiyu/android/RenamePresentationActivityTest.kt")
+assistant_picker_target = "app.daiyu.android.AssistantPickerVisualTest"
+assistant_picker_only = mode == "smoke" and raw_filter == assistant_picker_target
+assistant_picker_source = Path("app/src/androidTest/kotlin/app/daiyu/android/AssistantPickerVisualTest.kt")
 popup_title_target = tuple("app.daiyu.android." + name for name in (
     "PopupTitleGeometryTest", "AssistantPickerVisualTest", "SharedSheetSpacingActivityTest", "CollaborationEmptyStateTest",
 ))
@@ -271,7 +274,7 @@ provider_catalog_only = mode == "smoke" and sorted(raw_filter.split(",")) == sor
 provider_catalog_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                             for name in provider_catalog_target}
 classes = {}
-for path in sorted(provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
+for path in sorted(provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else [assistant_picker_source] if assistant_picker_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
         continue
     if speech_only and path != speech_source:
@@ -369,7 +372,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
+                discovery_scope="targeted" if provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or assistant_picker_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

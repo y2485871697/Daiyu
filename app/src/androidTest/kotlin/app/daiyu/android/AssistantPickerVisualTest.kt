@@ -32,6 +32,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
     private var selected by mutableStateOf<String?>(null)
     private var dismissed by mutableStateOf(false)
     private var edited: String? = null
+    private var deleted: String? = null
 
     private fun show(scale: Float = 1f, dark: Boolean = false) {
         val fixtureKey = Any()
@@ -44,6 +45,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             selected = null
             dismissed = false
             edited = null
+            deleted = null
             activity.setContent {
                 val platform = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(platform.density, .9f)) {
@@ -53,7 +55,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
                         density.set(LocalDensity.current)
                         key(fixtureKey) {
                             AssistantPickerDialog(!dismissed, profiles, selected ?: "visual-a", { selected = it }, { edited = it }, { dismissed = true },
-                                onCopy = {}, onDelete = {}, onCreate = {}, assets = assets)
+                                onCopy = {}, onDelete = { deleted = it }, onCreate = {}, assets = assets)
                         }
                     }
                 }
@@ -233,6 +235,35 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) { ui.runOnIdle { edited != null } }
             assertEquals("visual-a", edited)
         }
+    }
+
+    fun testDeleteSheetOmitsPromptAndCloseButKeepsCancelBackAndConfirm() {
+        show()
+        fun openDelete() {
+            ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
+            awaitDialogEnter(ui.onNodeWithTag("assistant-action-delete"))
+            ui.onNodeWithTag("assistant-action-delete").performClick()
+            awaitDialogEnter(ui.onNodeWithText(text(R.string.assistant_delete_title)))
+        }
+        openDelete()
+        ui.onNodeWithText(text(R.string.assistant_delete_body, "Visual A")).assertDoesNotExist()
+        ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+        ui.onNodeWithText("Visual A").assertIsDisplayed()
+        ui.onNodeWithText("First description").assertIsDisplayed()
+        ui.onNodeWithContentDescription("返回").assertHasClickAction()
+        ui.onNodeWithText(text(R.string.action_delete)).assertIsEnabled().assertHasClickAction()
+        ui.onNodeWithText(text(R.string.action_cancel)).performClick()
+        awaitDialogEnter(ui.onNodeWithTag("assistant-item-visual-a"))
+        assertNull(deleted)
+        openDelete()
+        ui.onNodeWithContentDescription("返回").performClick()
+        awaitDialogEnter(ui.onNodeWithTag("assistant-item-visual-a"))
+        assertNull(deleted)
+        openDelete()
+        ui.onNodeWithText(text(R.string.action_delete)).performClick()
+        ui.waitUntil(5_000) { ui.runOnIdle { deleted != null } }
+        assertEquals("visual-a", deleted)
+        assertFalse(dismissed)
     }
 
     fun testSearchStillFiltersRealProfilesAndSelectionUsesOriginalId() {

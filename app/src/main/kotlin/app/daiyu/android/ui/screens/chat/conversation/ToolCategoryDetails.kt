@@ -74,7 +74,7 @@ internal object ToolCategoryDetails {
             }
 
             "terminal", "background_job" -> {
-                (terminalTarget ?: TerminalToolTarget.fromResult(toolName, result, output))?.let { target ->
+                (terminalTarget ?: TerminalToolTarget.fromPresentation(toolName, resultJson))?.let { target ->
                     fields += ToolFieldUi("执行环境", target.label)
                     target.hostIdentity?.let { fields += ToolFieldUi("Android 宿主权限", it) }
                 }

@@ -330,12 +330,12 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             for (stale in listOf(key.copy(conversation = ConversationId("other")),
                 key.copy(data = key.data - 1), key.copy(generation = key.generation - 1),
                 key.copy(sources = emptyList()))) {
-                pendingFrame(stale, snapshot, listOf(WorkStepState.PENDING, WorkStepState.PENDING, WorkStepState.PENDING, WorkStepState.UNKNOWN))
+                pendingFrame(stale, snapshot, List(4) { WorkStepState.UNKNOWN })
             }
         }
         awaitReceipts()
     }
-    fun testReturnedToolsStayRunningThenShowTheirExactFinalStatus() {
+    fun testReturnedToolsStayUnconfirmedThenShowTheirExactFinalStatus() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()
         val pending = Job()
@@ -351,8 +351,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                     call("publishChat")
                     val search = steps().first()
                     assertEquals("search_apps", search.toolName)
-                    assertEquals(WorkStepState.PENDING, search.state)
-                    assertEquals(ToolActivityUi.RUNNING, search.activity)
+                    assertEquals(WorkStepState.UNKNOWN, search.state)
+                    assertEquals(ToolActivityUi.UNKNOWN, search.activity)
                     assertEquals(ToolActivityUi.UNKNOWN, steps().last().activity)
                 }
                 assertSame(pending, field("toolReceiptRead").get(activity))
@@ -361,8 +361,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             val header = ui.onNodeWithTag("work-process-header")
             if (header.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠")
                 header.performClick()
-            ui.onNodeWithTag("tool-step-header:receipt-0").assert(SemanticsMatcher("tool stays executing until its exact final receipt") {
-                it.config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].startsWith("执行中 ·")
+            ui.onNodeWithTag("tool-step-header:receipt-0").assert(SemanticsMatcher("tool stays unconfirmed until its exact final receipt") {
+                it.config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].startsWith("结果未确认 ·")
             })
         } finally {
             mainThread {
@@ -387,7 +387,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         ui.onAllNodesWithText("读取结果").assertCountEquals(0)
     }
 
-    fun testNewToolResultKeepsItsOwnRowRunningWithoutResettingFinalRows() {
+    fun testNewToolResultStaysUnconfirmedWithoutResettingFinalRows() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()
         val pending = Job()
@@ -409,9 +409,9 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 field("toolReceiptRequest").set(activity, Any())
                 repeat(3) {
                     call("publishChat")
-                    assertEquals(expected + WorkStepState.PENDING, steps().map { it.state })
+                    assertEquals(expected + WorkStepState.UNKNOWN, steps().map { it.state })
                     assertEquals(listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED, ToolActivityUi.NOT_EXECUTED,
-                        ToolActivityUi.UNKNOWN, ToolActivityUi.RUNNING), steps().map { it.activity })
+                        ToolActivityUi.UNKNOWN, ToolActivityUi.UNKNOWN), steps().map { it.activity })
                 }
                 assertSame(pending, field("toolReceiptRead").get(activity))
                 assertTrue(pending.isActive)

@@ -101,7 +101,7 @@ internal object ToolCardPresentations {
             result == null -> "等待执行回执"
             else -> "已收到返回内容，状态以执行回执为准"
         }
-        val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromResult(toolName, result, output) else null
+        val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromPresentation(toolName, resultJson) else null
         val details = ToolCategoryDetails.project(kind.first, arguments, result, toolName, target, screenScreenshot, argumentJson, resultJson)
         val sections = buildList {
             if (kind.first in setOf("delegation", "child_control")) {

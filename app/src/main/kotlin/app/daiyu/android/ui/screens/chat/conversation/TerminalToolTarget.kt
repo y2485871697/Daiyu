@@ -17,6 +17,9 @@ internal data class TerminalToolTarget(val environment: String, val identity: St
             return from(toolName, receipt)
         }
 
+        fun fromPresentation(toolName: String, resultJson: ToolPresentationJson): TerminalToolTarget? =
+            from(toolName, resultJson.read(MAX_RECEIPT))
+
         fun from(toolName: String, receipt: JSONObject?): TerminalToolTarget? {
             if (receipt == null) return null
             fun readUid(key: String): Long? {

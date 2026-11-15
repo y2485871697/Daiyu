@@ -85,7 +85,8 @@ class ChildStopChoiceActivityTest : WiredActivityTestCase() {
                 is ConversationSubAgentPreferences.WriteResult.Saved)
         }
         mainThread { activity.select(conversation) }
-        assertNotNull(fixture.controller.sendWithChildren(conversation, "parent task"))
+        val sent = fixture.controller.sendWithChildren(conversation, "parent task")
+        assertNotNull("child-stop send rejected: ${fixture.controller.problem}", sent)
         val owner = checkNotNull(fixture.controller.active)
         if (withChildren) assertTrue(childEntered.await(5, TimeUnit.SECONDS))
         assertTrue(parentEntered.await(5, TimeUnit.SECONDS))

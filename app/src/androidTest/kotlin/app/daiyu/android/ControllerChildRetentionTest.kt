@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import android.app.Application
 import android.content.Context
+import android.content.ContextWrapper
 import android.os.Looper
 import android.test.InstrumentationTestCase
 import app.daiyu.android.delegation.*
@@ -16,6 +17,7 @@ import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.model.catalog.SavedCatalogModel
 import app.daiyu.android.model.catalog.selectionFor
 import app.daiyu.android.storage.*
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -27,11 +29,16 @@ import java.util.concurrent.atomic.AtomicReference
 class ControllerChildRetentionTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() {
         val balances = fixtureProviderBalances()
-        init { attachBaseContext(base) } }
+        init { attachBaseContext(base) }
+        override fun getApplicationContext(): Context = this
+    }
     private class Fixture(base: Context, val submit: Boolean = true, holdParent: Boolean = false,
         holdChildCleanup: Boolean = false) {
         val id = UUID.randomUUID().toString()
-        val app = FixtureApplication(testContext(base, "controller-retention-$id-"))
+        val filesRoot = File(base.cacheDir, "controller-retention-files-$id").apply { check(mkdirs()) }
+        val app = FixtureApplication(object : ContextWrapper(testContext(base, "controller-retention-$id-")) {
+            override fun getFilesDir(): File = filesRoot
+        })
         val database = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.retention.$id"
         val settings = ModelSettingsStore(app, alias)
@@ -120,6 +127,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
             app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             app.getSharedPreferences("subagent_configuration", 0).edit().clear().commit()
             database.runtimeLockFile.delete(); app.deleteDatabase("conversations.db")
+            check(filesRoot.deleteRecursively())
             val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it == alias || it.startsWith("$alias.") }.forEach { keys.deleteEntry(it) }
         }
@@ -141,7 +149,10 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         Fixture(instrumentation.targetContext, submit, holdParent, holdChildCleanup).also {
             fixtures.add(it); awaitChange(it, "recovery") { it.controller.ready }; it.prepare()
         }
-    private fun send(f: Fixture) = assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
+    private fun send(f: Fixture) {
+        val sent = f.controller.sendWithChildren(f.conversation, "parent task")
+        assertNotNull("retained-child send rejected: ${f.controller.problem}", sent)
+    }
     private fun retained(f: Fixture): Int = synchronized(f.controller) {
         val field = ChatController::class.java.getDeclaredField("backgroundRuns").apply { isAccessible = true }
         (field.get(f.controller) as Map<*, *>).size

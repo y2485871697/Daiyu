@@ -74,7 +74,11 @@ class PetPresentationContractTest(unittest.TestCase):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/pet/PetPresentationTest.kt').read_text()
         sampler = text.split('private fun stable(expectedSpeech: String? = null): Rect', 1)[1].split('override fun cleanupFixture', 1)[0]
         self.assertIn('java.util.concurrent.CountDownLatch(1)', sampler)
-        self.assertIn('completed.await(5, java.util.concurrent.TimeUnit.SECONDS)', sampler)
+        self.assertIn('java.util.concurrent.TimeUnit.SECONDS.toNanos(5)', sampler)
+        self.assertIn('frameSignals.tryAcquire(remaining, java.util.concurrent.TimeUnit.NANOSECONDS)', sampler)
+        self.assertIn('if (completed.count != 0L) ui.mainClock.advanceTimeByFrame()', sampler)
+        self.assertIn('frameSignals.release()', sampler)
+        self.assertIn('lastFrameState.get()', sampler)
         accepted = sampler.split('if (next == previous && accepted.compareAndSet(null, next))', 1)[1].split('previous = next', 1)[0]
         self.assertLess(accepted.index('active = false'), accepted.index('completed.countDown()'))
         self.assertLess(accepted.index('removeFrameCallback(callback)'), accepted.index('completed.countDown()'))

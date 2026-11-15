@@ -93,6 +93,8 @@ class PetPresentationTest : WiredActivityTestCase() {
         val accepted = java.util.concurrent.atomic.AtomicReference<Frame?>()
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
         val completed = java.util.concurrent.CountDownLatch(1)
+        val frameSignals = java.util.concurrent.Semaphore(0)
+        val lastFrameState = java.util.concurrent.atomic.AtomicReference("no native frame")
         var previous: Frame? = null
         var frameNanos = Long.MIN_VALUE
         var sampledNanos = Long.MIN_VALUE
@@ -102,6 +104,14 @@ class PetPresentationTest : WiredActivityTestCase() {
             override fun doFrame(time: Long) {
                 if (!active) return
                 frameNanos = time
+                val screen = IntArray(2); frame.getLocationOnScreen(screen)
+                val local = IntArray(2); frame.getLocationInWindow(local)
+                val params = frame.layoutParams as android.view.WindowManager.LayoutParams
+                lastFrameState.set("alpha=${frame.alpha} attached=${frame.isAttachedToWindow} " +
+                    "layout=${frame.isLayoutRequested} size=${frame.width}x${frame.height} " +
+                    "requested=${params.x},${params.y} actual=${screen[0] - local[0]},${screen[1] - local[1]} " +
+                    "sprite=${bounds()} speechReady=${overlaySpeechReady(expectedSpeech)} previous=$previous")
+                frameSignals.release()
                 frame.postInvalidateOnAnimation()
                 choreographer.postFrameCallback(this)
             }
@@ -120,6 +130,7 @@ class PetPresentationTest : WiredActivityTestCase() {
                             active = false
                             choreographer.removeFrameCallback(callback)
                             completed.countDown()
+                            frameSignals.release()
                         }
                         previous = next
                     } else previous = null
@@ -128,6 +139,7 @@ class PetPresentationTest : WiredActivityTestCase() {
                     active = false
                     choreographer.removeFrameCallback(callback)
                     completed.countDown()
+                    frameSignals.release()
                 }
             }
         }
@@ -137,8 +149,14 @@ class PetPresentationTest : WiredActivityTestCase() {
             choreographer.postFrameCallback(callback)
         }
         try {
-            assertTrue("Overlay did not produce two equal ready draw frames",
-                completed.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+            while (completed.count != 0L) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0 || !frameSignals.tryAcquire(remaining, java.util.concurrent.TimeUnit.NANOSECONDS)) break
+                if (completed.count != 0L) ui.mainClock.advanceTimeByFrame()
+            }
+            assertTrue("Overlay did not produce two equal ready draw frames: ${lastFrameState.get()}",
+                completed.count == 0L)
             failure.get()?.let { throw it }
             return checkNotNull(accepted.get()).sprite
         } finally {

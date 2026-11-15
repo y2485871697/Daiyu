@@ -146,19 +146,37 @@ class SourceTests(unittest.TestCase):
         self.assertLess(workflow.index('sudo apt-get install --no-install-recommends -y libpulse0'),
                         workflow.index('      - name: 安装并检查启动'))
         wrapper = re.search(r"          script: (bash -c '.*')", workflow).group(1)
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / 'smoke').mkdir()
-            (root / 'scripts').mkdir()
-            (root / 'scripts/smoke_boot.sh').write_text('#!/bin/sh\ntouch invoked\nexit 7\n')
-            for ready, expected in ((False, 1), (True, 7)):
-                with self.subTest(ready=ready):
-                    if ready:
-                        (root / 'smoke/prelaunch-ready.txt').write_text('26\n')
-                    result = subprocess.run(['sh', '-c', wrapper], cwd=root, capture_output=True)
-                    self.assertEqual(result.returncode, expected, result.stderr)
-                    self.assertEqual((root / 'invoked').exists(), ready)
-                    self.assertEqual((root / 'smoke/exit-code.txt').read_text().strip(), str(expected))
+        canonical = "app.daiyu.android.SearchHistoryDialogTest,app.daiyu.android.SearchHostActivityTest,app.daiyu.android.RetainedSearchDataTest,app.daiyu.android.SearchSQLiteCancellationTest"
+        cases = (
+            ("smoke", canonical, "frozen", 9),
+            ("smoke", canonical + ",app.daiyu.android.OtherTest", "default", 7),
+            ("smoke", canonical + "," + canonical.split(",")[0], "default", 7),
+            ("smoke", "app.daiyu.android.OtherTest", "default", 7),
+            ("candidate", canonical, "default", 7),
+            ("", "", "default", 7),
+        )
+        for mode, classes, selected, exit_code in cases:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / 'smoke').mkdir()
+                for script, marker, code in (
+                        ('scripts/smoke_boot.sh', 'default', 7),
+                        ('.smoke-validation-tools/scripts/smoke_boot.sh', 'frozen', 9)):
+                    path = root / script
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text('#!/bin/sh\ntouch ' + marker + '-invoked\nexit ' + str(code) + '\n')
+                for ready in (False, True):
+                    with self.subTest(mode=mode, classes=classes, ready=ready):
+                        if ready:
+                            (root / 'smoke/prelaunch-ready.txt').write_text('26\n')
+                        result = subprocess.run(['sh', '-c', wrapper], cwd=root, capture_output=True,
+                                                env=dict(os.environ, SMOKE_MODE=mode, SMOKE_TEST_CLASSES=classes))
+                        expected = exit_code if ready else 1
+                        self.assertEqual(result.returncode, expected, result.stderr)
+                        self.assertEqual((root / (selected + '-invoked')).exists(), ready)
+                        other = 'default' if selected == 'frozen' else 'frozen'
+                        self.assertFalse((root / (other + '-invoked')).exists())
+                        self.assertEqual((root / 'smoke/exit-code.txt').read_text().strip(), str(expected))
 
     def test_prelaunch_pin_checks_actual_metadata_and_version_command(self):
         script = ROOT / 'scripts/prepare_smoke_emulator.sh'

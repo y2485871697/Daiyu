@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动、附件弹层、权限界面、终端输出或工具回执的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore]
+        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore, search-history]
         default: workflow
 permissions:
   contents: read
@@ -117,6 +117,8 @@ jobs:
               patterns = ('test_reasoning_workflow_contract.py', 'test_reasoning_typewriter_contract.py', 'test_work_timeline_connector_contract.py', 'test_workflow_render_isolation_contract.py', 'test_markdown_typing_contract.py', 'test_markdown_body_visibility_contract.py', 'test_markdown_table_style_contract.py', 'test_markdown_code_block_contract.py', 'test_markdown_entry_contract.py', 'test_markdown_cold_start_contract.py', 'test_markdown_return_contract.py', 'test_markdown_stream_progress_contract.py', 'test_markdown_stream_optimization_contract.py', 'test_message_display_contract.py', 'test_rendering_smoke_scope.py', 'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'legacy-restore':
               patterns = ('test_message_display_contract.py',)
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'search-history':
+              patterns = ('test_search_history_sheet_contract.py', 'test_search_host_start_contract.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               discovered = suite.countTestCases()
@@ -192,6 +194,12 @@ jobs:
             classes=(LegacyReconnectRestoreTest)
             filters=()
           fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == search-history ]]; then
+            classes=(MessageImageContractTest)
+            filters=(--tests app.daiyu.android.ui.screens.search.MessageSearchRequestStateTest
+                     --tests app.daiyu.android.ui.screens.search.SearchRequestStateTest
+                     --tests app.daiyu.android.ui.screens.search.ConversationSearchResultsTest)
+          fi
           for class in "${classes[@]}"; do
             filters+=(--tests "app.daiyu.android.ui.screens.chat.conversation.$class")
           done
@@ -242,6 +250,8 @@ jobs:
               expected = {'NativeCompletionWebSearchTest', 'MarkdownProjectionTest', 'CompletedReasoningProjectionTest', 'MarkdownTableGridTest', 'RenderingParserRegressionTest', 'AssistantWorkflowCompositionTest', 'ReasoningWorkflowMapperTest', 'ReasoningStreamCompositionTest', 'MessageDisplayStoreTest', 'LegacySearchDisplayTest', 'RenderingMediaGeometryTest', 'ResponsesBackgroundResumeTest', 'MarkdownRevealHapticsTest', 'MarkdownTableWidthTest', 'MarkdownParserTest', 'MarkdownProjectionCacheTest', 'WorkflowNarrationCompositionTest', 'ResponsesDeltaBatchTest', 'MarkdownRevealInvalidationTest', 'ChatTurnMapperTest', 'ReportedReasoningTextTest', 'MarkdownBlockReuseTest', 'RestoredMarkdownTest', 'MarkdownRevealTest', 'MessageMediaLayoutTest', 'StreamingMarkdownParserTest', 'MarkdownPreparationCompositionTest', 'MarkdownCodePolicyTest', 'AssistantWorkflowContentTest', 'MarkdownAdmissionCompositionTest', 'ResponsesWebSearchTest', 'ReconnectPartsTest', 'ReconnectMarkdownProjectionAcceptanceTest', 'ReconnectMarkdownRestoreAcceptanceTest', 'LegacyReconnectRestoreTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'legacy-restore':
               expected = {'LegacyReconnectRestoreTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'search-history':
+              expected = {'MessageImageContractTest', 'MessageSearchRequestStateTest', 'SearchRequestStateTest', 'ConversationSearchResultsTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

@@ -140,6 +140,7 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeBy(200)
                 ui.waitUntil(5_000) { entered.count == 0L }
                 node("search:loading").assertIsDisplayed()
+                assertInitialLoadingCentered()
                 assertSameHeight()
                 release.countDown()
                 awaitUniqueTag(tag)
@@ -215,176 +216,191 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
         } finally { release.countDown() }
         assertEquals(0, fixture.opens.get())
     }
-    fun testPausedPagedSearchRestoresPositionAfterSlowReadAndAppendRetryAndRejectsOldClicks() {
-        for (blockLastPage in listOf(false, true)) {
-            val reads = AtomicInteger()
-            val entered = CountDownLatch(1); val release = CountDownLatch(1)
-            val lastPageEntered = CountDownLatch(1); val releaseLastPage = CountDownLatch(1)
-            try {
-                show(reader = { request, cursor, signal ->
-                    val attempt = reads.incrementAndGet()
-                    if (attempt == 4) { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
-                    if (attempt == 5) error("synthetic append read failure")
-                    if (blockLastPage && attempt == 7) {
-                        lastPageEntered.countDown(); check(releaseLastPage.await(10, TimeUnit.SECONDS))
-                    }
-                    signal.throwIfCanceled()
-                    val start = cursor?.nextExpanded ?: 0
-                    val rows = (start until start + 20).map { hit.copy(messageId = "paged-$it") }
-                    MessageSearchPage(rows, if (start < 40) MessageSearchCursor(request.query, "current",
-                        listOf(SearchConversationRevision("current", "当前会话", "fixture")), 0, start + 20) else null)
-                })
-                node("search:query").performTextReplacement("历史")
-                dismissIme()
-                awaitUniqueTag("search:message:current:paged-0:1")
-                node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
-                val oldMore = checkNotNull(node("search:more").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-                node("search:more").performClick()
-                ui.waitUntil(5_000) { reads.get() == 2 }
-                node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
-                node("search:more").performClick()
-                val tag = "search:message:current:paged-55:1"
-                ui.waitUntil(5_000) { reads.get() == 3 }
-                node("search-history-results").scrollToDescendant(hasTestTag(tag))
-                val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-                val before = node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
-                val top = node(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
-                val dialogBounds = node("search-history-dialog").fetchSemanticsNode().boundsInRoot
-                val listBounds = node("search-history-results").fetchSemanticsNode().boundsInRoot
-                fun assertRetainedGeometry() {
-                    node(tag).assertIsDisplayed().assertHasNoClickAction()
-                    assertEquals(dialogBounds, node("search-history-dialog").fetchSemanticsNode().boundsInRoot)
-                    assertEquals(listBounds, node("search-history-results").fetchSemanticsNode().boundsInRoot)
-                    assertEquals(top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
-                    assertEquals(before, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
-                    mainThread { oldClick(); oldMore() }
-                    assertNull(opened)
-                }
-                realPauseResume(activity, atPause = {
-                    oldClick(); oldMore()
-                    assertNull(opened)
-                    assertEquals(3, reads.get())
-                })
-                ui.mainClock.advanceTimeBy(200)
-                assertTrue(entered.await(5, TimeUnit.SECONDS))
-                assertEquals(4, reads.get())
-                assertRetainedGeometry()
-                release.countDown()
-                awaitUniqueTag("search:retry")
-                assertRetainedGeometry()
-                node("search:retry").performClick()
-                if (blockLastPage) {
-                    ui.waitUntil(5_000) { lastPageEntered.count == 0L }
-                    assertRetainedGeometry()
-                    releaseLastPage.countDown()
-                }
-                ui.waitUntil(5_000) {
-                    ui.onAllNodes(hasTestTag(tag) and hasClickAction()).fetchSemanticsNodes().size == 1
-                }
-                node(tag).assertIsDisplayed().assertHasClickAction()
-                node("search:query").assertEditableText("历史")
-                assertEquals(before, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
-                assertEquals(top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
-                assertEquals(7, reads.get())
-                mainThread { oldClick(); oldMore() }
-                assertNull(opened)
-                assertEquals(7, reads.get())
-                assertEquals(0, fixture.opens.get())
-            } finally { release.countDown(); releaseLastPage.countDown() }
-        }
-    }
-
-
-    fun testSmallResultKeepsGeometryDuringResumeAndRealQueryChangeDropsIt() {
+    fun testResumeKeepsPagedResultsAndPositionWithoutAnotherReadAndRejectsOldClicks() {
         val reads = AtomicInteger()
-        val entered = CountDownLatch(1); val release = CountDownLatch(1)
-        try {
-            show(fontScale = .9f, reader = { request, _, signal ->
-                if (reads.incrementAndGet() == 2) { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
-                signal.throwIfCanceled()
-                MessageSearchPage(listOf(hit.copy(snippet = request.query)))
-            })
-            node("search:query").performTextReplacement("原查询")
-            dismissIme()
-            awaitUniqueTag(tag)
-            val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-            val dialog = node("search-history-dialog").fetchSemanticsNode().boundsInRoot
-            val list = node("search-history-results").fetchSemanticsNode().boundsInRoot
-            realPauseResume(activity)
-            ui.mainClock.advanceTimeBy(200)
-            assertTrue(entered.await(5, TimeUnit.SECONDS))
-            node(tag).assertIsDisplayed().assertHasNoClickAction()
-            assertEquals(dialog, node("search-history-dialog").fetchSemanticsNode().boundsInRoot)
-            assertEquals(list, node("search-history-results").fetchSemanticsNode().boundsInRoot)
-            mainThread { oldClick() }
+        show(reader = { request, cursor, _ ->
+            reads.incrementAndGet()
+            val start = cursor?.nextExpanded ?: 0
+            MessageSearchPage((start until start + 20).map { hit.copy(messageId = "paged-$it") },
+                if (start < 40) MessageSearchCursor(request.query, "current",
+                    listOf(SearchConversationRevision("current", "当前会话", "fixture")), 0, start + 20) else null)
+        })
+        node("search:query").performTextReplacement("历史")
+        dismissIme()
+        awaitUniqueTag("search:message:current:paged-0:1")
+        node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
+        node("search:more").performClick()
+        ui.waitUntil(5_000) { reads.get() == 2 }
+        node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
+        val oldMore = checkNotNull(node("search:more").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val target = "search:message:current:paged-35:1"
+        node("search-history-results").scrollToDescendant(hasTestTag(target))
+        val oldClick = checkNotNull(node(target).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val bounds = node(target).fetchSemanticsNode().boundsInRoot
+        val scroll = node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+        realPauseResume(activity, atPause = {
+            oldClick(); oldMore()
             assertNull(opened)
-            node("search:query").performTextReplacement("新查询")
-            awaitUniqueTag(tag)
-            node(tag).assertTextEquals("助手 · 新查询")
-            release.countDown()
-            ui.waitForIdle()
-            node(tag).assertTextEquals("助手 · 新查询")
-        } finally { release.countDown() }
+            assertEquals(2, reads.get())
+        })
+        ui.mainClock.advanceTimeBy(500)
+        ui.waitForIdle()
+        node(target).assertIsDisplayed().assertHasClickAction()
+        assertEquals(bounds, node(target).fetchSemanticsNode().boundsInRoot)
+        assertEquals(scroll, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
+        node("search:loading").assertDoesNotExist()
+        assertEquals(2, reads.get())
+        mainThread { oldClick(); oldMore() }
+        assertNull(opened)
+        assertEquals(2, reads.get())
+        node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
+        node("search:more").performClick()
+        ui.waitUntil(5_000) { reads.get() == 3 }
+        val last = "search:message:current:paged-55:1"
+        node("search-history-results").scrollToDescendant(hasTestTag(last))
+        node(last).performClick()
+        assertEquals("paged-55", opened?.messageId)
     }
 
-    fun testResumeAcceptsAuthoritativeEmptyOrReadErrorInsteadOfRetainingOldHits() {
+    fun testResumeKeepsSmallResultAndRealQueryChangeStartsOneNewRead() {
+        val reads = AtomicInteger()
+        show(reader = { request, _, _ ->
+            reads.incrementAndGet()
+            MessageSearchPage(listOf(hit.copy(snippet = request.query)))
+        })
+        node("search:query").performTextReplacement("原查询")
+        dismissIme()
+        awaitUniqueTag(tag)
+        val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val bounds = node(tag).fetchSemanticsNode().boundsInRoot
+        realPauseResume(activity)
+        ui.mainClock.advanceTimeBy(500)
+        node(tag).assertTextEquals("助手 · 原查询").assertHasClickAction()
+        assertEquals(bounds, node(tag).fetchSemanticsNode().boundsInRoot)
+        node("search:loading").assertDoesNotExist()
+        assertEquals(1, reads.get())
+        mainThread { oldClick() }
+        assertNull(opened)
+        node("search:query").performTextReplacement("新查询")
+        dismissIme()
+        awaitUniqueTag(tag)
+        node(tag).assertTextEquals("助手 · 新查询")
+        assertEquals(2, reads.get())
+    }
+
+    fun testResumeDoesNotRetryEmptyOrFailedSearch() {
         for (fail in listOf(false, true)) {
             val reads = AtomicInteger()
             show(reader = { _, _, _ ->
-                if (reads.incrementAndGet() == 1) MessageSearchPage(listOf(hit))
-                else if (fail) error("synthetic fresh read failure") else MessageSearchPage(emptyList())
+                reads.incrementAndGet()
+                if (fail) error("synthetic read failure") else MessageSearchPage(emptyList())
             })
             node("search:query").performTextReplacement("查询")
             dismissIme()
-            awaitUniqueTag(tag)
+            val terminal = if (fail) "search:error" else "search:empty"
+            awaitUniqueTag(terminal)
             realPauseResume(activity)
-            ui.mainClock.advanceTimeBy(200)
-            awaitUniqueTag(if (fail) "search:error" else "search:empty")
-            node(tag).assertDoesNotExist()
-            assertEquals(2, reads.get())
+            ui.mainClock.advanceTimeBy(500)
+            node(terminal).assertIsDisplayed()
+            node("search:loading").assertDoesNotExist()
+            assertEquals(1, reads.get())
             assertNull(opened)
         }
     }
 
-    fun testResumePreservesContinuationGeometryAndRepausingDoesNotLoseTheTarget() {
+    fun testResumeKeepsExistingContinuationReadInsteadOfRestartingIt() {
         val reads = AtomicInteger()
-        val firstEntered = CountDownLatch(1); val secondEntered = CountDownLatch(1)
-        val release = CountDownLatch(1)
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
         try {
-            show(reader = { request, _, signal ->
-                when (reads.incrementAndGet()) {
-                    2 -> { firstEntered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
-                    3 -> { secondEntered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+            show(reader = { request, cursor, signal ->
+                if (reads.incrementAndGet() == 2) {
+                    entered.countDown()
+                    check(release.await(10, TimeUnit.SECONDS))
                 }
                 signal.throwIfCanceled()
-                MessageSearchPage((0 until 20).map { hit.copy(messageId = "footer-$it") },
-                    MessageSearchCursor(request.query, "current",
-                        listOf(SearchConversationRevision("current", "当前会话", "fixture")), 0, 20))
+                val start = cursor?.nextExpanded ?: 0
+                MessageSearchPage((start until start + 20).map { hit.copy(messageId = "footer-$it") },
+                    if (cursor == null) MessageSearchCursor(request.query, "current",
+                        listOf(SearchConversationRevision("current", "当前会话", "fixture")), 0, 20) else null)
             })
             node("search:query").performTextReplacement("查询")
             dismissIme()
             awaitUniqueTag("search:message:current:footer-0:1")
             node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
             val oldMore = checkNotNull(node("search:more").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-            val bounds = node("search:more").fetchSemanticsNode().boundsInRoot
-            val scroll = node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+            node("search:more").performClick()
+            ui.waitUntil(5_000) { entered.count == 0L }
+            val bounds = node("search-history-results").fetchSemanticsNode().boundsInRoot
             realPauseResume(activity)
-            ui.mainClock.advanceTimeBy(200)
-            assertTrue(firstEntered.await(5, TimeUnit.SECONDS))
-            node("search:more").assertIsNotEnabled()
-            assertEquals(bounds, node("search:more").fetchSemanticsNode().boundsInRoot)
-            realPauseResume(activity)
-            ui.mainClock.advanceTimeBy(200)
-            assertTrue(secondEntered.await(5, TimeUnit.SECONDS))
-            node("search:more").assertIsNotEnabled()
-            assertEquals(bounds, node("search:more").fetchSemanticsNode().boundsInRoot)
+            ui.mainClock.advanceTimeBy(500)
+            assertEquals(bounds, node("search-history-results").fetchSemanticsNode().boundsInRoot)
+            assertEquals(2, reads.get())
             mainThread { oldMore() }
-            assertEquals(3, reads.get())
+            assertEquals(2, reads.get())
             release.countDown()
-            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("search:more") and isEnabled()).fetchSemanticsNodes().size == 1 }
-            assertEquals(scroll, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
-            assertEquals(3, reads.get())
+            awaitUniqueTag("search:message:current:footer-20:1")
+            node("search:loading").assertDoesNotExist()
+            assertEquals(2, reads.get())
         } finally { release.countDown() }
     }
 
+    fun testCancelledInitialReadStaysCancelledAcrossResumeUntilExplicitRetry() {
+        val reads = AtomicInteger()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        try {
+            show(reader = { _, _, _ ->
+                if (reads.incrementAndGet() == 1) {
+                    entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                }
+                MessageSearchPage(listOf(hit))
+            })
+            node("search:query").performTextReplacement("查询")
+            dismissIme()
+            ui.mainClock.advanceTimeBy(200)
+            ui.waitUntil(5_000) { entered.count == 0L }
+            node("search:cancel").performClick()
+            node("search:loading").assertDoesNotExist()
+            realPauseResume(activity)
+            ui.mainClock.advanceTimeBy(500)
+            node("search:loading").assertDoesNotExist()
+            assertEquals(1, reads.get())
+            ui.onNodeWithText(activity.getString(R.string.search_retry)).performClick()
+            awaitUniqueTag(tag)
+            assertEquals(2, reads.get())
+            release.countDown()
+            ui.waitForIdle()
+            node(tag).assertTextEquals("助手 · 可点击的历史正文")
+        } finally { release.countDown() }
+    }
+
+    private fun assertInitialLoadingCentered() {
+        val content = node("search-history-content").fetchSemanticsNode().boundsInRoot
+        val loading = node("search:loading-content").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertEquals(content.center.x, loading.center.x, 2f)
+        assertEquals(content.center.y, loading.center.y, 2f)
+        assertTrue(loading.top >= content.top && loading.bottom <= content.bottom)
+    }
+
+    fun testInitialLoadingStaysCenteredWhenImeChangesAndAfterExistingReadCompletesInBackground() {
+        val reads = AtomicInteger()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        try {
+            show(reader = { _, _, signal ->
+                reads.incrementAndGet(); entered.countDown()
+                check(release.await(15, TimeUnit.SECONDS)); signal.throwIfCanceled()
+                MessageSearchPage(listOf(hit))
+            })
+            node("search:query").performClick().performTextReplacement("历史")
+            ui.mainClock.advanceTimeBy(200)
+            ui.waitUntil(5_000) { entered.count == 0L }
+            assertInitialLoadingCentered()
+            dismissIme()
+            awaitDialogImeFrame(node("usage-glass-dialog"), visible = false)
+            assertInitialLoadingCentered()
+            realPauseResume(activity, atPause = { release.countDown() })
+            awaitUniqueTag(tag)
+            node("search:loading-content").assertDoesNotExist()
+            assertEquals(1, reads.get())
+        } finally { release.countDown() }
+    }
 }

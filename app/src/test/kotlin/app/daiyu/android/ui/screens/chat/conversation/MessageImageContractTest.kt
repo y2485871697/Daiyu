@@ -74,11 +74,13 @@ class MessageImageContractTest {
         assertEquals(owner, historical.reference.owner)
     }
 
-    @Test fun imageMetadataNeverBecomesSearchableTextAndToolsRemainSearchable() {
+    @Test fun searchIncludesOnlyBodyTextWithoutImageMetadataOrToolContent() {
         val tool = MessageBlock.Tool(ToolInvocation(ToolCallId("call"), "lookup", "arguments"), "result")
         val blocks = listOf(text("before"), image(1), tool, image(2), text("after"))
-        assertEquals("before\nlookup arguments result\nafter", retainedSearchText(blocks))
-        assertEquals("", retainedSearchText(listOf(image(1))))
+        assertEquals("before\nafter", retainedSearchText(blocks))
+        assertEquals("", retainedSearchText(listOf(image(1), tool)))
+        assertEquals("lookup arguments result", retainedSearchText(listOf(
+            MessageBlock.Text("body", "lookup arguments result"))))
     }
 
     @Test fun noLoaderMissingAssetAndResolverExceptionsFailClosedWithoutDiagnostics() = runTest {

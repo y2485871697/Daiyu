@@ -40,6 +40,59 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         return user to stored
     }
 
+    fun testSearchMatchesOnlyBodyKeepsRolesAndExcludesToolReasoningAndProtocolAfterReopen() {
+        val conversation = database.create("default")
+        val (user, answer) = turn(conversation, "body-only", "用户正文关键词", answerTransform = { owner ->
+            val blocks = listOf(MessageBlock.Text("before", "助手正文前段"),
+                MessageBlock.Tool(ToolInvocation(ToolCallId("hidden-call"), "hidden_tool_name",
+                    "screen_read_mode=visual_fallback"), "hidden_tool_result"),
+                MessageBlock.Text("after", "助手正文后段"))
+            owner.copy(blocks = blocks, historySegments = listOf(MessageHistorySegment(owner.id,
+                Message.ASSISTANT_ROLE, blocks,
+                protocolItems = listOf("{\"type\":\"hidden_protocol_marker\"}"),
+                reportedReasoning = listOf(ReportedReasoning("thought", "hidden_reasoning_marker")))))
+        })
+        database.close(); database = ConversationDatabase(scoped)
+        data = RetainedConversationData(database, ContextService(scoped, database))
+        val before = database.exportBackup()
+        for (hidden in listOf("hidden_tool_name", "screen_read_mode", "visual_fallback",
+            "hidden_tool_result", "hidden_protocol_marker", "hidden_reasoning_marker")) {
+            assertTrue(hidden, data.search(hidden).isEmpty())
+            assertTrue(hidden, data.searchCurrentConversation(hidden, conversation.id.value).isEmpty())
+        }
+        val userHit = data.search("用户正文关键词").single()
+        assertEquals(user.id.value, userHit.messageId)
+        assertEquals("用户", userHit.roleLabel)
+        val answerHit = data.searchCurrentConversation("助手正文前段", conversation.id.value).single()
+        assertEquals(answer.id.value, answerHit.messageId)
+        assertEquals("助手", answerHit.roleLabel)
+        assertEquals("助手正文前段\n助手正文后段", answerHit.snippet)
+        assertEquals(before, database.exportBackup())
+    }
+
+    fun testToolOnlySegmentsDoNotOccupyBodySearchPagesOrChangeSegmentIdentity() {
+        val conversation = database.create("default")
+        val (_, answer) = turn(conversation, "body-pages", "ordinary user", answerTransform = { owner ->
+            owner.copy(historySegments = listOf(
+                MessageHistorySegment(owner.id, "assistant", listOf(
+                    MessageBlock.Text("first", "body needle first"))),
+                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Tool(
+                    ToolInvocation(ToolCallId("only-tool"), "body needle tool", "body needle arguments"),
+                    "body needle result"))),
+                MessageHistorySegment(owner.id, "assistant", listOf(
+                    MessageBlock.Text("last", "body needle last"))),
+            ))
+        })
+        val first = data.searchPage("body needle", conversation.id.value, pageSize = 1)
+        assertEquals(listOf(0), first.results.map { it.segmentIndex })
+        val next = checkNotNull(first.nextCursor)
+        val second = data.searchPage("body needle", conversation.id.value, next, pageSize = 1)
+        assertEquals(listOf(2), second.results.map { it.segmentIndex })
+        assertEquals("body needle last", second.results.single().snippet)
+        assertEquals(answer.id.value, second.results.single().ownerMessageId)
+        assertNull(second.nextCursor)
+    }
+
     fun testCurrentScopeIsReadBeforeGlobalCapAndStillFindsOldMessages() {
         val noisy = database.create("default")
         repeat(101) { turn(noisy, "noise-$it", "共同关键词 $it") }

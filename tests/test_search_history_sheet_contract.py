@@ -54,6 +54,27 @@ class SearchHistorySheetContract(unittest.TestCase):
                       'requests.cancel(); onDismiss()', 'SearchAppendPhase.Invalidated'):
             self.assertIn(token, dialog)
 
+    def test_body_only_search_preserves_roles_and_centers_only_initial_loading(self):
+        source = (SRC / 'ui/RetainedMessageText.kt').read_text()
+        dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
+        self.assertIn('filterIsInstance<MessageBlock.Text>()', source)
+        self.assertNotIn('block.invocation', source)
+        self.assertIn('"${hit.roleLabel} · ${hit.snippet}"', dialog)
+        self.assertIn('contentAlignment = Alignment.Center', dialog)
+        self.assertIn('SearchHistoryLoading { cancelSearch() }', dialog)
+        self.assertIn('SearchAppendPhase.Loading -> SearchLoading', dialog)
+        self.assertIn('testTag("search-history-content")', dialog)
+
+    def test_resume_keeps_request_and_results_without_automatic_reread(self):
+        dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
+        self.assertIn('searchedQuery != query', dialog)
+        self.assertIn('searchedQuery = query', dialog)
+        self.assertIn('visit = Any()', dialog)
+        self.assertNotIn('if (!resumed) requests.cancel()', dialog)
+        self.assertNotIn('restoreCount', dialog)
+        self.assertNotIn('requests.loadMore()\n                else', dialog)
+        self.assertIn('onDispose { lifecycle.removeObserver(observer); requests.cancel() }', dialog)
+
     def test_android_regressions_keep_page_prompt_but_remove_dialog_prompt(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/SearchHistoryDialogTest.kt').read_text()
         host = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/SearchHostActivityTest.kt').read_text()

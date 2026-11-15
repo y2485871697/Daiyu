@@ -1,9 +1,11 @@
 package app.daiyu.android.ui.app
 
 import app.daiyu.android.ui.haptics.clickable
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,7 +17,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,71 +84,42 @@ internal fun SearchHistoryDialog(
     val loadingListState = rememberLazyListState()
     var visit by remember(lifecycle) { mutableStateOf(Any()) }
     val renderedVisit = visit
-    var lastDisplayed by remember(request) { mutableStateOf<DisplayedHistoryResults?>(null) }
-    var restoreCount by remember(request) { mutableStateOf(0) }
-    var restoring by remember(request) { mutableStateOf(false) }
+    var searchedQuery by remember(conversationId) { mutableStateOf<String?>(null) }
 
     fun available() = visit === renderedVisit && currentOwner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-    fun retainForRestore() {
-        restoreCount = maxOf(restoreCount, lastDisplayed?.rows?.size ?: 0)
-        restoring = restoreCount > 0
-    }
     fun search() {
         if (available() && conversationId != null && request.query.isNotEmpty()) {
-            retainForRestore()
             requests.start(request, debounceMillis = 180, read = latestSearch)
         } else requests.cancel()
     }
-    DisposableEffect(requests, lifecycle, request) {
+    DisposableEffect(requests, lifecycle) {
         val observer = LifecycleEventObserver { _, _ ->
             val nextResumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
             if (resumed && !nextResumed) {
                 visit = Any()
-                retainForRestore()
             }
             resumed = nextResumed
-            if (!resumed) requests.cancel()
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer); requests.cancel() }
     }
-    LaunchedEffect(request, query, resumed, renderedVisit) { search() }
+    LaunchedEffect(request, query, resumed) {
+        if (available() && searchedQuery != query) {
+            searchedQuery = query
+            search()
+        }
+    }
     val phase = if (snapshot.request == request) snapshot.phase else SearchPhase.Idle
-    // The lazy content and its list position must use the same render version.
-    val renderResumed = resumed
-    val renderRestoring = restoring
-    val renderRestoreCount = restoreCount
-    val authoritativeTerminal = phase == SearchPhase.ReadError ||
-        (phase == SearchPhase.Results && snapshot.results.isEmpty())
-    val renderFresh = renderResumed && !renderRestoring && phase == SearchPhase.Results
-    val freshFrame = if (renderFresh) DisplayedHistoryResults(
+    val renderFrame = if (phase == SearchPhase.Results) DisplayedHistoryResults(
         snapshot.results, snapshot.appendPhase, snapshot.nextCursor != null,
     ) else null
-    val retainedFrame = lastDisplayed?.takeIf {
-        !authoritativeTerminal && (!renderResumed || renderRestoring)
-    }
-    val renderFrame = retainedFrame ?: freshFrame
-    val renderReadOnly = retainedFrame != null
+    val renderReadOnly = !resumed
     val useResultsPosition = renderFrame != null
-    SideEffect {
-        if (authoritativeTerminal) lastDisplayed = null
-        else if (renderFresh && available() && snapshot.generation == requests.state.value.generation) {
-            lastDisplayed = freshFrame
-        }
-    }
-    LaunchedEffect(request, renderResumed, renderRestoring, renderRestoreCount, snapshot) {
-        if (renderResumed && renderRestoring && available() &&
-            snapshot.generation == requests.state.value.generation && snapshot.request == request) {
-            if (authoritativeTerminal) { restoring = false; restoreCount = 0 }
-            else if (snapshot.phase == SearchPhase.Results && snapshot.appendPhase == SearchAppendPhase.Idle) {
-                if (snapshot.results.size < renderRestoreCount && snapshot.nextCursor != null) requests.loadMore()
-                else { restoring = false; restoreCount = 0 }
-            }
-        }
-    }
+    val showInitialLoading = request.query.isNotBlank() && conversationId != null &&
+        (phase == SearchPhase.Idle || phase == SearchPhase.Loading)
     fun requestCurrent(): Boolean {
         val now = requests.state.value
-        return available() && restoring == renderRestoring && now.generation == snapshot.generation &&
+        return available() && now.generation == snapshot.generation &&
             now.request == request && snapshot.request == request
     }
     fun retrySearch() { if (requestCurrent()) search() }
@@ -160,9 +132,6 @@ internal fun SearchHistoryDialog(
             AssistantSearchField(query, onValueChange = {
                 if (available() && query != it.take(1000)) {
                     val next = it.take(1000)
-                    if (next.trim() != request.query) {
-                        lastDisplayed = null; restoring = false; restoreCount = 0
-                    } else retainForRestore()
                     requests.cancel()
                     query = next
                 }
@@ -170,7 +139,7 @@ internal fun SearchHistoryDialog(
                 focused = searchFocused, onFocusChanged = { searchFocused = it },
                 modifier = Modifier.padding(bottom = 8.dp).testTag("search-history-search"),
                 fieldModifier = Modifier.testTag("search:query"))
-            Box(Modifier.fillMaxWidth().weight(1f)) {
+            Box(Modifier.fillMaxWidth().weight(1f).testTag("search-history-content")) {
                 LazyColumn(Modifier.fillMaxSize()
                     .testTag("search-history-results"),
                     state = if (useResultsPosition) listState else loadingListState) {
@@ -190,7 +159,7 @@ internal fun SearchHistoryDialog(
                                 val generation = snapshot.generation
                                 val openHit: () -> Unit = {
                                     val now = requests.state.value
-                                    if (!renderReadOnly && !restoring && available() && now.generation == generation && now.request == request &&
+                                    if (!renderReadOnly && available() && now.generation == generation && now.request == request &&
                                         now.phase == SearchPhase.Results && hit.conversationId == conversationId) {
                                         TouchHaptics.action(feedbackView) { onOpenHit(hit) }
                                     }
@@ -220,7 +189,7 @@ internal fun SearchHistoryDialog(
                                         val generation = snapshot.generation
                                         val loadNextPage: () -> Unit = {
                                             val now = requests.state.value
-                                            if (!renderReadOnly && !restoring && available() && now.generation == generation && now.request == request &&
+                                            if (!renderReadOnly && available() && now.generation == generation && now.request == request &&
                                                 now.phase == SearchPhase.Results && now.nextCursor != null) {
                                                 TouchHaptics.action(feedbackView) { requests.loadMore() }
                                             }
@@ -237,32 +206,28 @@ internal fun SearchHistoryDialog(
                             SearchNotice(stringResource(R.string.search_cancelled))
                             TextButton(text = stringResource(R.string.search_retry), onClick = { retrySearch() })
                         }
-                        !renderResumed || renderRestoring || phase == SearchPhase.Idle || phase == SearchPhase.Loading -> item("loading") {
-                            SearchLoading { cancelSearch() }
-                        }
                     }
                 }
-                if (renderReadOnly && renderResumed) {
-                    Box(Modifier.matchParentSize()) {
-                        Column(Modifier.align(Alignment.BottomEnd).background(MiuixTheme.colorScheme.surface)) {
-                            when (snapshot.appendPhase) {
-                                SearchAppendPhase.ReadError -> SearchReadError { retryPage() }
-                                SearchAppendPhase.Invalidated -> {
-                                    SearchNotice(stringResource(R.string.search_history_changed), "search:history_changed")
-                                    TextButton(text = stringResource(R.string.search_refresh), onClick = { retrySearch() })
-                                }
-                                SearchAppendPhase.Cancelled -> {
-                                    SearchNotice(stringResource(R.string.search_cancelled))
-                                    TextButton(text = stringResource(R.string.search_retry), onClick = { retrySearch() })
-                                }
-                                else -> if (phase == SearchPhase.Cancelled) {
-                                    TextButton(text = stringResource(R.string.search_retry), onClick = { retrySearch() })
-                                } else SearchLoading { cancelSearch() }
-                            }
-                        }
+                if (showInitialLoading) {
+                    Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
+                        SearchHistoryLoading { cancelSearch() }
                     }
                 }
+
             }
         }
+    }
+}
+
+@Composable
+private fun SearchHistoryLoading(onCancel: () -> Unit) {
+    Column(Modifier.testTag("search:loading-content"), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(24.dp).testTag("search:loading"))
+            Text(text = stringResource(R.string.search_loading),
+                modifier = Modifier.padding(start = 12.dp), style = MiuixTheme.textStyles.body2)
+        }
+        TextButton(text = stringResource(R.string.search_cancel), onClick = onCancel,
+            modifier = Modifier.padding(top = 8.dp).testTag("search:cancel"))
     }
 }

@@ -16,6 +16,21 @@ SPEC.loader.exec_module(recorder)
 
 
 class RecordToolTestsScopeTest(unittest.TestCase):
+    def test_timeline_divider_scope_is_exact_and_keeps_full_fallback(self):
+        target = "app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest"
+        modules = ("test_chat_timeline_contract", "test_reasoning_flow_stability_contract",
+                   "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+                   "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope")
+        for python in ("python", "python3"):
+            command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))
+            self.assertEqual("timeline-divider-targeted", scope)
+            self.assertEqual([python, "-B", "-m", "unittest", *modules, "-v"], command)
+        for invalid in ("", target + ",", " " + target, target + " ", target + "," + target,
+                        target + "Extra", target + ",app.daiyu.android.OtherTest"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=invalid))[1])
+        for mode in ("", "compile", "candidate", "daily", "release", "checks", "build"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=target))[1])
+
     def test_workspace_gesture_scope_is_exact_and_keeps_full_fallback(self):
         target = "app.daiyu.android.ConversationWorkspaceActivityTest"
         command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))

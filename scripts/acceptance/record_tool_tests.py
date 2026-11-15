@@ -694,6 +694,12 @@ QUESTION_CARD_MODULES = (
 
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest"):
+        return [python, "-B", "-m", "unittest", "test_chat_timeline_contract",
+                "test_reasoning_flow_stability_contract", "test_record_tool_tests_scope",
+                "test_acceptance_tool_receipt",
+                "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", "-v"], "timeline-divider-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(QUESTION_CARD_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *QUESTION_CARD_MODULES, "-v"], "question-card-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
@@ -909,7 +915,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted") or (
+    if scope in ("generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "timeline-divider-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

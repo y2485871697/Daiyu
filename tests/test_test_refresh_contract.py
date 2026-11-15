@@ -107,6 +107,23 @@ class TestRefreshContract(unittest.TestCase):
                         validate_changes(changes)
         validate_changes([*allowed, 'tests/example.py'])
 
+    def test_smoke_runner_is_an_exact_validation_path_not_a_scripts_wildcard(self):
+        path = 'scripts/smoke_boot.sh'
+        self.assertIn(path, VALIDATION_FILES)
+        validate_changes([path])
+        validate_changes([path, 'app/src/androidTest/kotlin/ExampleTest.kt'])
+        for invalid in (path + '.bak', path + '/extra', 'scripts/./smoke_boot.sh',
+                        'scripts/../scripts/smoke_boot.sh', 'scripts//smoke_boot.sh',
+                        'scripts\\smoke_boot.sh', '/scripts/smoke_boot.sh', 'scripts/unknown.sh'):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                validate_changes([invalid])
+        for forbidden in ('app/src/main/Example.kt', 'core-domain/src/main/Example.kt',
+                          'app/build.gradle.kts', 'settings.gradle.kts',
+                          'scripts/prepare-speech-runtime.py', '.github/workflows/build.yml'):
+            for changed in ([path, forbidden], [forbidden, path]):
+                with self.subTest(changed=changed), self.assertRaises(ValueError):
+                    validate_changes(changed)
+
     def test_application_build_and_ambiguous_paths_fail_closed(self):
         for name in ('app/src/main/Example.kt', 'app/build.gradle.kts', 'settings.gradle.kts',
                      'scripts/prepare-speech-runtime.py', '.github/workflows/build.yml',

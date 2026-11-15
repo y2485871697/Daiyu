@@ -213,7 +213,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = true) }
     }
 
-    fun testPauseWithoutStopDoesNotClearDraftFocusOrSelection() {
+    fun testRealPauseWithoutStopPreservesDraftAndSelection() {
         dismissIme()
         setDraft(" 暂时遮盖的草稿 ")
         node("chat-draft").performTouchInput {
@@ -222,12 +222,85 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         }
         awaitImeFrame(node("chat-draft"), visible = true)
         setSelection(1, 4, relativeToOriginalText = true)
+        node("chat-draft").assertIsFocused()
+        assertDraft(" 暂时遮盖的草稿 ")
+        assertHostSelection(1, 4)
         val database = fixture.database.exportBackup()
         realPauseResume(activity)
-        node("chat-draft").assertIsFocused()
+        // The translucent cover also takes window focus; only draft/selection must survive it.
         assertDraft(" 暂时遮盖的草稿 ")
         assertSelection(1, 4)
         assertHostSelection(1, 4)
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPauseWithoutStopDoesNotClearDraftFocusOrSelection() {
+        dismissIme()
+        val draft = " 仅生命周期暂停的草稿 "
+        val database = fixture.database.exportBackup()
+        val state = androidx.compose.runtime.mutableStateOf(ComposerUi(text = draft))
+        val owner = object : androidx.lifecycle.LifecycleOwner {
+            val registry = androidx.lifecycle.LifecycleRegistry(this)
+            override val lifecycle: androidx.lifecycle.Lifecycle get() = registry
+        }
+        mainThread {
+            owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+            activity.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.lifecycle.compose.LocalLifecycleOwner provides owner) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        DaiyuChatScreen(ChatScreenState("生命周期焦点回归", composer = state.value),
+                            ChatScreenActions(onProjectedDraftEdit = { expected, next, start, end ->
+                                if (state.value.text != expected) false else {
+                                    state.value = state.value.copy(text = next,
+                                        selectionStart = start, selectionEnd = end)
+                                    true
+                                }
+                            }))
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        awaitImeFrame(node("chat-draft"), visible = true)
+        setSelection(1, 4, relativeToOriginalText = true)
+        fun assertRetainedDraft() {
+            assertDraft(draft)
+            assertSelection(1, 4)
+            mainThread {
+                assertEquals(draft, state.value.text)
+                assertEquals(1, state.value.selectionStart)
+                assertEquals(4, state.value.selectionEnd)
+                assertTrue(activity.window.decorView.hasWindowFocus())
+                assertTrue(activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+            }
+        }
+        node("chat-draft").assertIsFocused()
+        assertRetainedDraft()
+        mainThread { owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_PAUSE) }
+        node("chat-draft").assertIsFocused()
+        assertRetainedDraft()
+        mainThread { owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_RESUME) }
+        node("chat-draft").assertIsFocused()
+        assertRetainedDraft()
+        mainThread { owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_PAUSE) }
+        node("chat-draft").assertIsFocused()
+        mainThread { owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_STOP) }
+        node("chat-draft").assertIsNotFocused()
+        awaitImeFrame(node("chat-draft"), visible = false)
+        assertRetainedDraft()
+        mainThread {
+            owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_START)
+            owner.registry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_RESUME)
+        }
+        node("chat-draft").assertIsNotFocused()
+        awaitImeFrame(node("chat-draft"), visible = false)
+        assertRetainedDraft()
         assertEquals(database, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }

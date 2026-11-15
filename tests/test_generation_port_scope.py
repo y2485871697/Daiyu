@@ -153,6 +153,7 @@ class GenerationPortScopeTest(unittest.TestCase):
         exact_route = ('if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "' + ",".join(CLASSES) +
                        '"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;')
         self.assertIn(exact_route, workflow)
+        self.assertIn("${{ inputs.mode == 'smoke' && inputs.smoke_classes == 'app.daiyu.android.GenerationInputImportTest,app.daiyu.android.storage.SQLiteGenerationAttemptStoreTest,app.daiyu.android.storage.SQLiteGenerationOutputStoreTest,app.daiyu.android.integration.tools.RunGenerationToolsDeviceTest,app.daiyu.android.ControllerGenerationResourcesTest,app.daiyu.android.ControllerGenerationIntegrationTest,app.daiyu.android.storage.GenerationProtocolMigrationTest' && '-generation-port' || '' }}", workflow)
         self.assertIn('ref: ${{ inputs.mode == \'smoke\' && inputs.expected_sha || github.sha }}', workflow)
         self.assertIn('ref: ${{ github.sha }}', workflow)
         self.assertIn('python3 .smoke-validation-tools/scripts/verify_smoke_source.py', workflow)

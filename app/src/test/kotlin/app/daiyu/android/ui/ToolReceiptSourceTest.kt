@@ -131,8 +131,9 @@ class ToolReceiptSourceTest {
         changed.forEachIndexed { index, block ->
             assertEquals(if (index == 20 || index == 33) null else index, position(currentMessage, block))
         }
+        assertEquals(0, loaded.retainedPositions(current.copy(data = current.data + 1))(currentMessage, changed.first()))
         for (invalid in listOf(current.copy(conversation = ConversationId("other")),
-            current.copy(data = current.data + 1), current.copy(generation = current.generation + 1)))
+            current.copy(data = current.data - 1), current.copy(generation = current.generation + 1)))
             assertNull(loaded.retainedPositions(invalid)(currentMessage, changed.first()))
     }
 

@@ -196,7 +196,7 @@ class ConversationPreviewTest {
         val context = RuntimeEnvironment.getApplication()
         database = ConversationDatabase(context)
         data = RetainedConversationData(database, ContextService(database, PrivateBlobs(context)))
-        assertEquals(33, database.readableDatabase.version)
+        assertEquals(34, database.readableDatabase.version)
         assertNull(data.summaries(null).single { it.id == id.value }.lastMessageAtMillis)
         assertEquals(bytes, app.daiyu.android.storage.SQLiteText.read(database.readableDatabase, "messages", "history_segments", "id", reply.id.value))
     }

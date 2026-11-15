@@ -55,7 +55,8 @@ jobs:
           import json, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_chat_usage_ready_contract.py', 'test_context_usage_wiring_contract.py'):
+          for pattern in ('test_chat_usage_ready_contract.py', 'test_context_usage_wiring_contract.py',
+                          'test_usage_tab_retention_contract.py', 'test_usage_heatmap_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -75,6 +76,7 @@ jobs:
             -PdaiyuCheckGraph=usage-layout-checks/task-graph.json \
             :app:compileDebugKotlin :app:testDebugUnitTest \
             --tests 'app.daiyu.android.ui.model.ConversationTokenUsageUiTest' \
+            --tests 'app.daiyu.android.data.repository.ModelUsageProjectionTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee usage-layout-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -83,7 +85,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'ConversationTokenUsageUiTest'}
+          expected = {'ConversationTokenUsageUiTest', 'ModelUsageProjectionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

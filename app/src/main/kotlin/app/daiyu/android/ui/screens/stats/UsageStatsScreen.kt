@@ -111,7 +111,8 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
         stats = loaded.getOrDefault(UsageStatsSnapshot())
     }
 
-    val modelContent = if (!stats.isLoading && !loadFailed && selectedTab == UsageStatsTab.Models)
+    // Keep the model projection and filters alive while the overview tab is visible.
+    val modelContent = if (!stats.isLoading && !loadFailed)
         modelUsageContent(stats) else null
     SettingsScaffoldPage(
         title = stringResource(R.string.stats_page_title),

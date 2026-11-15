@@ -386,6 +386,69 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testTabSwitchRetainsModelProjectionFilterAndExpansionWithoutReloading() {
+        val today = LocalDate.now()
+        fun at(date: LocalDate) = date.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val usage = ModelUsageSnapshot(listOf(ModelUsageProviderUi("retained-provider", "Retained provider", listOf(
+            ModelUsageModelUi("retained-model", "Retained model", 300, 100, 2, 2,
+                cachedTokens = 60, cacheCreationTokens = 30,
+                events = listOf(
+                    ModelUsageEvent(at(today), 100, 40, 20, 10, "recent"),
+                    ModelUsageEvent(at(today.minusDays(10)), 200, 60, 40, 20, "older"),
+                )),
+        ))))
+        val calls = AtomicInteger()
+        show {
+            calls.incrementAndGet()
+            empty().copy(tokenAccountingAvailable = true, modelUsage = usage)
+        }
+        selectTab(R.string.stats_tab_models)
+        usagePage().scrollToDescendant(hasText("Retained model"))
+        ui.onNode(hasText("Retained model") and hasClickAction()).performClick()
+        val filterTitle = activity.getString(R.string.stats_model_filter_title)
+        usagePage().scrollToDescendant(hasText(filterTitle))
+        ui.onNode(hasText(filterTitle) and hasClickAction()).performClick()
+        val preset = activity.getString(R.string.stats_model_filter_preset_today)
+        usagePage().scrollToDescendant(hasText(preset) and hasClickAction())
+        ui.onNode(hasText(preset) and hasClickAction()).performClick()
+        usagePage().scrollToDescendant(hasTestTag("usage-model-total"))
+        ui.onNode(hasText("140") and hasAnyAncestor(hasTestTag("usage-model-total")),
+            useUnmergedTree = true).assertIsDisplayed()
+
+        repeat(3) {
+            selectTab(R.string.stats_tab_overview)
+            node("usage-heatmap").assertExists()
+            node("usage-model-pane").assertDoesNotExist()
+            val modelsTab = tab(R.string.stats_tab_models)
+            usagePage().scrollToDescendant(hasTestTag(modelsTab))
+            ui.mainClock.autoAdvance = false
+            try {
+                node(modelsTab).performClick()
+                repeat(4) {
+                    ui.mainClock.advanceTimeByFrame()
+                    node("usage-loading").assertDoesNotExist()
+                    node("usage-model-loading").assertDoesNotExist()
+                    node("usage-model-total").assertExists()
+                    ui.onNode(hasText("140") and hasAnyAncestor(hasTestTag("usage-model-total")),
+                        useUnmergedTree = true).assertExists()
+                    ui.onNode(hasText("400") and hasAnyAncestor(hasTestTag("usage-model-total")),
+                        useUnmergedTree = true).assertDoesNotExist()
+                }
+            } finally {
+                ui.mainClock.autoAdvance = true
+            }
+            usagePage().scrollToDescendant(hasTestTag("usage-model-total"))
+            ui.onNode(hasText("140") and hasAnyAncestor(hasTestTag("usage-model-total")),
+                useUnmergedTree = true).assertIsDisplayed()
+            usagePage().scrollToDescendant(hasText("Retained model"))
+            val activeDays = activity.getString(R.string.stats_model_active_days)
+            usagePage().scrollToDescendant(hasText(activeDays))
+            ui.onNodeWithText(activeDays).assertIsDisplayed()
+        }
+        assertEquals("Switching tabs must not read statistics again", 1, calls.get())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testModelUsageDoesNotMixUnattributedHistoricalUsageOrShowExplanatoryCopy() {
         show { reported() }
         assertMetric(R.string.stats_page_token_total, "320")

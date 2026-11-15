@@ -323,6 +323,10 @@ private class InputWindow(private val window: Window) {
                 root.descendantFocusability = previous
         }
     }
+    private val composeDialog: Boolean
+        get() = entries.any { entry ->
+            generateSequence(entry.view) { it.parent as? View }.any { it is DialogWindowProvider }
+        }
     private val originalImeState = window.attributes.softInputMode and LayoutParams.SOFT_INPUT_MASK_STATE
     private var managedImeState = LayoutParams.SOFT_INPUT_STATE_UNCHANGED
     private var ownsImeState = true
@@ -363,11 +367,14 @@ private class InputWindow(private val window: Window) {
             else LayoutParams.SOFT_INPUT_STATE_UNCHANGED
         val mode = window.attributes.softInputMode
         if (!ownsImeState) return
-        if ((mode and LayoutParams.SOFT_INPUT_MASK_STATE) != managedImeState) {
+        val currentState = mode and LayoutParams.SOFT_INPUT_MASK_STATE
+        // Compose Dialog rewrites the adjust mode with an unspecified state on recomposition.
+        val dialogReset = composeDialog && currentState == LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+        if (currentState != managedImeState && !dialogReset) {
             ownsImeState = false
             return
         }
-        if (state == managedImeState) return
+        if (state == managedImeState && currentState == state) return
         managedImeState = state
         window.setSoftInputMode((mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()) or state)
     }

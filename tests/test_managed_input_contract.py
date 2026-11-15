@@ -94,7 +94,10 @@ class ManagedInputContractTest(unittest.TestCase):
                       'visibleImeFrame ?: return', 'frame.bottom <= shown.bottom',
                       'focused && awaitingVisibleIme && !visible', 'SOFT_INPUT_STATE_ALWAYS_VISIBLE',
                       '!= managedImeState', 'ownsImeState = false', 'if (!ownsImeState) return',
-                      'mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()'):
+                      'mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()',
+                      'composeDialog && currentState == LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED',
+                      'currentState != managedImeState && !dialogReset',
+                      'state == managedImeState && currentState == state'):
             self.assertIn(token, policy)
         for token in ('showSoftInput', 'hideSoftInput', 'requestFocus', 'postOnAnimation', 'Thread.sleep'):
             self.assertNotIn(token, policy)
@@ -263,7 +266,9 @@ class ManagedInputContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, precise)
         self.assertIn('RectF(touch.left, touch.top, touch.right, touch.bottom).roundOut(targetPixels)', stable)
         self.assertIn('Touch geometry rejected: $lastSample', stable)
-        self.assertEqual(1, stable.count('automation.windows'))
+        self.assertEqual(2, stable.count('automation.windows'))
+        self.assertIn('other.id == readyWindowId && other.isFocused && !bounds.isEmpty', stable)
+        self.assertLess(stable.index('var readyWindowId = -1'), stable.index('fun sample(): TouchFrame?'))
         self.assertNotIn('requestFocus', stable)
         self.assertNotIn('injectInputEvent', stable)
 

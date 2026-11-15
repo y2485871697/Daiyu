@@ -292,7 +292,7 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         node("drawer-choice-reverse").assertIsSelected()
     }
 
-    private fun awaitPaneRows(vararg ids: ConversationId) {
+    private fun awaitPaneRows(ids: List<ConversationId>) {
         awaitControl("sidebar captured seeded rows and message metadata") {
             val field = MainActivity::class.java.getDeclaredField("paneState\$delegate").apply { isAccessible = true }
             @Suppress("UNCHECKED_CAST")
@@ -308,7 +308,7 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         val (user, reply) = pair(completed.id)
         db.send(user, reply); db.save(reply.copy(status = RunStatus.COMPLETED))
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
-        awaitPaneRows(completed.id, ordinary.id)
+        awaitPaneRows(listOf(completed.id, ordinary.id))
         node("drawer-conversation:${completed.id.value}").assertIsDisplayed()
         node("drawer-conversation:${ordinary.id.value}").assertIsDisplayed()
         node("drawer-filter-button").performClick()
@@ -341,13 +341,13 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
             db.send(question.copy(createdAt = userAt), answer.copy(createdAt = replyAt))
             if (!running) db.save(answer.copy(createdAt = replyAt, status = RunStatus.COMPLETED))
             db.rename(owner.id, title)
-            db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=? WHERE id=?", arrayOf(day, owner.id.value))
+            db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=? WHERE id=?", arrayOf<Any>(day, owner.id.value))
             return owner
         }
         val older = seed("older-day-new-output", oldMillis(), 1000L, 3000L, false)
         val newer = seed("newer-day-running", oldMillis() + 86400000L, 2000L, 9000L, true)
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
-        awaitPaneRows(older.id, newer.id)
+        awaitPaneRows(listOf(older.id, newer.id))
         assertTrue(screenBounds("drawer-conversation:${newer.id.value}").top < screenBounds("drawer-conversation:${older.id.value}").top)
         node("drawer-sort-button").performClick()
         node("drawer-choice-last-output").performClick()

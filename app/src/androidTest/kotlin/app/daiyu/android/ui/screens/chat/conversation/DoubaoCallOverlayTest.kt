@@ -392,35 +392,47 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         nearDp(284f, bounds("doubao-call-controls").top - panel.top)
     }
 
-    fun testShortPanelKeepsControlsReachableByBodyScrollWithoutDraggingThePanel() {
-        mount(430.dp); finishOpening()
-        val panelNode = ui.onNodeWithTag("doubao-call-expanded")
-        val panel = panelNode.fetchSemanticsNode().boundsInRoot
+    fun testShortUniversalPanelOnlyScrollsCaptionsWithAllControlsFixed() = assertOnlyCaptionsScroll(430.dp, true)
+    fun testShortDoubaoPanelOnlyScrollsCaptionsWithAllControlsFixed() = assertOnlyCaptionsScroll(430.dp, false)
+    fun testCompactUniversalPanelOnlyScrollsCaptionsWithAllControlsFixed() = assertOnlyCaptionsScroll(400.dp, true)
+    fun testCompactDoubaoPanelOnlyScrollsCaptionsWithAllControlsFixed() = assertOnlyCaptionsScroll(400.dp, false)
+
+    private fun assertOnlyCaptionsScroll(hostHeight: Dp, selectable: Boolean) {
+        mount(hostHeight, session().copy(modelSelectable = selectable,
+            reply = "只有字幕区域可以滚动，固定控件保持原位。\n".repeat(35), replyTextComplete = true))
+        finishOpening(); advanceOverlayFrames(400)
+        val tags = listOf("doubao-call-expanded", "doubao-call-orb", "doubao-call-status",
+            "doubao-call-status-detail", "doubao-call-controls", "doubao-call-mute",
+            "doubao-call-speaker", "doubao-call-captions", "doubao-call-hang-up")
+        val fixed = (tags + listOf("doubao-call-caption-area", "voice-call-model-title", "doubao-call-clock",
+            "doubao-call-minimize")).associateWith { ui.onNodeWithTag(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
         val body = ui.onNodeWithTag("doubao-call-body")
-        val before = scrollPosition(body)
-        // Stay above the nested caption scroller and below the panel drag handle.
-        body.performTouchInput {
-            swipe(Offset(center.x, height * .45f), Offset(center.x, height * .10f), 400L)
-        }
-        advanceOverlayFrames(32)
-        val after = scrollPosition(body)
-        assertTrue("Short fixture must overflow: $after", after.second > 0f)
-        assertTrue("Body must scroll: before=$before after=$after", after.first > before.first + 1f)
+        assertFalse(body.fetchSemanticsNode().config.contains(SemanticsProperties.VerticalScrollAxisRange))
         val viewport = body.fetchSemanticsNode().boundsInRoot
-        fun fullyVisible(tag: String): SemanticsNodeInteraction {
-            val target = ui.onNodeWithTag(tag).assertIsDisplayed()
-            val node = target.fetchSemanticsNode()
-            val bounds = Rect(node.positionInRoot, Size(node.size.width.toFloat(), node.size.height.toFloat()))
-            assertTrue("$tag must fit inside body: target=$bounds viewport=$viewport",
-                bounds.left >= viewport.left - 1f && bounds.top >= viewport.top - 1f &&
-                    bounds.right <= viewport.right + 1f && bounds.bottom <= viewport.bottom + 1f)
-            return target
+        for (tag in tags.drop(1) + "doubao-call-caption-area") {
+            val bounds = fixed.getValue(tag)
+            assertTrue("$tag must fit without body scrolling: $bounds vs $viewport",
+                bounds.top >= viewport.top - 1f && bounds.bottom <= viewport.bottom + 1f)
         }
-        fullyVisible("doubao-call-hang-up")
-        fullyVisible("doubao-call-speaker").performTouchInput { click() }
-        awaitVisualIdle()
-        assertEquals(1, speakerToggles)
-        assertEquals(panel, panelNode.fetchSemanticsNode().boundsInRoot)
+        fun assertFixed() = fixed.forEach { (tag, bounds) ->
+            assertEquals("$tag moved outside the caption scroller", bounds, ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot)
+        }
+        ui.onNodeWithTag("doubao-call-status").performTouchInput { swipeDown(durationMillis = 350L) }
+        advanceOverlayFrames(24); assertFixed()
+        ui.onNodeWithTag("doubao-call-controls").performTouchInput { swipeUp(durationMillis = 350L) }
+        advanceOverlayFrames(24); assertFixed()
+        val caption = ui.onNodeWithTag("doubao-call-caption-area")
+        val before = scrollPosition(caption)
+        assertTrue("Long captions must overflow", before.second > 0f)
+        caption.performTouchInput { swipe(Offset(center.x, height * .25f), Offset(center.x, height * .8f), 400L) }
+        advanceOverlayFrames(32)
+        val after = scrollPosition(caption)
+        assertTrue("Only captions must scroll: $before -> $after", after.first < before.first - 1f)
+        assertFixed()
+        repeat(3) { caption.performTouchInput { swipeDown(durationMillis = 200L) }; advanceOverlayFrames(16) }
+        assertFixed()
+        ui.onNodeWithTag("doubao-call-speaker").performTouchInput { click() }
+        awaitVisualIdle(); assertEquals(1, speakerToggles); assertFixed()
     }
 
     fun testConnectingBackendOpensWithListeningWavesInPanelAndCapsule() {

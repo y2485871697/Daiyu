@@ -151,7 +151,8 @@ class VoiceCallContractTest(unittest.TestCase):
         self.assertIn('controller.nativeSearchState(owner)', owner)
         indicator = (SRC / 'ui/screens/chat/conversation/VoiceCallCompressionIndicator.kt').read_text()
         self.assertIn('正在搜索', indicator)
-        self.assertIn('LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey)', indicator)
+        self.assertIn('LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey, running)', indicator)
+        self.assertIn('if (running && !busy && (compressed || searched))', indicator)
         self.assertIn('delay(2_000)', indicator)
     def test_call_picker_and_initial_model_are_scoped_to_actual_call_binding(self):
         main = (SRC / 'MainActivity.kt').read_text()

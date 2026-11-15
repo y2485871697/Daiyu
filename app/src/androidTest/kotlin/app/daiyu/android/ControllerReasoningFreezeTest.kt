@@ -13,6 +13,118 @@ import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
 class ControllerReasoningFreezeTest : InstrumentationTestCase() {
+    fun testNativeSearchDecoderEdgesReachTheExactCallObserverWhenMainDeliveryIsDelayed() {
+        val fixture = RunControlFixture(instrumentation.targetContext)
+        val unblock = CountDownLatch(1)
+        var observation: app.daiyu.android.voice.control.VoiceControlCancellation? = null
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            val session = fixture.session("answer", held = true, holdSeconds = 30)
+            fixture.database.draft("search fixture")
+            assertNotNull(fixture.controller.send(null, "search fixture"))
+            assertTrue(session.entered.await(10, TimeUnit.SECONDS))
+            val message = checkNotNull(fixture.controller.active)
+            val owner = app.daiyu.android.voice.control.VoiceAssistantOwner(
+                message.conversationId.value, message.runId.value, message.id.value)
+            val bodies = CopyOnWriteArrayList<app.daiyu.android.voice.control.VoiceAssistantBody>()
+            controlMain {
+                observation = app.daiyu.android.voice.control.AndroidUniversalOwnerObserver(fixture.controller) { false }
+                    .observe(owner) { bodies += it }
+            }
+            val blocked = CountDownLatch(1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                blocked.countDown(); check(unblock.await(10, TimeUnit.SECONDS))
+            }
+            assertTrue(blocked.await(5, TimeUnit.SECONDS))
+            val wire = listOf(
+                """{"type":"response.web_search_call.searching","item_id":"search-fixture"}""",
+                """{"type":"response.web_search_call.completed","item_id":"search-fixture"}""",
+                """{"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}""",
+                "[DONE]").joinToString("\n\n", postfix = "\n\n") { "data: $it" }
+            app.daiyu.android.model.NativeCompletionStream.read(app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS,
+                wire.reader().buffered(), { false }, checkNotNull(session.sink.get()))
+            unblock.countDown()
+            awaitControl("ordered native search edges") { bodies.any { it.searching } && bodies.any { it.searchCompletion != null } }
+            val started = bodies.indexOfFirst { it.searching }
+            val finished = bodies.indexOfFirst { it.searchCompletion != null }
+            assertTrue(started >= 0 && finished > started)
+            assertFalse(bodies[finished].searching)
+            assertEquals(message.conversationId.value, bodies[finished].owner.conversationId)
+            assertTrue(bodies.all { it.owner == owner })
+            controlMain { observation?.cancel(); observation = null }
+            session.release.countDown()
+            awaitControl("run complete") { fixture.controller.active == null }
+        } finally {
+            unblock.countDown()
+            controlMain { observation?.cancel() }
+            fixture.close()
+        }
+    }
+
+    fun testQueuedSearchSuccessReplayIsDroppedWhenItsExactRunIsRevoked() {
+        val fixture = RunControlFixture(instrumentation.targetContext)
+        val unblock = CountDownLatch(1)
+        var observation: AutoCloseable? = null
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            val session = fixture.session("answer", held = true, holdSeconds = 30)
+            fixture.database.draft("replay fixture")
+            assertNotNull(fixture.controller.send(null, "replay fixture"))
+            assertTrue(session.entered.await(10, TimeUnit.SECONDS))
+            val message = checkNotNull(fixture.controller.active)
+            val owner = app.daiyu.android.voice.control.VoiceAssistantOwner(
+                message.conversationId.value, message.runId.value, message.id.value)
+            checkNotNull(session.sink.get())(ModelEvent.NativeSearch("search", app.daiyu.android.domain.NativeSearchPhase.COMPLETED))
+            assertNotNull(fixture.controller.nativeSearchState(owner).completion)
+            val blocked = CountDownLatch(1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                blocked.countDown(); check(unblock.await(10, TimeUnit.SECONDS))
+            }
+            assertTrue(blocked.await(5, TimeUnit.SECONDS))
+            val notices = CopyOnWriteArrayList<app.daiyu.android.voice.control.VoiceNativeSearchState>()
+            observation = fixture.controller.observeNativeSearch(owner) { notices += it }
+            assertTrue(fixture.controller.stop(message))
+            unblock.countDown()
+            val barrier = CountDownLatch(1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post { barrier.countDown() }
+            assertTrue(barrier.await(10, TimeUnit.SECONDS))
+            assertTrue("A revoked owner must not replay success", notices.isEmpty())
+        } finally {
+            unblock.countDown(); observation?.close(); fixture.close()
+        }
+    }
+
+    fun testCompressionTransitionsAreCapturedInOrderBeforeTheCoalescedUiNotification() {
+        val fixture = RunControlFixture(instrumentation.targetContext)
+        val unblock = CountDownLatch(1)
+        var observation: AutoCloseable? = null
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            val notices = CopyOnWriteArrayList<ChatController.VoiceCompressionNotice>()
+            controlMain { observation = fixture.controller.observeMainCompression { notices += it } }
+            val blocked = CountDownLatch(1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                blocked.countDown(); check(unblock.await(10, TimeUnit.SECONDS))
+            }
+            assertTrue(blocked.await(5, TimeUnit.SECONDS))
+            val publish = ChatController::class.java.getDeclaredMethod("postCompressionActivity",
+                app.daiyu.android.timeline.CompressionActivity::class.java).apply { isAccessible = true }
+            val running = app.daiyu.android.timeline.CompressionActivity("compression-fixture", "voice-owner", 2, null)
+            publish.invoke(fixture.controller, running)
+            publish.invoke(fixture.controller, running.copy(running = false, succeeded = true))
+            unblock.countDown()
+            awaitControl("both compression transitions") { notices.size == 2 }
+            assertEquals(listOf(true, false), notices.map { it.running })
+            assertEquals(listOf(null, "compression-fixture"), notices.map { it.completion })
+            assertTrue(notices.all { it.conversationId == "voice-owner" })
+            controlMain { observation?.close(); observation = null }
+        } finally {
+            unblock.countDown()
+            controlMain { observation?.close() }
+            fixture.close()
+        }
+    }
+
     fun testStandaloneAndConversationPreferencesReachRealPreparationOnceAndSurviveEdits() {
         val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
         val entered = CountDownLatch(1)
@@ -155,7 +267,10 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
 
     fun testVoiceCallInheritsSourceReasoningIntoItsActualTextRequestAndCleansItAfterHangup() {
         val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
-        val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
+        val prompts = CopyOnWriteArrayList<String>()
+        val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, assistant, _ ->
+            frozen += p; prompts += assistant.systemPrompt
+        })
         try {
             awaitControl("controller ready") { fixture.controller.ready }
             fixture.controller.reasoningPreference.set(null, ReasoningEffort.LOW)
@@ -189,6 +304,7 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
             awaitControl("voice complete") { fixture.controller.active == null }
             val provider = frozen.single()
             assertTrue(provider.requestOptions.voiceTextOnly)
+            assertTrue(prompts.single().contains(app.daiyu.android.voice.VoiceCallOutput.INSTRUCTIONS))
             assertEquals("high", JSONObject(provider.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
             assertEquals(1, fixture.opens.get())
             controlMain { fixture.controller.discardVoiceCall(temporary.id) }

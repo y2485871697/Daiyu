@@ -236,6 +236,15 @@ class ChatController internal constructor(private val application:Application,
     }
 
     private val contextService by lazy { ContextService(application, database).also { it.onCompression = ::postCompressionActivity } }
+    internal data class VoiceCompressionNotice(val conversationId: String, val running: Boolean, val completion: String?)
+    private val voiceCompressionListeners = linkedMapOf<(VoiceCompressionNotice) -> Unit, Any>()
+    @Synchronized internal fun observeMainCompression(listener: (VoiceCompressionNotice) -> Unit): AutoCloseable {
+        val registration = Any()
+        if (!closed) voiceCompressionListeners[listener] = registration
+        return AutoCloseable { synchronized(this) {
+            if (voiceCompressionListeners[listener] === registration) voiceCompressionListeners.remove(listener)
+        } }
+    }
     private val completedMainCompression = linkedMapOf<String, String>()
     @Synchronized internal fun completedMainCompression(conversationId: ConversationId?): String? =
         conversationId?.value?.let(completedMainCompression::get)
@@ -291,8 +300,19 @@ class ChatController internal constructor(private val application:Application,
                 }
             }
             timelineRevision.incrementAndGet()
+            val running = compressionActivitiesById.values.any {
+                it.running && !it.waiting && it.taskId == null && it.conversationId == value.conversationId
+            }
+            val notice = VoiceCompressionNotice(value.conversationId, running, completedMainCompression[value.conversationId])
+            val targets = voiceCompressionListeners.map { it.key to it.value }
+            handler.post {
+                targets.forEach { (listener, registration) ->
+                    val current = synchronized(this) { !closed && voiceCompressionListeners[listener] === registration }
+                    if (current) try { listener(notice) } catch (_: Exception) { }
+                }
+                synchronized(this) { if (!closed) notifyChanged() }
+            }
         }
-        handler.post { synchronized(this) { if (!closed) notifyChanged() } }
     }
     internal fun timelineHistory(id: ConversationId, displayAnchors: Set<String>? = null): List<app.daiyu.android.timeline.ChatTimelineEntry> {
         check(Looper.myLooper() != Looper.getMainLooper())
@@ -2471,6 +2491,24 @@ class ChatController internal constructor(private val application:Application,
             try {listener(lifetime.initial)} catch (_:Exception) { /* Optional feedback only. */ }
         }
     }
+    private val nativeSearchListeners = linkedMapOf<(app.daiyu.android.voice.control.VoiceNativeSearchState) -> Unit,
+        Pair<VoiceAssistantOwner, Any>>()
+    @Synchronized internal fun observeNativeSearch(owner: VoiceAssistantOwner,
+        listener: (app.daiyu.android.voice.control.VoiceNativeSearchState) -> Unit): AutoCloseable {
+        val registration = owner to Any()
+        if (!closed) {
+            nativeSearchListeners[listener] = registration
+            val initial = nativeSearchState(owner)
+            handler.post {
+                val current = synchronized(this) { !closed && nativeSearchOwner == owner &&
+                    nativeSearchListeners[listener] === registration }
+                if (current) try { listener(initial) } catch (_: Exception) { }
+            }
+        }
+        return AutoCloseable { synchronized(this) {
+            if (nativeSearchListeners[listener] === registration) nativeSearchListeners.remove(listener)
+        } }
+    }
     private var nativeSearchOwner: VoiceAssistantOwner? = null
     private var nativeSearchActivity = app.daiyu.android.voice.control.VoiceNativeSearchActivity()
     @Synchronized internal fun nativeSearchState(owner: VoiceAssistantOwner): app.daiyu.android.voice.control.VoiceNativeSearchState =
@@ -2484,6 +2522,15 @@ class ChatController internal constructor(private val application:Application,
                 nativeSearchActivity = app.daiyu.android.voice.control.VoiceNativeSearchActivity()
             }
             nativeSearchActivity.accept(event)
+            val state = nativeSearchActivity.state
+            val targets = nativeSearchListeners.filterValues { it.first == exact }.map { it.key to it.value }
+            handler.post {
+                targets.forEach { (listener, registration) ->
+                    val current = synchronized(this) { !closed && nativeSearchOwner == exact &&
+                        nativeSearchListeners[listener] === registration }
+                    if (current) try { listener(state) } catch (_: Exception) { }
+                }
+            }
             notifyChanged()
         }
     }
@@ -4632,11 +4679,13 @@ class ChatController internal constructor(private val application:Application,
                         else app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) { activity ->
                             synchronized(this) {
                                 val original = reconnectResources
-                                if (!activity.running || (original != null && resources === original && !original.fenced))
-                                    {
-                                        if (activity.running) runtimeStore?.bindCompressionModel(assistant, activity.model)
-                                        postCompressionActivity(activity)
-                                    }
+                                if (original != null && resources === original && !original.fenced) {
+                                    if (activity.running) runtimeStore?.bindCompressionModel(assistant, activity.model)
+                                    postCompressionActivity(activity)
+                                } else if (!activity.running) {
+                                    // A revoked operation may release its row, never publish late success/failure.
+                                    postCompressionActivity(activity.copy(succeeded = false, failure = null))
+                                }
                             }
                         },
                     onUsage = { synchronized(this) {
@@ -6097,7 +6146,7 @@ class ChatController internal constructor(private val application:Application,
                 toolScreenshotPreviews.clear()
                 preparation?.revoked=true
                 imageProvider=null; imageProviderConfiguration=null
-                configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear()
+                configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear();nativeSearchListeners.clear();voiceCompressionListeners.clear()
             }
             compressionWaitSpans.values.forEach { it.end() }
             compressionWaitSpans.clear()

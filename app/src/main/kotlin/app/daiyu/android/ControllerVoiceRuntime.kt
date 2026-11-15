@@ -301,7 +301,8 @@ internal class ControllerVoiceRuntime(
             value.duplexVoice
         } else value.duplexVoice.takeIf { id -> realtimeSpeechVoices.any { it.id == id } } ?: DoubaoDuplexProtocol.DEFAULT_VOICE
         return app.daiyu.android.voice.duplex.DoubaoDuplexConfig(value.duplexKey, voice,
-            value.instructions.ifBlank { "你是代鱼，一个简洁、自然、友善的中文语音助手。" })
+            value.instructions.ifBlank { "你是代鱼，一个简洁、自然、友善的中文语音助手。" } + "\n\n" +
+                app.daiyu.android.voice.VoiceCallOutput.INSTRUCTIONS)
     }
     /** Local-only freeze; authorization is still required before any HTTP request. */
     suspend fun authorizeReference(prepared: FrozenVoiceSpeech): FrozenVoiceSpeech = withContext(Dispatchers.IO) {

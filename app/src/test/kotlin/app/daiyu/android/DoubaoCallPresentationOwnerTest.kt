@@ -17,6 +17,19 @@ class DoubaoCallPresentationOwnerTest {
         startedAtMillis = 100, endedAtMillis = endedAtMillis, muted = muted, speaker = speaker,
     )
 
+    @Test fun realtimeCaptionProjectionKeepsDoubaoIdentityAndNeverChangesTheSourceOrUserTranscript() {
+        val owner = DoubaoCallPresentationOwner()
+        val raw = "可以出门。\n\n来源：\n\n1. [天气](<https://example.org>)"
+        val source = snapshot(reply = raw, transcript = "用户网址https://user.example.org")
+        owner.update(source)
+        assertEquals("可以出门。", owner.state!!.reply)
+        assertEquals("豆包", owner.state!!.responseLabel)
+        assertEquals(source.state.transcript, owner.state!!.transcript)
+        assertEquals(raw, source.state.reply)
+        assertEquals(source.state.captionEpoch, owner.state!!.captionEpoch)
+        assertEquals(source.state.replyTextComplete, owner.state!!.replyTextComplete)
+    }
+
     @Test fun initialConnectionUsesListeningVisualWithoutChangingTheBackendPhase() {
         val owner = DoubaoCallPresentationOwner()
         for (phase in listOf(DuplexPhase.IDLE, DuplexPhase.CONNECTING)) {

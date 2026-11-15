@@ -92,6 +92,70 @@ class VoiceCallControllerTest {
     }
 
 
+    @Test fun telephoneOutputHasStablePrefixesAndDropsReferencesBeforeBothCaptionAndSpeech() {
+        val raw = "明天晴。[天气](https://example.org/a_(b)) 可以出门。\n\n来源：\n\n1. [天气](<https://example.org/source>)"
+        val expected = "明天晴。天气 可以出门。"
+        var previous = ""
+        for (end in 0..raw.length) {
+            val projected = app.daiyu.android.voice.VoiceCallOutput.text(raw.take(end), false)
+            assertTrue("Must not retract speech at $end: $previous -> $projected", projected.startsWith(previous))
+            assertTrue("Only stable telephone text at $end: $projected", expected.startsWith(projected))
+            previous = projected
+        }
+        assertEquals(expected, app.daiyu.android.voice.VoiceCallOutput.text(raw, true))
+        assertEquals("来源：用户告诉我的。编号[甲]保留，2026年也保留。",
+            app.daiyu.android.voice.VoiceCallOutput.text("来源：用户告诉我的。编号[甲]保留，2026年也保留。", true))
+        for (reference in listOf("https://example.org", "http://example.org", "www.example.org",
+            "<https://example.org>", "[1](https://example.org)", "【1†source】", "\uE200cite\uE202source\uE201")) {
+            val source = "好。$reference 可以。"
+            var emitted = ""
+            for (end in 0..source.length) {
+                val next = app.daiyu.android.voice.VoiceCallOutput.text(source.take(end), false)
+                assertTrue("Reference split at $end: $reference", next.startsWith(emitted))
+                assertTrue("Reference must never enter speech: $next", "好。 可以。".startsWith(next))
+                emitted = next
+            }
+            assertEquals("好。 可以。", app.daiyu.android.voice.VoiceCallOutput.text(source, true))
+        }
+        for (footer in listOf("来源：\n1.\n[材料](https://example.org)",
+            "来源：[材料](https://example.org)", "来源：1. [材料](https://example.org)",
+            "来源：\n- [材料](https://example.org)")) {
+            val source = "答复。\n" + footer
+            for (end in 0..source.length) assertTrue("No footer prefix at $end: $footer",
+                "答复。".startsWith(app.daiyu.android.voice.VoiceCallOutput.text(source.take(end), false)))
+            assertEquals("答复。", app.daiyu.android.voice.VoiceCallOutput.text(source, true))
+        }
+        assertEquals("请看", app.daiyu.android.voice.VoiceCallOutput.text(
+            "[请看 https://example.org](https://example.org)", true))
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.finishRecognition(); f.accept(owner)
+        for (end in 0..raw.length step 3) {
+            f.body(owner, raw.take(end))
+            assertEquals(c.state.value.reply, f.outputs.single().bodies.last().first)
+        }
+        f.body(owner, raw, VoiceBodyStatus.COMPLETE)
+        assertEquals(expected, c.state.value.reply)
+        assertEquals(expected to true, f.outputs.single().bodies.last())
+        assertTrue(c.state.value.active)
+        c.stop(c.state.value.permitId!!)
+    }
+
+    @Test fun referenceOnlyTelephoneAnswerDrainsEmptyAndTheNextAnswerHasAFreshProjection() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.finishRecognition(); f.accept(owner)
+        f.body(owner, "来源：\n\n1. [链接](https://example.org)", VoiceBodyStatus.COMPLETE)
+        assertEquals("", c.state.value.reply)
+        assertEquals("" to true, f.outputs.single().bodies.last())
+        f.outputs.single().drained(); f.flush()
+        assertTrue(c.state.value.active)
+        f.finishRecognition("next turn")
+        val next = owner.copy(runId = "run-2", messageId = "assistant-2")
+        f.accept(next); f.body(next, "新的口语回答。", VoiceBodyStatus.COMPLETE)
+        assertEquals("新的口语回答。", c.state.value.reply)
+        assertEquals("新的口语回答。" to true, f.outputs.last().bodies.last())
+        c.stop(c.state.value.permitId!!)
+    }
+
     @Test fun lateAcceptedCleanupAndBridgeFailurePublishReleaseStageAndFenceRestart() {
         for (bridge in listOf(false, true)) {
             val f = Fake(); val c = VoiceCallController(f)

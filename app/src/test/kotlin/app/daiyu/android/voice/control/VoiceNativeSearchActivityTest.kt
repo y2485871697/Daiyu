@@ -32,6 +32,21 @@ class VoiceNativeSearchActivityTest {
         activity.accept(event("four", NativeSearchPhase.INCOMPLETE))
         assertNull(activity.state.completion)
     }
+    @Test fun failedOrIncompleteMemberPreventsAGroupSuccessButDoesNotPoisonTheNextSearch() {
+        for (failure in listOf(NativeSearchPhase.FAILED, NativeSearchPhase.INCOMPLETE)) {
+            val activity = VoiceNativeSearchActivity()
+            activity.accept(event("a", NativeSearchPhase.RUNNING))
+            activity.accept(event("b", NativeSearchPhase.RUNNING))
+            activity.accept(event("a", failure))
+            assertTrue(activity.state.searching)
+            activity.accept(event("b", NativeSearchPhase.COMPLETED))
+            assertFalse(activity.state.searching); assertNull(activity.state.completion)
+            activity.accept(event("c", NativeSearchPhase.RUNNING))
+            activity.accept(event("c", NativeSearchPhase.COMPLETED))
+            assertNotNull(activity.state.completion)
+        }
+    }
+
     @Test fun concurrentSearchesRemainBusyUntilAllKnownCallsFinish() {
         val activity = VoiceNativeSearchActivity()
         activity.accept(event("one", NativeSearchPhase.RUNNING))

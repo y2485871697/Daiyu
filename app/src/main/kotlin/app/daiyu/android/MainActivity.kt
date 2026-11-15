@@ -239,6 +239,7 @@ class MainActivity : ComponentActivity() {
     private var universalOwnMutation = false
     private var universalPermissionPermit: String? = null
     private var universalUnobserve: (() -> Unit)? = null
+    private var voiceCompressionObservation: AutoCloseable? = null
     private var accountPreviewRevoke: (() -> Unit)? = null
     private val universalMicrophonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val original = universalPermissionPermit
@@ -406,6 +407,14 @@ class MainActivity : ComponentActivity() {
                     .forEach { controller.cancelTextSend(it) }
                 // Keep the original callback association: Unknown is not proof that nothing was saved.
             }).also { host ->
+                voiceCompressionObservation = controller.observeMainCompression { notice ->
+                    if (voiceCallConversation?.id?.value == notice.conversationId && host.state.value.active) {
+                        host.setCompressing(notice.running)
+                        voiceCallPresentation.update(host.state.value, host.speaker, notice.running,
+                            notice.completion, SystemClock.elapsedRealtime())
+                        publishChat()
+                    }
+                }
                 lifecycleScope.launch {
                     host.state.collect { value ->
                         voiceCallPresentation.update(value, host.speaker, controller.isMainContextCompressing(voiceCallConversation?.id),
@@ -6315,6 +6324,7 @@ class MainActivity : ComponentActivity() {
         revokeUniversalVoice()
         if (universalVoiceDelegate.isInitialized()) universalVoice.close()
         universalUnobserve?.invoke(); universalUnobserve = null
+        voiceCompressionObservation?.close(); voiceCompressionObservation = null
         try { cascadeVoice.dispose() } catch (_: Exception) { toast("级联音频释放未确认") }
         invalidateConfiguredVoice()
         dictationHost.close()

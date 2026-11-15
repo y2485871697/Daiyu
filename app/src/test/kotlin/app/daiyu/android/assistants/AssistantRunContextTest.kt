@@ -5,6 +5,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AssistantRunContextTest {
+    @Test fun telephonePolicyIsRunOnlyAndKeepsTheOriginalAssistantAndMemory() {
+        val context = Store(AssistantProfile("voice", "名字不变", "原有人格", enabledSkillIds = listOf("saved")))
+            .capture("voice", "保留的记忆")
+        val original = context.systemPrompt
+        val call = context.forVoiceConversation()
+        assertEquals("名字不变", call.name)
+        assertEquals(context.assistantId, call.assistantId)
+        assertEquals(context.resolvedMemory, call.resolvedMemory)
+        assertTrue(call.systemPrompt.contains(app.daiyu.android.voice.VoiceCallOutput.INSTRUCTIONS))
+        assertTrue(call.systemPrompt.contains("原有人格"))
+        assertTrue(call.enabledSkillIds.isEmpty())
+        assertEquals(original, context.systemPrompt)
+        assertFalse(original.contains(app.daiyu.android.voice.VoiceCallOutput.INSTRUCTIONS))
+        assertEquals(listOf("saved"), context.enabledSkillIds)
+    }
+
     @Test fun everyCapturedAssistantKeepsOneExecutionPolicyRegardlessOfPersonalityOrMemory() {
         val policy = AssistantRunContext.EXECUTION_POLICY
         listOf(AssistantProfile("a", "A", "custom"), AssistantProfile("b", "B", "", memoryEnabled = false)).forEach { profile ->

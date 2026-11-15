@@ -273,7 +273,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         if (answer.final) return
         val progressed = value.text != answer.text || value.searching != session.searching ||
             value.searchCompletion != session.searchCompletion
-        session.reply = value.text
+        val spokenText = app.daiyu.android.voice.VoiceCallOutput.text(value.text, value.status == VoiceBodyStatus.COMPLETE)
+        session.reply = spokenText
         session.searching = value.searching
         session.searchCompletion = value.searchCompletion
         answer.text = value.text; answer.final = value.status == VoiceBodyStatus.COMPLETE
@@ -281,7 +282,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         if (answer.final) armDrainTimeout(session, answer)
         else if (progressed) armResponseTimeout(session, answer)
         publish(session)
-        try { answer.playback?.body(value.text, answer.final) }
+        try { answer.playback?.body(spokenText, answer.final) }
         catch (_: Exception) { end(session, VoiceControlStopReason.PLAYBACK_FAILED) }
     }
     private fun armResponseTimeout(session: Call, answer: Answer) {

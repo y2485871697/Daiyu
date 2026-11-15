@@ -44,6 +44,8 @@ internal class AndroidUniversalOwnerObserver(
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         var serial = 0L // Listener, replay and delivery are all on main.
         var read: Job? = null
+        var currentBody: VoiceAssistantBody? = null
+        var searchState = controller.nativeSearchState(owner)
         fun matching(value: Message?) = value?.takeIf {
             it.role == Message.ASSISTANT_ROLE && it.id.value == owner.messageId &&
                 it.runId.value == owner.runId && it.conversationId.value == owner.conversationId
@@ -53,9 +55,9 @@ internal class AndroidUniversalOwnerObserver(
             val snapshot = try { universalAssistantBody(owner, message, questionWaiting(message)) }
             catch (_: Exception) { VoiceAssistantBody(owner, "", VoiceBodyStatus.UNKNOWN) }
             snapshot?.let { value ->
-                val search = controller.nativeSearchState(owner)
-                body(value.copy(searching = value.status == VoiceBodyStatus.STREAMING && search.searching,
-                    searchCompletion = search.completion))
+                currentBody = value
+                body(value.copy(searching = value.status == VoiceBodyStatus.STREAMING && searchState.searching,
+                    searchCompletion = searchState.completion))
             }
         }
         val listener: () -> Unit = listener@{
@@ -94,15 +96,24 @@ internal class AndroidUniversalOwnerObserver(
                 }
             }
         }
+        val searchObservation = controller.observeNativeSearch(owner) { search ->
+            if (!closed.get()) {
+                searchState = search
+                currentBody?.takeIf { it.status == VoiceBodyStatus.STREAMING }?.let {
+                    body(it.copy(searching = search.searching, searchCompletion = search.completion))
+                }
+            }
+        }
         controller.observe(listener)
         try {
             listener() // Replay AFTER registration, including a response completed before subscribe.
         } catch (failure: Throwable) {
-            closed.set(true); controller.unobserve(listener); scope.cancel()
+            closed.set(true); searchObservation.close(); controller.unobserve(listener); scope.cancel()
             throw failure
         }
         return VoiceControlCancellation {
             closed.set(true)
+            searchObservation.close()
             controller.unobserve(listener)
             scope.cancel() // No waits for main callbacks or DB I/O under controller/audio locks.
         }

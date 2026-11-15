@@ -40,13 +40,13 @@ internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion:
         state.dots = 1
         while (busy && running) { delay(350); state.dots = state.dots % 3 + 1 }
     }
-    LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey) {
+    LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey, running) {
         state.success = false
         state.check.snapTo(0f)
         val compressed = completion != null && completion != consumed
         val searched = searchCompletion != null && searchCompletion != consumedSearch
         state.searching = !compressing && (searching || searched && !compressed)
-        if (!busy && (compressed || searched)) {
+        if (running && !busy && (compressed || searched)) {
             consumed = completion
             consumedSearch = searchCompletion
             state.success = true

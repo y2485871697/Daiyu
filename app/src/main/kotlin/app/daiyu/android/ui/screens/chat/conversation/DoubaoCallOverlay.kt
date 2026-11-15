@@ -223,7 +223,8 @@ private fun DoubaoCallSession(
         captionFollow.followTail = true
     }
     val compressionState = rememberVoiceCallCompressionState(state.compressing, state.compressionCompletion,
-        state.presentation != DoubaoCallPresentation.CLOSING, searching = state.searching,
+        state.presentation != DoubaoCallPresentation.CLOSING &&
+            state.visualState !in setOf(DoubaoCallVisualState.ERROR, DoubaoCallVisualState.ENDED), searching = state.searching,
         searchCompletion = state.searchCompletion, resetKey = state.captionEpoch)
     val layer = rememberGraphicsLayer()
     val progress = motion.progress
@@ -488,7 +489,9 @@ private fun ExpandedCallContent(
     captionFollow: CallCaptionFollow,
     captions: Pair<State<String>, State<String>>,
 ) {
-    Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 12.dp)) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val bottomPadding = if (maxHeight < 312.dp) 4.dp else 12.dp
+    Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = bottomPadding)) {
         // The original drag zone extends 7dp into each horizontal padding; the heading adds
         // its own 7dp start inset, keeping the title aligned with the captions below.
         Column(Modifier.fillMaxWidth().height(58.dp).layout { measurable, constraints ->
@@ -524,7 +527,7 @@ private fun ExpandedCallContent(
                 Spacer(Modifier.width(5.dp))
                 Text(clock, Modifier.testTag("doubao-call-clock"), color = Color(0xFFAAA1B6), fontSize = 11.sp)
             }
-            if (state.modelSelectable) VoiceCallCompressionIndicator(state.compressing || state.searching, state.compressionCompletion, running, compressionState)
+            if (state.modelSelectable || state.compressing || state.searching || compressionState.success) VoiceCallCompressionIndicator(state.compressing || state.searching, state.compressionCompletion, running, compressionState)
             Box(
                 Modifier.size(40.dp).testTag("doubao-call-minimize")
                     .semantics { contentDescription = "收起通话" }
@@ -533,31 +536,35 @@ private fun ExpandedCallContent(
             ) { CallGlyph(CallControl.MINIMIZE, Color(0xFFA59AB4), Modifier.size(20.dp)) }
         }
         }
-        // 面板高 374dp 时，主体占 304dp：焦点区 146、字幕 80、控制区 78。
-        
-        // 短屏下只滚动主体，控制区与拖拽手势分开。
+        // Preserve the 374dp layout; compact only the fixed focus spacing on short screens.
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            val focusHeight = (maxHeight - 158.dp).coerceAtLeast(142.dp)
-            Column(Modifier.fillMaxSize().testTag("doubao-call-body").verticalScroll(rememberScrollState(), enabled = enabled)) {
-            Column(Modifier.fillMaxWidth().height(focusHeight).padding(top = 8.dp, bottom = 6.dp),
+            val controlsHeight = if (maxHeight < 250.dp) 72.dp else 78.dp
+            val captionHeight = (maxHeight - controlsHeight - 142.dp).coerceIn(36.dp, 80.dp)
+            val focusHeight = (maxHeight - controlsHeight - captionHeight).coerceAtLeast(0.dp)
+            val compact = focusHeight < 142.dp
+            Column(Modifier.fillMaxSize().testTag("doubao-call-body")) {
+            Column(Modifier.fillMaxWidth().height(focusHeight)
+                .padding(top = if (compact) 0.dp else 8.dp, bottom = if (compact) 0.dp else 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
                 // CSS's 66dp orb has an out-of-layout 7dp halo.
-                Box(Modifier.size(66.dp).testTag("doubao-call-orb"), contentAlignment = Alignment.Center) {
-                    CallWave(state.orbState(), Modifier.requiredSize(80.dp), running = running)
+                Box(Modifier.fillMaxWidth().height(if (compact) 80.dp else 66.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(66.dp).testTag("doubao-call-orb"), contentAlignment = Alignment.Center) {
+                        CallWave(state.orbState(), Modifier.requiredSize(80.dp), running = running)
+                    }
                 }
-                Spacer(Modifier.height(13.dp))
+                Spacer(Modifier.height(if (compact) 0.dp else 13.dp))
                 Text(state.statusLabel(compressionState.dots), color = Color(0xFF51445F), fontSize = 19.sp, lineHeight = 28.sp,
                     fontWeight = FontWeight(550),
                     modifier = Modifier.height(28.dp).testTag("doubao-call-status"),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(5.dp))
+                Spacer(Modifier.height(if (compact) 0.dp else 5.dp))
                 Text(state.statusDetail(), color = Color(0xFFAAA0B6), fontSize = 10.sp, lineHeight = 16.sp,
                     modifier = Modifier.height(16.dp).testTag("doubao-call-status-detail"),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            CallCaptionArea(state, enabled, captionScroll, captionFollow, captions)
-            Row(Modifier.fillMaxWidth().height(78.dp).testTag("doubao-call-controls"),
+            CallCaptionArea(state, enabled, captionScroll, captionFollow, captions, Modifier.height(captionHeight))
+            Row(Modifier.fillMaxWidth().height(controlsHeight).testTag("doubao-call-controls"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 CallControlButton(CallControl.MIC, "麦克风", "doubao-call-mute", state.muted, enabled, actions.onToggleMute, Modifier.weight(1f))
@@ -567,6 +574,7 @@ private fun ExpandedCallContent(
             }
             }
         }
+    }
     }
 }
 
@@ -579,7 +587,7 @@ private class CallCaptionFollow {
 @Composable
 private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
     scroll: androidx.compose.foundation.ScrollState, follow: CallCaptionFollow,
-    captions: Pair<State<String>, State<String>>) {
+    captions: Pair<State<String>, State<String>>, modifier: Modifier) {
     val edge = with(LocalDensity.current) { 6.dp.roundToPx() }
     LaunchedEffect(scroll) {
         scroll.interactionSource.interactions.collect { interaction ->
@@ -608,7 +616,7 @@ private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
             override suspend fun onPostFling(consumed: Velocity, available: Velocity) = Velocity(0f, available.y)
         }
     }
-    Column(Modifier.fillMaxWidth().height(80.dp).testTag("doubao-call-caption-area").padding(bottom = 4.dp)
+    Column(modifier.fillMaxWidth().testTag("doubao-call-caption-area").padding(bottom = 4.dp)
         .drawWithContent {
             drawContent()
             drawLine(Color(0x4DECE6F2), Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())

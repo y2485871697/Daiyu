@@ -33,7 +33,7 @@ internal class DoubaoCallPresentationOwner {
             startedAtMillis = snapshot.startedAtMillis,
             endedAtMillis = snapshot.endedAtMillis,
             transcript = snapshot.state.transcript,
-            reply = snapshot.state.reply,
+            reply = app.daiyu.android.voice.VoiceCallOutput.text(snapshot.state.reply, snapshot.state.replyTextComplete),
             captionEpoch = snapshot.state.captionEpoch,
             replyTextComplete = snapshot.state.replyTextComplete,
             transcriptTextComplete = snapshot.state.transcriptTextComplete,

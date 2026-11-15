@@ -14,10 +14,15 @@ class ChatInitialPositionContract(unittest.TestCase):
         chat = CHAT.read_text()
         self.assertLess(screen.index('ChatViewportFrame(state.conversationKey'), screen.index('androidx.compose.runtime.key(state.conversationKey)'))
         self.assertIn('onViewportReady = onViewportReady', screen)
+        self.assertIn('retainUnconfirmedRows = !state.historyReady', screen)
+        self.assertIn('val turns = if (retainingRows) retainedTurns else incomingTurns', chat)
+        self.assertIn('if (incomingTurns.isNotEmpty() || !retainUnconfirmedRows) retainedTurns = incomingTurns', chat)
+        self.assertIn('!currentRetainingRows && completed.isNotEmpty()', chat)
+        self.assertIn('!currentRetainingRows && it.listKey in stillVisible', chat)
         self.assertIn('state.historyReady && displayedTurns.isEmpty()', screen)
         self.assertIn('historyWindowReady = conversation == null || prepared != null', HOST.read_text())
         self.assertIn('historyReady = historyWindowReady,', HOST.read_text())
-        self.assertIn('SideEffect { onViewportReady(!initialPositionPending && turns.isNotEmpty()) }', chat)
+        self.assertIn('SideEffect { onViewportReady(!initialPositionPending && incomingTurns.isNotEmpty()) }', chat)
         self.assertIn('remember(owner, empty) { mutableStateOf(empty) }', frame)
         self.assertIn('if (readiness.value)', frame)
         self.assertIn('if (recorded.hasFrame) drawLayer(frame)', frame)
@@ -106,8 +111,8 @@ class ChatInitialPositionContract(unittest.TestCase):
     def test_later_navigation_and_stream_motion_are_preserved(self):
         chat = CHAT.read_text()
         request = chat.split('LaunchedEffect(scrollRequest,', 1)[1].split('// Keep a single motion', 1)[0]
-        self.assertIn('turns.size, tailIndex, touchEpoch, scrollResumed, pageActive)', request)
-        self.assertGreaterEqual(request.count('if (!scrollResumed || !pageActive) return@LaunchedEffect'), 2)
+        self.assertIn('turns.size, tailIndex, touchEpoch, scrollResumed, pageActive, retainingRows)', request)
+        self.assertGreaterEqual(request.count('if (!scrollResumed || !pageActive || currentRetainingRows) return@LaunchedEffect'), 2)
         self.assertIn('listState.animateScrollToItem(index)', request)
         follow = chat.split('// Keep a single motion', 1)[1].split('// Read confirmation', 1)[0]
         self.assertIn('snapshotFlow {', follow)

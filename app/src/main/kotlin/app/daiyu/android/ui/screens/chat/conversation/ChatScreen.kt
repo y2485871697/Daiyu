@@ -161,7 +161,7 @@ internal fun DaiyuChatScreen(
                 ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
                     speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
-                    onViewportReady = onViewportReady)
+                    onViewportReady = onViewportReady, retainUnconfirmedRows = !state.historyReady)
               }
             }
         }, composer = { backdrop ->

@@ -146,7 +146,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                         val colors = probeColors.getValue(visit)
                                         Box(Modifier.fillMaxWidth().height(if (tail) tailHeight else 40.dp)
                                             .background(if (tail) colors.first else colors.second))
-                                    }, onViewportReady = ready)
+                                    }, onViewportReady = ready, retainUnconfirmedRows = retainFrames)
                                 }
                               }
                             }

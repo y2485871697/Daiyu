@@ -217,7 +217,14 @@ internal fun ChatMessageList(
     compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
     speechPreparingMessageId: String? = null,
     onViewportReady: (Boolean) -> Unit = {},
+    retainUnconfirmedRows: Boolean = false,
 ) {
+    val incomingTurns = turns
+    var retainedTurns by remember { mutableStateOf(turns, androidx.compose.runtime.referentialEqualityPolicy()) }
+    val retainingRows = retainUnconfirmedRows && incomingTurns.isEmpty() && retainedTurns.isNotEmpty()
+    val turns = if (retainingRows) retainedTurns else incomingTurns
+    val currentRetainingRows by rememberUpdatedState(retainingRows)
+    SideEffect { if (incomingTurns.isNotEmpty() || !retainUnconfirmedRows) retainedTurns = incomingTurns }
     val reconnects = remember(timeline) {
         timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
     }
@@ -324,7 +331,7 @@ internal fun ChatMessageList(
         }
     }
     fun canFollowBottom(): Boolean =
-        !initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
+        !currentRetainingRows && !initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
             (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !currentNestedTail.migrating
 
     fun correctFollowClearance() {
@@ -486,8 +493,8 @@ internal fun ChatMessageList(
         }
     }
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
-    LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed, pageActive) {
-        if (!scrollResumed || !pageActive) return@LaunchedEffect
+    LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed, pageActive, retainingRows) {
+        if (!scrollResumed || !pageActive || currentRetainingRows) return@LaunchedEffect
         val request = scrollRequest?.takeIf { it.serial != consumedScrollSerial }
         if (request != null || initialPositionPending && scrollRequest == null) {
             if (request != null) {
@@ -497,7 +504,7 @@ internal fun ChatMessageList(
             wasDragged = false
             // Subcomposition may start this effect during measurement.
             withFrameNanos { }
-            if (!scrollResumed || !pageActive) return@LaunchedEffect
+            if (!scrollResumed || !pageActive || currentRetainingRows) return@LaunchedEffect
             if (request != null && (request.messageId != null || request.listKey != null)) {
                 val index = request.targetIndex(turns)
                 if (index >= 0) {
@@ -524,7 +531,7 @@ internal fun ChatMessageList(
                     // Initial placement is layout restoration, not streaming output to animate.
                     while (true) {
                         withFrameNanos { }
-                        if (!scrollResumed || !pageActive) return@LaunchedEffect
+                        if (!scrollResumed || !pageActive || currentRetainingRows) return@LaunchedEffect
                         val index = currentTailIndex
                         val layout = listState.layoutInfo
                         if (index < 0 || layout.viewportSize.height <= 0) continue
@@ -710,10 +717,10 @@ internal fun ChatMessageList(
                 it.size > 0 && it.offset < visibleBottom &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
             }.map { it.key }.toSet()
-            currentReadAction to if (initialPositionPending || !pageActive) emptyList() else
+            currentReadAction to if (initialPositionPending || !pageActive || currentRetainingRows) emptyList() else
                 completedVisibleTurns(visibleKeys, currentAssistants, readyTurns, revealedTurns)
         }.collect { (readAction, completed) ->
-            if (pageActive && !initialPositionPending && completed.isNotEmpty()) {
+            if (pageActive && !initialPositionPending && !currentRetainingRows && completed.isNotEmpty()) {
                 // Wait for the formatted terminal body, not a shorter raw-text placeholder.
                 withFrameNanos { }
                 withFrameNanos { }
@@ -725,16 +732,16 @@ internal fun ChatMessageList(
                 }.map { it.key }.toSet()
                 val current = currentAssistants
                 readAction(completed.filter {
-                    pageActive && !initialPositionPending && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
+                    pageActive && !initialPositionPending && !currentRetainingRows && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
                 }.map { it.listKey }.toSet())
             }
         }
     }
-    SideEffect { onViewportReady(!initialPositionPending && turns.isNotEmpty()) }
+    SideEffect { onViewportReady(!initialPositionPending && incomingTurns.isNotEmpty()) }
     Box(modifier.fillMaxSize()) {
       BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewportHeightPx = constraints.maxHeight
-        LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending,
+        LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending && !retainingRows,
             modifier = Modifier.testTag("chat-messages").fillMaxSize()
                 .then(clearanceLayout)
                 .onPlaced { clearanceLayout.coordinates = it }
@@ -775,7 +782,7 @@ internal fun ChatMessageList(
                                 onVisibleAdvance = {
                                     val layout = listState.layoutInfo
                                     val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
-                                    if (!initialPositionPending && scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
+                                    if (!currentRetainingRows && !initialPositionPending && scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
                                         layout.visibleItemsInfo.any { it.key == turn.listKey && it.size > 0 &&
                                             it.offset < visibleBottom && it.offset + it.size > layout.viewportStartOffset }) {
                                         actions.onVisibleTextAdvance(turn.listKey)
@@ -807,7 +814,7 @@ internal fun ChatMessageList(
                     val viewportState = nestedStates[turn.listKey]
                     if (turn is ChatTurnUi.Assistant && viewportState != null) {
                         StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
-                            userScrollEnabled = pageActive && !initialPositionPending,
+                            userScrollEnabled = pageActive && !initialPositionPending && !retainingRows,
                             follows = { turn.listKey == assistantOwnerKey && followBottom && (initialPositionPending || canFollowBottom()) },
                             clearance = { currentOcclusionPx + with(density) { 24.dp.roundToPx() } },
                             viewportHeight = { viewportHeightPx - currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() } },

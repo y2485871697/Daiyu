@@ -470,7 +470,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         return object : RequestRebindingModelSession {
                                             private var firstNext = true
                                             override fun needsRebind(): Boolean = !selectedModel.sameRequest(currentDefinition())
-                                            override fun updateToolDefinitions(definitions: List<ToolDefinition>) = transport.updateToolDefinitions(definitions)
+                                            override fun updateToolDefinitions(definitions: List<app.daiyu.android.domain.ToolDefinition>) = transport.updateToolDefinitions(definitions)
                                             override fun cancel() {
                                                 if (!cancelStarted.compareAndSet(false, true)) return
                                                 var confirmed = false

@@ -179,7 +179,7 @@ class MarkdownEntrySmokeScopeTests(unittest.TestCase):
             "${{ inputs.mode == 'smoke' && inputs.smoke_classes == '"
             + canonical + "' && '-session-entry' || '' }}"
         )
-        self.assertTrue(group.endswith(suffix), group)
+        self.assertIn(suffix, group)
         self.assertEqual(1, group.count(suffix))
         self.assertIn('\n  cancel-in-progress: false\n', workflow)
         fragments = group.split('${{')

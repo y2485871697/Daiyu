@@ -85,3 +85,13 @@ class SearchHistorySheetContract(unittest.TestCase):
         self.assertIn('node("search:prompt").assertExists()', manage)
         failure = host.split('fun testRealReaderFailureIsRetryableAndDifferentFromEmptyAndBlank()', 1)[1].split('\n    fun ', 1)[0]
         self.assertIn('node("search:prompt").assertDoesNotExist()', failure)
+
+    def test_history_hit_retires_tail_display_before_publishing_owner_window(self):
+        host = (SRC / 'MainActivity.kt').read_text()
+        action = host.split('private fun openHistoryHit(hit: MessageSearchHit)', 1)[1].split('private fun toast', 1)[0]
+        steps = ('hit.ownerMessageId', 'val window = controller.database.messages',
+                 'openRetainedConversation(hit.conversationId)', 'displayWindow = null',
+                 'shown = window', 'prepareMessageActionSnapshot()', 'publishChat()',
+                 'requestScroll(hit.messageId, false, hit.segmentIndex)')
+        positions = [action.index(step) for step in steps]
+        self.assertEqual(sorted(positions), positions)

@@ -6728,6 +6728,7 @@ class MainActivity : ComponentActivity() {
         val window = controller.database.messages(conversation.id, sequence + 1, 50).toMutableList()
         // Resolve the owner/window before leaving search, so a deleted hit keeps its source page.
         openRetainedConversation(hit.conversationId)
+        displayWindow = null
         shown = window
         prepareMessageActionSnapshot(); publishChat(); requestScroll(hit.messageId, false, hit.segmentIndex)
     }

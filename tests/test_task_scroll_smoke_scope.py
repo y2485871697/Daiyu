@@ -230,7 +230,20 @@ class TaskScrollComplementScopeTests(unittest.TestCase):
             root = Path(directory)
             helper = self.fixture(root)
             raw = ','.join(COMPLEMENT)
-            for value in (','.join(COMPLEMENT[:-1]), raw + ',' + CLASSES[0], raw + ',' + COMPLEMENT[0], raw + ',', ' ' + raw, raw + ' '):
-                result = helper.select(root, classes=value)
-                self.assertNotEqual(0, result.returncode)
-                self.assertIn('Ambiguous instrumentation test declaration', result.stderr)
+            for value in (','.join(COMPLEMENT[:-1]), raw + ',' + CLASSES[0], raw + ',' + COMPLEMENT[0]):
+                with self.subTest(classes=value):
+                    result = helper.select(root, classes=value)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn('Ambiguous instrumentation test declaration', result.stderr)
+
+    def test_malformed_complement_is_rejected_before_inventory_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            raw = ','.join(COMPLEMENT)
+            for value in (raw + ',', ',' + raw, ' ' + raw, raw + ' '):
+                with self.subTest(classes=value):
+                    result = helper.select(root, classes=value)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn('Expected comma-separated complete instrumentation class names', result.stderr)
+                    self.assertNotIn('Ambiguous instrumentation test declaration', result.stderr)

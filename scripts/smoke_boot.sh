@@ -270,6 +270,7 @@ child_task_card_read_only_target = {
     "app.daiyu.android.ChatThemeInteractionActivityTest",
     "app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest",
 }
+child_task_card_read_only_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(child_task_card_read_only_target)
 child_task_card_only = mode == "smoke" and sorted(raw_filter.split(",")) in (
     sorted(child_task_card_target), sorted(child_task_card_inheritance_target), sorted(child_task_card_theme_target),
     sorted(child_delegation_target), sorted(child_task_card_read_only_target))
@@ -474,7 +475,7 @@ if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shar
     raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not catalog_model_editor_only and not subagent_preset_only and not batch_delete_only and not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and not question_card_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not catalog_model_editor_only and not subagent_preset_only and not batch_delete_only and not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and not question_card_only and not child_task_card_read_only_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys

@@ -163,7 +163,7 @@ internal fun DaiyuChatScreen(
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
                 modifier = Modifier.onGloballyPositioned { composerBounds = it.boundsInRoot() },
-                onVoiceAnchorBounds = { voiceAnchor = it }, callUi = callUi, callMotion = motionState,
+                onVoiceAnchorBounds = { voiceAnchor = it }, callUi = callUi, callMotion = motionState.takeIf { callUi != null },
                 onInputFocusChanged = { focused ->
                     draftFocused = focused
                     if (focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()

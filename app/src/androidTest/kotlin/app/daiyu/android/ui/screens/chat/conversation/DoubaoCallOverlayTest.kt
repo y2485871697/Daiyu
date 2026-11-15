@@ -49,6 +49,78 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
     private lateinit var motion: DoubaoCallMotionState
     private lateinit var fixtureScope: CoroutineScope
 
+    private fun mountChat(readScreen: () -> ChatScreenState) {
+        activity = startMain()
+        ui.mainClock.autoAdvance = false
+        mainThread {
+            activity.setContent {
+                app.daiyu.android.ui.app.AgentAppTheme(
+                    app.daiyu.android.data.model.AppearanceSettings(), applyInterfaceScale = false,
+                ) {
+                    DaiyuChatScreen(readScreen(), ChatScreenActions(), callUi = call)
+                }
+            }
+        }
+    }
+
+    private fun indicatorPixels(): List<Color> {
+        val image = captureScreenNode(ui.onNodeWithTag("chat-voice-indicator", useUnmergedTree = true)).toPixelMap()
+        return List(image.width * image.height) { index -> image[index % image.width, index / image.width] }
+    }
+
+    private fun assertIndicatorSettles(label: String) {
+        ui.mainClock.advanceTimeBy(1_000L)
+        val before = indicatorPixels()
+        ui.mainClock.advanceTimeBy(2_100L)
+        assertEquals(label, before, indicatorPixels())
+    }
+
+    private fun assertIndicatorAnimates(label: String) {
+        ui.mainClock.advanceTimeBy(900L)
+        val before = indicatorPixels()
+        ui.mainClock.advanceTimeBy(280L)
+        val after = indicatorPixels()
+        assertEquals(before.size, after.size)
+        assertTrue(label, before.indices.count { before[it] != after[it] } > 3)
+    }
+
+    fun testIdleChatIndicatorIsStillBeforeAnyCallAndAfterCallRemoval() {
+        var screen by mutableStateOf(ChatScreenState("idle", conversationKey = "first"))
+        mountChat { screen }
+        assertIndicatorSettles("A chat that has never opened a call must stay still")
+        mainThread { screen = screen.copy(conversationKey = "second") }
+        assertIndicatorSettles("Switching idle conversations must not start a call animation")
+        mainThread { call = session() }
+        ui.onNodeWithTag("doubao-call-expanded").assertExists()
+        ui.mainClock.advanceTimeBy(700L)
+        mainThread { call = null }
+        assertIndicatorSettles("Removing a call must leave the new no-call motion state idle")
+    }
+
+    fun testChatIndicatorPreservesGenerationListeningAndPressButStopsForInactivePhases() {
+        var screen by mutableStateOf(ChatScreenState("activity", conversationKey = "activity"))
+        mountChat { screen }
+        mainThread { screen = screen.copy(composer = ComposerUi(phase = ComposerPhase.RUNNING,
+            executionPhase = app.daiyu.android.domain.runtime.ExecutionPhase.STREAMING)) }
+        assertIndicatorAnimates("Actual model generation must still animate")
+        for (phase in listOf(app.daiyu.android.domain.runtime.ExecutionPhase.WAITING_USER,
+            app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED,
+            app.daiyu.android.domain.runtime.ExecutionPhase.TERMINAL)) {
+            mainThread { screen = screen.copy(composer = screen.composer.copy(executionPhase = phase)) }
+            assertIndicatorSettles("Inactive execution phase $phase must settle")
+        }
+        mainThread { screen = screen.copy(composer = ComposerUi(listening = true)) }
+        assertIndicatorAnimates("Actual speech input must still animate")
+        mainThread { screen = screen.copy(composer = ComposerUi()) }
+        assertIndicatorSettles("Stopping speech input must settle")
+        val beforePress = indicatorPixels()
+        ui.onNodeWithTag("chat-voice").performTouchInput { down(center) }
+        ui.mainClock.advanceTimeBy(96L)
+        assertTrue("Pressing the voice button must preserve finite visual feedback", beforePress != indicatorPixels())
+        ui.onNodeWithTag("chat-voice").performTouchInput { up() }
+        assertIndicatorSettles("Releasing the voice button must not leave a permanent animation")
+    }
+
     private fun session(key: Long = nextKey++) = DoubaoCallUi(
         sessionKey = key,
         conversationKey = "component-test",

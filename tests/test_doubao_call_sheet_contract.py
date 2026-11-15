@@ -144,7 +144,7 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
         screen = (CHAT / 'ChatScreen.kt').read_text()
         self.assertIn('remember(callUi?.sessionKey) { DoubaoCallMotionState() }', screen)
-        self.assertIn('callMotion = motionState', screen)
+        self.assertIn('callMotion = motionState.takeIf { callUi != null }', screen)
         self.assertIn('motion = motionState', screen)
         self.assertIn('val progress = motion.progress', overlay)
         close = overlay.split('DoubaoCallPresentation.CLOSING -> {', 1)[1].split('DisposableEffect(motion)', 1)[0]

@@ -34,7 +34,8 @@ internal class VoiceCallPresentationOwner {
                 value.phase in setOf(VoiceControlPhase.SPEAKING, VoiceControlPhase.DRAINING, VoiceControlPhase.WAITING_FOR_BODY) -> DoubaoCallVisualState.RESPONDING
                 else -> DoubaoCallVisualState.LISTENING
             },
-            transcript = value.transcript, reply = value.reply, captionEpoch = value.captionEpoch, muted = value.muted, speaker = speaker,
+            transcript = value.transcript, reply = value.reply, captionEpoch = value.captionEpoch,
+            replyTextComplete = value.replyTextComplete, transcriptTextComplete = value.transcriptTextComplete, muted = value.muted, speaker = speaker,
             compressing = compressing,
             searching = value.searching, searchCompletion = value.searchCompletion,
             compressionCompletion = completedCompression?.takeUnless { it == initialCompression },
@@ -46,6 +47,12 @@ internal class VoiceCallPresentationOwner {
                 VoiceControlPhase.STOPPED -> when (value.reason) {
                     VoiceControlStopReason.RECOGNITION_FAILED -> "语音识别失败，请重新拨打"
                     VoiceControlStopReason.RELEASE_FAILED -> "语音资源释放未确认"
+                    VoiceControlStopReason.PLAYBACK_FAILED -> "语音播放失败，请重新拨打"
+                    VoiceControlStopReason.TIMEOUT -> when (value.failureStage) {
+                        VoiceControlFailureStage.DRAIN -> "语音播放等待超时，请重新拨打"
+                        VoiceControlFailureStage.RESPONSE -> "回答等待超时，请重新拨打"
+                        else -> "请求受理超时，请重新拨打"
+                    }
                     VoiceControlStopReason.CONFIGURATION_CHANGED -> "请检查语音配置"
                     VoiceControlStopReason.EXPIRED -> "本次个人音色授权已到期，请重新拨打"
                     VoiceControlStopReason.RESPONSE_FAILED -> value.unsupportedReasoning?.unsupportedMessage

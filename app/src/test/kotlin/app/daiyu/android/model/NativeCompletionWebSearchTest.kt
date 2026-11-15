@@ -25,6 +25,24 @@ class NativeCompletionWebSearchTest {
     private fun read(stream: String, events: MutableList<ModelEvent>) = NativeCompletionStream.read(
         ProviderProtocol.CHAT_COMPLETIONS, stream.reader().buffered(), { false }, events::add)
 
+    @Test fun nullableUnusedTerminalMetadataDoesNotFailAnAlreadyDeliveredAnswer() {
+        val events = mutableListOf<ModelEvent>()
+        read(frame(chunk(JSONObject().put("content", "answer"))) + frame(chunk(JSONObject()
+            .put("content", JSONObject.NULL).put("audio", JSONObject.NULL)
+            .put("function_call", JSONObject.NULL).put("tool_calls", JSONObject.NULL), "stop")) + frame("[DONE]"), events)
+        assertEquals("answer", events.filterIsInstance<ModelEvent.TextFinal>().single().text)
+        assertTrue(events.none { it is ModelEvent.ToolReady })
+        for (field in listOf("audio", "function_call")) {
+            val rejected = mutableListOf<ModelEvent>()
+            try {
+                read(frame(chunk(JSONObject().put("content", "answer"))) +
+                    frame(chunk(JSONObject().put(field, JSONObject()), "stop")) + frame("[DONE]"), rejected)
+                fail("non-null $field must be rejected")
+            } catch (failure: ModelRequestException) { assertEquals(ModelFailure.PROTOCOL, failure.failure) }
+            assertTrue(rejected.none { it is ModelEvent.TextFinal || it is ModelEvent.ToolReady || it is ModelEvent.Usage })
+        }
+    }
+
     @Test fun searchIsOptInPerFrozenModelAndNeverAFunctionTool() {
         val tool = ToolDefinition("lookup", "lookup", "{\"type\":\"object\",\"properties\":{}}")
         for (enabled in listOf(false, true)) {

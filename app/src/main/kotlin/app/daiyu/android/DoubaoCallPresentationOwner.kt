@@ -35,6 +35,8 @@ internal class DoubaoCallPresentationOwner {
             transcript = snapshot.state.transcript,
             reply = snapshot.state.reply,
             captionEpoch = snapshot.state.captionEpoch,
+            replyTextComplete = snapshot.state.replyTextComplete,
+            transcriptTextComplete = snapshot.state.transcriptTextComplete,
             reason = snapshot.state.reason,
             muted = snapshot.muted,
             speaker = snapshot.speaker,

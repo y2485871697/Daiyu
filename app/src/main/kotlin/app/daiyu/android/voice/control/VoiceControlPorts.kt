@@ -51,7 +51,13 @@ interface VoiceControlRecognition {
     /** Fence callbacks; stop capture and release the existing input lease before returning. */
     fun closeAndDrain()
 }
+enum class VoiceControlFailureStage { ADMISSION, RESPONSE, DRAIN, PLAYBACK, RECOGNITION, RELEASE }
+
 interface VoiceControlPlayback {
+    /** Real player starts/completions, not enqueues or body updates. */
+    val progress: Long get() = 0L
+    /** A production adapter may need synthesis + preparation + playback for one sentence. */
+    val drainTimeoutMillis: Long get() = 0L
     /** Whole body snapshot, not a delta. Delegate sentence commitment/corrections to existing VoiceChain. */
     fun body(text: String, complete: Boolean)
     /** Exact owned output only. Stop, fence callbacks and strictly release before returning. */
@@ -68,6 +74,8 @@ interface VoiceControlPlayback {
  * Never log text, audio, credentials, receipt IDs or raw provider exceptions.
  */
 interface VoiceControlPorts {
+    /** Bounded enum diagnostics only; never include content, owner IDs or provider errors. */
+    fun stopped(reason: VoiceControlStopReason, stage: VoiceControlFailureStage?) {}
     fun dispatch(action: () -> Unit)
     fun submissionReady(): Boolean = true
     /** Monotonic, same origin as schedule; Android SystemClock.elapsedRealtime is suitable. */

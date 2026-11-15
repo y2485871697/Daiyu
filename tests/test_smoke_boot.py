@@ -41,6 +41,7 @@ class SourceTests(unittest.TestCase):
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
         setup = script.split('  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
         self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest"', setup)
+        self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest,app.daiyu.android.storage.ConversationModelBindingDatabaseTest"', setup)
         self.assertIn('--es command enter', setup)
         self.assertIn('--es command clock --es hhmm 1200', setup)
         self.assertNotIn('date ', setup)

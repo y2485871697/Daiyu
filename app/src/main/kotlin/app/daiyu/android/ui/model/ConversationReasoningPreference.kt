@@ -84,9 +84,33 @@ internal class ConversationReasoningPreference(private val values: KeyValue) {
     @Synchronized fun rememberedModel(providerId: String, modelId: String): ReasoningEffort =
         snapshotKey(modelKey(providerId, modelId))
 
-    private fun snapshotKey(key: String): ReasoningEffort {
+    @Synchronized fun rememberedVoiceModel(providerId: String, modelId: String): ReasoningEffort? =
+        snapshotOptionalKey(voiceModelKey(providerId, modelId))
+
+    @Synchronized fun rememberVoiceModel(providerId: String, modelId: String, effort: ReasoningEffort) =
+        save(voiceModelKey(providerId, modelId), effort)
+
+    @Synchronized fun setVoice(conversationId: String, providerId: String, modelId: String, effort: ReasoningEffort) {
+        val current = key(conversationId)
+        val remembered = voiceModelKey(providerId, modelId)
+        try {
+            save(current, effort)
+            save(remembered, effort)
+        } catch (failure: Exception) {
+            unconfirmed.add(current)
+            unconfirmed.add(remembered)
+            throw failure
+        }
+    }
+
+    private fun voiceModelKey(providerId: String, modelId: String): String =
+        "reasoning:voice:${modelKey(providerId, modelId)}"
+
+    private fun snapshotKey(key: String): ReasoningEffort = snapshotOptionalKey(key) ?: ReasoningEffort.OFF
+
+    private fun snapshotOptionalKey(key: String): ReasoningEffort? {
         check(key !in unconfirmed) { "思考偏好保存未确认；请重新保存" }
-        val raw = values.get(key) ?: return ReasoningEffort.OFF
+        val raw = values.get(key) ?: return null
         val stored = ReasoningEffort.fromWireValue(raw)
             ?: throw IllegalStateException("思考偏好无效；请重新保存，未启动模型请求")
         return ReasoningEffort.textPreference(stored)

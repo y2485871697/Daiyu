@@ -462,7 +462,9 @@ WORKFLOW_BODY_MODULES = (
 DOUBAO_MOTION_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.conversation." + name for name in (
     "DoubaoCallOverlayTest", "DoubaoCallOrbPixelsTest", "DoubaoCallOverlayZeroDurationTest"))
 DOUBAO_MOTION_REASONING_PLATFORM_CLASSES = DOUBAO_MOTION_PLATFORM_CLASSES + ("app.daiyu.android.ControllerReasoningFreezeTest",)
+DOUBAO_MOTION_VOICE_PLATFORM_CLASSES = DOUBAO_MOTION_REASONING_PLATFORM_CLASSES + ("app.daiyu.android.storage.ConversationModelBindingDatabaseTest",)
 DOUBAO_MOTION_MODULES = ("test_doubao_call_sheet_contract", "test_doubao_motion_scope", "test_voice_call_contract",
+    "test_smoke_boot.SourceTests.test_call_clock_fixture_keeps_strict_raster_assertions",
     "test_acceptance_tool_receipt",
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope")
 
@@ -616,7 +618,7 @@ def command_for(python, env):
                  or sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VOICE_REFRESH_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *VOICE_REFRESH_MODULES, "-v"], "voice-refresh-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (sorted(DOUBAO_MOTION_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_REASONING_PLATFORM_CLASSES))):
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (sorted(DOUBAO_MOTION_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_REASONING_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_VOICE_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *DOUBAO_MOTION_MODULES, "-v"], "doubao-motion-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_BODY_PLATFORM_CLASSES)):

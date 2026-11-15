@@ -19,6 +19,9 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         var timer: VoiceControlCancellation? = null
         var final = false
         var text = ""
+        var timerSerial = 0L
+        var acceptedAt = 0L
+        var drainProgress = 0L
     }
     private class Call(val permit: VoiceControlPermit) {
         var input: Input? = null
@@ -31,6 +34,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         var captionEpoch = 0L
         var transcript = ""
         var reply = ""
+        var replyTextComplete = false
+        var transcriptTextComplete = false
         var searching = false
         var searchCompletion: String? = null
         var compressing = false
@@ -73,6 +78,16 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
     fun stop(permitId: String) = revoke(permitId, VoiceControlStopReason.USER)
     fun revoke(permitId: String, reason: VoiceControlStopReason = VoiceControlStopReason.REVOKED) {
         call?.takeIf { it.permit.id == permitId }?.let { end(it, reason) }
+    }
+    fun acceptedReleaseFailed() {
+        releaseFailed = true
+        val session = call
+        if (session != null) end(session, VoiceControlStopReason.RELEASE_FAILED)
+        else {
+            try { ports.stopped(VoiceControlStopReason.RELEASE_FAILED, VoiceControlFailureStage.RELEASE) } catch (_: Exception) { }
+            mutable.value = state.value.copy(phase = VoiceControlPhase.STOPPED,
+                reason = VoiceControlStopReason.RELEASE_FAILED, failureStage = VoiceControlFailureStage.RELEASE)
+        }
     }
     fun setCompressing(value: Boolean) {
         val session = call ?: return
@@ -121,7 +136,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         }
         mutable.value = VoiceControlState(shown, session.permit.id, session.permit.profile,
             session.nextTurn, 0, transcript, reply = session.reply, muted = session.muted, captionEpoch = session.captionEpoch,
-            searching = session.searching, searchCompletion = session.searchCompletion)
+            searching = session.searching, searchCompletion = session.searchCompletion,
+            replyTextComplete = session.replyTextComplete, transcriptTextComplete = session.transcriptTextComplete)
     }
     private fun listen(session: Call) {
         if (!current(session) || session.input != null || session.pending != null || session.compressing || session.muted || session.modelPicker) return
@@ -179,6 +195,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         if (text.isBlank()) { listen(session); return }
         beginSpeech(session, input)
         if (!current(session) || session.compressing || session.muted || session.modelPicker) return
+        session.transcriptTextComplete = true
         session.pending = input.turn
         session.submitted = false
         session.pendingDeadline = ports.nowMillis() + session.permit.limits.receiptMillis
@@ -191,7 +208,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
             session.timer = ports.schedule(50) { post { submitWhenReady(session, turn, text) } }
             return
         }
-        if (ports.nowMillis() >= session.pendingDeadline) { end(session, VoiceControlStopReason.TIMEOUT); return }
+        if (ports.nowMillis() >= session.pendingDeadline) { end(session, VoiceControlStopReason.TIMEOUT, stage = VoiceControlFailureStage.ADMISSION); return }
         try {
             if (!ports.submissionReady()) {
                 session.timer = ports.schedule(50) { post { submitWhenReady(session, turn, text) } }
@@ -199,7 +216,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
             }
             session.submitted = true
             session.timer = ports.schedule(session.permit.limits.receiptMillis) { post {
-                if (current(session) && session.pending === turn) end(session, VoiceControlStopReason.TIMEOUT)
+                if (current(session) && session.pending === turn) end(session, VoiceControlStopReason.TIMEOUT, stage = VoiceControlFailureStage.ADMISSION)
             } }
             ports.submit(turn, text) { receipt -> post { accepted(session, turn, receipt) } }
         } catch (_: Exception) { if (current(session)) end(session, VoiceControlStopReason.UNKNOWN) }
@@ -218,9 +235,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
             if (accepted != null && session.answer?.owner != accepted.assistant) {
                 try { ports.stopAcceptedRun(accepted.assistant) }
                 catch (_: Exception) {
-                    releaseFailed = true
-                    call?.let { end(it, VoiceControlStopReason.RELEASE_FAILED) }
-                    mutable.value = state.value.copy(phase = VoiceControlPhase.STOPPED, reason = VoiceControlStopReason.RELEASE_FAILED)
+                    acceptedReleaseFailed()
                 }
             }
             return
@@ -231,9 +246,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         session.answer = answer
         if (!admitted(session)) return
         try {
-            answer.timer = ports.schedule(session.permit.limits.responseMillis) { post {
-                if (current(session) && session.answer === answer && !answer.final) end(session, VoiceControlStopReason.TIMEOUT)
-            } }
+            answer.acceptedAt = ports.nowMillis()
+            armResponseTimeout(session, answer)
             val playback = ports.playback(turn, answer.owner,
                 drained = { post {
                     if (current(session) && session.answer === answer) {
@@ -257,25 +271,48 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
                 value.unsupportedReasoning.takeIf { value.status == VoiceBodyStatus.FAILED }); return
         }
         if (answer.final) return
+        val progressed = value.text != answer.text || value.searching != session.searching ||
+            value.searchCompletion != session.searchCompletion
         session.reply = value.text
         session.searching = value.searching
         session.searchCompletion = value.searchCompletion
         answer.text = value.text; answer.final = value.status == VoiceBodyStatus.COMPLETE
-        if (answer.final) {
-            answer.timer?.cancel()
-            answer.timer = ports.schedule(session.permit.limits.drainMillis) { post {
-                if (current(session) && session.answer === answer) end(session, VoiceControlStopReason.TIMEOUT)
-            } }
-        }
+        session.replyTextComplete = answer.final
+        if (answer.final) armDrainTimeout(session, answer)
+        else if (progressed) armResponseTimeout(session, answer)
         publish(session)
         try { answer.playback?.body(value.text, answer.final) }
         catch (_: Exception) { end(session, VoiceControlStopReason.PLAYBACK_FAILED) }
+    }
+    private fun armResponseTimeout(session: Call, answer: Answer) {
+        answer.timer?.cancel()
+        val serial = ++answer.timerSerial
+        val remaining = (answer.acceptedAt + 900_000L - ports.nowMillis()).coerceAtLeast(0L)
+        answer.timer = ports.schedule(minOf(session.permit.limits.responseMillis, remaining)) { post {
+            if (current(session) && session.answer === answer && !answer.final && answer.timerSerial == serial)
+                end(session, VoiceControlStopReason.TIMEOUT, stage = VoiceControlFailureStage.RESPONSE)
+        } }
+    }
+    private fun armDrainTimeout(session: Call, answer: Answer) {
+        answer.timer?.cancel()
+        val serial = ++answer.timerSerial
+        val playback = answer.playback
+        answer.drainProgress = playback?.progress ?: 0L
+        val timeout = maxOf(session.permit.limits.drainMillis, playback?.drainTimeoutMillis ?: 0L)
+        answer.timer = ports.schedule(timeout) { post {
+            if (current(session) && session.answer === answer && answer.final && answer.timerSerial == serial) {
+                if (answer.playback?.progress != answer.drainProgress) armDrainTimeout(session, answer)
+                else end(session, VoiceControlStopReason.TIMEOUT, stage = VoiceControlFailureStage.DRAIN)
+            }
+        } }
     }
     private fun beginSpeech(session: Call, input: Input) {
         if (input.speech) return
         input.speech = true
         session.captionEpoch++
         session.reply = ""
+        session.replyTextComplete = false
+        session.transcriptTextComplete = false
         interrupt(session)
     }
     private fun interrupt(session: Call) {
@@ -301,7 +338,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         if (failed) { releaseFailed = true; if (current(session)) end(session, VoiceControlStopReason.RELEASE_FAILED) }
     }
     private fun end(session: Call, reason: VoiceControlStopReason,
-        unsupportedReasoning: app.daiyu.android.domain.RequestReasoningEffort? = null) {
+        unsupportedReasoning: app.daiyu.android.domain.RequestReasoningEffort? = null,
+        stage: VoiceControlFailureStage? = null) {
         if (call !== session) return
         call = null
         var failed = false
@@ -314,9 +352,18 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         releaseAnswer(session, true)
         attempt { ports.revoke(session.permit) }
         if (failed) releaseFailed = true
+        val finalReason = if (failed || releaseFailed) VoiceControlStopReason.RELEASE_FAILED else reason
+        val finalStage = if (finalReason == VoiceControlStopReason.RELEASE_FAILED) VoiceControlFailureStage.RELEASE
+            else stage ?: when (finalReason) {
+                VoiceControlStopReason.PLAYBACK_FAILED -> VoiceControlFailureStage.PLAYBACK
+                VoiceControlStopReason.RECOGNITION_FAILED -> VoiceControlFailureStage.RECOGNITION
+                VoiceControlStopReason.RESPONSE_FAILED -> VoiceControlFailureStage.RESPONSE
+                else -> null
+            }
+        try { ports.stopped(finalReason, finalStage) } catch (_: Exception) { /* Diagnostic storage does not own audio. */ }
         mutable.value = VoiceControlState(phase = VoiceControlPhase.STOPPED,
             permitId = session.permit.id, profile = session.permit.profile,
-            reason = if (failed || releaseFailed) VoiceControlStopReason.RELEASE_FAILED else reason,
+            reason = finalReason, failureStage = finalStage,
             unsupportedReasoning = unsupportedReasoning.takeUnless { failed || releaseFailed })
     }
     override fun close() { call?.let { end(it, VoiceControlStopReason.CLOSED) }; closed = true }

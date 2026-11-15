@@ -36,7 +36,7 @@ env:
   SOURCE_RUN_ID: ${{ inputs.source_run_id }}
   SOURCE_VARIANT: compile
   SMOKE_MODE: smoke
-  SMOKE_TEST_CLASSES: app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest
+  SMOKE_TEST_CLASSES: app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest,app.daiyu.android.storage.ConversationModelBindingDatabaseTest
   SMOKE_API: all
   SMOKE_SHARD_COUNT: '1'
   SMOKE_SHARD_INDEX: '0'
@@ -64,8 +64,8 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: 仅准备固定语音依赖并运行三类单测（不打包）
         run: |
-          ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
-          ./gradlew --no-daemon :app:testDebugUnitTest --tests 'app.daiyu.android.ui.screens.chat.conversation.DoubaoGenieGeometryTest' --tests 'app.daiyu.android.DoubaoCallPresentationOwnerTest' --tests 'app.daiyu.android.CallEntryPolicyTest'
+          ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
+          ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:testDebugUnitTest --tests 'app.daiyu.android.ui.screens.chat.conversation.DoubaoGenieGeometryTest' --tests 'app.daiyu.android.DoubaoCallPresentationOwnerTest' --tests 'app.daiyu.android.CallEntryPolicyTest'
       - name: 上传通话增量检查证据
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

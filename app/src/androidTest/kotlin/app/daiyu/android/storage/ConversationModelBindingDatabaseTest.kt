@@ -20,6 +20,32 @@ class ConversationModelBindingDatabaseTest : InstrumentationTestCase() {
     override fun tearDown() {
         database.close(); context.deleteDatabase("conversations.db"); super.tearDown()
     }
+    fun testVoiceSelectionPersistsAcrossSourcesCleanupAndReopeningWithoutChangingChat() {
+        val source = database.create(database.selectedAssistantId())
+        val first = database.create(database.selectedAssistantId(), modelSource = source.id, temporaryVoice = true)
+        assertEquals(a, database.modelBinding(first.id))
+        assertTrue(database.bindModel(source.id, a, b))
+        database.delete(first.id)
+        val second = database.create(database.selectedAssistantId(), modelSource = source.id, temporaryVoice = true)
+        assertEquals(a, database.modelBinding(second.id))
+        assertTrue(database.bindModel(second.id, a, b))
+        assertEquals(a, database.modelBinding(null))
+        database.delete(second.id)
+        database.close(); database = ConversationDatabase(context)
+        val third = database.create(database.selectedAssistantId(), temporaryVoice = true)
+        assertEquals(b, database.modelBinding(third.id))
+        assertEquals(b, database.modelBinding(source.id))
+        assertEquals(a, database.modelBinding(database.create(database.selectedAssistantId()).id))
+    }
+    fun testVoiceBindingAndMemoryRollbackTogetherIfRememberingFails() {
+        val voice = database.create(database.selectedAssistantId(), temporaryVoice = true)
+        database.writableDatabase.execSQL("CREATE TEMP TRIGGER reject_voice_memory BEFORE INSERT ON neutral_config WHEN NEW.name='voice_call_model_binding_v1' BEGIN SELECT RAISE(ABORT,'rejected'); END")
+        try { try { database.bindModel(voice.id, a, b); fail("must rollback") } catch (_: android.database.sqlite.SQLiteException) { } }
+        finally { database.writableDatabase.execSQL("DROP TRIGGER reject_voice_memory") }
+        assertEquals(a, database.modelBinding(voice.id))
+        assertEquals(a, database.modelBinding(database.create(database.selectedAssistantId(), temporaryVoice = true).id))
+    }
+
     fun testSameProviderModelsAreIndependentAndChildCopiesTheSourceOnce() {
         val first = database.create(database.selectedAssistantId())
         val second = database.create(database.selectedAssistantId())
@@ -67,7 +93,7 @@ class ConversationModelBindingDatabaseTest : InstrumentationTestCase() {
         database.writableDatabase.execSQL("DROP TABLE conversation_model_selections")
         database.writableDatabase.version = 29
         database.close(); database = ConversationDatabase(context)
-        assertEquals(31, database.readableDatabase.version)
+        assertEquals(33, database.readableDatabase.version)
         database.initializeModelBindings(a)
         assertEquals(a, database.modelBinding(source.id))
         assertEquals(source.assistantId, database.assistantId(source.id))

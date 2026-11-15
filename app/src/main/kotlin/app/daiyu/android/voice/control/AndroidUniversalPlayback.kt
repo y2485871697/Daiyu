@@ -24,6 +24,9 @@ internal class AndroidUniversalPlayback(
     private val failed: () -> Unit,
     private val gate: AudioOwnerGate = ActivityVoiceAudio.gate, // Isolated fake gate in JVM tests only.
 ) : VoiceControlPlayback {
+    private val playbackProgress = java.util.concurrent.atomic.AtomicLong()
+    override val progress: Long get() = playbackProgress.get()
+    override val drainTimeoutMillis: Long get() = 450_000L
     private val closed = AtomicBoolean(false)
     @Volatile private var releaseFailure: Throwable? = null
     private var finalBody = false // control-thread confined
@@ -44,6 +47,11 @@ internal class AndroidUniversalPlayback(
         finally { outputReleasing.set(false) }
     }
     private val trackedOutput = object : SpeechOutput by output {
+        override fun speak(text: String, events: SpeechOutput.Events) = output.speak(text, object : SpeechOutput.Events {
+            override fun started() { playbackProgress.incrementAndGet(); events.started() }
+            override fun completed() { playbackProgress.incrementAndGet(); events.completed() }
+            override fun failed(reason: String) = events.failed(reason)
+        })
         override fun stop() = releaseOutput(false)
         override fun close() = releaseOutput(true)
     }

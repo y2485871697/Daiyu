@@ -313,6 +313,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             if (id != null) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(id.value)).use { it.moveToFirst() }) { "会话不存在" }
             if (ConversationModelSelections.read(db, id) == expected) {
                 ConversationModelSelections.write(db, id, replacement)
+                if (id != null && isTemporaryVoice(id.value)) VoiceCallModelMemory.write(db, replacement)
                 changed = true
             }
         }
@@ -350,7 +351,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
             if (assistantId != null) requireAssistant(db, assistantId)
             check(db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",assistantId);put("workspace_binding",workspaceBinding)}) != -1L)
             UsageStatisticsStore.created(db, value.id.value, value.updatedAt)
-            ConversationModelSelections.inherit(db, modelSource, value.id)
+            if (temporaryVoice) ConversationModelSelections.write(db, value.id,
+                VoiceCallModelMemory.readOrInitialize(db) { ConversationModelSelections.read(db, modelSource) })
+            else ConversationModelSelections.inherit(db, modelSource, value.id)
             check(workspaceBinding(db, value.id) == workspaceBinding) { "创建工作区绑定回执不匹配" }
         }
         return value

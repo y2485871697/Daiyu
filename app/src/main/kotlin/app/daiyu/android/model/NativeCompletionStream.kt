@@ -93,7 +93,7 @@ internal object NativeCompletionStream {
             }
             if (delta.has("role")) protocol(delta.string("role") == "assistant")
             if (delta.has("refusal") && !delta.isNull("refusal")) throw ModelRequestException(ModelFailure.INCOMPLETE)
-            protocol(!delta.has("function_call") && !delta.has("audio"))
+            protocol(delta.isNull("function_call") && delta.isNull("audio"))
             val nativeReasoning = when {
                 !delta.isNull("reasoning_content") -> delta.string("reasoning_content")
                 !delta.isNull("reasoning") -> delta.string("reasoning")
@@ -141,7 +141,7 @@ internal object NativeCompletionStream {
                     }
                 }
             }
-            if (delta.has("tool_calls")) protocol(delta.opt("tool_calls") is JSONArray)
+            if (!delta.isNull("tool_calls")) protocol(delta.opt("tool_calls") is JSONArray)
             delta.optJSONArray("tool_calls")?.let { array -> for (i in 0 until array.length()) {
                 val wire = array.getJSONObject(i)
                 val index = if (wire.has("index")) wire.index("index") else i

@@ -252,10 +252,30 @@ class MainActivity : ComponentActivity() {
     private var voiceCallStarting: Any? = null
     private var voiceCallAnchor: String? = null
     private var voiceCallHasDialogue = false
+    private var voiceCallModelResume: (() -> Unit)? = null
+    private var voiceCallModelSelectionReady = false
     private var voiceCallModelName = "模型"
+    private var voiceThinkingPicker by mutableStateOf<ChatController.VoiceCallReasoning?>(null)
+    private var voiceThinkingVisit: Any? = null
+    private fun openVoiceThinking(key: Long) {
+        val owner = voiceCallConversation?.id ?: return
+        val visit = Any()
+        voiceThinkingVisit = visit
+        lifecycleScope.launch {
+            val loaded = withContext(Dispatchers.IO) { runCatching { controller.voiceCallReasoning(owner) } }
+            if (activityUsable() && voiceThinkingVisit === visit && voiceCallConversation?.id == owner &&
+                voiceCallPresentation.state?.let { it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING } == true) {
+                loaded.onSuccess { voiceThinkingPicker = it }.onFailure { voiceConfigurationToast("思考配置读取失败，请重新打开") }
+            }
+        }
+    }
     private var chatModelConversation: ConversationId? = null
     private fun voiceCallModelOwner(): ConversationId? = chatModelConversation
     private fun clearVoiceCallConversation() {
+        voiceCallModelResume = null
+        voiceCallModelSelectionReady = false
+        voiceThinkingVisit = null
+        voiceThinkingPicker = null
         if (voiceCallModelPicker) dismissChatModels()
         voiceCallStarting = null
         val temporary = voiceCallConversation
@@ -511,7 +531,8 @@ class MainActivity : ComponentActivity() {
                 voiceCallConversation = temporary
                 voiceCallHasDialogue = false
                 voiceCallModelName = checkNotNull(created).modelName
-                ensureVoiceCallService {
+                val beginCall: () -> Unit = {
+                    ensureVoiceCallService {
                     if (voiceCallConversation?.id != temporary.id || !activityUsable() || !voiceForeground ||
                         retainedPage != "chat" || sidebarVisible || editorGeneration != generation) {
                         refreshVoiceCallService()
@@ -536,7 +557,14 @@ class MainActivity : ComponentActivity() {
                             })
                         }
                     } catch (_: Exception) { revokeUniversalVoice(); toast("语音对话未启动，请检查配置或音频占用") }
+                    }
                 }
+                if (created.needsModelSelection) {
+                    openChatModels(forVoiceCall = true)
+                    voiceCallModelSelectionReady = false
+                    voiceCallModelResume = beginCall
+                    voiceConfigurationToast("已记住的通话模型不可用，请重新选择")
+                } else beginCall()
             }
         }
     }
@@ -3230,6 +3258,21 @@ class MainActivity : ComponentActivity() {
                     onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = backupBusy,
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
                     repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource)
+                voiceThinkingPicker?.let { voice ->
+                    SubAgentThinkingEffortPickerDialog(show = true, mainChat = true,
+                        effort = ReasoningEffort.textPreference(voice.effort, model = voice.requestModel),
+                        options = ReasoningEffort.textChoices(voice.requestModel),
+                        onDismiss = { voiceThinkingVisit = null; voiceThinkingPicker = null },
+                        onEffortChange = { effort ->
+                            if (activityUsable() && voiceCallConversation?.id == voice.owner && voiceThinkingPicker == voice &&
+                                voiceCallPresentation.state?.presentation != DoubaoCallPresentation.CLOSING) {
+                                try {
+                                    if (controller.setVoiceCallReasoning(voice, effort)) voiceThinkingPicker = voice.copy(effort = effort)
+                                    else { voiceThinkingPicker = null; voiceConfigurationToast("通话模型已更改，请重新打开") }
+                                } catch (_: Exception) { voiceConfigurationToast("思考偏好保存未确认") }
+                            }
+                        })
+                }
                 // Saved independently for the standalone composer or this conversation.
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
@@ -3733,6 +3776,7 @@ class MainActivity : ComponentActivity() {
                     openChatModels(forVoiceCall = true)
                 }
             },
+            onModelLongPress = { if (current()) openVoiceThinking(key) },
             onToggleMute = { if (current()) universalVoice.setMuted(!universalVoice.state.value.muted) },
             onToggleSpeaker = {
                 if (current()) {
@@ -7727,6 +7771,10 @@ class MainActivity : ComponentActivity() {
         reloadChatModels(owner)
     }
     private fun dismissChatModels() {
+        val resume = voiceCallModelResume
+        val resumeReady = voiceCallModelSelectionReady
+        voiceCallModelResume = null
+        voiceCallModelSelectionReady = false
         if (voiceCallModelPicker) {
             voiceCallModelPicker = false
             if (universalVoiceDelegate.isInitialized()) universalVoice.setModelPicker(false)
@@ -7735,6 +7783,10 @@ class MainActivity : ComponentActivity() {
         chatModelProviderEditor = null; chatModelPicker = null; chatModelSettings = null; chatModelSession = null; chatModelOwner = null
         chatModelConversation = null
         chatModelSelectionFailed = false; chatModelProviderChoices = emptyMap()
+        if (resume != null) {
+            if (resumeReady) resume()
+            else { clearVoiceCallConversation(); refreshVoiceCallService() }
+        }
     }
     private fun reloadChatModels(owner: Any, retainPresentation: Boolean = false) {
         if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner) return
@@ -7843,7 +7895,10 @@ class MainActivity : ComponentActivity() {
                     if (dialogActionsCurrent(lease) && chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
                         if (success) {
                             if (voiceCallModelPicker) {
+                                voiceThinkingVisit = null
+                                voiceThinkingPicker = null
                                 voiceCallModelName = ticket.record.id
+                                voiceCallModelSelectionReady = true
                                 voiceCallPresentation.setModelName(voiceCallModelName)
                             }
                             reloadChatModels(owner, retainPresentation = true); refresh()

@@ -194,9 +194,7 @@ internal class ActivityUniversalVoiceHost(
                 try { this@ActivityUniversalVoiceHost.stopAcceptedRun(extra) }
                 catch (_: Exception) {
                     bridgeReleaseFailed = true
-                    controller.state.value.permitId?.let {
-                        this@ActivityUniversalVoiceHost.revoke(it, VoiceControlStopReason.RELEASE_FAILED)
-                    }
+                    controller.acceptedReleaseFailed()
                 }
             }
             this@ActivityUniversalVoiceHost.submit(turn, finalText) { receipt -> post { receipts.accept(receipt) } }
@@ -212,6 +210,11 @@ internal class ActivityUniversalVoiceHost(
                     value.owner == owner) body(value)
             }
             return VoiceControlCancellation { observing.set(false); source.cancel() }
+        }
+        override fun stopped(reason: VoiceControlStopReason, stage: VoiceControlFailureStage?) {
+            app.getSharedPreferences("voice-call-diagnostic-v1", Context.MODE_PRIVATE).edit()
+                .putString("reason", reason.name).putString("stage", stage?.name)
+                .putLong("time_ms", System.currentTimeMillis()).apply()
         }
         override fun playback(turn: VoiceControlTurn, owner: VoiceAssistantOwner, drained: () -> Unit,
             failed: () -> Unit): VoiceControlPlayback {

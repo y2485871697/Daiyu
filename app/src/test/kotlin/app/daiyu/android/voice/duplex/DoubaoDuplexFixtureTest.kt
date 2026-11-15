@@ -237,12 +237,17 @@ class DoubaoDuplexFixtureTest {
             assertEquals("你好。", c.session.state.value.transcript)
             c.wire.receive("conversation.item.input_audio_transcription.completed", "text", "你好")
             assertEquals("你好", c.session.state.value.transcript)
+            assertTrue(c.session.state.value.transcriptTextComplete)
             c.wire.receive("response.output_audio.started", id = "r1")
             for ((field, s) in listOf("text" to "Hello", "delta" to " ", "transcript" to "世", "content" to "界"))
                 c.wire.receive("response.output_text.delta", field, s, "r1")
             assertEquals("Hello 世界", c.session.state.value.reply)
+            assertFalse(c.session.state.value.replyTextComplete)
             c.wire.receive("response.output_text.done", "text", "Hello 世界！", "r1")
             assertEquals("Hello 世界！", c.session.state.value.reply)
+            assertTrue(c.session.state.value.replyTextComplete)
+            c.wire.receive("response.output_audio.started", id = "r2")
+            assertFalse(c.session.state.value.replyTextComplete)
         }
     }
 

@@ -35,6 +35,8 @@ class VoiceCallControllerTest {
         val observations = mutableListOf<Observation>()
         class Output(val drained: () -> Unit, val failed: () -> Unit) : VoiceControlPlayback {
             val bodies = mutableListOf<Pair<String, Boolean>>()
+            override var progress = 0L
+            override var drainTimeoutMillis = 0L
             var closes = 0
             var failClose = false
             override fun body(text: String, complete: Boolean) { bodies += text to complete }
@@ -74,7 +76,10 @@ class VoiceCallControllerTest {
         }
         override fun playback(turn: VoiceControlTurn, owner: VoiceAssistantOwner, drained: () -> Unit,
             failed: () -> Unit): VoiceControlPlayback = Output(drained, failed).also { outputs += it }
-        override fun stopAcceptedRun(owner: VoiceAssistantOwner) { stopped += owner }
+        var failStop = false
+        val terminalDiagnostics = mutableListOf<Pair<VoiceControlStopReason, VoiceControlFailureStage?>>()
+        override fun stopped(reason: VoiceControlStopReason, stage: VoiceControlFailureStage?) { terminalDiagnostics += reason to stage }
+        override fun stopAcceptedRun(owner: VoiceAssistantOwner) { stopped += owner; check(!failStop) }
         override fun revoke(permit: VoiceControlPermit) { revoked += permit }
         fun finishRecognition(text: String = "send exactly once") { recognitions.last().finalResult(text); flush() }
         fun accept(owner: VoiceAssistantOwner, index: Int = sends.lastIndex) {
@@ -86,6 +91,77 @@ class VoiceCallControllerTest {
         }
     }
 
+
+    @Test fun lateAcceptedCleanupAndBridgeFailurePublishReleaseStageAndFenceRestart() {
+        for (bridge in listOf(false, true)) {
+            val f = Fake(); val c = VoiceCallController(f)
+            val permit = c.start(profile)!!
+            f.finishRecognition(); c.stop(permit)
+            assertEquals(VoiceControlStopReason.USER to null, f.terminalDiagnostics.single())
+            if (bridge) c.acceptedReleaseFailed() else { f.failStop = true; f.accept(owner) }
+            assertEquals(VoiceControlStopReason.RELEASE_FAILED, c.state.value.reason)
+            assertEquals(VoiceControlFailureStage.RELEASE, c.state.value.failureStage)
+            assertEquals(VoiceControlStopReason.RELEASE_FAILED to VoiceControlFailureStage.RELEASE, f.terminalDiagnostics.last())
+            assertEquals(2, f.terminalDiagnostics.size)
+            assertNull(c.start(profile))
+        }
+    }
+    @Test fun drainProgressEventuallyTimesOutAfterProgressStops() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile, VoiceControlLimits(drainMillis = 1_000))
+        f.finishRecognition(); f.accept(owner); f.body(owner, "回答。", VoiceBodyStatus.COMPLETE)
+        f.outputs.single().progress++
+        f.advance(1_001)
+        assertTrue(c.state.value.active)
+        f.advance(1_001)
+        assertEquals(VoiceControlStopReason.TIMEOUT, c.state.value.reason)
+        assertEquals(VoiceControlFailureStage.DRAIN, c.state.value.failureStage)
+        assertEquals(VoiceControlStopReason.TIMEOUT to VoiceControlFailureStage.DRAIN, f.terminalDiagnostics.single())
+    }
+    @Test fun realSearchProgressExtendsOnlyTheIdleResponseDeadlineAndFinalStillWaitsForDrain() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile, VoiceControlLimits(responseMillis = 1_000, drainMillis = 5_000))
+        f.finishRecognition(); f.accept(owner)
+        val original = f.timers.last { it.due == f.now + 1_000 }
+        f.advance(600)
+        f.observations.last().body(VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING, searching = true)); f.flush()
+        original.action(); f.flush()
+        assertTrue(c.state.value.active)
+        f.advance(600)
+        assertTrue(c.state.value.searching)
+        f.body(owner, "已查到。", VoiceBodyStatus.COMPLETE)
+        assertTrue(c.state.value.replyTextComplete)
+        assertTrue(c.state.value.active)
+        f.outputs.single().drained(); f.flush()
+        assertEquals(VoiceControlPhase.LISTENING, c.state.value.phase)
+        assertEquals(1, f.sends.size)
+    }
+    @Test fun repeatedUnchangedSearchCannotKeepAStalledResponseAlive() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile, VoiceControlLimits(responseMillis = 1_000))
+        f.finishRecognition(); f.accept(owner)
+        val search = VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING, searching = true)
+        f.observations.last().body(search); f.flush()
+        f.advance(600); f.observations.last().body(search); f.flush()
+        f.advance(401)
+        assertEquals(VoiceControlStopReason.TIMEOUT, c.state.value.reason)
+        assertEquals(VoiceControlFailureStage.RESPONSE, c.state.value.failureStage)
+    }
+    @Test fun completedBodyUsesPlaybackBudgetAndOnlyRealProgressExtendsDrain() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile)
+        f.finishRecognition(); f.accept(owner)
+        f.outputs.single().drainTimeoutMillis = 450_000L
+        f.body(owner, "长回答。", VoiceBodyStatus.COMPLETE)
+        f.advance(60_001)
+        assertTrue(c.state.value.active)
+        f.outputs.single().progress++
+        f.advance(390_000)
+        assertTrue(c.state.value.active)
+        f.outputs.single().drained(); f.flush()
+        assertEquals(VoiceControlPhase.LISTENING, c.state.value.phase)
+        assertEquals(1, f.sends.size)
+    }
 
     @Test fun synchronousStopFromConnectingObserverDoesNotOpenRecognition() = runBlocking {
         val f = Fake(); val c = VoiceCallController(f)

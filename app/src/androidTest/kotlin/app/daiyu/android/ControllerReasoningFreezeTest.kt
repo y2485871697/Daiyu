@@ -123,6 +123,36 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
         } finally { fixture.close() }
     }
 
+    fun testMissingRememberedVoiceModelCanBeExplicitlyRepairedWithoutStartingARequest() {
+        val fixture = RunControlFixture(instrumentation.targetContext)
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            val source = fixture.database.create()
+            val original = checkNotNull(fixture.database.modelBinding(source.id))
+            val old = fixture.database.create(modelSource = source.id, temporaryVoice = true)
+            val missing = app.daiyu.android.storage.ConversationModelBinding("deleted-provider", "deleted-model")
+            assertTrue(fixture.database.bindModel(old.id, original, missing))
+            fixture.database.delete(old.id)
+            val result = AtomicReference<ChatController.VoiceCallStart?>()
+            val complete = CountDownLatch(1)
+            controlMain { fixture.controller.createVoiceCall(source.id) { result.set(it); complete.countDown() } }
+            assertTrue(complete.await(10, TimeUnit.SECONDS))
+            val repair = checkNotNull(result.get())
+            assertTrue(repair.needsModelSelection)
+            assertEquals(missing, fixture.database.modelBinding(repair.conversation.id))
+            assertEquals(original, fixture.database.modelBinding(source.id))
+            assertEquals(0, fixture.opens.get())
+            assertTrue(fixture.database.messages(repair.conversation.id).isEmpty())
+            assertTrue(fixture.database.bindModel(repair.conversation.id, missing, original))
+            assertEquals("run-control", fixture.controller.freezeConversationProvider(repair.conversation.id).settings.model)
+            controlMain { fixture.controller.discardVoiceCall(repair.conversation.id) }
+            awaitControl("repair owner cleaned") { fixture.database.conversations().none { it.id == repair.conversation.id } }
+            val restored = fixture.database.create(modelSource = source.id, temporaryVoice = true)
+            assertEquals(original, fixture.database.modelBinding(restored.id))
+            fixture.database.delete(restored.id)
+        } finally { fixture.close() }
+    }
+
     fun testVoiceCallInheritsSourceReasoningIntoItsActualTextRequestAndCleansItAfterHangup() {
         val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
         val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
@@ -139,6 +169,11 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
             assertTrue(created.await(10, TimeUnit.SECONDS))
             val temporary = checkNotNull(start.get()).conversation
             assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(temporary.id.value))
+            val voiceReasoning = fixture.controller.voiceCallReasoning(temporary.id)
+            controlMain { assertTrue(fixture.controller.setVoiceCallReasoning(voiceReasoning, ReasoningEffort.HIGH)) }
+            assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(source.id.value))
+            assertEquals(ReasoningEffort.OFF, fixture.controller.reasoningPreference.rememberedModel(binding.providerSlotId, binding.localModelIdentity))
+            assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.rememberedVoiceModel(binding.providerSlotId, binding.localModelIdentity))
             fixture.controller.reasoningPreference.set(source.id.value, ReasoningEffort.OFF)
             fixture.session("voice answer", held = false)
             val ticket = ChatController.TextSendTicket()

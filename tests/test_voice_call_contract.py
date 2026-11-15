@@ -9,12 +9,44 @@ class VoiceCallContractTest(unittest.TestCase):
         create = controller.split('internal fun createVoiceCall(', 1)[1].split('internal fun discardVoiceCall', 1)[0]
         self.assertIn('val inheritedReasoning = reasoningPreference.snapshot(source?.value)', create)
         self.assertLess(create.index('snapshot(source?.value)'), create.index('database.create('))
-        self.assertIn('reasoningPreference.set(temporary.id.value, inheritedReasoning)', create)
+        self.assertIn('else reasoningPreference.set(temporary.id.value, defaultVoiceReasoning(temporary.id, binding))', create)
+        self.assertIn('VoiceReasoningSource(database.modelBinding(source), inheritedReasoning)', create)
         self.assertNotIn('ReasoningEffort.OFF', create)
         discard = controller.split('internal fun discardVoiceCall(', 1)[1].split('internal fun sendText', 1)[0]
         self.assertLess(discard.index('reasoningPreference.forget(owner.value)'), discard.index('database.delete(owner)'))
         self.assertIn('abandoned.forEach { reasoningPreference.forget(it.value); database.delete(it) }', controller)
         self.assertIn('temporary.forEach { reasoningPreference.forget(it.value); database.delete(it) }', controller)
+
+    def test_call_buttons_and_mini_tap_use_existing_touch_feedback_without_changing_drag(self):
+        overlay = (ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/DoubaoCallOverlay.kt").read_text()
+        self.assertIn("import app.daiyu.android.ui.haptics.clickable", overlay)
+        self.assertIn("import app.daiyu.android.ui.haptics.hapticClick", overlay)
+        self.assertNotIn("import androidx.compose.foundation.clickable", overlay)
+        self.assertIn("rememberUpdatedState(hapticClick(enabled, onExpand))", overlay)
+        self.assertIn("if (enabled) detectTapGestures { latestExpand() }", overlay)
+        self.assertIn(".clickable(enabled = enabled, role = Role.Button, onClick = onClick)", overlay)
+        self.assertIn("val interactive = !morphing", overlay)
+        self.assertNotIn("android.os.Vibrator", overlay)
+
+    def test_voice_uses_its_own_model_and_depth_and_both_calls_use_the_conversation_character_clock(self):
+        controller = (SRC / 'ChatController.kt').read_text()
+        self.assertIn('setVoice(expected.owner.value, expected.binding.providerSlotId', controller)
+        self.assertIn('rememberedVoiceModel(binding.providerSlotId', controller)
+        database = (SRC / 'storage/ConversationDatabase.kt').read_text()
+        self.assertIn('if (temporaryVoice) ConversationModelSelections.write', database)
+        self.assertIn('VoiceCallModelMemory.readOrInitialize(db)', database)
+        self.assertIn('isTemporaryVoice(id.value)) VoiceCallModelMemory.write(db, replacement)', database)
+        main = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('onModelLongPress = { if (current()) openVoiceThinking(key) }', main)
+        self.assertIn('controller.setVoiceCallReasoning(voice, effort)', main)
+        self.assertIn('needsModelSelection = model == null', controller)
+        self.assertIn('if (created.needsModelSelection)', main)
+        self.assertIn('if (resumeReady) resume()', main)
+        reveal = (SRC / 'ui/screens/chat/conversation/CallCaptionReveal.kt').read_text()
+        self.assertIn('MarkdownTypingState(emptyList())', reveal)
+        self.assertIn('live = true, paceTerminal = true', reveal)
+        self.assertIn('withFrameNanos', reveal)
+        self.assertNotIn('Text(text,', (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text())
 
     def test_reasoning_rejection_is_a_closed_diagnostic_not_a_network_title_or_spoken_text(self):
         observer = (SRC / 'voice/control/AndroidUniversalOwnerObserver.kt').read_text()

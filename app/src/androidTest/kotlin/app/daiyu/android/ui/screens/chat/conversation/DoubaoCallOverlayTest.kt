@@ -110,6 +110,82 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         }
     }
 
+    fun testCallButtonsAndMiniRestoreDeliverOneClickWhileMotionAndDraggingStaySilent() {
+        val context = instrumentation.targetContext
+        val preferencesName = "call-feedback-${System.nanoTime()}"
+        val requests = java.util.concurrent.CopyOnWriteArrayList<app.daiyu.android.domain.haptics.HapticRequest>()
+        val port = object : app.daiyu.android.domain.haptics.HapticPort {
+            override fun play(request: app.daiyu.android.domain.haptics.HapticRequest): app.daiyu.android.domain.haptics.HapticDelivery {
+                requests += request
+                return app.daiyu.android.domain.haptics.HapticDelivery.PLAYED
+            }
+            override fun cancel() = Unit
+        }
+        var runtime: app.daiyu.android.haptics.HapticsRuntime? = null
+        var registration: AutoCloseable? = null
+        var selectedModels = 0
+        var selectedDepths = 0
+        try {
+            mount(initialState = session().copy(modelSelectable = true), onSelectModel = { selectedModels++ },
+                onModelLongPress = { selectedDepths++ })
+            mainThread {
+                runtime = app.daiyu.android.haptics.HapticsRuntime(app.daiyu.android.haptics.LocalHapticSettingsStore(
+                    context.getSharedPreferences(preferencesName, android.content.Context.MODE_PRIVATE))) { port }
+                check(runtime!!.store.write(runtime!!.store.read().copy(touch = true)))
+                registration = app.daiyu.android.ui.haptics.TouchHaptics.install(runtime!!)
+            }
+            ui.onNodeWithTag("doubao-call-mute").assertIsNotEnabled().performTouchInput { click() }
+            assertEquals(0, requests.size)
+            finishOpening()
+            fun click(tag: String) {
+                val before = requests.size
+                ui.onNodeWithTag(tag).performTouchInput { click() }
+                ui.waitForIdle()
+                assertEquals(tag, before + 1, requests.size)
+                assertEquals(app.daiyu.android.domain.haptics.HapticKind.CLICK, requests.last().kind)
+            }
+            for (tag in listOf("voice-call-select-model", "doubao-call-mute", "doubao-call-speaker", "doubao-call-captions")) click(tag)
+            assertEquals(1, selectedModels)
+            val beforeLongPress = requests.size
+            ui.onNodeWithTag("voice-call-select-model").performTouchInput { longClick() }
+            assertEquals(1, selectedDepths)
+            assertEquals(1, selectedModels)
+            assertEquals(beforeLongPress + 1, requests.size)
+            assertEquals(app.daiyu.android.domain.haptics.HapticKind.LONG_PRESS, requests.last().kind)
+            assertEquals(1, muteToggles)
+            assertEquals(1, speakerToggles)
+            assertEquals(1, captionToggles)
+            val beforeDrag = requests.size
+            ui.onNodeWithTag("doubao-call-drag-handle").performTouchInput {
+                swipe(center, center.copy(y = center.y - 40f), 300L)
+            }
+            assertEquals(beforeDrag, requests.size)
+            click("doubao-call-minimize")
+            advanceOverlayFrames(40)
+            click("doubao-call-expand")
+            advanceOverlayFrames(40)
+            click("doubao-call-minimize")
+            advanceOverlayFrames(40)
+            click("doubao-call-drag-handle")
+            advanceOverlayFrames(40)
+            click("doubao-call-hang-up")
+            assertEquals(1, hangUps)
+            val afterHangup = requests.size
+            ui.onNodeWithTag("doubao-call-hang-up").assertIsNotEnabled().performTouchInput { click() }
+            assertEquals(afterHangup, requests.size)
+            advanceOverlayFrames(40)
+            assertEquals(afterHangup, requests.size)
+            assertEquals(1, hangUps)
+        } finally {
+            mainThread {
+                registration?.close()
+                runtime?.close()
+                app.daiyu.android.ui.haptics.TouchHaptics.install((context.applicationContext as app.daiyu.android.ChatApplication).hapticsRuntime)
+            }
+            context.deleteSharedPreferences(preferencesName)
+        }
+    }
+
     fun testOrdinaryFailureShowsSafeReasonWhileRealtimeKeepsItsConnectionTitle() {
         mount(initialState = session().copy(title = "GPT", modelSelectable = true,
             visualState = DoubaoCallVisualState.ERROR, errorTitle = "通话遇到问题", reason = "模型不支持关闭思考"))
@@ -201,7 +277,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         speaker = false,
     )
 
-    private fun mount(height: Dp? = null, initialState: DoubaoCallUi? = null) {
+    private fun mount(height: Dp? = null, initialState: DoubaoCallUi? = null, onSelectModel: () -> Unit = {}, onModelLongPress: (() -> Unit)? = null) {
         activity = startMain()
         ui.mainClock.autoAdvance = false
         mainThread {
@@ -226,6 +302,8 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
                             motion = remember(state.sessionKey) { DoubaoCallMotionState() }
                             fixtureScope = rememberCoroutineScope()
                             DoubaoCallOverlay(state, DoubaoCallActions(
+                                onSelectModel = onSelectModel,
+                                onModelLongPress = onModelLongPress,
                                 onExpand = { call = call?.copy(presentation = DoubaoCallPresentation.EXPANDED) },
                                 onMinimize = { call = call?.copy(presentation = DoubaoCallPresentation.MINI) },
                                 onHangUp = {
@@ -491,6 +569,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             call = call!!.copy(visualState = DoubaoCallVisualState.RESPONDING,
                 transcript = "opening finished transcript", reply = "opening finished reply")
         }
+        advanceOverlayFrames(64)
         ui.onNodeWithTag("doubao-call-status").assertTextEquals("豆包正在回应")
         ui.onNodeWithText("opening finished transcript").assertExists()
         ui.onNodeWithText("opening finished reply").assertExists()
@@ -794,6 +873,26 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
         ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
         ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+    }
+
+    fun testBothCallKindsPaceAnImmediateFinalSnapshotInsteadOfFlashingTheWholeReply() {
+        for (ordinary in listOf(false, true)) {
+            if (ordinary) {
+                mainThread { call = session().copy(modelSelectable = true) }
+                awaitMotionStart(1f)
+            } else mount()
+            finishOpening()
+            val full = "字幕逐字呈现".repeat(80)
+            mainThread { call = call!!.copy(reply = full, replyTextComplete = true) }
+            advanceOverlayFrames(32)
+            val partial = ui.onNodeWithTag("call-caption-reply").fetchSemanticsNode()
+                .config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString("") { it.text }
+            assertTrue("ordinary=$ordinary: nonempty prefix", partial.isNotEmpty())
+            assertTrue("ordinary=$ordinary: COMPLETE must not flush", partial.length < full.length)
+            assertTrue(full.startsWith(partial))
+            advanceOverlayFrames(600)
+            ui.onNodeWithTag("call-caption-reply").assertTextEquals(full)
+        }
     }
 
     fun testBothCallKindsFollowCaptionTailWithoutOverridingManualScroll() {

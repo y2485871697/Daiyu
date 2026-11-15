@@ -17,6 +17,8 @@ data class DuplexState(
     val reply: String = "",
     val reason: String? = null,
     val captionEpoch: Long = 0,
+    val replyTextComplete: Boolean = false,
+    val transcriptTextComplete: Boolean = false,
 )
 
 /**
@@ -168,11 +170,13 @@ class DoubaoDuplexSession(
                             suppressOutput = true; playbackGeneration++; tailRequested = false
                             epoch++; audio.flush(epoch); turnBytes = 0
                             text.reset()
-                            mutableState.value = mutableState.value.copy(transcript = "", reply = "", captionEpoch = state.value.captionEpoch + 1)
+                            mutableState.value = mutableState.value.copy(transcript = "", reply = "", captionEpoch = state.value.captionEpoch + 1,
+                                replyTextComplete = false, transcriptTextComplete = false)
                         }?.let { recognized ->
                             check(recognized.length <= 100_000)
                             mutableState.value = mutableState.value.copy(
                                 transcript = DuplexAsrHypothesis.display(state.value.transcript, recognized, done),
+                                transcriptTextComplete = done,
                                 phase = if (done) DuplexPhase.THINKING else DuplexPhase.LISTENING)
                         }
                     }
@@ -181,7 +185,8 @@ class DoubaoDuplexSession(
                         update(DuplexPhase.SPEAKING)
                     }
                     "response.output_text.delta", "response.output_text.done" -> if (acceptResponse(e, false)) {
-                        mutableState.value = mutableState.value.copy(reply = text.accept(e))
+                        mutableState.value = mutableState.value.copy(reply = text.accept(e),
+                            replyTextComplete = e.optString("type") == "response.output_text.done")
                     }
                     "response.output_audio.delta" -> if (acceptResponse(e, false)) {
                         val bytes = java.util.Base64.getDecoder().decode(
@@ -246,6 +251,7 @@ class DoubaoDuplexSession(
         }
         if (id.isNotEmpty()) {
             if (responseId.isNotEmpty() && id != responseId) {
+                mutableState.value = mutableState.value.copy(replyTextComplete = false)
                 retireCurrentResponse()
                 playbackGeneration++; tailRequested = false; turnBytes = 0
             }

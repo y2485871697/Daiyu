@@ -14,6 +14,41 @@ class ConversationReasoningPreferenceTest {
         override fun remove(key: String) { values.remove(key) }
     }
 
+    @Test fun voiceModelMemoryIsIndependentPersistentAndSurvivesTemporaryCleanup() {
+        val values = MemoryKeyValue()
+        val preference = ConversationReasoningPreference(values)
+        preference.set("source", ReasoningEffort.HIGH)
+        preference.rememberModel("provider", "model", ReasoningEffort.MEDIUM)
+        assertEquals(null, preference.rememberedVoiceModel("provider", "model"))
+        preference.setVoice("temporary", "provider", "model", ReasoningEffort.LOW)
+        assertEquals(ReasoningEffort.HIGH, preference.snapshot("source"))
+        assertEquals(ReasoningEffort.MEDIUM, preference.rememberedModel("provider", "model"))
+        preference.forget("temporary")
+        assertEquals(ReasoningEffort.LOW, ConversationReasoningPreference(values).rememberedVoiceModel("provider", "model"))
+        preference.rememberVoiceModel("provider", "model", ReasoningEffort.OFF)
+        assertEquals(ReasoningEffort.OFF, preference.rememberedVoiceModel("provider", "model"))
+    }
+    @Test fun partiallySavedVoiceChoiceFencesBothKeysUntilConfirmed() {
+        val memory = mutableMapOf<String, String>()
+        var fail = true
+        val preference = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
+            override fun get(key: String) = memory[key]
+            override fun remove(key: String) { memory.remove(key) }
+            override fun set(key: String, value: String) {
+                memory[key] = value
+                if (fail && key.startsWith("reasoning:voice:")) error("unconfirmed")
+            }
+        })
+        try { preference.setVoice("temporary", "p", "m", ReasoningEffort.HIGH); org.junit.Assert.fail() }
+        catch (_: IllegalStateException) { }
+        for (read in listOf<() -> Any?>({ preference.snapshot("temporary") }, { preference.rememberedVoiceModel("p", "m") })) {
+            try { read(); org.junit.Assert.fail() } catch (_: IllegalStateException) { }
+        }
+        fail = false
+        preference.setVoice("temporary", "p", "m", ReasoningEffort.LOW)
+        assertEquals(ReasoningEffort.LOW, preference.snapshot("temporary"))
+    }
+
     @Test fun missingAndUnknownDisplayValuesUseOff() {
         val values = MemoryKeyValue()
         val preference = ConversationReasoningPreference(values)

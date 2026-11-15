@@ -9,7 +9,9 @@ import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
+import app.daiyu.android.ui.haptics.combinedClickable
+import app.daiyu.android.ui.haptics.hapticClick
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -100,10 +102,13 @@ data class DoubaoCallUi(
     val responseLabel: String = "豆包",
     val captionEpoch: Long = 0,
     val errorTitle: String = "连接遇到问题",
+    val replyTextComplete: Boolean = false,
+    val transcriptTextComplete: Boolean = false,
 )
 
 data class DoubaoCallActions(
     val onSelectModel: () -> Unit = {},
+    val onModelLongPress: (() -> Unit)? = null,
     val onExpand: () -> Unit = {},
     val onMinimize: () -> Unit = {},
     val onHangUp: () -> Unit = {},
@@ -243,6 +248,11 @@ private fun DoubaoCallSession(
     }
     val picture = if (closing) checkNotNull(closingPicture) else state
     val mini = if (closing) retainedMini else state.presentation == DoubaoCallPresentation.MINI
+    val captionsRunning = !closing && !mini && state.captionsEnabled
+    val captions = key(picture.captionEpoch) {
+        rememberCallCaptionReveal(picture.transcript, picture.transcriptTextComplete, captionsRunning) to
+            rememberCallCaptionReveal(picture.reply, picture.replyTextComplete, captionsRunning)
+    }
     SideEffect {
         if (!closing) {
             retainedMini = mini
@@ -427,9 +437,9 @@ private fun DoubaoCallSession(
                 .border(1.dp, Color.White, shape),
         ) {
             if (mini) {
-                MiniCallContent(picture, clock, interactive, dragHandle, latestActions.onExpand, running = !closing && !morphing)
+                MiniCallContent(picture, clock, interactive, dragHandle, latestActions.onExpand, running = !closing && !morphing, compressionState = compressionState)
             } else {
-                ExpandedCallContent(picture, clock, interactive, dragHandle, latestActions, running = !closing && !morphing, compressionState = compressionState, captionScroll = captionScroll, captionFollow = captionFollow)
+                ExpandedCallContent(picture, clock, interactive, dragHandle, latestActions, running = !closing && !morphing, compressionState = compressionState, captionScroll = captionScroll, captionFollow = captionFollow, captions = captions)
             }
         }
     }
@@ -448,7 +458,7 @@ private fun callClock(state: DoubaoCallUi): String {
     return "${(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}"
 }
 
-private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成后自动恢复麦克风" else reason?.takeIf { it.isNotBlank() } ?: when (visualState) {
+private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成后自动恢复麦克风" else if (searching) "正在查询相关信息" else reason?.takeIf { it.isNotBlank() } ?: when (visualState) {
     DoubaoCallVisualState.LISTENING -> if (muted) "麦克风已关闭" else "不用着急，我一直在这里"
     DoubaoCallVisualState.RESPONDING -> "正在回应你的话"
     DoubaoCallVisualState.MUTED -> "麦克风已关闭"
@@ -456,7 +466,8 @@ private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成
     DoubaoCallVisualState.ERROR -> "暂时无法继续通话"
 }
 
-private fun DoubaoCallUi.statusLabel(): String = if (compressing) "正在整理上下文" else when (visualState) {
+private fun DoubaoCallUi.statusLabel(dots: Int): String = if (compressing) "正在压缩" + ".".repeat(dots)
+    else if (searching) "正在搜索" + ".".repeat(dots) else when (visualState) {
     DoubaoCallVisualState.LISTENING -> "我在听，你说"
     DoubaoCallVisualState.RESPONDING -> if (modelSelectable) "正在回应" else "豆包正在回应"
     DoubaoCallVisualState.MUTED -> "麦克风已静音"
@@ -475,6 +486,7 @@ private fun ExpandedCallContent(
     compressionState: VoiceCallCompressionState,
     captionScroll: androidx.compose.foundation.ScrollState,
     captionFollow: CallCaptionFollow,
+    captions: Pair<State<String>, State<String>>,
 ) {
     Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 12.dp)) {
         // The original drag zone extends 7dp into each horizontal padding; the heading adds
@@ -493,7 +505,8 @@ private fun ExpandedCallContent(
             Row(Modifier.weight(1f).fillMaxHeight().then(if (state.modelSelectable) Modifier else dragHandle),
                 verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.testTag("voice-call-select-model").then(if (state.modelSelectable)
-                    Modifier.clickable(enabled = enabled, role = Role.Button, onClick = actions.onSelectModel) else Modifier),
+                    Modifier.combinedClickable(enabled = enabled, role = Role.Button, onClick = actions.onSelectModel,
+                        onLongClickLabel = "调整思考深度", onLongClick = actions.onModelLongPress) else Modifier),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(state.title, Modifier.testTag("voice-call-model-title"), color = CallInk,
                         fontSize = 14.sp, fontWeight = FontWeight(650))
@@ -534,7 +547,7 @@ private fun ExpandedCallContent(
                     CallWave(state.orbState(), Modifier.requiredSize(80.dp), running = running)
                 }
                 Spacer(Modifier.height(13.dp))
-                Text(state.statusLabel(), color = Color(0xFF51445F), fontSize = 19.sp, lineHeight = 28.sp,
+                Text(state.statusLabel(compressionState.dots), color = Color(0xFF51445F), fontSize = 19.sp, lineHeight = 28.sp,
                     fontWeight = FontWeight(550),
                     modifier = Modifier.height(28.dp).testTag("doubao-call-status"),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -543,7 +556,7 @@ private fun ExpandedCallContent(
                     modifier = Modifier.height(16.dp).testTag("doubao-call-status-detail"),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            CallCaptionArea(state, enabled, captionScroll, captionFollow)
+            CallCaptionArea(state, enabled, captionScroll, captionFollow, captions)
             Row(Modifier.fillMaxWidth().height(78.dp).testTag("doubao-call-controls"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -565,7 +578,8 @@ private class CallCaptionFollow {
 
 @Composable
 private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
-    scroll: androidx.compose.foundation.ScrollState, follow: CallCaptionFollow) {
+    scroll: androidx.compose.foundation.ScrollState, follow: CallCaptionFollow,
+    captions: Pair<State<String>, State<String>>) {
     val edge = with(LocalDensity.current) { 6.dp.roundToPx() }
     LaunchedEffect(scroll) {
         scroll.interactionSource.interactions.collect { interaction ->
@@ -600,18 +614,18 @@ private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
             drawLine(Color(0x4DECE6F2), Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
         }.padding(top = 7.dp, bottom = 5.dp).nestedScroll(containment).verticalScroll(scroll, enabled = enabled)) {
         if (state.captionsEnabled) {
-            if (state.transcript.isNotBlank()) CaptionLine("我", state.transcript)
-            if (state.reply.isNotBlank()) CaptionLine(state.responseLabel, state.reply, reply = true)
+            if (state.transcript.isNotBlank()) CaptionLine("我", captions.first)
+            if (state.reply.isNotBlank()) CaptionLine(state.responseLabel, captions.second, reply = true)
         }
     }
 }
 
 @Composable
-private fun CaptionLine(who: String, text: String, reply: Boolean = false) {
+private fun CaptionLine(who: String, text: State<String>, reply: Boolean = false) {
     Row(Modifier.fillMaxWidth().heightIn(min = 20.dp), verticalAlignment = Alignment.Top) {
         Text(who, Modifier.width(25.dp), color = Color(0xFFB4A8C3), fontSize = 10.sp, lineHeight = 20.sp)
         Spacer(Modifier.width(8.dp))
-        Text(text, Modifier.weight(1f), color = if (reply) Color(0xFF736180) else Color(0xFF8E839C), fontSize = 11.sp, lineHeight = 20.sp,
+        Text(text.value, Modifier.weight(1f).testTag(if (reply) "call-caption-reply" else "call-caption-transcript"), color = if (reply) Color(0xFF736180) else Color(0xFF8E839C), fontSize = 11.sp, lineHeight = 20.sp,
             softWrap = true, textAlign = TextAlign.Start)
     }
 }
@@ -624,8 +638,9 @@ private fun MiniCallContent(
     dragHandle: Modifier,
     onExpand: () -> Unit,
     running: Boolean,
+    compressionState: VoiceCallCompressionState,
 ) {
-    val latestExpand by rememberUpdatedState(onExpand)
+    val latestExpand by rememberUpdatedState(hapticClick(enabled, onExpand))
     Row(Modifier.fillMaxSize().padding(start = 13.dp, end = 9.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.weight(1f).fillMaxHeight().then(dragHandle)
@@ -635,11 +650,13 @@ private fun MiniCallContent(
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
             CallWave(state.orbState(), Modifier.size(37.dp), compact = true, running = running)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(state.statusLabel(), color = Color(0xFF675477), fontSize = 12.sp, fontWeight = FontWeight(550), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(state.statusLabel(compressionState.dots), color = Color(0xFF675477), fontSize = 12.sp, fontWeight = FontWeight(550), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Box(Modifier.size(4.dp).background(Color(0xFFAE95CA), RoundedCornerShape(2.dp)))
                     Text(clock, Modifier.testTag("doubao-call-clock"), color = Color(0xFFB0A2BD), fontSize = 10.sp)
-                    Text(state.title, color = Color(0xFFB0A2BD), fontSize = 10.sp, maxLines = 1,
+                    if (state.compressing || state.searching || compressionState.success)
+                        VoiceCallCompressionIndicator(state.compressing || state.searching, state.compressionCompletion, running, compressionState)
+                    else Text(state.title, color = Color(0xFFB0A2BD), fontSize = 10.sp, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
                 }
             }

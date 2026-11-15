@@ -45,10 +45,10 @@ internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion:
         state.check.snapTo(0f)
         val compressed = completion != null && completion != consumed
         val searched = searchCompletion != null && searchCompletion != consumedSearch
-        consumed = completion
-        consumedSearch = searchCompletion
         state.searching = !compressing && (searching || searched && !compressed)
         if (!busy && (compressed || searched)) {
+            consumed = completion
+            consumedSearch = searchCompletion
             state.success = true
             state.check.animateTo(1f, tween(280))
             delay(2_000)

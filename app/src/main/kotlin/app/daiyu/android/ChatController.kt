@@ -2521,7 +2521,29 @@ class ChatController internal constructor(private val application:Application,
         notifyChanged()
         return true
     }
-    internal data class VoiceCallStart(val conversation: Conversation, val modelName: String)
+    private data class VoiceReasoningSource(val binding: ConversationModelBinding?, val effort: ReasoningEffort)
+    private val voiceReasoningSources = java.util.concurrent.ConcurrentHashMap<ConversationId, VoiceReasoningSource>()
+    internal data class VoiceCallReasoning(val owner: ConversationId, val binding: ConversationModelBinding,
+        val requestModel: String, val effort: ReasoningEffort)
+    internal fun voiceCallReasoning(owner: ConversationId): VoiceCallReasoning {
+        require(ConversationDatabase.isTemporaryVoice(owner.value))
+        val binding = checkNotNull(database.modelBinding(owner))
+        val settings = conversationModelEditing(owner).second.settings
+        return VoiceCallReasoning(owner, binding,
+            app.daiyu.android.model.ReasoningRequestPolicy.requestModel(settings.model, settings.requestOptions), reasoningPreference.snapshot(owner.value))
+    }
+    @Synchronized internal fun setVoiceCallReasoning(expected: VoiceCallReasoning, effort: ReasoningEffort): Boolean {
+        if (closed || !ready || !voiceReasoningSources.containsKey(expected.owner) ||
+            database.modelBinding(expected.owner) != expected.binding) return false
+        reasoningPreference.setVoice(expected.owner.value, expected.binding.providerSlotId, expected.binding.localModelIdentity, effort)
+        return true
+    }
+    private fun defaultVoiceReasoning(owner: ConversationId, binding: ConversationModelBinding): ReasoningEffort =
+        reasoningPreference.rememberedVoiceModel(binding.providerSlotId, binding.localModelIdentity)
+            ?: voiceReasoningSources[owner]?.takeIf { it.binding == binding }?.effort
+            ?: reasoningPreference.rememberedModel(binding.providerSlotId, binding.localModelIdentity)
+
+    internal data class VoiceCallStart(val conversation: Conversation, val modelName: String, val needsModelSelection: Boolean = false)
     internal fun createVoiceCall(source: ConversationId?, complete: (VoiceCallStart?) -> Unit) {
         val admitted = synchronized(this) { idleAvailable() }
         if (!admitted) { complete(null); return }
@@ -2531,9 +2553,14 @@ class ChatController internal constructor(private val application:Application,
                 val temporary = database.create(source?.let(database::assistantId) ?: assistantStore.selectedId.value,
                     modelSource = source, temporaryVoice = true)
                 try {
-                    reasoningPreference.set(temporary.id.value, inheritedReasoning)
-                    VoiceCallStart(temporary, freezeConversationProvider(temporary.id).settings.model)
+                    voiceReasoningSources[temporary.id] = VoiceReasoningSource(database.modelBinding(source), inheritedReasoning)
+                    val binding = database.modelBinding(temporary.id)
+                    if (binding == null) reasoningPreference.set(temporary.id.value, inheritedReasoning)
+                    else reasoningPreference.set(temporary.id.value, defaultVoiceReasoning(temporary.id, binding))
+                    val model = runCatching { freezeConversationProvider(temporary.id).settings.model }.getOrNull()
+                    VoiceCallStart(temporary, model ?: "模型", needsModelSelection = model == null)
                 } catch (failure: Exception) {
+                    voiceReasoningSources.remove(temporary.id)
                     reasoningPreference.forget(temporary.id.value)
                     database.delete(temporary.id)
                     throw failure
@@ -2544,6 +2571,7 @@ class ChatController internal constructor(private val application:Application,
     }
     internal fun discardVoiceCall(owner: ConversationId) {
         require(ConversationDatabase.isTemporaryVoice(owner.value))
+        voiceReasoningSources.remove(owner)
         val attempt = object : Runnable {
             private var failures = 0
             override fun run() {
@@ -5332,12 +5360,16 @@ class ChatController internal constructor(private val application:Application,
     private fun switchChatReasoningModel(previousProvider: String?, previousModel: String?,
         nextProvider: String, nextModel: String, owner: String? = preferences.getString("selected", null), changeModel: () -> Unit) {
         if (previousProvider == nextProvider && previousModel == nextModel) { changeModel(); return }
-        val next = reasoningPreference.rememberedModel(nextProvider, nextModel)
+        val voiceOwner = owner?.takeIf(ConversationDatabase::isTemporaryVoice)?.let(::ConversationId)
+        val next = if (voiceOwner != null) defaultVoiceReasoning(voiceOwner, ConversationModelBinding(nextProvider, nextModel))
+            else reasoningPreference.rememberedModel(nextProvider, nextModel)
         val previous = if (previousProvider != null && previousModel != null) reasoningPreference.snapshot(owner) else null
         changeModel()
         reasoningPreference.set(owner, next)
-        if (previousProvider != null && previousModel != null && previous != null)
-            reasoningPreference.rememberModel(previousProvider, previousModel, previous)
+        if (previousProvider != null && previousModel != null && previous != null) {
+            if (voiceOwner != null) reasoningPreference.rememberVoiceModel(previousProvider, previousModel, previous)
+            else reasoningPreference.rememberModel(previousProvider, previousModel, previous)
+        }
     }
 
     internal fun selectProviderCatalogModel(editor: ProviderEditorSlot, expected: ModelSettings,

@@ -16,6 +16,20 @@ SPEC.loader.exec_module(recorder)
 
 
 class RecordToolTestsScopeTest(unittest.TestCase):
+    def test_workspace_gesture_scope_is_exact_and_keeps_full_fallback(self):
+        target = "app.daiyu.android.ConversationWorkspaceActivityTest"
+        command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))
+        self.assertEqual("workspace-gesture-targeted", scope)
+        self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.WORKSPACE_GESTURE_MODULES, "-v"], command)
+        self.assertEqual(("test_workspace_picker_contract", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+                          "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope"),
+                         recorder.WORKSPACE_GESTURE_MODULES)
+        for invalid in ("", target + ",", " " + target, target + " ", target + "," + target,
+                        target + ",app.daiyu.android.OtherTest"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=invalid))[1])
+        for mode in ("", "compile", "candidate", "daily", "release"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=target))[1])
+
     def test_workflow_node_motion_scope_is_exact_and_retains_full_fallback(self):
         classes = recorder.WORKFLOW_NODE_MOTION_PLATFORM_CLASSES
         self.assertEqual(classes, (

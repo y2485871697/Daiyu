@@ -612,7 +612,16 @@ WORKFLOW_NODE_MOTION_MODULES = (
 )
 
 
+WORKSPACE_GESTURE_PLATFORM_CLASS = "app.daiyu.android.ConversationWorkspaceActivityTest"
+WORKSPACE_GESTURE_MODULES = (
+    "test_workspace_picker_contract", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == WORKSPACE_GESTURE_PLATFORM_CLASS:
+        return [python, "-B", "-m", "unittest", *WORKSPACE_GESTURE_MODULES, "-v"], "workspace-gesture-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_NODE_MOTION_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *WORKFLOW_NODE_MOTION_MODULES, "-v"], "workflow-node-motion-targeted"

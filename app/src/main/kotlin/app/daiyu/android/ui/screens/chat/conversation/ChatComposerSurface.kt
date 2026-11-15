@@ -57,12 +57,16 @@ internal fun ChatComposerSurface(backdrop: LayerBackdrop? = null, content: @Comp
 
 /** Shares the editor gesture without making voice or attachment controls descendants. */
 @Composable
-internal fun ComposerWorkspacePullUpArea(pointers: WorkspacePullUpPointers, onOpenWorkspace: () -> Unit) {
+internal fun ComposerWorkspacePullUpArea(
+    pointers: WorkspacePullUpPointers,
+    gestureEnabled: Boolean = true,
+    onOpenWorkspace: () -> Unit,
+) {
     Box(Modifier.fillMaxWidth().height(12.dp).testTag("chat-workspace-gesture-area")
         .semantics {
             contentDescription = "会话工作区"
             onClick(label = "打开会话工作区") { onOpenWorkspace(); true }
-        }.workspacePullUpGesture(pointers, onOpenWorkspace))
+        }.workspacePullUpGesture(pointers, gestureEnabled, onOpenWorkspace))
 }
 
 /** A passive ancestor sees pointers split across the strip, editor and controls. */
@@ -85,9 +89,14 @@ internal fun Modifier.observeWorkspacePointers(pointers: WorkspacePullUpPointers
 }
 
 @Composable
-internal fun Modifier.workspacePullUpGesture(pointers: WorkspacePullUpPointers, onOpenWorkspace: () -> Unit): Modifier {
+internal fun Modifier.workspacePullUpGesture(
+    pointers: WorkspacePullUpPointers,
+    enabled: Boolean = true,
+    onOpenWorkspace: () -> Unit,
+): Modifier {
     val latestOpenWorkspace by rememberUpdatedState(onOpenWorkspace)
-    return pointerInput(pointers) {
+    return pointerInput(pointers, enabled) {
+        if (!enabled) return@pointerInput
         val threshold = max(48.dp.toPx(), viewConfiguration.touchSlop * 3f)
         awaitEachGesture {
             // TextField consumes taps in Main; observe Initial without stealing its down.

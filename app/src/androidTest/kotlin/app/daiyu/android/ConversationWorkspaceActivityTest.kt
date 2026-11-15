@@ -36,13 +36,13 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     private var busy by mutableStateOf(false)
     private var path by mutableStateOf("/private/workspace")
 
-    private var composerDraft by mutableStateOf("可选择的正文\n第二行\n第三行\n第四行\n第五行\n第六行\n第七行")
+    private var composerDraft by mutableStateOf("")
     private var editorGeneration by mutableStateOf(0L)
 
     fun testRealChatTopStripOpensTheActualSheetWithoutSavingOrSending() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
         awaitHostWindowFocus(activity)
-        setDraft("真实输入栏上滑保留的草稿")
+        setDraft("")
         dismissIme()
         node("chat-workspace-gesture-area").performTouchInput {
             swipe(center, center + Offset(0f, -px(80)))
@@ -53,7 +53,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("workspace-close").assertDoesNotExist()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitHostWindowFocus(activity)
-        assertDraft("真实输入栏上滑保留的草稿")
+        assertDraft("")
         assertNull(fixture.database.workspaceBinding(null))
         assertEquals(0, fixture.opens.get())
     }
@@ -61,7 +61,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     fun testRealChatFocusedEditorOpensActualSheetAndHidesIme() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
         awaitHostWindowFocus(activity)
-        setDraft("真实正文手势")
+        setDraft("")
         node("chat-draft").performTouchInput { click() }
         awaitImeFrame(node("chat-draft"), true)
         node("chat-draft").performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
@@ -91,17 +91,17 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("workspace-close").assertDoesNotExist()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitHostWindowFocus(activity)
-        assertDraft("真实正文手势")
+        assertDraft("")
         assertNull(fixture.database.workspaceBinding(null))
         assertEquals(0, fixture.opens.get())
     }
 
-    private fun showComposer() {
+    private fun showComposer(selectionStart: Int = composerDraft.length) {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ChatMenuLayer(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
-                        ChatComposer(ComposerUi(text = composerDraft, editorGeneration = editorGeneration),
+                        ChatComposer(ComposerUi(text = composerDraft, selectionStart = selectionStart, selectionEnd = selectionStart, editorGeneration = editorGeneration),
                             ChatScreenActions(onTextChange = { composerDraft = it }, onOpenWorkspace = { opens++ }, onVoiceLongPress = { voiceLongPresses++; true }))
                     }
                 }
@@ -177,22 +177,97 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(0, opens) }
     }
 
-    fun testEmptyAndShortEditorUpwardDragAndGenerationCancellation() {
+    fun testEmptyEditorUpwardDragAndGenerationCancellation() {
         showComposer()
-        for (value in listOf("", "短草稿")) {
-            ui.runOnIdle { composerDraft = value }
-            node("chat-draft").performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
-        }
-        ui.runOnIdle { assertEquals(2, opens) }
+        node("chat-draft").performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
+        ui.runOnIdle { assertEquals(1, opens) }
         node("chat-workspace-gesture-area").performTouchInput { down(center); moveBy(Offset(0f, -px(80))) }
         ui.runOnIdle { editorGeneration++ }
         node("chat-workspace-gesture-area").performTouchInput { up() }
-        ui.runOnIdle { assertEquals(2, opens) }
+        ui.runOnIdle { assertEquals(1, opens) }
         node("chat-draft").performTouchInput {
             down(0, center); down(1, center + Offset(px(12), 0f))
             moveTo(0, center + Offset(0f, -px(80))); up(0); up(1)
         }
+        ui.runOnIdle { assertEquals(1, opens) }
+    }
+
+    fun testAnyNonEmptyDraftDisablesBothSwipesAndClearingRestoresThem() {
+        showComposer()
+        for (draft in listOf("短草稿", " ", "\n", (1..20).joinToString("\n") { "第${it}行正文" })) {
+            ui.runOnIdle { composerDraft = draft }
+            for (tag in listOf("chat-workspace-gesture-area", "chat-draft")) {
+                node(tag).performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
+                ui.runOnIdle { assertEquals(0, opens); assertEquals(draft, composerDraft) }
+            }
+        }
+        ui.runOnIdle { composerDraft = "" }
+        for (tag in listOf("chat-workspace-gesture-area", "chat-draft")) {
+            node(tag).performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
+        }
         ui.runOnIdle { assertEquals(2, opens) }
+    }
+
+    fun testDraftBecomingNonEmptyCancelsAnAlreadyStartedSwipe() {
+        showComposer()
+        for (tag in listOf("chat-workspace-gesture-area", "chat-draft")) {
+            ui.runOnIdle { composerDraft = "" }
+            node(tag).performTouchInput { down(center); moveBy(Offset(0f, -px(64))) }
+            ui.runOnIdle { composerDraft = "手势中新增的草稿" }
+            node(tag).performTouchInput { up() }
+            ui.runOnIdle { assertEquals(0, opens) }
+        }
+        ui.runOnIdle { composerDraft = "" }
+        node("chat-draft").performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
+        ui.runOnIdle { assertEquals(1, opens) }
+    }
+
+    fun testLongDraftScrollsInsideEditorWithoutOpeningWorkspace() {
+        composerDraft = (1..30).joinToString("\n") { "第${it}行正文滚动内容" }
+        val draft = composerDraft
+        showComposer(selectionStart = 0)
+        val field = node("chat-draft")
+        dismissIme()
+        awaitImeFrame(field, false)
+        awaitVisualIdle()
+        field.assertIsNotFocused()
+        val bounds = field.fetchSemanticsNode().boundsInRoot
+        val before = captureScreenNode(field).toPixelMap()
+        field.performTouchInput {
+            swipe(Offset(centerX, height * .8f), Offset(centerX, height * .2f), 350)
+        }
+        awaitVisualIdle()
+        field.assertIsNotFocused()
+        awaitImeFrame(field, false)
+        assertEquals(bounds, field.fetchSemanticsNode().boundsInRoot)
+        val after = captureScreenNode(field).toPixelMap()
+        assertEquals(before.width, after.width)
+        assertEquals(before.height, after.height)
+        var changed = 0
+        for (y in 0 until before.height) for (x in 0 until before.width) {
+            if (before[x, y] != after[x, y]) changed++
+        }
+        assertTrue("Multiline text must scroll inside the editor", changed > before.width)
+        ui.runOnIdle { assertEquals(0, opens); assertEquals(draft, composerDraft) }
+    }
+
+    fun testRealNonEmptyDraftKeepsExplicitWorkspaceEntryAvailable() {
+        awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
+        awaitHostWindowFocus(activity)
+        val draft = "显式入口保留草稿"
+        setDraft(draft)
+        dismissIme()
+        node("chat-workspace-gesture-area").performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
+        node("conversation-workspace-sheet").assertDoesNotExist()
+        ui.onNodeWithContentDescription("更多").performClick()
+        node("chat-menu:OPEN_WORKSPACE").scrollToVisible().performClick()
+        awaitUniqueTag("conversation-workspace-sheet")
+        node("workspace-path-card:0").assertExists()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitHostWindowFocus(activity)
+        assertDraft(draft)
+        assertNull(fixture.database.workspaceBinding(null))
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testPointersSplitBetweenStripAndEditorNeverOpenWorkspace() {

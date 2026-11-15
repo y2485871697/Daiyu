@@ -12,14 +12,20 @@ class WorkspacePickerContract(unittest.TestCase):
     def test_body_and_strip_share_initial_pass_gesture(self):
         composer = self.text('ui/screens/chat/conversation/ChatComposer.kt')
         surface = self.text('ui/screens/chat/conversation/ChatComposerSurface.kt')
-        self.assertIn('testTag("chat-draft").workspacePullUpGesture(workspacePointers, openWorkspace)', composer)
-        self.assertIn('key(state.editorGeneration) { ComposerWorkspacePullUpArea(workspacePointers, openWorkspace) }', composer)
+        self.assertIn('testTag("chat-draft").workspacePullUpGesture(workspacePointers, workspaceGestureEnabled, openWorkspace)', composer)
+        self.assertIn('key(state.editorGeneration) { ComposerWorkspacePullUpArea(workspacePointers, workspaceGestureEnabled, openWorkspace) }', composer)
         self.assertIn('requireUnconsumed = true, pass = PointerEventPass.Initial', surface)
         self.assertIn('awaitPointerEvent(PointerEventPass.Initial)', surface)
         self.assertNotIn('down.consume()', surface)
         self.assertIn('event.changes.any { it.isConsumed }', surface)
         self.assertIn('PointerEventType.Release && !change.pressed && change.previousPressed', surface)
         self.assertIn('longPressTimeoutMillis', surface)
+        self.assertIn('val workspaceGestureEnabled = state.text.isEmpty()', composer)
+        self.assertIn('pointerInput(pointers, enabled)', surface)
+        self.assertIn('if (!enabled) return@pointerInput', surface)
+        self.assertLess(surface.index('if (!enabled) return@pointerInput'), surface.index('awaitEachGesture {'))
+        self.assertIn('workspacePullUpGesture(pointers, gestureEnabled, onOpenWorkspace)', surface)
+        self.assertIn('onClick(label = "打开会话工作区") { onOpenWorkspace(); true }', surface)
 
     def test_first_page_is_card_not_inline_editor(self):
         sheet = self.text('ui/components/ConversationWorkspaceSheet.kt')

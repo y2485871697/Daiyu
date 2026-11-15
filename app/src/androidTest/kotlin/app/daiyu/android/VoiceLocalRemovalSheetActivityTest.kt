@@ -43,6 +43,7 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
         } }
         awaitUniqueTag("delete-confirm-dialog")
         awaitNodeWindowFocus(node("delete-confirm-dialog"))
+        awaitNodeTouchReady(node("delete-confirm-dialog"))
         ui.waitForIdle()
     }
 
@@ -67,7 +68,7 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
                 .fetchSemanticsNode().boundsInRoot
             assertEquals(cancel.width, confirm.width, 1f)
-            assertEquals(cancel.height, confirm.height, 1f)
+            assertEquals("equal heights: dark=$dark fontScale=$fontScale cancel=$cancel confirm=$confirm", cancel.height, confirm.height, 1f)
             assertTrue(cancel.right < confirm.left)
             val title = ui.onNodeWithText("移除这个音色？").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             assertEquals("title is centered on the glass card", sheet.center.x, title.center.x, 1f)
@@ -88,7 +89,7 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
     fun testRemovalUsesSoftRedInBothThemes() {
         for (dark in listOf(false, true)) {
             mount(dark)
-            val pixels = node("dialog-confirm").captureToImage().toPixelMap()
+            val pixels = captureScreenNode(node("dialog-confirm")).toPixelMap()
             val fill = pixels[(12f * density).toInt(), pixels.height / 2]
             assertEquals(expectedPrimary.red, fill.red, .025f)
             assertEquals(expectedPrimary.green, fill.green, .025f)

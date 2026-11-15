@@ -16,6 +16,8 @@ class DeleteConfirmDialogContractTest(unittest.TestCase):
                       "radius = 30f, saturation = 1.45f", "scrimBlurRadius = 3f",
                       "LocalAppearanceDark.current", "fontSize = 20.sp", "TextAlign.Center",
                       "0xFFBB5358", "0xFFCB6B70", "Color.White", "heightIn(min = 48.dp)",
+                      "height(IntrinsicSize.Min)", 'fillMaxHeight().testTag("dialog-cancel")',
+                      'fillMaxHeight().testTag("dialog-confirm")',
                       'testTag("delete-confirm-title")', 'testTag("dialog-cancel")', 'testTag("dialog-confirm")'):
             self.assertIn(token, card)
         for token in ("message:", "Text(message", "ChatSelectionSheet", "WindowDialog", "bottomSheet = true", "DaiyuIcons.Close"):

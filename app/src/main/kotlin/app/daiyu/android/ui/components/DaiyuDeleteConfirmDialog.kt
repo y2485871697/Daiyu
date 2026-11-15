@@ -84,13 +84,13 @@ internal fun DaiyuDeleteConfirmDialog(
                 fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().testTag("delete-confirm-title"))
             Spacer(Modifier.height(27.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
                 DeleteConfirmButton(stringResource(R.string.action_cancel), onDismiss, text,
                     Color.White.copy(alpha = if (dark) .065f else .48f),
-                    Modifier.weight(1f).testTag("dialog-cancel").then(cancelModifier), enabled = cancelEnabled,
+                    Modifier.weight(1f).fillMaxHeight().testTag("dialog-cancel").then(cancelModifier), enabled = cancelEnabled,
                     border = Color(if (dark) 0x0AFFFFFF else 0x10293F30))
                 DeleteConfirmButton(confirmText, onConfirm, Color.White, red,
-                    Modifier.weight(1f).testTag("dialog-confirm").then(confirmModifier), enabled = confirmEnabled)
+                    Modifier.weight(1f).fillMaxHeight().testTag("dialog-confirm").then(confirmModifier), enabled = confirmEnabled)
             }
         }
     }

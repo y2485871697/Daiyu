@@ -3,7 +3,9 @@ package app.daiyu.android.ui.components
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Rect
 import android.graphics.RectF
+import android.os.Build
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -33,6 +35,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import kotlin.math.hypot
@@ -321,6 +324,53 @@ private class InputWindow(private val window: Window) {
         }
     }
     private val originalImeState = window.attributes.softInputMode and LayoutParams.SOFT_INPUT_MASK_STATE
+    private var managedImeState = LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+    private var ownsImeState = true
+    private var awaitingVisibleIme = false
+    private var visibleImeFrame: Rect? = null
+    private var visibleImeRotation = -1
+    private val legacyImeTree = if (Build.VERSION.SDK_INT < 30) decor?.viewTreeObserver else null
+    private val legacyImeLayout = ViewTreeObserver.OnGlobalLayoutListener { rememberLegacyImeState() }
+    private val resumeImeObservation = Runnable {
+        awaitingVisibleIme = false
+        rememberLegacyImeState()
+    }
+
+    private fun rememberLegacyImeState() {
+        val root = decor ?: return
+        if (!root.hasWindowFocus() || root.windowVisibility != View.VISIBLE) return
+        val owner = entries.firstOrNull()?.view?.findViewTreeLifecycleOwner()
+            ?: (window.context.inputActivity() as? LifecycleOwner) ?: return
+        if (owner.lifecycle.currentState != Lifecycle.State.RESUMED) return
+        val insets = ViewCompat.getRootWindowInsets(root) ?: return
+        val focused = entries.any { it.focused() }
+        val visible = if (!focused) false else if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
+            if (window.isFloating) {
+                visibleImeFrame = Rect().also { root.getWindowVisibleDisplayFrame(it) }
+                visibleImeRotation = root.display?.rotation ?: -1
+            }
+            true
+        } else if (!window.isFloating) false else {
+            val shown = visibleImeFrame ?: return
+            val frame = Rect().also { root.getWindowVisibleDisplayFrame(it) }
+            if (root.display?.rotation != visibleImeRotation || frame.left != shown.left ||
+                frame.right != shown.right || frame.top != shown.top || frame.bottom <= shown.bottom) return
+            false
+        }
+        if (focused && awaitingVisibleIme && !visible) return
+        awaitingVisibleIme = false
+        val state = if (focused && visible) LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+            else LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+        val mode = window.attributes.softInputMode
+        if (!ownsImeState) return
+        if ((mode and LayoutParams.SOFT_INPUT_MASK_STATE) != managedImeState) {
+            ownsImeState = false
+            return
+        }
+        if (state == managedImeState) return
+        managedImeState = state
+        window.setSoftInputMode((mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()) or state)
+    }
     private val original = window.callback
     private var candidate: InputEntry? = null
     private var nativeFocus: View? = null
@@ -330,6 +380,14 @@ private class InputWindow(private val window: Window) {
     private var tap = false
     private val slop = ViewConfiguration.get(window.context).scaledTouchSlop
     private val callback = object : Window.Callback by original {
+        override fun onWindowFocusChanged(hasFocus: Boolean) {
+            if (legacyImeTree != null) {
+                decor?.removeCallbacks(resumeImeObservation)
+                awaitingVisibleIme = hasFocus && managedImeState == LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                if (hasFocus) decor?.post(resumeImeObservation)
+            }
+            original.onWindowFocusChanged(hasFocus)
+        }
         override fun dispatchTouchEvent(event: MotionEvent): Boolean {
             val outside = entries.none { it.bounds()?.contains(event.rawX, event.rawY) == true }
             when (event.actionMasked) {
@@ -370,6 +428,7 @@ private class InputWindow(private val window: Window) {
                 LayoutParams.SOFT_INPUT_STATE_UNCHANGED)
         }
         window.callback = callback
+        legacyImeTree?.addOnGlobalLayoutListener(legacyImeLayout)
     }
     private fun dismiss(entry: InputEntry) {
         if (!entry.focused() || entry !in entries) return
@@ -413,8 +472,10 @@ private class InputWindow(private val window: Window) {
         if (candidate === entry) candidate = null
         if (entries.isEmpty()) {
             val mode = window.attributes.softInputMode
-            if (originalImeState != LayoutParams.SOFT_INPUT_STATE_UNCHANGED &&
-                (mode and LayoutParams.SOFT_INPUT_MASK_STATE) == LayoutParams.SOFT_INPUT_STATE_UNCHANGED) {
+            decor?.removeCallbacks(resumeImeObservation)
+            legacyImeTree?.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(legacyImeLayout)
+            if (ownsImeState && originalImeState != managedImeState &&
+                (mode and LayoutParams.SOFT_INPUT_MASK_STATE) == managedImeState) {
                 val restored = (mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()) or originalImeState
                 window.setSoftInputMode(restored)
                 // setSoftInputMode(0) restores defaults but leaves the previous attributes value.

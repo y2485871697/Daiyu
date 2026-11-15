@@ -384,6 +384,27 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             assertEquals(1, selection.end)
             @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
             val view = (before.root as androidx.compose.ui.platform.ViewRootForTest).view
+            if (android.os.Build.VERSION.SDK_INT < 30) {
+                val expected = if (hiddenBeforeHome)
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+                else android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                mainThread {
+                    val root = view.rootView
+                    val frame = android.graphics.Rect().also { root.getWindowVisibleDisplayFrame(it) }
+                    val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+                    val params = root.layoutParams as? android.view.WindowManager.LayoutParams
+                    android.util.Log.i("DaiyuImePolicy", "tag=$tag hidden=$hiddenBeforeHome " +
+                        "mode=${params?.softInputMode} frame=$frame size=${root.width}x${root.height} " +
+                        "ime=${insets?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())} " +
+                        "stable=${insets?.getInsetsIgnoringVisibility(androidx.core.view.WindowInsetsCompat.Type.systemBars())} " +
+                        "system=${insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())}")
+                }
+                awaitControl("legacy window records actual IME state before HOME") {
+                    val params = view.rootView.layoutParams as? android.view.WindowManager.LayoutParams
+                    params != null && (params.softInputMode and
+                        android.view.WindowManager.LayoutParams.SOFT_INPUT_MASK_STATE) == expected
+                }
+            }
             val token = view.windowToken
             val stopped = java.util.concurrent.CountDownLatch(1)
             val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->

@@ -86,8 +86,24 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertNotIn('SOFT_INPUT_STATE_ALWAYS_HIDDEN', text)
         self.assertNotIn('SOFT_INPUT_STATE_VISIBLE', text)
         self.assertNotIn('OnPreDrawListener', text)
+        self.assertIn('Build.VERSION.SDK_INT < 30', text)
+        self.assertIn('OnGlobalLayoutListener { rememberLegacyImeState() }', text)
+        policy = text.split('private fun rememberLegacyImeState()', 1)[1].split('private val original =', 1)[0]
+        for token in ('!root.hasWindowFocus()', 'Lifecycle.State.RESUMED',
+                      'insets.isVisible(WindowInsetsCompat.Type.ime())', 'entries.any { it.focused() }',
+                      'visibleImeFrame ?: return', 'frame.bottom <= shown.bottom',
+                      'focused && awaitingVisibleIme && !visible', 'SOFT_INPUT_STATE_ALWAYS_VISIBLE',
+                      '!= managedImeState', 'ownsImeState = false', 'if (!ownsImeState) return',
+                      'mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()'):
+            self.assertIn(token, policy)
+        for token in ('showSoftInput', 'hideSoftInput', 'requestFocus', 'postOnAnimation', 'Thread.sleep'):
+            self.assertNotIn(token, policy)
         remove = text.split('    fun remove(entry:', 1)[1]
-        self.assertIn('== LayoutParams.SOFT_INPUT_STATE_UNCHANGED', remove)
+        self.assertIn('== managedImeState', remove)
+        self.assertIn('originalImeState != managedImeState', remove)
+        self.assertIn('removeOnGlobalLayoutListener(legacyImeLayout)', remove)
+        self.assertIn('removeCallbacks(resumeImeObservation)', remove)
+        self.assertIn('decor?.post(resumeImeObservation)', text)
         self.assertIn('or originalImeState', remove)
         self.assertIn('if (restored == 0) window.attributes = window.attributes.apply { softInputMode = restored }', remove)
 

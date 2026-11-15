@@ -103,7 +103,7 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_short_growth_does_not_use_partial_height_as_an_internal_follow_target(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        measure = viewport.split("onViewportMeasure?.invoke()", 1)[1].split("layout(body.width, height)", 1)[0]
+        measure = viewport.split("onViewportMeasure?.invoke()", 1)[1].split("layout(body.width, height,", 1)[0]
         self.assertEqual(1, measure.count("viewportHeight()"))
         self.assertIn("val currentViewportHeight = viewportHeight().coerceAtLeast(1)", measure)
         self.assertIn("minOf(body.height, currentViewportHeight)", measure)

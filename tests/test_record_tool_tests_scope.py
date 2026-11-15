@@ -354,6 +354,12 @@ class ChildStopScopeTest(unittest.TestCase):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
 
 
+    def test_child_stop_smoke_has_own_concurrency_without_cancelling_other_scopes(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        concurrency = workflow.split("concurrency:\n", 1)[1].split("jobs:\n", 1)[0]
+        self.assertIn("inputs.smoke_classes == 'app.daiyu.android.ChildStopChoiceActivityTest,app.daiyu.android.ControllerChildRetentionTest' && '-child-stop'", concurrency)
+        self.assertIn("cancel-in-progress: false", concurrency)
+
     def test_stop_selector_reads_only_exact_requested_files_and_keeps_empty_shards(self):
         from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
         helper = SpeechPlatformDiscoveryTest()

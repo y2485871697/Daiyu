@@ -411,7 +411,23 @@ PROVIDER_CATALOG_MODULES = (
 )
 
 
+SEARCH_PLATFORM_CLASSES = (
+    "app.daiyu.android.SearchHistoryDialogTest",
+    "app.daiyu.android.SearchHostActivityTest",
+    "app.daiyu.android.RetainedSearchDataTest",
+    "app.daiyu.android.SearchSQLiteCancellationTest",
+)
+SEARCH_MODULES = (
+    "test_search_history_sheet_contract", "test_search_host_start_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SEARCH_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *SEARCH_MODULES, "-v"], "search-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PROVIDER_CATALOG_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PROVIDER_CATALOG_MODULES, "-v"], "provider-catalog-targeted"

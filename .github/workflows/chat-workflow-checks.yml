@@ -118,7 +118,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'legacy-restore':
               patterns = ('test_message_display_contract.py',)
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'search-history':
-              patterns = ('test_search_history_sheet_contract.py', 'test_search_host_start_contract.py')
+              patterns = ('test_search_history_sheet_contract.py', 'test_search_host_start_contract.py', 'test_record_tool_tests_scope.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               discovered = suite.countTestCases()

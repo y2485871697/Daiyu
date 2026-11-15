@@ -626,3 +626,130 @@ class ChatStatusBarInsetsScopeTest(unittest.TestCase):
                     call.assert_called_once()
             finally:
                 os.chdir(old)
+
+
+class SearchScopeTest(unittest.TestCase):
+    CLASSES = (
+        "app.daiyu.android.SearchHistoryDialogTest", "app.daiyu.android.SearchHostActivityTest",
+        "app.daiyu.android.RetainedSearchDataTest", "app.daiyu.android.SearchSQLiteCancellationTest",
+    )
+    MODULES = (
+        "test_search_history_sheet_contract", "test_search_host_start_contract",
+        "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+        "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+    )
+
+    def test_exact_search_scope_uses_only_reviewed_contracts(self):
+        self.assertEqual(self.CLASSES, recorder.SEARCH_PLATFORM_CLASSES)
+        self.assertEqual(self.MODULES, recorder.SEARCH_MODULES)
+        for classes in itertools.permutations(self.CLASSES):
+            for python in ("python", "python3"):
+                command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(classes)))
+                self.assertEqual("search-targeted", scope)
+                self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+                self.assertNotIn("discover", command)
+
+    def test_inexact_search_scope_and_other_modes_keep_full(self):
+        exact = ",".join(self.CLASSES)
+        invalid = [",".join(group) for size in range(4) for group in itertools.combinations(self.CLASSES, size)]
+        invalid += [exact + "," + name for name in self.CLASSES]
+        invalid += [exact + ",app.daiyu.android.OtherTest", exact + ",", " " + exact, exact + " ", exact.replace(",", ", ", 1)]
+        full = (["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full")
+        for value in invalid:
+            self.assertEqual(full, recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value)))
+        for mode in ("", "compile", "candidate", "daily", "release", "build", "checks"):
+            self.assertEqual(full, recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=exact)))
+
+    def test_receipt_keeps_actual_failure_command_and_identity(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA="c" * 40, GITHUB_RUN_ID="14", GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(self.CLASSES))
+                with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess, "call", return_value=11) as call, patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(11, recorder.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual("search-targeted", receipt["scope"])
+                    self.assertEqual(11, receipt["exit_code"])
+                    self.assertEqual(dict(sha="c" * 40, run_id=14, attempt=1), receipt["identity"])
+                    self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], receipt["command"])
+                    self.assertEqual(receipt["command"], call.call_args.args[0])
+                    self.assertTrue(call.call_args.kwargs["env"]["PYTHONPATH"].startswith(str(Path("tests").resolve())))
+                    call.assert_called_once()
+            finally:
+                os.chdir(old)
+
+
+class SearchInventoryTest(unittest.TestCase):
+    CLASSES = SearchScopeTest.CLASSES
+
+    def fixture(self, root):
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        helper = SpeechPlatformDiscoveryTest()
+        helper.fixture(root)
+        paths = []
+        for i, name in enumerate(self.CLASSES):
+            package, simple = name.rsplit(".", 1)
+            path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("package " + package + "\nclass " + simple + " : TestCase() {\n" + "".join(" fun testCase" + str(n) + "() {}\n" for n in range(i + 1)) + "}\n")
+            paths.append(path)
+        return helper, paths
+
+    def test_exact_inventory_and_four_shards_count_real_methods(self):
+        for classes in (self.CLASSES, tuple(reversed(self.CLASSES))):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper, paths = self.fixture(root)
+                paths[0].write_text(paths[0].read_text().removesuffix("}\n") + " fun testAdded() {}\n}\n")
+                expected = dict(zip(self.CLASSES, (2, 2, 3, 4)))
+                selected = []
+                total = 0
+                for shard in range(4):
+                    result = helper.select(root, shard, classes=",".join(classes))
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                    selection = json.loads((root / "smoke/selection.json").read_text())
+                    self.assertEqual("targeted", inventory["discovery_scope"])
+                    self.assertEqual(expected, inventory["all_classes"])
+                    self.assertEqual(sum(expected[name] for name in selection["selected_classes"]), selection["expected_tests"])
+                    selected.extend(selection["selected_classes"])
+                    total += selection["expected_tests"]
+                self.assertCountEqual(self.CLASSES, selected)
+                self.assertEqual(sum(expected.values()), total)
+
+    def test_non_exact_classes_and_other_modes_do_not_skip_unrelated_ambiguity(self):
+        exact = ",".join(self.CLASSES)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper, _ = self.fixture(root)
+            for value in (",".join(self.CLASSES[:-1]), exact + "," + self.CLASSES[0], exact + ",app.daiyu.android.OtherTest"):
+                result = helper.select(root, classes=value)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            for mode in ("candidate", "daily"):
+                result = helper.select(root, classes=exact, mode=mode)
+                self.assertNotEqual(0, result.returncode)
+
+    def test_missing_zero_method_and_ambiguous_requested_sources_fail_closed(self):
+        for failure in ("missing", "zero", "ambiguous"):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper, paths = self.fixture(root)
+                if failure == "missing":
+                    paths[0].unlink()
+                elif failure == "zero":
+                    paths[0].write_text("package app.daiyu.android\nclass SearchHistoryDialogTest : TestCase() {}\n")
+                else:
+                    paths[0].write_text(paths[0].read_text() + "class ExtraTest : TestCase() {}\n")
+                result = helper.select(root, classes=",".join(self.CLASSES))
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse((root / "smoke/selection.json").exists())
+
+    def test_search_workflow_uses_frozen_selector_and_independent_concurrency(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        canonical = ",".join(self.CLASSES)
+        self.assertIn("inputs.mode == 'smoke' && inputs.smoke_classes == '" + canonical + "' && '-search-history' || ''", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn('test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "' + canonical + '"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi', workflow)
+        self.assertIn('bash "$smoke_script"', workflow)

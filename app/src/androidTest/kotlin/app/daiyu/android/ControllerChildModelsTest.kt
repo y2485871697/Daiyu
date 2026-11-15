@@ -175,7 +175,13 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
             val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
             assertTrue(f.preferences.update(key) { it.copy(profiles = it.profiles + f.profile.copy(id = "added", name = "Added")) }
                 is ConversationSubAgentPreferences.WriteResult.Saved)
-            release.countDown(); finishParent(f)
+            release.countDown()
+            awaitControl("both hot-configured child tasks complete") {
+                f.childOpened.get() == 2 && f.controller.childTasks(f.conversation.id).let { records ->
+                    records.size == 2 && records.all { it.status == ChildTaskStatus.COMPLETED }
+                }
+            }
+            finishParent(f)
             assertEquals(1, f.parentOpened.get()); assertEquals(2, f.childOpened.get())
             assertEquals(setOf("review", "added"), f.controller.childTasks(f.conversation.id).map { it.profileId }.toSet())
         } finally { release.countDown() }

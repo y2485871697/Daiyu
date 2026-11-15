@@ -22,9 +22,9 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         "conversation_reference_read",
         "assistant_memory_read", "assistant_memory_search", "list_subagents", "inspect_child_tasks", "control_child_task", "get_child_task",
         "terminal_exec", "terminal_read") + expectedPlatformActions +
-        listOf("screen", "screen_action", "terminal_job_start", "terminal_job_read")
+        listOf("screen", "screen_action", "launch_app", "terminal_job_start", "terminal_job_read")
     private val expectedSideEffects = setOf(
-        "ask_user", "terminal_exec", "screen_action", "terminal_job_start"
+        "ask_user", "terminal_exec", "screen_action", "launch_app", "terminal_job_start"
     ) + expectedPlatformActions
     private class FixtureApplication(base: Context) : Application() {
         val balances = fixtureProviderBalances()
@@ -302,7 +302,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals(expectedSideEffects,probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
         val usage=probe.definitions.single {it.name=="context_usage"}
         val reply=f.db.messages(c.id).last().second
-        assertTrue(usage.description.contains(c.id.value));assertTrue(usage.description.contains(reply.runId.value))
+        assertTrue(usage.description.contains("省略branch_id"))
+        assertFalse(usage.description.contains(c.id.value));assertFalse(usage.description.contains(reply.runId.value))
         assertFalse(org.json.JSONObject(usage.parameters).getBoolean("additionalProperties"))
     }
     fun testCatalogBatchWaitsForTerminalAndPersistsOrderedReceipts() {
@@ -312,7 +313,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val ready=CountDownLatch(1);val release=CountDownLatch(1)
         probe.firstUsage = ModelEvent.Usage(100, 20, 0)
         probe.batches=listOf(listOf(call("archive","context_archive_page",org.json.JSONObject()
-            .put("archive_id",a.id).put("offset",0).put("limit",2)),
+            .put("offset",0).put("limit",2)),
             call("usage","context_usage",org.json.JSONObject().put("branch_id",a.conversation.id.value))))
         probe.beforeReturn={ready.countDown();check(release.await(10,TimeUnit.SECONDS))}
         try {
@@ -340,7 +341,9 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals(RunStatus.COMPLETED,reply.status)
         assertEquals(outputs.map {it.output},reply.blocks.filterIsInstance<MessageBlock.Tool>().map {it.result})
         assertEquals(prior,probe.history.dropLast(1))
-        assertTrue(probe.definitions.single {it.name=="context_archive_page"}.description.contains(a.id))
+        val archiveDefinition = probe.definitions.single {it.name=="context_archive_page"}
+        assertTrue(archiveDefinition.description.contains("省略archive_id"))
+        assertFalse(archiveDefinition.description.contains(a.id))
         val entries=ledger(f);assertEquals(2,entries.size)
         assertTrue(entries.all {it.state==app.daiyu.android.domain.tools.LedgerState.CONFIRMED && !it.isError &&
             it.sessionId==reply.runId.value && it.taskId==reply.runId.value})

@@ -9,7 +9,7 @@ class PopupPerformanceContract(unittest.TestCase):
     def test_request_is_host_gated_and_does_not_masquerade_as_window_registration(self):
         activity = (APP / 'MainActivity.kt').read_text()
         assistant = activity.split('private fun openAssistantPicker(', 1)[1].split('private fun selectCurrentConversationAssistant(', 1)[0]
-        model = activity.split('private fun openChatModels()', 1)[1].split('private fun dismissChatModels()', 1)[0]
+        model = activity.split('private fun openChatModels(', 1)[1].split('private fun dismissChatModels()', 1)[0]
         self.assertLess(assistant.index('requestPopup('), assistant.index('assistantPicker=true'))
         self.assertLess(model.index('requestPopup('), model.index('dismissChatModels()'))
         self.assertIn('Type.ASSISTANT_PICKER', assistant)

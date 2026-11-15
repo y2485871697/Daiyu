@@ -126,6 +126,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         if (!admitted(session)) return
         val input = Input(VoiceControlTurn(session.permit, ++session.nextTurn))
         session.input = input
+        publish(session, if (session.answer == null) VoiceControlPhase.CONNECTING else null)
+        if (session.input !== input || !admitted(session)) return
         try {
             val source = ports.recognize(input.turn, object : VoiceControlPorts.RecognitionEvents {
                 override fun listening() = post { if (current(session) && session.input === input) publish(session) }

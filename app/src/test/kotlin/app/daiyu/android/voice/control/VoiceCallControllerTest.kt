@@ -1,5 +1,9 @@
 package app.daiyu.android.voice.control
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -23,6 +27,7 @@ class VoiceCallControllerTest {
         }
         data class Send(val turn: VoiceControlTurn, val text: String, val result: (VoiceControlReceipt) -> Unit)
         val sends = mutableListOf<Send>()
+        var throwRecognition = false
         var throwSubmit = false
         var ready = true
         override fun submissionReady() = ready
@@ -55,6 +60,7 @@ class VoiceCallControllerTest {
         override fun requestMicrophonePermission(permit: VoiceControlPermit) { permissions += permit }
         override fun recognize(turn: VoiceControlTurn, events: VoiceControlPorts.RecognitionEvents): VoiceControlRecognition {
             check(admissionValue == VoiceAdmission.READY)
+            check(!throwRecognition) { "private-recognition-error" }
             recognitions += events
             return Input().also { inputs += it }
         }
@@ -81,6 +87,73 @@ class VoiceCallControllerTest {
     }
 
 
+    @Test fun synchronousStopFromConnectingObserverDoesNotOpenRecognition() = runBlocking {
+        val f = Fake(); val c = VoiceCallController(f)
+        val observer = launch(Dispatchers.Unconfined) {
+            c.state.collect { value ->
+                if (value.phase == VoiceControlPhase.CONNECTING) c.stop(checkNotNull(value.permitId))
+            }
+        }
+        try {
+            val permit = c.start(profile)
+            assertEquals(VoiceControlPhase.STOPPED, c.state.value.phase)
+            assertEquals(VoiceControlStopReason.USER, c.state.value.reason)
+            assertEquals(permit, c.state.value.permitId)
+            assertTrue(f.recognitions.isEmpty()); assertTrue(f.inputs.isEmpty()); assertTrue(f.timers.isEmpty())
+            assertEquals(listOf(permit), f.revoked.map { it.id })
+        } finally { observer.cancel() }
+    }
+
+    @Test fun startPublishesConnectingBeforeAsynchronousListening() {
+        val f = Fake(); val c = VoiceCallController(f)
+        val permit = c.start(profile)
+        assertNotNull(permit)
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        assertTrue(c.state.value.active)
+        assertEquals(permit, c.state.value.permitId)
+        assertEquals(1, f.inputs.size)
+        assertTrue(f.queue.isEmpty())
+        f.recognitions.single().listening()
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        f.flush()
+        assertEquals(VoiceControlPhase.LISTENING, c.state.value.phase)
+        assertEquals(permit, c.state.value.permitId)
+    }
+    @Test fun restartReplacesStoppedPermitBeforeListeningAndRejectsOldCallbacks() {
+        val f = Fake(); val c = VoiceCallController(f)
+        val first = checkNotNull(c.start(profile))
+        val old = f.recognitions.single()
+        c.stop(first)
+        assertEquals(VoiceControlPhase.STOPPED, c.state.value.phase)
+        val second = c.start(profile)
+        assertNotNull(second); assertNotEquals(first, second)
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        assertEquals(second, c.state.value.permitId)
+        old.listening(); old.failed(); old.finalResult("stale"); f.flush()
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        assertTrue(f.sends.isEmpty())
+        f.recognitions.last().listening(); f.flush()
+        assertEquals(VoiceControlPhase.LISTENING, c.state.value.phase)
+        assertEquals(second, c.state.value.permitId)
+    }
+    @Test fun synchronousRecognitionFailureStopsTheNewPermitAndReleasesIt() {
+        val f = Fake(); val c = VoiceCallController(f)
+        f.throwRecognition = true
+        val permit = c.start(profile)
+        assertNotNull(permit)
+        assertEquals(VoiceControlPhase.STOPPED, c.state.value.phase)
+        assertFalse(c.state.value.active)
+        assertEquals(permit, c.state.value.permitId)
+        assertEquals(VoiceControlStopReason.RECOGNITION_FAILED, c.state.value.reason)
+        assertEquals(listOf(permit), f.revoked.map { it.id })
+        assertTrue(f.inputs.isEmpty()); assertTrue(f.timers.isEmpty())
+        f.throwRecognition = false
+        val next = c.start(profile)
+        assertNotEquals(permit, next)
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        assertEquals(next, c.state.value.permitId)
+    }
+
     @Test fun speechInterruptsSearchAndRejectsLateSuccessWithoutClosingMicrophone() {
         val f = Fake(); val c = VoiceCallController(f)
         c.start(profile); f.finishRecognition("查一下"); f.accept(owner)
@@ -98,6 +171,7 @@ class VoiceCallControllerTest {
     @Test fun microphoneStaysOpenWhileAnswerStreamsAndSpeechInterruptsExactRun() {
         val f = Fake(); val c = VoiceCallController(f)
         c.start(profile); f.finishRecognition("你好"); f.accept(owner)
+        assertEquals(VoiceControlPhase.WAITING_FOR_BODY, c.state.value.phase)
         f.body(owner, "正在回答。")
         assertEquals(2, f.inputs.size)
         assertEquals("正在回答。", c.state.value.reply)

@@ -4,6 +4,15 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
 class VoiceCallContractTest(unittest.TestCase):
+    def test_start_publishes_active_identity_before_asynchronous_recognition(self):
+        controller = (SRC / 'voice/control/VoiceCallController.kt').read_text()
+        listening = controller.split('private fun listen(session: Call)', 1)[1].split('private fun recognized', 1)[0]
+        self.assertLess(listening.index('session.input = input'), listening.index('publish(session,'))
+        self.assertLess(listening.index('VoiceControlPhase.CONNECTING'), listening.index('ports.recognize('))
+        self.assertIn('if (session.input !== input || !admitted(session)) return', listening)
+        main = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('permit != null && universalVoice.state.value.active', main)
+
     def test_voice_uses_temporary_owner_without_editor_mutation(self):
         main = (SRC / "MainActivity.kt").read_text()
         send = main.split("submit = { turn, text, result ->", 1)[1].split("observe =", 1)[0]

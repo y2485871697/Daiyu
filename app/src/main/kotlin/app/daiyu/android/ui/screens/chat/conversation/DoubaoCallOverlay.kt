@@ -29,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -61,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -141,32 +141,39 @@ internal fun ImageBitmap.restoreLegacyCallCaptureAlpha(): ImageBitmap {
 private val CallShadowOutset = 28.dp
 private val CallMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
-// Cache software-blurred pixels so live and captured layers use the same shadow on API 26 too.
-private fun Modifier.callPanelShadow(cornerRadius: Dp): Modifier = drawWithCache {
+// Keep the software shadow out of GraphicsLayer's lossy API 26 readback.
+private fun Density.createCallPanelShadow(size: IntSize, cornerRadius: Dp): ImageBitmap {
     val padding = CallShadowOutset.roundToPx()
     val inset = padding.toFloat()
-    val shadow = if (size.width > 0f && size.height > 0f) {
-        val bitmap = android.graphics.Bitmap.createBitmap(
-            size.width.roundToInt() + padding * 2,
-            size.height.roundToInt() + padding * 2,
-            android.graphics.Bitmap.Config.ARGB_8888,
-        ).apply { density = android.graphics.Bitmap.DENSITY_NONE }
-        val canvas = android.graphics.Canvas(bitmap)
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        val radius = minOf(cornerRadius.toPx(), size.width / 2f, size.height / 2f)
-        fun layer(blur: Dp, offset: Dp, alpha: Float) {
-            paint.color = android.graphics.Color.argb((alpha * 255).roundToInt(), 183, 166, 206)
-            paint.maskFilter = android.graphics.BlurMaskFilter(blur.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
-            val y = inset + offset.toPx()
-            canvas.drawRoundRect(inset, y, inset + size.width, y + size.height, radius, radius, paint)
-        }
-        layer(14.dp, 4.dp, .24f)
-        layer(7.dp, 0.dp, .12f)
-        bitmap.asImageBitmap()
-    } else null
-    onDrawBehind {
-        shadow?.let { drawImage(it, topLeft = Offset(-inset, -inset)) }
+    val bitmap = android.graphics.Bitmap.createBitmap(
+        size.width + padding * 2, size.height + padding * 2,
+        android.graphics.Bitmap.Config.ARGB_8888,
+    ).apply { density = android.graphics.Bitmap.DENSITY_NONE }
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    val radius = minOf(cornerRadius.toPx(), size.width / 2f, size.height / 2f)
+    fun layer(blur: Dp, offset: Dp, alpha: Float) {
+        paint.color = android.graphics.Color.argb((alpha * 255).roundToInt(), 183, 166, 206)
+        paint.maskFilter = android.graphics.BlurMaskFilter(blur.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+        val y = inset + offset.toPx()
+        canvas.drawRoundRect(inset, y, inset + size.width, y + size.height, radius, radius, paint)
     }
+    layer(14.dp, 4.dp, .24f)
+    layer(7.dp, 0.dp, .12f)
+    return bitmap.asImageBitmap()
+}
+
+private fun ImageBitmap.withCallPanelShadow(shadow: ImageBitmap): ImageBitmap {
+    val source = asAndroidBitmap()
+    val content = if (source.config == android.graphics.Bitmap.Config.HARDWARE)
+        checkNotNull(source.copy(android.graphics.Bitmap.Config.ARGB_8888, false)) else source
+    val bitmap = android.graphics.Bitmap.createBitmap(shadow.width, shadow.height,
+        android.graphics.Bitmap.Config.ARGB_8888).apply { density = android.graphics.Bitmap.DENSITY_NONE }
+    android.graphics.Canvas(bitmap).apply {
+        drawBitmap(shadow.asAndroidBitmap(), 0f, 0f, null)
+        drawBitmap(content, (shadow.width - content.width) / 2f, (shadow.height - content.height) / 2f, null)
+    }
+    return bitmap.asImageBitmap()
 }
 
 
@@ -216,6 +223,7 @@ private fun DoubaoCallSession(
     val layer = rememberGraphicsLayer()
     val progress = motion.progress
     var snapshotReady by remember { mutableStateOf(false) }
+    var recordedShadow by remember { mutableStateOf<ImageBitmap?>(null) }
     var frozenBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     // Keep the last live surface for closing; a morph reuses one padded raster.
     var presented by remember { mutableStateOf(false) }
@@ -258,7 +266,10 @@ private fun DoubaoCallSession(
                     motion.transforming = true
                     // Never start the clock on an empty/unrecorded GraphicsLayer.
                     snapshotFlow { snapshotReady }.first { it }
-                    val bitmap = layer.toImageBitmap().restoreLegacyCallCaptureAlpha()
+                    val shadow = checkNotNull(recordedShadow)
+                    val content = layer.toImageBitmap()
+                    coroutineContext.ensureActive()
+                    val bitmap = content.restoreLegacyCallCaptureAlpha().withCallPanelShadow(shadow)
                     coroutineContext.ensureActive()
                     frozenBitmap = bitmap
                     progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = CallMotionEasing))
@@ -276,7 +287,10 @@ private fun DoubaoCallSession(
                 // If closed before the first draw, the draw pass supplies one fallback recording.
                 snapshotFlow { snapshotReady }.first { it }
                 if (frozenBitmap == null) {
-                    val bitmap = layer.toImageBitmap().restoreLegacyCallCaptureAlpha()
+                    val shadow = checkNotNull(recordedShadow)
+                    val content = layer.toImageBitmap()
+                    coroutineContext.ensureActive()
+                    val bitmap = content.restoreLegacyCallCaptureAlpha().withCallPanelShadow(shadow)
                     coroutineContext.ensureActive()
                     frozenBitmap = bitmap
                 }
@@ -351,7 +365,12 @@ private fun DoubaoCallSession(
                     while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
                 }
             } else Modifier
-        val shape = RoundedCornerShape(if (mini) 23.dp else 29.dp)
+        val cornerRadius = if (mini) 23.dp else 29.dp
+        val shape = RoundedCornerShape(cornerRadius)
+        val panelSize = IntSize(panelWidth.roundToInt(), panelHeight.roundToInt())
+        val shadow = remember(panelSize, cornerRadius, density) {
+            with(density) { createCallPanelShadow(panelSize, cornerRadius) }
+        }
         Box(
             Modifier
                 .offset { IntOffset(panelBounds.left.roundToInt(), panelBounds.top.roundToInt()) }
@@ -365,15 +384,16 @@ private fun DoubaoCallSession(
                     val captureSize = IntSize(size.width.roundToInt() + outset * 2,
                         size.height.roundToInt() + outset * 2)
                     if (!morphing || !snapshotReady) {
-                        // The recording must include the shadow outside the rounded panel.
-                        layer.record(size = captureSize) {
-                            translate(padding, padding) { this@drawWithContent.drawContent() }
+                        layer.record(size = IntSize(size.width.roundToInt(), size.height.roundToInt())) {
+                            this@drawWithContent.drawContent()
                         }
+                        recordedShadow = shadow
                         snapshotReady = true
                     }
                     // Preserve the last visible frame while the closing raster is prepared.
                     if (!morphing || (closing && frozenBitmap == null && progress.value == 1f)) {
-                        translate(-padding, -padding) { drawLayer(layer) }
+                        drawImage(checkNotNull(recordedShadow), topLeft = Offset(-padding, -padding))
+                        drawLayer(layer)
                     } else {
                         // Never replay the full live display list once per strip.
                         val bitmap = frozenBitmap ?: return@drawWithContent
@@ -402,7 +422,6 @@ private fun DoubaoCallSession(
                         }
                     }
                 }
-                .callPanelShadow(if (mini) 23.dp else 29.dp)
                 .clip(shape)
                 .background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
                 .border(1.dp, Color.White, shape),

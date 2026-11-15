@@ -187,15 +187,29 @@ class MessageDisplayStoreTest {
         assertEquals(7, database.displayMessages(answer.conversationId).rows.size)
     }
 
-    @Test fun missingAssistantInBoundedTailFallsBackToNormalWindow() {
+    @Test fun unansweredTailKeepsLatestAnsweredRunWithoutDecodingOlderPayloads() {
         val answer = seedNextRun()
-        insertSupplement("orphan-tail")
-        database.writableDatabase.execSQL("UPDATE messages SET run_id='orphan-run' WHERE id='orphan-tail'")
-        val fallback = database.displayMessages(answer.conversationId, latestRunOnly = true)
-        assertEquals(5, fallback.rows.size)
-        assertEquals(0, fallback.deferredRows)
-        assertEquals(database.displayMessages(answer.conversationId), fallback)
-        database.writableDatabase.delete("messages", "id='orphan-tail'", null)
+        repeat(2) { insertSupplement("unanswered-$it") }
+        val db = database.writableDatabase
+        repeat(2) { db.execSQL("UPDATE messages SET run_id=? WHERE id=?",
+            arrayOf("unanswered-run-$it", "unanswered-$it")) }
+        val canonical = database.messages(answer.conversationId)
+        val preview = database.displayMessages(answer.conversationId, latestRunOnly = true)
+        assertEquals(listOf("next-user", "next-answer", "unanswered-0", "unanswered-1"),
+            preview.rows.map { it.second.id.value })
+        assertEquals(2, preview.deferredRows)
+        assertEquals(canonical, database.messages(answer.conversationId))
+        assertEquals(6, database.displayMessages(answer.conversationId).rows.size)
+        db.execSQL("UPDATE messages SET blocks='broken' WHERE id='answer'")
+        assertEquals(preview, database.displayMessages(answer.conversationId, latestRunOnly = true))
+        db.execSQL("UPDATE message_display SET payload='broken' WHERE message_id='next-answer'")
+        assertEquals(preview, database.displayMessages(answer.conversationId, latestRunOnly = true))
+        assertTrue(runCatching { database.displayMessages(answer.conversationId) }.isFailure)
+        assertEquals("broken", SQLiteText.read(db, "messages", "blocks", "id", "answer"))
+    }
+
+    @Test fun boundedUserOnlyTailKeepsNormalWindowFallback() {
+        val answer = seedNextRun()
         repeat(51) { insertSupplement("supplement-$it") }
         val preview = database.displayMessages(answer.conversationId, latestRunOnly = true)
         assertEquals(50, preview.rows.size)

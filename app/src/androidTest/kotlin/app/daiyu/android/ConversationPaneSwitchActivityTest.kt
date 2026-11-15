@@ -381,9 +381,26 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
     }
 
     fun testLatestBodyIsVisibleBeforeOlderDisplayReadCompletes() {
+        assertLatestBodyVisibleBeforeOlderRead(unansweredTail = false)
+    }
+
+    fun testUnansweredTailShowsLatestAnswerAndUserBeforeOlderDisplayReadCompletes() {
+        assertLatestBodyVisibleBeforeOlderRead(unansweredTail = true)
+    }
+
+    private fun assertLatestBodyVisibleBeforeOlderRead(unansweredTail: Boolean) {
         val (_, second) = prepareConversations()
         seedOlderHistory(second)
-        val original = seedToolHistory(second)
+        seedToolHistory(second)
+        if (unansweredTail) fixture.database.writableDatabase.insertOrThrow("messages", null,
+            android.content.ContentValues().apply {
+                put("id", "unanswered-user"); put("conversation_id", second.id.value)
+                put("run_id", "unanswered-run"); put("role", Message.USER_ROLE)
+                put("blocks", """[{"type":"text","item":"q","text":"unanswered tail"}]""")
+                put("status", RunStatus.COMPLETED.name); put("protocol", "[]"); put("history_segments", "[]")
+            })
+        val original = fixture.database.messages(second.id)
+        val firstRows = if (unansweredTail) 3 else 2
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         val reader = activity.paneDisplayWindowReader
@@ -401,7 +418,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
             var scroll = 0L
             var keys = emptyList<String>()
             mainThread {
-                assertEquals(2, displayWindow()!!.rows.size)
+                assertEquals(firstRows, displayWindow()!!.rows.size)
                 assertEquals(2, displayWindow()!!.deferredRows)
                 assertEquals("prepared history body", chatState().turns.filterIsInstance<ChatTurnUi.Assistant>().single().finalText)
                 keys = chatState().turns.map { it.listKey }
@@ -409,13 +426,14 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
                 MainActivity::class.java.getDeclaredMethod("dismissSidebar").apply { isAccessible = true }.invoke(activity)
             }
             ui.onNodeWithText("prepared history body", useUnmergedTree = true).assertIsDisplayed()
+            if (unansweredTail) ui.onNodeWithText("unanswered tail", useUnmergedTree = true).assertIsDisplayed()
             mainThread { assertNotNull(displayWindow()); assertEquals(scroll, chatState().scrollRequest!!.serial) }
             assertFalse(onMain.get())
             release.countDown()
             awaitControl("full same-owner authority after staged display") { displayWindow() == null }
             mainThread {
-                assertEquals(4, chatState().turns.size)
-                assertEquals(keys, chatState().turns.takeLast(2).map { it.listKey })
+                assertEquals(firstRows + 2, chatState().turns.size)
+                assertEquals(keys, chatState().turns.takeLast(firstRows).map { it.listKey })
                 assertEquals(scroll, chatState().scrollRequest!!.serial)
                 assertEquals("draft-1", hostValue("getDraft"))
             }

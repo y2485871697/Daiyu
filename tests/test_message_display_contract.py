@@ -1,6 +1,7 @@
 """Display-only startup wiring; behavioral SQLite and Activity tests execute in cloud."""
 from pathlib import Path
 import unittest
+import re
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 
@@ -23,6 +24,19 @@ class MessageDisplayContract(unittest.TestCase):
         self.assertIn('withStoppedDisplayRows(it, savedTimeline)', host)
         self.assertIn('timelineReadAnchors == anchors', host)
         self.assertIn('currentTimelineAnchors() != anchors', host)
+
+    def test_unanswered_tail_selects_the_latest_answer_before_payload_reads(self):
+        store = (APP / 'storage/MessageDisplayStore.kt').read_text()
+        selection = store.split('val ids = if (!latestRunOnly)', 1)[1].split('val rows = ids.map', 1)[0]
+        self.assertIn('metadata.indexOfLast { it.role == Message.ASSISTANT_ROLE }', selection)
+        self.assertIn('if (assistant < 0) metadata', selection)
+        self.assertIn('metadata[first - 1].run == run', selection)
+        self.assertIn('metadata.subList(first, metadata.size)', selection)
+        self.assertNotIn('payload', selection)
+        self.assertIn('deferredRows = metadata.size - ids.size', store)
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneSwitchActivityTest.kt').read_text()
+        self.assertIn('testUnansweredTailShowsLatestAnswerAndUserBeforeOlderDisplayReadCompletes', device)
+        self.assertIn('assertLatestBodyVisibleBeforeOlderRead(unansweredTail = true)', device)
 
     def test_projection_cannot_supply_protocol_or_capabilities(self):
         dto = (APP / 'storage/MessageDisplayWindow.kt').read_text()
@@ -53,7 +67,9 @@ class MessageDisplayContract(unittest.TestCase):
         self.assertIn('coordinateBlocks = it.blocks', store)
         self.assertNotIn('block.put("text"', store)
         db = (APP / 'storage/ConversationDatabase.kt').read_text()
-        self.assertIn('null, 32)', db)
+        schema = re.search(r'null,\s*(\d+)\)', db)
+        self.assertIsNotNone(schema)
+        self.assertGreaterEqual(int(schema.group(1)), 32)
         upgrade = db.split('override fun onUpgrade(', 1)[1]
         self.assertLess(upgrade.index('MessageDisplayStore.install(db)'), upgrade.index('if (oldVersion >= 13) return'))
         canonical = db.split('internal fun storedMessage(', 1)[1].split('internal fun videoInputs(', 1)[0]

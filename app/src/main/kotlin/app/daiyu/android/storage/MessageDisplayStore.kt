@@ -27,9 +27,16 @@ internal object MessageDisplayStore {
             buildList { while (c.moveToNext()) add(Metadata(c.getLong(0), c.getString(1), c.getString(2),
                 c.getString(3), c.getString(4), if (c.isNull(5)) null else c.getLong(5))) }.reversed()
         }
-        // Keep the newest contiguous run, including supplements, within the requested tail.
-        val tail = if (latestRunOnly) metadata.takeLastWhile { it.run == metadata.last().run } else metadata
-        val ids = if (latestRunOnly && tail.any { it.role == Message.ASSISTANT_ROLE }) tail else metadata
+        // Keep the newest answered run and every later user row, not the entire page for an unanswered tail.
+        val ids = if (!latestRunOnly) metadata else {
+            val assistant = metadata.indexOfLast { it.role == Message.ASSISTANT_ROLE }
+            if (assistant < 0) metadata else {
+                val run = metadata[assistant].run
+                var first = assistant
+                while (first > 0 && metadata[first - 1].run == run) first--
+                metadata.subList(first, metadata.size)
+            }
+        }
         val rows = ids.map { row ->
             fun decodePayload(value: JSONObject): MessageDisplayRow {
                 require(value.keys().asSequence().toSet() == setOf("version", "id", "conversation", "run", "blocks", "history", "projections"))

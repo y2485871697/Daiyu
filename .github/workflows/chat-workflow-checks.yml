@@ -84,6 +84,8 @@ jobs:
                           'test_workflow_render_isolation_contract.py',
                           'test_large_history_storage_contract.py', 'test_markdown_entry_contract.py',
                           'test_message_display_contract.py', 'test_context_usage_wiring_contract.py',
+                          'test_tool_receipt_snapshot_contract.py', 'test_tool_receipt_pause_contract.py',
+                          'test_pause_receipt_smoke_scope.py',
                           'test_checkpoint_encoding_hotpath_contract.py',
                           'test_streaming_follow_contract.py', 'test_chat_menu_scroll_isolation_contract.py',
                           'test_sidebar_selection_contract.py', 'test_streaming_freeze_contract.py',

@@ -98,19 +98,27 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testPaneReentryPublishesSettledDisplayReceiptsBeforeAuthoritativeHistory() {
+    fun testPaneReentryPublishesDisplayBeforeReceiptsAndAuthoritativeHistory() {
         val conversation = fixture.database.conversations().single()
         mainThread { activity.select(conversation) }
         awaitReceipts()
         mainThread { activity.select(null) }
         val entered = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)
+        val receiptEntered = java.util.concurrent.CountDownLatch(1)
+        val receiptRelease = java.util.concurrent.CountDownLatch(1)
+        val receiptReader = activity.toolReceiptReader
         val readerField = field("loadedWindowReader")
         @Suppress("UNCHECKED_CAST")
         val reader = readerField.get(activity) as (ConversationId, Long, Int) -> List<Pair<Long, Message>>
         val displayField = field("displayWindow\$delegate")
         fun display() = (displayField.get(activity) as State<*>).value
         mainThread {
+            activity.toolReceiptReader = { rows, window ->
+                receiptEntered.countDown()
+                check(receiptRelease.await(60, TimeUnit.SECONDS))
+                receiptReader(rows, window)
+            }
             val blocked: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, limit ->
                 entered.countDown(); check(release.await(60, TimeUnit.SECONDS)); reader(id, before, limit)
             }
@@ -119,33 +127,31 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 .apply { isAccessible = true }.invoke(activity, conversation.id.value)
         }
         try {
+            assertTrue("receipt read entered", receiptEntered.await(8, TimeUnit.SECONDS))
             assertTrue("authority read entered", entered.await(8, TimeUnit.SECONDS))
             mainThread {
+                assertNotNull("display is published while receipt IO is blocked", display())
+                assertTrue((field("shown").get(activity) as List<*>).isEmpty())
+                val state = (field("chatState\$delegate").get(activity) as State<*>).value as ChatScreenState
+                assertEquals(conversation.id.value, state.conversationKey)
+                assertFalse(loadedKey()?.canDisplayFor(currentKey()) == true)
+                repeat(3) {
+                    call("publishChat")
+                    assertEquals(List(3) { WorkStepState.PENDING } + WorkStepState.UNKNOWN, steps().map { it.state })
+                    assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                }
+                assertEquals(ComposerPhase.IDLE, state.composer.phase)
+                assertNull(state.composer.controlOwnerKey)
+                assertTrue((field("questionCards").get(activity) as Map<*, *>).isEmpty())
+            }
+            receiptRelease.countDown()
+            awaitReceipts()
+            mainThread {
+                assertEquals("authority is still blocked", 1L, release.count)
                 assertNotNull(display())
                 assertTrue((field("shown").get(activity) as List<*>).isEmpty())
-                assertEquals("the first display publication already has exact receipts", expected, steps().map { it.state })
                 assertTrue(checkNotNull(loadedKey()).canDisplayFor(currentKey()))
-                val current = currentKey()
-                val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity)) as RetainedToolOutcomes.Snapshot
-                val pending = Job()
-                val request = Any()
-                field("toolReceiptRead").get(activity)?.let { (it as Job).cancel() }
-                field("toolReceiptKey").set(activity, null)
-                field("toolReceiptSnapshot").set(activity, null)
-                field("toolReceiptRead").set(activity, pending)
-                field("toolReceiptRequested").set(activity, current)
-                field("toolReceiptRequest").set(activity, request)
-                try {
-                    repeat(3) {
-                        call("publishChat")
-                        assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
-                        assertSame(pending, field("toolReceiptRead").get(activity))
-                    }
-                    MainActivity::class.java.declaredMethods.single { it.name == "completeToolReceipts" }
-                        .apply { isAccessible = true }.invoke(activity, request, current, snapshot)
-                    assertNotNull(display())
-                    assertEquals("display consumes completed evidence without waiting for history", expected, steps().map { it.state })
-                } finally { pending.cancel() }
+                assertEquals("display consumes completed evidence without waiting for history", expected, steps().map { it.state })
             }
             release.countDown()
             awaitControl("authority takes over without status regression") { display() == null }
@@ -153,9 +159,37 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             mainThread { assertEquals(expected, steps().map { it.state }) }
             assertEquals(0, fixture.opens.get())
         } finally {
-            release.countDown()
-            mainThread { readerField.set(activity, reader) }
+            receiptRelease.countDown(); release.countDown()
+            mainThread { activity.toolReceiptReader = receiptReader; readerField.set(activity, reader) }
         }
+    }
+
+    fun testReceiptReadFailureKeepsUnprovenStatusesPendingAndCanRetry() {
+        val conversation = fixture.database.conversations().single()
+        val receiptReader = activity.toolReceiptReader
+        val entered = java.util.concurrent.CountDownLatch(1)
+        mainThread {
+            activity.select(null)
+            activity.toolReceiptReader = { _, _ ->
+                entered.countDown()
+                throw java.io.IOException("receipt read unavailable")
+            }
+            activity.select(conversation)
+        }
+        try {
+            assertTrue("failed worker entered", entered.await(8, TimeUnit.SECONDS))
+            awaitControl("failed reader leaves no accepted evidence or pending job") {
+                field("toolReceiptRead").get(activity) == null && loadedKey()?.canDisplayFor(currentKey()) != true
+            }
+            mainThread {
+                assertEquals(List(3) { WorkStepState.PENDING } + WorkStepState.UNKNOWN, steps().map { it.state })
+                assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                activity.toolReceiptReader = receiptReader
+                call("publishChat")
+            }
+            awaitReceipts()
+            assertEquals(0, fixture.opens.get())
+        } finally { mainThread { activity.toolReceiptReader = receiptReader } }
     }
 
     fun testFirstReadSurvivesLivePhaseChangesAndPublishesWithoutAnotherModelEvent() {

@@ -13,6 +13,69 @@ from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
 
 
 class PauseReceiptSmokeScopeTest(unittest.TestCase):
+    def test_pane_receipt_pair_has_an_exact_bounded_contract_scope(self):
+        pair = recorder.PANE_RECEIPT_PLATFORM_CLASSES
+        for names in (pair, tuple(reversed(pair))):
+            command, scope = recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(names)))
+            self.assertEqual('pane-receipts-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.PANE_RECEIPT_MODULES, '-v'], command)
+            self.assertNotIn('discover', command)
+        raw = ','.join(pair)
+        for value in (pair[0], pair[1], raw + ',' + pair[0], raw + ',app.daiyu.android.OtherTest', ' ' + raw, raw + ','):
+            self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=value))[1])
+        self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE='release', SMOKE_TEST_CLASSES=raw))[1])
+        self.assertTrue({'test_sidebar_selection_contract', 'test_tool_receipt_snapshot_contract',
+                         'test_message_display_contract', 'test_tool_receipt_pause_contract'} <= set(recorder.PANE_RECEIPT_MODULES))
+
+    def pane_pair_fixture(self, root):
+        helper = self.fixture(root)
+        name = recorder.PANE_RECEIPT_PLATFORM_CLASSES[0]
+        package, _, short = name.rpartition('.')
+        path = root / 'app/src/androidTest/kotlin' / (name.replace('.', '/') + '.kt')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('package ' + package + '\nclass ' + short + ' : TestCase() {\n'
+                        ' fun testPaneOne() {}\n fun testPaneTwo() {}\n}\n')
+        return helper, path
+
+    def test_pane_pair_four_shards_cover_only_requested_sources_and_keep_empty_shards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper, _ = self.pane_pair_fixture(root)
+            selected, empty = [], 0
+            expected = dict(zip(recorder.PANE_RECEIPT_PLATFORM_CLASSES, (2, 1)))
+            for shard in range(4):
+                result = helper.select(root, shard, classes=','.join(reversed(recorder.PANE_RECEIPT_PLATFORM_CLASSES)))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                self.assertEqual(expected, inventory['all_classes'])
+                self.assertEqual(sum(expected[name] for name in selection['selected_classes']), selection['expected_tests'])
+                selected.extend(selection['selected_classes'])
+                empty += selection['status'] == 'filtered-empty-shard'
+            self.assertCountEqual(recorder.PANE_RECEIPT_PLATFORM_CLASSES, selected)
+            self.assertEqual(2, empty)
+
+    def test_pane_pair_inventory_tracks_new_methods_and_rejects_missing_or_ambiguous_source(self):
+        for damage in ('missing', 'multiple-class', 'duplicate-method', 'new-method'):
+            with self.subTest(damage=damage), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper, path = self.pane_pair_fixture(root)
+                if damage == 'missing':
+                    path.unlink()
+                elif damage == 'multiple-class':
+                    path.write_text(path.read_text() + '\nclass ExtraTest : TestCase() { fun testExtra() {} }\n')
+                else:
+                    method = 'testPaneOne' if damage == 'duplicate-method' else 'testPaneThree'
+                    path.write_text(path.read_text().replace('\n}', '\n fun ' + method + '() {}\n}'))
+                result = helper.select(root, 0, classes=','.join(recorder.PANE_RECEIPT_PLATFORM_CLASSES))
+                if damage == 'new-method':
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                    self.assertEqual(3, inventory['all_classes'][recorder.PANE_RECEIPT_PLATFORM_CLASSES[0]])
+                else:
+                    self.assertNotEqual(0, result.returncode)
+
     def test_exact_scope_has_explicit_business_contracts_and_never_discovers_all_tests(self):
         for classes in (recorder.PAUSE_RECEIPT_PLATFORM_CLASSES,
                         tuple(reversed(recorder.PAUSE_RECEIPT_PLATFORM_CLASSES))):

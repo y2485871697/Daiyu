@@ -44,16 +44,28 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('receipt(message, block)?.activity', display)
         self.assertNotIn('Message(', display.replace('RenderMessage(', ''))
 
-    def test_pane_prepares_receipts_on_worker_and_adopts_before_first_publication(self):
+    def test_pane_publishes_before_guarded_receipt_worker_completes(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         prepare = host.split('private fun preparePaneSnapshot(', 1)[1].split('private fun retainedConversation', 1)[0]
-        self.assertIn('RetainedToolOutcomes.Snapshot.read(controller.database,', prepare)
-        self.assertIn('toolReceipts = receipts', prepare)
-        self.assertIn('prepared?.toolReceipts?.let(::adoptPreparedToolReceipts)', host)
-        self.assertIn('expanded.toolReceipts?.let(::adoptPreparedToolReceipts)', host)
+        self.assertNotIn('RetainedToolOutcomes.Snapshot.read(', prepare)
+        self.assertNotIn('toolReceipts', prepare)
+        self.assertNotIn('adoptPreparedToolReceipts', host)
+        self.assertIn('RetainedToolOutcomes.Snapshot.read(controller.database, rows, display)', host)
+        worker = host.split('private fun prepareToolReceipts(): Boolean', 1)[1].split('private fun completeToolReceipts(', 1)[0]
+        for fragment in ('val rows = shown.map { it.second }', 'val display = displayWindow', 'val read = toolReceiptReader',
+                         'toolReceiptRead?.cancel()', 'toolReceiptRequested?.canDisplayFor(key) == true',
+                         'withContext(Dispatchers.IO)', 'read(rows, display)', 'completeToolReceipts(request, key, snapshot)',
+                         'catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }',
+                         'catch (_: Exception)', 'toolReceiptRequest === request'):
+            self.assertIn(fragment, worker)
+        complete = host.split('private fun completeToolReceipts(', 1)[1].split('private fun publishChat()', 1)[0]
+        for fragment in ('!activityUsable()', 'toolReceiptRequest !== request', 'toolReceiptRequested != key',
+                         '!key.canDisplayFor(currentToolReceiptKey())'):
+            self.assertIn(fragment, complete)
+        self.assertLess(complete.index('!key.canDisplayFor'), complete.index('toolReceiptKey = key'))
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()
-        self.assertIn('testPaneReentryPublishesSettledDisplayReceiptsBeforeAuthoritativeHistory', test)
-        self.assertIn('the first display publication already has exact receipts', test)
+        self.assertIn('testPaneReentryPublishesDisplayBeforeReceiptsAndAuthoritativeHistory', test)
+        self.assertIn('display is published while receipt IO is blocked', test)
         self.assertIn('display consumes completed evidence without waiting for history', test)
 
     def test_body_growth_is_not_a_reason_to_decode_checkpoints_again(self):

@@ -76,10 +76,13 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('prepareRestoredMarkdown(snapshot.display, checkActive = checkActive)', prepare)
         self.assertIn('prepare(id, snapshot, checkActive)', prepare)
         self.assertIn(
-            'return snapshot.copy(presentations = presentations, toolReceipts = receipts, '
+            'return snapshot.copy(presentations = presentations, '
             'timeline = timeline, timelineRevision = timelineRevision)',
             ' '.join(prepare.split()),
         )
+        self.assertNotIn('RetainedToolOutcomes.Snapshot.read(', prepare)
+        self.assertNotIn('toolReceipts =', prepare)
+        self.assertNotIn('adoptPreparedToolReceipts', host)
         self.assertNotIn('toolPresentations', io)
         normalized_click = ' '.join(click.split())
         self.assertLess(

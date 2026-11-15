@@ -156,6 +156,14 @@ screen_cleanup_only = mode == 'smoke' and sorted(raw_filter.split(',')) in scree
 screen_cleanup_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                           for name in (requested if screen_cleanup_only else screen_cleanup_target)}
 
+pane_receipt_target = {
+    'app.daiyu.android.ConversationPaneSwitchActivityTest',
+    'app.daiyu.android.ToolReceiptPauseActivityTest',
+}
+pane_receipt_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(pane_receipt_target)
+pane_receipt_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
+                        for name in pane_receipt_target}
+
 pause_receipt_target = {
     'app.daiyu.android.ToolReceiptPauseActivityTest',
     'app.daiyu.android.RetainedToolOutcomesTest',
@@ -319,6 +327,8 @@ for path in sorted([conversation_date_source] if conversation_date_only else sea
         continue
     if screen_cleanup_only and path not in screen_cleanup_sources:
         continue
+    if pane_receipt_only and path not in pane_receipt_sources:
+        continue
     if pause_receipt_only and path not in pause_receipt_sources:
         continue
     if linux_settings_only and path != linux_settings_source:
@@ -364,7 +374,7 @@ if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shar
     raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys
@@ -384,7 +394,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if conversation_date_only or search_history_only or provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or assistant_picker_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
+                discovery_scope="targeted" if conversation_date_only or search_history_only or provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or assistant_picker_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pane_receipt_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

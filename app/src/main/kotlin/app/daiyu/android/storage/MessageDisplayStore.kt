@@ -40,13 +40,23 @@ internal object MessageDisplayStore {
         val rows = ids.map { row ->
             fun decodePayload(value: JSONObject): MessageDisplayRow {
                 require(value.keys().asSequence().toSet() == setOf("version", "id", "conversation", "run", "blocks", "history", "projections"))
-                require(value.getInt("version") == 3 && value.getString("id") == row.id &&
+                val version = value.getInt("version")
+                require(version in 3..4 && value.getString("id") == row.id &&
                     value.getString("conversation") == conversation.value && value.getString("run") == row.run)
                 val history = value.getJSONArray("history")
                 repeat(history.length()) { require(history.getJSONObject(it).getJSONArray("protocol").length() == 0) }
                 val segments = MessageHistoryCodec.decode(history)
-                val blocks = decodeBlocks(value.getJSONArray("blocks"))
                 val projections = value.getJSONArray("projections")
+                val encodedBlocks = value.get("blocks")
+                val blocks = when (encodedBlocks) {
+                    is JSONArray -> decodeBlocks(encodedBlocks)
+                    is String -> {
+                        require(version == 4 && encodedBlocks == "assistant-history" && projections.length() == 0 &&
+                            row.role == Message.ASSISTANT_ROLE && segments.any { it.role == Message.ASSISTANT_ROLE })
+                        segments.filter { it.role == Message.ASSISTANT_ROLE }.flatMap { it.blocks }
+                    }
+                    else -> error("Invalid display blocks")
+                }
                 val addresses = mutableSetOf<Pair<Int, Int>>()
                 repeat(projections.length()) { index ->
                     val projection = projections.getJSONObject(index)
@@ -72,7 +82,13 @@ internal object MessageDisplayStore {
             }
             val cached = db.rawQuery("SELECT 1 FROM message_display WHERE message_id=?", arrayOf(row.id)).use { it.moveToFirst() }
             val hit = if (!cached) null else try {
-                decodePayload(JSONObject(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", row.id))))
+                val value = JSONObject(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", row.id)))
+                val projection = decodePayload(value)
+                if (value.getInt("version") == 3 && compactBlocks(value, projection)) {
+                    db.update("message_display", ContentValues().apply { put("payload", value.toString()) },
+                        "message_id=?", arrayOf(row.id))
+                }
+                projection
             } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
               catch (cancelled: android.os.OperationCanceledException) { throw cancelled }
               catch (_: Exception) { db.delete("message_display", "message_id=?", arrayOf(row.id)); null }
@@ -91,6 +107,7 @@ internal object MessageDisplayStore {
                 repairHistory(history, segments, projections)
                 val value = envelope(row.id, conversation.value, row.run, blocks, segments, projections)
                 val projection = decodePayload(value)
+                compactBlocks(value, projection)
                 val payload = value.toString()
                 check(db.insertOrThrow("message_display", null, ContentValues().apply {
                     put("message_id", row.id); put("payload", payload)
@@ -106,8 +123,18 @@ internal object MessageDisplayStore {
     }
 
     private fun envelope(id: String, conversation: String, run: String, blocks: JSONArray, history: JSONArray,
-        projections: JSONArray) = JSONObject().put("version", 3).put("id", id).put("conversation", conversation).put("run", run)
+        projections: JSONArray) = JSONObject().put("version", 4).put("id", id).put("conversation", conversation).put("run", run)
             .put("blocks", blocks).put("history", history).put("projections", projections)
+
+    private fun compactBlocks(value: JSONObject, row: MessageDisplayRow): Boolean {
+        if (row.role != Message.ASSISTANT_ROLE || value.getJSONArray("projections").length() != 0 ||
+            row.segments.none { it.role == Message.ASSISTANT_ROLE }) return false
+        val historyBlocks = row.segments.filter { it.role == Message.ASSISTANT_ROLE }.flatMap { it.coordinateBlocks }
+        if (row.coordinateBlocks != historyBlocks) return false
+        // A validated exact duplicate can refer to the already stored, ordered assistant history.
+        value.put("version", 4).put("blocks", "assistant-history")
+        return true
+    }
 
     private data class Metadata(val seq: Long, val id: String, val run: String, val role: String,
         val status: String, val time: Long?)

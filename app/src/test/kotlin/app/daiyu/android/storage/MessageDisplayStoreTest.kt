@@ -39,6 +39,101 @@ class MessageDisplayStoreTest {
     private fun count() = database.readableDatabase.rawQuery("SELECT count(*) FROM message_display", null).use {
         check(it.moveToFirst()); it.getInt(0)
     }
+    @Test fun exactAssistantHistoryBlocksUseOneValidatedPayloadAcrossReopen() {
+        val (user, answer) = seed()
+        val first = MessageBlock.Text("body", "汉".repeat(400_000))
+        val last = MessageBlock.Text("end", "b".repeat(70_000))
+        val owner = answer.copy(status = RunStatus.STOPPED, blocks = listOf(first, last), historySegments = listOf(
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, listOf(first)),
+            MessageHistorySegment(MessageId("embedded-user"), Message.USER_ROLE, listOf(MessageBlock.Text("q2", "continue"))),
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, listOf(last)),
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, emptyList(), reportedReasoning = listOf(
+                ReportedReasoning("tail-reasoning", "reasoning-only tail", elapsedMillis = 11, blockOffset = 0)))))
+        database.save(owner)
+        val canonical = canonicalDisplaySource(answer.id)
+        val display = database.displayMessages(user.conversationId)
+        val payload = displayPayload(answer.id)
+        assertEquals(4, payload.getInt("version"))
+        assertEquals("assistant-history", payload.getString("blocks"))
+        assertTrue(payload.toString().length < 500_000)
+        assertEquals(ChatTurnMapper.map(database.messages(user.conversationId).map { it.second }), ChatTurnMapper.mapDisplay(display))
+        assertEquals(owner.blocks, display.rows.last().second.coordinateBlocks)
+        assertEquals(display, database.displayMessages(user.conversationId))
+        assertEquals(canonical, canonicalDisplaySource(answer.id))
+        database.close()
+        database = ConversationDatabase(RuntimeEnvironment.getApplication())
+        assertEquals(display, database.displayMessages(user.conversationId))
+        assertEquals(canonical, canonicalDisplaySource(answer.id))
+    }
+
+    @Test fun compatibleVersionThreeDuplicateCompactsWithoutChangingCanonicalBytes() {
+        val (user, answer) = seed()
+        database.save(answer.copy(status = RunStatus.STOPPED, historySegments = listOf(
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, answer.blocks))))
+        val expected = database.displayMessages(user.conversationId)
+        val canonical = canonicalDisplaySource(answer.id)
+        val old = displayPayload(answer.id)
+        val blocks = old.getJSONArray("history").getJSONObject(0).getJSONArray("blocks")
+        old.put("version", 3).put("blocks", blocks)
+        val oldText = old.toString()
+        val db = database.writableDatabase
+        db.execSQL("UPDATE message_display SET payload=? WHERE message_id=?", arrayOf(oldText, answer.id.value))
+        db.beginTransaction()
+        try {
+            assertEquals(expected, MessageDisplayStore.read(db, user.conversationId, Long.MAX_VALUE, 50))
+            assertEquals("assistant-history", displayPayload(answer.id).getString("blocks"))
+            assertEquals(expected, MessageDisplayStore.read(db, user.conversationId, Long.MAX_VALUE, 50))
+        } finally { db.endTransaction() }
+        assertEquals(oldText, displayPayload(answer.id).toString())
+        assertEquals(canonical, canonicalDisplaySource(answer.id))
+        assertEquals(expected, database.displayMessages(user.conversationId))
+        assertEquals(4, displayPayload(answer.id).getInt("version"))
+        assertEquals("assistant-history", displayPayload(answer.id).getString("blocks"))
+        assertEquals(canonical, canonicalDisplaySource(answer.id))
+    }
+
+    @Test fun differentTopLevelBlocksAreNotReplacedByHistory() {
+        val (user, answer) = seed()
+        val owner = answer.copy(status = RunStatus.STOPPED, historySegments = listOf(
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE,
+                listOf(MessageBlock.Text("body", "different history body")))))
+        database.save(owner)
+        val canonical = canonicalDisplaySource(answer.id)
+        val display = database.displayMessages(user.conversationId)
+        assertEquals(owner.blocks, display.rows.last().second.coordinateBlocks)
+        assertEquals("first", displayPayload(answer.id).getJSONArray("blocks").getJSONObject(0).getString("text"))
+        assertEquals(display, database.displayMessages(user.conversationId))
+        assertEquals(canonical, canonicalDisplaySource(answer.id))
+    }
+
+    @Test fun invalidAssistantHistoryReferencesRebuildFromCanonical() {
+        val (user, answer) = seed()
+        database.save(answer.copy(status = RunStatus.STOPPED, historySegments = listOf(
+            MessageHistorySegment(answer.id, Message.ASSISTANT_ROLE, answer.blocks))))
+        val expected = database.displayMessages(user.conversationId)
+        val canonical = canonicalDisplaySource(answer.id)
+        val valid = displayPayload(answer.id).toString()
+        val damaged = listOf(
+            org.json.JSONObject(valid).put("blocks", "unknown-history"),
+            org.json.JSONObject(valid).put("version", 3),
+            org.json.JSONObject(valid).put("history", org.json.JSONArray()),
+            org.json.JSONObject(valid).put("projections", org.json.JSONArray().put(org.json.JSONObject())))
+        damaged.forEach { value ->
+            database.writableDatabase.execSQL("UPDATE message_display SET payload=? WHERE message_id=?",
+                arrayOf(value.toString(), answer.id.value))
+            assertEquals(expected, database.displayMessages(user.conversationId))
+            assertEquals("assistant-history", displayPayload(answer.id).getString("blocks"))
+            assertEquals(canonical, canonicalDisplaySource(answer.id))
+        }
+    }
+
+    private fun displayPayload(id: MessageId) = org.json.JSONObject(requireNotNull(
+        SQLiteText.read(database.readableDatabase, "message_display", "payload", "message_id", id.value)))
+
+    private fun canonicalDisplaySource(id: MessageId) = listOf("blocks", "protocol", "history_segments").map {
+        SQLiteText.read(database.readableDatabase, "messages", it, "id", id.value)
+    }
+
     @Test fun writesAndReopenKeepProtocolFreeDisplayAndExactTurnKeys() {
         val (user, initial) = seed()
         val supplement = user.copy(id = MessageId("supplement"), blocks = listOf(MessageBlock.Text("extra", "extra")))

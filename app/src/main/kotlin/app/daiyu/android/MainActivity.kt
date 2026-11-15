@@ -1360,7 +1360,6 @@ class MainActivity : ComponentActivity() {
         val messages: List<Pair<Long, Message>>,
         val display: app.daiyu.android.storage.MessageDisplayWindow? = null,
         val presentations: app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache? = null,
-        val toolReceipts: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null,
         val timeline: List<app.daiyu.android.timeline.ChatTimelineEntry>? = null,
         val timelineRevision: Long? = null,
     )
@@ -6562,7 +6561,6 @@ class MainActivity : ComponentActivity() {
                             expanded.timelineRevision?.takeIf { expanded.timeline != null }?.let { timelineReadRevision = it }
                             if (expanded.timeline != null) timelineReadAnchors = currentTimelineAnchors()
                             expanded.presentations?.let { toolPresentations = it }
-                            expanded.toolReceipts?.let(::adoptPreparedToolReceipts)
                             publishChat()
                         }
                     }
@@ -6609,14 +6607,9 @@ class MainActivity : ComponentActivity() {
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { null }
         checkActive()
-        val receipts = try {
-            app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database,
-                snapshot.messages.map { it.second }, snapshot.display)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { null }
-        checkActive()
-        return snapshot.copy(presentations = presentations, toolReceipts = receipts,
-            timeline = timeline, timelineRevision = timelineRevision)
+        // Durable tool checkpoints are independent of displaying the conversation.
+        // publishChat uses the guarded asynchronous receipt reader while results remain pending.
+        return snapshot.copy(presentations = presentations, timeline = timeline, timelineRevision = timelineRevision)
     }
 
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
@@ -6856,7 +6849,6 @@ class MainActivity : ComponentActivity() {
         prepared?.presentations?.let { toolPresentations = it }
         if (refreshHistoryLoading) refreshHistoryPending = true
         shown = prepared?.messages.orEmpty().toMutableList()
-        prepared?.toolReceipts?.let(::adoptPreparedToolReceipts)
         if (prepared != null && prepared.display == null) streamingHistoryRefresh.needsRead(
             controller.active?.takeIf { it.conversationId == conversation?.id }, true, controller.dataRevision, editorGeneration, false)
         childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false
@@ -7312,10 +7304,9 @@ class MainActivity : ComponentActivity() {
         app.daiyu.android.ui.RetainedToolOutcomes.sources(shown.map { it.second }, displayWindow),
         controller.active?.takeIf { it.conversationId == selected?.id }?.let(controller::runState))
 
-    private fun adoptPreparedToolReceipts(snapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot) {
-        toolReceiptRead?.cancel(); toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
-        toolReceiptSnapshot = snapshot
-        toolReceiptKey = currentToolReceiptKey()
+    internal var toolReceiptReader: (List<Message>, app.daiyu.android.storage.MessageDisplayWindow?) ->
+        app.daiyu.android.ui.RetainedToolOutcomes.Snapshot = { rows, display ->
+        app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows, display)
     }
 
     private fun prepareToolReceipts(): Boolean {
@@ -7333,12 +7324,16 @@ class MainActivity : ComponentActivity() {
         toolReceiptRequest = request
         val rows = shown.map { it.second }
         val display = displayWindow
+        val read = toolReceiptReader
         toolReceiptRead = lifecycleScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
-                    RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows, display) }
+                    RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.UI_PREPARE) { read(rows, display) }
                 }
                 completeToolReceipts(request, key, snapshot)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                // Keep unproven results pending; a later publication can retry the read.
             } finally {
                 if (toolReceiptRequest === request) {
                     toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null

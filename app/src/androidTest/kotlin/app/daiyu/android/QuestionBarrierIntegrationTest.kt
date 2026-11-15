@@ -436,7 +436,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             } finally { ui.mainClock.autoAdvance = true }
             await(f,"swiped drawer settled and authority installed") {
                 val visible = MainActivity::class.java.getDeclaredMethod("getSidebarVisible").apply { isAccessible = true }.invoke(current) as Boolean
-                !visible && !displayPending()
+                return@await !visible && !displayPending()
             }
             ui.waitForIdle()
             assertUnclipped()

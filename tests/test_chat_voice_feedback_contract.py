@@ -29,7 +29,9 @@ class ChatVoiceFeedbackContractTest(unittest.TestCase):
         self.assertIn('config.asrKey.isBlank()', check)
         self.assertIn('config.asrResource !in app.daiyu.android.voice.providers.DoubaoAsrProtocol.resources', check)
         self.assertIn('OfflineSpeechPack.state.value.ready', check)
-        self.assertIn('if (mode == ChatMenuAction.VOICE_CHAT && offlineReady) return null', check)
+        self.assertNotIn('if (mode == ChatMenuAction.VOICE_CHAT && offlineReady) return null', check)
+        self.assertIn('return when (config.dictation)', check)
+        self.assertIn('"SYSTEM" -> if (offlineReady) null', check)
         for forbidden in ('remoteVoice.', 'stopCascadeVoice(', 'invalidate', 'retainedPage =', 'VoiceConversationDialog', 'startCapture', 'authorizeReference'):
             self.assertNotIn(forbidden, check)
 
@@ -55,7 +57,7 @@ class ChatVoiceFeedbackContractTest(unittest.TestCase):
     def test_press_interaction_drives_spring_size_and_existing_morph_animation(self):
         for fragment in ('val interactionSource = remember { MutableInteractionSource() }',
                          'val pressed by interactionSource.collectIsPressedAsState()',
-                         'val showPressFeedback = enabled && (pressed || tapFeedback)',
+                         'val showPressFeedback = pressAnimationEnabled && enabled && (pressed || tapFeedback)',
                          'if (listening || showPressFeedback) 32.dp else 20.dp',
                          'spring(dampingRatio = 0.65f)',
                          'interactionSource = interactionSource,',

@@ -13,6 +13,11 @@ on:
         description: 检查目标完整提交SHA
         type: string
         required: true
+      validation_sha:
+        description: 可选已审验证源，仅覆盖单个语音反馈契约，不改冻结生产/JVM/设备测试
+        type: string
+        required: false
+        default: ''
       check_id:
         description: 本次定向检查标识
         type: string
@@ -52,6 +57,27 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as env:
               env.write('CHECK_SOURCE_SHA=' + actual + '\n')
           PY
+      - name: 仅覆盖已审语音反馈契约并登记验证源
+        if: inputs.validation_sha != ''
+        env:
+          VALIDATION_SHA: ${{ inputs.validation_sha }}
+        run: |
+          python3 - <<'PYVALIDATION'
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          source, validation, workflow = os.environ['CHECK_SOURCE_SHA'], os.environ['VALIDATION_SHA'], os.environ['GITHUB_SHA']
+          assert re.fullmatch('[0-9a-f]{40}', validation)
+          subprocess.run(['git', 'merge-base', '--is-ancestor', source, validation], check=True)
+          subprocess.run(['git', 'merge-base', '--is-ancestor', validation, workflow], check=True)
+          path = 'tests/test_chat_voice_feedback_contract.py'
+          data = subprocess.check_output(['git', 'show', validation + ':' + path])
+          before = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          Path(path).write_bytes(data)
+          Path('duplex-call-checks').mkdir(exist_ok=True)
+          Path('duplex-call-checks/validation-source.json').write_text(json.dumps(dict(
+              checked_sha=source, validation_sha=validation, workflow_sha=workflow,
+              validation_files=[dict(path=path, before_sha256=before, after_sha256=hashlib.sha256(data).hexdigest())]), indent=2) + '\n')
+          PYVALIDATION
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin

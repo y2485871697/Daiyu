@@ -140,6 +140,14 @@ class ChildTaskCardContractTest(unittest.TestCase):
                 seen.extend(selection["selected_classes"])
             self.assertCountEqual(classes, seen)
 
+    def test_result_check_freezes_requested_source_without_confusing_dispatch_revision(self):
+        workflow = (ROOT / '.github/workflows/child-result-checks.yml').read_text()
+        checkout = workflow.split('      - uses: actions/checkout@', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('ref: ${{ inputs.expected_sha }}', checkout)
+        self.assertIn('GITHUB_SHA="$EXPECTED_SHA" python3 scripts/cooperation/cloud_checks.py --verify-revision-only', workflow)
+        self.assertIn("source_sha=os.environ['EXPECTED_SHA']", workflow)
+        self.assertIn("workflow_sha=os.environ['GITHUB_SHA']", workflow)
+
     def test_platform_tool_checks_bind_only_the_tool_checkout_sha(self):
         workflow = (ROOT / '.github/workflows/child-task-card-platform.yml').read_text()
         root_env = workflow.split('\nenv:\n', 1)[1].split('\njobs:', 1)[0]

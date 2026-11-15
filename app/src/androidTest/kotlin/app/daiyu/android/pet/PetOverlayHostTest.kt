@@ -202,6 +202,101 @@ class PetOverlayHostTest : InstrumentationTestCase() {
         }
     }
 
+    private fun requestedPosition(host: PetOverlayHost): Pair<Int, Int> {
+        val field = PetOverlayHost::class.java.getDeclaredField("params").apply { isAccessible = true }
+        val params = field.get(host) as android.view.WindowManager.LayoutParams
+        return params.x to params.y
+    }
+    private fun stagePlacement(f: Fixture): FrameLayout {
+        f.host.sync(f.visible.copy(state = f.visible.state.copy(settings =
+            f.visible.state.settings.copy(x = 70, y = 120))))
+        val frame = f.port.active.single() as FrameLayout
+        val side = (128f * f.context.resources.displayMetrics.density).roundToInt()
+        frame.layout(0, 0, side + 80, side + 60)
+        assertTrue(frame.viewTreeObserver.dispatchOnPreDraw())
+        return frame
+    }
+
+    fun testPreDrawPlacementIsDeferredCoalescedAndUsesLatestSize() = verifyDeferredPlacement()
+    private fun verifyDeferredPlacement() {
+        lateinit var f: Fixture
+        try {
+            instrumentation.runOnMainSync {
+                f = Fixture()
+                val frame = stagePlacement(f)
+                repeat(3) { assertTrue(frame.viewTreeObserver.dispatchOnPreDraw()) }
+                assertEquals(1, f.port.updates)
+                assertEquals(0f, frame.alpha)
+                val side = (128f * f.context.resources.displayMetrics.density).roundToInt()
+                frame.layout(0, 0, side + 100, side + 80)
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertEquals(2, f.port.updates)
+                assertEquals(20 to 40, requestedPosition(f.host))
+                assertEquals(0f, f.port.active.single().alpha)
+            }
+        } finally { instrumentation.runOnMainSync { f.close() } }
+    }
+
+    fun testDeferredPlacementCannotUpdateRetiredOrReplacementRoot() = verifyRetiredPlacement()
+    private fun verifyRetiredPlacement() {
+        lateinit var f: Fixture
+        lateinit var retired: FrameLayout
+        try {
+            instrumentation.runOnMainSync {
+                f = Fixture()
+                retired = stagePlacement(f)
+                f.host.sync(f.visible.copy(state = f.visible.state.copy(settings = PetSettings())))
+                assertTrue(f.port.active.isEmpty())
+                stagePlacement(f)
+                assertEquals(2, f.port.updates)
+                assertFalse(f.port.active.contains(retired))
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertEquals(3, f.port.updates)
+                assertEquals(0, retired.childCount)
+                assertEquals(1, f.port.active.size)
+                val replacement = f.port.active.single() as FrameLayout
+                val side = (128f * f.context.resources.displayMetrics.density).roundToInt()
+                replacement.layout(0, 0, side + 100, side + 80)
+                assertTrue(replacement.viewTreeObserver.dispatchOnPreDraw())
+                f.host.close()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertEquals(3, f.port.updates)
+                assertTrue(f.port.active.isEmpty())
+            }
+        } finally { instrumentation.runOnMainSync { f.close() } }
+    }
+
+    fun testDeferredUpdateFailureKeepsUnknownCleanupOwner() = verifyDeferredFailure()
+    private fun verifyDeferredFailure() {
+        lateinit var f: Fixture
+        lateinit var frame: FrameLayout
+        try {
+            instrumentation.runOnMainSync {
+                f = Fixture()
+                frame = stagePlacement(f)
+                f.port.failUpdate = true
+                f.port.failRemove = true
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertEquals(2, f.port.updates)
+                assertEquals(PetOverlayState.ERROR, f.state)
+                assertTrue(checkNotNull(f.error).contains("清理结果未知"))
+                assertEquals(0, frame.childCount)
+                assertSame(frame, f.port.active.single())
+                f.host.sync(f.visible)
+                assertEquals(1, f.port.adds)
+                assertEquals(2, f.port.updates)
+            }
+        } finally { instrumentation.runOnMainSync { f.close() } }
+    }
+
     fun testOverlayBoundsKeepSpriteNotBubbleInsideScreen() {
         val bare = petPlacement(0, 0, 400, 600, 128, 128, 128, 16)
         val speech = petPlacement(0, 0, 400, 600, 128, 220, 230, 16)

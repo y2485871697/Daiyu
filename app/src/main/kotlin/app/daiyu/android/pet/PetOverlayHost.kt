@@ -140,13 +140,22 @@ internal class PetOverlayHost(
             else {
                 val next = placement(this)
                 val changed = params.x != next.x || params.y != next.y
-                if (changed) { alpha = 0f; update(); false }
+                if (changed) { alpha = 0f; schedulePlacementUpdate(this); false }
                 else if (!windowOriginMatches(this, next)) {
                     alpha = 0f
                     postInvalidateOnAnimation()
                     false
                 } else { alpha = 1f; true }
             }
+        }
+    }
+    private fun schedulePlacementUpdate(current: DragWindow) {
+        if (current.placementUpdatePending) return
+        current.placementUpdatePending = true
+        // Submit after pre-draw returns, outside ViewRoot's active traversal.
+        ui.post {
+            current.placementUpdatePending = false
+            if (!closed && !owner.cleanupPending && view === current) update()
         }
     }
     private fun windowOriginMatches(current: View, target: PetPlacement): Boolean {
@@ -191,6 +200,7 @@ internal class PetOverlayHost(
         removeAndReport(PetOverlayState.CLOSED)
     }
     private inner class DragWindow(context: Context) : FrameLayout(context), LifecycleOwner, SavedStateRegistryOwner {
+        var placementUpdatePending = false
         private val ownerLifecycle = LifecycleRegistry(this)
         private val savedState = SavedStateRegistryController.create(this)
         override val lifecycle: Lifecycle get() = ownerLifecycle

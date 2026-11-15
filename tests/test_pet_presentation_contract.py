@@ -29,10 +29,23 @@ class PetPresentationContractTest(unittest.TestCase):
         overlay = (PET / 'PetOverlayHost.kt').read_text()
         self.assertIn('alpha = 0f', overlay)
         self.assertIn('addOnPreDrawListener', overlay)
-        self.assertIn('if (changed) { alpha = 0f; update(); false }', overlay)
+        self.assertIn('if (changed) { alpha = 0f; schedulePlacementUpdate(this); false }', overlay)
         self.assertIn('FLAG_LAYOUT_NO_LIMITS', overlay)
         self.assertIn('FLAG_LAYOUT_IN_SCREEN', overlay)
         self.assertNotIn('constrainPetOverlayPosition', overlay)
+
+    def test_overlay_submits_placement_after_traversal_and_fences_retired_roots(self):
+        text = (PET / 'PetOverlayHost.kt').read_text()
+        gate = text.split('viewTreeObserver.addOnPreDrawListener', 1)[1].split('private fun schedulePlacementUpdate', 1)[0]
+        self.assertIn('schedulePlacementUpdate(this)', gate)
+        self.assertNotIn('update();', gate)
+        posted = text.split('private fun schedulePlacementUpdate', 1)[1].split('private fun windowOriginMatches', 1)[0]
+        for fragment in ('if (current.placementUpdatePending) return', 'current.placementUpdatePending = true',
+                         'ui.post {', 'current.placementUpdatePending = false',
+                         '!closed && !owner.cleanupPending && view === current', 'update()'):
+            self.assertIn(fragment, posted)
+        self.assertLess(posted.index('ui.post {'), posted.index('update()'))
+        self.assertNotIn('alpha = 1f', posted)
 
     def test_sprite_anchor_is_saved_instead_of_bubble_window_origin(self):
         geometry = (PET / 'PetPlacement.kt').read_text()

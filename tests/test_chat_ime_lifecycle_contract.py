@@ -20,7 +20,9 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
 
     def test_ime_padding_is_local_to_conversation_not_header(self):
         screen = self.read(CHAT / 'ChatScreen.kt')
-        self.assertEqual(1, screen.count('.windowInsetsPadding('))
+        self.assertEqual(2, screen.count('.windowInsetsPadding('))
+        self.assertEqual(1, screen.count('.windowInsetsPadding(stableStatusBars)'))
+        self.assertEqual(1, screen.count('.windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))'))
         self.assertIn('WindowInsets.navigationBars.union(WindowInsets.ime)', screen)
         self.assertNotIn('.navigationBarsPadding()', screen)
         self.assertNotIn('.imePadding()', screen)
@@ -32,9 +34,10 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
     def test_composer_reservation_uses_same_measure_not_snapshot_feedback(self):
         layers = self.read(CHAT / 'ChatComposerSurface.kt').split('internal fun ChatConversationLayers', 1)[1]
         self.assertIn('SubcomposeLayout', layers)
-        self.assertLess(layers.index('subcompose("composer")'), layers.index('val bottomInset = editor.height.toDp()'))
-        self.assertLess(layers.index('val bottomInset = editor.height.toDp()'), layers.index('subcompose("messages")'))
-        self.assertIn('messages(bottomInset)', layers)
+        self.assertLess(layers.index('subcompose("composer", editorContent)'), layers.index('val bottomInset = editor.height.toDp()'))
+        self.assertLess(layers.index('val bottomInset = editor.height.toDp()'), layers.index('subcompose("messages", messageContent.forInset(bottomInset))'))
+        self.assertIn('messageContent.forInset(bottomInset)', layers)
+        self.assertIn('remember(messages, backdrop, background)', layers)
         self.assertLess(layers.index('content.placeRelative(0, 0)'), layers.index('editor.placeRelative(0, height - editor.height)'))
         for forbidden in ('onSizeChanged', 'mutableIntStateOf', 'mutableStateOf'):
             self.assertNotIn(forbidden, layers)

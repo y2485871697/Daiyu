@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -277,6 +278,32 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         mainThread { editorHeight = 60.dp }
         ui.waitForIdle()
         assertEquals(60.dp, messageInset)
+    }
+
+    fun testViewportRemeasureDoesNotRecomposeUnchangedMessagesSlot() {
+        var viewportHeight by mutableStateOf(160.dp)
+        val compositions = java.util.concurrent.atomic.AtomicInteger()
+        val measuredHeight = java.util.concurrent.atomic.AtomicInteger()
+        val messages: @Composable (androidx.compose.ui.unit.Dp) -> Unit = {
+            androidx.compose.runtime.SideEffect { compositions.incrementAndGet() }
+            Box(Modifier.fillMaxSize().onSizeChanged { size -> measuredHeight.set(size.height) })
+        }
+        val editor: @Composable (top.yukonga.miuix.kmp.blur.LayerBackdrop?) -> Unit = {
+            Box(Modifier.height(40.dp))
+        }
+        mount {
+            ChatConversationLayers(Modifier.height(viewportHeight), messages = messages, composer = editor)
+        }
+        val initial = compositions.get()
+        var previousHeight = measuredHeight.get()
+        assertTrue(initial > 0)
+        for (height in listOf(200.dp, 120.dp, 180.dp, 160.dp)) {
+            mainThread { viewportHeight = height }
+            ui.waitForIdle()
+            assertTrue("viewport still remeasures at $height", measuredHeight.get() != previousHeight)
+            assertEquals("viewport-only frames preserve messages slot content", initial, compositions.get())
+            previousHeight = measuredHeight.get()
+        }
     }
 
 }

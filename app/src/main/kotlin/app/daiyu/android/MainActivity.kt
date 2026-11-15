@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
@@ -2422,7 +2421,7 @@ class MainActivity : ComponentActivity() {
                             val usageConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
                             val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
                             val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)
-                            BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+                            BoxWithConstraints(Modifier.fillMaxSize()) {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {
                                     val mediaLease = imageHost.mediaPreviews

@@ -50,7 +50,9 @@ class ChatImeMotionContractTest(unittest.TestCase):
         self.assertNotIn('imePadding()', composer)
         self.assertNotIn('windowInsetsPadding(', composer)
         screen = (CHAT / 'ChatScreen.kt').read_text()
-        self.assertEqual(1, screen.count('.windowInsetsPadding('))
+        self.assertEqual(2, screen.count('.windowInsetsPadding('))
+        self.assertEqual(1, screen.count('.windowInsetsPadding(stableStatusBars)'))
+        self.assertEqual(1, screen.count('.windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))'))
         self.assertIn('WindowInsets.navigationBars.union(WindowInsets.ime)', screen)
         self.assertNotIn('animateContentSize', screen)
 

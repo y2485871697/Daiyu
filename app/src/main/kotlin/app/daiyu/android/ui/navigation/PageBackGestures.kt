@@ -30,6 +30,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +77,13 @@ import kotlinx.coroutines.yield
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.currentCoroutineContext
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+@Composable
+internal fun rememberPageImeVisible(insets: WindowInsets = WindowInsets.ime): Boolean {
+    val density = LocalDensity.current
+    val visible by remember(insets, density) { derivedStateOf { insets.getBottom(density) > 0 } }
+    return visible
+}
 
 internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean, val returnDirection: Float,
     private val scope: kotlinx.coroutines.CoroutineScope,
@@ -587,7 +595,7 @@ internal fun PageBackGestureHost(
         }
     }
     state.ordinaryReturn = toolbarBack
-    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val imeVisible = rememberPageImeVisible()
     val currentBack by rememberUpdatedState(dispatchBack)
     val activeDeparture = departing && !departureInterrupted && departure?.returnSkipped != true && !(departure?.forward == true &&
         (!state.previewAllowed || departure.forwardSkipped))

@@ -117,6 +117,19 @@ internal fun Modifier.workspacePullUpGesture(pointers: WorkspacePullUpPointers, 
     }
 }
 
+private class MessageLayerContent(private val messages: @Composable (Dp) -> Unit) {
+    private var inset = Dp.Unspecified
+    private var content: (@Composable () -> Unit)? = null
+
+    fun forInset(bottomInset: Dp): @Composable () -> Unit {
+        content?.let { if (inset == bottomInset) return it }
+        val next: @Composable () -> Unit = { messages(bottomInset) }
+        inset = bottomInset
+        content = next
+        return next
+    }
+}
+
 /** Capture messages only; the editor is a separate, sharp overlay above the shared backdrop. */
 @Composable
 internal fun ChatConversationLayers(
@@ -129,17 +142,21 @@ internal fun ChatConversationLayers(
     val editorContent: @Composable () -> Unit = remember(composer, backdrop) {
         { Box(Modifier.fillMaxWidth()) { composer(backdrop) } }
     }
+    val messageContent = remember(messages, backdrop, background) {
+        MessageLayerContent { bottomInset ->
+            Box(Modifier.fillMaxSize().captureForTopBar(backdrop).background(background)) {
+                messages(bottomInset)
+            }
+        }
+    }
     SubcomposeLayout(modifier.fillMaxSize()) { constraints ->
         val width = constraints.maxWidth
         val height = constraints.maxHeight
         val editor = subcompose("composer", editorContent).single()
             .measure(constraints.copy(minWidth = width, minHeight = 0))
         val bottomInset = editor.height.toDp()
-        val content = subcompose("messages") {
-            Box(Modifier.fillMaxSize().captureForTopBar(backdrop).background(background)) {
-                messages(bottomInset)
-            }
-        }.single().measure(Constraints.fixed(width, height))
+        val content = subcompose("messages", messageContent.forInset(bottomInset))
+            .single().measure(Constraints.fixed(width, height))
         layout(width, height) {
             content.placeRelative(0, 0)
             editor.placeRelative(0, height - editor.height)

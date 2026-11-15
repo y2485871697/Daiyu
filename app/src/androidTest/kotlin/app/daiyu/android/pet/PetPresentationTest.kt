@@ -65,6 +65,8 @@ class PetPresentationTest : WiredActivityTestCase() {
         data class Frame(val sprite: Rect, val rootX: Int, val rootY: Int,
             val width: Int, val height: Int, val spriteLeft: Int, val spriteTop: Int)
         val accepted = java.util.concurrent.atomic.AtomicReference<Frame?>()
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val completed = java.util.concurrent.CountDownLatch(1)
         var previous: Frame? = null
         var frameNanos = Long.MIN_VALUE
         var sampledNanos = Long.MIN_VALUE
@@ -79,17 +81,28 @@ class PetPresentationTest : WiredActivityTestCase() {
             }
         }
         val listener = android.view.ViewTreeObserver.OnDrawListener {
-            if (frameNanos != Long.MIN_VALUE && sampledNanos != frameNanos) {
+            if (active && frameNanos != Long.MIN_VALUE && sampledNanos != frameNanos) {
                 sampledNanos = frameNanos
-                val panel = frame.getChildAt(0)
-                val ready = frame.alpha == 1f && frame.isAttachedToWindow && !frame.isLayoutRequested &&
-                    panel?.alpha == 1f && !panel.isLayoutRequested && !sprite().isLayoutRequested && sprite().width > 0
-                if (ready) {
-                    val origin = IntArray(2); frame.getLocationOnScreen(origin)
-                    val next = Frame(bounds(), origin[0], origin[1], frame.width, frame.height, sprite().left, sprite().top)
-                    if (next == previous) accepted.compareAndSet(null, next)
-                    previous = next
-                } else previous = null
+                try {
+                    val panel = frame.getChildAt(0)
+                    val ready = frame.alpha == 1f && frame.isAttachedToWindow && !frame.isLayoutRequested &&
+                        panel?.alpha == 1f && !panel.isLayoutRequested && !sprite().isLayoutRequested && sprite().width > 0
+                    if (ready) {
+                        val origin = IntArray(2); frame.getLocationOnScreen(origin)
+                        val next = Frame(bounds(), origin[0], origin[1], frame.width, frame.height, sprite().left, sprite().top)
+                        if (next == previous && accepted.compareAndSet(null, next)) {
+                            active = false
+                            choreographer.removeFrameCallback(callback)
+                            completed.countDown()
+                        }
+                        previous = next
+                    } else previous = null
+                } catch (caught: Throwable) {
+                    failure.set(caught)
+                    active = false
+                    choreographer.removeFrameCallback(callback)
+                    completed.countDown()
+                }
             }
         }
         instrumentation.runOnMainSync {
@@ -98,7 +111,9 @@ class PetPresentationTest : WiredActivityTestCase() {
             choreographer.postFrameCallback(callback)
         }
         try {
-            ui.waitUntil(5_000) { accepted.get() != null }
+            assertTrue("Overlay did not produce two equal ready draw frames",
+                completed.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            failure.get()?.let { throw it }
             return checkNotNull(accepted.get()).sprite
         } finally {
             instrumentation.runOnMainSync {

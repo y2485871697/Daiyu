@@ -69,3 +69,19 @@ class PetPresentationContractTest(unittest.TestCase):
         overlay = tests.split('fun testRealOverlayFirstDrawSpeechGrowthAndDismissalPreserveAnchor', 1)[1]
         self.assertIn('repeat(3)', overlay)
         self.assertIn('visibleFrames.all { it == expected }', overlay)
+
+    def test_overlay_frame_sampler_stops_at_acceptance_without_espresso_idle(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/pet/PetPresentationTest.kt').read_text()
+        sampler = text.split('private fun stable(): Rect', 1)[1].split('override fun cleanupFixture', 1)[0]
+        self.assertIn('java.util.concurrent.CountDownLatch(1)', sampler)
+        self.assertIn('completed.await(5, java.util.concurrent.TimeUnit.SECONDS)', sampler)
+        accepted = sampler.split('if (next == previous && accepted.compareAndSet(null, next))', 1)[1].split('previous = next', 1)[0]
+        self.assertLess(accepted.index('active = false'), accepted.index('completed.countDown()'))
+        self.assertLess(accepted.index('removeFrameCallback(callback)'), accepted.index('completed.countDown()'))
+        for value in ('rootX: Int', 'rootY: Int', 'width: Int', 'height: Int', 'spriteLeft: Int', 'spriteTop: Int'):
+            self.assertIn(value, sampler)
+        self.assertNotIn('ui.waitUntil', sampler)
+        self.assertNotIn('Thread.sleep', sampler)
+        self.assertIn('failure.get()?.let { throw it }', sampler)
+        self.assertIn('finally {', sampler)
+        self.assertIn('removeOnDrawListener(listener)', sampler)

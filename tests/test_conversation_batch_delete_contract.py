@@ -104,6 +104,14 @@ class ConversationBatchDeleteContractTest(unittest.TestCase):
                 selected.extend(selection["selected_classes"])
             self.assertEqual(sorted(classes), sorted(selected))
 
+    def test_exact_batch_delete_group_does_not_displace_unrelated_pending_smoke(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        concurrency = workflow.split("concurrency:\n", 1)[1].split("\njobs:", 1)[0]
+        selector = ",".join(RECORDER.BATCH_DELETE_PLATFORM_CLASSES)
+        self.assertIn("inputs.mode == 'smoke' && inputs.smoke_classes == '" + selector
+                      + "' && '-conversation-batch-delete' || ''", concurrency)
+        self.assertIn("cancel-in-progress: false", concurrency)
+
     def test_cloud_scope_is_exact_incremental_and_rejects_partial_duplicate_or_unknown(self):
         classes = RECORDER.BATCH_DELETE_PLATFORM_CLASSES
         modules = RECORDER.BATCH_DELETE_MODULES

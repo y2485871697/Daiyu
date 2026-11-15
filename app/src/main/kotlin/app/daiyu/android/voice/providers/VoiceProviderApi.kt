@@ -48,7 +48,7 @@ fun interface PersonalVoiceReference {
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-class VoiceProviderException(message: String) : IllegalStateException(message),
+class VoiceProviderException(message: String, val kind: SpeechSynthesisFailureKind? = null) : IllegalStateException(message),
     kotlinx.coroutines.CopyableThrowable<VoiceProviderException> {
     // Keep sanitized failures cause-free across coroutine stack recovery.
     override fun createCopy(): VoiceProviderException? = null
@@ -89,7 +89,7 @@ internal fun headers(config: SpeechProviderConfig, vararg initial: Pair<String, 
 }
 
 /** Bytes are synthesis results, NOT evidence of playback start or permission to use a microphone. */
-enum class SpeechSynthesisFailureKind { REQUEST, TRANSPORT, HTTP_STATUS, RESPONSE_SIZE, EMPTY_RESPONSE, AUDIO_DECODE, AUDIO_SIZE }
+enum class SpeechSynthesisFailureKind { REQUEST, AUTHORIZATION, TRANSPORT, HTTP_STATUS, RESPONSE_SIZE, EMPTY_RESPONSE, AUDIO_DECODE, AUDIO_SIZE }
 
 data class SpeechSynthesisFailure(val kind: SpeechSynthesisFailureKind, val httpStatus: Int?, val responseBytes: Int)
 
@@ -128,6 +128,11 @@ class SpeechSynthesisClient(
             kind = SpeechSynthesisFailureKind.TRANSPORT
             val response = try { transport.execute(request, MAX_AUDIO_BYTES) }
             catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: VoiceProviderException) {
+                if (failure.kind != SpeechSynthesisFailureKind.AUTHORIZATION) throw VoiceProviderException("朗读网络请求失败")
+                kind = SpeechSynthesisFailureKind.AUTHORIZATION
+                throw VoiceProviderException("个人声音授权已失效", kind)
+            }
             catch (_: Exception) { throw VoiceProviderException("朗读网络请求失败") }
             currentCoroutineContext().ensureActive()
             status = response.status.takeIf { it in 100..599 }

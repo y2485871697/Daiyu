@@ -150,7 +150,7 @@ class ResponsesModel internal constructor(
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
                 configuringRequest = false
-                if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, null)
+                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.openAiWebSearchEnabled) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, null)
                 val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
                 voiceSearch?.sent()
@@ -352,6 +352,7 @@ class ResponsesModel internal constructor(
             }
             val uploaded = if (backgroundResume == null) imageFiles.resolve(wireRequest, imagePlan) else emptySet()
             val requestBytes = ImageRequestPreflight.prepare(wireRequest, settings, imagePlan, cancelled::get, videoPlan, uploaded)
+            VoiceSearchRequestTrace.policy(settings.protocol, settings.requestOptions, wireRequest)
             var deliveryFailure: Exception? = null
             var voiceSearch: VoiceSearchRequestTrace? = null
             val eventBuffer = StreamEventBuffer({ event ->
@@ -446,7 +447,7 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
-                if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, wireRequest)
+                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.openAiWebSearchEnabled) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, wireRequest)
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode {

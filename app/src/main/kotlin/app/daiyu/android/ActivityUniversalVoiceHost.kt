@@ -15,6 +15,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
+internal const val UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS = 15_000L
+
+internal fun universalPersonalVoiceCascadeLimits(limits: VoiceControlLimits): PersonalVoiceCascadeLimits {
+    val maxSegments = 8 * limits.maxTurns
+    return PersonalVoiceCascadeLimits(maxSegments, 1_600 * limits.maxTurns,
+        maxSegments.toLong() * UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS, limits.durationMillis)
+}
+
 /**
  * 将连续语音通话接入 Activity；一次显式启动冻结识别与朗读配置，阶段等待有独立时限。
  * 构造、渲染和恢复时保持待命；编辑器、发送回执与原始 Message 仍由 Main 持有。
@@ -138,8 +146,7 @@ internal class ActivityUniversalVoiceHost(
                 val identity = checkNotNull(runtime.personalBinding(speech)) { "personal_call_voice_unavailable" }
                 val limits = startingLimits
                 binding.personal = PersonalVoiceCallAuthorization(identity,
-                    PersonalVoiceCascadeLimits(8 * limits.maxTurns, 1600 * limits.maxTurns,
-                        limits.durationMillis, limits.durationMillis),
+                    universalPersonalVoiceCascadeLimits(limits),
                     currentBinding = { runtime.personalBinding(speech) },
                     callIsCurrent = { !closed && frozen === binding && !binding.revoked && current() },
                     nowMillis = SystemClock::elapsedRealtime)
@@ -229,13 +236,13 @@ internal class ActivityUniversalVoiceHost(
                 PersonalVoiceCascadeOwner(owner.conversationId, owner.runId, owner.messageId))
             val speech = if (personal == null) binding.speech else binding.speech.withUpload(object : PersonalCascadeUpload {
                 override fun consume(requestId: String, exactText: String): Long = try {
-                    personal.consume(requestId, exactText, 15_000)
+                    personal.consume(requestId, exactText, UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS)
                 } catch (failure: Exception) {
                     diagnostics?.recordAsync(DiagnosticEvent.SPEECH_PERSONAL_AUTHORIZATION_DENIED)
                     throw failure
                 }
                 override fun current(): Boolean = personal.current()
-            }, 15_000)
+            }, UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS)
             val allowed = { admitted(turn.permit) && frozen === binding && personal?.current() != false }
             val base = speechOutput(identity, speech)
             // Recheck every sentence and every real player event, not just first lease acquisition.

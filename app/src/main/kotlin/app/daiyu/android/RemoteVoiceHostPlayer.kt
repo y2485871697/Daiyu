@@ -92,7 +92,13 @@ internal class RemoteVoiceHostPlayer(
                     val guarded = VoiceHttpTransport { request, maxBytes ->
                         ensureActive()
                         check(!closed && runtime.referenceStillCurrent(frozen))
-                        cap = frozen.upload?.consume(requestId, text) ?: frozen.playbackLimitMs
+                        cap = try {
+                            frozen.upload?.consume(requestId, text) ?: frozen.playbackLimitMs
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            throw VoiceProviderException("个人声音授权已失效", SpeechSynthesisFailureKind.AUTHORIZATION)
+                        }
                         check(cap in 1..frozen.playbackLimitMs)
                         check(!closed && speechCurrent())
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_HTTP_STARTED)
@@ -112,6 +118,7 @@ internal class RemoteVoiceHostPlayer(
                     SpeechSynthesisClient(guarded, reference, onFailure = { failure ->
                         val code = when (failure.kind) {
                             SpeechSynthesisFailureKind.REQUEST -> RuntimeDiagnostics.Code.SPEECH_REQUEST_INVALID
+                            SpeechSynthesisFailureKind.AUTHORIZATION -> RuntimeDiagnostics.Code.SPEECH_AUTHORIZATION_DENIED
                             SpeechSynthesisFailureKind.TRANSPORT -> RuntimeDiagnostics.Code.SPEECH_TRANSPORT_FAILED
                             SpeechSynthesisFailureKind.HTTP_STATUS -> RuntimeDiagnostics.Code.SPEECH_HTTP_REJECTED
                             SpeechSynthesisFailureKind.RESPONSE_SIZE -> RuntimeDiagnostics.Code.SPEECH_RESPONSE_TOO_LARGE

@@ -217,4 +217,27 @@ class SpeechProtocolsTest {
         }
     }
 
+
+    @Test fun authorizationAtUploadIsNotReportedAsTransportAndNeverLeaksTheRawReason() = runBlocking {
+        val canary = "private-reference personal_call_budget_or_binding_denied"
+        val cases = listOf(
+            VoiceProviderException(canary, SpeechSynthesisFailureKind.AUTHORIZATION) to SpeechSynthesisFailureKind.AUTHORIZATION,
+            VoiceProviderException(canary) to SpeechSynthesisFailureKind.TRANSPORT,
+            java.io.IOException(canary) to SpeechSynthesisFailureKind.TRANSPORT)
+        for ((source, expected) in cases) {
+            var attempts = 0
+            val failures = mutableListOf<SpeechSynthesisFailure>()
+            val client = SpeechSynthesisClient(VoiceHttpTransport { _, _ -> attempts++; throw source }, onFailure = failures::add)
+            try {
+                client.synthesize(config(SpeechEngine.OPENAI), "private-speech", "alloy")
+                fail("must reject")
+            } catch (failure: VoiceProviderException) {
+                assertEquals(if (expected == SpeechSynthesisFailureKind.AUTHORIZATION) "个人声音授权已失效" else "朗读网络请求失败", failure.message)
+                assertNull(failure.cause)
+                assertFalse(failure.message.orEmpty().contains(canary))
+            }
+            assertEquals(1, attempts)
+            assertEquals(listOf(SpeechSynthesisFailure(expected, null, 0)), failures)
+        }
+    }
 }

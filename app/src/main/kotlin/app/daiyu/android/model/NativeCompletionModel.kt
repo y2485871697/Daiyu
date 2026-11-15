@@ -120,6 +120,7 @@ class NativeCompletionModel internal constructor(
                 if (summaryRequest) null else if (settings.protocol == ProviderProtocol.GEMINI) settings.model else request.opt("model") as? String)
             val headers = SessionGateway.headers(endpoint, sessionContext, settings.requestOptions.sessionGateway)
             val bytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
+            VoiceSearchRequestTrace.policy(settings.protocol, settings.requestOptions, request)
             var deliveryFailure: Exception? = null
             var voiceSearch: VoiceSearchRequestTrace? = null
             val eventBuffer = StreamEventBuffer({ event ->
@@ -146,7 +147,7 @@ class NativeCompletionModel internal constructor(
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
-                if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(settings.protocol, request)
+                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.openAiWebSearchEnabled) voiceSearch = VoiceSearchRequestTrace(settings.protocol, request)
                 conn.send(bytes.size.toLong()) { bytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode {

@@ -4122,6 +4122,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val frozenReasoning = ReasoningEffort.textPreference(reasoningIntent,
             model = app.daiyu.android.model.ReasoningRequestPolicy.requestModel(provider.model, provider.requestOptions))
+        app.daiyu.android.model.VoiceSearchRequestTrace.policy(requestProvider.protocol, requestProvider.requestOptions)
         val requestConfig = requestProvider.asModelSettings()
         // sendPrepared runs on the preparation worker. Freeze once, AFTER the exact provider;
         // no settings IO on pause/continue/tool rounds, and no fallback on a corrupt/fenced store.

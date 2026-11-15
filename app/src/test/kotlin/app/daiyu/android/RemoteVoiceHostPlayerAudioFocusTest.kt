@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.media.MediaPlayer
 import app.daiyu.android.diagnostics.DiagnosticLogStore
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import java.io.File
 import java.util.concurrent.Executor
 import org.json.JSONObject
@@ -646,4 +647,43 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         } finally { diagnostics.enabled = false; diagnostics.clear() }
     }
 
+
+    @Test fun consumeDenialIsAuthorizationWhileConsumeCancellationIsNotAFailure() {
+        val wasEnabled = RuntimeDiagnostics.enabled
+        RuntimeDiagnostics.install(File(context.cacheDir, "consume-authorization-runtime"))
+        RuntimeDiagnostics.awaitWrites()
+        try {
+            RuntimeDiagnostics.enabled = true
+            for (cancelConsume in listOf(false, true)) {
+                host.closeStrict()
+                RuntimeDiagnostics.awaitWrites()
+                RuntimeDiagnostics.clear()
+                var consumes = 0
+                val upload = PersonalCascadeUpload { _, _ ->
+                    consumes++
+                    if (cancelConsume) throw CancellationException("private-consume")
+                    error("personal_call_budget_or_binding_denied private-consume")
+                }
+                host = newHost(FrozenVoiceSpeech(config).withUpload(upload, 15_000))
+                assertTrue(host.play("owner", "consume-$cancelConsume", "private-speech"))
+                drainUntil { host.state.value.phase == SpeechPhase.ERROR }
+                RuntimeDiagnostics.awaitWrites()
+                val rows = RuntimeDiagnostics.export()
+                val codes = (0 until rows.length()).map { rows.getJSONObject(it) }
+                    .filter { it.optString("stage") == "SPEECH_SYNTHESIS" }
+                    .map { it.getString("code") }
+                assertEquals(if (cancelConsume) emptyList<String>() else listOf("SPEECH_AUTHORIZATION_DENIED"), codes)
+                assertEquals(1, consumes)
+                assertEquals(0, requests)
+                assertTrue(media.isEmpty())
+                assertNull(shadowOf(audio).lastAudioFocusRequest)
+                assertFalse(rows.toString().contains("private-consume"))
+                assertFalse(rows.toString().contains("private-speech"))
+            }
+        } finally {
+            RuntimeDiagnostics.awaitWrites()
+            RuntimeDiagnostics.clear()
+            RuntimeDiagnostics.enabled = wasEnabled
+        }
+    }
 }

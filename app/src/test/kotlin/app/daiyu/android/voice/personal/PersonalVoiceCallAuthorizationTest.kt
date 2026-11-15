@@ -2,6 +2,9 @@ package app.daiyu.android.voice.personal
 
 import org.junit.Assert.*
 import org.junit.Test
+import app.daiyu.android.universalPersonalVoiceCascadeLimits
+import app.daiyu.android.UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS
+import app.daiyu.android.voice.control.VoiceControlLimits
 
 class PersonalVoiceCallAuthorizationTest {
     private val binding = PersonalVoiceCascadeBinding("a".repeat(64), "revision", "voice", "b".repeat(64))
@@ -103,5 +106,39 @@ class PersonalVoiceCallAuthorizationTest {
     @Test fun bindingCallbackFailureFailsClosedWithoutProviderDetails() {
         val call = authorization(currentBinding = { error("private fixture") })
         assertFalse(call.current())
+    }
+
+    @Test fun newCallReservationsMatchAllAllowedSegmentsWithoutExtendingWallClockExpiry() {
+        val limits = universalPersonalVoiceCascadeLimits(VoiceControlLimits())
+        assertEquals(PersonalVoiceCascadeLimits(24, 4800, 360_000, 180_000), limits)
+        val clock = Clock()
+        val call = PersonalVoiceCallAuthorization(binding, limits, { binding }, { true }, { clock.now })
+        val first = answer(call)
+        repeat(12) { assertEquals(15_000L, first.consume("first-$it", "字", UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS)) }
+        first.close()
+        clock.now += 63_000
+        val second = answer(call, answer = owner.copy(runId = "next", messageId = "next"))
+        repeat(12) { assertEquals(15_000L, second.consume("next-$it", "字", UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS)) }
+        assertTrue(second.current())
+        denied { second.consume("twenty-fifth", "字", UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS) }
+        assertFalse(call.current())
+    }
+    @Test fun newCallReservationBudgetStillHonorsExactExpiryAndImmediateRevocation() {
+        for (expire in listOf(true, false)) {
+            val clock = Clock()
+            val call = PersonalVoiceCallAuthorization(binding, universalPersonalVoiceCascadeLimits(VoiceControlLimits()),
+                { binding }, { true }, { clock.now })
+            val answer = answer(call)
+            repeat(13) { answer.consume("segment-$it", "字", UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS) }
+            if (expire) {
+                clock.now += 179_999
+                assertTrue(answer.current())
+                assertEquals(1L, call.remainingMillis())
+                clock.now++
+            } else call.revoke()
+            denied { answer.consume("after-stop", "字", UNIVERSAL_PERSONAL_SEGMENT_AUDIO_MS) }
+            assertFalse(answer.current())
+            assertEquals(0L, call.remainingMillis())
+        }
     }
 }

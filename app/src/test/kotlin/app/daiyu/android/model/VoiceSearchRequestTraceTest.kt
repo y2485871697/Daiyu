@@ -53,9 +53,9 @@ class VoiceSearchRequestTraceTest {
     }
 
     private fun request(protocol: ProviderProtocol, enabled: Boolean, connection: Connection, sink: (ModelEvent) -> Unit = {},
-                        beforeNext: (ModelSession) -> Unit = {}) {
+                        voiceOnly: Boolean = true, beforeNext: (ModelSession) -> Unit = {}) {
         val settings = ModelSettings("https://wire.invalid/v1", "search-fixture", "private-credential", false,
-            protocol = protocol, requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = enabled, voiceTextOnly = true))
+            protocol = protocol, requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = enabled, voiceTextOnly = voiceOnly))
         val model = if (protocol == ProviderProtocol.RESPONSES) ResponsesModel(settings) { connection }
             else NativeCompletionModel(settings, { connection })
         val session = model.open(emptyList(), emptyList<ToolDefinition>())
@@ -177,6 +177,91 @@ class VoiceSearchRequestTraceTest {
                             trace.completed()
                         }
                     } finally { trace.close(cancelBeforeExecute); connection.disconnect() }
+                }
+            }
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+
+    @Test fun ordinaryNativeSearchRequestHasWirePolicyWithoutInventedSearchReceipts() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("search-policy-ordinary").toFile())
+        RuntimeDiagnostics.enabled = true
+        try {
+            for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS)) {
+                RuntimeDiagnostics.clear()
+                val connection = Connection(stream(protocol, false))
+                val events = mutableListOf<ModelEvent>()
+                request(protocol, true, connection, events::add, voiceOnly = false)
+                RuntimeDiagnostics.awaitWrites()
+                val rows = RuntimeDiagnostics.export()
+                val policies = (0 until rows.length()).map(rows::getJSONObject)
+                    .filter { it.optString("code") == "SEARCH_POLICY_WIRE" }
+                assertEquals(1, policies.size)
+                assertEquals((protocol.ordinal.toLong() shl 2) or 2L, policies.single().getLong("revision_or_count"))
+                assertTrue(codes().contains(if (protocol == ProviderProtocol.RESPONSES) "SEARCH_WIRE_RESPONSES" else "SEARCH_WIRE_CHAT"))
+                assertFalse(events.any { it is ModelEvent.NativeSearch })
+                assertFalse(codes().contains("SEARCH_RUNNING"))
+                assertFalse(codes().contains("SEARCH_COMPLETED"))
+                assertTrue(codes().contains("SEARCH_NO_RECEIPT"))
+            }
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+    @Test fun frozenPolicyContainsOnlyFlagsAndNeverMeansSearchWasExecuted() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("search-policy-frozen").toFile())
+        RuntimeDiagnostics.enabled = true
+        try {
+            RuntimeDiagnostics.clear()
+            VoiceSearchRequestTrace.policy(ProviderProtocol.RESPONSES,
+                ProviderRequestOptions(openAiWebSearchEnabled = true, voiceTextOnly = true))
+            RuntimeDiagnostics.awaitWrites()
+            val rows = RuntimeDiagnostics.export()
+            val policy = (0 until rows.length()).map(rows::getJSONObject)
+                .single { it.optString("code") == "SEARCH_POLICY_FROZEN" }
+            assertEquals(3L, policy.getLong("revision_or_count"))
+            assertEquals(-1L, policy.getLong("bytes_or_size"))
+            assertFalse(codes().contains("SEARCH_RUNNING"))
+            assertFalse(codes().contains("SEARCH_COMPLETED"))
+            assertFalse(codes().contains("SEARCH_SEND_COMPLETED"))
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+    @Test fun connectionFactoryFailureKeepsWirePolicyButCannotClaimSendOrSearch() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("search-policy-connect").toFile())
+        RuntimeDiagnostics.enabled = true
+        try {
+            val settings = ModelSettings("https://wire.invalid/v1", "fixture", "private-credential", false,
+                requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = true, voiceTextOnly = true))
+            val model = ResponsesModel(settings) { throw java.io.IOException("private-connect-failure") }
+            val session = model.open(emptyList(), emptyList<ToolDefinition>())
+            val events = mutableListOf<ModelEvent>()
+            assertNotNull(runCatching { session.next(emptyList(), events::add) }.exceptionOrNull())
+            assertTrue(codes().contains("SEARCH_POLICY_WIRE"))
+            assertFalse(codes().contains("SEARCH_SEND_COMPLETED"))
+            assertFalse(events.any { it is ModelEvent.NativeSearch })
+            assertFalse(RuntimeDiagnostics.export().toString().contains("private-connect-failure"))
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+
+    @Test fun policyDistinguishesAbsentWireFromZeroToolsAndPreservesEveryFlag() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("search-policy-flags").toFile())
+        RuntimeDiagnostics.enabled = true
+        try {
+            for (protocol in ProviderProtocol.entries.filter { it != ProviderProtocol.UNKNOWN }) {
+                for (voice in listOf(false, true)) for (search in listOf(false, true)) {
+                    for (wire in listOf(null, JSONObject(), JSONObject().put("tools", JSONArray()),
+                        JSONObject().put("tools", JSONArray().put(JSONObject().put("type", "web_search"))))) {
+                        RuntimeDiagnostics.clear()
+                        VoiceSearchRequestTrace.policy(protocol,
+                            ProviderRequestOptions(openAiWebSearchEnabled = search, voiceTextOnly = voice), wire)
+                        RuntimeDiagnostics.awaitWrites()
+                        val rows = RuntimeDiagnostics.export()
+                        val code = if (wire == null) "SEARCH_POLICY_FROZEN" else "SEARCH_POLICY_WIRE"
+                        val row = (0 until rows.length()).map(rows::getJSONObject).single { it.optString("code") == code }
+                        assertEquals((protocol.ordinal.toLong() shl 2) or (if (voice) 1L else 0L) or (if (search) 2L else 0L),
+                            row.getLong("revision_or_count"))
+                        assertEquals(if (wire == null) -1L else if (wire.has("tools")) wire.getJSONArray("tools").length().toLong() else 0L,
+                            row.getLong("bytes_or_size"))
+                        assertFalse(codes().contains("SEARCH_RUNNING"))
+                        assertFalse(codes().contains("SEARCH_COMPLETED"))
+                    }
                 }
             }
         } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }

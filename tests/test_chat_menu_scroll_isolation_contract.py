@@ -200,7 +200,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         for token in ('rememberTopBarBackdrop()', 'blurRadius = 24f', 'saturation = 1.35f',
                       '.clip(shape).then(blur)', 'rememberPopupMotion(menu.expanded())',
                       'BackHandler(enabled = menu.expanded(), onBack = menu.onDismiss)',
-                      '0.15f + 0.85f * motion.fraction.value', 'TransformOrigin(1f, 0f)',
+                      '0.15f + 0.85f * motion.fraction.value', 'TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)',
                       'surface.place(x, y)', 'delay(PopupExitRetentionMillis)',
                       'if (!menu.expanded()) event.changes.forEach { it.consume() }',
                       'else Modifier.clearAndSetSemantics {}', 'menu.onDismiss()',

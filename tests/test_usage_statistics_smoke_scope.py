@@ -17,12 +17,16 @@ class UsageStatisticsSmokeScopeTest(unittest.TestCase):
         modules = (
             "test_chat_usage_ready_contract", "test_context_usage_wiring_contract",
             "test_usage_tab_retention_contract", "test_usage_heatmap_contract",
-            "test_usage_statistics_smoke_scope", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+            "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
             "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
         )
         self.assertEqual(target, recorder.USAGE_STATS_PLATFORM_CLASS)
         self.assertEqual(modules, recorder.USAGE_STATS_MODULES)
         self.assertEqual(len(modules), len(set(modules)))
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/build.yml").read_text()
+        validation = workflow.split("      - name: 验证冻结补检工具\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("working-directory: .smoke-validation-tools", validation)
+        self.assertIn("test_smoke_boot.SourceTests test_usage_statistics_smoke_scope -v", validation)
         for python in ("python", "python3"):
             command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))
             self.assertEqual("usage-statistics-targeted", scope)

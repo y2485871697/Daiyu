@@ -153,7 +153,7 @@ USAGE_STATS_PLATFORM_CLASS = "app.daiyu.android.UsagePresentationActivityTest"
 USAGE_STATS_MODULES = (
     "test_chat_usage_ready_contract", "test_context_usage_wiring_contract",
     "test_usage_tab_retention_contract", "test_usage_heatmap_contract",
-    "test_usage_statistics_smoke_scope", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )
 

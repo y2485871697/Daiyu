@@ -51,10 +51,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         source = CHAT.read_text()
         viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
         placement = viewport.split('layout(viewport.width, state.contentHeight)', 1)[1]
-        guard = placement.index('val q = if (!state.bounded) 0 else {')
-        origin = placement.index('val origin = state.itemOrigin')
-        self.assertLess(guard, origin)
-        self.assertNotIn('itemOrigin', placement[:guard])
+        self.assertIn('val origin = if (state.bounded) state.itemOrigin else null', placement)
         self.assertIn('state.viewportOffset = q', placement)
         self.assertIn('viewport.placeRelative(0, q)', placement)
         self.assertIn('list.localPositionOf(coordinates, Offset.Zero).y', viewport)
@@ -81,8 +78,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
         for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = body.height",
-                      "minOf(body.height, visibleHeight)", "body.height - height",
-                      "state.bounded && following && !state.followCatchup", "maximum.toFloat()",
+                      "minOf(body.height, currentViewportHeight)", "state.contentHeight - visibleHeight",
+                      "state.bounded && following && !state.followCatchup", "state.maxOffset.toFloat()",
                       "body.placeRelative(0, -state.scrollOffset.roundToInt())",
                       "layout(viewport.width, state.contentHeight)", "Modifier.onPlaced",
                       "list.localPositionOf(coordinates, Offset.Zero).y",
@@ -109,10 +106,19 @@ class StreamingOcclusionContract(unittest.TestCase):
         measure = viewport.split("onViewportMeasure?.invoke()", 1)[1].split("layout(body.width, height)", 1)[0]
         self.assertEqual(1, measure.count("viewportHeight()"))
         self.assertIn("val currentViewportHeight = viewportHeight().coerceAtLeast(1)", measure)
-        self.assertIn("val followOffset = if (body.height > currentViewportHeight) maximum else 0", measure)
-        self.assertLess(measure.index("val currentViewportHeight ="), measure.index("val followOffset ="))
+        self.assertIn("minOf(body.height, currentViewportHeight)", measure)
+        self.assertNotIn("state.itemOrigin", measure)
         self.assertNotIn("val followOffset = (body.height - viewportHeight()", viewport)
-        self.assertIn("state.scrollOffset = if (state.bounded && following && !state.followCatchup) followOffset.toFloat()", viewport)
+        placement = viewport.split("layout(viewport.width, state.contentHeight)", 1)[1]
+        self.assertNotIn("state.scrollOffset =", measure)
+        self.assertEqual(1, placement.count("val following = follows()"))
+        self.assertIn("val followOffset = if (state.contentHeight > viewport.height) maximum else 0", placement)
+        self.assertIn("val maximum = (state.contentHeight - visibleHeight).coerceAtLeast(0)", placement)
+        self.assertLess(placement.index("val origin ="), placement.index("val maximum ="))
+        self.assertNotIn("if (follows()", placement)
+        self.assertIn("state.scrollOffset = if (state.bounded && following && !state.followCatchup) followOffset.toFloat()", placement)
+        self.assertLess(placement.index("state.scrollOffset = if"), placement.index("state.viewportOffset = q"))
+        self.assertLess(placement.index("state.viewportOffset = q"), placement.index("viewport.placeRelative(0, q)"))
         self.assertNotIn("if (state.bounded && follows()) maximum.toFloat()", viewport)
         self.assertIn("clipRect(bottom = bottom)", viewport)
         self.assertIn("state.viewportOffset.coerceIn(0, state.maxOffset)", viewport)

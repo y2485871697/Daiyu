@@ -11,6 +11,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
@@ -102,6 +106,57 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         assertTrue(measures.get() > beforeShrink)
         ui.onNodeWithTag("chat-stream-viewport:measure-probe").assertHeightIsEqualTo(80.dp)
         mainThread { assertEquals(0, state.maxOffset); assertEquals(0f, state.scrollOffset, 0.001f) }
+    }
+
+    fun testFollowGateChangeAfterMeasureCannotPublishHalfATailTransform() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        var following = true
+        mount {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            Box(Modifier.onPlaced { following = false }) {
+                StreamingTailContainer(state, { null }, "follow-gate", true,
+                    follows = { following }, clearance = { 0 },
+                    viewportHeight = { with(density) { 120.dp.roundToPx() } }) {
+                    Box(Modifier.size(100.dp, 1000.dp).testTag("follow-gate-body"))
+                }
+            }
+        }
+        mainThread {
+            assertTrue(state.maxOffset > 0)
+            assertEquals("No measure-only follow offset may leak into reading placement", 0f,
+                state.viewportOffset - state.scrollOffset, 0.001f)
+        }
+        val body = ui.onNodeWithTag("follow-gate-body").fetchSemanticsNode()
+        val viewport = ui.onNodeWithTag("chat-stream-viewport:follow-gate").fetchSemanticsNode()
+        assertEquals("The actual body, not just its outer item, keeps the reading anchor",
+            viewport.layoutInfo.coordinates.positionInRoot().y,
+            body.layoutInfo.coordinates.positionInRoot().y, 1f)
+    }
+
+    fun testCurrentPlacementOriginDefinesTheFirstDrawnTailSlice() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        val origins = java.util.Collections.synchronizedList(mutableListOf<Float>())
+        var expected = 0f
+        mainThread { state.itemOrigin = 100f }
+        mount {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val viewportPx = with(density) { 120.dp.roundToPx() }
+            val bodyPx = with(density) { 1000.dp.roundToPx() }
+            expected = 100f - (bodyPx - viewportPx)
+            Box(Modifier.onPlaced { state.itemOrigin = -100f }.drawWithContent {
+                drawContent()
+                origins.add(state.viewportOffset - state.scrollOffset)
+            }) {
+                StreamingTailContainer(state, { null }, "current-origin", true,
+                    follows = { true }, clearance = { 0 }, viewportHeight = { viewportPx }) {
+                    Box(Modifier.size(100.dp, 1000.dp))
+                }
+            }
+        }
+        val drawn = synchronized(origins) { origins.toList() }
+        assertTrue("Observe the first draw, not only settled state", drawn.isNotEmpty())
+        drawn.forEach { assertEquals("The prior positive origin cannot shrink a new negative-origin slice",
+            expected, it, 1f) }
     }
 
     private fun rows(): List<ChatTurnUi> = List(20) { ChatTurnUi.User("u$it", "row $it") }
@@ -329,7 +384,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             }
         }
         ui.onNodeWithTag("chat-messages").assertHeightIsEqualTo(200.dp)
-        ui.onNodeWithTag("chat-stream-viewport:measure-tail").assertHeightIsEqualTo(125.dp)
+        ui.onNodeWithTag("chat-stream-viewport:measure-tail").assertHeightIsEqualTo(200.dp - 40.dp - 11.dp - ChatTailClearance)
         val initial = compositions.get()
         assertTrue(initial > 0)
         for (height in listOf(200.dp, 120.dp, 200.dp, 160.dp)) {
@@ -337,7 +392,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             ui.waitForIdle()
             ui.onNodeWithTag("chat-messages").assertHeightIsEqualTo(height)
             ui.onNodeWithTag("chat-stream-viewport:measure-tail")
-                .assertHeightIsEqualTo(height - 40.dp - 11.dp - 24.dp)
+                .assertHeightIsEqualTo(height - 40.dp - 11.dp - ChatTailClearance)
             assertEquals("unchanged turn content at $height", initial, compositions.get())
         }
     }

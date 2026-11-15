@@ -28,7 +28,7 @@ class ChatImeHotpathContractTest(unittest.TestCase):
         self.assertIn('viewportHeightPx.intValue = constraints.maxHeight', body)
         self.assertIn('listViewportHeight = { viewportHeightPx.intValue }', body)
         viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
-        self.assertIn('val safeBottom = listViewportHeight() - clearance()', viewport)
+        self.assertIn('val safeBottom = currentListHeight - clearance()', viewport)
         self.assertIn('val currentListHeight = listViewportHeight()', viewport)
         tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageListMeasurePhaseTest.kt').read_text()
         self.assertIn('testRealStreamingListViewportResizeDoesNotRecomposeTurnContent', tests)

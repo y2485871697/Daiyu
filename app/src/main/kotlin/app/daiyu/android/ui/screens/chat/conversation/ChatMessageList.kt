@@ -64,7 +64,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -175,25 +174,8 @@ internal fun StreamingTailContainer(
             val currentViewportHeight = viewportHeight().coerceAtLeast(1)
             val body = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
             state.contentHeight = body.height
-            val height = if (state.bounded) {
-                val safeBottom = listViewportHeight() - clearance()
-                val availableBelowOrigin = safeBottom - (state.itemOrigin?.roundToInt() ?: 0).coerceAtLeast(0)
-                val visibleHeight = minOf(currentViewportHeight, availableBelowOrigin).coerceAtLeast(1)
-                minOf(body.height, visibleHeight)
-            } else body.height
-            val maximum = (body.height - height).coerceAtLeast(0)
-            val following = follows()
-            if (protectClearance() && !following) state.followCatchup = true
-            if (!protectClearance()) state.followCatchup = false
-            if (following && state.followCatchup && state.itemOrigin?.let {
-                    it + body.height <= listViewportHeight() - clearance() + 1f
-                } == true) state.followCatchup = false
-            state.maxOffset = maximum
-            // Keep short replies at their top while the outer follower reveals appended rows.
-            // Once the body fills a reading viewport, pin its tail to the actual visible slice.
-            val followOffset = if (body.height > currentViewportHeight) maximum else 0
-            state.scrollOffset = if (state.bounded && following && !state.followCatchup) followOffset.toFloat()
-                else Snapshot.withoutReadObservation { state.scrollOffset.coerceIn(0f, maximum.toFloat()) }
+            // Position-dependent clipping is resolved after this item's current origin is placed.
+            val height = if (state.bounded) minOf(body.height, currentViewportHeight) else body.height
             layout(body.width, height) {
                 body.placeRelative(0, -state.scrollOffset.roundToInt())
             }
@@ -204,11 +186,30 @@ internal fun StreamingTailContainer(
         layout(viewport.width, state.contentHeight) {
             // onPlaced runs after this item's parent placement, before its child
             // placement. No assumption about LazyListState publishing a measure.
-            val q = if (!state.bounded) 0 else {
-                val origin = state.itemOrigin
-                if (follows() && origin != null) {
-                    val desired = (currentListHeight - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
-                    // Let the outer list retire its hidden extent before handing the inner follower back its offset.
+            val following = follows()
+            val origin = if (state.bounded) state.itemOrigin else null
+            val safeBottom = currentListHeight - clearance()
+            val visibleHeight = if (state.bounded) {
+                minOf(viewport.height, (safeBottom - (origin?.roundToInt() ?: 0).coerceAtLeast(0)).coerceAtLeast(1))
+            } else viewport.height
+            val maximum = (state.contentHeight - visibleHeight).coerceAtLeast(0)
+            state.maxOffset = maximum
+            val protect = protectClearance()
+            if (protect && !following) state.followCatchup = true
+            if (!protect) state.followCatchup = false
+            val q = if (!state.bounded) {
+                state.scrollOffset = 0f
+                0
+            } else {
+                if (following && state.followCatchup && origin?.let {
+                        it + state.contentHeight <= currentListHeight - clearance() + 1f
+                    } == true) state.followCatchup = false
+                val followOffset = if (state.contentHeight > viewport.height) maximum else 0
+                state.scrollOffset = if (state.bounded && following && !state.followCatchup) followOffset.toFloat()
+                    else state.scrollOffset.coerceIn(0f, state.maxOffset.toFloat())
+                if (following && origin != null) {
+                    val desired = (currentListHeight - clearance() - origin.roundToInt() - visibleHeight).coerceIn(0, state.maxOffset)
+                    // Retire the outer hidden extent before handing its offset to the inner follower.
                     if (state.followCatchup) desired.coerceIn(
                         state.viewportOffset.coerceAtMost(state.scrollOffset.roundToInt()), state.scrollOffset.roundToInt())
                     else desired

@@ -10,6 +10,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -64,6 +67,74 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         if (active) ui.onNodeWithText("resume tail marker").assertIsDisplayed()
+    }
+
+    fun testBoundedWaitingTailBodyKeepsEveryDrawAnchorAcrossResume() {
+        val samples = java.util.Collections.synchronizedList(mutableListOf<Float>())
+        var markerCoordinates: androidx.compose.ui.layout.LayoutCoordinates? = null
+        var listCoordinates: androidx.compose.ui.layout.LayoutCoordinates? = null
+        var observe = false
+        mainThread {
+            owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                        Box(Modifier.size(320.dp, 240.dp)) {
+                            ChatMessageList(
+                                listOf(ChatTurnUi.User("question-user", "waiting question"),
+                                    ChatTurnUi.Assistant("waiting-tail", status = RunStatus.RUNNING)),
+                                ChatScreenActions(),
+                                modifier = Modifier.onPlaced { listCoordinates = it },
+                                scrollRequest = ChatScrollRequest(1),
+                                turnExtras = {
+                                    Box(Modifier.height(700.dp).testTag("waiting-body-marker")
+                                        .onPlaced { markerCoordinates = it }.drawWithContent {
+                                            drawContent()
+                                            val marker = markerCoordinates
+                                            val list = listCoordinates
+                                            if (observe && marker != null && list != null && marker.isAttached && list.isAttached) {
+                                                samples.add(list.localPositionOf(marker, androidx.compose.ui.geometry.Offset.Zero).y)
+                                            }
+                                        })
+                                    Text("waiting option marker")
+                                })
+                        }
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        ui.onNodeWithText("waiting option marker").assertIsDisplayed()
+        val initial = ui.onNodeWithTag("waiting-body-marker").fetchSemanticsNode()
+            .layoutInfo.coordinates.positionInRoot().y
+        val outer = top("chat-turn:waiting-tail")
+        var relativeBefore = 0f
+        mainThread {
+            relativeBefore = checkNotNull(listCoordinates).localPositionOf(checkNotNull(markerCoordinates),
+                androidx.compose.ui.geometry.Offset.Zero).y
+        }
+        repeat(3) {
+            mainThread { owner.registry.currentState = Lifecycle.State.CREATED }
+            ui.waitForIdle()
+            mainThread { samples.clear(); observe = true }
+            ui.mainClock.autoAdvance = false
+            try {
+                ui.runOnUiThread { owner.registry.currentState = Lifecycle.State.RESUMED }
+                repeat(12) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    assertEquals("Outer anchor", outer, top("chat-turn:waiting-tail"), 1f)
+                    val marker = ui.onNodeWithTag("waiting-body-marker").fetchSemanticsNode()
+                        .layoutInfo.coordinates.positionInRoot().y
+                    assertEquals("A bounded waiting body cannot jump inside an unchanged item", initial, marker, 1f)
+                }
+            } finally { ui.mainClock.autoAdvance = true }
+            mainThread { observe = false }
+            val draws = synchronized(samples) { samples.toList() }
+            assertTrue("Must observe draw callbacks, not only settled semantics", draws.isNotEmpty())
+            draws.forEach { assertEquals("Every drawn inner origin matches the pre-pause anchor", relativeBefore, it, 1f) }
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testInactiveInitialPositionResumesWithoutLifecycleOrNewRequest() {

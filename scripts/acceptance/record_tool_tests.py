@@ -600,7 +600,22 @@ PET_MODEL_MODULES = (
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )
 
+WORKFLOW_NODE_MOTION_PLATFORM_CLASSES = (
+    "app.daiyu.android.ui.screens.chat.conversation.WorkflowNodeMotionTest",
+    "app.daiyu.android.ui.screens.chat.conversation.WorkTimelineConnectorTest",
+)
+WORKFLOW_NODE_MOTION_MODULES = (
+    "test_reasoning_workflow_contract", "test_work_timeline_connector_contract",
+    "test_workflow_render_isolation_contract", "test_workflow_narration_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_NODE_MOTION_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *WORKFLOW_NODE_MOTION_MODULES, "-v"], "workflow-node-motion-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PET_MODEL_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PET_MODEL_MODULES, "-v"], "pet-model-targeted"

@@ -16,6 +16,23 @@ SPEC.loader.exec_module(recorder)
 
 
 class RecordToolTestsScopeTest(unittest.TestCase):
+    def test_workflow_node_motion_scope_is_exact_and_retains_full_fallback(self):
+        classes = recorder.WORKFLOW_NODE_MOTION_PLATFORM_CLASSES
+        self.assertEqual(classes, (
+            "app.daiyu.android.ui.screens.chat.conversation.WorkflowNodeMotionTest",
+            "app.daiyu.android.ui.screens.chat.conversation.WorkTimelineConnectorTest"))
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("workflow-node-motion-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.WORKFLOW_NODE_MOTION_MODULES, "-v"], command)
+        for selected in (classes[:-1], (*classes, classes[0]), (*classes, "app.daiyu.android.OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))[1])
+        for mode in ("", "compile", "candidate", "daily", "release"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=",".join(classes)))[1])
+        self.assertIn("test_reasoning_workflow_contract", recorder.WORKFLOW_NODE_MOTION_MODULES)
+        self.assertIn("test_work_timeline_connector_contract", recorder.WORKFLOW_NODE_MOTION_MODULES)
+        self.assertIn("test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope", recorder.WORKFLOW_NODE_MOTION_MODULES)
+
     def test_default_keeps_full_command_and_receipt_contract(self):
         command, scope = recorder.command_for("python3", {})
         self.assertEqual(command, ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"])

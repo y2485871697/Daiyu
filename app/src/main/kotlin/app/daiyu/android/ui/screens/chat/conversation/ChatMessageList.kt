@@ -206,7 +206,7 @@ internal fun StreamingTailContainer(
             val maximum = if (state.bounded) (state.contentHeight - visibleHeight).coerceAtLeast(0) else 0
             state.maxOffset = maximum
             val protect = protectClearance()
-            if (!state.bounded || !protect) state.followCatchup = false
+            if (!protect) state.followCatchup = false
             else if (!following) state.followCatchup = true
             val q = if (!state.bounded) {
                 state.scrollOffset = 0f
@@ -737,13 +737,14 @@ internal fun ChatMessageList(
                     (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
                 val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())
                 if (followDistance <= 0f) {
-                    if (currentNestedTail.bounded && currentNestedTail.followCatchup) {
+                    if (currentNestedTail.followCatchup) {
                         clearanceLayout.remeasurement?.forceRemeasure()
                         val settledLayout = listState.layoutInfo
                         val settledTail = settledLayout.visibleItemsInfo.lastOrNull {
                             it.index == index && it.key == currentTailKey
                         }
-                        if (settledTail != null && settledTail.size == currentNestedTail.contentHeight &&
+                        if (settledTail != null && (currentTailKey != assistantOwnerKey ||
+                                settledTail.size == currentNestedTail.contentHeight) &&
                             settledTail.offset + settledTail.size + settledLayout.afterContentPadding <= settledLayout.viewportEndOffset &&
                             settledTail.offset + settledTail.size <= settledLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx) {
                             currentNestedTail.followCatchup = false

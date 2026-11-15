@@ -650,7 +650,10 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val end = ui.onNodeWithTag("gap-end").fetchSemanticsNode().layoutInfo.coordinates
                 val bottom = end.positionInRoot().y + end.size.height
                 previous?.let { before ->
-                    assertTrue("Disclosure handoff cannot snap the appended backlog in one frame", before - bottom <= 14f * density)
+                    assertTrue("Disclosure handoff cannot snap the appended backlog in one frame: frame=$index body=$bodyHeight " +
+                        "before=$before bottom=$bottom upDp=${(before - bottom) / density} streaming=$streaming appended=$appended unbounded=$sawUnbounded " +
+                        ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[WorkflowDisclosureGeometry].invoke(),
+                        before - bottom <= 14f * density)
                 }
                 previous = bottom
             }

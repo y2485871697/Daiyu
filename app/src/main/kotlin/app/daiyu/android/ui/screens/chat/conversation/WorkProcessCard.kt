@@ -90,7 +90,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val detailExtent = remember(ownerKey) { WorkflowCollapseExtent() }
     val progressSummary = work.progressSummary
     val shape = RoundedCornerShape(12.dp)
-    CompositionLocalProvider(LocalWorkflowNodeMotions provides motions,
+    CompositionLocalProvider(LocalWorkflowDisclosureParent provides disclosure,
+        LocalWorkflowNodeMotions provides motions,
         LocalWorkflowNodeMotionEnabled provides (expanded && !stopped && work.controlActivity != ToolActivityUi.PAUSED)) {
     Column(modifier.fillMaxWidth().then(disclosure.containerModifier).clip(shape).background(colors.surface).drawWithContent {
         drawContent()

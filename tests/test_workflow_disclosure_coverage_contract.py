@@ -7,6 +7,22 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 
 
 class WorkflowDisclosureCoverageTests(unittest.TestCase):
+    def test_nested_disclosures_anchor_the_enclosing_workflow_until_the_requester_finishes(self):
+        motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        work = (CHAT / 'WorkProcessCard.kt').read_text()
+        self.assertIn('LocalWorkflowDisclosureParent provides disclosure', work)
+        self.assertIn('boundary.captureAnchor(this, anchorAtTop)', motion)
+        self.assertIn('boundary.anchorRequester === this', motion)
+        self.assertIn('force || boundary.animationIdle', motion)
+        self.assertIn('onDispose { motion.dispose() }', motion)
+
+    def test_external_catchup_survives_unwrapping_until_the_same_owner_is_settled(self):
+        source = (CHAT / 'ChatMessageList.kt').read_text()
+        self.assertNotIn('if (!state.bounded || !protect) state.followCatchup = false', source)
+        self.assertIn('if (!protect) state.followCatchup = false', source)
+        self.assertIn('if (currentNestedTail.followCatchup) {', source)
+        self.assertIn('currentTailKey != assistantOwnerKey ||', source)
+
     def test_total_workflow_reversals_are_capped_by_placed_closing_geometry(self):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         work = (CHAT / 'WorkProcessCard.kt').read_text()
@@ -92,7 +108,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('nestedTail.migrating || nestedTail.followCatchup', source)
         self.assertEqual(2, source.count('while (followBottom && (disclosureViewport.active != null ||'))
         self.assertIn('val protect = protectClearance()', source)
-        self.assertIn('if (!state.bounded || !protect) state.followCatchup = false', source)
+        self.assertIn('if (!protect) state.followCatchup = false', source)
         self.assertNotIn('16.dp.roundToPx()', source)
         self.assertNotIn('24.dp.roundToPx()', source)
 

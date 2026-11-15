@@ -227,18 +227,21 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         val draft = composerDraft
         showComposer(selectionStart = 0)
         val field = node("chat-draft")
-        dismissIme()
-        awaitImeFrame(field, false)
+        field.performTouchInput { click() }
+        awaitImeFrame(field, true)
+        field.performTextInputSelection(androidx.compose.ui.text.TextRange.Zero)
         awaitVisualIdle()
-        field.assertIsNotFocused()
+        field.assertIsFocused()
         val bounds = field.fetchSemanticsNode().boundsInRoot
         val before = captureScreenNode(field).toPixelMap()
         field.performTouchInput {
             swipe(Offset(centerX, height * .8f), Offset(centerX, height * .2f), 350)
         }
         awaitVisualIdle()
-        field.assertIsNotFocused()
-        awaitImeFrame(field, false)
+        field.assertIsFocused()
+        awaitImeFrame(field, true)
+        field.assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange,
+            androidx.compose.ui.text.TextRange.Zero))
         assertEquals(bounds, field.fetchSemanticsNode().boundsInRoot)
         val after = captureScreenNode(field).toPixelMap()
         assertEquals(before.width, after.width)
@@ -259,8 +262,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         dismissIme()
         node("chat-workspace-gesture-area").performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
         node("conversation-workspace-sheet").assertDoesNotExist()
-        ui.onNodeWithContentDescription("更多").performClick()
-        node("chat-menu:OPEN_WORKSPACE").scrollToVisible().performClick()
+        node("chat-workspace-gesture-area").performClick()
         awaitUniqueTag("conversation-workspace-sheet")
         node("workspace-path-card:0").assertExists()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

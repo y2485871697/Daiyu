@@ -173,3 +173,17 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("capture.tasks.resumeGroup(capture.group)", choice)
         self.assertNotIn("configure(", choice)
         self.assertNotIn("hotUpdates = false", choice)
+
+    def test_isolated_child_stop_fixtures_inject_owned_shizuku_authorization(self):
+        controller = (APP / "ChatController.kt").read_text()
+        self.assertIn("shizukuAuthorizationOverride: app.daiyu.android.shizuku.ShizukuAuthorization? = null", controller)
+        self.assertIn("shizukuAuthorizationOverride ?: checkNotNull((application as? ChatApplication)?.shizuku)", controller)
+        self.assertIn('"shizuku_application_host_required"', controller)
+        fixtures = APP.parents[4] / "androidTest/kotlin/app/daiyu/android"
+        for name in ("RunControlFixture.kt", "ControllerChildRetentionTest.kt"):
+            text = (fixtures / name).read_text()
+            self.assertIn("import app.daiyu.android.shizuku.ShizukuAuthorization", text)
+            self.assertIn("private val shizukuAuthorization = ShizukuAuthorization(", text)
+            self.assertIn("shizukuAuthorizationOverride = shizukuAuthorization", text)
+            self.assertIn("shizukuAuthorization.close()", text)
+            self.assertLess(text.index("controller.close()"), text.index("shizukuAuthorization.close()"))

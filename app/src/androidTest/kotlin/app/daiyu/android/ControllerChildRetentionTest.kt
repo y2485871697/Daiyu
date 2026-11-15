@@ -16,6 +16,7 @@ import app.daiyu.android.model.catalog.CatalogCommitResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.model.catalog.SavedCatalogModel
 import app.daiyu.android.model.catalog.selectionFor
+import app.daiyu.android.shizuku.ShizukuAuthorization
 import app.daiyu.android.storage.*
 import java.io.File
 import java.util.UUID
@@ -39,6 +40,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         val app = FixtureApplication(object : ContextWrapper(testContext(base, "controller-retention-$id-")) {
             override fun getFilesDir(): File = filesRoot
         })
+        private val shizukuAuthorization = ShizukuAuthorization(app)
         val database = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.retention.$id"
         val settings = ModelSettingsStore(app, alias)
@@ -111,7 +113,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                         }
                     }
                 }
-            }, providerBalanceHost = { app.balances })
+            }, providerBalanceHost = { app.balances }, shizukuAuthorizationOverride = shizukuAuthorization)
         }
         fun prepare() {
             conversation = database.create("default")
@@ -122,7 +124,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                 is ConversationSubAgentPreferences.WriteResult.Saved)
         }
         fun dispose() {
-            childRelease.countDown(); childCleanupRelease.countDown(); parentRelease.countDown(); controller.close(); app.balances.close()
+            childRelease.countDown(); childCleanupRelease.countDown(); parentRelease.countDown(); controller.close(); shizukuAuthorization.close(); app.balances.close()
             app.getSharedPreferences("model-settings", 0).edit().clear().commit()
             app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             app.getSharedPreferences("subagent_configuration", 0).edit().clear().commit()

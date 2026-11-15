@@ -5,6 +5,7 @@ import android.content.Context
 import android.test.InstrumentationTestCase
 import app.daiyu.android.balance.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.shizuku.ShizukuAuthorization
 import app.daiyu.android.storage.*
 import app.daiyu.android.tasksurface.*
 import java.util.UUID
@@ -35,6 +36,7 @@ internal class RunControlFixture(base:Context,
         testContext(base,"run-control-$fixtureId-")) {
         override fun getFilesDir() = this@RunControlFixture.filesRoot
     })
+    private val shizukuAuthorization = ShizukuAuthorization(application)
     private val ownedBalanceHost = if (providerBalanceHost == null) ProviderBalanceRuntimeHost(
         draftQuery = BalanceQuery { error("Unexpected fixture balance request") },
         factory = { BalanceRuntime(
@@ -71,7 +73,8 @@ internal class RunControlFixture(base:Context,
             virtualDisplayFactory = virtualDisplayFactory, mcpTransport = mcpTransport, taskSurfaceStore = taskSurfaces,
             sessionModel = if (onSession == null) null else { provider, assistant, session ->
                 onSession(provider, assistant, session); factory(provider.asModelSettings())
-            }, diagnostics = diagnostics, providerBalanceHost = { checkNotNull(providerBalanceHost ?: ownedBalanceHost) })
+            }, diagnostics = diagnostics, providerBalanceHost = { checkNotNull(providerBalanceHost ?: ownedBalanceHost) },
+            shizukuAuthorizationOverride = shizukuAuthorization)
     }
     class Session(val text:String,held:Boolean,private val holdSeconds:Long=10,
         private val releaseOnCancel:Boolean=true) : ModelSession {
@@ -95,6 +98,7 @@ internal class RunControlFixture(base:Context,
         synchronized(queued) {sessions.forEach {it.release.countDown()}}
         if (diagnosticsFile.exists()) diagnostics.setEnabled(false)
         controller.stop();controller.close()
+        shizukuAuthorization.close()
         ownedBalanceHost?.close()
         diagnosticsFile.parentFile?.deleteRecursively()
         application.getSharedPreferences("model-settings",0).edit().clear().commit()

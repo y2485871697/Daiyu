@@ -165,7 +165,8 @@ class ChatController internal constructor(private val application:Application,
         app.daiyu.android.browser.BrowserSettingsStore(application.getSharedPreferences("browser-settings", 0)),
     internal val diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null,
     private val providerBalanceHost: () -> app.daiyu.android.balance.ProviderBalanceRuntimeHost =
-        { (application as ChatApplication).providerBalanceHost }) {
+        { (application as ChatApplication).providerBalanceHost },
+    shizukuAuthorizationOverride: app.daiyu.android.shizuku.ShizukuAuthorization? = null) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -814,7 +815,7 @@ class ChatController internal constructor(private val application:Application,
     private var pendingShizuku:ControllerShizukuPreparation?=null
     private var pendingShizukuToken:Preparation?=null
     @Synchronized internal fun shizukuPreparation():ControllerShizukuPreparation? = pendingShizuku
-    private val shizukuAccess by lazy { checkNotNull((application as? ChatApplication)?.shizuku) {
+    private val shizukuAccess by lazy { shizukuAuthorizationOverride ?: checkNotNull((application as? ChatApplication)?.shizuku) {
         "shizuku_application_host_required"
     } }
     // Use this app-scoped importer in the host, rather than creating another draft store instance.

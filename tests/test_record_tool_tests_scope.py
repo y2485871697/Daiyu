@@ -19,6 +19,11 @@ SPEC.loader.exec_module(recorder)
 class RecordToolTestsScopeTest(unittest.TestCase):
     def test_timeline_divider_scope_is_exact_and_keeps_full_fallback(self):
         target = "app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest"
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        concurrency = workflow.split("concurrency:\n", 1)[1].split("\njobs:", 1)[0]
+        self.assertIn("group: daiyu-${{ inputs.mode }}-${{ github.ref }}", concurrency)
+        self.assertIn("${{ inputs.mode == 'smoke' && inputs.smoke_classes == '" + target + "' && '-timeline-divider' || '' }}", concurrency)
+        self.assertIn("cancel-in-progress: false", concurrency)
         modules = ("test_chat_timeline_contract", "test_reasoning_flow_stability_contract",
                    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
                    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope")

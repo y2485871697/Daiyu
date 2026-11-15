@@ -136,9 +136,16 @@ task_scroll_target = {
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
 }
-task_scroll_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(task_scroll_target)
+task_scroll_complement = {
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
+}
+task_scroll_complement_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(task_scroll_complement)
+task_scroll_only = mode == 'smoke' and sorted(raw_filter.split(',')) in (
+    sorted(task_scroll_target), sorted(task_scroll_complement))
 task_scroll_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
-                       for name in task_scroll_target}
+                       for name in raw_filter.split(',')}
 page_performance_target = task_scroll_target | {
     'app.daiyu.android.UsagePresentationActivityTest',
     'app.daiyu.android.LocalCatalogModelsActivityTest',
@@ -409,7 +416,7 @@ pet_model_target = (
 pet_model_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(pet_model_target)
 pet_model_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                      for name in pet_model_target}
-for path in sorted(child_stop_sources if child_stop_only else pane_question_sources if pane_question_only else question_card_sources if question_card_only else message_action_sources if message_action_only else generation_port_sources if generation_port_only else pet_model_sources if pet_model_only else pet_presentation_sources if pet_presentation_only else delete_confirm_sources if delete_confirm_only else subagent_preset_sources if subagent_preset_only else batch_delete_sources if batch_delete_only else ime_sources if ime_only else [conversation_date_source] if conversation_date_only else search_history_sources if search_history_only else [catalog_model_editor_source] if catalog_model_editor_only else provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else [assistant_picker_source] if assistant_picker_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
+for path in sorted(task_scroll_sources if task_scroll_only else child_stop_sources if child_stop_only else pane_question_sources if pane_question_only else question_card_sources if question_card_only else message_action_sources if message_action_only else generation_port_sources if generation_port_only else pet_model_sources if pet_model_only else pet_presentation_sources if pet_presentation_only else delete_confirm_sources if delete_confirm_only else subagent_preset_sources if subagent_preset_only else batch_delete_sources if batch_delete_only else ime_sources if ime_only else [conversation_date_source] if conversation_date_only else search_history_sources if search_history_only else [catalog_model_editor_source] if catalog_model_editor_only else provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else [assistant_picker_source] if assistant_picker_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
         continue
     if speech_only and path != speech_source:
@@ -489,7 +496,7 @@ if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shar
     raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not child_stop_only and not catalog_model_editor_only and not subagent_preset_only and not batch_delete_only and not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and not question_card_only and not child_task_card_read_only_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not child_stop_only and not catalog_model_editor_only and not subagent_preset_only and not batch_delete_only and not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and not question_card_only and not child_task_card_read_only_only and not task_scroll_complement_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys

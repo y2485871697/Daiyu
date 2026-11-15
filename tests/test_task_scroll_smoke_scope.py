@@ -24,6 +24,12 @@ CLASSES = (
 )
 
 
+COMPLEMENT = (
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
+)
+
 class TaskScrollSmokeScopeTests(unittest.TestCase):
     def test_exact_task_scroll_scope_runs_explicit_contracts_and_tool_guards(self):
         self.assertEqual(CLASSES, recorder.TASK_SCROLL_PLATFORM_CLASSES)
@@ -140,3 +146,91 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
             result = helper.select(root, classes=','.join(CLASSES))
             self.assertNotEqual(0, result.returncode)
             self.assertIn('Unknown instrumentation test class', result.stderr)
+
+class TaskScrollComplementScopeTests(unittest.TestCase):
+    fixture = TaskScrollSmokeScopeTests.fixture
+
+    def test_exact_complement_retains_tool_guards(self):
+        self.assertEqual(COMPLEMENT, recorder.TASK_SCROLL_COMPLEMENT_CLASSES)
+        for classes in (COMPLEMENT, tuple(reversed(COMPLEMENT))):
+            command, scope = recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(classes)))
+            self.assertEqual('task-scroll-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
+
+    def test_unapproved_complement_keeps_full_checks(self):
+        raw = ','.join(COMPLEMENT)
+        for value in (','.join(COMPLEMENT[:-1]), raw + ',' + CLASSES[0], raw + ',' + COMPLEMENT[0], raw + ',', ',' + raw, ' ' + raw, raw + ' '):
+            self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=value))[1])
+        for mode in ('', 'compile', 'candidate', 'daily', 'release'):
+            self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+    def test_complement_inventory_exact_once_with_one_empty_shard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            selected, empty = [], 0
+            for shard in range(4):
+                result = helper.select(root, shard, classes=','.join(reversed(COMPLEMENT)))
+                self.assertEqual(0, result.returncode, result.stderr)
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                self.assertEqual(set(COMPLEMENT), set(inventory['all_classes']))
+                self.assertEqual(3, inventory['total_tests'])
+                selected.extend(selection['selected_classes'])
+                if not selection['selected_classes']:
+                    empty += 1
+                    self.assertEqual('filtered-empty-shard', selection['status'])
+                    self.assertEqual(0, selection['expected_tests'])
+            self.assertCountEqual(COMPLEMENT, selected)
+            self.assertEqual(1, empty)
+
+    def test_requested_complement_missing_or_ambiguous_stays_closed(self):
+        for missing in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper = self.fixture(root)
+                path = root / 'app/src/androidTest/kotlin' / (COMPLEMENT[0].replace('.', '/') + '.kt')
+                if missing:
+                    path.unlink()
+                else:
+                    with path.open('a') as output:
+                        output.write('class OtherTest : TestCase() {}' + chr(10))
+                result = helper.select(root, classes=','.join(COMPLEMENT))
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn('Unknown instrumentation test class' if missing else 'Ambiguous instrumentation test declaration', result.stderr)
+
+    def test_complement_failure_receipt_keeps_frozen_cwd(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA='d' * 40, GITHUB_RUN_ID='15', GITHUB_RUN_ATTEMPT='2', SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(COMPLEMENT))
+                with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess, 'call', return_value=7) as call, patch.object(recorder.sys, 'stdout', SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(7, recorder.record('python3'))
+                    receipt = json.loads(Path('tool-evidence/receipt.json').read_text())
+                    self.assertEqual('task-scroll-targeted', receipt['scope'])
+                    self.assertEqual(7, receipt['exit_code'])
+                    self.assertEqual(dict(sha='d' * 40, run_id=15, attempt=2), receipt['identity'])
+                    tools_root = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(tools_root, call.call_args.kwargs['cwd'])
+                    self.assertEqual(str(tools_root / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
+            finally:
+                os.chdir(old)
+
+    def test_complement_uses_frozen_smoke_script_only_for_canonical_scope(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/build.yml').read_text()
+        canonical = ','.join(COMPLEMENT)
+        self.assertIn('if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "' + canonical + '"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;', workflow)
+
+
+    def test_unapproved_complement_keeps_full_inventory_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            raw = ','.join(COMPLEMENT)
+            for value in (','.join(COMPLEMENT[:-1]), raw + ',' + CLASSES[0], raw + ',' + COMPLEMENT[0], raw + ',', ' ' + raw, raw + ' '):
+                result = helper.select(root, classes=value)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn('Ambiguous instrumentation test declaration', result.stderr)

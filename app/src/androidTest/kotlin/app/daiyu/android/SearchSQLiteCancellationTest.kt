@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference
 /** Real framework SQLite cancellation, including a deterministic cancellation between chunks. */
 @Suppress("DEPRECATION")
 class SearchSQLiteCancellationTest : android.test.AndroidTestCase() {
-    fun testCancellationBetween64KiBChunksClosesEveryCursorAndLeavesConnectionUsable() {
+    fun testCancellationBetweenChunksClosesEveryCursorAndLeavesConnectionUsable() {
         val signal = CancellationSignal()
         val cursors = mutableListOf<SQLiteCursor>()
         var queryCount = 0
@@ -20,19 +20,22 @@ class SearchSQLiteCancellationTest : android.test.AndroidTestCase() {
             SQLiteCursor(driver, table, query).also { cursor ->
                 cursors.add(cursor)
                 queryCount++
-                // length SELECT, first chunk SELECT, then second chunk SELECT.
-                if (queryCount == 3) signal.cancel()
+                // The initial SELECT combines length + first chunk; cancel at the first continuation.
+                if (queryCount == 2) signal.cancel()
             }
         }
         SQLiteDatabase.create(factory).use { db ->
             db.execSQL("CREATE TABLE messages(id TEXT PRIMARY KEY, blocks TEXT)")
-            val original = "中文🙂".repeat(40000)
+            val unit = "中文🙂"
+            val original = unit.repeat(SQLiteText.CHUNK_BYTES / unit.toByteArray(Charsets.UTF_8).size + 1)
+            assertTrue(original.toByteArray(Charsets.UTF_8).size > SQLiteText.CHUNK_BYTES)
             db.execSQL("INSERT INTO messages(id,blocks) VALUES(?,?)", arrayOf("owner", original))
             try {
                 SQLiteText.read(db, "messages", "blocks", "id", "owner", cancellationSignal = signal)
                 fail("chunk reader ignored cancellation")
             } catch (_: OperationCanceledException) { }
-            assertEquals(3, queryCount)
+            assertTrue(signal.isCanceled)
+            assertEquals(2, queryCount)
             assertTrue(cursors.all { it.isClosed })
             assertFalse(db.inTransaction())
             assertEquals(original, SQLiteText.read(db, "messages", "blocks", "id", "owner",

@@ -54,7 +54,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         })
         database.close(); database = ConversationDatabase(scoped)
         data = RetainedConversationData(database, ContextService(scoped, database))
-        val before = database.exportBackup()
+        val before = database.messages(conversation.id)
         for (hidden in listOf("hidden_tool_name", "screen_read_mode", "visual_fallback",
             "hidden_tool_result", "hidden_protocol_marker", "hidden_reasoning_marker")) {
             assertTrue(hidden, data.search(hidden).isEmpty())
@@ -67,7 +67,13 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         assertEquals(answer.id.value, answerHit.messageId)
         assertEquals("助手", answerHit.roleLabel)
         assertEquals("助手正文前段\n助手正文后段", answerHit.snippet)
-        assertEquals(before, database.exportBackup())
+        assertEquals(before, database.messages(conversation.id))
+        val literal = "screen_read_mode=visual_fallback"
+        val (literalUser, literalAnswer) = turn(conversation, "body-literal", literal)
+        val literalHits = data.search(literal)
+        assertEquals(setOf(literalUser.id.value, literalAnswer.id.value), literalHits.map { it.messageId }.toSet())
+        assertEquals(setOf("用户", "助手"), literalHits.map { it.roleLabel }.toSet())
+        assertTrue(literalHits.all { it.snippet == literal })
     }
 
     fun testToolOnlySegmentsDoNotOccupyBodySearchPagesOrChangeSegmentIdentity() {

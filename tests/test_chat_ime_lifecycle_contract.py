@@ -103,6 +103,7 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         self.assertIn('repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = false) }', android)
         self.assertIn('repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = true) }', android)
         self.assertIn('realPauseResume(activity)', android)
+        self.assertIn('onSelectionChange = { start, end ->', android)
         measure = self.read(ANDROID / 'ui/screens/chat/conversation/ChatComposerMeasurePhaseTest.kt')
         self.assertIn('actual > 0', measure)
         self.assertIn('actual, reserved', measure)

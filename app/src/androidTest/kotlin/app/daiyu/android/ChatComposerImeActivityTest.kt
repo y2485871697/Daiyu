@@ -251,7 +251,9 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                     androidx.lifecycle.compose.LocalLifecycleOwner provides owner) {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                         DaiyuChatScreen(ChatScreenState("生命周期焦点回归", composer = state.value),
-                            ChatScreenActions(onProjectedDraftEdit = { expected, next, start, end ->
+                            ChatScreenActions(onSelectionChange = { start, end ->
+                                state.value = state.value.copy(selectionStart = start, selectionEnd = end)
+                            }, onProjectedDraftEdit = { expected, next, start, end ->
                                 if (state.value.text != expected) false else {
                                     state.value = state.value.copy(text = next,
                                         selectionStart = start, selectionEnd = end)

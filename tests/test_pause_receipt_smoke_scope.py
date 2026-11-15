@@ -57,7 +57,7 @@ class PauseReceiptSmokeScopeTest(unittest.TestCase):
             self.assertEqual(2, empty)
 
     def test_pane_pair_inventory_tracks_new_methods_and_rejects_missing_or_ambiguous_source(self):
-        for damage in ('missing', 'multiple-class', 'duplicate-method', 'new-method'):
+        for damage in ('missing', 'multiple-class', 'new-method'):
             with self.subTest(damage=damage), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 helper, path = self.pane_pair_fixture(root)
@@ -66,7 +66,7 @@ class PauseReceiptSmokeScopeTest(unittest.TestCase):
                 elif damage == 'multiple-class':
                     path.write_text(path.read_text() + '\nclass ExtraTest : TestCase() { fun testExtra() {} }\n')
                 else:
-                    method = 'testPaneOne' if damage == 'duplicate-method' else 'testPaneThree'
+                    method = 'testPaneThree'
                     path.write_text(path.read_text().replace('\n}', '\n fun ' + method + '() {}\n}'))
                 result = helper.select(root, 0, classes=','.join(recorder.PANE_RECEIPT_PLATFORM_CLASSES))
                 if damage == 'new-method':

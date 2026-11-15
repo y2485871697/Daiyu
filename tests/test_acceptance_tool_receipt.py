@@ -28,6 +28,37 @@ class ChildStopReceiptScopeTest(unittest.TestCase):
         self.assertEqual(1, command.count("test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope"))
 
 
+    def test_frozen_stop_scope_checks_current_tools_without_rebuilding_apk(self):
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                for code in (0, 3):
+                    env = dict(GITHUB_SHA="b" * 40, GITHUB_RUN_ID="43", GITHUB_RUN_ATTEMPT="2",
+                               EXPECTED_SHA="a" * 40, SMOKE_MODE="smoke",
+                               SMOKE_TEST_CLASSES=",".join(producer.CHILD_STOP_PLATFORM_CLASSES))
+                    def child(command, stdout, stderr, env=None, cwd=None):
+                        self.assertEqual(ROOT, cwd)
+                        self.assertTrue(env["PYTHONPATH"].startswith(str(ROOT / "tests")))
+                        self.assertNotIn("discover", command)
+                        stdout.write(b"frozen stop scope raw output\n")
+                        return code
+                    console = io.BytesIO()
+                    with patch.dict(os.environ, env, clear=True), \
+                            patch.object(producer.subprocess, "check_output", return_value="a" * 40 + "\n"), \
+                            patch.object(producer.subprocess, "call", side_effect=child), \
+                            patch.object(producer.sys, "stdout", SimpleNamespace(buffer=console)):
+                        self.assertEqual(code, producer.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual(code, receipt["exit_code"])
+                    self.assertEqual("a" * 40, receipt["identity"]["sha"])
+                    self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+                    self.assertEqual("child-stop-targeted", receipt["scope"])
+                    self.assertEqual(b"frozen stop scope raw output\n", Path("tool-evidence/unittest.log").read_bytes())
+            finally:
+                os.chdir(previous)
+
+
 PROVIDER_SAVE_CLASSES = (
     "app.daiyu.android.ProviderSavePositionActivityTest",
     "app.daiyu.android.ControllerProviderSaveNoticeTest",

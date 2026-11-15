@@ -42,7 +42,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                             }) else WorkProcessCard(work, "direction-fixture", content = {
                                 Box(Modifier.fillMaxWidth().height(80.dp).testTag("direction-body"))
                             })
-                            if (following) Box(Modifier.height(180.dp))
+                            if (following || !lower) Box(Modifier.height(180.dp))
                         } })
                 }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("direction-composer")) })
             }

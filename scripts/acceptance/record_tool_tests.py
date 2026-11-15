@@ -402,7 +402,6 @@ POPUP_TITLE_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
     "PopupTitleGeometryTest", "AssistantPickerVisualTest", "SharedSheetSpacingActivityTest", "CollaborationEmptyStateTest",
 ))
 POPUP_TITLE_MODULES = (
-    "test_test_refresh_contract",
     "test_popup_title_contract", "test_shared_sheet_spacing_contract", "test_assistant_picker_frame_contract",
     "test_chat_attachment_sizing_contract", "test_voice_tone_selection_contract",
     "test_bottom_sheet_edge_contract", "test_voice_personal_menu_contract",
@@ -456,6 +455,16 @@ WORKFLOW_BODY_MODULES = (
     "test_markdown_typing_contract", "test_chat_resume_scroll_contract",
     "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
+WORKFLOW_DISCLOSURE_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.conversation." + name for name in (
+    "WorkflowDisclosureDirectionTest", "ReasoningWorkflowTest", "ChatStreamingOcclusionTest",
+    "ChatStreamingFollowTest", "ChatMessageListMeasurePhaseTest", "ChatResumeScrollTest",
+))
+WORKFLOW_DISCLOSURE_MODULES = WORKFLOW_BODY_MODULES + (
+    "test_reasoning_flow_stability_contract", "test_streaming_occlusion_contract",
+    "test_streaming_follow_contract", "test_workflow_disclosure_scope",
 )
 
 
@@ -584,22 +593,6 @@ PET_PRESENTATION_MODULES = (
 )
 
 
-PET_MODEL_PLATFORM_CLASSES = (
-    "app.daiyu.android.pet.AndroidPetStoreCapacityTest",
-    "app.daiyu.android.pet.AndroidPetStoreTest",
-    "app.daiyu.android.pet.PetThinkingPickerActivityTest",
-    "app.daiyu.android.pet.PetCupboardDialogTest",
-    "app.daiyu.android.pet.PetApplicationHostTest",
-    "app.daiyu.android.pet.PetHostTest",
-    "app.daiyu.android.IndependentModelProductionTest",
-)
-PET_MODEL_MODULES = (
-    "test_pet_model_reasoning_contract", "test_pet_model_smoke_scope",
-    "test_pet_error_logging_contract", "test_pet_settings_disclosure_contract",
-    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
-    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
-)
-
 WORKFLOW_NODE_MOTION_PLATFORM_CLASSES = (
     "app.daiyu.android.ui.screens.chat.conversation.WorkflowNodeMotionTest",
     "app.daiyu.android.ui.screens.chat.conversation.WorkTimelineConnectorTest",
@@ -625,9 +618,6 @@ def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_NODE_MOTION_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *WORKFLOW_NODE_MOTION_MODULES, "-v"], "workflow-node-motion-targeted"
-    if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PET_MODEL_PLATFORM_CLASSES)):
-        return [python, "-B", "-m", "unittest", *PET_MODEL_MODULES, "-v"], "pet-model-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == CATALOG_MODEL_EDITOR_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *CATALOG_MODEL_EDITOR_MODULES, "-v"], "catalog-model-editor-targeted"
@@ -666,6 +656,9 @@ def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (sorted(DOUBAO_MOTION_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_REASONING_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_VOICE_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *DOUBAO_MOTION_MODULES, "-v"], "doubao-motion-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_DISCLOSURE_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *WORKFLOW_DISCLOSURE_MODULES, "-v"], "workflow-disclosure-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(WORKFLOW_BODY_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *WORKFLOW_BODY_MODULES, "-v"], "workflow-body-targeted"

@@ -90,7 +90,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
             assertTrue(hits.none { it.snippet.first().isLowSurrogate() || it.snippet.last().isHighSurrogate() })
         }
         assertEquals(prefix + "关键词" + suffix,
-            (database.messages(conversation.id).first { it.id == user.id }.blocks.single() as MessageBlock.Text).text)
+            (database.messages(conversation.id).first { it.second.id == user.id }.second.blocks.single() as MessageBlock.Text).text)
     }
 
     fun testToolOnlySegmentsDoNotOccupyBodySearchPagesOrChangeSegmentIdentity() {

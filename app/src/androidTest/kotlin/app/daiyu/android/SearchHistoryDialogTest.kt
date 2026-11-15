@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -19,6 +20,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.SearchHistoryDialog
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewDialog
 import app.daiyu.android.ui.model.MessageSearchHit
+import app.daiyu.android.ui.retainedSearchSnippet
 import app.daiyu.android.ui.model.MessageSearchPage
 import app.daiyu.android.ui.model.MessageSearchCursor
 import app.daiyu.android.ui.model.SearchConversationRevision
@@ -102,6 +104,35 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             awaitUniqueTag(globalTag)
             node(globalTag).performClick()
             assertEquals(globalHit, opened)
+        }
+    }
+
+    fun testMultilineAndEmojiHitContextsKeepHighlightsInsideVisibleLines() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            for (before in listOf("段\n".repeat(30), "😀".repeat(40))) {
+                val opening = "不展示无关开头".repeat(120)
+                val body = opening + before + "用好工具，再用一次" + "附近后文".repeat(30)
+                val snippet = retainedSearchSnippet(body, opening.length + before.length, 1)
+                val contextHit = hit.copy(snippet = snippet)
+                show(dark, scale, fontScale = 1.3f, reader = { _, _, _ -> MessageSearchPage(listOf(contextHit)) })
+                node("search:query").performTextReplacement("用")
+                dismissIme()
+                awaitUniqueTag(tag)
+                val layouts = mutableListOf<TextLayoutResult>()
+                node(tag).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+                val text = layouts.single()
+                assertTrue(text.lineCount <= 2)
+                assertFalse(text.layoutInput.text.text.contains("不展示无关开头"))
+                assertFalse(text.layoutInput.text.text.contains('\n'))
+                val first = text.layoutInput.text.spanStyles.first()
+                for (offset in first.start until first.end) {
+                    val line = text.getLineForOffset(offset)
+                    assertTrue("highlight is past visible lines", line < text.lineCount)
+                    assertTrue("highlight is ellipsized", offset < text.getLineEnd(line, visibleEnd = true))
+                }
+                node(tag).performClick()
+                assertEquals(contextHit, opened)
+            }
         }
     }
 

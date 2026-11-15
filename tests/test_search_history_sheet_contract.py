@@ -110,6 +110,20 @@ class SearchHistorySheetContract(unittest.TestCase):
         positions = [action.index(step) for step in steps]
         self.assertEqual(sorted(positions), positions)
 
+    def test_hit_context_is_bounded_and_keeps_keyword_visible_in_multiline_previews(self):
+        reader = (SRC / 'ui/RetainedConversationData.kt').read_text()
+        helper = (SRC / 'ui/RetainedMessageText.kt').read_text()
+        highlight = (SRC / 'ui/screens/search/SearchHighlight.kt').read_text()
+        self.assertIn('retainedSearchSnippet(text, at, needle.length)', reader)
+        self.assertNotIn('(at - 36)', reader)
+        self.assertIn('repeat(12)', helper)
+        self.assertIn('offsetByCodePoints', helper)
+        self.assertIn("if (char.isWhitespace()) ' ' else char", highlight)
+        instrumentation = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/SearchHistoryDialogTest.kt').read_text()
+        self.assertIn('testMultilineAndEmojiHitContextsKeepHighlightsInsideVisibleLines', instrumentation)
+        self.assertIn('SemanticsActions.GetTextLayoutResult', instrumentation)
+        self.assertIn('visibleEnd = true', instrumentation)
+
     def test_scope_toggle_reuses_log_button_and_restarts_scope_without_losing_query(self):
         dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
         field = (SRC / 'ui/screens/assistants/AssistantSearchField.kt').read_text()

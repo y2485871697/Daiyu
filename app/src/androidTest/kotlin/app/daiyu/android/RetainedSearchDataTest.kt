@@ -76,6 +76,23 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         assertTrue(literalHits.all { it.snippet == literal })
     }
 
+    fun testLongBodySnippetStaysAroundHitWithoutSplittingEmojiOrChangingTarget() {
+        val conversation = database.create("default")
+        val prefix = "无关开头\n".repeat(200) + "😀".repeat(40)
+        val suffix = "😀".repeat(100)
+        val (user, answer) = turn(conversation, "hit-context", prefix + "关键词" + suffix)
+        val expected = "😀".repeat(12) + "关键词" + "😀".repeat(80)
+        for (hits in listOf(data.search("关键词"),
+            data.searchCurrentConversation("关键词", conversation.id.value))) {
+            assertEquals(setOf(user.id.value, answer.id.value), hits.map { it.messageId }.toSet())
+            assertTrue(hits.all { it.snippet == expected && it.conversationId == conversation.id.value })
+            assertTrue(hits.all { it.ownerMessageId == it.messageId && it.segmentIndex == 0 })
+            assertTrue(hits.none { it.snippet.first().isLowSurrogate() || it.snippet.last().isHighSurrogate() })
+        }
+        assertEquals(prefix + "关键词" + suffix,
+            (database.messages(conversation.id).first { it.id == user.id }.blocks.single() as MessageBlock.Text).text)
+    }
+
     fun testToolOnlySegmentsDoNotOccupyBodySearchPagesOrChangeSegmentIdentity() {
         val conversation = database.create("default")
         val (_, answer) = turn(conversation, "body-pages", "ordinary user", answerTransform = { owner ->

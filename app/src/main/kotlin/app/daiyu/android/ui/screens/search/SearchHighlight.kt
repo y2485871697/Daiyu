@@ -8,7 +8,7 @@ internal fun highlightSearchBody(roleLabel: String, body: String, query: String,
     buildAnnotatedString {
         append("$roleLabel · ")
         val bodyStart = length
-        append(body)
+        for (char in body) append(if (char.isWhitespace()) ' ' else char)
         val needle = query.trim()
         if (needle.isEmpty()) return@buildAnnotatedString
         var from = 0

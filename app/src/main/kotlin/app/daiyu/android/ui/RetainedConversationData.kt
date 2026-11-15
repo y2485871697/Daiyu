@@ -156,7 +156,7 @@ internal class RetainedConversationData(private val database: ConversationDataba
                     if (at < 0) continue
                     if (hits.size == pageSize) { hasMore = true; continue }
                     hits.add(MessageSearchHit(id, title, message.id.value,
-                        text.substring((at - 36).coerceAtLeast(0), (at + needle.length + 80).coerceAtMost(text.length)),
+                        retainedSearchSnippet(text, at, needle.length),
                         if (message.role == "user") "用户" else "助手",
                         owners[identity] ?: message.id.value, segmentIndex))
                     nextConversation = conversationIndex

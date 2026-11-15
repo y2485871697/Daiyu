@@ -68,6 +68,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val expanded = currentOverride ?: (!stopped && !finished)
     val visibility = remember(ownerKey, stopped) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
+    val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility)
     val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
     var contentMounted by remember(ownerKey) { mutableStateOf(false) }
     val disclosureHandoffReady = reasoningReady && fullyClosed && !contentMounted
@@ -89,7 +90,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val shape = RoundedCornerShape(12.dp)
     CompositionLocalProvider(LocalWorkflowNodeMotions provides motions,
         LocalWorkflowNodeMotionEnabled provides (expanded && !stopped && work.controlActivity != ToolActivityUi.PAUSED)) {
-    Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
+    Column(modifier.fillMaxWidth().then(disclosure.containerModifier).clip(shape).background(colors.surface).drawWithContent {
         drawContent()
         drawLine(if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF),
             Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx())
@@ -98,7 +99,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             val summaryWidth = maxWidth * .56f
             val stacked = work.failedStepCount > 0 || work.unconfirmedStepCount > 0 ||
                 maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
-            Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable {
+            Row(Modifier.fillMaxWidth().testTag("work-process-header").then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
+                disclosure.toggle(opening = !expanded)
                 overrideFinished = finishing; overrideStopped = stopped; expandedOverride = !expanded
             }
                 .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
@@ -120,8 +122,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                     if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
             }
         }
-        AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)) {
+        AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
+            exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)) {
             DisposableEffect(ownerKey) {
                 contentMounted = true
                 onDispose { contentMounted = false }
@@ -185,6 +187,9 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
     val colors = conversationColors()
     val lineMotion = LocalWorkflowLineMotion.current
     var expanded by rememberSaveable(step.renderKey) { mutableStateOf(false) }
+    val visibility = remember(step.renderKey) { MutableTransitionState(expanded) }
+    visibility.targetState = expanded
+    val disclosure = rememberWorkflowDisclosureMotion(step.renderKey, visibility)
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error
@@ -199,7 +204,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
         ToolActivityUi.INTERRUPTED -> "所属运行已中断"
         else -> step.activity.label
     }
-    Row(Modifier.fillMaxWidth().testTag("tool-step:${step.toolCallId}").drawBehind {
+    Row(Modifier.fillMaxWidth().testTag("tool-step:${step.toolCallId}").then(disclosure.containerModifier).drawBehind {
         if (showConnector) drawLine(colors.line,
             Offset(5.dp.toPx(), 27.dp.toPx()), Offset(5.dp.toPx(), minOf(size.height,
                 27.dp.toPx() + (size.height + lineMotion.spacingAfter.toPx() - 27.dp.toPx()) * (lineMotion.outgoing?.fraction() ?: 1f))), 1.dp.toPx())
@@ -224,7 +229,9 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
         Column(Modifier.weight(1f)) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val stacked = maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f
-                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").heightIn(min = 44.dp).conversationClickable { expanded = !expanded }
+                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
+                    disclosure.toggle(opening = !expanded); expanded = !expanded
+                }
                     .semantics { stateDescription = "$stateLabel · ${if (expanded) "已展开" else "已折叠"}" }
                     .padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -243,8 +250,8 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                         if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
                 }
             }
-            AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)) {
+            AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)) {
                 CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(step.name, stateLabel)) {
                     Column(Modifier.padding(bottom = 4.dp).then(
                         if (step.categoryDetails != null) Modifier.testTag("tool-category:${step.category}") else Modifier

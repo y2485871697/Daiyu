@@ -112,6 +112,7 @@ internal fun ReportedReasoningCard(
     }
     val visibility = remember(ownerKey, stopped) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
+    val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility)
     val manualExpansion = currentOverride == true
     val handoffReady = stopped || !observedLive || !isThinking && settled &&
         (manualExpansion || visibility.isIdle && !visibility.currentState && !visibility.targetState)
@@ -121,12 +122,12 @@ internal fun ReportedReasoningCard(
         animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
         label = "reported-reasoning-chevron"
     )
-    Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey")
+    Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey").then(disclosure.containerModifier)
         .then(if (embedded) Modifier else Modifier.clip(shape).border(1.dp, colors.line, shape).background(colors.surface))) {
-        Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey")
+        Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey").then(disclosure.headerModifier)
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
-            ) { overridePhase = isThinking; overrideStopped = stopped; expandedOverride = !disclosureExpanded }.semantics {
+            ) { disclosure.toggle(opening = !disclosureExpanded); overridePhase = isThinking; overrideStopped = stopped; expandedOverride = !disclosureExpanded }.semantics {
                 stateDescription = if (expanded) "已展开" else "已折叠"
             } else Modifier.semantics(mergeDescendants = true) {})
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
@@ -146,17 +147,18 @@ internal fun ReportedReasoningCard(
             modifier = Modifier.fillMaxWidth(),
             enter = expandVertically(
                 animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
-                expandFrom = Alignment.Top
+                expandFrom = disclosure.alignment
             ) + fadeIn(tween(ReasoningDisclosureDurationMillis)),
             exit = shrinkVertically(
                 animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
-                shrinkTowards = Alignment.Top
+                shrinkTowards = disclosure.alignment
             ) + fadeOut(tween(ReasoningDisclosureDurationMillis))
         ) {
             Column(Modifier.fillMaxWidth()) {
                 if (!embedded) HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.testTag("reported-reasoning-content:$ownerKey")
                     .conversationClickable(onClickLabel = "收起思考摘要") {
+                        disclosure.toggle(opening = false)
                         overridePhase = isThinking; overrideStopped = stopped; expandedOverride = false
                     }
                     .padding(start = if (embedded) 0.dp else 11.dp, end = if (embedded) 0.dp else 11.dp, top = 8.dp, bottom = 10.dp),

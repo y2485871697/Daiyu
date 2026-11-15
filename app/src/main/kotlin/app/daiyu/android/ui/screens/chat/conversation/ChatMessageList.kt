@@ -337,9 +337,43 @@ internal fun ChatMessageList(
             clearanceLayout.remeasurement = null
         }
     }
+    val disclosureViewport = remember(listState) {
+        WorkflowDisclosureViewport(
+            follows = { followBottom && !currentDragging },
+            bounds = {
+                clearanceLayout.coordinates?.takeIf { it.isAttached }?.let {
+                    val origin = it.positionInWindow()
+                    androidx.compose.ui.geometry.Rect(origin.x, origin.y,
+                        origin.x + it.size.width, origin.y + (it.size.height - currentOcclusionPx - currentFollowClearancePx).coerceAtLeast(0))
+                }
+            },
+            resumeFollow = { if (pageActive && scrollResumed && !currentDragging) followBottom = true },
+            canAnchor = { pageActive && scrollResumed && !currentDragging && !initialPositionPending && !currentRetainingRows && !currentNestedTail.migrating &&
+                (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !exactNavigationOwnsScroll },
+            correctAnchor = { itemKey, delta ->
+                var consumed = 0f
+                if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {
+                    clearanceLayout.correcting = true
+                    try {
+                        var remaining = delta
+                        val viewport = nestedStates[itemKey]
+                        if (viewport != null && viewport.bounded && !viewport.migrating) {
+                            val before = viewport.scrollOffset
+                            viewport.scrollOffset = (before + remaining).coerceIn(0f, viewport.maxOffset.toFloat())
+                            remaining -= viewport.scrollOffset - before
+                        }
+                        consumed = delta - remaining
+                        if (abs(remaining) > .5f) consumed += listState.dispatchRawDelta(remaining)
+                        if (abs(consumed) > .5f) clearanceLayout.remeasurement?.forceRemeasure()
+                    } finally { clearanceLayout.correcting = false }
+                }
+                consumed
+            },
+        )
+    }
     fun canFollowBottom(): Boolean =
         !currentRetainingRows && !initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
-            (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !currentNestedTail.migrating
+            (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !currentNestedTail.migrating && disclosureViewport.active == null
 
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
@@ -572,7 +606,7 @@ internal fun ChatMessageList(
         snapshotFlow { Triple(scrollResumed, currentDragging, listState.isScrollInProgress) }
             .collect { (resumed, dragged, scrolling) ->
                 if (!resumed) wasDragged = false
-                else if (dragged) { followBottom = false; wasDragged = true }
+                else if (dragged) { disclosureViewport.cancelAnchor(); followBottom = false; wasDragged = true }
                 else if (!scrolling && wasDragged) {
                     wasDragged = false
                     followBottom = !listState.canScrollForward
@@ -766,6 +800,8 @@ internal fun ChatMessageList(
                     } while (event.changes.any { it.pressed })
                     return@awaitEachGesture
                 }
+                // A disclosure may restore this press's follow intent; other child actions still cancel it.
+                disclosureViewport.pointerDown(followBottom)
                 // A down over a child action also cancels follow and an in-flight user-message jump.
                 followBottom = false; wasDragged = false
                 consumedScrollSerial = currentScrollSerial
@@ -781,7 +817,8 @@ internal fun ChatMessageList(
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> androidx.compose.runtime.CompositionLocalProvider(
-                            LocalWorkflowVisualScope provides workflowAdmissions.scope(turn.listKey, initialPositionPending)) { Column {
+                            LocalWorkflowVisualScope provides workflowAdmissions.scope(turn.listKey, initialPositionPending),
+                            LocalWorkflowDisclosureContext provides remember(turn.listKey) { WorkflowDisclosureContext(disclosureViewport, turn.listKey) }) { Column {
                             ReconnectedAssistantTurn(turn, reconnectPartsByKey.getValue(turn.listKey), actions, imageLoader,
                                 dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id,

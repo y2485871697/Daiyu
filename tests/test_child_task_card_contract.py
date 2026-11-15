@@ -88,6 +88,19 @@ class ChildTaskCardContractTest(unittest.TestCase):
         for debug in ('READ_TASK_RESULT', 'ToolDisclosureUi("原因"', 'ToolDisclosureUi("任务"', 'scrub(row.model'):
             self.assertNotIn(debug, source)
 
+    def test_platform_tool_checks_bind_only_the_tool_checkout_sha(self):
+        workflow = (ROOT / '.github/workflows/child-task-card-platform.yml').read_text()
+        root_env = workflow.split('\nenv:\n', 1)[1].split('\njobs:', 1)[0]
+        self.assertIn('EXPECTED_SHA: ${{ inputs.expected_sha }}', root_env)
+        self.assertIn('SOURCE_SHA: ${{ inputs.source_sha }}', root_env)
+        check = workflow.split('      - name: 执行本次五类定向库存与工具契约\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('working-directory: validation-tools', check)
+        self.assertIn('EXPECTED_SHA: ${{ github.sha }}', check)
+        self.assertNotIn('SOURCE_SHA:', check)
+        source_binding = workflow.split('      - name: 绑定冻结源码及真实执行身份\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"', source_binding)
+        self.assertIn('test "$SOURCE_SHA" = "$EXPECTED_SHA"', source_binding)
+
     def test_child_category_stops_before_generic_debug_body(self):
         source = (CHAT / 'ToolCategoryContent.kt').read_text()
         child = source.index('ChildTaskReceiptContent(details)')

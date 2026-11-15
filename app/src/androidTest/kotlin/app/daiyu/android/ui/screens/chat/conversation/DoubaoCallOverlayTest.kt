@@ -17,6 +17,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Density
@@ -594,6 +595,22 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithTag("doubao-call-expanded").assertExists()
     }
 
+    fun testLegacyCaptureAlphaCorrectionPreservesAlphaAndOpaquePixels() {
+        val opaque = android.graphics.Color.rgb(24, 48, 72)
+        val encoded = android.graphics.Bitmap.createBitmap(intArrayOf(0,
+            android.graphics.Color.argb(85, 60, 54, 69), opaque), 3, 1,
+            android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
+        val restored = encoded.restoreLegacyCallCaptureAlpha()
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            assertSame(encoded, restored)
+        } else {
+            val bitmap = restored.asAndroidBitmap()
+            assertEquals(0, bitmap.getPixel(0, 0))
+            assertEquals(android.graphics.Color.argb(85, 180, 162, 207), bitmap.getPixel(1, 0))
+            assertEquals(opaque, bitmap.getPixel(2, 0))
+        }
+    }
+
     fun testFrozenEntranceAndLiveSurfaceHaveTheSameUnclippedShadowAtFullSize() {
         mount()
         ui.mainClock.advanceTimeBy(96L)
@@ -732,7 +749,9 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             val tail = position()
             assertTrue("ordinary=$ordinary: caption must overflow: $tail", tail.second > 0f)
             assertTrue("ordinary=$ordinary: caption must follow tail: $tail", tail.first >= tail.second - 1f)
-            caption.performTouchInput { swipeDown() }
+            caption.assertIsDisplayed().performTouchInput {
+                swipe(Offset(center.x, height * .25f), Offset(center.x, height * .80f), 400L)
+            }
             advanceOverlayFrames(64)
             val manual = position()
             val held = manual.first

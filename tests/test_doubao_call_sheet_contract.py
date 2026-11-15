@@ -162,6 +162,9 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         entrance = overlay.split('if (firstPresentation) {', 1)[1].split('} else {', 1)[0]
         self.assertLess(entrance.index('layer.toImageBitmap()'), entrance.index('progress.animateTo(1f'))
         self.assertIn('CallShadowOutset = 28.dp', overlay)
+        self.assertEqual(2, overlay.count('layer.toImageBitmap().restoreLegacyCallCaptureAlpha()'))
+        self.assertIn('if (android.os.Build.VERSION.SDK_INT >= 28) return this', overlay)
+        self.assertIn('channel * 255 + alpha / 2', overlay)
         self.assertNotIn('.dropShadow(', overlay)
         self.assertNotIn('.shadow(14.dp', overlay)
         self.assertIn('private fun Modifier.callPanelShadow(cornerRadius: Dp): Modifier = drawWithCache', overlay)

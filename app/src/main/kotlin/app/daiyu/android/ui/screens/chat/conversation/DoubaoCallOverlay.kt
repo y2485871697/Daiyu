@@ -34,6 +34,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.PathParser
@@ -114,6 +116,26 @@ data class DoubaoCallActions(
 internal class DoubaoCallMotionState {
     val progress = Animatable(0f)
     var transforming by mutableStateOf(true)
+}
+
+// Compose 1.9's API 26–27 ImageReader snapshot treats premultiplied RGBA as straight ARGB.
+// Undo that extra multiplication once per capture, never on each animation frame.
+internal fun ImageBitmap.restoreLegacyCallCaptureAlpha(): ImageBitmap {
+    if (android.os.Build.VERSION.SDK_INT >= 28) return this
+    val source = asAndroidBitmap()
+    val pixels = IntArray(source.width * source.height)
+    source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+    for (index in pixels.indices) {
+        val color = pixels[index]
+        val alpha = color ushr 24
+        if (alpha == 0 || alpha == 255) continue
+        fun restore(channel: Int) = ((channel * 255 + alpha / 2) / alpha).coerceAtMost(255)
+        pixels[index] = (alpha shl 24) or
+            (restore((color ushr 16) and 255) shl 16) or
+            (restore((color ushr 8) and 255) shl 8) or restore(color and 255)
+    }
+    return android.graphics.Bitmap.createBitmap(pixels, source.width, source.height,
+        android.graphics.Bitmap.Config.ARGB_8888).apply { density = source.density }.asImageBitmap()
 }
 
 private val CallShadowOutset = 28.dp
@@ -236,7 +258,7 @@ private fun DoubaoCallSession(
                     motion.transforming = true
                     // Never start the clock on an empty/unrecorded GraphicsLayer.
                     snapshotFlow { snapshotReady }.first { it }
-                    val bitmap = layer.toImageBitmap()
+                    val bitmap = layer.toImageBitmap().restoreLegacyCallCaptureAlpha()
                     coroutineContext.ensureActive()
                     frozenBitmap = bitmap
                     progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = CallMotionEasing))
@@ -254,7 +276,7 @@ private fun DoubaoCallSession(
                 // If closed before the first draw, the draw pass supplies one fallback recording.
                 snapshotFlow { snapshotReady }.first { it }
                 if (frozenBitmap == null) {
-                    val bitmap = layer.toImageBitmap()
+                    val bitmap = layer.toImageBitmap().restoreLegacyCallCaptureAlpha()
                     coroutineContext.ensureActive()
                     frozenBitmap = bitmap
                 }

@@ -79,7 +79,10 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         host = (APP / 'ui/navigation/PageBackGestures.kt').read_text()
         idle = host.split('val currentTransitionIdle by rememberUpdatedState', 1)[1].split('val showDeparture', 1)[0]
         self.assertIn('idleRequestKey', idle)
-        self.assertIn('resumed && !activeDeparture && !state.active && !state.gestureVisualActive', idle)
+        self.assertIn('resumed && !transitionRunning && !state.active && !state.gestureVisualActive', idle)
+        self.assertIn('val returnMotionActive = resumed && !departureInterrupted && departing && departure?.forward == false', host)
+        self.assertIn('val transitionRunning = activeDeparture || returnMotionActive', host)
+        self.assertIn('layers.setMotionActive(transitionRunning || state.active || state.gestureVisualActive || state.toolbarPending)', host)
         self.assertNotIn('delay(', idle)
         self.assertNotIn('visualProgress', idle)
         regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()

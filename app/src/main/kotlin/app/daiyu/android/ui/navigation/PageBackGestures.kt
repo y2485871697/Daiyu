@@ -600,13 +600,17 @@ internal fun PageBackGestureHost(
     val currentBack by rememberUpdatedState(dispatchBack)
     val activeDeparture = departing && !departureInterrupted && departure?.returnSkipped != true && !(departure?.forward == true &&
         (!state.previewAllowed || departure.forwardSkipped))
+    // Missing pixels suppress only the overlay, not the still-running return clock.
+    val returnMotionActive = resumed && !departureInterrupted && departing && departure?.forward == false
+    val transitionRunning = activeDeparture || returnMotionActive
     // Do not read visualProgress here. It is intentionally consumed only by layer/draw lambdas so
     // pointer updates invalidate the motion layer rather than the whole page composition.
     // The entering surface is live and hit-tested at its animated position; only return overlays own input.
     state.transitionBlocked = (activeDeparture && departure?.forward != true) ||
         (state.previewAllowed && !state.active && state.gestureVisualActive)
     SideEffect {
-        if (!state.active && !activeDeparture && !state.gestureVisualActive) {
+        layers.setMotionActive(transitionRunning || state.active || state.gestureVisualActive || state.toolbarPending)
+        if (!state.active && !transitionRunning && !state.gestureVisualActive) {
             layers.resume(frame)
             state.restorePreview()
         }
@@ -630,8 +634,8 @@ internal fun PageBackGestureHost(
     }
 
     val currentTransitionIdle by rememberUpdatedState(onTransitionIdle)
-    LaunchedEffect(layers, visualRouteKey, resumed, activeDeparture, state.active, state.gestureVisualActive, idleRequestKey) {
-        if (resumed && !activeDeparture && !state.active && !state.gestureVisualActive) currentTransitionIdle()
+    LaunchedEffect(layers, visualRouteKey, resumed, transitionRunning, state.active, state.gestureVisualActive, idleRequestKey) {
+        if (resumed && !transitionRunning && !state.active && !state.gestureVisualActive) currentTransitionIdle()
     }
 
     val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.returnSkipped && !departure.forwardSkipped && state.previewAllowed

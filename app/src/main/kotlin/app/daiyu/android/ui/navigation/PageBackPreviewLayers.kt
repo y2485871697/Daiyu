@@ -70,6 +70,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     private var pending: Departure? = null
     private var closed = false
     private var active = false
+    private var motionActive = false
     private var previewEpoch = 0L
     private var resumedSinceGesture = false
     var currentKey: Any? = null
@@ -123,6 +124,13 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
+    fun setMotionActive(value: Boolean) {
+        if (motionActive == value) return
+        motionActive = value
+        if (value) frames.values.forEach { it.warmup?.cancel(); it.warmup = null }
+        else frames[currentKey]?.let { schedule(it) }
+    }
+
     fun setActive(value: Boolean) {
         if (active == value) return
         active = value
@@ -158,12 +166,12 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     private fun schedule(frame: Frame) = schedule(frame, captureBackPerformanceToken())
 
     private fun schedule(frame: Frame, sourceToken: BackPerformanceRecorder.Token?) {
-        if (closed || !active || frame.frozen || frame.releaseRequested || currentKey != frame.key || frame.generation == 0L || frame.size == IntSize.Zero) return
+        if (closed || !active || motionActive || frame.frozen || frame.releaseRequested || currentKey != frame.key || frame.generation == 0L || frame.size == IntSize.Zero) return
         if (frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }) return
         frame.warmup = scope.launch {
             if (frame.ready == null) withFrameNanos { } else delay(64)
             frame.warmup = null
-            if (!closed && active && !frame.frozen && frames[frame.key] === frame && currentKey == frame.key) {
+            if (!closed && active && !motionActive && !frame.frozen && frames[frame.key] === frame && currentKey == frame.key) {
                 capture(frame, sourceToken)
             }
         }
@@ -261,7 +269,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             frame.captures.any { !it.isCompleted && (!navigation || !it.isCancelled) }) return
         // Submit the final read while the source is alive; cancelled warm reads drain separately.
         if (navigation) { if (!frame.frozen || frame.generation == 0L) return }
-        else if (frame.frozen || frame.hasFreshImage) return
+        else if (motionActive || frame.frozen || frame.hasFreshImage) return
         val epoch = previewEpoch
         val captureEpoch = frame.captureEpoch
         val generation = frame.generation

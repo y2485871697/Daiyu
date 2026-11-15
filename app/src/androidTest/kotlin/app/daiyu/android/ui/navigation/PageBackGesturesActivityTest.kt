@@ -80,6 +80,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var sliderValue by mutableStateOf(0.2f)
     private var inputText by mutableStateOf("a text field with selectable content")
     private var immediateCaptureRequests = 0
+    private var warmCaptureRequests = 0
     private var idleRequest by mutableStateOf(0)
     private val idleRoutes = mutableListOf<String>()
     private lateinit var horizontal: ScrollState
@@ -104,6 +105,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                         idleRequestKey = idleRequest,
                         onTransitionIdle = { idleRoutes.add(renderedRoute) },
                         previewCapture = { frame ->
+                            if (!frame.navigationFrozen) warmCaptureRequests++
                             if (immediateCapture && frame.navigationFrozen) {
                                 immediateCaptureRequests++
                                 checkNotNull(exactPixels[frame])
@@ -831,10 +833,11 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun assertIdleWaitsForMotion(commit: Boolean) {
+    private fun assertIdleWaitsForMotion(commit: Boolean, losePreview: Boolean = false) {
         predictive = false
         navigateOnBack = true
         mount(capturePreviousPage = true, immediateCapture = true)
+        val source = checkNotNull(observedFrame)
         ui.mainClock.autoAdvance = false
         try {
             idleRoutes.clear()
@@ -854,8 +857,14 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 }
                 up()
             }
+            if (losePreview) mainThread { source.image = null }
             ui.mainClock.advanceTimeBy(48)
             assertTrue("return or cancel settle cannot notify idle", idleRoutes.isEmpty())
+            if (losePreview) ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            val warmBeforeSettle = warmCaptureRequests
+            ui.mainClock.advanceTimeBy(96)
+            assertTrue("a missing overlay does not finish its return clock", idleRoutes.isEmpty())
+            assertEquals("settling cannot submit full-page warm copies", warmBeforeSettle, warmCaptureRequests)
             ui.mainClock.advanceTimeBy(1200)
             ui.waitForIdle()
             assertEquals(listOf(if (commit) "previous-page" else "test-page"), idleRoutes)
@@ -865,6 +874,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
 
     fun testTransitionIdleWaitsForCommittedDeparture() = assertIdleWaitsForMotion(commit = true)
     fun testTransitionIdleWaitsForCancelledGesture() = assertIdleWaitsForMotion(commit = false)
+    fun testTransitionIdleWaitsForSkippedDepartureClock() = assertIdleWaitsForMotion(commit = true, losePreview = true)
 
     fun testTransitionIdleConsumesNewRequestOnAlreadyIdleRoute() {
         mount(capturePreviousPage = true)

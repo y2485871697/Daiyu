@@ -461,6 +461,70 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    fun testMotionSuspendsWarmCopiesButKeepsFinalNavigationAndDrain() {
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        ui.waitForIdle()
+        mainThread {
+            val scheduler = TestCoroutineScheduler()
+            val clock = object : MonotonicFrameClock {
+                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
+            }
+            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
+            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
+            val layers = PageBackPreviewLayers(graphics, scope) {
+                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
+            }
+            try {
+                layers.enter("source")
+                val source = layers.frame("source")
+                layers.setActive(true)
+                source.recorded(IntSize(2, 2))
+                layers.setMotionActive(true)
+                scheduler.advanceTimeBy(200); scheduler.runCurrent()
+                assertEquals("motion cancels queued warm work before its first read", 0, copies.size)
+                layers.beginGesture(source)
+                assertEquals("fresh navigation pixels still submit during motion", 1, copies.size)
+                copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                assertTrue(source.canDrawPreview)
+
+                layers.enter("target")
+                val target = layers.frame("target")
+                target.recorded(IntSize(2, 2))
+                repeat(12) {
+                    target.recorded(IntSize(2, 2))
+                    scheduler.advanceTimeBy(16); scheduler.runCurrent()
+                }
+                assertEquals("destination animation frames never launch warm reads", 1, copies.size)
+                layers.setMotionActive(false)
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals("idle destination resumes preparation", 2, copies.size)
+                layers.setMotionActive(true)
+                layers.setActive(false)
+                layers.setActive(true)
+                scheduler.runCurrent()
+                assertEquals("resuming lifecycle cannot bypass the motion gate", 2, copies.size)
+                copies[1].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                assertNull("pause still rejects the old in-flight copy", target.ready)
+                scheduler.advanceTimeBy(200); scheduler.runCurrent()
+                assertEquals("cancelled read drains without restarting during motion", 2, copies.size)
+                layers.setMotionActive(false)
+                scheduler.advanceTimeBy(65); scheduler.runCurrent()
+                assertEquals(3, copies.size)
+                layers.close()
+                assertFalse("a submitted source remains alive until its read drains", target.layer.isReleased)
+                copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                assertTrue(target.layer.isReleased)
+            } finally {
+                copies.forEach { it.complete(ImageBitmap(2, 2)) }
+                scheduler.runCurrent()
+                layers.close()
+                scope.cancel()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun testPreparedSnapshotRetainsLastGoodGenerationButRejectsInvalidEpochs() {
         lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
         mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }

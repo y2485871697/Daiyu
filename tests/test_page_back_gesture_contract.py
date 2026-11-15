@@ -481,6 +481,23 @@ class PageBackGestureContractTest(unittest.TestCase):
         recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
         self.assertIn('info.takeLast(MAX_COMPOSE_NAME)', recorder)
 
+    def test_motion_gates_only_warm_reads_not_exact_navigation_capture(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        motion = layers.split('fun setMotionActive(value: Boolean)', 1)[1].split('fun setActive(', 1)[0]
+        self.assertIn('it.warmup?.cancel()', motion)
+        self.assertIn('else frames[currentKey]?.let { schedule(it) }', motion)
+        self.assertNotIn('capture.cancel()', motion)
+        self.assertNotIn('frame.image = null', motion)
+        schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('private fun observeCaptures(', 1)[0]
+        self.assertIn('!active || motionActive || frame.frozen', schedule)
+        self.assertIn('active && !motionActive && !frame.frozen', schedule)
+        capture = layers.split('private fun capture(frame: Frame, sourceToken:', 1)[1].split('fun frame(', 1)[0]
+        self.assertIn('else if (motionActive || frame.frozen || frame.hasFreshImage) return', capture)
+        self.assertIn('withContext(NonCancellable) { snapshot(frame) }', capture)
+        self.assertIn('layers.setMotionActive(transitionRunning || state.active || state.gestureVisualActive || state.toolbarPending)', self.host)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        self.assertIn('fun testMotionSuspendsWarmCopiesButKeepsFinalNavigationAndDrain()', regression)
+
     def test_continuous_redraw_uses_throttled_same_size_last_good_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('fun beginGesture(', 1)[0]

@@ -92,9 +92,9 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
             val owner = db.create("default")
             val old = oldMillis()
             db.writableDatabase.execSQL("UPDATE usage_statistics_conversations SET created_at=? WHERE conversation_id=?",
-                arrayOf(old, owner.id.value))
+                arrayOf<Any>(old, owner.id.value))
             db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=NULL,updated=? WHERE id=?",
-                arrayOf(old + 1000, owner.id.value))
+                arrayOf<Any>(old + 1000, owner.id.value))
             db.writableDatabase.execSQL("DROP TRIGGER conversation_sidebar_date_insert")
             db.writableDatabase.version = 32
             db.close(); db = ConversationDatabase(scoped)
@@ -133,7 +133,7 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         val owner = db.create("default")
         val old = oldMillis()
         db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=?,updated=? WHERE id=?",
-            arrayOf(old, old, owner.id.value))
+            arrayOf<Any>(old, old, owner.id.value))
         val (user, reply) = pair(owner.id)
         db.send(user, reply); db.save(reply.copy(status = RunStatus.COMPLETED))
         assertOld(owner.id, old)
@@ -163,8 +163,8 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         val old = oldMillis()
         val updated = old + 86400000L
         db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=?,updated=? WHERE id=?",
-            arrayOf(old, updated, owner.id.value))
-        val text = db.exportBackup(owner.id)
+            arrayOf<Any>(old, updated, owner.id.value))
+        val text = db.exportConversationBackup(owner.id)
         assertEquals(4, JSONObject(text).getInt("version"))
         db.delete(owner.id); db.importBackup(text)
         assertEquals(old, db.conversations().single().sidebarDateMillis)
@@ -183,17 +183,24 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         val first = source.create("default")
         val second = source.create("default")
         val old = oldMillis()
-        source.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=?,updated=?", arrayOf(old, old + 86400000L))
+        val dates = mapOf(first.id to old, second.id to old + 86400000L)
+        for ((id, date) in dates) {
+            source.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=?,updated=? WHERE id=?",
+                arrayOf<Any>(date, date + 86400000L, id.value))
+        }
         val exporter = app.daiyu.android.backup.NeutralBackupService(fixture.application, source)
-        val packages = listOf(exporter.exportPackage(), exporter.exportConversation(first.id),
-            exporter.exportConversations(listOf(first.id, second.id)))
-        for (text in packages) {
+        val packages = listOf(exporter.exportPackage() to dates,
+            exporter.exportConversation(first.id) to mapOf(first.id to old),
+            exporter.exportConversations(listOf(first.id, second.id)) to dates)
+        for ((text, expectedDates) in packages) {
             val scoped = testContext(instrumentation.targetContext, "sidebar-backup-${UUID.randomUUID()}-")
             val target = ConversationDatabase(scoped)
             try {
                 val importer = app.daiyu.android.backup.NeutralBackupService(scoped, target)
                 assertFalse(importer.importPackage(text).alreadyImported)
-                assertTrue(target.conversations().all { it.sidebarDateMillis == old && it.updatedAt == old + 86400000L })
+                val restored = target.conversations()
+                assertEquals(expectedDates, restored.associate { it.id to it.sidebarDateMillis })
+                assertTrue(restored.all { it.updatedAt == expectedDates.getValue(it.id) + 86400000L })
                 assertTrue(importer.importPackage(text).alreadyImported)
                 target.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=sidebar_date+1")
                 var rejected = false
@@ -206,7 +213,13 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
     fun testSelectingAnOldConversationKeepsTheOpenDrawerAndItsScrollPosition() {
         val db = fixture.database
         val owners = (0 until 70).map { index -> db.create("default").also { db.rename(it.id, "history-$index") } }
+        val historyDate = oldMillis()
+        owners.forEachIndexed { index, owner ->
+            db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=?,updated=? WHERE id=?",
+                arrayOf<Any>(historyDate, historyDate + index, owner.id.value))
+        }
         val wanted = owners.first()
+        val firstVisible = owners.last()
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         awaitControl("sidebar snapshot contains seeded conversations") {
             val field = MainActivity::class.java.getDeclaredField("paneState\$delegate").apply { isAccessible = true }
@@ -214,7 +227,9 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
             val pane = field.get(activity) as androidx.compose.runtime.MutableState<app.daiyu.android.ui.model.ConversationPaneUiState>
             pane.value.historyConversations.size == owners.size
         }
+        node("drawer-conversation:${firstVisible.id.value}").assertIsDisplayed()
         node("drawer-list").performScrollToNode(hasTestTag("drawer-conversation:${wanted.id.value}"))
+        node("drawer-conversation:${firstVisible.id.value}").assertIsNotDisplayed()
         val top = node("drawer-conversation:${wanted.id.value}").assertIsDisplayed().getUnclippedBoundsInRoot().top.value
         node("drawer-conversation:${wanted.id.value}").performClick()
         awaitControl("selected historical owner published") {

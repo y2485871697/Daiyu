@@ -93,7 +93,7 @@ class ConversationPreviewTest {
         val old = java.time.LocalDate.now(zone).minusDays(5).atStartOfDay(zone).toInstant().toEpochMilli()
         val updated = System.currentTimeMillis()
         database.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=?,updated=? WHERE id=?",
-            arrayOf(old, updated, owner.value))
+            arrayOf<Any>(old, updated, owner.value))
         val first = data.summaries(null).single()
         assertEquals(old, first.dateGroupMillis)
         assertEquals(updated, first.updatedAtMillis)

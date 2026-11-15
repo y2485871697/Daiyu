@@ -96,6 +96,26 @@ class ChatTurnMapperTest {
         assertEquals(ChatTurnMapper.map(listOf(a, b)).map { it.listKey }, turns.map { it.listKey })
     }
 
+    @Test fun repeatedMappingUsesCachedOperationMetadataButRefreshesReceiptState() {
+        val block = MessageBlock.Tool(ToolInvocation(ToolCallId("capture"), "browser_read", "{\"action\":\"navigate\"}"), "{}")
+        val original = message(block)
+        var builds = 0
+        val cache = ToolPresentationCache({ name, arguments, result ->
+            builds++
+            ToolCardPresentations.present(name, arguments, result).copy(
+                operationGlyph = "webCamera", hasBrowserScreenshot = true)
+        })
+        for (state in listOf(WorkStepState.UNKNOWN, WorkStepState.OK, WorkStepState.FAILED)) {
+            val turn = ChatTurnMapper.map(listOf(original), toolReceipt = { _, _ -> ToolReceiptUi(state) },
+                presentations = cache).single() as ChatTurnUi.Assistant
+            val step = turn.workProcess!!.segments.single().steps.single()
+            assertEquals("webCamera", step.operationGlyph)
+            assertTrue(step.hasBrowserScreenshot)
+            assertEquals(state, step.state)
+        }
+        assertEquals(1, builds)
+    }
+
     @Test fun browserScreenshotFlagUsesOnlyExactToolAndAction() {
         for (name in listOf("browser_read", "browser_write", "screen", "search")) {
             for (args in listOf("{\"action\":\"screenshot\"}", "{\"action\":\"navigate\"}", "bad json")) {

@@ -147,4 +147,64 @@ class ToolPresentationJsonTest {
             assertEquals(1, Regex("""TerminalToolTarget\s*\.\s*fromPresentation\s*\(\s*toolName\s*,\s*resultJson\s*\)""").findAll(source).count())
         }
     }
+
+    @Test fun glyphAndBrowserScreenshotUseTheSharedArgumentDecoder() {
+        val cases = listOf(
+            Triple("browser_read", "{\"action\":\"screenshot\"}", "webCamera"),
+            Triple("browser_write", "{\"action\":\"screenshot\"}", "webCamera"),
+            Triple("control_child_task", "{\"action\":\"pause\"}", "pause"),
+            Triple("direct_child_task", "{\"kind\":\"REPLACE\"}", "swap"),
+            Triple("screen_action", "{\"operation\":\"tap\"}", "tap"),
+            Triple("search_media", "{\"kind\":\"audio\"}", "music"),
+        )
+        for ((name, decoded, glyph) in cases) {
+            var parses = 0
+            val card = ToolCardPresentations.presentParsed(name, "{}", null,
+                ToolPresentationJson("{}") { parses++; JSONObject(decoded) }, ToolPresentationJson(null))
+            assertEquals(glyph, card.operationGlyph)
+            assertEquals(name in setOf("browser_read", "browser_write"), card.hasBrowserScreenshot)
+            assertEquals(1, parses)
+        }
+    }
+
+    @Test fun cachedOperationMetadataKeepsItsOriginalLargeArgumentBehavior() {
+        for (length in listOf(65_536, 65_537, 131_072, 131_073, 2_097_153)) {
+            val source = JSONObject().put("action", "screenshot").put("padding", "")
+            val args = source.put("padding", "x".repeat(length - source.toString().length)).toString()
+            assertEquals(length, args.length)
+            var parses = 0
+            val card = ToolCardPresentations.presentParsed("browser_read", args, null,
+                ToolPresentationJson(args) { parses++; JSONObject(it) }, ToolPresentationJson(null))
+            assertEquals("webCamera", card.operationGlyph)
+            assertTrue(card.hasBrowserScreenshot)
+            assertEquals(if (length <= 65_536) "browser" else "generic", card.category)
+            assertEquals(1, parses)
+        }
+    }
+
+    @Test fun fixedGlyphNeverRequestsArgumentsAndMalformedDynamicArgumentsFailOnce() {
+        var parses = 0
+        val fixed = ToolPresentationJson("{broken" + "x".repeat(131_072)) { parses++; error("unused") }
+        for (name in listOf("terminal_exec", "terminal_pty_step", "shizuku_execute")) {
+            assertEquals("terminal", toolOperationGlyph(name, fixed))
+        }
+        assertEquals(0, parses)
+        val bad = ToolPresentationJson("{broken") { parses++; throw IllegalArgumentException() }
+        val card = ToolCardPresentations.presentParsed("browser_read", "{broken", null, bad, ToolPresentationJson(null))
+        assertEquals("generic", card.operationGlyph)
+        assertFalse(card.hasBrowserScreenshot)
+        assertEquals(1, parses)
+    }
+
+    @Test fun turnMapperConsumesCachedGlyphAndScreenshotWithoutRawArgumentParsing() {
+        val relative = "src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatTurnMapper.kt"
+        val file = listOf(java.io.File(relative), java.io.File("app/$relative")).firstOrNull { it.isFile }
+        assertNotNull(file)
+        val source = file!!.readText()
+        assertTrue(source.contains("hasBrowserScreenshot = display.hasBrowserScreenshot"))
+        assertTrue(source.contains("operationGlyph = display.operationGlyph"))
+        assertFalse(source.contains("JSONObject(block.invocation.arguments)"))
+        assertFalse(source.contains("toolOperationGlyph(block.invocation.name"))
+    }
+
 }

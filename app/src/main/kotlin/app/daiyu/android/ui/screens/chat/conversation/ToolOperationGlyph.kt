@@ -1,13 +1,14 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import org.json.JSONObject
-
 internal fun isMcpToolName(name: String): Boolean =
     name.matches(Regex("mcp_(?:[0-7]|live_[0-9]+_[0-9]+)_call"))
 
 /** Match protocol identifiers, never translated titles or result prose. */
-internal fun toolOperationGlyph(toolName: String, arguments: String): String {
-    val args = runCatching { JSONObject(arguments) }.getOrNull()
+internal fun toolOperationGlyph(toolName: String, arguments: String): String =
+    toolOperationGlyph(toolName, ToolPresentationJson(arguments))
+
+internal fun toolOperationGlyph(toolName: String, argumentJson: ToolPresentationJson): String {
+    val args by lazy { argumentJson.read(Int.MAX_VALUE) }
     return when (toolName) {
         "assistant_memory_search", "skills_list" -> "search"
         "assistant_memory_read", "skills_read" -> "book"

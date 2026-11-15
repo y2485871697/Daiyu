@@ -374,10 +374,9 @@ object ChatTurnMapper {
             executionTargetLabel = display.targetLabel,
             renderKey = toolRenderKey(message, block, occurrence),
             dedicatedKey = dedicatedKey, categoryDetails = display.details,
-            hasBrowserScreenshot = block.invocation.name in setOf("browser_read", "browser_write") &&
-                runCatching { org.json.JSONObject(block.invocation.arguments).optString("action") == "screenshot" }.getOrDefault(false),
+            hasBrowserScreenshot = display.hasBrowserScreenshot,
             hasScreenScreenshot = display.hasScreenScreenshot,
-            operationGlyph = toolOperationGlyph(block.invocation.name, block.invocation.arguments),
+            operationGlyph = display.operationGlyph,
             activity = activity ?: ToolActivityUi.from(receipt ?: when (confirmedError) {
                 true -> WorkStepState.FAILED
                 false -> WorkStepState.OK

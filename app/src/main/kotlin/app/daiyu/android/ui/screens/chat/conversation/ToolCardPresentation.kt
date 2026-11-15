@@ -5,7 +5,7 @@ import org.json.JSONObject
 /** 按工具名和操作类型生成卡片分类、标题及摘要。 */
 internal object ToolCardPresentations {
     val categories = setOf("memory", "skills", "delegation", "child_control", "workspace", "terminal", "background_job", "files", "image_read", "browser", "gui", "apps", "device_read", "personal_search", "system_action", "generation", "speech", "mcp", "context", "user_question", "generic")
-    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null, val hasScreenScreenshot: Boolean = false)
+    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null, val hasScreenScreenshot: Boolean = false, val hasBrowserScreenshot: Boolean = false, val operationGlyph: String = "generic")
     private val tools = buildMap {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }
         group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
@@ -116,7 +116,9 @@ internal object ToolCardPresentations {
             "执行其他工具 · $toolName"
         } else kind.second
         val title = target?.let { "$operationTitle · ${it.label}" } ?: operationTitle
-        return Presentation(kind.first, title, summary, sections, details, target?.label, screenScreenshot)
+        return Presentation(kind.first, title, summary, sections, details, target?.label, screenScreenshot,
+            hasBrowserScreenshot = toolName in setOf("browser_read", "browser_write") && argumentJson.read(Int.MAX_VALUE)?.optString("action") == "screenshot",
+            operationGlyph = toolOperationGlyph(toolName, argumentJson))
     }
     private fun arrayCount(value: JSONObject?, key: String, label: String): String =
         value?.optJSONArray(key)?.let { "$label：${it.length()}" }.orEmpty()

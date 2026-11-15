@@ -12,6 +12,8 @@ import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.haptics.combinedClickable
 import app.daiyu.android.ui.haptics.hapticClick
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -581,6 +583,7 @@ private fun ExpandedCallContent(
 private class CallCaptionFollow {
     var followTail by mutableStateOf(true)
     var dragging by mutableStateOf(false)
+    var touching by mutableStateOf(false)
     var userScroll by mutableStateOf(false)
 }
 
@@ -588,7 +591,6 @@ private class CallCaptionFollow {
 private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
     scroll: androidx.compose.foundation.ScrollState, follow: CallCaptionFollow,
     captions: Pair<State<String>, State<String>>, modifier: Modifier) {
-    val edge = with(LocalDensity.current) { 6.dp.roundToPx() }
     LaunchedEffect(scroll) {
         scroll.interactionSource.interactions.collect { interaction ->
             when (interaction) {
@@ -597,16 +599,16 @@ private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
             }
         }
     }
-    LaunchedEffect(scroll, edge) {
-        snapshotFlow { Triple(scroll.value, scroll.isScrollInProgress, follow.dragging) }.collect { (value, moving, held) ->
+    LaunchedEffect(scroll) {
+        snapshotFlow { Triple(scroll.value, scroll.isScrollInProgress, follow.dragging || follow.touching) }.collect { (value, moving, held) ->
             if (follow.userScroll && !moving && !held) {
-                follow.followTail = scroll.maxValue - value <= edge
+                follow.followTail = value == scroll.maxValue
                 follow.userScroll = false
             }
         }
     }
     LaunchedEffect(scroll, state.sessionKey, state.captionEpoch, state.captionsEnabled, enabled) {
-        snapshotFlow { Triple(scroll.maxValue, follow.followTail, follow.dragging) }.collectLatest { (end, following, held) ->
+        snapshotFlow { Triple(scroll.maxValue, follow.followTail, follow.dragging || follow.touching) }.collectLatest { (end, following, held) ->
             if (enabled && state.captionsEnabled && following && !held) scroll.scrollTo(end)
         }
     }
@@ -620,7 +622,21 @@ private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
         .drawWithContent {
             drawContent()
             drawLine(Color(0x4DECE6F2), Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
-        }.padding(top = 7.dp, bottom = 5.dp).nestedScroll(containment).verticalScroll(scroll, enabled = enabled)) {
+        }.padding(top = 7.dp, bottom = 5.dp)
+        .pointerInput(follow, enabled, state.captionsEnabled) {
+            if (!enabled || !state.captionsEnabled) return@pointerInput
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                follow.touching = true
+                try {
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Final)
+                    } while (event.changes.any { it.pressed })
+                } finally {
+                    follow.touching = false
+                }
+            }
+        }.nestedScroll(containment).verticalScroll(scroll, enabled = enabled)) {
         if (state.captionsEnabled) {
             if (state.transcript.isNotBlank()) CaptionLine("我", captions.first)
             if (state.reply.isNotBlank()) CaptionLine(state.responseLabel, captions.second, reply = true)

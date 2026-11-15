@@ -405,7 +405,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             "doubao-call-status-detail", "doubao-call-controls", "doubao-call-mute",
             "doubao-call-speaker", "doubao-call-captions", "doubao-call-hang-up")
         val fixed = (tags + listOf("doubao-call-caption-area", "voice-call-model-title", "doubao-call-clock",
-            "doubao-call-minimize")).associateWith { ui.onNodeWithTag(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
+            "doubao-call-minimize")).associateWith { ui.onNodeWithTag(it, useUnmergedTree = it == "voice-call-model-title").assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
         val body = ui.onNodeWithTag("doubao-call-body")
         assertFalse(body.fetchSemanticsNode().config.contains(SemanticsProperties.VerticalScrollAxisRange))
         val viewport = body.fetchSemanticsNode().boundsInRoot
@@ -415,7 +415,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
                 bounds.top >= viewport.top - 1f && bounds.bottom <= viewport.bottom + 1f)
         }
         fun assertFixed() = fixed.forEach { (tag, bounds) ->
-            assertEquals("$tag moved outside the caption scroller", bounds, ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot)
+            assertEquals("$tag moved outside the caption scroller", bounds, ui.onNodeWithTag(tag, useUnmergedTree = tag == "voice-call-model-title").fetchSemanticsNode().boundsInRoot)
         }
         ui.onNodeWithTag("doubao-call-status").performTouchInput { swipeDown(durationMillis = 350L) }
         advanceOverlayFrames(24); assertFixed()
@@ -433,6 +433,34 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         assertFixed()
         ui.onNodeWithTag("doubao-call-speaker").performTouchInput { click() }
         awaitVisualIdle(); assertEquals(1, speakerToggles); assertFixed()
+    }
+
+    fun testBothCallKindsPauseCaptionTailOnTouchDownAndResumeAfterUp() = assertCaptionTouchPausesTail(false)
+    fun testBothCallKindsPauseCaptionTailOnTouchDownAndResumeAfterCancel() = assertCaptionTouchPausesTail(true)
+
+    private fun assertCaptionTouchPausesTail(cancelGesture: Boolean) {
+        for (ordinary in listOf(false, true)) {
+            if (ordinary) {
+                mainThread { call = session().copy(modelSelectable = true) }
+                awaitMotionStart(1f)
+            } else mount(400.dp)
+            finishOpening()
+            mainThread { call = call!!.copy(reply = "字幕持续增长，按住时保持阅读位置。\n".repeat(35), replyTextComplete = true) }
+            advanceOverlayFrames(400)
+            val caption = ui.onNodeWithTag("doubao-call-caption-area")
+            val before = scrollPosition(caption)
+            assertTrue("ordinary=$ordinary: captions must overflow", before.second > 0f)
+            assertEquals("ordinary=$ordinary: initial tail", before.second, before.first, 1f)
+            caption.performTouchInput { down(center) }
+            advanceOverlayFrames(32)
+            val held = scrollPosition(caption)
+            assertTrue("ordinary=$ordinary: reveal must continue while held", held.second > before.second)
+            assertEquals("ordinary=$ordinary: pointer down must pause tail before drag slop", before.first, held.first, 1f)
+            caption.performTouchInput { if (cancelGesture) cancel() else up() }
+            advanceOverlayFrames(32)
+            val resumed = scrollPosition(caption)
+            assertEquals("ordinary=$ordinary: untouched follow intent resumes after release or cancel", resumed.second, resumed.first, 1f)
+        }
     }
 
     fun testConnectingBackendOpensWithListeningWavesInPanelAndCapsule() {

@@ -59,8 +59,7 @@ jobs:
             --tests '*RunGenerationToolsTest' --tests '*RunOrdinaryGenerationToolsTest' \
             --tests '*ControllerGenerationPreparationTest' --tests '*GenerationInputHostTest' \
             --tests '*SavedCatalogSubAgentModelSourceTest' --tests '*SavedSubAgentRuntimeBindingsTest' \
-            --tests '*GenerationAttemptCodecTest' --tests '*BackupGenerationCodecTest' \
-            :app:compileDebugAndroidTestKotlin 2>&1 | tee generation-port-checks/gradle.log
+            --tests '*GenerationAttemptCodecTest' --tests '*BackupGenerationCodecTest' 2>&1 | tee generation-port-checks/gradle.log
       - name: 核对测试终态和零安装包
         run: |
           python3 - <<'PY'

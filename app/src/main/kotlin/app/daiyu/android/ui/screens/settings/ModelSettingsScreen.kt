@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.State
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -74,6 +76,11 @@ internal data class ModelSettingsDraftUi(
 
 internal val RetainedModelSaveAction = SemanticsPropertyKey<() -> Unit>("RetainedModelSaveAction")
 
+/** Saved readback can replace a draft with an equal value and a new editing authority. */
+@Composable
+internal fun rememberUpdatedSettingsDraft(draft: ModelSettingsDraftUi): State<ModelSettingsDraftUi> =
+    remember { mutableStateOf(draft, referentialEqualityPolicy()) }.apply { value = draft }
+
 internal data class ModelCatalogEntryUi(val id: String, val displayName: String = id, val apiModelId: String = id)
 
 /** Endpoint selection is a draft edit. Only an explicit save authorizes rebinding. */
@@ -121,8 +128,8 @@ internal fun ModelSettingsScreen(
     oauthLoginRunning: Boolean = false,
 ) {
     val oauthOnly = draft.oauth != null || onOAuthLogin != null
-    val latestDraft by rememberUpdatedState(draft)
-    val latestEnabled by rememberUpdatedState(enabled)
+    val latestDraft by rememberUpdatedSettingsDraft(draft)
+    val latestEnabled by rememberUpdatedState(enabled && !LocalProviderConfigurationSavePending.current)
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
     val balance = rememberProviderBalanceTest(draft, enabled, testBalance)
     var fieldsSaveError by remember(draft) { mutableStateOf<String?>(null) }

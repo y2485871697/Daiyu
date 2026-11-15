@@ -250,6 +250,7 @@ internal fun SettingsTextField(
                     }
                 },
                 enabled = enabled,
+                readOnly = LocalProviderConfigurationSavePending.current,
                 singleLine = !multiline,
                 minLines = if (multiline && !embedded) 4 else 1,
                 maxLines = if (multiline) 8 else 1,

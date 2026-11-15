@@ -47,7 +47,7 @@ internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boole
     var selection by remember { mutableStateOf<RequestBodyField?>(null) }
     var adding by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    val latestDraft by rememberUpdatedState(draft)
+    val latestDraft by rememberUpdatedSettingsDraft(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val latestOwner by rememberUpdatedState(owner)
     val latestChange by rememberUpdatedState(onDraftChange)

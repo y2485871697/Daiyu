@@ -77,6 +77,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     isRemoteModel: (SavedCatalogModel<T>) -> Boolean = { false },
     catalogConnectionSaved: Boolean = true,
     configurationContent: @Composable (ProviderConfigurationForm) -> Unit = { it.Content() },
+    configurationSavePending: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -152,8 +153,8 @@ internal fun <T> ProviderCatalogSettingsScreen(
         }
     val tabs: LazyListScope.() -> Unit = {
         if (twoTabs) item(key = "provider-tabs") {
-            ProviderSettingsTabs(modelTab, modelDeletionEnabled && !state.saving) { selected ->
-                if (ownerCurrent()) { session.invalidate(); selectedModelIds.value = null; modelTab = selected }
+            ProviderSettingsTabs(modelTab, (modelDeletionEnabled || configurationSavePending) && !state.saving) { selected ->
+                if (ownerCurrent() && !configurationSavePending) { session.invalidate(); selectedModelIds.value = null; modelTab = selected }
             }
         }
     }
@@ -199,6 +200,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
             catalogForDraft = draft,
             catalogEnabled = enabled && !state.saving,
             enabled = enabled && !state.saving,
+            savePending = configurationSavePending,
             // Deliberately no legacy clickable remote result list: that list changes the active draft.
         ))
         state.selection?.let { selection ->

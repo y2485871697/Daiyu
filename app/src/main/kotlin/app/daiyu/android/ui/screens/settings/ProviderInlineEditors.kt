@@ -81,7 +81,7 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     val rows = (if (headers) draft.headerFieldRows else draft.bodyFieldRows) ?: parsed.getOrDefault(emptyList())
     val nextId = (rows.maxOfOrNull { it.id } ?: -1L) + 1L
     var expanded by rememberSaveable(headers, draft.protocol) { mutableStateOf(false) }
-    val latestDraft by rememberUpdatedState(draft)
+    val latestDraft by rememberUpdatedSettingsDraft(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val latestExpanded by rememberUpdatedState(expanded)
     val latestChange by rememberUpdatedState(onDraftChange)

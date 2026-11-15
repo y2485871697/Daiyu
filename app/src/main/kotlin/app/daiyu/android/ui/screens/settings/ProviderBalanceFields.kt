@@ -35,7 +35,7 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val visit = remember(lifecycle) { AtomicBoolean(true) }
     DisposableEffect(visit) { onDispose { visit.set(false) } }
-    val latestDraft by rememberUpdatedState(draft)
+    val latestDraft by rememberUpdatedSettingsDraft(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val latestChange by rememberUpdatedState(onChange)
     val configuration = draft.providerBalanceConfiguration()

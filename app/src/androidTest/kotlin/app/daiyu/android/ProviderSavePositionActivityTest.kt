@@ -4,6 +4,19 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsActions
+import app.daiyu.android.ui.screens.settings.ModelSettingsDraftUi
+import app.daiyu.android.ui.screens.settings.ModelSettingsScreen
+import app.daiyu.android.ui.screens.settings.RetainedModelSaveAction
+import app.daiyu.android.ui.screens.settings.rememberUpdatedSettingsDraft
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.settings.ProviderManagementRoute
@@ -86,6 +99,11 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         assertEquals("Renamed position provider",
             fixture.controller.providers.snapshot().providers.single { it.slotId == slot }.name)
 
+        reveal("provider-name", "Renamed position provider").performTextReplacement("Third position name")
+        node("provider-name").assertTextContains("Third position name")
+        saveAtBottom("Renamed position provider", "Third position name")
+        assertEquals("Third position name", fixture.controller.providers.snapshot().providers.single { it.slotId == slot }.name)
+
         // A real switch must NOT reuse the first provider's form or its scroll state.
         val first = form()
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
@@ -112,11 +130,19 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         assertEquals(catalog?.providerIdentity, fixture.settings.localModelCatalogSnapshot()?.providerIdentity)
         assertEquals(catalog?.models, fixture.settings.localModelCatalogSnapshot()?.models)
 
-        reveal("settings-field:API Key", title).performTextReplacement("")
-        reveal("model-save", title, lazyKey = "model_save")
+        reveal("provider-name", title).performTextReplacement("After unchanged save")
+        node("provider-name").assertTextContains("After unchanged save")
+        saveAtBottom(title, "After unchanged save")
+        reveal("provider-name", "After unchanged save").performTextReplacement("After renamed save")
+        node("provider-name").assertTextContains("After renamed save")
+        saveAtBottom("After unchanged save", "After renamed save")
+        assertEquals("After renamed save", fixture.controller.providers.snapshot().providers.single { it.slotId == slot }.name)
+        val currentTitle = "After renamed save"
+        reveal("settings-field:API Key", currentTitle).performTextReplacement("")
+        reveal("model-save", currentTitle, lazyKey = "model_save")
         val failedForm = form()
         node("model-save").performClick()
-        reveal("model-save-error", title, lazyKey = "model_save").assertIsDisplayed()
+        reveal("model-save-error", currentTitle, lazyKey = "model_save").assertIsDisplayed()
         assertSame(failedForm.first, form().first)
         assertSame(failedForm.second, form().second)
         assertEquals(before, fixture.settings.load())
@@ -124,4 +150,92 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         assertEquals(catalog?.models, fixture.settings.localModelCatalogSnapshot()?.models)
         assertEquals(0, fixture.opens.get())
     }
+
+    fun testEqualDraftReplacementUpdatesIdentityAndKeepsCurrentNameEditable() {
+        val original = ModelSettingsDraftUi(providerName = "Equal provider", endpoint = "https://equal.invalid", apiKey = "test-key")
+        val draftState = mutableStateOf(original, referentialEqualityPolicy())
+        var currentIdentity: () -> Boolean = { false }
+        var saves = 0
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), false) {
+                val draft = draftState.value
+                val latest by rememberUpdatedSettingsDraft(draft)
+                currentIdentity = { latest === draft }
+                ModelSettingsScreen(draft, { draftState.value = it }, { saves++ }, {},
+                    providerName = "Equal provider", pageTitle = "Equal provider", showCatalog = false)
+            }
+        } }
+        awaitUniqueTag("provider-name")
+        val staleIdentity = currentIdentity
+        val staleSubmit = reveal("model-save", "Equal provider", lazyKey = "model_save")
+            .fetchSemanticsNode().config[RetainedModelSaveAction]
+        val replacement = original.copy()
+        assertEquals(original, replacement)
+        assertNotSame(original, replacement)
+        mainThread { draftState.value = replacement }
+        ui.waitForIdle()
+        assertFalse("an equal old draft must not regain editing authority", staleIdentity())
+        assertTrue("the latest equal draft must own new callbacks", currentIdentity())
+        mainThread { staleSubmit() }
+        assertEquals("an old equal draft cannot submit", 0, saves)
+        reveal("provider-name", "Equal provider").performTextReplacement("Equal draft is editable")
+        node("provider-name").assertTextContains("Equal draft is editable")
+        reveal("model-save", "Equal provider", lazyKey = "model_save").performClick()
+        assertEquals(1, saves)
+    }
+
+    fun testBlockedSaveKeepsButtonColorsAndRejectsTouchAndStaleActions() {
+        val snapshot = fixture.controller.providers.snapshot()
+        val slot = snapshot.providers.first().slotId
+        val title = snapshot.providers.first().name
+        showProviders()
+        reveal("provider-open-$slot", "模型提供商").performClick()
+        awaitModelEditor()
+        reveal("model-save", title, lazyKey = "model_save")
+        val host = ui.onNode(SemanticsMatcher.keyIsDefined(RetainedProviderConfigurationForm), useUnmergedTree = true)
+        val bounds = host.fetchSemanticsNode().boundsInRoot
+        val buttonBounds = node("model-save").fetchSemanticsNode().boundsInRoot
+        val sample = Offset(buttonBounds.left - bounds.left + buttonBounds.width * .2f,
+            buttonBounds.top - bounds.top + buttonBounds.height * .5f)
+        val before = captureScreenNode(host).toPixelMap()
+        val expected = before[sample.x.toInt(), sample.y.toInt()]
+        val staleSave = node("model-save").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        val held = executor.submit<Unit> {
+            fixture.settings.modelCatalog.readConfiguration {
+                entered.countDown()
+                check(release.await(30, TimeUnit.SECONDS))
+            }
+        }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            node("model-save").performClick()
+            ui.waitUntil(5_000) { fixture.controller.dataBusy }
+            ui.waitForIdle()
+            host.assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Disabled))
+            ui.onNodeWithTag("model-save").assertDoesNotExist()
+            val pending = captureScreenNode(host).toPixelMap()
+            val actual = pending[sample.x.toInt(), sample.y.toInt()]
+            assertEquals("save keeps the normal red channel", expected.red, actual.red, .02f)
+            assertEquals("save keeps the normal green channel", expected.green, actual.green, .02f)
+            assertEquals("save keeps the normal blue channel", expected.blue, actual.blue, .02f)
+            host.performTouchInput { click(sample) }
+            mainThread { staleSave(); staleSave() }
+            assertTrue(fixture.controller.dataBusy)
+            release.countDown()
+            held.get(5, TimeUnit.SECONDS)
+            awaitSavedForm(title)
+            ui.onNodeWithTag("model-save-error").assertDoesNotExist()
+            reveal("provider-name", title).performTextReplacement("Editable after blocked save")
+            node("provider-name").assertTextContains("Editable after blocked save")
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            release.countDown()
+            held.get(5, TimeUnit.SECONDS)
+            executor.shutdownNow()
+        }
+    }
+
 }

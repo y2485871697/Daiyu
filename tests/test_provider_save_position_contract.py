@@ -102,6 +102,38 @@ class ProviderSavePositionContractTest(unittest.TestCase):
                          'reveal("model-save-error"', "currentCatalog?.models", "previous.activeSlotId"):
             self.assertIn(required, android)
 
+    def test_equal_readback_uses_reference_state_without_weakening_old_callback_guards(self):
+        screen = source("ModelSettingsScreen.kt")
+        self.assertIn("mutableStateOf(draft, referentialEqualityPolicy())", screen)
+        self.assertIn(".apply { value = draft }", screen)
+        for name in ("ModelSettingsScreen.kt", "ProviderBalanceFields.kt", "ProviderInlineEditors.kt", "RequestBodyFieldsEditor.kt"):
+            text = source(name)
+            self.assertIn("val latestDraft by rememberUpdatedSettingsDraft(draft)", text, name)
+            self.assertNotIn("val latestDraft by rememberUpdatedState(draft)", text, name)
+        self.assertIn("latestDraft === draft", screen)
+
+    def test_save_retains_colors_but_blocks_touch_accessibility_and_ime(self):
+        form = source("ProviderConfigurationForm.kt")
+        for required in ("savePending: Boolean = false", "enabled = enabled || savePending",
+                         "PointerEventPass.Initial", "it.consume()", "clearAndSetSemantics",
+                         "disabled()", "onPreviewKeyEvent { true }",
+                         "LocalProviderConfigurationSavePending provides savePending"):
+            self.assertIn(required, form)
+        self.assertIn("readOnly = LocalProviderConfigurationSavePending.current", source("SettingsUiComponents.kt"))
+        self.assertIn("enabled && !LocalProviderConfigurationSavePending.current", source("ModelSettingsScreen.kt"))
+        route = source("ProviderManagementRoute.kt")
+        self.assertIn("busy == null && !controller.dataBusy && d.draft === submitted", route)
+        self.assertIn("(busy != null || savedReadbackUi != null)", route)
+        self.assertIn("configurationSavePending = configurationSavePending", route)
+
+    def test_real_route_repeats_name_edits_and_holds_the_save_transaction_for_visual_checks(self):
+        android = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ProviderSavePositionActivityTest.kt").read_text()
+        for required in ("testEqualDraftReplacementUpdatesIdentityAndKeepsCurrentNameEditable",
+                         "testBlockedSaveKeepsButtonColorsAndRejectsTouchAndStaleActions",
+                         "After unchanged save", "After renamed save", "Third position name",
+                         "readConfiguration", "staleSave(); staleSave()", "expected.red", "actual.red"):
+            self.assertIn(required, android)
+
 
 if __name__ == "__main__":
     unittest.main()

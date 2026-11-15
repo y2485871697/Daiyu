@@ -103,7 +103,9 @@ class ChatGptSpeedContractTest(unittest.TestCase):
         self.assertIn('val composerAvailable =', host)
         projection = host.split('val composerAvailable =', 1)[1].split('private fun cycleChatGptSpeed(', 1)[0]
         self.assertIn('val allowed = composerAvailable && !controller.dataBusy', projection)
-        self.assertIn('gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null', projection)
+        admission = host.split('private fun withComposerAdmission(', 1)[1].split('private fun publishChat()', 1)[0]
+        self.assertIn('gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null', admission)
+        self.assertIn(').let(::withComposerAdmission)', projection)
         self.assertIn('enabled = allowed', projection)
         composer = source('ui/screens/chat/conversation/ChatComposer.kt')
         self.assertIn('val visualEnabled = state.enabled || state.gptSpeedSaving', composer)

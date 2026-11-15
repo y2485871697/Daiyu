@@ -36,7 +36,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
                 val pending = chatReturnRefresh?.takeIf { it.conversation == selected?.id && it.editor == editorGeneration }
                 if (pending == null) chatReturnRefresh = ChatReturnRefresh(selected?.id, editorGeneration, refreshState)
                 else pending.full = pending.full || refreshState
-                chatState = chatState.copy(composer = chatState.composer.copy(enabled = false))
+                chatState = chatState.copy(composer = withComposerAdmission(chatState.composer))
             }
         }
         """), normalized_code(restore))
@@ -53,7 +53,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
             'BackHandler(enabled = retainedPage != "chat") {', 1)[0]
         self.assertIn('app.daiyu.android.ui.navigation.PageBackGestureHost(', host)
         self.assertIn(normalized_code("""
-            retainedRootActive = retainedPage == "chat" && returnRefreshRequest == null,
+            retainedRootActive = retainedPage == "chat",
             idleRequestKey = returnRefreshRequest,
             onTransitionIdle = { finishChatReturn(returnRefreshRequest) },
         """), normalized_code(host))

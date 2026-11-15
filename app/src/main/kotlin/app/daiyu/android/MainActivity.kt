@@ -993,7 +993,7 @@ class MainActivity : ComponentActivity() {
         var error by mutableStateOf<String?>(null)
     }
     private var composerShortcutPick by mutableStateOf<ComposerShortcutPick?>(null)
-    private fun composerShortcutAvailable() = activityUsable() && chatReturnRefresh == null && selectionReady && retainedPage == "chat" &&
+    private fun composerShortcutAvailable() = activityUsable() && selectionReady && retainedPage == "chat" &&
         !sidebarVisible && inlineMessageEditor == null && controller.ready && !controller.dataBusy && chatState.composer.enabled &&
         pendingTextSend == null && controller.textSendState() == null && !imageHost.sending && !videoSending &&
         !shizukuWritesBlocked && terminalEditor == null && virtualDisplayEditor == null && guiEditor == null
@@ -1294,6 +1294,7 @@ class MainActivity : ComponentActivity() {
         contextManagementVisit = ContextManagementVisit(owner, adapter)
     }
 
+    // A deferred refresh request is not an interaction lock on the retained chat.
     private class ChatReturnRefresh(val conversation: ConversationId?, val editor: Long, var full: Boolean)
     private var chatReturnRefresh by mutableStateOf<ChatReturnRefresh?>(null)
     private var retainedPageState by mutableStateOf("chat")
@@ -2462,7 +2463,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                        composer = projectedVoiceComposer().let { it.copy(enabled = it.enabled && routeActive && chatReturnRefresh == null) }.copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
+                                        composer = projectedVoiceComposer().let { it.copy(enabled = it.enabled && routeActive) }.copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
                                             contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
                                             contextTokensText = contextUsageLabels.second,
                                             voiceModes = buildSet {
@@ -2568,7 +2569,7 @@ class MainActivity : ComponentActivity() {
                     previewScopeKey = selected?.id,
                     retainedRootKey = "chat",
                     retainedRootVisible = chatBodyVisible,
-                    retainedRootActive = retainedPage == "chat" && returnRefreshRequest == null,
+                    retainedRootActive = retainedPage == "chat",
                     idleRequestKey = returnRefreshRequest,
                     onTransitionIdle = { finishChatReturn(returnRefreshRequest) },
                     retainedRootScopeKey = appearance,
@@ -3280,8 +3281,8 @@ class MainActivity : ComponentActivity() {
         val renderedInlineVisit = inlineMessageEditor?.visit
         val renderedActionVisit = messageActionVisit
         val renderedSpeechOwner = speechHost.owner
-        fun editorMatches() = activityUsable() && voiceForeground && chatReturnRefresh == null && messageActionVisit === renderedActionVisit &&
-            selectionReady && pendingTextSend == null && controller.textSendState() == null &&
+        fun editorMatches() = activityUsable() && voiceForeground && messageActionVisit === renderedActionVisit &&
+            selectionReady && dataRevision == controller.dataRevision && pendingTextSend == null && controller.textSendState() == null &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
             inlineMessageEditor?.visit === renderedInlineVisit
         fun gestureOwner() = currentControlOwner()?.takeIf {
@@ -3620,7 +3621,6 @@ class MainActivity : ComponentActivity() {
         onModelClick = { guard { if (currentChat()) openChatModels() } }, onReasoningClick = { if (currentChat()) thinkingPicker = true },
         onAssistantClick = { if (currentChat()) openAssistantPicker() }, onCopy = { id -> copyMessage(id) },
         onMenuAction = { action -> guard {
-            if (chatReturnRefresh != null) return@guard
             if (inlineMessageEditor != null) {
                 if (currentChat()) when (action) {
                     ChatMenuAction.ATTACH_IMAGE -> pickEditImages()
@@ -6258,7 +6258,7 @@ class MainActivity : ComponentActivity() {
             val pending = chatReturnRefresh?.takeIf { it.conversation == selected?.id && it.editor == editorGeneration }
             if (pending == null) chatReturnRefresh = ChatReturnRefresh(selected?.id, editorGeneration, refreshState)
             else pending.full = pending.full || refreshState
-            chatState = chatState.copy(composer = chatState.composer.copy(enabled = false))
+            chatState = chatState.copy(composer = withComposerAdmission(chatState.composer))
         }
     }
 
@@ -7019,7 +7019,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private fun currentChatControlAvailable() = voiceForeground && chatReturnRefresh == null && retainedPage == "chat" && !sidebarVisible
+    private fun currentChatControlAvailable() = voiceForeground && retainedPage == "chat" && !sidebarVisible
     private fun supplementEditor() = SupplementEditor(selected?.id?.value, editorGeneration, draftRevision, draft)
     private fun receiptSupplementEditor(): SupplementEditor {
         val current = supplementEditor()
@@ -7400,6 +7400,19 @@ class MainActivity : ComponentActivity() {
         publishChat()
     }
 
+    private fun withComposerAdmission(composer: ComposerUi): ComposerUi {
+        val composerAvailable = !sidebarVisible && controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true &&
+            controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
+            !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
+        val allowed = composerAvailable && !controller.dataBusy && dataRevision == controller.dataRevision &&
+            composer.editorGeneration == editorGeneration
+        return composer.copy(enabled = allowed,
+            gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null,
+            gptSpeedEnabled = allowed && controller.active == null && !controller.hasLiveChildTasks() &&
+                gptSpeedSaveOwner == null && pendingTextSend == null &&
+                !imageHost.sending && !videoSending && inlineMessageEditor == null)
+    }
+
     private fun publishChat() = publishChat(rowsChanged = true)
 
     private fun publishChat(rowsChanged: Boolean, scrollRequest: ChatScrollRequest? = chatState.scrollRequest) { app.daiyu.android.diagnostics.synchronousTrace("daiyu.chat.publish") {
@@ -7425,10 +7438,6 @@ class MainActivity : ComponentActivity() {
             }.toMap()
             val state = controlOwner?.let { controller.runState(it) }
             val phase = composerPhaseForRun(state?.pauseRequested)
-            val composerAvailable = chatReturnRefresh == null && !sidebarVisible && controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true &&
-                controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
-                !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
-            val allowed = composerAvailable && !controller.dataBusy
             val messageEditBlocked = inlineMessageEditor?.let { !messageEditTargetCurrent(it) } == true
             val savedTimeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty()
             val visibleTimeline = displayWindow?.let {
@@ -7553,17 +7562,13 @@ class MainActivity : ComponentActivity() {
                     modelLabel = savedModelLabel(),
                     reasoningLabel = try { ReasoningEffort.textPreference(reasoningPreference.snapshot(selected?.id?.value), model = confirmedReasoningModel).displayName } catch (_: Exception) { "配置无效，需重存" },
                     gptSpeedMode = confirmedGptSpeed?.mode,
-                    gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null,
-                    gptSpeedEnabled = allowed && controller.active == null && !controller.hasLiveChildTasks() &&
-                        gptSpeedSaveOwner == null && pendingTextSend == null &&
-                        !imageHost.sending && !videoSending && inlineMessageEditor == null,
-                    assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed,
+                    assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(),
                     supplementAvailable = controlOwner?.let(controller::canSupplement) == true &&
                         supplementDraft.pending == null && !supplementMediaBlocked(),
                     supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                         supplementDraft.pending != null,
                     executionPhase = state?.phase,
-                ))
+                ).let(::withComposerAdmission))
             regeneration?.takeIf { preview -> preview.assistantId?.let { id -> chatState.turns.any { it.id == id } } == true }
                 ?.let(controller::acknowledgeRegenerationPreview)
             acceptedTextPreview?.takeIf { preview ->

@@ -75,6 +75,7 @@ jobs:
                           'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py')
           if os.environ['SCREEN_JANK_CHECK_SCOPE'] == 'page-back':
               patterns = ('test_automatic_back_performance_contract.py', 'test_popup_performance_contract.py', 'test_chat_return_refresh_contract.py',
+                          'test_chat_menu_scroll_isolation_contract.py', 'test_sidebar_selection_contract.py', 'test_chat_gpt_speed_contract.py',
                           'test_jank_diagnostics_contract.py',
                           'test_page_frame_logging_contract.py',
                           'test_page_back_gesture_contract.py', 'test_page_back_repeat_contract.py',

@@ -298,7 +298,6 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 ui.mainClock.autoAdvance = false
                 try {
                     val before = ui.runOnUiThread { invokeHost(activity, "getChatState") as ChatScreenState }
-                    val staleControls = ui.runOnUiThread { retainedControls(activity) }
                     runtime.clear()
                     ui.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
                     awaitOrdinaryReturnCommit { invokeHost(activity, "getRetainedPage") == "chat" }
@@ -311,10 +310,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                         assertEquals(before.scrollRequest, after.scrollRequest)
                         assertEquals(before.composer.text, after.composer.text)
                         assertNotNull("committed return has not reached transition idle", invokeHost(activity, "getChatReturnRefresh"))
-                        assertFalse("pending return cannot admit the retained composer", after.composer.enabled)
-                        staleControls.onSend(before.composer.text)
-                        staleControls.onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.SETTINGS)
-                        assertEquals("stale callbacks cannot leave the pending return", "chat", invokeHost(activity, "getRetainedPage"))
+                        assertTrue("the ready retained editor stays usable before idle", after.composer.enabled)
                         assertEquals(0, fixture.opens.get())
                     }
                 } finally { ui.mainClock.autoAdvance = advancing }
@@ -408,6 +404,82 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             assertDraft("return refresh count draft")
             assertEquals(0, fixture.opens.get())
         } finally { runtime.clear(); runtime.enabled = previousEnabled }
+    }
+
+    fun testRealChatReturnFirstDrawerSwipeAndControlsWorkBeforeMotionIdle() {
+        val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
+        if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
+        try {
+            setDraft("return interaction draft")
+            openSettings()
+            captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+            ui.mainClock.autoAdvance = false
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .5f))
+                moveTo(Offset(width * .8f, height * .5f), 180)
+                up()
+            }
+            ui.mainClock.advanceTimeByFrame()
+            assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+            assertNotNull("heavy refresh still waits for motion idle", invokeHost(activity, "getChatReturnRefresh"))
+            ui.onNodeWithTag("page-back-departure").assertExists()
+            for (tag in listOf("chat-model", "chat-attach", "chat-reasoning", "chat-assistant", "chat-send")) {
+                ui.onNodeWithTag(tag).assertIsEnabled()
+            }
+            ui.onNodeWithTag("chat-reasoning").performTouchInput { click() }
+            ui.mainClock.advanceTimeByFrame()
+            assertEquals("the live reasoning callback works before idle", true, invokeHost(activity, "getThinkingPicker"))
+            instrumentation.runOnMainSync { invokeHost(activity, "setThinkingPicker", false) }
+            ui.mainClock.advanceTimeByFrame()
+            // One gesture, starting in the exposed chat, before advancing the return to idle.
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .02f, height * .5f))
+                moveTo(Offset(width * .6f, height * .5f), 180)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("conversation-drawer").assertIsDisplayed()
+            assertNotNull("the first drawer drag works while return work is pending", invokeHost(activity, "getChatReturnRefresh"))
+            instrumentation.runOnMainSync {
+                val state = invokeHost(activity, "getChatState") as ChatScreenState
+                app.daiyu.android.MainActivity::class.java.declaredMethods.single { it.name == "publishChat" && it.parameterCount == 2 }
+                    .apply { isAccessible = true }.invoke(activity, false, state.scrollRequest)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("chat-model").assertIsEnabled()
+            ui.onNodeWithTag("chat-attach").assertIsEnabled()
+            assertNotNull("publication does not consume the pending refresh", invokeHost(activity, "getChatReturnRefresh"))
+            ui.onNodeWithTag("page-back-host").performTouchInput { up() }
+            ui.mainClock.advanceTimeBy(1000)
+            awaitControl("first drawer swipe opens the sidebar") { invokeHost(activity, "getSidebarVisible") == true }
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+        }
+    }
+
+    fun testReturnAdmissionKeepsUnsynchronizedDataAndEditorDisabled() {
+        setDraft("admission draft")
+        fun admission() = ui.runOnUiThread {
+            invokeHost(activity, "withComposerAdmission", (invokeHost(activity, "getChatState") as ChatScreenState).composer) as ComposerUi
+        }
+        assertTrue(admission().enabled)
+        val data = app.daiyu.android.MainActivity::class.java.getDeclaredField("dataRevision").apply { isAccessible = true }
+        val savedData = ui.runOnUiThread { data.getLong(activity) }
+        val controls = retainedControls(activity)
+        try {
+            instrumentation.runOnMainSync {
+                data.setLong(activity, savedData - 1)
+                controls.onSend("admission draft")
+            }
+            assertFalse("a deferred refresh must not admit an unreconciled owner", admission().enabled)
+            assertEquals("stale callbacks cannot submit with unreconciled data", 0, fixture.opens.get())
+        } finally { instrumentation.runOnMainSync { data.setLong(activity, savedData) } }
+        val current = ui.runOnUiThread { (invokeHost(activity, "getChatState") as ChatScreenState).composer }
+        val stale = ui.runOnUiThread { invokeHost(activity, "withComposerAdmission", current.copy(editorGeneration = current.editorGeneration - 1)) as ComposerUi }
+        assertFalse("an older editor cannot regain admission", stale.enabled)
+        assertTrue("the synchronized current editor remains usable", admission().enabled)
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testRealSettingsScrollImmediatelyIntoReconnectAndBackKeepsSavedPosition() {

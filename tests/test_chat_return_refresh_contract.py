@@ -26,7 +26,8 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
             self.assertIn(cleanup, returned)
         self.assertIn('chatReturnRefresh = ChatReturnRefresh(selected?.id, editorGeneration, refreshState)', returned)
         self.assertIn('pending.full = pending.full || refreshState', returned)
-        self.assertIn('chatState.composer.copy(enabled = false)', returned)
+        self.assertNotIn('chatState.composer.copy(enabled = false)', returned)
+        self.assertIn('chatState = chatState.copy(composer = withComposerAdmission(chatState.composer))', returned)
         self.assertNotIn('refresh()', returned)
         self.assertNotIn('publishChat(', returned)
         settled = body(self.main, 'private fun finishChatReturn(')
@@ -53,16 +54,24 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         if (activityUsable()) refresh()
     ''', dismiss)
 
-    def test_return_idle_masks_admission_and_cancels_on_existing_owner_boundaries(self):
-        self.assertIn('retainedRootActive = retainedPage == "chat" && returnRefreshRequest == null', self.main)
+    def test_return_idle_defers_work_without_masking_admission_and_keeps_owner_boundaries(self):
+        self.assertIn('retainedRootActive = retainedPage == "chat"', self.main)
         self.assertIn('onTransitionIdle = { finishChatReturn(returnRefreshRequest) }', self.main)
         self.assertIn('idleRequestKey = returnRefreshRequest', self.main)
-        self.assertIn('it.enabled && routeActive && chatReturnRefresh == null', self.main)
+        self.assertIn('it.enabled && routeActive', self.main)
         for signature in ('private fun composerShortcutAvailable()', 'private fun currentChatControlAvailable()'):
-            self.assertIn('chatReturnRefresh == null', self.main.split(signature, 1)[1].split('\n', 1)[0])
-        self.assertIn('voiceForeground && chatReturnRefresh == null && messageActionVisit', self.main)
-        self.assertIn('val composerAvailable = chatReturnRefresh == null', self.main)
-        self.assertIn('if (chatReturnRefresh != null) return@guard', self.main)
+            self.assertNotIn('chatReturnRefresh', self.main.split(signature, 1)[1].split('\n', 1)[0])
+        self.assertIn('voiceForeground && messageActionVisit', self.main)
+        self.assertIn('val composerAvailable = !sidebarVisible && controller.ready && selectionReady', self.main)
+        self.assertNotIn('if (chatReturnRefresh != null) return@guard', self.main)
+        self.assertNotIn('chatReturnRefresh == null', self.main)
+        self.assertIn('val allowed = composerAvailable && !controller.dataBusy', self.main)
+        admission = body(self.main, 'private fun withComposerAdmission(')
+        self.assertIn('dataRevision == controller.dataRevision', admission)
+        self.assertIn('composer.editorGeneration == editorGeneration', admission)
+        self.assertNotIn('chatReturnRefresh', admission)
+        self.assertNotIn('publishChat(', admission)
+        self.assertIn(').let(::withComposerAdmission)', self.main)
         self.assertIn('if (value != "chat") chatReturnRefresh = null', self.main)
         for signature in ('override fun onPause()', 'override fun onResume()', 'override fun onDestroy()'):
             self.assertIn('chatReturnRefresh = null', body(self.main, signature))
@@ -77,6 +86,18 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         for method in ('testTransitionIdleWaitsForCommittedDeparture', 'testTransitionIdleWaitsForCancelledGesture',
                        'testTransitionIdleConsumesNewRequestOnAlreadyIdleRoute'):
             self.assertIn('fun ' + method + '()', regression)
+
+    def test_real_return_tail_regression_uses_first_drag_before_idle_or_manual_publication(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
+        regression = body(source, 'fun testRealChatReturnFirstDrawerSwipeAndControlsWorkBeforeMotionIdle()')
+        drag = regression.index('the first drawer drag works while return work is pending')
+        self.assertLess(drag, regression.index('it.name == "publishChat"'))
+        self.assertLess(drag, regression.index('advanceTimeBy(1000)'))
+        self.assertIn('ui.onNodeWithTag("chat-reasoning").performTouchInput { click() }', regression)
+        self.assertIn('getThinkingPicker', regression)
+        self.assertIn('page-back-departure', regression)
+        self.assertIn('first drawer swipe opens the sidebar', regression)
+        self.assertIn('fun testReturnAdmissionKeepsUnsynchronizedDataAndEditorDisabled()', source)
 
     def test_custom_subagent_toolbars_share_the_final_copy_entry(self):
         source = (APP / 'ui/SubAgentSettingsScreen.kt').read_text()

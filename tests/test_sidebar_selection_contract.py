@@ -144,7 +144,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
         host = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('onOpen = { openSidebar() }, onDismiss = { dismissSidebar() }', host)
         self.assertIn(
-            'val composerAvailable = chatReturnRefresh == null && !sidebarVisible && '
+            'val composerAvailable = !sidebarVisible && '
             'controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true && '
             'controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && '
             '!shizukuWritesBlocked && !mcpPreparing && mcpApproval == null',

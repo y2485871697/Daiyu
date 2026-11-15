@@ -210,7 +210,10 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
     private fun awaitDraw(id: String) {
         ui.waitUntil(5_000) {
             throwCaptureFailure()
-            draws.any { it.frameOwner == id }
+            if (draws.any { it.frameOwner == id }) true else {
+                requestProbe()
+                false
+            }
         }
         ui.waitForIdle()
         awaitCapturedFrames()
@@ -446,7 +449,10 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
             ui.mainClock.autoAdvance = true
             ui.waitUntil(5_000) {
                 throwCaptureFailure()
-                draws.any { it.frameOwner == "cold" && it.owner == "cold" && it.tail }
+                if (draws.any { it.frameOwner == "cold" && it.owner == "cold" && it.tail }) true else {
+                    requestProbe()
+                    false
+                }
             }
             val finalProbe = requestProbe()
             ui.mainClock.advanceTimeByFrame()

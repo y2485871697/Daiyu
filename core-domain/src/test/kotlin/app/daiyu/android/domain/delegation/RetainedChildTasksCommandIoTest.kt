@@ -144,6 +144,22 @@ class RetainedChildTasksCommandIoTest {
             assertEquals(ChildTaskCommandReceipt.Unconfirmed("child_source_journal_unconfirmed"),
                 f.supervisor.command(next, f.invocation, command))
             assertEquals(0, f.store.writes.get())
+            listOf(Triple(f.binding, f.owner, f.authorization),
+                Triple(next, nextOwner, checkNotNull(next.authorization.get()))).forEachIndexed { index, (binding, owner, authorization) ->
+                val context = ToolExecutionContext(owner,
+                    ToolInvocation(ToolCallId("ordinary-$index"), "start_child_tasks", "{}"), authorization) { false }
+                assertEquals(ChildTaskAdmission.Unconfirmed("child_source_journal_unconfirmed"),
+                    f.supervisor.submit(binding, context, listOf(ChildModelTask("p", "new")), independentOfPausedTasks = false))
+                assertTrue(f.supervisor.snapshots(binding).none { it.record.prompt == "new" })
+            }
+            f.store.finishAfterCommit = null
+            listOf(Triple(f.binding, f.owner, f.authorization),
+                Triple(next, nextOwner, checkNotNull(next.authorization.get()))).forEachIndexed { index, (binding, owner, authorization) ->
+                val context = ToolExecutionContext(owner,
+                    ToolInvocation(ToolCallId("independent-$index"), "start_child_tasks", "{}"), authorization) { false }
+                assertTrue(f.supervisor.submit(binding, context, listOf(ChildModelTask("p", "independent")),
+                    independentOfPausedTasks = true) is ChildTaskAdmission.Accepted)
+            }
         } finally { sourceGate.release.countDown(); f.drain() }
     }
 

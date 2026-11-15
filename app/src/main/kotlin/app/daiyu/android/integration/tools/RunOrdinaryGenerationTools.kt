@@ -30,8 +30,7 @@ internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorizatio
             val callId = arguments.text("tool_call_id")
             val call = synchronized(calls) { calls[callId] }
                 ?: return@diagnosticRead ExecutionReceipt.NotExecuted("generation_source_not_found")
-            if (arguments.text("action") == "stop" && !call.stop())
-                return@diagnosticRead ExecutionReceipt.Unknown("generation_source_stop_unconfirmed")
+            if (arguments.text("action") == "stop") call.stop()
             val items = org.json.JSONArray()
             call.runtime.outcomes().flatMap { it.items }.forEach { item ->
                 items.put(org.json.JSONObject().put("item_id", item.identity.itemId)

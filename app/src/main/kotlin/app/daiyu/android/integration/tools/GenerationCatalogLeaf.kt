@@ -3,7 +3,8 @@ package app.daiyu.android.integration.tools
 import app.daiyu.android.domain.tools.RegisteredTool
 
 /** 将生成工具的注册和异步清理结果接入父目录；注册表、调度器和账本由父目录统一管理。 */
-internal class GenerationCatalogLeaf(private val tools: RunGenerationTools) : AutoCloseable {
+internal class GenerationCatalogLeaf(private val tools: RunGenerationTools,
+    private val closeObservationTimeoutMillis: Long = 30_000) : AutoCloseable {
     val registeredTools: List<RegisteredTool> get() = tools.registeredTools
     private val lock = Any()
     private var started = false
@@ -25,7 +26,7 @@ internal class GenerationCatalogLeaf(private val tools: RunGenerationTools) : Au
             Thread({
                 val closed = try {
                     tools.close()
-                    when (val state = tools.awaitClose(30_000)) {
+                    when (val state = tools.awaitClose(closeObservationTimeoutMillis)) {
                         GenerationToolsCloseResult.Drained -> RunCatalogCloseResult.Drained
                         is GenerationToolsCloseResult.Unknown -> RunCatalogCloseResult.Unknown(state.reason)
                     }
@@ -43,6 +44,10 @@ internal class GenerationCatalogLeaf(private val tools: RunGenerationTools) : Au
 
     /** Parent registers only after its dispatch receipts and in-flight creations settle. */
     fun observeClose(done: (RunCatalogCloseResult) -> Unit) {
+        if (synchronized(lock) { result } is RunCatalogCloseResult.Unknown &&
+            tools.awaitClose(0) is GenerationToolsCloseResult.Drained) {
+            synchronized(lock) { result = RunCatalogCloseResult.Drained }
+        }
         val closed = synchronized(lock) {
             result.also { if (it == null) observers.add(done) }
         }

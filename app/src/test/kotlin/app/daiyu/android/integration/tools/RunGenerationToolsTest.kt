@@ -12,6 +12,7 @@ import org.junit.Test
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -122,6 +123,33 @@ class RunGenerationToolsTest {
                 assertFalse(control.claimReplacement("new"))
                 release.countDown(); worker.join(3000); assertFalse(worker.isAlive)
                 assertTrue(control.stop()); assertTrue(control.claimReplacement("new"))
+            } finally { release.countDown(); worker.join(3000) }
+        }
+    }
+
+    @Test fun mediaStopCanConfirmAfterTheLeafObservationTimedOutAndTheWorkerThenDrained() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        Fixture(config(video = true), http = GenerationHttp {
+            entered.countDown(); check(release.await(5, TimeUnit.SECONDS))
+            GenerationHttpResponse(200, """{"id":"task_1","status":"queued"}""".toByteArray())
+        }).use { f ->
+            val worker = Thread { f.dispatch() }.apply { isDaemon = true; start() }
+            val leaf = GenerationCatalogLeaf(f.leaf, closeObservationTimeoutMillis = 10)
+            val control = MediaTaskControl("profile", "video_generation", f.leaf, leaf)
+            val observed = CountDownLatch(1)
+            val result = AtomicReference<RunCatalogCloseResult>()
+            leaf.observeClose { result.set(it); observed.countDown() }
+            try {
+                assertTrue(entered.await(3, TimeUnit.SECONDS)); f.leaf.pauseForConfiguration()
+                assertFalse(control.stop(100)); assertTrue(observed.await(3, TimeUnit.SECONDS))
+                assertTrue(result.get() is RunCatalogCloseResult.Unknown)
+                assertFalse(control.stopConfirmed); assertFalse(control.claimReplacement("new"))
+                release.countDown(); worker.join(3000); assertFalse(worker.isAlive)
+                assertTrue(control.stop()); assertTrue(control.stopConfirmed)
+                assertTrue(control.claimReplacement("new"))
+                val refreshed = AtomicReference<RunCatalogCloseResult>()
+                leaf.observeClose { refreshed.set(it) }
+                assertSame(RunCatalogCloseResult.Drained, refreshed.get())
             } finally { release.countDown(); worker.join(3000) }
         }
     }

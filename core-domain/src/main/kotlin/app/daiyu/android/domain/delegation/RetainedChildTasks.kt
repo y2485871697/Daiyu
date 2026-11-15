@@ -187,6 +187,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             if (inputSnapshot.any { !resources.models.getValue(it.profileId).acceptsNewTask() })
                 return ChildTaskAdmission.Rejected("child_model_deleted")
             if (cancelled) return ChildTaskAdmission.Rejected("cancelled_before_admission")
+            if (!independentOfPausedTasks && unconfirmedSources.any { it.conversationId == binding.owner.conversationId.value })
+                return ChildTaskAdmission.Unconfirmed("child_source_journal_unconfirmed")
             if (!independentOfPausedTasks && tasks.values.any { it.initial.owner.conversationId == binding.owner.conversationId.value && (it.stopRequested ||
                     it.pause.snapshot() in setOf(ChildTaskPauseState.PENDING, ChildTaskPauseState.PAUSED)) })
                 return ChildTaskAdmission.Rejected("child_paused_source_requires_stop_or_explicit_independent_task")

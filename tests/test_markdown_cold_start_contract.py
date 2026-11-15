@@ -7,14 +7,14 @@ BASE = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 
 
 class MarkdownColdStartContract(unittest.TestCase):
-    def test_pending_body_is_visible_and_has_nonzero_height_without_raw_fallback(self):
+    def test_pending_body_has_no_loading_status_or_raw_fallback(self):
         source = (BASE / 'MessageMarkdown.kt').read_text()
         pending = source.split('internal fun ProjectedMessageMarkdown(', 1)[1].split('internal fun ParsedMessageMarkdown(', 1)[0]
-        self.assertIn('if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())', pending)
-        self.assertIn('Box(modifier) {', pending)
-        self.assertIn('Box(Modifier.fillMaxWidth().heightIn(min = 52.dp)', pending)
-        self.assertIn('testTag("markdown-pending")', pending)
-        self.assertIn('正在加载消息…', pending)
+        self.assertIn('if (body == null) Box(modifier)', pending)
+        self.assertNotIn('MarkdownBodyLoading', source)
+        self.assertNotIn('markdown-pending', source)
+        self.assertNotIn('正在加载消息', source)
+        self.assertNotIn('heightIn(min = 52.dp)', pending)
         self.assertNotIn('BasicText(text', pending)
         self.assertNotIn('MarkdownParser.parse', pending)
         self.assertNotIn('runBlocking', pending)
@@ -31,12 +31,13 @@ class MarkdownColdStartContract(unittest.TestCase):
 
     def test_android_regressions_cover_cold_final_mixed_and_append_paths(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageMarkdownTest.kt').read_text()
-        for name in ['testColdCompletedTurnsShowLoadingInsteadOfEmptyBodiesAndActions',
-                     'testColdMixedBodyShowsLoadingWithoutPublishingReadOrRawMarkdown',
+        for name in ['testColdCompletedTurnsHideLoadingStatusAndPrematureActions',
+                     'testColdMixedBodyHidesLoadingWithoutPublishingReadOrRawMarkdown',
                      'testColdPendingTurnReplacementCannotBorrowAnotherAnswersBodyOrActions',
                      'testEmptyProjectionDoesNotCountAsPreviouslyDisplayedBody']:
             self.assertIn(name, source)
-        self.assertIn('assertHeightIsAtLeast(52.dp)', source)
+        self.assertIn('onAllNodesWithText("正在加载消息…", useUnmergedTree = true).assertCountEquals(0)', source)
+        self.assertNotIn('assertHeightIsAtLeast(52.dp)', source)
         self.assertIn('testAppendedBodyKeepsMarkdownGeometryThroughPendingParseAndCompletion', source)
         self.assertIn('testCachedChatReturnIsFormattedAndReadReadyWithoutWaitingForAnotherParse', source)
 

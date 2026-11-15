@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,7 +37,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -124,7 +122,7 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
     sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
 ) {
     val body = rememberMarkdownBodySnapshot(text, blocks, sourceWindow)
-    if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())
+    if (body == null) Box(modifier)
     else ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters, generationComplete && body.text == text, visibility)
 }
 
@@ -137,17 +135,6 @@ internal fun rememberMarkdownBodySnapshot(text: String, blocks: List<MarkdownBlo
     val body = markdownBodySnapshot(text, blocks, published.body, sourceWindow)
     SideEffect { published.body = body }
     return body
-}
-
-@Composable
-private fun MarkdownBodyLoading(modifier: Modifier, hasText: Boolean) {
-    if (!hasText) { Box(modifier); return }
-    Box(modifier) {
-        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("markdown-pending"), contentAlignment = Alignment.CenterStart) {
-            Text("正在加载消息…", color = conversationColors().muted,
-                style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))
-        }
-    }
 }
 
 @Composable

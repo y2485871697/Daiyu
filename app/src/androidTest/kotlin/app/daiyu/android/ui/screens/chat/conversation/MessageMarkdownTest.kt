@@ -197,7 +197,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertEquals(preparedCalls, calls.get())
     }
 
-    fun testColdCompletedTurnsShowLoadingInsteadOfEmptyBodiesAndActions() {
+    fun testColdCompletedTurnsHideLoadingStatusAndPrematureActions() {
         val sources = listOf("你好！我是代鱼，有什么可以帮你？", "我可以帮你：\n\n- **解答问题**\n- **查看设备情况**", "当前电量 **34%**，未在充电。")
         val turns = sources.mapIndexed { index, text ->
             ChatTurnUi.Assistant("cold-$index", finalText = text, status = RunStatus.COMPLETED)
@@ -218,9 +218,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(100)
             ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
-            val pending = ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true)
-            pending.assertCountEquals(3)
-            repeat(3) { pending[it].assertHeightIsAtLeast(52.dp) }
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+            ui.onAllNodesWithText("正在加载消息…", useUnmergedTree = true).assertCountEquals(0)
             turns.forEach { ui.onNodeWithTag("chat-turn:${it.id}").assertDoesNotExist() }
             ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).assertCountEquals(0)
             ui.onAllNodesWithContentDescription("重新生成", useUnmergedTree = true).assertCountEquals(0)
@@ -236,7 +235,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         } finally { release.countDown(); ui.mainClock.autoAdvance = autoAdvance }
     }
 
-    fun testColdMixedBodyShowsLoadingWithoutPublishingReadOrRawMarkdown() {
+    fun testColdMixedBodyHidesLoadingWithoutPublishingReadOrRawMarkdown() {
         val source = "Cold mixed **answer**."
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -255,7 +254,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             } }
             ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(52.dp)
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("正在加载消息…", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText(source, useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             assertFalse(ready.get()); assertFalse(settled.get())
@@ -288,7 +288,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             mainThread { turn = turn.copy(finalText = source, status = RunStatus.COMPLETED) }
             ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("正在加载消息…", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             release.countDown()
             body("empty-to-body", "First body.").assertIsDisplayed()
@@ -313,7 +314,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             mainThread { turn = ChatTurnUi.Assistant("pending-turn", finalText = "**pending**", status = RunStatus.COMPLETED) }
             ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("正在加载消息…", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText("old", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             release.countDown()
@@ -501,7 +503,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.waitForIdle()
             ui.onNodeWithText("**answer**", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText("answer", useUnmergedTree = true).assertDoesNotExist()
-            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertExists().assertHeightIsAtLeast(52.dp)
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("正在加载消息…", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithTag("chat-turn:${turn.id}").assertDoesNotExist()
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             assertTrue(confirmed.none { turn.listKey in it })

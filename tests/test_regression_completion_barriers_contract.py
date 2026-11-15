@@ -114,7 +114,7 @@ class RegressionCompletionBarriersContractTest(unittest.TestCase):
         test = (TESTS / 'ui/screens/chat/conversation/MessageMarkdownTest.kt').read_text()
         method = test.split('fun testEmptyProjectionDoesNotCountAsPreviouslyDisplayedBody()', 1)[1].split('fun testColdPendingTurnReplacement', 1)[0]
         for oracle in ('MarkdownProjection(listOf(""),', 'entered.count == 0L',
-                       'ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed()',
+                       'ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()',
                        'ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()',
                        'release.countDown()', 'body("empty-to-body", "First body.").assertIsDisplayed()'):
             self.assertIn(oracle, method)

@@ -283,6 +283,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             ui.waitForIdle()
             val fixedTop = top()
             val originalBottom = bottom()
+            var sawIntermediate = false
             ui.mainClock.autoAdvance = false
             try {
                 when (closing) {
@@ -290,7 +291,6 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     "stop" -> ui.runOnUiThread { stopped = true }
                     else -> touchHeader()
                 }
-                var sawIntermediate = false
                 var previousBottom = originalBottom
                 repeat(40) {
                     ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
@@ -420,22 +420,45 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             }
         } } }
         ui.waitForIdle()
-        val originalIdentity = ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot.top
-        for (header in listOf("work-process-header", "tool-step-header:nested-tool")) {
+        fun nestedFrame(): Pair<Float, Float> {
+            val node = ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode()
+            val coordinates = node.layoutInfo.coordinates
+            val fullTop = coordinates.positionInRoot().y
+            val window = ui.onNodeWithTag("chat-stream-viewport:tail").fetchSemanticsNode()
+                .layoutInfo.coordinates.positionInRoot().y
+            val identity = node.boundsInRoot
+            assertTrue("Short nested disclosure must keep the avatar above its local draw-clip edge", identity.top >= window - 1f)
+            assertTrue("Unclipped identity origin must stay below the local window", fullTop >= window - 1f)
+            assertEquals("Identity top must never be partially clipped", node.positionInRoot.y, identity.top, 1f)
+            assertEquals("Identity retains its complete tagged height in every frame", node.size.height.toFloat(), identity.height, 1f)
+            val safeBottom = ui.onNodeWithTag("nested-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
+            assertTrue("Nested disclosure must remain above the input", bottom() <= safeBottom + 1f)
+            val surface = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().layoutInfo.coordinates
+            return fullTop to surface.size.height.toFloat()
+        }
+        fun animateNested(header: String, opening: Boolean, frames: Int = 40) {
             ui.mainClock.autoAdvance = false
             try {
+                var previous = nestedFrame()
                 ui.onNodeWithTag(header).performTouchInput { click() }
-                repeat(40) {
+                repeat(frames) {
                     ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                     assertDirection(true, header)
-                    val window = ui.onNodeWithTag("chat-stream-viewport:tail").fetchSemanticsNode()
-                        .layoutInfo.coordinates.positionInRoot().y
-                    val identity = ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot
-                    assertTrue("Short nested disclosure must keep the avatar above its local draw-clip edge", identity.top >= window - 1f)
-                    val safeBottom = ui.onNodeWithTag("nested-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
-                    assertTrue("Nested disclosure must remain above the input", bottom() <= safeBottom + 1f)
+                    val current = nestedFrame()
+                    val identityDelta = current.first - previous.first
+                    val heightDelta = current.second - previous.second
+                    val compensation = identityDelta + if (opening || header != "work-process-header") heightDelta else 0f
+                    assertTrue("Nested anchor cannot jump in either direction: $compensation",
+                        kotlin.math.abs(compensation) <= 14f * density + 1f)
+                    previous = current
                 }
             } finally { ui.mainClock.autoAdvance = true }
+        }
+        val originalIdentity = nestedFrame().first
+        for (header in listOf("work-process-header", "tool-step-header:nested-tool")) {
+            animateNested(header, opening = true, frames = 5)
+            animateNested(header, opening = false, frames = 3)
+            animateNested(header, opening = true)
         }
         val identity = ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot
         assertTrue("The whole row must move up, not only its contents inside a fixed clip", identity.top < originalIdentity - 40f * density)
@@ -447,9 +470,8 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         val pixels = host.captureToImage().toPixelMap()
         val pixel = pixels[(body.center.x - hostBounds.left).toInt(), (body.center.y - hostBounds.top).toInt()]
         assertTrue("The nested details are actually drawn through all ancestors", pixel.red > .9f && pixel.blue > .9f && pixel.green < .1f)
-        ui.onNodeWithTag("tool-step-header:nested-tool").performTouchInput { click() }; ui.waitForIdle()
-        assertDirection(true, "tool-step-header:nested-tool")
-        ui.onNodeWithTag("work-process-header").performTouchInput { click() }; ui.waitForIdle()
+        animateNested("tool-step-header:nested-tool", opening = false)
+        animateNested("work-process-header", opening = false)
         assertDirection(true)
         assertEquals(originalIdentity, ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot.top, 2f)
     }

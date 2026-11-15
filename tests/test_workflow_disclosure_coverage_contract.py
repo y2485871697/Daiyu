@@ -68,6 +68,10 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
             self.assertIn('fun ' + name, source)
         self.assertIn('identity.top >= window - 1f', source)
         self.assertIn('captureToImage().toPixelMap()', source)
+        self.assertIn('node.size.height.toFloat(), identity.height', source)
+        self.assertIn('kotlin.math.abs(compensation) <= 14f * density + 1f', source)
+        self.assertIn('animateNested(header, opening = false, frames = 3)', source)
+        self.assertIn('animateNested("work-process-header", opening = false)', source)
 
 
 if __name__ == '__main__':

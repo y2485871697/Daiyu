@@ -73,24 +73,44 @@ class ToolReceiptSourceTest {
     }
 
     @Test fun returnedSearchResultWaitsForEvidenceWithoutTrustingItsJson() {
-        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED, RunStatus.INTERRUPTED)) {
+        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED, RunStatus.STOPPED, RunStatus.INTERRUPTED)) {
             for (result in listOf("{\"ok\":true}", "{\"ok\":false}", "not a receipt", "")) {
                 val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = result)
                 val source = message.copy(status = status, blocks = listOf(returned))
                 val pending = RetainedToolOutcomes.pendingProjection(source, returned)!!
-                assertEquals(ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING), pending)
+                assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN), pending)
                 val turn = ChatTurnMapper.map(listOf(source), toolReceipt = { owner, tool ->
                     RetainedToolOutcomes.pendingProjection(owner, tool)
                 }).single() as ChatTurnUi.Assistant
                 val flow = turn.workProcess!!
                 val step = flow.segments.flatMap { it.steps }.single()
-                assertEquals(WorkStepState.PENDING, step.state)
-                assertEquals(ToolActivityUi.RUNNING, step.activity)
-                assertEquals(0, flow.unconfirmedStepCount)
+                assertEquals(WorkStepState.UNKNOWN, step.state)
+                assertEquals(ToolActivityUi.UNKNOWN, step.activity)
+                assertEquals(1, flow.unconfirmedStepCount)
                 assertEquals(0, flow.completedStepCount)
             }
         }
     }
+    @Test fun onlyExactActiveCallCanSupplyLiveActivityWithoutDurableEvidence() {
+        val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = "done")
+        val source = message.copy(blocks = listOf(returned))
+        val live = ExecutionState(phase = ExecutionPhase.TOOL_EXECUTING, activeToolCalls = setOf(call.id))
+        fun activity(state: ExecutionState?, stopping: Boolean = false) =
+            RetainedToolOutcomes.pendingProjection(source, returned, state, stopping)!!.activity
+        assertEquals(ToolActivityUi.UNKNOWN, activity(null))
+        assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(activeToolCalls = emptySet())))
+        assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(activeToolCalls = setOf(ToolCallId("other")))))
+        assertEquals(ToolActivityUi.RUNNING, activity(live))
+        assertEquals(ToolActivityUi.WAITING, activity(live.copy(phase = ExecutionPhase.WAITING_USER)))
+        assertEquals(ToolActivityUi.PAUSING, activity(live.copy(pauseRequested = true)))
+        assertEquals(ToolActivityUi.STOPPING, activity(live, stopping = true))
+        assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(phase = ExecutionPhase.IDLE)))
+        for (status in RunStatus.values().filter { it != RunStatus.RUNNING }) {
+            assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
+                RetainedToolOutcomes.pendingProjection(source.copy(status = status), returned, live, true))
+        }
+    }
+
     @Test fun noReturnedResultAndUserMessagesCannotInventARunningActivity() {
         val pending = message.blocks.single() as MessageBlock.Tool
         assertNull(RetainedToolOutcomes.pendingProjection(message, pending))

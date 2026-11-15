@@ -223,6 +223,8 @@ internal fun ChatMessageList(
     compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
     speechPreparingMessageId: String? = null,
     onViewportReady: (Boolean) -> Unit = {},
+    onPresentationReady: (Boolean) -> Unit = {},
+    historyReady: Boolean = true,
     retainUnconfirmedRows: Boolean = false,
     onTurnComposed: ((String) -> Unit)? = null,
 ) {
@@ -267,6 +269,9 @@ internal fun ChatMessageList(
         mutableStateOf(initialChatPositionPending(scrollRequest, consumedScrollSerial, followBottom))
     }
     val pageActive by rememberUpdatedState(app.daiyu.android.ui.navigation.LocalPageContentActive.current)
+    val presentationActive by rememberUpdatedState(LocalChatPresentationActive.current)
+    val currentHistoryReady by rememberUpdatedState(historyReady)
+    val currentPresentationReady by rememberUpdatedState(onPresentationReady)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var scrollResumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var resumeFollowPending by remember { mutableStateOf(false) }
@@ -758,10 +763,10 @@ internal fun ChatMessageList(
                 it.size > 0 && it.offset < visibleBottom &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
             }.map { it.key }.toSet()
-            currentReadAction to if (initialPositionPending || !pageActive || currentRetainingRows) emptyList() else
+            currentReadAction to if (!presentationActive || !scrollResumed || initialPositionPending || !pageActive || currentRetainingRows) emptyList() else
                 completedVisibleTurns(visibleKeys, currentAssistants, readyTurns, revealedTurns)
         }.collect { (readAction, completed) ->
-            if (pageActive && !initialPositionPending && !currentRetainingRows && completed.isNotEmpty()) {
+            if (presentationActive && scrollResumed && pageActive && !initialPositionPending && !currentRetainingRows && completed.isNotEmpty()) {
                 // Wait for the formatted terminal body, not a shorter raw-text placeholder.
                 withFrameNanos { }
                 withFrameNanos { }
@@ -773,16 +778,32 @@ internal fun ChatMessageList(
                 }.map { it.key }.toSet()
                 val current = currentAssistants
                 readAction(completed.filter {
-                    pageActive && !initialPositionPending && !currentRetainingRows && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
+                    presentationActive && scrollResumed && pageActive && !initialPositionPending && !currentRetainingRows && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
                 }.map { it.listKey }.toSet())
             }
         }
     }
     SideEffect { onViewportReady(!initialPositionPending && incomingTurns.isNotEmpty()) }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
+            val formatted = currentAssistants.values.none { turn ->
+                turn.listKey in visibleKeys && (readyTurns[turn.listKey] != turn ||
+                    turn.status != RunStatus.RUNNING && revealedTurns[turn.listKey] != turn)
+            }
+            val confirmedEmpty = currentHistoryReady && currentTurns.isEmpty() && currentTailIndex < 0
+            currentHistoryReady && !currentRetainingRows &&
+                layout.viewportSize.width > 0 && layout.viewportSize.height > 0 &&
+                (confirmedEmpty || !initialPositionPending && layout.visibleItemsInfo.isNotEmpty() &&
+                    (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && formatted)
+        }.collect { ready -> currentPresentationReady(ready) }
+    }
+
     val viewportHeightPx = remember { mutableIntStateOf(0) }
     Box(modifier.fillMaxSize()) {
       Layout(modifier = Modifier.fillMaxSize(), content = {
-        LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending && !retainingRows,
+        LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending && !retainingRows && presentationActive,
             modifier = Modifier.testTag("chat-messages").fillMaxSize()
                 .then(clearanceLayout)
                 .onPlaced { clearanceLayout.coordinates = it }
@@ -827,7 +848,7 @@ internal fun ChatMessageList(
                                 onVisibleAdvance = {
                                     val layout = listState.layoutInfo
                                     val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
-                                    if (!currentRetainingRows && !initialPositionPending && scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
+                                    if (presentationActive && pageActive && !currentRetainingRows && !initialPositionPending && scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
                                         layout.visibleItemsInfo.any { it.key == turn.listKey && it.size > 0 &&
                                             it.offset < visibleBottom && it.offset + it.size > layout.viewportStartOffset }) {
                                         actions.onVisibleTextAdvance(turn.listKey)
@@ -859,7 +880,7 @@ internal fun ChatMessageList(
                     val viewportState = nestedStates[turn.listKey]
                     if (turn is ChatTurnUi.Assistant && viewportState != null) {
                         StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
-                            userScrollEnabled = pageActive && !initialPositionPending && !retainingRows,
+                            userScrollEnabled = pageActive && !initialPositionPending && !retainingRows && presentationActive,
                             follows = { turn.listKey == assistantOwnerKey && followBottom && (initialPositionPending || canFollowBottom()) },
                             clearance = { currentOcclusionPx + with(density) { 24.dp.roundToPx() } },
                             viewportHeight = { viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() } },

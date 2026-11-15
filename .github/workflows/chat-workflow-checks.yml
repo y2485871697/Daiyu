@@ -77,7 +77,7 @@ jobs:
               patterns = ('test_markdown_table_style_contract.py', 'test_markdown_entry_contract.py',
                           'test_markdown_body_visibility_contract.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'cold-start':
-              patterns = ('test_chat_initial_position_contract.py', 'test_chat_resume_scroll_contract.py',
+              patterns = ('test_chat_initial_position_contract.py', 'test_page_back_gesture_contract.py', 'test_chat_resume_scroll_contract.py',
                           'test_markdown_cold_start_contract.py', 'test_markdown_return_contract.py',
                           'test_markdown_body_visibility_contract.py', 'test_markdown_typing_contract.py',
                           'test_markdown_stream_progress_contract.py', 'test_markdown_code_block_contract.py',
@@ -172,7 +172,9 @@ jobs:
                       --tests app.daiyu.android.storage.SQLiteTextChunksTest
                       --tests app.daiyu.android.ui.ConversationPreviewTest
                       --tests app.daiyu.android.storage.MessageDisplayStoreTest
-                      --tests app.daiyu.android.ui.screens.chat.conversation.StreamingHistoryRefreshTest)
+                      --tests app.daiyu.android.ui.screens.chat.conversation.StreamingHistoryRefreshTest
+                      --tests app.daiyu.android.ui.ToolReceiptSourceTest
+                      --tests app.daiyu.android.ui.screens.chat.conversation.ToolActivityUiTest)
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then
             classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest

@@ -71,17 +71,20 @@ class SidebarSelectionContractTest(unittest.TestCase):
         host = (SRC / 'MainActivity.kt').read_text()
         click = host.split('private fun selectPaneConversation(', 1)[1].split('private fun retainedConversation(', 1)[0]
         io = click.split('withContext(Dispatchers.IO) {', 1)[1].split('if (paneSelectionRequest !== request', 1)[0]
-        self.assertIn('preparePaneSnapshot(id, snapshot, prepare)', io)
+        self.assertIn('preparePaneSnapshot(id, snapshot, prepare, revision.data)', io)
         prepare = click.split('private fun preparePaneSnapshot(', 1)[1]
         self.assertIn('prepareRestoredMarkdown(snapshot.display, checkActive = checkActive)', prepare)
         self.assertIn('prepare(id, snapshot, checkActive)', prepare)
         self.assertIn(
             'return snapshot.copy(presentations = presentations, '
-            'timeline = timeline, timelineRevision = timelineRevision)',
+            'timeline = timeline, timelineRevision = timelineRevision,',
             ' '.join(prepare.split()),
         )
         self.assertNotIn('RetainedToolOutcomes.Snapshot.read(', prepare)
-        self.assertNotIn('toolReceipts =', prepare)
+        self.assertIn('toolReceipts = toolReceipts', prepare)
+        self.assertIn('toolReceiptReader(snapshot.messages.map { it.second }, snapshot.display)', prepare)
+        self.assertIn('installPreparedToolReceipts(prepared)', host)
+        self.assertIn('key?.canDisplayFor(currentToolReceiptKey()) == true', host)
         self.assertNotIn('adoptPreparedToolReceipts', host)
         self.assertNotIn('toolPresentations', io)
         normalized_click = ' '.join(click.split())

@@ -13,25 +13,28 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertLess(read.index('SQLiteText.read('), read.index('if (ownTransaction) db.endTransaction()'))
         self.assertLess(read.index('db.endTransaction()'), read.index('RunCheckpointCodec.decodeWithRecovery(payload)'))
         self.assertIn('检查点元数据不匹配', read)
-    def test_pending_receipt_read_is_not_an_unknown_terminal_result(self):
+    def test_missing_receipt_does_not_invent_a_live_execution(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
-        self.assertIn('if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)', host)
+        self.assertIn('RetainedToolOutcomes.pendingProjection(message, block,', host)
         projection = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
         pending = projection.split('fun pendingProjection(', 1)[1].split('fun projectionReader(database:', 1)[0]
-        self.assertIn('block.result != null', pending)
-        self.assertIn('ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING)', pending)
+        self.assertIn('if (block.result == null) return null', pending)
+        self.assertIn('ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)', pending)
+        self.assertIn('block.invocation.id !in liveState.activeToolCalls', pending)
+        self.assertIn('status != RunStatus.RUNNING', pending)
         self.assertNotIn('WorkStepState.OK', pending)
         self.assertNotIn('JSONObject', pending)
-    def test_pending_tools_keep_executing_without_a_separate_reading_status(self):
+    def test_display_fallback_uses_same_exact_live_aware_unknown_projection(self):
         activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolActivityUi.kt').read_text()
         self.assertNotIn('READING', activity)
         self.assertNotIn('读取结果', activity)
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         display = host.split('val visibleDisplayReceipts =', 1)[1].split('val visibleChildNames', 1)[0]
         self.assertIn('retainedDisplayReceipts?.invoke(owner, block)', display)
-        self.assertIn('receiptsReady || block.result == null', display)
-        self.assertIn('ToolReceiptUi(WorkStepState.PENDING,', display)
-        self.assertIn('ToolActivityUi.RUNNING)', display)
+        self.assertIn('if (receiptsReady) null else', display)
+        self.assertIn('RetainedToolOutcomes.pendingProjection(source.status, block,', display)
+        self.assertIn('liveState = live?.let(controller::runState)', display)
+        self.assertNotIn('ToolActivityUi.RUNNING', display)
         self.assertNotIn('WorkStepState.OK', display)
 
     def test_the_ui_publisher_uses_only_a_worker_prepared_immutable_snapshot(self):
@@ -56,11 +59,16 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('receipt(message, block)?.activity', display)
         self.assertNotIn('Message(', display.replace('RenderMessage(', ''))
 
-    def test_pane_publishes_before_guarded_receipt_worker_completes(self):
+    def test_pane_prepares_matching_receipts_before_first_publish_and_retains_async_update_guards(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         prepare = host.split('private fun preparePaneSnapshot(', 1)[1].split('private fun retainedConversation', 1)[0]
         self.assertNotIn('RetainedToolOutcomes.Snapshot.read(', prepare)
-        self.assertNotIn('toolReceipts', prepare)
+        self.assertIn('toolReceiptReader(snapshot.messages.map { it.second }, snapshot.display)', prepare)
+        self.assertIn('toolReceipts = toolReceipts', prepare)
+        select = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('private fun sendDraft(', 1)[0]
+        self.assertLess(select.index('installPreparedToolReceipts(prepared)'), select.index('refresh()'))
+        self.assertIn('key?.canDisplayFor(currentToolReceiptKey()) == true', host)
+        self.assertIn('toolReceiptKey?.canDisplayFor(key) == true', host)
         self.assertNotIn('adoptPreparedToolReceipts', host)
         self.assertIn('RetainedToolOutcomes.Snapshot.read(controller.database, rows, display)', host)
         worker = host.split('private fun prepareToolReceipts(): Boolean', 1)[1].split('private fun completeToolReceipts(', 1)[0]
@@ -76,8 +84,8 @@ class ReceiptSnapshotContract(unittest.TestCase):
             self.assertIn(fragment, complete)
         self.assertLess(complete.index('!key.canDisplayFor'), complete.index('toolReceiptKey = key'))
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()
-        self.assertIn('testPaneReentryPublishesDisplayBeforeReceiptsAndAuthoritativeHistory', test)
-        self.assertIn('display is published while receipt IO is blocked', test)
+        self.assertIn('testPaneReentryPreparesReceiptsBeforeDisplayAndAuthoritativeHistory', test)
+        self.assertIn('previous page remains selected while receipt IO is blocked', test)
         self.assertIn('display consumes completed evidence without waiting for history', test)
 
     def test_body_growth_is_not_a_reason_to_decode_checkpoints_again(self):

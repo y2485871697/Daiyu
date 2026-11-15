@@ -202,10 +202,20 @@ internal object RetainedToolOutcomes {
         }
     }
 
-    /** 等待同一来源的持久化回执时，沿用“执行中”，直到精确最终回执就绪。 */
-    fun pendingProjection(message: Message, block: MessageBlock.Tool): ToolReceiptUi? =
-        if (message.role == Message.ASSISTANT_ROLE && block.result != null)
-            ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) else null
+    /** Missing evidence is not execution; only an exact live active call can supply activity. */
+    fun pendingProjection(message: Message, block: MessageBlock.Tool,
+        liveState: ExecutionState? = null, stopping: Boolean = false): ToolReceiptUi? =
+        if (message.role != Message.ASSISTANT_ROLE) null else pendingProjection(message.status, block, liveState, stopping)
+
+    // The caller must match conversation/run/message before supplying liveState.
+    fun pendingProjection(status: RunStatus, block: MessageBlock.Tool,
+        liveState: ExecutionState? = null, stopping: Boolean = false): ToolReceiptUi? {
+        if (block.result == null) return null
+        if (status != RunStatus.RUNNING || liveState == null || block.invocation.id !in liveState.activeToolCalls)
+            return ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
+        return toolReceiptPresentation(ToolDisposition.UNKNOWN, liveOwner = true, phase = liveState.phase,
+            pauseRequested = liveState.pauseRequested, stopRequested = stopping, runStatus = status, activeCall = true)
+    }
 
     fun projectionReader(database: ConversationDatabase, messages: List<Message>,
         liveState: (Message) -> ExecutionState? = { null },

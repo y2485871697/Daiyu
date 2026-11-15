@@ -61,7 +61,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
 
     def test_retained_overflow_loses_ownership_on_navigation_not_lifecycle_pause(self):
         activity = (APP / 'MainActivity.kt').read_text()
-        call = activity.split('DaiyuChatScreen(chatState.copy(', 1)[1].split('readAutomaticCompression = {', 1)[0]
+        call = activity.split('DaiyuChatScreen(pageState, pageActions,', 1)[1].split('readAutomaticCompression = {', 1)[0]
         self.assertIn('menuAvailable = retainedPage == "chat" && !sidebarVisible', call)
         self.assertNotIn('menuAvailable = routeActive', call)
         screen = (CHAT / 'ChatScreen.kt').read_text()
@@ -80,12 +80,13 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
 
     def test_page_passes_a_deferred_configuration_reader_to_the_menu_leaf(self):
         activity = (APP / 'MainActivity.kt').read_text()
-        call = activity.split('DaiyuChatScreen(chatState.copy(', 1)[1].split('callUi =', 1)[0]
+        call = activity.split('DaiyuChatScreen(pageState, pageActions,', 1)[1].split('callUi =', 1)[0]
         before_reader, reader = call.split('readAutomaticCompression = {', 1)
         self.assertNotIn('automaticCompression = automaticCompression', before_reader)
         self.assertNotIn('automaticCompressionPending = automaticCompressionPending', before_reader)
-        self.assertIn('ChatAutomaticCompressionState(', reader)
-        self.assertIn('automaticCompression, automaticCompressionPending)', reader)
+        self.assertIn('pageCompression', reader)
+        self.assertIn('val pageCompression = app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(', activity)
+        self.assertIn('automaticCompression, automaticCompressionPending)', activity)
         for name in ('ChatScreen.kt', 'ChatTopBar.kt'):
             source = (CHAT / name).read_text()
             self.assertIn('readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null', source)

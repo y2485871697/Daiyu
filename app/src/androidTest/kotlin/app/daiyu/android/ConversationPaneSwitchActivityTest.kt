@@ -503,4 +503,97 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
         } finally { mainThread { activity.paneDisplayWindowReader = reader } }
     }
 
+    fun testWholePageKeepsCommittedVisitUntilLatestCandidateIsReady() {
+        val conversations = prepareConversations()
+        val (first, second, third) = conversations
+        val blocked = androidx.compose.runtime.mutableStateMapOf(second.id.value to true)
+        data class Draw(val owner: Any?, val root: Any, val visit: Any)
+        val draws = java.util.concurrent.CopyOnWriteArrayList<Draw>()
+        val disposed = java.util.concurrent.CopyOnWriteArrayList<Any>()
+        val placed = java.util.concurrent.CopyOnWriteArrayList<Pair<Any?, androidx.compose.ui.unit.IntSize>>()
+        val ready = CountDownLatch(1)
+        val previous = ChatPageHostProbe.observer
+        mainThread {
+            ChatPageHostProbe.observer = ChatPageHostProbe.Observer(
+                allowReady = { owner ->
+                    if (owner == second.id.value) ready.countDown()
+                    blocked[owner] != true
+                },
+                onDraw = { owner, root, visit -> draws += Draw(owner, root, visit) },
+                onPlaced = { owner, size -> placed += owner to size },
+                onDisposed = { disposed += it },
+            )
+        }
+        fun sample(owner: String): Draw {
+            val before = draws.size
+            mainThread { ChatPageHostProbe.drawEpoch++; activity.window.decorView.invalidate() }
+            ui.waitUntil(5_000) { draws.size > before }
+            val frames = draws.drop(before)
+            assertTrue(frames.isNotEmpty())
+            frames.forEach { assertEquals(owner, it.owner) }
+            return frames.last()
+        }
+        try {
+            val initial = sample(first.id.value)
+            click(second)
+            assertSelected(second, "draft-1")
+            ui.waitUntil(10_000) { ready.count == 0L }
+            repeat(4) {
+                val kept = sample(first.id.value)
+                assertSame(initial.root, kept.root)
+                assertSame(initial.visit, kept.visit)
+                assertFalse(initial.visit in disposed)
+            }
+            assertTrue(placed.any { it.first == second.id.value && it.second.width > 0 && it.second.height > 0 })
+            click(third)
+            assertSelected(third, "draft-2")
+            ui.waitUntil(10_000) { draws.any { it.owner == third.id.value } }
+            val latest = sample(third.id.value)
+            assertSame(initial.root, latest.root)
+            assertNotSame(initial.visit, latest.visit)
+            mainThread { blocked.clear() }
+            repeat(4) { assertSame(latest.visit, sample(third.id.value).visit) }
+            assertTrue(draws.none { it.owner == second.id.value })
+            awaitControl("old whole-page visit disposed after replacement") { initial.visit in disposed }
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            mainThread { blocked.clear(); ChatPageHostProbe.observer = previous }
+        }
+    }
+
+    fun testFirstDisplayWaitsForSameSourceToolReceiptBaselineWithoutInventingRunning() {
+        val (first, second) = prepareConversations()
+        seedToolHistory(second)
+        val read = activity.toolReceiptReader
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val onMain = AtomicBoolean()
+        mainThread {
+            activity.toolReceiptReader = { rows, display ->
+                if (app.daiyu.android.ui.RetainedToolOutcomes.sources(rows, display).any { it.conversation == second.id.value }) {
+                    if (Looper.myLooper() == Looper.getMainLooper()) onMain.set(true)
+                    entered.countDown()
+                    check(release.await(60, TimeUnit.SECONDS))
+                }
+                read(rows, display)
+            }
+        }
+        try {
+            click(second)
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            mainThread { assertEquals(first.id, selectedConversation()?.id) }
+            release.countDown()
+            assertSelected(second, "draft-1")
+            mainThread {
+                val steps = chatState().turns.filterIsInstance<ChatTurnUi.Assistant>()
+                    .flatMap { it.workProcess?.segments.orEmpty() }.flatMap { it.steps }
+                assertEquals(4, steps.size)
+                assertTrue(steps.none { it.activity == ToolActivityUi.RUNNING || it.state == WorkStepState.PENDING })
+                // Arbitrary result JSON isn't evidence that a tool succeeded.
+                assertTrue(steps.all { it.state == WorkStepState.UNKNOWN })
+            }
+            assertFalse(onMain.get())
+        } finally { release.countDown(); mainThread { activity.toolReceiptReader = read } }
+    }
+
 }

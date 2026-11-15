@@ -84,7 +84,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 assertEquals(states, steps().map { it.state })
             }
             assertEquals(if (states == expected) listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED,
-                ToolActivityUi.NOT_EXECUTED, ToolActivityUi.INTERRUPTED) else listOf(ToolActivityUi.RUNNING, ToolActivityUi.RUNNING, ToolActivityUi.RUNNING, ToolActivityUi.UNKNOWN),
+                ToolActivityUi.NOT_EXECUTED, ToolActivityUi.INTERRUPTED) else List(4) { ToolActivityUi.UNKNOWN },
                 steps().map { it.activity })
             assertEquals(currentKey(), field("toolReceiptRequested").get(activity))
             assertSame(pending, field("toolReceiptRead").get(activity))
@@ -98,7 +98,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testPaneReentryPublishesDisplayBeforeReceiptsAndAuthoritativeHistory() {
+    fun testPaneReentryPreparesReceiptsBeforeDisplayAndAuthoritativeHistory() {
         val conversation = fixture.database.conversations().single()
         mainThread { activity.select(conversation) }
         awaitReceipts()
@@ -128,23 +128,13 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
         try {
             assertTrue("receipt read entered", receiptEntered.await(8, TimeUnit.SECONDS))
-            assertTrue("authority read entered", entered.await(8, TimeUnit.SECONDS))
             mainThread {
-                assertNotNull("display is published while receipt IO is blocked", display())
-                assertTrue((field("shown").get(activity) as List<*>).isEmpty())
                 val state = (field("chatState\$delegate").get(activity) as State<*>).value as ChatScreenState
-                assertEquals(conversation.id.value, state.conversationKey)
-                assertFalse(loadedKey()?.canDisplayFor(currentKey()) == true)
-                repeat(3) {
-                    call("publishChat")
-                    assertEquals(List(3) { WorkStepState.PENDING } + WorkStepState.UNKNOWN, steps().map { it.state })
-                    assertEquals(List(3) { ToolActivityUi.RUNNING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
-                }
-                assertEquals(ComposerPhase.IDLE, state.composer.phase)
-                assertNull(state.composer.controlOwnerKey)
-                assertTrue(((field("questionCards\$delegate").get(activity) as State<*>).value as Map<*, *>).isEmpty())
+                assertNull("previous page remains selected while receipt IO is blocked", state.conversationKey)
+                assertEquals("authority cannot overtake prepared receipt baseline", 1L, entered.count)
             }
             receiptRelease.countDown()
+            assertTrue("authority read entered", entered.await(8, TimeUnit.SECONDS))
             awaitReceipts()
             mainThread {
                 assertEquals("authority is still blocked", 1L, release.count)
@@ -182,8 +172,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 field("toolReceiptRead").get(activity) == null && loadedKey()?.canDisplayFor(currentKey()) != true
             }
             mainThread {
-                assertEquals(List(3) { WorkStepState.PENDING } + WorkStepState.UNKNOWN, steps().map { it.state })
-                assertEquals(List(3) { ToolActivityUi.RUNNING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                assertEquals(List(4) { WorkStepState.UNKNOWN }, steps().map { it.state })
+                assertEquals(List(4) { ToolActivityUi.UNKNOWN }, steps().map { it.activity })
                 activity.toolReceiptReader = receiptReader
                 call("publishChat")
             }
@@ -214,15 +204,14 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                     assertSame("live phase must not cancel the exact-source read", pending,
                         field("toolReceiptRead").get(activity))
                     assertTrue(pending.isActive)
-                    assertEquals(List(3) { ToolActivityUi.RUNNING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                    assertEquals(List(4) { ToolActivityUi.UNKNOWN }, steps().map { it.activity })
                 }
                 MainActivity::class.java.declaredMethods.single { it.name == "completeToolReceipts" }
                     .apply { isAccessible = true }.invoke(activity, request, scheduled, snapshot)
                 assertEquals("completed evidence is published in this callback", expected, steps().map { it.state })
                 assertEquals(ToolActivityUi.SUCCESS, steps().first().activity)
-                assertEquals("a latest-phase refresh is still requested", currentKey(),
-                    field("toolReceiptRequested").get(activity))
-                assertNotSame(pending, field("toolReceiptRead").get(activity))
+                assertNull("same durable source is reprojected without another read", field("toolReceiptRequested").get(activity))
+                assertNull(field("toolReceiptRead").get(activity))
             } finally { pending.cancel() }
         }
         awaitReceipts()

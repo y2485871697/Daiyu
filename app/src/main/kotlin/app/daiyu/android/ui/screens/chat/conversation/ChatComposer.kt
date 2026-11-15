@@ -72,6 +72,7 @@ import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.LineHeightStyle
@@ -105,7 +106,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
-    val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current
+    val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current && LocalChatPresentationActive.current
+    var inputFocused by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(pageActive) {
+        if (!pageActive && inputFocused) focus.clearFocus(force = true)
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val editing = actions.editingMessageKey != null
     val toolbarEnabled = pageActive && state.enabled && !editing
@@ -268,7 +273,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             },
                             enabled = state.enabled,
                             readOnly = !pageActive,
-                            modifier = Modifier.testTag("chat-draft").workspacePullUpGesture(workspacePointers, workspaceGestureEnabled, openWorkspace).onFocusChanged { onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
+                            modifier = Modifier.testTag("chat-draft").focusProperties { canFocus = pageActive }.workspacePullUpGesture(workspacePointers, workspaceGestureEnabled, openWorkspace).onFocusChanged { inputFocused = it.isFocused; onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
                                 .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
                             maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
                             cursorBrush = SolidColor(if (WindowInsets.isImeVisible) chrome.accent else Color.Unspecified),

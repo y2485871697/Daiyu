@@ -112,7 +112,14 @@ internal fun DaiyuChatScreen(
     readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null,
     speechPreparingMessageId: String? = null,
     menuAvailable: Boolean = true,
+    onPresentationReady: (Boolean) -> Unit = {},
 ) {
+    val presentationActive = LocalChatPresentationActive.current &&
+        app.daiyu.android.ui.navigation.LocalPageContentActive.current
+    val suppliedActions = actions
+    val actions = if (presentationActive) suppliedActions else ChatScreenActions(editingMessageKey = suppliedActions.editingMessageKey)
+    val suppliedCallActions = callActions
+    val callActions = if (presentationActive) suppliedCallActions else DoubaoCallActions()
     val drawerBlocksIme = app.daiyu.android.ui.components.LocalConversationDrawerBlocksIme.current
     val conversationInsets = if (drawerBlocksIme) WindowInsets.navigationBars
         else WindowInsets.navigationBars.union(WindowInsets.ime)
@@ -129,7 +136,7 @@ internal fun DaiyuChatScreen(
     var draftFocused by remember { mutableStateOf(false) }
     var inputDismissInProgress by remember { mutableStateOf(false) }
     val dismissInputOnTap = chatInputDismissTapModifier {
-        if (draftFocused && !app.daiyu.android.ui.components.InputDismissal.insideInput) {
+        if (presentationActive && draftFocused && !app.daiyu.android.ui.components.InputDismissal.insideInput) {
             inputDismissInProgress = true
             try {
                 hideChatInputIme(focus, keyboard, view)
@@ -159,13 +166,12 @@ internal fun DaiyuChatScreen(
         }
         ChatConversationLayers(Modifier.weight(1f)
             .windowInsetsPadding(conversationInsets), messages = { bottomInset ->
-            ChatViewportFrame(state.conversationKey, state.historyReady && displayedTurns.isEmpty(), Modifier.fillMaxSize()) { onViewportReady ->
-              androidx.compose.runtime.key(state.conversationKey) {
+            androidx.compose.runtime.key(state.conversationKey) {
                 ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
                     speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
-                    onViewportReady = onViewportReady, retainUnconfirmedRows = !state.historyReady)
-              }
+                    onPresentationReady = onPresentationReady, historyReady = state.historyReady,
+                    retainUnconfirmedRows = !state.historyReady)
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
@@ -173,7 +179,7 @@ internal fun DaiyuChatScreen(
                 onVoiceAnchorBounds = { voiceAnchor = it }, callUi = callUi, callMotion = motionState.takeIf { callUi != null },
                 onInputFocusChanged = { focused ->
                     draftFocused = focused
-                    if (focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()
+                    if (presentationActive && focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()
                 }, isInputDismissInProgress = { inputDismissInProgress },
                 attachmentContent = composerAttachments)
         })

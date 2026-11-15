@@ -1419,6 +1419,9 @@ class MainActivity : ComponentActivity() {
         val presentations: app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache? = null,
         val timeline: List<app.daiyu.android.timeline.ChatTimelineEntry>? = null,
         val timelineRevision: Long? = null,
+        val modelSelection: ChatGptSpeedSelection? = null,
+        val toolReceipts: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null,
+        val receiptKey: ToolReceiptKey? = null,
     )
     internal var paneConversationReader: (String) -> PaneConversationSnapshot = { id ->
         val conversations = controller.database.conversations()
@@ -2449,7 +2452,6 @@ class MainActivity : ComponentActivity() {
                         onOpenSkills = { dismissSidebarState(); guard { openSkillManagement() } },
                         onOpenPermissions = { dismissSidebarState(); retainedPage = "permission-check" },
                     ) {
-                        chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
                             val messageSpeech by speechHost.state.collectAsStateWithLifecycle()
                             val speechMessageId = messageSpeech.requestId.takeIf {
                                 messageSpeech.owner == speechHost.owner && messageSpeech.phase == SpeechPhase.SPEAKING
@@ -2480,17 +2482,7 @@ class MainActivity : ComponentActivity() {
                             val usageConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
                             val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
                             val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)
-                            BoxWithConstraints(Modifier.fillMaxSize()) {
-                                val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
-                                Column(Modifier.fillMaxSize()) {
-                                    val mediaLease = imageHost.mediaPreviews
-                                    val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot, displayWindow) {
-                                        chatMediaPreviewGallery(if (displayWindow == null) chatState.turns else emptyList(),
-                                            mediaLease.takeIf { displayWindow == null },
-                                            messageMediaSnapshot.takeIf { displayWindow == null })
-                                    }
-                                    app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
-                                    DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
+                            val pageState = chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
                                         composer = projectedVoiceComposer().let { it.copy(enabled = it.enabled && routeActive) }.copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
                                             contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
                                             contextTokensText = contextUsageLabels.second,
@@ -2502,21 +2494,45 @@ class MainActivity : ComponentActivity() {
                                             },
                                             videoSendAvailable = inlineMessageEditor == null && videoComposerControls?.canSubmit == true,
                                             videoSendBlocked = inlineMessageEditor == null && (videoComposerControls?.blocked == true ||
-                                                videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true))), chatActions(completionReadAction()), modifier = Modifier.weight(1f), turnExtras = { turn ->
-                                        if (routeActive && turn.segmentIndex == 0) {
+                                                videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true)))
+                            val pageCompression = app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
+                                automaticCompression, automaticCompressionPending)
+                            val pageActions = chatActions(completionReadAction())
+                            val pageGeneration = editorGeneration
+                            val pageImageLoader = imageHost.historyLoader.takeIf { displayWindow == null }
+                            val pageAssistant = projectedAssistants.firstOrNull {
+                                it.id == (if (selected == null) activeAssistant else selected?.assistantId)
+                            }
+                            val pageCallUi = shownVoiceCall()
+                            val pageCallActions = if (voiceCallPresentation.state != null) voiceCallActions() else doubaoCallActions()
+                                    val mediaLease = imageHost.mediaPreviews
+                                    val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot, displayWindow) {
+                                        chatMediaPreviewGallery(if (displayWindow == null) chatState.turns else emptyList(),
+                                            mediaLease.takeIf { displayWindow == null },
+                                            messageMediaSnapshot.takeIf { displayWindow == null })
+                                    }
+                            app.daiyu.android.ui.screens.chat.conversation.ChatPageHost(
+                                owner = pageState.conversationKey, modifier = Modifier.fillMaxSize(),
+                            ) { presented, onReady ->
+                            val pageCurrent = pageState.conversationKey == chatState.conversationKey && pageGeneration == editorGeneration
+                            chatPageState.SaveableStateProvider(pageState.conversationKey ?: "new-chat") {
+                            BoxWithConstraints(Modifier.fillMaxSize()) {
+                                val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
+                                Column(Modifier.fillMaxSize()) {
+                                    app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
+                                    DaiyuChatScreen(pageState, pageActions, modifier = Modifier.weight(1f), turnExtras = { turn ->
+                                        if (routeActive && pageCurrent && presented && turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
                                         }
                                     }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
+                                        onPresentationReady = onReady,
                                         menuAvailable = retainedPage == "chat" && !sidebarVisible,
-                                        readAutomaticCompression = {
-                                            app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
-                                                automaticCompression, automaticCompressionPending)
-                                        },
-                                        callUi = shownVoiceCall(),
-                                        callActions = if (voiceCallPresentation.state != null) voiceCallActions() else doubaoCallActions(), dedicatedTool = { step -> routeActive && DedicatedQuestion(step) },
+                                        readAutomaticCompression = { pageCompression },
+                                        callUi = pageCallUi,
+                                        callActions = pageCallActions, dedicatedTool = { step -> routeActive && DedicatedQuestion(step) },
                                         toolContent = { step -> if (routeActive) ToolTrustedContent(step) },
-                                        imageLoader = imageHost.historyLoader.takeIf { displayWindow == null },
-                                        assistant = projectedAssistants.firstOrNull { it.id == (if (selected == null) activeAssistant else selected?.assistantId) },
+                                        imageLoader = pageImageLoader,
+                                        assistant = pageAssistant,
                                         composerAttachments = { if (routeActive && !sidebarVisible) key(editorGeneration) {
                                             val editor = inlineMessageEditor
                                             if (editor == null) {
@@ -2567,7 +2583,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
-                                        if (routeActive) {
+                                        if (routeActive && pageCurrent && presented) {
                                             DictationComposerEntry()
                                             ShizukuComposerEntry()
                                         }
@@ -2575,6 +2591,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                            }
                     }
                 }
                 val returnRefreshRequest = chatReturnRefresh
@@ -2602,6 +2619,7 @@ class MainActivity : ComponentActivity() {
                     idleRequestKey = returnRefreshRequest,
                     onTransitionIdle = { finishChatReturn(returnRefreshRequest) },
                     retainedRootScopeKey = appearance,
+                    retainedRootIdentityKey = "chat",
                     retainedRootContent = rootChatContent,
                 ) {
                 BackHandler(enabled = retainedPage != "chat") {
@@ -6605,7 +6623,7 @@ class MainActivity : ComponentActivity() {
                     val snapshot = withContext(Dispatchers.IO) {
                         val snapshot = read(id)
                         val context = coroutineContext
-                        preparePaneSnapshot(id, snapshot, prepare) { context.ensureActive() }
+                        preparePaneSnapshot(id, snapshot, prepare, revision.data) { context.ensureActive() }
                     }
                     if (paneSelectionRequest !== request || !activityUsable() ||
                         (!initial && retainedPage != "chat") || selected?.id != owner || editorGeneration != editor) return@launch
@@ -6623,7 +6641,7 @@ class MainActivity : ComponentActivity() {
                             val context = coroutineContext
                             val window = paneDisplayWindowReader(snapshot.conversation.id)
                             context.ensureActive()
-                            preparePaneSnapshot(id, snapshot.copy(display = window, presentations = null), prepare) {
+                            preparePaneSnapshot(id, snapshot.copy(display = window, presentations = null), prepare, revision.data) {
                                 context.ensureActive()
                             }
                         } } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -6639,6 +6657,7 @@ class MainActivity : ComponentActivity() {
                             expanded.timelineRevision?.takeIf { expanded.timeline != null }?.let { timelineReadRevision = it }
                             if (expanded.timeline != null) timelineReadAnchors = currentTimelineAnchors()
                             expanded.presentations?.let { toolPresentations = it }
+                            installPreparedToolReceipts(expanded)
                             publishChat()
                         }
                     }
@@ -6664,7 +6683,7 @@ class MainActivity : ComponentActivity() {
 
     private fun preparePaneSnapshot(id: String, snapshot: PaneConversationSnapshot,
         prepare: (String, PaneConversationSnapshot, () -> Unit) -> app.daiyu.android.ui.screens.chat.conversation.ToolPresentationCache,
-        checkActive: () -> Unit): PaneConversationSnapshot {
+        receiptData: Long, checkActive: () -> Unit): PaneConversationSnapshot {
         checkActive()
         val timelineRevision = controller.timelineVersion
         val timeline = try {
@@ -6685,9 +6704,20 @@ class MainActivity : ComponentActivity() {
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { null }
         checkActive()
-        // Durable tool checkpoints are independent of displaying the conversation.
-        // publishChat uses the guarded asynchronous receipt reader while results remain pending.
-        return snapshot.copy(presentations = presentations, timeline = timeline, timelineRevision = timelineRevision)
+        val toolReceipts = try { toolReceiptReader(snapshot.messages.map { it.second }, snapshot.display) }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        checkActive()
+        val modelSelection = try {
+            val (editor, editing) = controller.conversationModelEditing(snapshot.conversation.id)
+            ChatGptSpeedSelection(editor, editing)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        checkActive()
+        return snapshot.copy(presentations = presentations, timeline = timeline, timelineRevision = timelineRevision,
+            modelSelection = modelSelection, toolReceipts = toolReceipts,
+            receiptKey = toolReceipts?.let { ToolReceiptKey(snapshot.conversation.id, receiptData, 0L,
+                app.daiyu.android.ui.RetainedToolOutcomes.sources(snapshot.messages.map { it.second }, snapshot.display), null) })
     }
 
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
@@ -6913,7 +6943,13 @@ class MainActivity : ComponentActivity() {
         selected = conversation; selectionReady = true; draft = targetDraft
         questionCards = emptyMap()
         dismissChatModels()
-        confirmedModelLabel = "模型"; confirmedReasoningModel = ""; confirmedGptSpeed = null
+        modelLabelRead = Any()
+        confirmedGptSpeed = prepared?.modelSelection
+        confirmedModelLabel = prepared?.modelSelection?.editing?.settings?.model?.ifBlank { "模型" } ?: "模型"
+        confirmedReasoningModel = prepared?.modelSelection?.editing?.settings?.let {
+            runCatching { app.daiyu.android.model.ReasoningRequestPolicy.requestModel(it.model, it.requestOptions) }.getOrNull()
+        }.orEmpty()
+        balanceRuntime = null
         paneState = paneState.copy(selectedConversationId = conversation?.id?.value)
         if (restoringSupplement) {
             restoredSupplementEditor = restoredSupplementEditor?.takeIf {
@@ -6937,6 +6973,7 @@ class MainActivity : ComponentActivity() {
         prepared?.presentations?.let { toolPresentations = it }
         if (refreshHistoryLoading) refreshHistoryPending = true
         shown = prepared?.messages.orEmpty().toMutableList()
+        installPreparedToolReceipts(prepared)
         if (prepared != null && prepared.display == null) streamingHistoryRefresh.needsRead(
             controller.active?.takeIf { it.conversationId == conversation?.id }, true, controller.dataRevision, editorGeneration, false)
         childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false
@@ -7397,9 +7434,18 @@ class MainActivity : ComponentActivity() {
         app.daiyu.android.ui.RetainedToolOutcomes.Snapshot.read(controller.database, rows, display)
     }
 
+    private fun installPreparedToolReceipts(prepared: PaneConversationSnapshot?) {
+        toolReceiptRead?.cancel()
+        toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
+        val key = prepared?.receiptKey?.copy(generation = editorGeneration)
+        val matches = key?.canDisplayFor(currentToolReceiptKey()) == true
+        toolReceiptSnapshot = prepared?.toolReceipts?.takeIf { matches }
+        toolReceiptKey = key?.takeIf { matches }
+    }
+
     private fun prepareToolReceipts(): Boolean {
         val key = currentToolReceiptKey()
-        if (toolReceiptKey == key) return true
+        if (toolReceiptKey?.canDisplayFor(key) == true) return true
         if (key.sources.isEmpty()) {
             toolReceiptRead?.cancel(); toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
             toolReceiptKey = key; toolReceiptSnapshot = null
@@ -7542,22 +7588,32 @@ class MainActivity : ComponentActivity() {
             val retainedReceipts = toolReceiptKey?.let { loaded ->
                 toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)
             }
-            val visibleToolReceipts = { message: Message, block: MessageBlock.Tool ->
-                retainedReceipts?.invoke(message, block)
-                    ?: if (receiptsReady) null else app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block)
-            }
             fun displayLiveOwner(owner: WorkStepOwnerUi) = controller.active?.takeIf {
                 it.conversationId.value == owner.conversationId && it.runId.value == owner.runId && it.id.value == owner.messageId
+            }
+            val visibleToolReceipts = { message: Message, block: MessageBlock.Tool ->
+                retainedReceipts?.invoke(message, block) ?: if (receiptsReady) null else {
+                    val live = displayLiveOwner(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value))
+                    app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block,
+                        liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true)
+                }
             }
             val retainedDisplayReceipts = toolReceiptKey?.let { loaded ->
                 toolReceiptSnapshot?.displayRowReader(loaded, currentReceipts,
                     liveState = { owner -> displayLiveOwner(owner)?.let(controller::runState) },
                     stopping = { owner -> displayLiveOwner(owner)?.let(controller::runStopping) == true })
             }
+            val displayReceiptSources = currentReceipts.sources.associateBy {
+                WorkStepOwnerUi(it.conversation, it.run, it.message)
+            }
             val visibleDisplayReceipts = { owner: WorkStepOwnerUi, block: MessageBlock.Tool ->
-                retainedDisplayReceipts?.invoke(owner, block) ?: if (receiptsReady || block.result == null) null
-                else app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi(WorkStepState.PENDING,
-                    app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi.RUNNING)
+                retainedDisplayReceipts?.invoke(owner, block) ?: if (receiptsReady) null else {
+                    val live = displayLiveOwner(owner)
+                    displayReceiptSources[owner]?.let { source ->
+                        app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(source.status, block,
+                            liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true)
+                    }
+                }
             }
             val visibleChildNames = toolReceiptKey?.takeIf { loaded -> loaded.canDisplayFor(currentReceipts) }
                 ?.let { toolReceiptSnapshot?.childAgentNames }.orEmpty()

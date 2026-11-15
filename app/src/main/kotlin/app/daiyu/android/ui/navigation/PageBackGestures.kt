@@ -397,6 +397,7 @@ internal fun PageBackGestureHost(
     retainedRootVisible: Boolean = contentKey == retainedRootKey,
     retainedRootActive: Boolean = retainedRootVisible,
     retainedRootScopeKey: Any? = null,
+    retainedRootIdentityKey: Any? = previewScopeKey,
     retainedRootContent: (@Composable (Boolean) -> Unit)? = null,
     idleRequestKey: Any? = null,
     onTransitionIdle: () -> Unit = {},
@@ -776,7 +777,7 @@ internal fun PageBackGestureHost(
                         frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))
                     }
                 }.background(background)) {
-                    if (retainedRootContent != null) key(previewScopeKey, retainedRootScopeKey) {
+                    if (retainedRootContent != null) key(retainedRootIdentityKey, retainedRootScopeKey) {
                         val rootActive = retainedRootActive && resumed
                         CompositionLocalProvider(
                             LocalPageBackGesture provides state.takeIf { rootActive },

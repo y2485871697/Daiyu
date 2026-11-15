@@ -64,7 +64,10 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
         self.assertGreaterEqual(entry.count('incident.epoch != backGeneration.get()'), 3)
         self.assertIn('ArrayBlockingQueue(128)', runtime)
         self.assertIn('require(bytes.size <= 16 * 1024)', runtime)
-        self.assertIn('rows.size > 256', runtime)
+        self.assertIn('private fun exportLocked(childOnly: Boolean = false)', runtime)
+        self.assertIn('rows.size > (if (childOnly) 1024 else 256)', runtime)
+        self.assertIn('rows.removeFirst()', runtime)
+        self.assertIn('return exportLocked()', runtime.split('fun export(): JSONArray {', 1)[1].split('private fun exportLocked', 1)[0])
         self.assertIn('FILE_BYTES = 512 * 1024', runtime)
         self.assertIn('backGeneration.incrementAndGet()', runtime.split('fun clear()', 1)[1])
         toggle = runtime.split('@Volatile var enabled = false', 1)[1].split('private var reserve', 1)[0]

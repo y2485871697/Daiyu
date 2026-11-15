@@ -25,6 +25,15 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertNotIn('viewport.scrollOffset =', anchor)
         self.assertIn('disclosureViewport.active == null', source)
 
+    def test_reentrant_anchor_layout_does_not_rebase_the_cycle_edge(self):
+        source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        self.assertIn('anchorGesture == viewport.gesture && !correctingAnchor', source)
+        start = source.index('correctingAnchor = true')
+        request = source.index('viewport.correctAnchor(it.itemKey, delta)', start)
+        release = source.index('finally { correctingAnchor = false }', request)
+        self.assertLess(start, request)
+        self.assertLess(request, release)
+
     def test_chat_helper_preserves_exit_input_and_focus_guards(self):
         source = (CHAT / 'WorkflowExpandableContent.kt').read_text()
         for token in ('visibleState = visibility', 'expandFrom = motion.alignment', 'shrinkTowards = motion.alignment',

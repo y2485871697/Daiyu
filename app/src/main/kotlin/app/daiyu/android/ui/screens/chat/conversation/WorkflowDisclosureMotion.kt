@@ -74,6 +74,7 @@ internal class WorkflowDisclosureMotion(
     private var anchorBottom = 0f
     private var anchorGesture = -1L
     private var manualChange = false
+    private var correctingAnchor = false
     private var expanded = false
     private var cycleChosen = false
     private var followingOnPress = false
@@ -95,21 +96,24 @@ internal class WorkflowDisclosureMotion(
     }.onGloballyPositioned { coordinates ->
         container = coordinates
         val viewport = context?.viewport
-        if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture) {
+        if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor) {
             if (!viewport.canAnchor()) viewport.active = null
             else {
                 val delta = if (anchorAtTop) coordinates.positionInWindow().y - anchorTop
                     else coordinates.positionInWindow().y + coordinates.size.height - anchorBottom
                 if (abs(delta) > .5f) context?.let {
-                    val consumed = viewport.correctAnchor(it.itemKey, delta)
-                    if (abs(delta - consumed) > .5f) {
-                        // At a scroll boundary, retain only the edge that the viewport can actually hold.
-                        if (anchorAtTop) anchorTop += delta - consumed
-                        else {
-                            anchorBottom += delta - consumed
-                            viewport.bounds()?.let { safe -> anchorBottom = minOf(anchorBottom, safe.bottom) }
+                    correctingAnchor = true
+                    try {
+                        val consumed = viewport.correctAnchor(it.itemKey, delta)
+                        if (abs(delta - consumed) > .5f) {
+                            // At a scroll boundary, retain only the edge that the viewport can actually hold.
+                            if (anchorAtTop) anchorTop += delta - consumed
+                            else {
+                                anchorBottom += delta - consumed
+                                viewport.bounds()?.let { safe -> anchorBottom = minOf(anchorBottom, safe.bottom) }
+                            }
                         }
-                    }
+                    } finally { correctingAnchor = false }
                 }
             }
         }

@@ -275,6 +275,22 @@ class StreamingOcclusionContract(unittest.TestCase):
         for token in ('height = 2400.dp', 'manualNonzeroPosition()', 'messageId = "u0"', 'sawRealStart && observedUnwrapped', 'assertTrue(running)', 'assertFalse(appendAssistant)'):
             self.assertIn(token, owner)
 
+    def test_measure_phase_fixture_derives_the_same_fixed_clearance(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageListMeasurePhaseTest.kt').read_text()
+        case = source.split('fun testRealStreamingListViewportResizeDoesNotRecomposeTurnContent()', 1)[1]
+        self.assertIn('200.dp - 40.dp - 11.dp - ChatTailClearance', case)
+        self.assertIn('height - 40.dp - 11.dp - ChatTailClearance', case)
+        self.assertIn('initial, compositions.get()', case)
+        self.assertNotIn('125.dp', case)
+        self.assertNotIn('- 24.dp', case)
+
+    def test_catchup_draw_and_terminal_transfer_share_observable_geometry(self):
+        source = CHAT.read_text()
+        self.assertIn('var viewportOffset by mutableIntStateOf(0)', source)
+        settle = source.split('if (followDistance <= 0f)', 1)[1].split('val alignment =', 1)[0]
+        self.assertIn('clearanceLayout.remeasurement?.forceRemeasure()', settle)
+        self.assertIn('settledTail.size == currentNestedTail.contentHeight', settle)
+        self.assertIn('currentNestedTail.followCatchup = false', settle)
 
 if __name__ == "__main__":
     unittest.main()

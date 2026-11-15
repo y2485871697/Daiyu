@@ -272,15 +272,20 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             var running by mutableStateOf(true)
             var stopped by mutableStateOf(false)
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { false }, { _, _ -> 0f }) }
-                CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
-                    WorkflowDisclosureContext(viewport, "collapse-fixture") { true }
-                }) {
-                    Column { WorkProcessCard(WorkProcessUi(emptyList(), "fixture", running = running), "collapse-fixture", stopped = stopped,
-                        content = { Box(Modifier.height(120.dp).testTag("collapse-body")) }) }
+                androidx.compose.runtime.key(closing) {
+                    val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { false }, { _, _ -> 0f }) }
+                    CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
+                        WorkflowDisclosureContext(viewport, "collapse-fixture:$closing") { true }
+                    }) {
+                        Column { WorkProcessCard(WorkProcessUi(emptyList(), "fixture", running = running), "collapse-fixture:$closing", stopped = stopped,
+                            content = { Box(Modifier.height(120.dp).testTag("collapse-body")) }) }
+                    }
                 }
             } } }
             ui.waitForIdle()
+            ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+            ui.onNodeWithTag("collapse-body").assertHeightIsEqualTo(120.dp)
             val fixedTop = top()
             val originalBottom = bottom()
             var sawIntermediate = false

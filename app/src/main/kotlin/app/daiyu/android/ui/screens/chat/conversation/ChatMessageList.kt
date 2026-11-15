@@ -112,7 +112,7 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)
     var boundaryDelta by mutableStateOf(0f)
     var followCatchup by mutableStateOf(false)
-    var viewportOffset = 0
+    var viewportOffset by mutableIntStateOf(0)
     var itemOrigin by mutableStateOf<Float?>(null)
     var scroller: ScrollableState? = null
 }
@@ -704,6 +704,18 @@ internal fun ChatMessageList(
                     (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
                 val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())
                 if (followDistance <= 0f) {
+                    if (currentNestedTail.bounded && currentNestedTail.followCatchup) {
+                        clearanceLayout.remeasurement?.forceRemeasure()
+                        val settledLayout = listState.layoutInfo
+                        val settledTail = settledLayout.visibleItemsInfo.lastOrNull {
+                            it.index == index && it.key == currentTailKey
+                        }
+                        if (settledTail != null && settledTail.size == currentNestedTail.contentHeight &&
+                            settledTail.offset + settledTail.size + settledLayout.afterContentPadding <= settledLayout.viewportEndOffset &&
+                            settledTail.offset + settledTail.size <= settledLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx) {
+                            currentNestedTail.followCatchup = false
+                        }
+                    }
                     motion.reset()
                     resumeFollowPending = false
                     alignViewport = false

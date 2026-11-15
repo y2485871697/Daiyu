@@ -19,6 +19,8 @@ class WorkflowDisclosureScopeTests(unittest.TestCase):
             self.assertNotIn('discover', command)
             self.assertIn('test_streaming_occlusion_contract', command)
             self.assertIn('test_streaming_follow_contract', command)
+            self.assertIn('test_workflow_disclosure_coverage_contract', command)
+            self.assertIn('test_disclosure_consistency_contract', command)
 
     def test_near_matches_do_not_claim_the_targeted_scope(self):
         value = ','.join(CLASSES)

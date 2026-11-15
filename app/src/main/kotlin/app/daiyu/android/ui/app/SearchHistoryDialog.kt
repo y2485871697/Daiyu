@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.app
 
 import app.daiyu.android.ui.haptics.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,7 +47,6 @@ import app.daiyu.android.ui.screens.search.MessageSearchPageReader
 import app.daiyu.android.ui.screens.search.MessageSearchRequest
 import app.daiyu.android.ui.screens.search.MessageSearchRequestState
 import app.daiyu.android.ui.screens.search.SearchAppendPhase
-import app.daiyu.android.ui.screens.search.SearchLoading
 import app.daiyu.android.ui.screens.search.SearchNotice
 import app.daiyu.android.ui.screens.search.SearchPhase
 import app.daiyu.android.ui.screens.search.SearchReadError
@@ -124,7 +124,6 @@ internal fun SearchHistoryDialog(
     }
     fun retrySearch() { if (requestCurrent()) search() }
     fun retryPage() { if (requestCurrent()) requests.loadMore() }
-    fun cancelSearch() { if (requestCurrent()) requests.cancel() }
     val exit = { if (available()) { requests.cancel(); onDismiss() } }
 
     UsageGlassDialog(title = stringResource(R.string.action_search_history), onDismiss = exit, useDefaultHeight = true) {
@@ -178,7 +177,7 @@ internal fun SearchHistoryDialog(
                             }
                             item("continuation") {
                                 when (renderFrame.appendPhase) {
-                                    SearchAppendPhase.Loading -> SearchLoading(enabled = !renderReadOnly) { if (!renderReadOnly) cancelSearch() }
+                                    SearchAppendPhase.Loading -> SearchHistoryLoading(Modifier.fillMaxWidth().padding(vertical = 12.dp))
                                     SearchAppendPhase.ReadError -> SearchReadError(enabled = !renderReadOnly) { if (!renderReadOnly) retryPage() }
                                     SearchAppendPhase.Invalidated -> {
                                         SearchNotice(stringResource(R.string.search_history_changed), "search:history_changed")
@@ -210,7 +209,7 @@ internal fun SearchHistoryDialog(
                 }
                 if (showInitialLoading) {
                     Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
-                        SearchHistoryLoading { cancelSearch() }
+                        SearchHistoryLoading()
                     }
                 }
 
@@ -220,14 +219,11 @@ internal fun SearchHistoryDialog(
 }
 
 @Composable
-private fun SearchHistoryLoading(onCancel: () -> Unit) {
-    Column(Modifier.testTag("search:loading-content"), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(24.dp).testTag("search:loading"))
-            Text(text = stringResource(R.string.search_loading),
-                modifier = Modifier.padding(start = 12.dp), style = MiuixTheme.textStyles.body2)
-        }
-        TextButton(text = stringResource(R.string.search_cancel), onClick = onCancel,
-            modifier = Modifier.padding(top = 8.dp).testTag("search:cancel"))
+private fun SearchHistoryLoading(modifier: Modifier = Modifier) {
+    Row(modifier.testTag("search:loading-content"),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(24.dp).testTag("search:loading"))
+        Text(text = stringResource(R.string.search_loading),
+            modifier = Modifier.padding(start = 12.dp), style = MiuixTheme.textStyles.body2)
     }
 }

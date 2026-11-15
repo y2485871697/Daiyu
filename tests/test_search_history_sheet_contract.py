@@ -61,9 +61,23 @@ class SearchHistorySheetContract(unittest.TestCase):
         self.assertNotIn('block.invocation', source)
         self.assertIn('"${hit.roleLabel} · ${hit.snippet}"', dialog)
         self.assertIn('contentAlignment = Alignment.Center', dialog)
-        self.assertIn('SearchHistoryLoading { cancelSearch() }', dialog)
-        self.assertIn('SearchAppendPhase.Loading -> SearchLoading', dialog)
+        self.assertIn('SearchHistoryLoading()', dialog)
+        self.assertIn('SearchAppendPhase.Loading -> SearchHistoryLoading(', dialog)
         self.assertIn('testTag("search-history-content")', dialog)
+
+    def test_initial_and_append_loading_have_no_cancel_button(self):
+        dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
+        self.assertNotRegex(dialog, r'R\.string\.search_cancel\b')
+        self.assertNotIn('"search:cancel"', dialog)
+        self.assertNotIn('fun cancelSearch()', dialog)
+        self.assertNotIn('import app.daiyu.android.ui.screens.search.SearchLoading', dialog)
+        self.assertIn('SearchAppendPhase.Loading -> SearchHistoryLoading(', dialog)
+        loading = dialog.split('private fun SearchHistoryLoading(', 1)[1]
+        self.assertNotIn('TextButton(', loading)
+        self.assertNotIn('onCancel', loading)
+        self.assertIn('horizontalArrangement = Arrangement.Center', loading)
+        self.assertIn('R.string.search_loading', loading)
+        self.assertIn('requests.cancel(); onDismiss()', dialog)
 
     def test_resume_keeps_request_and_results_without_automatic_reread(self):
         dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()

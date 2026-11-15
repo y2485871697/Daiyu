@@ -330,10 +330,14 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             val oldMore = checkNotNull(node("search:more").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
             node("search:more").performClick()
             ui.waitUntil(5_000) { entered.count == 0L }
+            node("search:loading").assertIsDisplayed()
+            assertNoCancelButton()
             val bounds = node("search-history-results").fetchSemanticsNode().boundsInRoot
             realPauseResume(activity)
             ui.mainClock.advanceTimeBy(500)
             assertEquals(bounds, node("search-history-results").fetchSemanticsNode().boundsInRoot)
+            node("search:loading").assertIsDisplayed()
+            assertNoCancelButton()
             assertEquals(2, reads.get())
             mainThread { oldMore() }
             assertEquals(2, reads.get())
@@ -344,13 +348,15 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
         } finally { release.countDown() }
     }
 
-    fun testCancelledInitialReadStaysCancelledAcrossResumeUntilExplicitRetry() {
+    fun testReaderCancelledInitialReadStaysCancelledAcrossResumeUntilExplicitRetry() {
         val reads = AtomicInteger()
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         try {
-            show(reader = { _, _, _ ->
+            show(reader = { _, _, signal ->
                 if (reads.incrementAndGet() == 1) {
                     entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                    signal.cancel()
+                    signal.throwIfCanceled()
                 }
                 MessageSearchPage(listOf(hit))
             })
@@ -358,8 +364,15 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             dismissIme()
             ui.mainClock.advanceTimeBy(200)
             ui.waitUntil(5_000) { entered.count == 0L }
-            node("search:cancel").performClick()
+            assertInitialLoadingCentered()
+            release.countDown()
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithText(activity.getString(R.string.search_retry)).fetchSemanticsNodes().size == 1
+            }
+            ui.onNodeWithText(activity.getString(R.string.search_retry)).assertIsDisplayed()
             node("search:loading").assertDoesNotExist()
+            node("search:error").assertDoesNotExist()
+            node("search:empty").assertDoesNotExist()
             realPauseResume(activity)
             ui.mainClock.advanceTimeBy(500)
             node("search:loading").assertDoesNotExist()
@@ -367,13 +380,48 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             ui.onNodeWithText(activity.getString(R.string.search_retry)).performClick()
             awaitUniqueTag(tag)
             assertEquals(2, reads.get())
-            release.countDown()
-            ui.waitForIdle()
             node(tag).assertTextEquals("助手 · 可点击的历史正文")
         } finally { release.countDown() }
     }
 
+    fun testDismissingInitialLoadingStillCancelsReaderWithoutCancelButton() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val cancelled = CountDownLatch(1); val finished = CountDownLatch(1)
+        try {
+            show(reader = { _, _, signal ->
+                signal.setOnCancelListener { cancelled.countDown() }
+                entered.countDown()
+                try {
+                    check(release.await(10, TimeUnit.SECONDS))
+                    MessageSearchPage(listOf(hit))
+                } finally { finished.countDown() }
+            })
+            node("search:query").performTextReplacement("查询")
+            dismissIme()
+            awaitDialogImeFrame(node("usage-glass-dialog"), visible = false)
+            ui.mainClock.advanceTimeBy(200)
+            ui.waitUntil(5_000) { entered.count == 0L }
+            assertInitialLoadingCentered()
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitForIdle()
+            node("search-history-dialog").assertDoesNotExist()
+            assertTrue(cancelled.await(5, TimeUnit.SECONDS))
+            assertEquals(1, dismissals)
+            release.countDown()
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            ui.waitForIdle()
+            node("search-history-dialog").assertDoesNotExist()
+            assertNull(opened)
+        } finally { release.countDown() }
+    }
+
+    private fun assertNoCancelButton() {
+        node("search:cancel").assertDoesNotExist()
+        ui.onNodeWithText(activity.getString(R.string.search_cancel)).assertDoesNotExist()
+    }
+
     private fun assertInitialLoadingCentered() {
+        assertNoCancelButton()
         val content = node("search-history-content").fetchSemanticsNode().boundsInRoot
         val loading = node("search:loading-content").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertEquals(content.center.x, loading.center.x, 2f)

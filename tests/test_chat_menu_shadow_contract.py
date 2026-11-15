@@ -15,16 +15,19 @@ class ChatMenuShadowContract(unittest.TestCase):
         cls.surface, _, cls.shadows = surface.partition("private fun ChatMenuShadows(")
 
     def test_production_passes_motion_without_clipping_shadow_in_parent(self):
-        self.assertIn("motion = motion", self.host)
+        self.assertIn("motion = motion, preferAbove = menu.preferAbove", self.host)
         self.assertIn("rememberPopupMotion(menu.expanded())", self.host)
         self.assertIn("0.15f + 0.85f * motion.fraction.value", self.host)
-        self.assertIn("TransformOrigin(1f, 0f)", self.host)
+        self.assertIn("if (menu.alignStart) TransformOrigin(0f, if (menu.preferAbove) 1f else 0f)", self.host)
+        self.assertIn("else TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)", self.host)
         self.assertNotIn("alpha =", self.host)
         self.assertNotIn(".daiyuMenuClipReveal(", self.host)
 
     def test_shadows_are_non_measuring_siblings_outside_body_alpha_and_reveal(self):
         self.assertIn("Box(modifier.width(IntrinsicSize.Max), propagateMinConstraints = true)", self.surface)
-        self.assertIn("ChatMenuShadows(motion, dark, Modifier.matchParentSize())", self.surface)
+        self.assertIn("ChatMenuShadows(motion, dark, Modifier.matchParentSize(), preferAbove)", self.surface)
+        self.assertIn("preferAbove: Boolean = false", self.surface)
+        self.assertIn("preferAbove = preferAbove, cornerRadius = 19.dp, squircleEnabled = false", self.surface)
         self.assertLess(self.surface.index("ChatMenuShadows("), self.surface.index("Column(Modifier"))
         self.assertNotIn(".dropShadow(", self.surface)
         self.assertEqual(2, self.shadows.count("shadowContext.createDropShadowPainter(shape, Shadow("))
@@ -42,7 +45,7 @@ class ChatMenuShadowContract(unittest.TestCase):
         prefix, layer_and_shadows = self.shadows.split(".graphicsLayer {", 1)
         layer, shadows = layer_and_shadows.split(".drawWithCache {", 1)
         self.assertIn("scaleY = menuRevealFraction(motion)", layer)
-        self.assertIn("transformOrigin = TransformOrigin(.5f, 0f)", layer)
+        self.assertIn("transformOrigin = TransformOrigin(.5f, if (preferAbove) 1f else 0f)", layer)
         self.assertNotIn("menuRevealFraction(", prefix)
         self.assertNotIn(".fraction.value", prefix)
         self.assertNotIn(".alpha.value", prefix)

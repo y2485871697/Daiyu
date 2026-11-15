@@ -212,7 +212,8 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertIn("tween(durationMillis = 150)", motion)
         layer = self.text("ui/screens/chat/conversation/ChatMenuLayer.kt")
         for fragment in ["rememberPopupMotion(menu.expanded())", "0.15f + 0.85f * motion.fraction.value",
-                         "TransformOrigin(1f, 0f)", ".daiyuMenuClipReveal(", "if ((expanded || mounted) && layer != null)",
+                         "if (menu.alignStart) TransformOrigin(0f, if (menu.preferAbove) 1f else 0f)",
+                         "else TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)", ".daiyuMenuClipReveal(", "if ((expanded || mounted) && layer != null)",
                          "delay(PopupExitRetentionMillis)", "PointerEventPass.Initial"]:
             self.assertIn(fragment, layer)
         self.assertIn("if (!menu.expanded()) event.changes.forEach { it.consume() }", layer)

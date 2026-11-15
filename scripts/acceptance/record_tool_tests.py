@@ -558,7 +558,22 @@ IME_MODULES = (
 )
 
 
+PET_PRESENTATION_PLATFORM_CLASSES = tuple("app.daiyu.android.pet." + name for name in (
+    "PetOverlayHostTest", "PetHostTest", "PetApplicationHostTest", "PetHostCloseTest",
+    "PetCupboardDialogTest", "PetPresentationTest",
+))
+PET_PRESENTATION_MODULES = (
+    "test_pet_presentation_contract", "test_pet_presentation_smoke_scope",
+    "test_pet_error_logging_contract", "test_pet_settings_disclosure_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PET_PRESENTATION_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *PET_PRESENTATION_MODULES, "-v"], "pet-presentation-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(DELETE_CONFIRM_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *DELETE_CONFIRM_MODULES, "-v"], "delete-confirm-targeted"

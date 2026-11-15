@@ -22,7 +22,7 @@ class PetOverlayHostTest : InstrumentationTestCase() {
     private fun verifyOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange() {
         instrumentation.runOnMainSync {
             val context = instrumentation.targetContext
-            val controller = PetController(InMemoryPetStore(), PetModelPort { _, _ -> PetCancel {} },
+            val controller = PetController(InMemoryPetStore(PetState(settings = PetSettings(enabled = true))), PetModelPort { _, _ -> PetCancel {} },
                 AndroidPetScheduler(), PetClock { 0 })
             val host = PetOverlayHost(context, controller, WhaleMaidResources(context), {}, onState = { _, _ -> })
             try {
@@ -43,8 +43,8 @@ class PetOverlayHostTest : InstrumentationTestCase() {
                 assertTrue(frame.width > 0); assertTrue(frame.height > 0)
                 assertTrue(frame.width < screenWidth); assertTrue(frame.height < screenHeight)
                 assertEquals(screenWidth - frame.width to screenHeight - frame.height,
-                    constrainPetOverlayPosition(Int.MAX_VALUE, Int.MAX_VALUE, screenWidth, screenHeight, frame.width, frame.height))
-                assertEquals(0 to 0, constrainPetOverlayPosition(-50, -50, screenWidth, screenHeight, frame.width, frame.height))
+                    petPlacement(Int.MAX_VALUE, Int.MAX_VALUE, screenWidth, screenHeight, frame.width, frame.width, frame.height, 0).let { it.x to it.y })
+                assertEquals(0 to 0, petPlacement(0, 0, screenWidth, screenHeight, frame.width, frame.width, frame.height, 0).let { it.x to it.y })
                 panel.getChildAt(0).visibility = View.GONE
                 val sprite = panel.getChildAt(1)
                 sprite.layoutParams = sprite.layoutParams.apply {
@@ -54,7 +54,7 @@ class PetOverlayHostTest : InstrumentationTestCase() {
                 assertEquals(sprite.layoutParams.width, frame.width)
                 assertEquals(sprite.layoutParams.height, frame.height)
                 assertEquals(screenWidth - frame.width to screenHeight - frame.height,
-                    constrainPetOverlayPosition(screenWidth, screenHeight, screenWidth, screenHeight, frame.width, frame.height))
+                    petPlacement(screenWidth, screenHeight, screenWidth, screenHeight, frame.width, frame.width, frame.height, 0).let { it.x to it.y })
             } finally { host.close(); controller.close() }
         }
     }
@@ -202,10 +202,14 @@ class PetOverlayHostTest : InstrumentationTestCase() {
         }
     }
 
-    fun testOverlayBoundsClampOversizedWindowAndReclampAfterGrowth() {
-        assertEquals(0 to 0, constrainPetOverlayPosition(800, 900, 400, 600, 500, 700))
-        assertEquals(280 to 470, constrainPetOverlayPosition(280, 470, 400, 600, 100, 100))
-        assertEquals(180 to 370, constrainPetOverlayPosition(280, 470, 400, 600, 220, 230))
-        assertEquals(0 to 0, constrainPetOverlayPosition(10, 10, 0, 0, 0, 0))
+    fun testOverlayBoundsKeepSpriteNotBubbleInsideScreen() {
+        val bare = petPlacement(0, 0, 400, 600, 128, 128, 128, 16)
+        val speech = petPlacement(0, 0, 400, 600, 128, 220, 230, 16)
+        assertEquals(0 to 0, bare.spriteX to bare.spriteY)
+        assertEquals(-46 to -102, speech.x to speech.y)
+        assertEquals(bare.spriteX to bare.spriteY, speech.spriteX to speech.spriteY)
+        val bottomRight = petPlacement(Int.MAX_VALUE, Int.MAX_VALUE, 400, 600, 128, 220, 230, 16)
+        assertEquals(272 to 472, bottomRight.spriteX to bottomRight.spriteY)
+        assertEquals(226 to 370, bottomRight.x to bottomRight.y)
     }
 }

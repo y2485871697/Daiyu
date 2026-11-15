@@ -1,0 +1,89 @@
+name: 代鱼女仆展示检查
+run-name: 代鱼女仆展示检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        type: string
+        required: true
+      check_id:
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-pet-presentation-checks-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      SKIP_JDK_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 核对准确源码
+        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - uses: ./.github/actions/setup-temurin
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 女仆展示与定向范围契约
+        run: |
+          mkdir -p pet-presentation-checks
+          set -o pipefail
+          PYTHONPATH=tests python3 -B -m unittest test_pet_presentation_contract test_pet_presentation_smoke_scope test_pet_error_logging_contract test_pet_settings_disclosure_contract test_record_tool_tests_scope test_acceptance_tool_receipt test_compile_release_contract test_frozen_smoke_source test_diagnostic_smoke_source test_smoke_boot.SourceTests -v 2>&1 | tee pet-presentation-checks/contracts.log
+      - name: 准备既有离线依赖
+        run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle -PdaiyuCheckGraph=pet-presentation-checks/prepare-graph.json :app:prepareOfflineSpeechRuntime
+      - name: 女仆应用单测与Android声明编译
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --parallel --build-cache --console=plain -I scripts/cooperation/checks_only.init.gradle -PdaiyuCheckGraph=pet-presentation-checks/app-graph.json :app:compileDebugAndroidTestKotlin :app:testDebugUnitTest --tests 'app.daiyu.android.pet.*' 2>&1 | tee pet-presentation-checks/app.log
+      - name: 女仆核心单测
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --build-cache --console=plain -I scripts/cooperation/checks_only.init.gradle -PdaiyuCheckGraph=pet-presentation-checks/core-graph.json :core-domain:test --tests 'app.daiyu.android.domain.pet.*' 2>&1 | tee pet-presentation-checks/core.log
+      - name: 核对单测终态和零安装包
+        run: |
+          python3 - <<'PYREPORT'
+          import json, os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reports = []
+          for folder, expected in (
+              ('app/build/test-results/testDebugUnitTest', ('AndroidPetModelPortTest', 'PetErrorLogTest', 'PetOverlayWindowOwnerTest', 'PetPlacementTest')),
+              ('core-domain/build/test-results/test', ('PetControllerTest', 'PetSpeechTest')),
+          ):
+              files = list(Path(folder).glob('TEST-*.xml'))
+              for name in expected:
+                  matches = [p for p in files if p.name.endswith('.' + name + '.xml')]
+                  assert len(matches) == 1, (name, matches)
+                  suite = ET.parse(matches[0]).getroot()
+                  assert int(suite.attrib['tests']) > 0, name
+                  assert all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped')), (name, suite.attrib)
+                  reports.append(dict(checked_class=name, **suite.attrib))
+          assert not list(Path('app/build').rglob('*.apk'))
+          record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+                        attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), unit=reports,
+                        apk_built=False, instrumentation_run=False)
+          Path('pet-presentation-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(record, ensure_ascii=False))
+          PYREPORT
+      - name: 上传检查证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 女仆展示定向检查
+          path: |
+            pet-presentation-checks/
+            app/build/test-results/testDebugUnitTest/
+            core-domain/build/test-results/test/
+          if-no-files-found: error

@@ -100,6 +100,7 @@ class PetHost internal constructor(
         this.closeOnOwnerDestroy = closeOnOwnerDestroy
         this.container = container
         mount = FrameLayout(container.context).also { layer ->
+            layer.clipChildren = false; layer.clipToPadding = false
             layer.addView(PetViewFactory.createPet(container.context, controller, resources, false),
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             container.addView(layer, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))

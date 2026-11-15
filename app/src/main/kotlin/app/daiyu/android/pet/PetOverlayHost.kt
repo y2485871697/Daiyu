@@ -10,14 +10,18 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import app.daiyu.android.domain.pet.*
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-internal fun constrainPetOverlayPosition(x: Int, y: Int, screenWidth: Int, screenHeight: Int,
-    childWidth: Int, childHeight: Int): Pair<Int, Int> =
-    x.coerceIn(0, (screenWidth - childWidth).coerceAtLeast(0)) to
-        y.coerceIn(0, (screenHeight - childHeight).coerceAtLeast(0))
 
 enum class PetOverlayState { DISABLED, IN_APP, PERMISSION_REQUIRED, VISIBLE, ERROR, CLOSED }
 
@@ -74,7 +78,9 @@ internal class PetOverlayHost(
     private var closed = false
     private val params = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
         PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; title = "DaiyuPet" }
     private val windows = windowPort ?: object : PetOverlayWindowPort<View> {
         private val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -92,9 +98,12 @@ internal class PetOverlayHost(
     }
     private val owner = PetOverlayWindowOwner(windows) { current ->
         ui.removeCallbacksAndMessages(null)
-        (current as FrameLayout).removeAllViews()
+        (current as DragWindow).releaseContent()
     }
     private val view: View? get() = owner.window
+    private var anchorX = -1
+    private var anchorY = -1
+    private var dragging = false
 
     fun sync(snapshot: PetSnapshot) {
         check(Looper.myLooper() == Looper.getMainLooper())
@@ -108,35 +117,46 @@ internal class PetOverlayHost(
             removeAndReport(PetOverlayState.PERMISSION_REQUIRED, "系统悬浮权限未授权；仅在应用内显示"); return
         }
         if (owner.cleanupPending) { reportCleanupError(); return }
+        if (!dragging) { anchorX = s.settings.x; anchorY = s.settings.y }
         if (view == null) {
             val frame = createWindow()
-            params.x = s.settings.x.coerceAtLeast(0); params.y = s.settings.y.coerceAtLeast(0)
+            val initial = placement(frame)
+            params.x = initial.x; params.y = initial.y
             if (!owner.add(frame)) {
                 if (owner.cleanupPending) reportCleanupError()
                 else onState(PetOverlayState.ERROR, "桌宠悬浮窗添加失败；仅在应用内显示")
                 return
             }
         }
-        if (s.settings.x >= 0) params.x = s.settings.x
-        if (s.settings.y >= 0) params.y = s.settings.y
         if (update()) onState(PetOverlayState.VISIBLE, null)
     }
     internal fun createWindow(): FrameLayout = DragWindow(context).apply {
+        alpha = 0f
+        clipChildren = false; clipToPadding = false
         addView(PetViewFactory.createPet(context, controller, this@PetOverlayHost.resources, true),
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
-        addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
-                ui.post { if (!closed && !owner.cleanupPending && view === this) update() }
+        viewTreeObserver.addOnPreDrawListener {
+            if (closed || owner.cleanupPending || view !== this) true
+            else {
+                val next = placement(this)
+                val changed = params.x != next.x || params.y != next.y
+                if (changed) { update(); false }
+                else { alpha = 1f; true }
             }
         }
+    }
+    private fun placement(current: View): PetPlacement {
+        val metrics = context.resources.displayMetrics
+        val side = (128f * controller.snapshot().state.settings.scale * metrics.density).roundToInt()
+        return petPlacement(anchorX, anchorY, metrics.widthPixels, metrics.heightPixels, side,
+            current.width.takeIf { it > 0 } ?: side, current.height.takeIf { it > 0 } ?: side,
+            (16 * metrics.density).roundToInt())
     }
     private fun update(): Boolean {
         if (closed || owner.cleanupPending) return false
         val current = view ?: return false
-        val metrics = context.resources.displayMetrics
-        val (x, y) = constrainPetOverlayPosition(params.x, params.y, metrics.widthPixels, metrics.heightPixels,
-            current.width, current.height)
-        params.x = x; params.y = y
+        val next = placement(current)
+        params.x = next.x; params.y = next.y
         return try { windows.update(current); true }
         catch (_: Exception) {
             if (owner.remove()) onState(PetOverlayState.ERROR, "桌宠悬浮窗更新失败")
@@ -157,26 +177,67 @@ internal class PetOverlayHost(
         // A prior close can leave an unknown root. Closing again must retry that same owner.
         removeAndReport(PetOverlayState.CLOSED)
     }
-    private inner class DragWindow(context: Context) : FrameLayout(context) {
+    private inner class DragWindow(context: Context) : FrameLayout(context), LifecycleOwner, SavedStateRegistryOwner {
+        private val ownerLifecycle = LifecycleRegistry(this)
+        private val savedState = SavedStateRegistryController.create(this)
+        override val lifecycle: Lifecycle get() = ownerLifecycle
+        override val savedStateRegistry: SavedStateRegistry get() = savedState.savedStateRegistry
+        init {
+            savedState.performRestore(null)
+            ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+            setViewTreeLifecycleOwner(this)
+            setViewTreeSavedStateRegistryOwner(this)
+        }
+        override fun onAttachedToWindow() {
+            if (lifecycle.currentState != Lifecycle.State.DESTROYED) {
+                ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_START)
+                ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+            }
+            super.onAttachedToWindow()
+        }
+        fun releaseContent() {
+            removeAllViews()
+            if (lifecycle.currentState != Lifecycle.State.DESTROYED)
+                ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        }
+        override fun onDetachedFromWindow() {
+            super.onDetachedFromWindow()
+            if (lifecycle.currentState != Lifecycle.State.DESTROYED)
+                ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        }
+        private var spriteGesture = false
         private var downX = 0f; private var downY = 0f; private var originX = 0; private var originY = 0
-        private var dragging = false
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
             if (closed || owner.cleanupPending || view !== this) return false
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY; originX = params.x; originY = params.y; dragging = false }
-                MotionEvent.ACTION_MOVE -> if (abs(event.rawX - downX) + abs(event.rawY - downY) >= 12 * resources.displayMetrics.density) dragging = true
+                MotionEvent.ACTION_DOWN -> {
+                    val bounds = android.graphics.Rect()
+                    val sprite = findViewById<View>(app.daiyu.android.R.id.pet_sprite)
+                    spriteGesture = sprite != null && sprite.getGlobalVisibleRect(bounds) &&
+                        bounds.contains(event.rawX.roundToInt(), event.rawY.roundToInt())
+                    downX = event.rawX; downY = event.rawY
+                    originX = placement(this).spriteX; originY = placement(this).spriteY; dragging = false
+                }
+                MotionEvent.ACTION_MOVE -> if (spriteGesture && abs(event.rawX - downX) + abs(event.rawY - downY) >= 12f) dragging = true
             }
             return dragging
         }
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if (closed || owner.cleanupPending || view !== this) return false
             if (!dragging) return super.onTouchEvent(event)
-            if (event.actionMasked == MotionEvent.ACTION_MOVE || event.actionMasked == MotionEvent.ACTION_UP) {
-                params.x = originX + (event.rawX - downX).roundToInt(); params.y = originY + (event.rawY - downY).roundToInt(); update()
+            if (event.actionMasked == MotionEvent.ACTION_MOVE) {
+                translationX = event.rawX - downX; translationY = event.rawY - downY
             }
-            if (!closed && !owner.cleanupPending && view === this &&
-                (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)) {
-                dragging = false; controller.setPosition(params.x, params.y)
+            if (event.actionMasked == MotionEvent.ACTION_UP) {
+                val metrics = context.resources.displayMetrics
+                val side = (128f * controller.snapshot().state.settings.scale * metrics.density).roundToInt()
+                anchorX = (originX + (event.rawX - downX).roundToInt()).coerceIn(0, (metrics.widthPixels - side).coerceAtLeast(0))
+                anchorY = (originY + (event.rawY - downY).roundToInt()).coerceIn(0, (metrics.heightPixels - side).coerceAtLeast(0))
+                dragging = false
+                translationX = 0f; translationY = 0f
+                if (update()) controller.setPosition(anchorX, anchorY)
+            } else if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                dragging = false; translationX = 0f; translationY = 0f
             }
             return true
         }

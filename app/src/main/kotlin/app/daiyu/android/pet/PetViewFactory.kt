@@ -24,7 +24,7 @@ internal object PetViewFactory {
         PetPanel(context, controller, resources, overlay)
     fun createSettings(context: Context, host: PetHost): View = PetSettingsView(context, host)
 }
-private abstract class ObservedPetLayout(context: Context, protected val controller: PetController) : LinearLayout(context) {
+internal abstract class ObservedPetLayout(context: Context, protected val controller: PetController) : LinearLayout(context) {
     private val ui = Handler(Looper.getMainLooper())
     private var observation: PetCancel? = null
     private var attachment = 0L
@@ -32,9 +32,10 @@ private abstract class ObservedPetLayout(context: Context, protected val control
     override fun onAttachedToWindow() {
         super.onAttachedToWindow(); attachment++
         val ticket = attachment
-        observation = controller.observe { next -> ui.post {
-            if (isAttachedToWindow && attachment == ticket) render(next)
-        } }
+        observation = controller.observe { next ->
+            if (Looper.myLooper() == Looper.getMainLooper()) render(next)
+            else ui.post { if (isAttachedToWindow && attachment == ticket) render(next) }
+        }
     }
     override fun onDetachedFromWindow() {
         attachment++; observation?.cancel(); observation = null; ui.removeCallbacksAndMessages(null)
@@ -43,21 +44,21 @@ private abstract class ObservedPetLayout(context: Context, protected val control
     protected abstract fun render(snapshot: PetSnapshot)
     protected fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 }
-private class PetPanel(context: Context, controller: PetController, assets: PetResourcePort,
+internal class PetPanel(context: Context, controller: PetController, assets: PetResourcePort,
     private val overlay: Boolean) : ObservedPetLayout(context, controller) {
     private var cupboard: PetCupboardDialog? = null
     private val assets = assets
-    private val bubble = TextView(context)
+    private val bubble = PetSpeechBubbleView(context)
     private val sprite = PetSpriteView(context, assets)
     private var previousX = 0f; private var previousY = 0f
     private var startX = 0f; private var startY = 0f
     private var moved = false
-    private var fadingSpeech: String? = null
     init {
         gravity = android.view.Gravity.CENTER_HORIZONTAL
-        bubble.setTextColor(0xff1e293b.toInt()); bubble.setBackgroundColor(0xffffffff.toInt())
-        bubble.setPadding(dp(10), dp(8), dp(10), dp(8)); bubble.setHapticClickListener { controller.dismissSpeech() }
-        addView(bubble, LayoutParams(dp(220), LayoutParams.WRAP_CONTENT))
+        alpha = 0f
+        clipChildren = false; clipToPadding = false
+        bubble.onDismiss = { controller.dismissSpeech() }
+        addView(bubble, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(sprite, LayoutParams(dp(128), dp(128)))
         sprite.id = app.daiyu.android.R.id.pet_sprite
         sprite.setHapticClickListener {
@@ -81,24 +82,47 @@ private class PetPanel(context: Context, controller: PetController, assets: PetR
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { startX = e.rawX; startY = e.rawY; previousX = startX; previousY = startY; moved = false; true }
                 MotionEvent.ACTION_MOVE -> {
-                    if (abs(e.rawX - startX) + abs(e.rawY - startY) >= dp(12)) moved = true
+                    if (abs(e.rawX - startX) + abs(e.rawY - startY) >= 12f) moved = true
                     if (moved && !overlay) {
-                        val host = parent as? View
-                        val maxX = ((host?.width ?: width) - width).coerceAtLeast(0).toFloat()
-                        val maxY = ((host?.height ?: height) - height).coerceAtLeast(0).toFloat()
-                        x = (x + e.rawX - previousX).coerceIn(0f, maxX)
-                        y = (y + e.rawY - previousY).coerceIn(0f, maxY)
+                        x += e.rawX - previousX
+                        y += e.rawY - previousY
                     }
                     previousX = e.rawX; previousY = e.rawY; true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) v.performClick() else if (!overlay) controller.setPosition(x.roundToInt(), y.roundToInt())
+                    if (!moved) v.performClick() else if (!overlay) {
+                        val host = parent as? View
+                        val next = petPlacement((x + sprite.left).roundToInt(), (y + sprite.top).roundToInt(),
+                            host?.width ?: width, host?.height ?: height, petSide, width, height, dp(16))
+                        moved = false
+                        controller.setPosition(next.spriteX, next.spriteY)
+                        placeInApp()
+                    }
                     moved = false; true
                 }
-                MotionEvent.ACTION_CANCEL -> { moved = false; true }
+                MotionEvent.ACTION_CANCEL -> { moved = false; placeInApp(); true }
                 else -> false
             }
         }
+        render(controller.snapshot())
+    }
+    internal val petSide: Int get() = sprite.measuredWidth
+    internal fun placeInApp() {
+        if (overlay || moved) return
+        val host = parent as? View ?: return
+        if (host.width <= 0 || host.height <= 0 || width <= 0 || height <= 0) return
+        val settings = controller.snapshot().state.settings
+        val next = petPlacement(settings.x, settings.y, host.width, host.height, petSide, width, height, dp(16))
+        x = next.x.toFloat(); y = next.y.toFloat()
+    }
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val previousLeft = sprite.left; val previousTop = sprite.top
+        super.onLayout(changed, left, top, right, bottom)
+        if (!overlay && moved) {
+            x += previousLeft - sprite.left
+            y += previousTop - sprite.top
+        } else placeInApp()
+        alpha = 1f
     }
     override fun render(snapshot: PetSnapshot) {
         val s = snapshot.state
@@ -106,21 +130,12 @@ private class PetPanel(context: Context, controller: PetController, assets: PetR
         val visible = !snapshot.closed && s.settings.enabled && snapshot.error?.contains("存储") != true
         visibility = if (visible) VISIBLE else GONE
         if (!visible) cupboard?.dismiss()
-        bubble.text = s.speech; bubble.visibility = if (s.speechVisible) VISIBLE else GONE
-        val displayedSpeech = if (visible && s.speechVisible) s.speech else null
-        if (displayedSpeech != fadingSpeech) {
-            bubble.animate().cancel(); bubble.alpha = 1f; fadingSpeech = displayedSpeech
-            if (displayedSpeech != null) bubble.animate().alpha(0f).setStartDelay(2_600).setDuration(500).start()
-        }
+        bubble.present(s.speech.takeIf { visible && s.speechVisible && it.isNotBlank() }, s.settings.scale)
         sprite.mood = s.mood
-        sprite.layoutParams = sprite.layoutParams.apply { width = dp((128 * s.settings.scale).roundToInt()); height = width }
+        val side = (128f * s.settings.scale * resources.displayMetrics.density).roundToInt()
+        if (sprite.layoutParams.width != side) sprite.layoutParams = sprite.layoutParams.apply { width = side; height = side }
         sprite.setRunning(visible)
-        if (visible && !overlay && !moved) post {
-            if (!isAttachedToWindow || moved) return@post
-            val host = parent as? View ?: return@post
-            x = (if (s.settings.x < 0) host.width - width - dp(16) else s.settings.x).coerceIn(0, (host.width - width).coerceAtLeast(0)).toFloat()
-            y = (if (s.settings.y < 0) (host.height * .62f).roundToInt() else s.settings.y).coerceIn(0, (host.height - height).coerceAtLeast(0)).toFloat()
-        }
+        if (visible) placeInApp()
     }
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
@@ -132,13 +147,13 @@ private class PetPanel(context: Context, controller: PetController, assets: PetR
     }
     override fun onDetachedFromWindow() {
         cupboard?.dismiss(); cupboard = null
-        bubble.animate().cancel(); fadingSpeech = null; sprite.setRunning(false); super.onDetachedFromWindow()
+        sprite.setRunning(false); super.onDetachedFromWindow()
     }
 }
 /** The original sheet is 4 frames x 8 square mood rows; draw pixels, never emoji/text substitutes. */
 internal class PetSpriteView(context: Context, private val assets: PetResourcePort) : View(context) {
     var mood: PetMood = PetMood.IDLE
-        set(value) { if (field != value) frame = 0; field = value; contentDescription = "鲸鱼女仆 ${value.name}"; invalidate() }
+        set(value) { field = value; contentDescription = "鲸鱼女仆 ${value.name}"; invalidate() }
     private val paint = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
     private val ui = Handler(Looper.getMainLooper())
     private var frame = 0

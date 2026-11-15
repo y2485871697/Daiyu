@@ -440,7 +440,34 @@ CONVERSATION_DATE_PLATFORM_CLASS = "app.daiyu.android.storage.ConversationDateGr
 CONVERSATION_DATE_MODULES = ('test_conversation_date_contract', 'test_conversation_date_smoke_scope', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
 
 
+IME_PLATFORM_CLASSES = (
+    'app.daiyu.android.ui.navigation.PageImeCompositionActivityTest',
+    'app.daiyu.android.ChatComposerImeActivityTest',
+    'app.daiyu.android.ChatAttachmentSizingActivityTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatComposerMeasurePhaseTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+)
+IME_MODULES = (
+    'test_chat_ime_hotpath_contract',
+    'test_chat_ime_lifecycle_contract',
+    'test_chat_ime_motion_contract',
+    'test_ime_frame_contract',
+    'test_chat_attachment_sizing_contract',
+    'test_chat_resume_scroll_contract',
+    'test_streaming_occlusion_contract',
+    'test_chat_ime_smoke_scope',
+    'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(IME_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *IME_MODULES, "-v"], "ime-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == CONVERSATION_DATE_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *CONVERSATION_DATE_MODULES, "-v"], "conversation-date-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

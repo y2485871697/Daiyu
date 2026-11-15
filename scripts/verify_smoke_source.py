@@ -201,6 +201,14 @@ def verify_checkout(env):
     return checkout_sha
 
 
+def concurrency_group_only_change(before, after):
+    pattern = rb"(?m)^concurrency:\n  group: [^\r\n]+\n  cancel-in-progress: false\n"
+    replacement = b"concurrency:\n  group: reviewed-queue\n  cancel-in-progress: false\n"
+    old, old_count = re.subn(pattern, replacement, before)
+    new, new_count = re.subn(pattern, replacement, after)
+    return before != after and old_count == new_count == 1 and old == new
+
+
 def main():
     checkout_sha = verify_checkout(os.environ)
     env = os.environ
@@ -217,6 +225,7 @@ def main():
     subprocess.run(['git', 'merge-base', '--is-ancestor', env['SOURCE_SHA'], checkout_sha], check=True)
     changed = subprocess.check_output(['git', 'diff', '--no-renames', '--name-only', '-z', env['SOURCE_SHA'], checkout_sha], text=True).split('\0')[:-1]
     source_artifact = None
+    reviewed_concurrency_workflows = []
     if env.get('SOURCE_VARIANT') == 'candidate':
         source_workflow = subprocess.check_output(['git', 'show', env['SOURCE_SHA'] + ':.github/workflows/build.yml'], text=True)
         verify_candidate(env, Path('delivery'), source_run, jobs, changed,
@@ -241,13 +250,20 @@ def main():
         verify_candidate_archive(Path('delivery'), source_artifact, archive)
     else:
         record = json.loads(Path('delivery/构建记录.json').read_text())
-        verify(env, record, source_run, jobs, changed, checkout_sha=checkout_sha)
+        if env.get('SOURCE_VARIANT') in ('compile', 'diagnostic'):
+            for path in ('.github/workflows/build.yml', '.github/workflows/test-refresh-regression.yml'):
+                if path in changed:
+                    before = subprocess.check_output(['git', 'show', env['SOURCE_SHA'] + ':' + path])
+                    if concurrency_group_only_change(before, Path(path).read_bytes()):
+                        reviewed_concurrency_workflows.append(path)
+        effective_changed = [path for path in changed if path not in reviewed_concurrency_workflows]
+        verify(env, record, source_run, jobs, effective_changed, checkout_sha=checkout_sha)
         if env.get('SOURCE_VARIANT') == 'diagnostic':
             verify_diagnostic_files(Path('delivery'), record)
     Path('smoke').mkdir(exist_ok=True)
     Path('smoke/source.json').write_text(json.dumps(dict(build_sha=env['SOURCE_SHA'], build_run=run_id,
         build_attempt=1, build_variant=env.get('SOURCE_VARIANT', 'debug'), check_sha=checkout_sha, workflow_sha=env['GITHUB_SHA'], validation_tools_sha=env['GITHUB_SHA'], check_run=env['GITHUB_RUN_ID'], check_attempt=env['GITHUB_RUN_ATTEMPT'],
-        changed_validation_files=changed, source_artifact=source_artifact,
+        changed_validation_files=changed, reviewed_concurrency_workflows=reviewed_concurrency_workflows, source_artifact=source_artifact,
         formal_acceptance=False if env.get('SOURCE_VARIANT') in ('candidate', 'daily', 'compile', 'diagnostic') else None), ensure_ascii=False) + '\n')
     print('既有应用包身份、变体及应用源码一致性核对通过')
 

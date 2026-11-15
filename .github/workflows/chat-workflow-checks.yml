@@ -119,11 +119,14 @@ jobs:
               patterns = ('test_message_display_contract.py',)
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
-              assert suite.countTestCases() > 0, pattern
+              discovered = suite.countTestCases()
               result = unittest.TextTestRunner(verbosity=2).run(suite)
-              assert result.wasSuccessful() and not result.skipped, pattern
-              records.append(dict(pattern=pattern, tests=result.testsRun, skipped=0))
+              records.append(dict(pattern=pattern, tests=result.testsRun, skipped=len(result.skipped),
+                                  discovered=discovered, successful=result.wasSuccessful()))
           Path('workflow-checks/contracts.json').write_text(json.dumps(records, indent=2) + '\n')
+          failed_patterns = [record['pattern'] for record in records
+                             if not (record['discovered'] > 0 and record['successful'] and record['skipped'] == 0)]
+          assert not failed_patterns, failed_patterns
           PY
           python3 scripts/verify_boundaries.py
       - name: 准备既有离线语音依赖（不打包）

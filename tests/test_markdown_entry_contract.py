@@ -39,7 +39,11 @@ class MarkdownEntryContract(unittest.TestCase):
         self.assertIn('context.ensureActive()', io)
         self.assertLess(selection.index('preparePaneSnapshot(id, snapshot, prepare)'), selection.index('select(snapshot.conversation, snapshot)'))
         self.assertLess(selection.index('select(snapshot.conversation, snapshot)'), selection.index('paneDisplayWindowReader(snapshot.conversation.id)'))
-        self.assertIn('if (revision != currentPaneRevision()) continue', selection)
+        self.assertIn(
+            'if (revision != currentPaneRevision() || snapshot.timeline != null && '
+            'snapshot.timelineRevision != controller.timelineVersion) continue',
+            ' '.join(selection.split()),
+        )
         self.assertIn('paneSelectionRequest !== request || !activityUsable()', selection)
 
     def test_cancelled_initial_selection_resumes_and_background_notifications_do_not_restart_it(self):

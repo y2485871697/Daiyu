@@ -11,6 +11,22 @@ def source(name):
 
 
 class ProviderSavePositionContractTest(unittest.TestCase):
+    def test_provider_actions_match_the_balance_button_horizontal_inset(self):
+        self.assertIn("LocalSettingsPageStyle provides true", source("SettingsScaffold.kt"))
+        card = source("SettingsUiComponents.kt").split("internal fun SettingsCard(", 1)[1].split("internal fun SettingsRow(", 1)[0]
+        self.assertIn("Modifier.padding(horizontal = 16.dp, vertical = 4.dp)", card)
+        balance = source("ProviderBalanceFields.kt").split('ProviderActionButton(text = if (test.running)', 1)[1].split('test.money?.let', 1)[0]
+        self.assertIn('.padding(horizontal = 12.dp, vertical = 8.dp)', balance)
+        screen = source("ModelSettingsScreen.kt")
+        actions = screen.split('item(key = "model_save")', 1)[1]
+        save = actions.split('if (providerName != null)', 1)[1].split('} else {', 1)[0]
+        self.assertIn('modifier = saveModifier.padding(horizontal = 28.dp, vertical = 4.dp)', save)
+        self.assertIn('onClick = submit', save)
+        delete = actions.split('item(key = "provider_delete")', 1)[1]
+        self.assertIn('Modifier.testTag("provider-delete").padding(horizontal = 28.dp, vertical = 4.dp)', delete)
+        self.assertIn('colors = deletionButtonColors()', delete)
+        self.assertIn('onDelete()', delete)
+
     def test_first_and_later_save_retain_only_the_page_ui_for_authoritative_reload(self):
         route = source("ProviderManagementRoute.kt")
         self.assertIn("open(added.slotId, savedPageUi = newProvider.pageUi)", route)

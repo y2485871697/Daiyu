@@ -287,7 +287,7 @@ internal fun ModelSettingsScreen(
                     text = if (onOAuthLogin != null) "创建" else "保存配置",
                     onClick = submit,
                     enabled = enabled && (!oauthOnly || draft.oauth != null),
-                    modifier = saveModifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    modifier = saveModifier.padding(horizontal = 28.dp, vertical = 4.dp),
                 )
             } else {
                 TextButton(
@@ -306,7 +306,7 @@ internal fun ModelSettingsScreen(
                     connection.cancel(); balance.cancel(); onDelete()
                 }
             }, colors = deletionButtonColors(),
-                modifier = Modifier.testTag("provider-delete").padding(horizontal = 20.dp, vertical = 4.dp))
+                modifier = Modifier.testTag("provider-delete").padding(horizontal = 28.dp, vertical = 4.dp))
         }
     }
 }

@@ -6,8 +6,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.key
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,6 +29,8 @@ import app.daiyu.android.ui.app.AgentAppTheme
 class ChatViewportFrameTest : WiredActivityTestCase() {
     private var owner by mutableStateOf("first")
     private var empty by mutableStateOf(false)
+    private var lazyContent = false
+    private val disposed = mutableListOf<String>()
     private val reports = mutableMapOf<String, (Boolean) -> Unit>()
     private val clicks = mutableListOf<String>()
     private val colors = mapOf("first" to Color.Red, "blocked" to Color.Green, "latest" to Color.Blue, "empty" to Color.White)
@@ -38,8 +44,18 @@ class ChatViewportFrameTest : WiredActivityTestCase() {
                         ChatViewportFrame(visit, empty, Modifier.fillMaxSize()) { report ->
                             SideEffect { reports[visit] = report }
                             key(visit) {
-                                Box(Modifier.fillMaxSize().graphicsLayer().background(colors.getValue(visit))
-                                    .testTag("target:$visit").clickable { clicks += visit })
+                                DisposableEffect(visit) { onDispose { disposed += visit } }
+                                if (lazyContent) {
+                                    LazyColumn(Modifier.fillMaxSize()) {
+                                        items((0 until 16).toList(), key = { "$visit-$it" }) { _ ->
+                                            Box(Modifier.fillMaxSize().height(80.dp).graphicsLayer()
+                                                .background(colors.getValue(visit)))
+                                        }
+                                    }
+                                } else {
+                                    Box(Modifier.fillMaxSize().graphicsLayer().background(colors.getValue(visit))
+                                        .testTag("target:$visit").clickable { clicks += visit })
+                                }
                             }
                         }
                     }
@@ -78,6 +94,22 @@ class ChatViewportFrameTest : WiredActivityTestCase() {
         assertFrame(Color.Green)
         ui.onNodeWithTag("target:blocked").assertExists().performClick()
         mainThread { assertEquals(listOf("blocked"), clicks) }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDisposedLazyRowsCannotEraseThePendingViewport() {
+        lazyContent = true
+        mount()
+        mainThread { owner = "blocked" }
+        ui.waitForIdle()
+        mainThread { assertTrue("Old lazy visit must actually be disposed", "first" in disposed) }
+        repeat(5) {
+            ui.mainClock.advanceTimeByFrame()
+            assertFrame(Color.Red)
+        }
+        mainThread { reports.getValue("blocked")(true) }
+        ui.waitForIdle()
+        assertFrame(Color.Green)
         assertEquals(0, fixture.opens.get())
     }
 

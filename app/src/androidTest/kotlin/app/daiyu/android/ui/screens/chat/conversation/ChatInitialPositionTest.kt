@@ -46,6 +46,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
     private var retainFrames = false
     private var probeEpoch by mutableStateOf(0)
     private val capturedProbes = CopyOnWriteArrayList<Pair<String, Int>>()
+    private val transparentProbes = CopyOnWriteArrayList<Pair<String, Int>>()
     private var owner by mutableStateOf("first")
     private var request by mutableStateOf<ChatScrollRequest?>(ChatScrollRequest(1))
     private var rowsAvailable by mutableStateOf(true)
@@ -98,7 +99,8 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                             }
                             drawLayer(frame)
                             pendingCaptures.incrementAndGet()
-                            scope.launch(Dispatchers.Main.immediate) {
+                            // Do not read a layer while its owning draw is still recording.
+                            scope.launch(Dispatchers.Main) {
                                 try {
                                     val pixels = frame.toImageBitmap().toPixelMap()
                                     val x = pixels.width / 2
@@ -118,8 +120,12 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                             }
                                         }
                                     }
-                                    if (!recognized && pixels.buffer.any { it ushr 24 != 0 }) {
-                                        draws += Draw("unmarked visible content", false, top + pixels.height, visit, probe.second)
+                                    if (!recognized) {
+                                        if (pixels.buffer.any { it ushr 24 != 0 }) {
+                                            draws += Draw("unmarked visible content", false, top + pixels.height, visit, probe.second)
+                                        } else {
+                                            transparentProbes += probe
+                                        }
                                     }
                                     capturedProbes += probe
                                 } catch (failure: Throwable) {
@@ -430,8 +436,10 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
                 awaitProbe(probe)
-                assertTrue("Unconfirmed empty rows erased the committed frame: $probe",
-                    draws.any { it.frameOwner == "first" && it.probeEpoch == probe.second && it.owner == "first" && it.tail })
+                val samples = draws.filter { it.frameOwner == probe.first && it.probeEpoch == probe.second }
+                assertFalse("An unconfirmed empty snapshot captured a transparent frame: $probe", probe in transparentProbes)
+                assertTrue("Unconfirmed empty rows erased the committed frame: $probe; captured=$samples",
+                    samples.isNotEmpty() && samples.all { it.owner == "first" && it.tail })
             }
             mainThread { rowsAvailable = true }
             frames(3)
@@ -463,8 +471,15 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
             val probes = capturedProbes.filter { it.first == "cold" }
             assertTrue(probes.isNotEmpty())
             probes.forEach { probe ->
-                assertTrue("Each pending viewport probe must retain the committed frame: $probe; captured=${draws.filter { it.frameOwner == probe.first && it.probeEpoch == probe.second }}",
-                    draws.any { it.frameOwner == "cold" && it.probeEpoch == probe.second && it.owner == "first" })
+                val samples = draws.filter { it.frameOwner == probe.first && it.probeEpoch == probe.second }
+                assertFalse("A pending viewport capture was transparent: $probe; captured=$samples", probe in transparentProbes)
+                assertTrue("Each pending viewport probe must retain the committed frame: $probe; captured=$samples",
+                    samples.isNotEmpty())
+                samples.forEach { sample ->
+                    assertEquals("A pending frame exposed another owner: $probe", "first", sample.owner)
+                    assertTrue("A pending frame exposed earlier history: $probe", sample.tail)
+                    assertEquals(viewportBottom - 24f * activity.resources.displayMetrics.density, sample.bottom, 2f)
+                }
             }
             assertTrue(reads.flatten().none { it.startsWith("cold-") })
             release.countDown()

@@ -143,7 +143,16 @@ class ChatInitialPositionContract(unittest.TestCase):
         device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatInitialPositionTest.kt').read_text()
         self.assertIn('frame.record(size = IntSize(', device)
         self.assertNotIn('frame.record(this, layoutDirection,', device)
-        self.assertIn('scope.launch(Dispatchers.Main.immediate)', device)
+        self.assertIn('scope.launch(Dispatchers.Main)', device)
+        self.assertNotIn('scope.launch(Dispatchers.Main.immediate)', device)
+        self.assertIn('transparentProbes += probe', device)
+        self.assertIn('probe in transparentProbes', device)
+        self.assertIn('samples.isNotEmpty() && samples.all', device)
+        viewport = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatViewportFrameTest.kt').read_text()
+        self.assertIn('testDisposedLazyRowsCannotEraseThePendingViewport', viewport)
+        self.assertIn('DisposableEffect(visit) { onDispose { disposed += visit } }', viewport)
+        self.assertIn('"first" in disposed', viewport)
+        self.assertIn('LazyColumn(Modifier.fillMaxSize())', viewport)
         for helper, next_helper in (('awaitCapturedFrames', 'awaitDraw'), ('awaitDraw', 'assertOnlyAlignedDraws')):
             body = device.split('private fun ' + helper + '(', 1)[1].split('private fun ' + next_helper + '(', 1)[0]
             wait = body.split('ui.waitUntil(5_000) {', 1)[1]

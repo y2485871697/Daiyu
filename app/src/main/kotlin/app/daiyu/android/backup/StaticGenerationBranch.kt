@@ -24,7 +24,8 @@ internal class StaticGenerationBranch(
         val live: GenerationOutputReference? = null, val historical: HistoricalGenerationOutput? = null,
         val static: StaticGenerationOutput? = null)
     internal class Capture(val conversation: String, val generation: String, val historicalKeys: Set<String>,
-        val staticRows: List<StaticGenerationOutput>, val sources: List<Source>, val outputs: List<StaticGenerationOutput>) {
+        val staticRows: List<StaticGenerationOutput>, val sources: List<Source>, val outputs: List<StaticGenerationOutput>,
+        val selectedCalls: Set<MessageGenerationCut.Call>? = null) {
         val leases = mutableListOf<StaticGenerationAssets.Lease>()
     }
     fun freezeAccount(db: SQLiteDatabase): Result<String> {
@@ -38,16 +39,29 @@ internal class StaticGenerationBranch(
         check(capture.outputs.all { it.destination.accountScope == scope }) { "生成账户范围已变化" }
         if (!BackupHistoryRows.exists(db, "neutral_backup_history")) BackupHistoryRows.install(db)
     }
-    fun capture(db: SQLiteDatabase, original: List<Message>, mapped: List<Message>, accountScope: Result<String>): Capture {
+    private fun selectedGeneration(value: org.json.JSONObject, calls: Set<MessageGenerationCut.Call>?): org.json.JSONObject {
+        if (calls == null) return value
+        return org.json.JSONObject().put("version", 1).apply {
+            for (kind in listOf("attempts", "outputs")) put(kind, JSONArray(
+                BackupHistoryRows.rows(value.getJSONArray(kind)).filter { MessageGenerationCut.call(it) in calls }))
+        }
+    }
+    fun capture(db: SQLiteDatabase, original: List<Message>, mapped: List<Message>, accountScope: Result<String>,
+        stablePrefixOnly: Boolean = false): Capture {
         val conversation = original.first().conversationId.value
-        val generation = BackupGenerationCodec.export(db, conversation)
+        val calls = MessageGenerationCut.calls(original)
+        val selectedCalls = calls.takeIf { stablePrefixOnly }
+        val generation = selectedGeneration(BackupGenerationCodec.export(db, conversation), selectedCalls)
         // The full physical history (not a UI page or only the copied prefix) authorizes every
         // selected tool/run binding, including imported historical members with no live reader.
-        BackupGenerationCodec.validate(generation, staticMessageRows(app.daiyu.android.context.ContextService.read(db,
-            app.daiyu.android.domain.ConversationId(conversation))))
-        val historical = BackupHistoryRows.history(db, "generation_output", conversation)
-        val static = StaticGenerationCodec.read(db, conversation)
-        val calls = MessageGenerationCut.calls(original)
+        BackupGenerationCodec.validate(generation, staticMessageRows(if (stablePrefixOnly) original else
+            app.daiyu.android.context.ContextService.read(db, app.daiyu.android.domain.ConversationId(conversation))))
+        val historical = BackupHistoryRows.history(db, "generation_output", conversation).filterValues {
+            selectedCalls == null || MessageGenerationCut.call(it) in selectedCalls
+        }
+        val static = StaticGenerationCodec.read(db, conversation).filter {
+            selectedCalls == null || MessageGenerationCut.call(it) in selectedCalls
+        }
         val sources = BackupHistoryRows.rows(generation.getJSONArray("outputs")).filter {
             MessageGenerationCut.call(it) in calls
         }.map { row ->
@@ -67,12 +81,16 @@ internal class StaticGenerationBranch(
         }
         StaticGenerationCodec.validateBatch(outputs)
         outputs.forEach { StaticGenerationCodec.validateDestination(it, staticMessageRows(mapped)) }
-        return Capture(conversation, generation.toString(), historical.keys.toSet(), static, sources, outputs)
+        return Capture(conversation, generation.toString(), historical.keys.toSet(), static, sources, outputs, selectedCalls)
     }
     fun verifySource(db: SQLiteDatabase, capture: Capture) {
-        check(BackupGenerationCodec.export(db, capture.conversation).toString() == capture.generation) { "生成来源集合已变化" }
-        check(BackupHistoryRows.history(db, "generation_output", capture.conversation).keys == capture.historicalKeys)
-        check(StaticGenerationCodec.read(db, capture.conversation) == capture.staticRows) { "静态来源集合已变化" }
+        check(selectedGeneration(BackupGenerationCodec.export(db, capture.conversation), capture.selectedCalls).toString() == capture.generation) { "生成来源集合已变化" }
+        check(BackupHistoryRows.history(db, "generation_output", capture.conversation).filterValues {
+            capture.selectedCalls == null || MessageGenerationCut.call(it) in capture.selectedCalls
+        }.keys == capture.historicalKeys)
+        check(StaticGenerationCodec.read(db, capture.conversation).filter {
+            capture.selectedCalls == null || MessageGenerationCut.call(it) in capture.selectedCalls
+        } == capture.staticRows) { "静态来源集合已变化" }
     }
     fun prepareAndPublish(capture: Capture) {
         capture.sources.zip(capture.outputs).forEach { (selected, output) ->

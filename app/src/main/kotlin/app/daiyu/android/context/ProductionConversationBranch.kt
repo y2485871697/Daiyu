@@ -36,7 +36,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
     }
     fun branch(id: ConversationId, through: MessageId, authorize: (SQLiteDatabase) -> Unit,
         copyImages: (List<Message>, List<Message>) -> List<Message>,
-        selectPrefix: ((List<Message>) -> List<Message>)? = null): BranchLocator {
+        selectPrefix: ((List<Message>) -> List<Message>)? = null,
+        stablePrefixOnly: Boolean = false): BranchLocator {
         val db = transactions.database()
         check(!db.inTransaction()) { "分支原件读取不能在外层SQL事务内" }
         val copy = ConversationId(UUID.randomUUID().toString())
@@ -57,7 +58,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
         val snapshot = transactions.run { sql ->
             checkCancelled(); authorize(sql)
             val original = ContextService.read(sql, id)
-            require(original.none { it.status == RunStatus.RUNNING })
+            if (!stablePrefixOnly) require(original.none { it.status == RunStatus.RUNNING })
             val end = original.indexOfFirst { it.id == through } + 1
             require(end > 0 && (selectPrefix != null || isHistoryClosedPrefix(original, end))) { "不能分离工具批次或补充消息" }
             val prefix = selectPrefix?.invoke(original) ?: original.take(end)
@@ -71,10 +72,12 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             val mapped = prefix.map { m -> m.copy(id = remap(m, m.id), conversationId = copy,
                 runId = runs.getOrPut(m.runId) { RunId(UUID.randomUUID().toString()) },
                 historySegments = m.historySegments.map { it.copy(messageId = remap(m, it.messageId)) }) }
-            val capture = generation?.capture(sql, prefix, mapped, checkNotNull(accountScope))
+            val capture = generation?.capture(sql, prefix, mapped, checkNotNull(accountScope), stablePrefixOnly)
             if (generation == null) requireNoGenerationOriginals(sql, prefix)
-            Snapshot(original, prefix, mapped, sourceValues(sql), attachments(sql), archives(sql),
-                original.map { SQLiteMessageVideoStore.readVerified(sql, it) }, capture,
+            val witnessed = if (stablePrefixOnly) prefix.map { selected -> original.single { it.id == selected.id } } else original
+            val assets = attachments(sql).filter { row -> !stablePrefixOnly || prefix.any { it.id.value == row.getString("message_id") } }
+            Snapshot(witnessed, prefix, mapped, sourceValues(sql), assets, archives(sql),
+                witnessed.map { SQLiteMessageVideoStore.readVerified(sql, it) }, capture,
                 prefix.map { AssistantReplyIdentities.read(sql, it) }, ConversationModelSelections.read(sql, id))
         }
         val selectedVideoInputs = snapshot.prefix.map { row ->
@@ -143,11 +146,20 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             try {
                 fun verifySource() {
                     authorize(db)
-                    check(ContextService.read(db, id) == snapshot.history) { "来源历史已变化" }
+                    val currentHistory = ContextService.read(db, id)
+                    if (stablePrefixOnly) check(checkNotNull(selectPrefix).invoke(currentHistory) == snapshot.prefix) { "来源消息前缀已变化" }
+                    else check(currentHistory == snapshot.history) { "来源历史已变化" }
                     check(ConversationModelSelections.read(db, id) == snapshot.modelBinding) { "来源模型绑定已变化" }
-                    check(sourceValues(db).map { it.toString() } == snapshot.sourceValues.map { it.toString() })
-                    check(attachments(db).map { it.toString() } == snapshot.attachments.map { it.toString() })
-                    check(archives(db).map { it.toString() } == snapshot.archives.map { it.toString() })
+                    if (stablePrefixOnly) {
+                        val current = sourceValues(db).single()
+                        val frozen = snapshot.sourceValues.single()
+                        check(listOf("id", "folder", "assistant_id", "workspace_binding", "pinned").all {
+                            current.get(it) == frozen.get(it)
+                        }) { "分支来源配置已变化" }
+                    } else check(sourceValues(db).map { it.toString() } == snapshot.sourceValues.map { it.toString() })
+                    val currentAssets = attachments(db).filter { row -> !stablePrefixOnly || snapshot.prefix.any { it.id.value == row.getString("message_id") } }
+                    check(currentAssets.map { it.toString() } == snapshot.attachments.map { it.toString() })
+                    if (!stablePrefixOnly) check(archives(db).map { it.toString() } == snapshot.archives.map { it.toString() })
                     snapshot.history.forEachIndexed { index, message ->
                         check(MessageVideoInputCodec.encode(message, SQLiteMessageVideoStore.readVerified(db, message)) ==
                             MessageVideoInputCodec.encode(message, snapshot.inputs[index])) { "来源视频或witness已变化" }

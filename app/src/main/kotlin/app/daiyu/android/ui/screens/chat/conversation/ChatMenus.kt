@@ -202,9 +202,15 @@ internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, 
                 Triple("分支", DaiyuIcons.Branch, actions.onBranch),
                 Triple("删除", DaiyuIcons.Delete, actions.onDeleteTurn),
             ).forEach { (label, icon, callback) ->
+                val enabled = when (label) {
+                    "复制" -> true
+                    "分支" -> actions.messageBranchEnabled
+                    else -> actions.messageActionsEnabled
+                }
                 val color = if (label == "删除") MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.onSurface
                 Row(Modifier.fillMaxWidth().heightIn(min = 38.dp).clip(RoundedCornerShape(11.dp))
-                    .clickable { onDismiss(); callback(id) }.padding(horizontal = 10.dp, vertical = 8.dp),
+                    .alpha(if (enabled) 1f else .38f)
+                    .clickable(enabled = enabled) { onDismiss(); callback(id) }.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     Icon(icon, null, Modifier.size(17.dp), tint = color)
                     Text(label, style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp), color = color)

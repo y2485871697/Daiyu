@@ -650,7 +650,20 @@ GENERATION_PORT_MODULES = (
 )
 
 
+MESSAGE_ACTION_PLATFORM_CLASSES = ('app.daiyu.android.ControllerMessageActionsTest', 'app.daiyu.android.MessageActionsActivityTest', 'app.daiyu.android.MessageConfirmationActivityTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageActionBarLayoutTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageActionAvailabilityTest')
+MESSAGE_ACTION_MODULES = (
+    "test_message_generation_actions_contract", "test_message_action_snapshot_admission_contract",
+    "test_message_action_scroll_contract", "test_message_confirmation_contract",
+    "test_branch_configuration_inheritance_contract", "test_message_timestamp_style_contract",
+    "test_record_tool_tests_scope",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MESSAGE_ACTION_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *MESSAGE_ACTION_MODULES, "-v"], "message-actions-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(GENERATION_PORT_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *GENERATION_PORT_MODULES, "-v"], "generation-port-targeted"

@@ -1,0 +1,97 @@
+"""Generating message actions use native disabled state and an independent stable-prefix branch."""
+from pathlib import Path
+import importlib.util
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
+
+class MessageGenerationActionsContract(unittest.TestCase):
+    def test_native_action_bar_and_long_press_menu_share_capability(self):
+        bar = (SRC / "ui/screens/chat/conversation/MessageActionBar.kt").read_text()
+        self.assertIn("messageActionsEnabled && actions.messageActionsEnabled", bar)
+        for call in ("onEditUser", "onSpeak", "onRegenerate", "onDeleteTurn"):
+            self.assertIn("actions." + call + "(id) }, enabled = actionsEnabled", bar)
+        self.assertIn("if (actionsEnabled) 1f else .38f", bar)
+        self.assertIn("branchEnabled && actions.messageBranchEnabled", bar)
+        menu = (SRC / "ui/screens/chat/conversation/ChatMenus.kt").read_text().split("internal fun UserTurnMenu", 1)[1].split("internal fun ChatVoiceModeMenu", 1)[0]
+        self.assertIn('"复制" -> true', menu)
+        self.assertIn('"分支" -> actions.messageBranchEnabled', menu)
+        self.assertIn("else -> actions.messageActionsEnabled", menu)
+        self.assertIn(".clickable(enabled = enabled)", menu)
+
+    def test_host_projects_real_admission_and_blocks_old_mutation_gestures(self):
+        activity = (SRC / "MainActivity.kt").read_text()
+        self.assertIn("messageActionsEnabled = controller.messageMutationsAvailable()", activity)
+        self.assertIn("messageBranchEnabled = controller.messageBranchAvailable()", activity)
+        self.assertIn("controller.loadMessageBranchSnapshot(owner)", activity)
+        for gate in ("return@regenerate", "return@delete"):
+            self.assertIn("if (!controller.messageMutationsAvailable()) " + gate, activity)
+        host = (SRC / "ControllerMessageActions.kt").read_text()
+        self.assertIn("action != MessageAction.BRANCH && !controller.messageMutationsAvailable()", host)
+
+    def test_live_branch_uses_an_independent_worker_and_lifetime_pin(self):
+        controller = (SRC / "ChatController.kt").read_text()
+        self.assertIn("private val messageBranchExecutor=Executors.newSingleThreadExecutor()", controller)
+        snapshot = controller.split("internal fun loadMessageBranchSnapshot", 1)[1].split("internal data class RegenerationPreview", 1)[0]
+        self.assertIn("messageBranchExecutor.execute", snapshot)
+        self.assertIn("messageActionReaders++", snapshot)
+        self.assertIn("messageActionReaders--", snapshot)
+        action = controller.split("internal fun messageAction(action:", 1)[1].split("internal fun skillManagement", 1)[0]
+        self.assertIn("val actionExecutor = if (stableBranch) messageBranchExecutor else executor", action)
+        self.assertIn("if (stableBranch) messageActionReaders++", action)
+        self.assertIn("if (stableBranch) messageActionReaders--", action)
+        reader = controller.split("private fun readBranchGenerationOriginal", 1)[1].split("private val branchGenerationAssets", 1)[0]
+        self.assertIn("retained.openOutputs", reader)
+        self.assertIn(".use { it.readBackup(reference) }", reader)
+        self.assertNotIn("generationOutputReaders", reader)
+
+    def test_branch_capability_is_prefix_scoped_and_not_mutation_authority(self):
+        store = (SRC / "storage/MessageActionStore.kt").read_text()
+        self.assertIn("branchPrefixSize: Int? = null", store)
+        self.assertIn("all.takeWhile { it.status != RunStatus.RUNNING }", store)
+        self.assertIn("ContextRevision.digest(prefix) == target.revision", store)
+        self.assertIn('require(target.branchPrefixSize == null)', store)
+        branch = (SRC / "context/ProductionConversationBranch.kt").read_text()
+        self.assertIn("if (!stablePrefixOnly) require(original.none", branch)
+        self.assertIn("checkNotNull(selectPrefix).invoke(currentHistory) == snapshot.prefix", branch)
+        self.assertIn("if (!stablePrefixOnly) check(archives(db)", branch)
+        self.assertIn("snapshot.history.forEachIndexed", branch)
+        static = (SRC / "backup/StaticGenerationBranch.kt").read_text()
+        self.assertIn("capture.selectedCalls", static)
+        self.assertIn("selectedGeneration(BackupGenerationCodec.export", static)
+
+    def test_held_model_and_real_activity_regressions_are_wired(self):
+        tests = ROOT / "app/src/androidTest/kotlin/app/daiyu/android"
+        controller = (tests / "ControllerMessageActionsTest.kt").read_text()
+        self.assertIn("fun testStableBranchCompletesWhileTheSourceModelIsStillHeld()", controller)
+        self.assertIn("assertEquals(1L, release.count)", controller)
+        self.assertIn("fun testBranchOnlyCapabilityCannotBeUsedForIdleHistoryMutation()", controller)
+        activity = (tests / "MessageActionsActivityTest.kt").read_text()
+        self.assertIn("fun testGeneratingActivityOnlyAllowsCopyAndActualBranchWithoutTheSnapshotDialog()", activity)
+        self.assertIn("clipboard.primaryClip", activity)
+        self.assertIn("session.cancelled.count", activity)
+        ui = (tests / "ui/screens/chat/conversation/MessageActionAvailabilityTest.kt").read_text()
+        self.assertIn("assertIsNotEnabled().performTouchInput", ui)
+        self.assertIn("enabled = true", ui)
+        self.assertIn("UserTurnMenu", ui)
+
+    def test_exact_five_class_smoke_scope_preserves_full_fallback(self):
+        spec = importlib.util.spec_from_file_location("message_action_recorder", ROOT / "scripts/acceptance/record_tool_tests.py")
+        recorder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recorder)
+        classes = recorder.MESSAGE_ACTION_PLATFORM_CLASSES
+        self.assertEqual(5, len(classes))
+        for chosen in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(chosen)))
+            self.assertEqual("message-actions-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.MESSAGE_ACTION_MODULES, "-v"], command)
+        for chosen in (classes[:-1], (*classes, classes[0]), (*classes, "app.daiyu.android.OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(chosen)))[1])
+        for mode in ("compile", "candidate", "daily", "release"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=",".join(classes)))[1])
+        smoke = (ROOT / "scripts/smoke_boot.sh").read_text()
+        self.assertIn("message_action_sources if message_action_only", smoke)
+
+if __name__ == "__main__":
+    unittest.main()

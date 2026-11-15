@@ -387,9 +387,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         authorize: (SQLiteDatabase) -> Unit,
         cancelled: () -> Boolean,
         copyAssets: (List<Message>, List<Message>) -> List<Message>,
-        selectPrefix: ((List<Message>) -> List<Message>)? = null): BranchLocator =
+        selectPrefix: ((List<Message>) -> List<Message>)? = null,
+        stablePrefixOnly: Boolean = false): BranchLocator =
         ProductionConversationBranch(store, blobs, transactions, videos, generation, cancelled)
-            .branch(id, through, authorize, copyAssets, selectPrefix)
+            .branch(id, through, authorize, copyAssets, selectPrefix, stablePrefixOnly)
 
     /** Materializes a true conversation copy. All IDs/run IDs are remapped, original is unchanged. */
     fun branch(id: ConversationId, through: MessageId,

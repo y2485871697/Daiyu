@@ -3472,6 +3472,8 @@ class MainActivity : ComponentActivity() {
         val renderedSpeed = confirmedGptSpeed
         val renderedSpeedConversation = selected?.id?.value
         return ChatScreenActions(
+        messageActionsEnabled = controller.messageMutationsAvailable(),
+        messageBranchEnabled = controller.messageBranchAvailable(),
         onOpenWorkspace = { if (currentChat()) openConversationWorkspace() },
         onReferenceShortcut = { trigger, expected ->
             if (editorMatches() && inlineMessageEditor == null && chatState.composer.enabled && draft == expected)
@@ -3540,7 +3542,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         },
-        onRegenerate = { id ->
+        onRegenerate = regenerate@{ id ->
+            if (!controller.messageMutationsAvailable()) return@regenerate
             val target = actionSnapshot?.renderedTargets?.get(id) ?: actionSnapshot?.targets?.get(id)
             val index = chatState.turns.indexOfFirst { it.matchesKey(id) }
             if (target != null && index >= 0 && chatState.turns.drop(index + 1).any { it is ChatTurnUi.User }) {
@@ -3548,7 +3551,7 @@ class MainActivity : ComponentActivity() {
                     action = { messageCallbacks.onRegenerate(id) }, showCloseButton = false, secondaryCancel = true)
             } else messageCallbacks.onRegenerate(id)
         }, onSpeak = speak@{ id ->
-            if (displayWindow != null || !activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
+            if (!controller.messageMutationsAvailable() || displayWindow != null || !activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
                 speechHost.owner != renderedSpeechOwner || selected?.id?.value != renderedConversation ||
                 editorGeneration != renderedEditorGeneration) return@speak
             val playback = speechHost.state.value
@@ -3562,13 +3565,41 @@ class MainActivity : ComponentActivity() {
                 }
             }
         },
-        onBranch = messageCallbacks.onBranch, onEditUser = messageCallbacks.onEditUser,
+        onBranch = branch@{ id ->
+            if (!controller.messageBranchAvailable() || !editorMatches() || !voiceForeground ||
+                retainedPage != "chat" || sidebarVisible || displayWindow != null) return@branch
+            if (actionSnapshot != null && controller.messageMutationsAvailable()) messageCallbacks.onBranch(id)
+            else {
+                val owner = selected?.id ?: return@branch
+                val rows = shown.map { it.second }
+                controller.loadMessageBranchSnapshot(owner) { snapshot ->
+                    if (editorMatches() && selected?.id == owner && messageActionVisit === renderedActionVisit &&
+                        retainedPage == "chat" && !sidebarVisible && voiceForeground && snapshot != null &&
+                        snapshot.matchesRendered(rows.filter { it.id.value in snapshot.rowRevisions })) {
+                        messageActionHost.bind(snapshot,
+                            isCurrent = { activityUsable() && selectionReady && selected?.id == owner &&
+                                messageActionVisit === renderedActionVisit && editorGeneration == renderedEditorGeneration &&
+                                draftRevision == renderedDraftRevision && inlineMessageEditor?.visit === renderedInlineVisit &&
+                                retainedPage == "chat" && !sidebarVisible && voiceForeground && displayWindow == null },
+                            result = { outcome -> guard {
+                                when (outcome) {
+                                    is MessageActionResult.Branch -> select(outcome.conversation)
+                                    is MessageActionResult.Unknown -> { refreshUnknownBranchOutcome(); toast(outcome.reason) }
+                                    is MessageActionResult.Rejected -> toast(outcome.reason)
+                                    else -> Unit
+                                }
+                            } }).onBranch(id)
+                    }
+                }
+            }
+        }, onEditUser = messageCallbacks.onEditUser,
         editingMessageKey = inlineMessageEditor?.key,
         onCancelMessageEdit = { if (currentChat() && editorMatches() && renderedInlineVisit != null &&
             inlineMessageEditor?.visit === renderedInlineVisit) {
             clearInlineMessageEditor(); publishChat(rowsChanged = false)
         } },
-        onDeleteTurn = { id ->
+        onDeleteTurn = delete@{ id ->
+            if (!controller.messageMutationsAvailable()) return@delete
             val firstSourceKey = chatState.turns.firstOrNull { it.matchesKey(id) }?.listKey ?: id
             prompt = ConfirmPrompt("删除这条消息及后面的内容？", "", "删除", true,
                 action = { messageCallbacks.onDeleteTurn(firstSourceKey) }, showCloseButton = false, deletionAppearance = true)

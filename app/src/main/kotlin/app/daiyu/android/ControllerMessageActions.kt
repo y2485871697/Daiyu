@@ -35,6 +35,7 @@ internal class ControllerMessageActionHost(private val controller: ChatControlle
             images: List<app.daiyu.android.media.ImageAttachment> = emptyList(),
             retainedImages: List<app.daiyu.android.domain.MessageImageReference>? = null) {
             if (lease !== token || !isCurrent()) return
+            if (action != MessageAction.BRANCH && !controller.messageMutationsAvailable()) return
             val target: MessageActionTarget? = if (action == MessageAction.RETRY_STEP) snapshot?.steps?.get(id)
                 else (snapshot?.renderedTargets?.get(id) ?: snapshot?.targets?.get(id))
             if (target == null) {

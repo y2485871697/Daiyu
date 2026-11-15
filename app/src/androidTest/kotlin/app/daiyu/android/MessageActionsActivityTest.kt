@@ -31,6 +31,54 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
         }
     }
 
+    fun testGeneratingActivityOnlyAllowsCopyAndActualBranchWithoutTheSnapshotDialog() {
+        val (conversation, user) = seed()
+        mainThread { activity.select(conversation) }; readySnapshot()
+        val session = fixture.session("source answer", held = true, holdSeconds = 60)
+        fixture.database.draft(conversation.id, "held message")
+        val accepted = java.util.concurrent.CountDownLatch(1)
+        mainThread {
+            assertTrue(fixture.controller.sendText(conversation, 1, 1, "held message") { accepted.countDown() })
+        }
+        assertTrue(accepted.await(15, java.util.concurrent.TimeUnit.SECONDS))
+        assertTrue(session.entered.await(15, java.util.concurrent.TimeUnit.SECONDS))
+        try {
+            awaitControl("generating controls disabled") { !retainedControls(activity).messageActionsEnabled }
+            val source = checkNotNull(fixture.controller.active)
+            val controls = retainedControls(activity)
+            assertTrue(controls.messageBranchEnabled)
+            mainThread {
+                controls.onDeleteTurn(user.id.value)
+                controls.onEditUser(user.id.value)
+                controls.onRegenerate(user.id.value)
+                controls.onSpeak(user.id.value)
+                controls.onCopy(user.id.value)
+            }
+            assertNull(field("prompt")); assertNull(call("getInlineMessageEditor"))
+            var copied = ""
+            mainThread {
+                val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+                controls.onBranch(user.id.value)
+            }
+            assertEquals("original user", copied)
+            awaitControl("branch selected while model remains held") {
+                val current = field("chatState") as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+                current.conversationKey != null && current.conversationKey != conversation.id.value
+            }
+            assertEquals(1L, session.release.count)
+            assertEquals(source.id, fixture.controller.active?.id)
+            assertEquals(1L, session.cancelled.count)
+            val branches = fixture.database.conversations().filter { it.id != conversation.id }
+            assertEquals(1, branches.size)
+            assertEquals(listOf("original user"), fixture.database.messages(branches.single().id).map {
+                it.second.blocks.filterIsInstance<MessageBlock.Text>().single().text
+            })
+            assertNull(field("prompt")); assertEquals(1, fixture.opens.get())
+        } finally { session.release.countDown() }
+        awaitControl("source run drained") { fixture.controller.active == null }
+    }
+
     fun testActualEditCallbackFillsComposerAndCancelRestoresDraftAndHistory() {
         val (conversation, user) = seed()
         mainThread { activity.select(conversation) }; readySnapshot()

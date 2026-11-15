@@ -400,6 +400,7 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
+    private val messageBranchExecutor=Executors.newSingleThreadExecutor()
     private val executor=Executors.newSingleThreadExecutor()
     private val screenshotExecutor=Executors.newSingleThreadExecutor()
     private val conversationConfigurationExecutor=Executors.newSingleThreadExecutor()
@@ -2194,6 +2195,10 @@ class ChatController internal constructor(private val application:Application,
     private fun idleAvailable() = !closed && ready && !conversationConfigurations.occupied && !preparing && !dataBusy && catalogDeletionReaders == 0 && active==null &&
         resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && pendingPlatformAction==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
+    @Synchronized internal fun messageMutationsAvailable(): Boolean = idleAvailable() && !hasLiveChildTasks()
+    @Synchronized internal fun messageBranchAvailable(): Boolean = !closed && ready && !recoveryFailed &&
+        !dataBusy && !preparing && !conversationConfigurations.occupied && catalogDeletionReaders == 0 &&
+        problem?.startsWith("会话恢复失败") != true
     @Synchronized internal fun taskConfigurationBusy(): Boolean = preparing || active != null ||
         resources != null || generationEntry != null || virtualDisplayEntry != null || guiEntry != null ||
         generationReaders > 0 || pendingShizuku != null || pendingPlatformAction != null ||
@@ -5096,7 +5101,7 @@ class ChatController internal constructor(private val application:Application,
                 } catch (_: Exception) { problem = "临时语音清理未完成" }
                 questionStore?.close(); database.close(); runtimeStore?.close(); runtimeStore=null
             }
-            finally {conversationConfigurationExecutor.shutdown();modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();screenshotExecutor.shutdown();executor.shutdown();closeDone.countDown()}
+            finally {conversationConfigurationExecutor.shutdown();modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();screenshotExecutor.shutdown();messageBranchExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
     private val staticGenerationAssets by lazy { app.daiyu.android.media.StaticGenerationAssets(
@@ -5108,6 +5113,24 @@ class ChatController internal constructor(private val application:Application,
         historicalOriginal = { neutralBackup.historicalGenerationOriginal(it) },
         lookup = { neutralBackup.findStaticGeneration(it) },
         cancelled = { synchronized(this) { closed } }) }
+    private fun readBranchGenerationOriginal(reference: app.daiyu.android.storage.GenerationOutputReference): ByteArray {
+        val scope = checkNotNull(GenerationSettingsStore(application).readAccountScope())
+        check(scope == reference.accountScope)
+        val binding = GenerationAttemptBinding(reference.conversationId, reference.assistantMessageId,
+            reference.runId, reference.toolCallId, reference.toolName)
+        val retained = retainGenerationResources(scope)
+        return retained.openOutputs(GenerationAssetOwner(scope, binding)).use { it.readBackup(reference) }
+    }
+    private val branchGenerationAssets by lazy { app.daiyu.android.backup.StaticGenerationBranch(
+        staticGenerationAssets,
+        account = { checkNotNull(GenerationSettingsStore(application).readAccountScope()) },
+        liveOriginal = ::readBranchGenerationOriginal,
+        historicalOriginal = { neutralBackup.historicalGenerationOriginal(it) },
+        lookup = { neutralBackup.findStaticGeneration(it) },
+        cancelled = { synchronized(this) { closed } }) }
+    private val runningBranchStore by lazy { MessageActionStore(database, contextService, messageImageAssets,
+        app.daiyu.android.backup.MessageVideoBackupAssets(videoAttachments.store), branchGenerationAssets,
+        cancelled = { synchronized(this) { closed } }, draftImages = imageAttachments.store) }
     private val messageActionStore by lazy { MessageActionStore(database, contextService, messageImageAssets,
         app.daiyu.android.backup.MessageVideoBackupAssets(videoAttachments.store), staticGenerationBranch,
         cancelled = { synchronized(this) { closed } }, draftImages = imageAttachments.store) }
@@ -5135,6 +5158,28 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
 
+    internal fun loadMessageBranchSnapshot(owner: ConversationId,
+        complete: (MessageActionSnapshot?) -> Unit): Boolean {
+        synchronized(this) {
+            if (!messageBranchAvailable()) return false
+            messageActionReaders++
+        }
+        try { messageBranchExecutor.execute {
+            val snapshot = runCatching { runningBranchStore.snapshot(owner, branchOnly = true) }.getOrNull()
+            handler.post {
+                val deliver = synchronized(this) {
+                    messageActionReaders--
+                    if (closed) { closeStorageWhenIdle(); false } else true
+                }
+                if (deliver) complete(snapshot)
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { messageActionReaders--; if (closed) closeStorageWhenIdle() }
+            return false
+        }
+        return true
+    }
+
     internal data class RegenerationPreview(val target: MessageActionTarget, val assistantId: String? = null)
     private var regenerationPreview: RegenerationPreview? = null
     @Synchronized internal fun regenerationPreview(): RegenerationPreview? = regenerationPreview
@@ -5150,14 +5195,18 @@ class ChatController internal constructor(private val application:Application,
         retainedImages: List<app.daiyu.android.domain.MessageImageReference>? = null,
         complete: (MessageActionResult) -> Unit): Boolean {
         val retainedImageSelection = retainedImages?.toList()
+        val stableBranch = action == MessageAction.BRANCH && target.branchPrefixSize != null
         synchronized(this) {
-            if (!idleAvailable() || hasLiveChildTasks()) return false
+            if (stableBranch) { if (!messageBranchAvailable()) return false }
+            else if (!idleAvailable() || hasLiveChildTasks()) return false
             if ((action == MessageAction.RETRY_STEP) != (target.toolCallId != null)) return false
             if (action == MessageAction.REGENERATE) regenerationPreview = RegenerationPreview(target)
+            if (stableBranch) messageActionReaders++
             dataBusy = true
         }
         notifyChanged()
-        try { executor.execute {
+        val actionExecutor = if (stableBranch) messageBranchExecutor else executor
+        try { actionExecutor.execute {
             var changed = false
             var acceptedAssistantId: String? = null
             var branchReasoning: app.daiyu.android.delegation.ReasoningEffort? = null
@@ -5188,7 +5237,7 @@ class ChatController internal constructor(private val application:Application,
                         MessageActionResult.EditDraft(it.text, target, it.videos)
                     }
                     MessageAction.BRANCH -> {
-                        val copy = messageActionStore.branch(target); changed = true
+                        val copy = (if (stableBranch) runningBranchStore else messageActionStore).branch(target); changed = true
                         if (retainBranchConfiguration(copy.id)) MessageActionResult.Branch(copy)
                         else branchUnknown(app.daiyu.android.context.BranchLocator(copy.id, emptyList()), false)
                     }
@@ -5249,6 +5298,7 @@ class ChatController internal constructor(private val application:Application,
                         if (result is MessageActionResult.Regenerated && result.outcome == RegenerationSendOutcome.ACCEPTED && acceptedAssistantId != null)
                             regenerationPreview?.copy(assistantId = acceptedAssistantId) else null
                     dataBusy = false
+                    if (stableBranch) messageActionReaders--
                     if (changed) dataRevision++
                     if (closed) { closeStorageWhenIdle(); false } else true
                 }
@@ -5258,6 +5308,7 @@ class ChatController internal constructor(private val application:Application,
             synchronized(this) {
                 if (regenerationPreview?.target === target) regenerationPreview = null
                 dataBusy = false
+                if (stableBranch) { messageActionReaders--; if (closed) closeStorageWhenIdle() }
             }; return false
         }
         return true

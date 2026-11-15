@@ -13,7 +13,8 @@ import app.daiyu.android.media.MessageImageReference as MediaReference
  * The revision covers all authoritative rows, never only the visible page. */
 internal data class MessageActionTarget(val conversationId: ConversationId, val messageId: MessageId,
     val ownerId: MessageId, val runId: RunId, val role: String, val revision: String,
-    val assistantId: String?, val toolCallId: ToolCallId? = null, val segmentIndex: Int = 0)
+    val assistantId: String?, val toolCallId: ToolCallId? = null, val segmentIndex: Int = 0,
+    val branchPrefixSize: Int? = null)
 internal data class MessageActionSnapshot(val conversationId: ConversationId, val revision: String,
     val targets: Map<String, MessageActionTarget>, val steps: Map<String, MessageActionTarget> = emptyMap(),
     val rowRevisions: Map<String, String> = emptyMap(),
@@ -34,14 +35,16 @@ internal class MessageActionStore(private val database: ConversationDatabase,
     private val draftImages: app.daiyu.android.media.ImageAttachmentStore? = null) {
     private val transactions = DatabaseTransactions { database.writableDatabase }
 
-    fun snapshot(id: ConversationId): MessageActionSnapshot = transactions.run { db ->
+    fun snapshot(id: ConversationId, branchOnly: Boolean = false): MessageActionSnapshot = transactions.run { db ->
         val binding = binding(db, id)
-        val history = ContextService.read(db, id)
+        val all = ContextService.read(db, id)
+        val history = if (branchOnly) all.takeWhile { it.status != RunStatus.RUNNING } else all
         val revision = ContextRevision.digest(history)
         val targets = linkedMapOf<String, MessageActionTarget>()
         history.forEach { owner ->
             fun add(id: MessageId, role: String) {
-                val target = MessageActionTarget(owner.conversationId, id, owner.id, owner.runId, role, revision, binding)
+                val target = MessageActionTarget(owner.conversationId, id, owner.id, owner.runId, role, revision, binding,
+                    branchPrefixSize = history.size.takeIf { branchOnly })
                 val previous = targets[id.value]
                 require(previous == null || previous.runId == target.runId && previous.role == target.role) {
                     "消息身份不唯一；未开放操作"
@@ -60,7 +63,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
             counts[row.id] = segment + 1
             val owner = history[entry.sourcePhysicalIndex]
             val target = MessageActionTarget(row.conversationId, row.id, owner.id, row.runId, row.role,
-                revision, binding, segmentIndex = segment)
+                revision, binding, segmentIndex = segment, branchPrefixSize = history.size.takeIf { branchOnly })
             val key = app.daiyu.android.timeline.TimelineAnchor(row.conversationId.value, row.runId.value,
                 row.id.value, segment).listKey
             renderedTargets[key] = target
@@ -101,14 +104,15 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         // Do not wrap the two-phase ContextService entry in transactions.run: safe live readers
         // reject an outer transaction, and acquiring their fence there reverses the lock order.
         val through = transactions.run { db ->
-            val history = authorize(db, target)
+            val history = authorizeBranch(db, target)
             val prefix = MessageHistoryCut.prefix(history, MessageHistoryCut.index(history, target) + 1)
             require(prefix.isNotEmpty())
             prefix.last().id
         }
         val locator = context.branchWithStatic(target.conversationId, through, videos, staticGeneration,
-            authorize = { authorize(it, target) }, cancelled = cancelled, copyAssets = ::copyImages,
-            selectPrefix = { history -> MessageHistoryCut.prefix(history, MessageHistoryCut.index(history, target) + 1) })
+            authorize = { authorizeBranch(it, target) }, cancelled = cancelled, copyAssets = ::copyImages,
+            selectPrefix = { history -> MessageHistoryCut.prefix(history, MessageHistoryCut.index(history, target) + 1) },
+            stablePrefixOnly = target.branchPrefixSize != null)
         // Post-COMMIT presentation must not lose the already allocated UNKNOWN locator.
         return try { transactions.run { conversation(it, locator.conversationId) } }
         catch (failure: Exception) { throw app.daiyu.android.context.BranchOutcomeUnknown(locator, failure) }
@@ -253,7 +257,22 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         throw IllegalArgumentException("此步骤不支持重试，请核实结果后新建请求")
     }
 
+    private fun authorizeBranch(db: SQLiteDatabase, target: MessageActionTarget): List<Message> {
+        val count = target.branchPrefixSize ?: return authorize(db, target)
+        require(binding(db, target.conversationId) == target.assistantId) { "助手所有者已变化；请刷新" }
+        val history = ContextService.read(db, target.conversationId)
+        require(count > 0 && count <= history.size)
+        val prefix = history.take(count)
+        require(prefix.none { it.status == RunStatus.RUNNING } && ContextRevision.digest(prefix) == target.revision) {
+            "分支来源消息已变化；请刷新后重试"
+        }
+        require(prefix.any { it.id == target.ownerId && it.runId == target.runId && it.conversationId == target.conversationId })
+        require(displayed(prefix, target).role == target.role)
+        return prefix
+    }
+
     private fun authorize(db: SQLiteDatabase, target: MessageActionTarget): List<Message> {
+        require(target.branchPrefixSize == null) { "分支快照不能修改消息" }
         require(binding(db, target.conversationId) == target.assistantId) { "助手所有者已变化；请刷新" }
         val history = ContextService.read(db, target.conversationId)
         require(ContextRevision.digest(history) == target.revision) { "消息或历史版本已变化；请刷新后重试" }

@@ -609,6 +609,70 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(0, f.opens.get())
     }
 
+    fun testStableBranchCompletesWhileTheSourceModelIsStillHeld() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val f = fresh { _, sink ->
+            entered.countDown(); check(release.await(30, TimeUnit.SECONDS))
+            sink(ModelEvent.TextFinal("answer", "source completed"))
+        }
+        val owner = seed(f)
+        val oldHistory = history(f, owner.id)
+        f.db.draft(owner.id, "new held request")
+        val accepted = CountDownLatch(1)
+        main { assertTrue(f.controller.sendText(owner, 1, 1, "new held request") { accepted.countDown() }) }
+        await(accepted); await(entered)
+        try {
+            val active = checkNotNull(f.controller.active)
+            val before = history(f, owner.id)
+            val done = CountDownLatch(1); val captured = AtomicReference<MessageActionSnapshot?>()
+            main {
+                assertFalse(f.controller.messageMutationsAvailable())
+                assertTrue(f.controller.messageBranchAvailable())
+                assertTrue(f.controller.loadMessageBranchSnapshot(owner.id) { captured.set(it); done.countDown() })
+            }
+            await(done)
+            val snapshot = checkNotNull(captured.get())
+            assertFalse(snapshot.targets.containsKey(active.id.value))
+            val target = snapshot.targets.getValue(oldHistory.last().id.value)
+            assertNotNull(target.branchPrefixSize)
+            val copy = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
+            assertEquals(1L, release.count)
+            assertEquals(active.id, f.controller.active?.id)
+            assertEquals(active.runId, f.controller.active?.runId)
+            assertEquals(before, history(f, owner.id))
+            assertEquals(oldHistory.map { it.blocks }, history(f, copy.id).map { it.blocks })
+            assertEquals(1, f.opens.get())
+            main {
+                for (operation in listOf(MessageAction.EDIT_USER, MessageAction.SAVE_EDIT,
+                    MessageAction.DELETE_TURN, MessageAction.REGENERATE, MessageAction.RETRY_STEP)) {
+                    assertFalse(f.controller.messageAction(operation, target) { fail("live mutation admitted") })
+                }
+            }
+            // The live tail may grow without invalidating the frozen, physical prefix.
+            f.db.writableDatabase.execSQL("UPDATE messages SET error=? WHERE id=?", arrayOf("later tail", active.id.value))
+            val again = action(f, MessageAction.BRANCH, target)
+            assertTrue(again is MessageActionResult.Branch)
+            val oldUser = oldHistory.first()
+            f.db.writableDatabase.execSQL("UPDATE messages SET error=? WHERE id=?", arrayOf("changed prefix", oldUser.id.value))
+            assertTrue(action(f, MessageAction.BRANCH, target) is MessageActionResult.Rejected)
+            f.db.writableDatabase.execSQL("UPDATE messages SET error=NULL WHERE id IN (?,?)",
+                arrayOf(oldUser.id.value, active.id.value))
+            assertEquals(1, f.opens.get())
+        } finally { release.countDown() }
+        awaitControl("source run completes independently") { f.controller.active == null }
+    }
+
+    fun testBranchOnlyCapabilityCannotBeUsedForIdleHistoryMutation() {
+        val f = fresh(); val owner = seed(f)
+        val done = CountDownLatch(1); val captured = AtomicReference<MessageActionSnapshot?>()
+        main { assertTrue(f.controller.loadMessageBranchSnapshot(owner.id) { captured.set(it); done.countDown() }) }
+        await(done)
+        val target = checkNotNull(captured.get()).targets.values.first()
+        val before = history(f, owner.id)
+        assertTrue(action(f, MessageAction.DELETE_TURN, target) is MessageActionResult.Rejected)
+        assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
+    }
+
     fun testActiveRunRejectsHistoryMutationAdmission() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         val f = fresh { _, sink -> entered.countDown(); check(release.await(15, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("answer", "done")) }

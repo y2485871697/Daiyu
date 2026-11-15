@@ -202,7 +202,6 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
     private var lastModel: PetModelSelection? = null
     private val model = EditText(context).apply { manageInput(); hint = "独立model ID"; isSingleLine = true }
     private val scale = SeekBar(context).apply { max = 26 }
-    private val memories = TextView(context)
     private val usage = TextView(context)
     private val foods = mutableListOf<View>()
     init {
@@ -262,7 +261,7 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
             }, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             cupboard.addView(row)
         }
-        group("外观与记忆")
+        group("外观")
         add(TextView(context).apply { text = "缩放 50%–180%" }); add(scale)
         scale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { if (fromUser) controller.setScale(.5f + progress * .05f) }
@@ -270,8 +269,7 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
             override fun onStopTrackingTouch(bar: SeekBar?) { app.daiyu.android.ui.haptics.TouchHaptics.click(bar) }
         })
         add(Button(context).apply { text = "重置缩放"; setHapticClickListener { controller.setScale(1f) } })
-        add(Button(context).apply { text = "清空记忆并取消当前反应"; setHapticClickListener { controller.clearMemories() } })
-        add(memories); add(usage)
+        add(usage)
     }
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -298,7 +296,6 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
         scale.progress = ((s.settings.scale - .5f) / .05f).roundToInt()
         status.text = snapshot.error ?: "粮食 ${s.satiety}/$PET_MAX_SATIETY (${petSatietyPercent(s.satiety)}%) · ${petSatietyBand(s.satiety)}${if (s.thinking) " · 思考中" else ""}"
         foods.forEach { it.isEnabled = s.settings.enabled && !s.thinking && !snapshot.closed }
-        memories.text = if (s.memories.isEmpty()) "暂无记忆" else s.memories.joinToString("\n") { "[${it.mood}] ${it.speech}" }
         val known = s.usage.filter { it.inputTokens != null && it.outputTokens != null }
         usage.text = "费用归属：pet（非主Agent）\n请求${s.usage.size}，有完整用量${known.size}；未报告≠免费\n" +
             "已报告输入${known.sumOf { it.inputTokens ?: 0 }} / 输出${known.sumOf { it.outputTokens ?: 0 }} Token；无价格不估算金额"

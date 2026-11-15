@@ -57,7 +57,7 @@ jobs:
         run: |
           mkdir -p pet-presentation-checks
           set -o pipefail
-          PYTHONPATH=tests python3 -B -m unittest test_pet_presentation_contract test_pet_presentation_smoke_scope test_pet_error_logging_contract test_pet_settings_disclosure_contract test_record_tool_tests_scope test_acceptance_tool_receipt test_compile_release_contract test_frozen_smoke_source test_diagnostic_smoke_source test_smoke_boot.SourceTests -v 2>&1 | tee pet-presentation-checks/contracts.log
+          PYTHONPATH=tests python3 -B -m unittest test_pet_model_reasoning_contract test_pet_model_smoke_scope test_pet_presentation_contract test_pet_presentation_smoke_scope test_pet_error_logging_contract test_pet_settings_disclosure_contract test_record_tool_tests_scope test_acceptance_tool_receipt test_compile_release_contract test_frozen_smoke_source test_diagnostic_smoke_source test_smoke_boot.SourceTests -v 2>&1 | tee pet-presentation-checks/contracts.log
       - name: 准备既有离线依赖
         run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle -PdaiyuCheckGraph=pet-presentation-checks/prepare-graph.json :app:prepareOfflineSpeechRuntime
       - name: 女仆应用单测与Android声明编译

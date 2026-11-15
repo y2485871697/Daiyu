@@ -48,7 +48,7 @@ class PetControllerTest {
         val before = running(id)
         return c.onRunTransition(before, before.copy(status = RunStatus.COMPLETED), title)
     }
-    @Test fun feedingPersistsIndependentRequestMemoryActionAndUsage() {
+    @Test fun feedingPersistsIndependentRequestActionAndUsageWithoutMemory() {
         val f = Fixture(InMemoryPetStore(initial()))
         assertTrue(f.c.feed(PetFood.BOWL) is PetCommandResult.Applied)
         assertEquals(8_000, f.c.snapshot().state.satiety)
@@ -59,7 +59,7 @@ class PetControllerTest {
         assertEquals(120, request.maxOutputTokens)
         f.model.reply()
         val state = f.c.snapshot().state
-        assertFalse(state.thinking); assertEquals(PetMood.EATING, state.mood); assertEquals(1, state.memories.size)
+        assertFalse(state.thinking); assertEquals(PetMood.EATING, state.mood); assertTrue(state.memories.isEmpty())
         assertTrue(state.satiety < 8_000); assertTrue(state.satiety >= 0)
         assertEquals(100L, state.usage.single().inputTokens)
         assertEquals(PetRequestStatus.COMPLETED, state.usage.single().status)
@@ -84,20 +84,20 @@ class PetControllerTest {
         val restored = Fixture(f.store)
         assertTrue(restored.c.onRunTransition(before, done, "replay") is PetCommandResult.Rejected)
         assertTrue(restored.model.requests.isEmpty())
-        assertEquals(1, restored.c.snapshot().state.memories.size)
+        assertTrue(restored.c.snapshot().state.memories.isEmpty())
         assertEquals(1, restored.c.snapshot().state.completedRuns.size)
     }
-    @Test fun latestPendingWorkAfterFeedRetainsOriginalBehaviourAndTaskWindow() {
+    @Test fun latestPendingWorkAfterFeedRemainsIndependentWithoutTaskHistory() {
         val f = Fixture(InMemoryPetStore(initial()))
         f.c.feed(PetFood.SPOON); f.work("old"); f.work("latest")
         assertEquals(1, f.model.requests.size)
         f.model.reply()
         assertEquals(2, f.model.requests.size)
         assertEquals(PetEvent.WORK_DONE, f.model.requests.last().event)
-        assertTrue(f.model.requests.last().prompt.contains("latest"))
-        assertEquals(listOf("latest"), f.c.snapshot().state.recentTasks.map { it.title })
+        assertFalse(f.model.requests.last().prompt.contains("latest"))
+        assertTrue(f.c.snapshot().state.recentTasks.isEmpty())
         f.model.reply(); f.now += PET_TASK_WINDOW_MS + 1; f.work("after-window")
-        assertEquals(listOf("after-window"), f.c.snapshot().state.recentTasks.map { it.title })
+        assertTrue(f.c.snapshot().state.recentTasks.isEmpty())
     }
     @Test fun synchronousCancelReceiptSurvivesInvalidationWithoutRestoringEffects() {
         val commands: List<(PetController) -> Unit> = listOf(
@@ -145,7 +145,7 @@ class PetControllerTest {
         f.c.setEnabled(false); assertEquals(1, f.voice.stopped)
         f.c.setEnabled(true); f.c.feed(PetFood.GRAIN); f.c.setEnabled(false)
         f.model.reply(1); f.scheduler.fire(1_500, true); f.scheduler.fire(3_100, true)
-        assertEquals(1, f.voice.spoken); assertEquals(1, f.c.snapshot().state.memories.size)
+        assertEquals(1, f.voice.spoken); assertTrue(f.c.snapshot().state.memories.isEmpty())
         assertFalse(f.c.snapshot().state.speechVisible)
     }
     @Test fun restoreInterruptsPendingRequestWithoutFabricatedCompletion() {
@@ -197,4 +197,35 @@ class PetControllerTest {
         assertTrue(g.c.feed(PetFood.BOWL) is PetCommandResult.Failed)
         assertEquals(5_000, g.c.snapshot().state.satiety); assertTrue(g.model.requests.isEmpty())
     }
+    @Test fun petEffortIsFrozenPersistsAndRevokesOnlyItsOldRequest() {
+        val f = Fixture(InMemoryPetStore(initial()))
+        f.c.feed(PetFood.BOWL)
+        val first = f.model.requests.single()
+        f.c.updateSettings(f.c.snapshot().state.settings.copy(reasoningEffort = RequestReasoningEffort.HIGH))
+        assertEquals(1, f.model.cancels)
+        assertEquals(RequestReasoningEffort.OFF, first.reasoningEffort)
+        f.model.reply(0)
+        assertFalse(f.c.snapshot().state.speechVisible)
+        f.c.feed(PetFood.GRAIN)
+        val next = f.model.requests.last()
+        assertEquals(RequestReasoningEffort.HIGH, next.reasoningEffort)
+        assertTrue(next.reasoningAllowed); assertEquals(32_768, next.maxOutputTokens)
+        assertTrue(next.maxOutputTokens > 32_000)
+        assertFalse(next.toolsAllowed); assertFalse(next.webSearchAllowed)
+        f.model.reply(1)
+        assertTrue(f.c.snapshot().state.memories.isEmpty())
+        f.c.close()
+        val restored = Fixture(f.store)
+        assertEquals(RequestReasoningEffort.HIGH, restored.c.snapshot().state.settings.reasoningEffort)
+        assertTrue(restored.c.snapshot().state.memories.isEmpty())
+    }
+    @Test fun safeFailureReasonSurvivesTheControllerBoundary() {
+        val f = Fixture(InMemoryPetStore(initial()))
+        f.c.feed(PetFood.GRAIN)
+        f.model.callbacks.single()(PetModelResult.Failed("模型不支持关闭思考"))
+        assertEquals("桌宠反应失败：模型不支持关闭思考", f.c.snapshot().error)
+        assertFalse(f.c.snapshot().state.speechVisible)
+        assertEquals(PetRequestStatus.FAILED, f.c.snapshot().state.usage.single().status)
+    }
+
 }

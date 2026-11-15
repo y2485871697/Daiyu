@@ -305,7 +305,7 @@ class PetApplicationHostTest : InstrumentationTestCase() {
                 f.model.callbacks[2](reply())
                 assertFalse(f.app.host.snapshot().pet.state.thinking)
                 assertTrue(f.app.host.snapshot().pet.state.speechVisible)
-                assertEquals(1, f.app.host.snapshot().pet.state.memories.size)
+                assertTrue(f.app.host.snapshot().pet.state.memories.isEmpty())
             } finally { f.close() }
         }
     }
@@ -402,7 +402,7 @@ class PetApplicationHostTest : InstrumentationTestCase() {
             releaseNew.countDown()
             assertTrue(newVoice.await(3, TimeUnit.SECONDS))
             val completed = app.host.snapshot().pet.state
-            assertEquals(1, completed.memories.size)
+            assertTrue(completed.memories.isEmpty())
             assertEquals(1, voices.get())
             assertEquals(PetRequestStatus.COMPLETED, completed.usage.last().status)
             assertEquals(11L, completed.usage.last().inputTokens)

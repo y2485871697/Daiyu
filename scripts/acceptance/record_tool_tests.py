@@ -584,7 +584,26 @@ PET_PRESENTATION_MODULES = (
 )
 
 
+PET_MODEL_PLATFORM_CLASSES = (
+    "app.daiyu.android.pet.AndroidPetStoreCapacityTest",
+    "app.daiyu.android.pet.AndroidPetStoreTest",
+    "app.daiyu.android.pet.PetThinkingPickerActivityTest",
+    "app.daiyu.android.pet.PetCupboardDialogTest",
+    "app.daiyu.android.pet.PetApplicationHostTest",
+    "app.daiyu.android.pet.PetHostTest",
+    "app.daiyu.android.IndependentModelProductionTest",
+)
+PET_MODEL_MODULES = (
+    "test_pet_model_reasoning_contract", "test_pet_model_smoke_scope",
+    "test_pet_error_logging_contract", "test_pet_settings_disclosure_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PET_MODEL_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *PET_MODEL_MODULES, "-v"], "pet-model-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == CATALOG_MODEL_EDITOR_PLATFORM_CLASS):
         return [python, "-B", "-m", "unittest", *CATALOG_MODEL_EDITOR_MODULES, "-v"], "catalog-model-editor-targeted"

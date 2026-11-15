@@ -80,7 +80,8 @@ class PetCupboardDialogTest : WiredActivityTestCase() {
         node("pet-cupboard-reset").assertTextEquals("100%  重置")
         node("pet-cupboard-scale").performSemanticsAction(SemanticsActions.SetProgress) { it(65f) }
         node("pet-cupboard-reset").assertTextEquals("65%  重置")
-        reveal("pet-cupboard-clear"); node("pet-cupboard-clear").performClick()
+        ui.onNodeWithText("发言手账").assertDoesNotExist()
+        node("pet-cupboard-clear").assertDoesNotExist()
         mainThread {
             assertTrue(checkNotNull(controller).snapshot().state.memories.isEmpty())
             assertEquals(.65f, checkNotNull(store).load().settings.scale)
@@ -100,19 +101,19 @@ class PetCupboardDialogTest : WiredActivityTestCase() {
 
     fun testHiddenAndDisabledSpriteClosesWindowAndFencesRetainedCallbacks() {
         mount(); open()
-        reveal("pet-cupboard-clear")
-        val oldClear = node("pet-cupboard-clear").fetchSemanticsNode().config[PetCupboardClearAction]
+        reveal("pet-cupboard-scale")
+        val oldScale = node("pet-cupboard-scale").fetchSemanticsNode().config[SemanticsActions.SetProgress].action!!
         mainThread { checkNotNull(layer).visibility = View.GONE }
         node("pet-cupboard").assertDoesNotExist()
         mainThread {
-            oldClear()
-            assertEquals(1, checkNotNull(controller).snapshot().state.memories.size)
+            oldScale(120f)
+            assertEquals(.65f, checkNotNull(controller).snapshot().state.settings.scale)
             checkNotNull(layer).visibility = View.VISIBLE
         }
         open()
         mainThread {
-            oldClear()
-            assertEquals(1, checkNotNull(controller).snapshot().state.memories.size)
+            oldScale(120f)
+            assertEquals(.65f, checkNotNull(controller).snapshot().state.settings.scale)
         }
         node("pet-cupboard").assertExists()
         mainThread { checkNotNull(controller).setEnabled(false) }
@@ -146,7 +147,7 @@ class PetCupboardDialogTest : WiredActivityTestCase() {
                         AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), false) {
                             PetCupboardContent(PetSnapshot(PetState(settings = PetSettings(enabled = true),
                                 memories = List(20) { PetMemory(PetMood.HAPPY, "发言$it", 0, 0, PetEvent.FEED) })),
-                                assets, onFeed = {}, onScale = {}, onClear = {})
+                                assets, onFeed = {}, onScale = {})
                         }
                     }
                 }
@@ -154,9 +155,9 @@ class PetCupboardDialogTest : WiredActivityTestCase() {
             awaitUniqueTag("pet-cupboard")
             reveal("pet-cupboard-food:POT"); node("pet-cupboard-food:POT").assertIsDisplayed()
             reveal("pet-cupboard-scale"); node("pet-cupboard-scale").assertIsDisplayed()
-            reveal("pet-cupboard-clear"); node("pet-cupboard-clear").assertIsDisplayed()
-            node("pet-cupboard").scrollToDescendant(hasText("[happy] 发言19"))
-            ui.onNodeWithText("[happy] 发言19").assertIsDisplayed()
+            node("pet-cupboard-clear").assertDoesNotExist()
+            ui.onNodeWithText("发言手账").assertDoesNotExist()
+            ui.onNodeWithText("[happy] 发言19").assertDoesNotExist()
         }
     }
 }

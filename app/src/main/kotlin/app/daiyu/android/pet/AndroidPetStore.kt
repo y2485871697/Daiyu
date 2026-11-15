@@ -2,6 +2,7 @@ package app.daiyu.android.pet
 
 import android.content.Context
 import app.daiyu.android.domain.pet.*
+import app.daiyu.android.domain.RequestReasoningEffort
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -27,15 +28,12 @@ object PetStateJson {
         val root = JSONObject().put("version", 2).put("settings", JSONObject()
             .put("enabled", settings.enabled).put("workReactions", settings.workReactions)
             .put("globalVisible", settings.globalVisible).put("audioEnabled", settings.audioEnabled)
+            .put("reasoningEffort", settings.reasoningEffort.name)
             .put("scale", settings.scale.toDouble()).put("x", settings.x).put("y", settings.y)
             .put("assistant", settings.model.assistantId).put("provider", settings.model.providerId).put("model", settings.model.modelId))
             .put("satiety", state.satiety).put("mood", state.mood.name).put("speech", state.speech)
             .put("speechVisible", state.speechVisible).put("thinking", state.thinking)
-        root.put("memories", JSONArray().also { a -> state.memories.forEach { m -> a.put(JSONObject()
-            .put("mood", m.mood.name).put("speech", m.speech).put("spent", m.satietySpent)
-            .put("at", m.atMillis).put("event", m.event.name)) } })
-        root.put("tasks", JSONArray().also { a -> state.recentTasks.forEach { t ->
-            a.put(JSONObject().put("title", t.title).put("at", t.atMillis)) } })
+        root.put("memories", JSONArray()).put("tasks", JSONArray())
         root.put("usage", JSONArray().also { a -> state.usage.forEach { u -> a.put(JSONObject()
             .put("id", u.requestId).put("assistant", u.assistantId).put("provider", u.providerId).put("model", u.modelId)
             .put("event", u.event.name).put("status", u.status.name)
@@ -54,11 +52,8 @@ object PetStateJson {
         val s = root.getJSONObject("settings")
         val settings = PetSettings(s.getBoolean("enabled"), s.getBoolean("workReactions"),
             s.getBoolean("globalVisible"), s.getBoolean("audioEnabled"), s.getDouble("scale").toFloat(),
-            s.getInt("x"), s.getInt("y"), PetModelSelection(s.getString("assistant"), s.getString("provider"), s.getString("model")))
-        val memories = root.getJSONArray("memories").objects().map { m -> PetMemory(
-            PetMood.valueOf(m.getString("mood")), m.getString("speech"), m.getInt("spent"),
-            m.getLong("at"), PetEvent.valueOf(m.getString("event"))) }
-        val tasks = root.getJSONArray("tasks").objects().map { PetTask(it.getString("title"), it.getLong("at")) }
+            s.getInt("x"), s.getInt("y"), PetModelSelection(s.getString("assistant"), s.getString("provider"), s.getString("model")),
+            if (s.has("reasoningEffort")) RequestReasoningEffort.valueOf(s.getString("reasoningEffort")) else RequestReasoningEffort.OFF)
         val usage = root.getJSONArray("usage").objects().map { u -> PetUsage(u.getString("id"),
             u.getString("assistant"), u.getString("provider"), u.getString("model"), PetEvent.valueOf(u.getString("event")),
             PetRequestStatus.valueOf(u.getString("status")), if (u.isNull("input")) null else u.getLong("input"),
@@ -67,7 +62,7 @@ object PetStateJson {
             PetCompletedRun(it.getString("conversation"), it.getString("run"))
         }
         return PetState(settings, root.getInt("satiety"), PetMood.valueOf(root.getString("mood")),
-            root.getString("speech"), root.getBoolean("speechVisible"), root.getBoolean("thinking"), memories, tasks, usage, completed)
+            root.getString("speech"), root.getBoolean("speechVisible"), root.getBoolean("thinking"), emptyList(), emptyList(), usage, completed)
     }
     private fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
 }

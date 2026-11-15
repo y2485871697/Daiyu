@@ -1,5 +1,6 @@
 package app.daiyu.android.domain.pet
 
+import app.daiyu.android.domain.RequestReasoningEffort
 import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.RunStatus
 import java.util.UUID
@@ -72,7 +73,8 @@ class PetController(
     @Synchronized fun updateSettings(settings: PetSettings): PetCommandResult {
         if (closed || !operational) return PetCommandResult.Rejected("运行不可用")
         val reset = settings.enabled != state.settings.enabled || settings.model != state.settings.model ||
-            settings.workReactions != state.settings.workReactions
+            settings.workReactions != state.settings.workReactions ||
+            settings.reasoningEffort != state.settings.reasoningEffort
         val base = if (reset) invalidate() else state
         if (!settings.audioEnabled) { cancel(audio); audio = null }
         return result(save(base.copy(settings = settings)))
@@ -135,9 +137,7 @@ class PetController(
     private fun start(event: PetEvent, food: PetFood?, title: String): PetCommandResult {
         generation++; stopEffects()
         val now = clock.nowMillis()
-        val tasks = state.recentTasks.filter { now >= it.atMillis && now - it.atMillis <= PET_TASK_WINDOW_MS && it.title != title }
-        val prepared = state.copy(recentTasks = if (event == PetEvent.WORK_DONE && title.isNotBlank())
-            (listOf(PetTask(title, now)) + tasks).take(8) else tasks)
+        val prepared = state.copy(memories = emptyList(), recentTasks = emptyList())
         val id = newId()
         val prompt = petPrompt(event, prepared, food, title, now)
         val flight = Flight(id, generation, event, food, title, prompt)
@@ -151,7 +151,9 @@ class PetController(
             deadline = scheduler.after(45_000) { synchronized(this) {
                 if (live(flight)) { val handle = modelCancel; complete(flight, PetModelResult.Failed("桌宠请求超时")); cancel(handle) }
             } }
-            val handle = model.complete(PetModelRequest(id, selection, event, prompt, "pet:$id")) { response ->
+            val handle = model.complete(PetModelRequest(id, selection, event, prompt, "pet:$id",
+                maxOutputTokens = if (state.settings.reasoningEffort == RequestReasoningEffort.OFF) 120 else 32_768,
+                reasoningEffort = state.settings.reasoningEffort)) { response ->
                 synchronized(this) { complete(flight, response) }
             }
             if (live(flight)) modelCancel = handle else cancel(handle)
@@ -176,15 +178,14 @@ class PetController(
         if (response is PetModelResult.Failed) {
             val ok = save(state.copy(thinking = false, mood = PetMood.IDLE, usage = state.usage.map {
                 if (it.requestId == flight.id) it.copy(status = PetRequestStatus.FAILED) else it }))
-            if (ok) { error = "桌宠反应失败；未生成记忆/语音"; publish() }
+            if (ok) { error = "桌宠反应失败：${response.reason}"; publish() }
         } else if (response is PetModelResult.Completed) {
             flight.receiptReceived = true
             val reaction = parsePetReaction(response.raw, flight.event, state.satiety, flight.food, flight.title)
             val spent = petSatietyCost(flight.prompt, reaction.speech)
-            val memory = PetMemory(reaction.mood, reaction.speech, spent, clock.nowMillis(), flight.event)
             val ok = save(state.copy(thinking = false, mood = reaction.mood, speech = reaction.speech,
                 speechVisible = true, satiety = (state.satiety - spent).coerceAtLeast(0),
-                memories = (listOf(memory) + state.memories).take(20), usage = state.usage.map {
+                memories = emptyList(), recentTasks = emptyList(), usage = state.usage.map {
                     if (it.requestId == flight.id) it.copy(status = PetRequestStatus.COMPLETED,
                         inputTokens = response.inputTokens, outputTokens = response.outputTokens) else it }))
             if (ok && allowed() && generation == flight.generation) {

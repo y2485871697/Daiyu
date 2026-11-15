@@ -1,16 +1,25 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.domain.RequestReasoningEffort
+import app.daiyu.android.delegation.ReasoningEffort
+import app.daiyu.android.ui.components.ChatThinkingSpeedIcon
+import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
+import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.pet.PetApplicationHost
 import app.daiyu.android.pet.PetHost
@@ -33,7 +42,7 @@ internal fun PetSettingsScreen(host: PetHost, models: IndependentModelSettings,
 }
 
 @Composable
-private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, modifier: Modifier,
+internal fun PetSettingsContent(host: PetHost, model: IndependentModelControls, modifier: Modifier,
     onBack: () -> Unit, onOverlayAllowedChange: (Boolean) -> Unit, onOpenOverlayPermission: () -> Unit) {
     var snapshot by remember(host) { mutableStateOf(host.snapshot()) }
     DisposableEffect(host) {
@@ -42,6 +51,7 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
     }
     var expanded by rememberSaveable(host) { mutableStateOf(false) }
     var showPermission by remember(host) { mutableStateOf(false) }
+    var showThinking by remember(host) { mutableStateOf(false) }
     val settings = snapshot.pet.state.settings
     val enabled = !snapshot.closed
     val colors = MiuixTheme.colorScheme
@@ -86,11 +96,30 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                     SettingsSwitchRow("指定说话模型", model.enabled, enabled && (!model.busy || model.saving),
                         busy = model.saving, tag = "pet-custom-model", onCheckedChange = model.onEnabledChange)
                     SettingsRow("说话模型", summary = model.label ?: "选择模型",
-                        tag = "pet-model-configure", showChevron = true, onClick = if (enabled && !model.busy) model.onChoose else null)
+                        tag = "pet-model-configure", onClick = if (enabled && !model.busy) model.onChoose else null,
+                        trailing = {
+                            Box(Modifier.size(32.dp).testTag("pet-thinking-button")
+                                .semantics {
+                                    contentDescription = "女仆思考等级"
+                                    stateDescription = settings.reasoningEffort.displayName
+                                }.clickable(enabled = enabled) { showThinking = true },
+                                contentAlignment = Alignment.Center) {
+                                ChatThinkingSpeedIcon(null, colors.onSurfaceVariantSummary, Modifier.size(24.dp))
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            DaiyuIcon(DaiyuIcons.ChevronRight, contentDescription = null,
+                                tint = colors.onSurfaceVariantSummary, size = 20.dp,
+                                modifier = Modifier.testTag("pet-model-chevron"))
+                        })
                 }
             }
         }
     }
+    SubAgentThinkingEffortPickerDialog(showThinking && enabled, ReasoningEffort.valueOf(settings.reasoningEffort.name),
+        ReasoningEffort.textChoices(), onDismiss = { showThinking = false }, onEffortChange = { effort ->
+            host.updateSettings(host.snapshot().pet.state.settings.copy(
+                reasoningEffort = RequestReasoningEffort.valueOf(effort.name)))
+        }, mainChat = true)
     if (showPermission) DaiyuConfirmDialog("允许悬浮显示", "需要在系统设置中允许悬浮窗权限。",
         confirmText = "去设置", destructive = false,
         onConfirm = { showPermission = false; onOpenOverlayPermission() },

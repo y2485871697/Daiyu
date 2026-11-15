@@ -26,7 +26,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -36,8 +35,6 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.pet.*
 import app.daiyu.android.ui.app.AgentAppTheme
 import kotlin.math.roundToInt
-
-internal val PetCupboardClearAction = SemanticsPropertyKey<() -> Unit>("PetCupboardClearAction")
 
 /** A sprite owns this window; closing it never closes the shared pet runtime. */
 internal class PetCupboardDialog(
@@ -70,8 +67,7 @@ internal class PetCupboardDialog(
                                 dismiss()
                                 controller.feed(food)
                             }
-                        }, onScale = { value -> command { controller.setScale(value) } },
-                        onClear = { command { controller.clearMemories() } })
+                        }, onScale = { value -> command { controller.setScale(value) } })
                 }
             }
         })
@@ -113,7 +109,7 @@ internal class PetCupboardDialog(
 
 @Composable
 internal fun PetCupboardContent(snapshot: PetSnapshot, assets: PetResourcePort,
-    onFeed: (PetFood) -> Unit, onScale: (Float) -> Unit, onClear: () -> Unit) {
+    onFeed: (PetFood) -> Unit, onScale: (Float) -> Unit) {
     val state = snapshot.state
     val band = petSatietyBand(state.satiety)
     val percent = petSatietyPercent(state.satiety)
@@ -165,16 +161,7 @@ internal fun PetCupboardContent(snapshot: PetSnapshot, assets: PetResourcePort,
             colors = SliderDefaults.colors(thumbColor = Color(0xfff8f6ff), activeTrackColor = Color(0xff62616a),
                 inactiveTrackColor = Color(0xffdedce0)),
             modifier = Modifier.fillMaxWidth().testTag("pet-cupboard-scale").semantics { contentDescription = "体型" })
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("发言手账", color = ink)
-            Text("清空", color = link,
-                modifier = Modifier.testTag("pet-cupboard-clear").semantics { this[PetCupboardClearAction] = onClear }
-                    .cupboardClick(usable, onClear))
-        }
-        if (state.memories.isEmpty()) Text("还没有发言", color = Color(0xff78716c), fontSize = 12.sp)
-        else state.memories.forEach { memory ->
-            Text("[${memory.mood.name.lowercase()}] ${memory.speech}", color = Color(0xff44403c), fontSize = 13.sp)
-        }
+
     }
 }
 

@@ -287,7 +287,7 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
             awaitControl("pet model failure") { isolated.host.snapshot().pet.error != null }
             val failed = isolated.host.snapshot().pet
             val failure = checkNotNull(failed.error)
-            assertEquals("桌宠反应失败；未生成记忆/语音", failure)
+            assertEquals("桌宠反应失败：桌宠独立模型请求失败", failure)
             assertEquals("missing-model", failed.state.usage.last().modelId)
             assertEquals(PetRequestStatus.FAILED, failed.state.usage.last().status)
             mainThread {

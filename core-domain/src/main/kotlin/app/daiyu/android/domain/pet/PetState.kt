@@ -1,5 +1,7 @@
 package app.daiyu.android.domain.pet
 
+import app.daiyu.android.domain.RequestReasoningEffort
+
 const val PET_MAX_SATIETY = 30_000
 const val PET_TASK_WINDOW_MS = 5L * 60 * 60 * 1000
 
@@ -26,7 +28,8 @@ data class PetSettings(
     val enabled: Boolean = false, val workReactions: Boolean = true,
     val globalVisible: Boolean = false, val audioEnabled: Boolean = false,
     val scale: Float = 1f, val x: Int = -1, val y: Int = -1,
-    val model: PetModelSelection = PetModelSelection()
+    val model: PetModelSelection = PetModelSelection(),
+    val reasoningEffort: RequestReasoningEffort = RequestReasoningEffort.OFF
 ) { init { require(scale.isFinite() && scale in 0.5f..1.8f) } }
 data class PetReaction(val mood: PetMood, val speech: String)
 data class PetMemory(val mood: PetMood, val speech: String, val satietySpent: Int,
@@ -52,6 +55,7 @@ data class PetState(
 ) {
     init { require(satiety in 0..PET_MAX_SATIETY); require(memories.size <= 20 && recentTasks.size <= 8) }
     fun forRestore(): PetState = copy(mood = PetMood.IDLE, speech = "", speechVisible = false, thinking = false,
+        memories = emptyList(), recentTasks = emptyList(),
         usage = usage.map { if (it.status == PetRequestStatus.PENDING) it.copy(status = PetRequestStatus.INTERRUPTED) else it })
 }
 data class PetSnapshot(val state: PetState, val error: String? = null, val closed: Boolean = false)
@@ -68,10 +72,11 @@ fun interface PetScheduler { fun after(delayMillis: Long, task: () -> Unit): Pet
 /** 宠物模型接口，与主聊天历史、凭据和工具隔离。 */
 data class PetModelRequest(val requestId: String, val selection: PetModelSelection,
     val event: PetEvent, val prompt: String, val sessionId: String,
-    val usageOwner: String = "pet", val maxOutputTokens: Int = 120, val timeoutMillis: Long = 45_000) {
+    val usageOwner: String = "pet", val maxOutputTokens: Int = 120, val timeoutMillis: Long = 45_000,
+    val reasoningEffort: RequestReasoningEffort = RequestReasoningEffort.OFF) {
     val toolsAllowed: Boolean get() = false
     val webSearchAllowed: Boolean get() = false
-    val reasoningAllowed: Boolean get() = false
+    val reasoningAllowed: Boolean get() = reasoningEffort != RequestReasoningEffort.OFF
 }
 sealed class PetModelResult {
     data class Completed(val raw: String, val inputTokens: Long? = null, val outputTokens: Long? = null) : PetModelResult() {

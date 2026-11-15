@@ -2,10 +2,12 @@ package app.daiyu.android.pet
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.pet.*
-import app.daiyu.android.model.MessagesModel
+import app.daiyu.android.model.ModelFactory
+import app.daiyu.android.model.ProviderSnapshot
+import app.daiyu.android.model.ReasoningRequestPolicy
+import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
-import app.daiyu.android.model.ResponsesModel
 import app.daiyu.android.storage.ModelSettings
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -21,22 +23,15 @@ data class ResolvedPetModel(val selection: PetModelSelection, val settings: Mode
     val isCurrent: () -> Boolean = { true })
 fun interface PetModelResolver { fun resolve(selection: PetModelSelection): ResolvedPetModel? }
 
-/** Reuses production Responses/Messages transports, with one isolated prompt, no tools/history,
- * no inherited request body, strict output cap and no retry. Provider usage remains unknown if absent.
+/** Reuses production model transports, with one isolated prompt, no tools/history,
+ * no inherited request body, bounded output and no retry. Provider usage remains unknown if absent.
  * Ownership transfers to PetHost; close cancels all work and shuts down the pet-only executor.
  */
 class AndroidPetModelPort internal constructor(
     private val resolver: PetModelResolver,
     private val transportFactory: (ModelSettings, Int) -> ModelPort
 ) : PetModelPort, AutoCloseable {
-    constructor(resolver: PetModelResolver) : this(resolver, { settings, limit ->
-        when (settings.protocol) {
-            ProviderProtocol.RESPONSES -> ResponsesModel(settings)
-            ProviderProtocol.MESSAGES -> MessagesModel(settings, limit)
-            ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> error("Pet model does not yet support ${settings.protocol.wireName}")
-            ProviderProtocol.UNKNOWN -> error("Unsupported pet protocol")
-        }
-    })
+    constructor(resolver: PetModelResolver) : this(resolver, { settings, _ -> ModelFactory.create(settings) })
     private val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "daiyu-pet-model").apply { isDaemon = true } }
     private val closed = AtomicBoolean(false)
     private val authority = Any()
@@ -84,7 +79,7 @@ class AndroidPetModelPort internal constructor(
     override fun complete(request: PetModelRequest, completion: (PetModelResult) -> Unit): PetCancel {
         check(!closed.get()) { "Pet model adapter closed" }
         require(request.selection.configured && request.usageOwner == "pet")
-        require(request.maxOutputTokens in 1..120 && request.sessionId == "pet:${request.requestId}")
+        require(request.maxOutputTokens in 1..32_768 && request.sessionId == "pet:${request.requestId}")
         val frozenRequest = request.copy(selection = request.selection.copy())
         val job = synchronized(authority) {
             check(!closed.get()) { "Pet model adapter closed" }
@@ -102,23 +97,30 @@ class AndroidPetModelPort internal constructor(
         try {
             // Resolve at acceptance, before queueing: later configuration edits must not retarget this request.
             // Freeze lookup failures too; the worker reports failure without retrying or falling back.
+            var resolutionFailure: Exception? = null
             val frozenModel = try {
                 val resolved = resolver.resolve(frozenRequest.selection) ?: error("Pet selection unavailable")
                 require(resolved.selection == frozenRequest.selection) { "Pet selection mismatch" }
-                // Do not inherit assistant custom instructions, tools, reasoning or custom request bodies.
-                val options = when (resolved.settings.protocol) {
-                    ProviderProtocol.RESPONSES -> ProviderRequestOptions("{\"max_output_tokens\":${frozenRequest.maxOutputTokens}}")
-                    ProviderProtocol.MESSAGES -> ProviderRequestOptions()
-                    ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> error("Pet model does not yet support ${resolved.settings.protocol.wireName}")
-                    ProviderProtocol.UNKNOWN -> error("Unsupported pet protocol")
+                // Only the pet's own effort and output budget enter this isolated request.
+                val limit = frozenRequest.maxOutputTokens
+                val body = when (resolved.settings.protocol) {
+                    ProviderProtocol.RESPONSES -> "{\"max_output_tokens\":$limit}"
+                    ProviderProtocol.MESSAGES -> "{\"max_tokens\":$limit}"
+                    ProviderProtocol.CHAT_COMPLETIONS -> "{\"max_completion_tokens\":$limit}"
+                    ProviderProtocol.GEMINI -> "{\"generationConfig\":{\"maxOutputTokens\":$limit}}"
+                    ProviderProtocol.UNKNOWN -> throw ModelRequestException(ModelFailure.CONFIGURATION)
                 }
-                resolved.copy(selection = resolved.selection.copy(), settings = resolved.settings.copy(
-                    batteryEnabled = false, deviceStatusEnabled = false, requestOptions = options))
-            } catch (_: Exception) { null }
+                val clean = resolved.settings.copy(batteryEnabled = false, deviceStatusEnabled = false,
+                    contextWindowOverride = null,
+                    requestOptions = ProviderRequestOptions(body))
+                val frozen = ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(clean),
+                    ReasoningEffort.valueOf(frozenRequest.reasoningEffort.name))
+                resolved.copy(selection = resolved.selection.copy(), settings = frozen.asModelSettings())
+            } catch (failure: Exception) { resolutionFailure = failure; null }
             val future = executor.submit {
                 try {
                     if (!live(frozenModel)) return@submit
-                    val settings = frozenModel?.settings ?: error("Pet selection unavailable")
+                    val settings = frozenModel?.settings ?: throw checkNotNull(resolutionFailure)
                     val transport = app.daiyu.android.model.usage.UsageRecorder.wrap(
                         transportFactory(settings, frozenRequest.maxOutputTokens), settings.requestSnapshot(), inferConversation = false)
                     val message = Message(MessageId("pet-prompt-${frozenRequest.requestId}"), ConversationId(frozenRequest.sessionId),
@@ -128,7 +130,7 @@ class AndroidPetModelPort internal constructor(
                     // External open must stay outside authority/owner: an arbitrary transport can
                     // block here. This is not a physical-send fence for arbitrary transports.
                     synchronized(authority) { if (!live(frozenModel)) return@submit }
-                    // Production Responses/Messages open only constructs a logical session; HTTP
+                    // Production transports open only constructs a logical session; HTTP
                     // starts in next. Publish even a late return so cancel/close cannot leak it.
                     val session = transport.open(listOf(message), emptyList<ToolDefinition>())
                     job.publishSession(session)
@@ -143,7 +145,7 @@ class AndroidPetModelPort internal constructor(
                             is ModelEvent.InputEstimate -> Unit
                             is ModelEvent.Usage -> { input = event.inputTokens; output = event.outputTokens }
                             is ModelEvent.ToolReady, is ModelEvent.NativeSearch -> error("Pet model attempted a tool call")
-                            is ModelEvent.ReasoningDelta, is ModelEvent.ReasoningFinal -> error("Pet model attempted reasoning")
+                            is ModelEvent.ReasoningDelta, is ModelEvent.ReasoningFinal -> Unit
                             is ModelEvent.ProtocolOutput -> Unit
                         }
                         require(texts.size <= 16 && texts.values.sumOf { it.length } <= 8192) { "Pet response too large" }
@@ -154,8 +156,9 @@ class AndroidPetModelPort internal constructor(
                         if (text.isBlank()) deliver(frozenModel, PetModelResult.Failed("桌宠模型未返回文字"))
                         else deliver(frozenModel, PetModelResult.Completed(text, input, output))
                     }
-                } catch (_: Exception) {
-                    deliver(frozenModel, PetModelResult.Failed("桌宠独立模型请求失败"))
+                } catch (failure: Exception) {
+                    val reason = if (failure is ModelRequestException) failure.userMessage else "桌宠独立模型请求失败"
+                    deliver(frozenModel, PetModelResult.Failed(reason))
                 } finally {
                     job.cleanSession()
                     jobs.remove(frozenRequest.requestId, job)

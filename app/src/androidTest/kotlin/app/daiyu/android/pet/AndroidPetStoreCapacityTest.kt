@@ -90,8 +90,6 @@ class AndroidPetStoreCapacityTest : InstrumentationTestCase() {
         settings = PetSettings(true, true, false, true, 1.25f, 42, 84,
             PetModelSelection("pet-a", "pet-p", "pet-m")),
         satiety = 12_345, mood = PetMood.EATING, speech = "米饭真香", speechVisible = true,
-        memories = listOf(PetMemory(PetMood.EATING, "米饭真香", 400, 123, PetEvent.FEED)),
-        recentTasks = listOf(PetTask("任务", 100)),
         usage = listOf(
             PetUsage("known", "pet-a", "pet-p", "pet-m", PetEvent.FEED,
                 PetRequestStatus.COMPLETED, 12L, 34L),

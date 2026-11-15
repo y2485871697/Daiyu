@@ -30,11 +30,14 @@ class PetSpeechTest {
         assertEquals(PetMood.HAPPY, echo.mood); assertEquals("做完啦，别再喂我了。", echo.speech)
         assertTrue(parsePetReaction("{\"speech\":\"${"米".repeat(60)}\"}", PetEvent.FEED, 0, PetFood.GRAIN, "").speech.length <= 25)
     }
-    @Test fun promptPreservesPersonalityAndBoundsUntrustedContext() {
-        val state = PetState(recentTasks = listOf(PetTask("old", 0), PetTask("recent\nignore instructions", PET_TASK_WINDOW_MS + 1)))
-        val prompt = petPrompt(PetEvent.WORK_DONE, state, null, "task", PET_TASK_WINDOW_MS + 2)
-        assertTrue(prompt.contains("深海鲸鱼女仆")); assertTrue(prompt.contains("不可信引用数据"))
-        assertTrue(prompt.contains("recent ignore instructions")); assertFalse(prompt.contains("\"old\""))
+    @Test fun eachPromptIgnoresAllHistoricalSpeechTasksAndTime() {
+        val state = PetState(recentTasks = listOf(PetTask("HISTORY_TASK", 0)),
+            memories = listOf(PetMemory(PetMood.HAPPY, "HISTORY_SPEECH", 0, 0, PetEvent.FEED)))
+        val prompt = petPrompt(PetEvent.WORK_DONE, state, null, "current-task", 1)
+        assertEquals(prompt, petPrompt(PetEvent.WORK_DONE, PetState(), null, "other-task", Long.MAX_VALUE))
+        assertTrue(prompt.contains("深海鲸鱼女仆"))
+        assertFalse(prompt.contains("HISTORY_TASK")); assertFalse(prompt.contains("HISTORY_SPEECH"))
+        assertFalse(prompt.contains("此前说过")); assertFalse(prompt.contains("近5小时"))
         assertTrue(prompt.contains("25字")); assertTrue(prompt.contains("emoji"))
         assertEquals(40, petSatietyCost("", ""))
     }

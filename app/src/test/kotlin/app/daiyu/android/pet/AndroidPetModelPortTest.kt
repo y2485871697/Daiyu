@@ -2,6 +2,10 @@ package app.daiyu.android.pet
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.pet.*
+import app.daiyu.android.delegation.ReasoningEffort
+import app.daiyu.android.model.ProviderSnapshot
+import app.daiyu.android.model.ReasoningRequestPolicy
+import org.json.JSONObject
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.storage.ModelSettings
@@ -48,6 +52,17 @@ class AndroidPetModelPortTest {
         }
     }
 
+    private fun petOptions(settings: ModelSettings, limit: Int): ProviderRequestOptions {
+        val body = when (settings.protocol) {
+            ProviderProtocol.RESPONSES -> "{\"max_output_tokens\":$limit}"
+            ProviderProtocol.MESSAGES -> "{\"max_tokens\":$limit}"
+            ProviderProtocol.CHAT_COMPLETIONS -> "{\"max_completion_tokens\":$limit}"
+            ProviderProtocol.GEMINI -> "{\"generationConfig\":{\"maxOutputTokens\":$limit}}"
+            else -> error("unsupported")
+        }
+        return ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(settings.copy(
+            requestOptions = ProviderRequestOptions(body))), ReasoningEffort.OFF).requestOptions
+    }
     @Test fun isolatedPublicModelSessionUsesExplicitSelectionNoToolsAndActualUsage() {
         val result = AtomicReference<PetModelResult>(); val finished = CountDownLatch(1)
         var capturedSettings: ModelSettings? = null
@@ -83,7 +98,10 @@ class AndroidPetModelPortTest {
             assertEquals(41L, response.inputTokens); assertEquals(12L, response.outputTokens)
             assertFalse(response.raw.contains("partial"))
             assertFalse(capturedSettings!!.batteryEnabled); assertFalse(capturedSettings!!.deviceStatusEnabled)
-            assertEquals("{\"max_output_tokens\":120}", capturedSettings!!.requestOptions.customBody)
+            val body = JSONObject(capturedSettings!!.requestOptions.customBody)
+            assertEquals(120, body.getInt("max_output_tokens"))
+            assertEquals("none", body.getJSONObject("reasoning").getString("effort"))
+            assertFalse(body.has("temperature"))
         } finally { adapter.close() }
     }
     @Test fun queuedRequestKeepsAcceptanceSettingsWhileNextRequestUsesEditedResolver() {
@@ -126,10 +144,10 @@ class AndroidPetModelPortTest {
             assertEquals(listOf(120, 120, 47), limits.toList())
             assertNotSame(original, captured[1])
             assertEquals(original.copy(batteryEnabled = false, deviceStatusEnabled = false,
-                requestOptions = ProviderRequestOptions("{\"max_output_tokens\":120}")), captured[1])
+                requestOptions = petOptions(original, 120)), captured[1])
             assertNotSame(edited, captured[2])
             assertEquals(edited.copy(batteryEnabled = false, deviceStatusEnabled = false,
-                requestOptions = ProviderRequestOptions()), captured[2])
+                requestOptions = petOptions(edited, 47)), captured[2])
         } finally { release.countDown(); adapter.close() }
     }
     @Test fun queuedUnavailableOrMismatchedReferencesStayFailedWithoutFallbackOrRetry() {
@@ -512,4 +530,71 @@ class AndroidPetModelPortTest {
         assertTrue(entered.await(3, TimeUnit.SECONDS)); adapter.close()
         assertTrue(cancelled.await(3, TimeUnit.SECONDS)); assertEquals(0, callbacks.get())
     }
+    @Test fun allProtocolsAcceptReasoningBeforeTextWithoutLeakingItOrInheritingHistory() {
+        for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES,
+            ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)) {
+            val finished = CountDownLatch(1); val result = AtomicReference<PetModelResult>()
+            val source = settings().copy(protocol = protocol, model = if (protocol == ProviderProtocol.GEMINI) "gemini-2.5-flash" else "api-model",
+                contextWindowOverride = 100, requestOptions = ProviderRequestOptions("{\"temperature\":0.9}"))
+            val adapter = AndroidPetModelPort(PetModelResolver { ResolvedPetModel(it, source) }) { frozen, limit ->
+                assertEquals(32_768, limit); assertNull(frozen.contextWindowOverride)
+                val body = JSONObject(frozen.requestOptions.customBody)
+                assertFalse(body.has("temperature")); assertFalse(frozen.requestOptions.openAiWebSearchEnabled)
+                when (protocol) {
+                    ProviderProtocol.RESPONSES -> { assertEquals(32_768, body.getInt("max_output_tokens")); assertEquals("high", body.getJSONObject("reasoning").getString("effort")) }
+                    ProviderProtocol.MESSAGES -> assertEquals(32_768, body.getInt("max_tokens"))
+                    ProviderProtocol.CHAT_COMPLETIONS -> assertEquals(32_768, body.getInt("max_completion_tokens"))
+                    ProviderProtocol.GEMINI -> assertEquals(32_768, body.getJSONObject("generationConfig").getInt("maxOutputTokens"))
+                    else -> fail("unexpected protocol")
+                }
+                object : ModelPort {
+                    override fun open(history: List<Message>): ModelSession = error("explicit empty tools required")
+                    override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
+                        assertEquals(1, history.size); assertTrue(definitions.isEmpty())
+                        return object : ModelSession {
+                            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                                sink(ModelEvent.ReasoningDelta("reason", "PRIVATE_REASONING"))
+                                sink(ModelEvent.ReasoningFinal("reason", "PRIVATE_REASONING"))
+                                sink(ModelEvent.TextFinal("text", "{\"mood\":\"happy\",\"speech\":\"收到啦\"}"))
+                                sink(ModelEvent.Usage(10, 20))
+                            }
+                            override fun cancel() {}
+                        }
+                    }
+                }
+            }
+            try {
+                adapter.complete(request().copy(reasoningEffort = RequestReasoningEffort.HIGH, maxOutputTokens = 32_768)) {
+                    result.set(it); finished.countDown()
+                }
+                assertTrue(protocol.toString(), finished.await(3, TimeUnit.SECONDS))
+                val response = result.get() as PetModelResult.Completed
+                assertFalse(response.raw.contains("PRIVATE_REASONING")); assertTrue(response.raw.contains("收到啦"))
+                assertEquals(20L, response.outputTokens)
+            } finally { adapter.close() }
+        }
+    }
+    @Test fun typedProviderErrorsKeepSafeDetailsWhileArbitraryExceptionsStayRedacted() {
+        val failures = listOf(ModelRequestException(ModelFailure.AUTHENTICATION),
+            IllegalStateException("SECRET_API_KEY_PROVIDER_BODY"))
+        failures.forEach { failure ->
+            val result = AtomicReference<PetModelResult>(); val finished = CountDownLatch(1)
+            val adapter = AndroidPetModelPort(PetModelResolver { ResolvedPetModel(it, settings()) }) { _, _ ->
+                ModelPort { object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        sink(ModelEvent.TextFinal("text", "unconfirmed")); throw failure
+                    }
+                    override fun cancel() {}
+                } }
+            }
+            try {
+                adapter.complete(request()) { result.set(it); finished.countDown() }
+                assertTrue(finished.await(3, TimeUnit.SECONDS))
+                val reason = (result.get() as PetModelResult.Failed).reason
+                assertFalse(reason.contains("SECRET"))
+                if (failure is ModelRequestException) assertEquals(failure.userMessage, reason)
+            } finally { adapter.close() }
+        }
+    }
+
 }
